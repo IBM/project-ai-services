@@ -72,17 +72,16 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 
 	logger.InfofCtx(ctx, "Using base directory for cleanup: %s\n", baseDir)
 
+	if err := podmanutils.DeletePods(ctx, rt, pods); err != nil {
+		return err
+	}
+
 	secretsToDelete := []string{vars.PodmanAuthSecret}
 	if err := podmanutils.DeleteSecrets(ctx, rt, secretsToDelete); err != nil {
 		return err
 	}
 
-	// Delete volumes (only those without skip-cleanup label)
 	if err := podmanutils.DeleteVolumes(ctx, rt, volumesToDelete); err != nil {
-		return err
-	}
-
-	if err := podmanutils.DeletePods(ctx, rt, pods); err != nil {
 		return err
 	}
 
