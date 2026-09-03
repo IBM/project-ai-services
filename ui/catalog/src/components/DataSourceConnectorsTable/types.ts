@@ -1,5 +1,5 @@
 import type { DataTableHeader } from "@carbon/react";
-import type { ConnectorStatus } from "@/types/api.types";
+import type { ConnectorStatus, PaginationMetadata } from "@/types/api.types";
 import type {
   BaseTableState,
   SharedTableAction,
@@ -25,21 +25,30 @@ export interface AppState extends BaseTableState<DataSourceConnectorRow> {
   // Selected connector for the details side panel
   selectedConnectorId: string | null;
   isDetailsPanelOpen: boolean;
+  // Text typed into the Remove confirmation input
+  confirmTextValue: string;
+  // Error message shown inside the Remove modal
+  modalDeleteError: string;
 }
 
 export const ACTION_TYPES = {
   FETCH_CONNECTORS_SUCCESS: "FETCH_CONNECTORS_SUCCESS",
   OPEN_DETAILS_PANEL: "OPEN_DETAILS_PANEL",
   CLOSE_DETAILS_PANEL: "CLOSE_DETAILS_PANEL",
+  SET_CONFIRM_TEXT: "SET_CONFIRM_TEXT",
+  SET_MODAL_DELETE_ERROR: "SET_MODAL_DELETE_ERROR",
 } as const;
 
-export type AppAction = {
-  type: typeof ACTION_TYPES.FETCH_CONNECTORS_SUCCESS;
-  payload: {
-    rows: DataSourceConnectorRow[];
-    total: number;
-  };
-};
+export type AppAction =
+  | {
+      type: typeof ACTION_TYPES.FETCH_CONNECTORS_SUCCESS;
+      payload: {
+        rows: DataSourceConnectorRow[];
+        pagination: PaginationMetadata;
+      };
+    }
+  | { type: typeof ACTION_TYPES.SET_CONFIRM_TEXT; payload: string }
+  | { type: typeof ACTION_TYPES.SET_MODAL_DELETE_ERROR; payload: string };
 
 export const HEADERS: DataTableHeader[] = [
   { header: "Name", key: "name" },
@@ -52,8 +61,8 @@ export const HEADERS: DataTableHeader[] = [
 
 // Status column sort order — offline floats to the top
 export const STATUS_SORT_ORDER: Record<ConnectorStatus, number> = {
-  Offline: 1,
-  Connected: 2,
+  offline: 1,
+  connected: 2,
 };
 
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -65,6 +74,7 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
 };
 
 export const INITIAL_STATE: AppState = {
+  modalDeleteError: "",
   search: "",
   page: 1,
   pageSize: 20,
@@ -90,6 +100,7 @@ export const INITIAL_STATE: AppState = {
   fetchError: null,
   selectedConnectorId: null,
   isDetailsPanelOpen: false,
+  confirmTextValue: "",
 };
 
 function ownCases(state: AppState, action: AppAction): AppState {
@@ -99,13 +110,15 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ...state,
         ...setLoading(false),
         rowsData: [...action.payload.rows].sort(
-          (a, b) =>
-            STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] ||
-            a.name.localeCompare(b.name),
+          (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
         ),
-        totalItems: action.payload.total,
+        totalItems: action.payload.pagination.total_items,
         fetchError: null,
       };
+    case ACTION_TYPES.SET_CONFIRM_TEXT:
+      return { ...state, confirmTextValue: action.payload };
+    case ACTION_TYPES.SET_MODAL_DELETE_ERROR:
+      return { ...state, modalDeleteError: action.payload };
     default:
       return state;
   }
