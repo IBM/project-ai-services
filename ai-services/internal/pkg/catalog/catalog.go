@@ -372,6 +372,13 @@ func (p *CatalogProvider) getItemFS(key string) (fs.FS, error) {
 	return item.itemFS, nil
 }
 
+// GetItemFS returns the filesystem for the catalog item identified by key.
+// Embedded items return &assets.CatalogFS; bundle items return an os.DirFS
+// rooted at their extracted directory on disk.
+func (p *CatalogProvider) GetItemFS(key string) (fs.FS, error) {
+	return p.getItemFS(key)
+}
+
 // ToServiceSummary converts a Service to ServiceSummary.
 func ToServiceSummary(service *types.Service) types.ServiceSummary {
 	return types.ServiceSummary{

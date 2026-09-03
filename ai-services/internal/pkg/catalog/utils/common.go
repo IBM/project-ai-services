@@ -112,14 +112,20 @@ func SanitizeFilePath(path string) string {
 
 // LoadChartFromCatalogFS walks assets.CatalogFS at catalogPath and returns a Helm chart.
 func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
+	return LoadChartFromFS(&assets.CatalogFS, catalogPath)
+}
+
+// LoadChartFromFS walks the given filesystem at catalogPath and returns a Helm chart.
+// Use this for bundle items that are stored on disk (os.DirFS) rather than embedded.
+func LoadChartFromFS(fsys fs.FS, catalogPath string) (helmchart.Charter, error) {
 	var files []*archive.BufferedFile
 
-	err := fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, catalogPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 
-		data, err := assets.CatalogFS.ReadFile(p)
+		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
