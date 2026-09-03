@@ -19,6 +19,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -219,14 +220,14 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 	}
 
 	return map[string]string{
-		workerconstants.ArgParamCaddyHTTPSPort:     strconv.Itoa(opts.Setup.HTTPSPort),
-		workerconstants.ArgParamCaddyFileContent:   utils.IndentString(caddyFileContent, utils.CaddyFileIndent),
-		workerconstants.ArgsParamCaddyCertContent:  utils.IndentString(sslCertContent, utils.CertContentIndent),
-		workerconstants.ArgParamCaddySslKeyContent: utils.IndentString(sslKeyContent, utils.CertContentIndent),
-		workerconstants.ArgParamWorkerToken:        opts.Token,
-		workerconstants.ArgParamWorkerGatewayAddr:  opts.GatewayAddr,
-		workerconstants.ArgParamWorkerPodmanURI:    strings.TrimPrefix(podmanURI, "unix://"),
-		workerconstants.ArgParamWorkerAuthFile:     authFileBase64,
+		constants.ArgParamCaddyHTTPSPort:          strconv.Itoa(opts.Setup.HTTPSPort),
+		constants.ArgParamCaddyFileContent:        utils.IndentString(caddyFileContent, utils.CaddyFileIndent),
+		constants.ArgParamSSLCertFileContent:      utils.IndentString(sslCertContent, utils.CertContentIndent),
+		constants.ArgParamSSLKeyFileContent:       utils.IndentString(sslKeyContent, utils.CertContentIndent),
+		workerconstants.ArgParamWorkerToken:       opts.Token,
+		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
+		workerconstants.ArgParamWorkerPodmanURI:   strings.TrimPrefix(podmanURI, "unix://"),
+		workerconstants.ArgParamWorkerAuthFile:    authFileBase64,
 	}, nil
 }
 
