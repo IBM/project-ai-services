@@ -8,12 +8,12 @@ import (
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	internalutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
-	internalutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 )
 
 // UninstallCatalog removes the catalog helm release and optionally cleans up PVCs and catalog namespace.

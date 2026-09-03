@@ -168,7 +168,7 @@ func (h *Helm) Uninstall(release string, opts *UninstallOpts) error {
 	return nil
 }
 
-func (h *Helm) UninstallRelease(ctx context.Context, release string) error {
+func (h *Helm) UninstallRelease(release string) error {
 	exists, err := h.IsReleaseExist(release)
 	if err != nil {
 		return fmt.Errorf("failed to check '%s' release existence: %w", release, err)

@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
@@ -71,8 +72,8 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 
 	logger.InfofCtx(ctx, "Using base directory for cleanup: %s\n", baseDir)
 
-	secretsToDelete := []string{workerconstants.WorkerPodmanAuthSecretName}
-	if err := deleteSecrets(ctx, rt, secretsToDelete); err != nil {
+	secretsToDelete := []string{vars.PodmanAuthSecret}
+	if err := podmanutils.DeleteSecrets(ctx, rt, secretsToDelete); err != nil {
 		return err
 	}
 
@@ -92,7 +93,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 func fetchVolumesToDelete(pods []types.Pod) []string {
 	volumesToDelete := []string{}
 	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[workerconstants.WorkerVolumeLabel]; ok && volumeNames != "" {
+		if volumeNames, ok := pod.Labels[vars.VolumeLabel]; ok && volumeNames != "" {
 			volumes := strings.Split(volumeNames, ",")
 			volumesToDelete = append(volumesToDelete, volumes...)
 		}
@@ -154,22 +155,4 @@ func getWorkerPodList(ctx context.Context, rt runtime.Runtime) ([]types.Pod, err
 	}
 
 	return podList, nil
-}
-
-// deleteSecrets removes the specified secrets.
-func deleteSecrets(ctx context.Context, rt runtime.Runtime, secrets []string) error {
-	for _, secret := range secrets {
-		if err := rt.DeleteSecret(ctx, secret); err != nil {
-			if utils.IsNotFoundError(err) {
-				logger.Infof("Secret %s already deleted or does not exist\n", secret)
-
-				continue
-			}
-
-			return err
-		}
-		logger.Infof("Successfully deleted secret: %s\n", secret)
-	}
-
-	return nil
 }

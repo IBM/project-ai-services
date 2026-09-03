@@ -117,3 +117,24 @@ func DeletePods(ctx context.Context, rt runtime.Runtime, pods []types.Pod) error
 
 	return nil
 }
+
+// DeleteSecrets iterates over the provided secret names and removes each one via the
+// runtime. "Not found" errors are treated as no-ops (the secret was already deleted
+// or never existed) and are logged without aborting the loop. Any other deletion
+// error is returned immediately, halting further processing.
+func DeleteSecrets(ctx context.Context, rt runtime.Runtime, secrets []string) error {
+	for _, secret := range secrets {
+		if err := rt.DeleteSecret(ctx, secret); err != nil {
+			if utils.IsNotFoundError(err) {
+				logger.InfofCtx(ctx, "Secret %s already deleted or does not exist\n", secret)
+
+				continue
+			}
+
+			return err
+		}
+		logger.Infof("Successfully deleted secret: %s\n", secret)
+	}
+
+	return nil
+}

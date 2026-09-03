@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -12,7 +13,6 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 	"helm.sh/helm/v4/pkg/storage/driver"
-	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 )
 
 // Uninstall removes all worker components deployed by `worker join`.
@@ -26,7 +26,7 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 	}
 
 	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {fmt.Sprintf(workerconstants.WorkerPodLabel)},
+		"label": {workerconstants.WorkerPodLabel},
 	})
 	if err != nil {
 		return fmt.Errorf("worker uninstall: list pods: %w", err)
@@ -53,7 +53,7 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	if err := helmClient.UninstallRelease(ctx, release); err != nil {
+	if err := helmClient.UninstallRelease(release); err != nil {
 		if errors.Is(err, driver.ErrReleaseNotFound) {
 			logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
 

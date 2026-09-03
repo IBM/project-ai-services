@@ -16,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // PodmanDeletion handles application deletion operations.
@@ -259,7 +260,7 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 
 	// Extract volume names from pod labels
 	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[catalogconstants.CatalogVolumeLabel]; ok && volumeNames != "" {
+		if volumeNames, ok := pod.Labels[vars.VolumeLabel]; ok && volumeNames != "" {
 			// Split comma-separated volume names (in case a pod has multiple volumes)
 			volumes := strings.Split(volumeNames, ",")
 			for _, volumeName := range volumes {
