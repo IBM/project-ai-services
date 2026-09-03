@@ -97,12 +97,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return nil
 	}
 
-	caddyFileContent, sslCertContent, sslKeyContent, err := readCaddyConfig(opts.SSLCertPath, opts.SSLKeyPath)
-	if err != nil {
-		return fmt.Errorf("worker setup: read Caddyfile: %w", err)
-	}
-
-	if err := deployAll(ctx, rt, tp, opts, existingResource, caddyFileContent, sslCertContent, sslKeyContent); err != nil {
+	if err := deployAll(ctx, rt, tp, opts, existingResource); err != nil {
 		return err
 	}
 
@@ -165,7 +160,7 @@ func readCaddyConfig(sslCertPath, sslKeyPath string) (string, string, string, er
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string, caddyFileContent, sslCertContent, sslKeyContent string) error {
+func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerconstants.WorkerAppTemplate, true, &appMetadata); err != nil {
 		return fmt.Errorf("worker setup: load metadata: %w", err)
@@ -227,12 +222,20 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 		return nil, err
 	}
 
+	caddyFileContent, sslCertContent, sslKeyContent, err := readCaddyConfig(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("worker setup: read Caddyfile: %w", err)
+	}
+
 	return map[string]string{
-		workerconstants.ArgParamCaddyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
-		workerconstants.ArgParamWorkerToken:       opts.Token,
-		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
-		workerconstants.ArgParamWorkerPodmanURI:   strings.TrimPrefix(podmanURI, "unix://"),
-		workerconstants.ArgParamWorkerAuthFile:    authFileBase64,
+		workerconstants.ArgParamCaddyHTTPSPort:     strconv.Itoa(opts.Setup.HTTPSPort),
+		workerconstants.ArgParamCaddyFileContent:   caddyFileContent,
+		workerconstants.ArgsParamCaddyCertContent:  sslCertContent,
+		workerconstants.ArgParamCaddySslKeyContent: sslKeyContent,
+		workerconstants.ArgParamWorkerToken:        opts.Token,
+		workerconstants.ArgParamWorkerGatewayAddr:  opts.GatewayAddr,
+		workerconstants.ArgParamWorkerPodmanURI:    strings.TrimPrefix(podmanURI, "unix://"),
+		workerconstants.ArgParamWorkerAuthFile:     authFileBase64,
 	}, nil
 }
 
