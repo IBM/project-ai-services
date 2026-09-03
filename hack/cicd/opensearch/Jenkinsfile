@@ -11,7 +11,7 @@ pipeline {
         string(
             name: 'BUILD_SCRIPTS_BRANCH',
             defaultValue: 'opensearch-3.8.0',
-            description: 'Branch or tag of the build-scripts repository to checkout'
+            description: 'Branch or tag of the ppc64le/build-scripts repository to checkout. Must exactly match an existing branch or tag name in that repo.'
         )
         booleanParam(
             name: 'PUSH_RELEASE_TAG',
@@ -39,7 +39,7 @@ pipeline {
 
         // Git repositories
         OPENSEARCH_BUILD_REPO = "https://github.com/opensearch-project/opensearch-build.git"
-        BUILD_SCRIPTS_REPO    = "https://github.com/ppc64le/build-scripts.git"
+        BUILD_SCRIPTS_REPO    = "https://github.com/irapandey/build-scripts.git" // TODO - change after validate and PR merge
 
         // Workspace
         BUILD_DIR   = "${WORKSPACE}/opensearch-build"
@@ -101,8 +101,15 @@ pipeline {
                 echo "Checking out build-scripts..."
 
                 dir("${SCRIPTS_DIR}") {
-                    git branch: "${BUILD_SCRIPTS_BRANCH}",
-                        url: "${BUILD_SCRIPTS_REPO}"
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "${BUILD_SCRIPTS_BRANCH}"]],
+                        extensions: [],
+                        userRemoteConfigs: [[
+                            url: "${BUILD_SCRIPTS_REPO}",
+                            refspec: '+refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*'
+                        ]]
+                    ])
                 }
             }
         }
