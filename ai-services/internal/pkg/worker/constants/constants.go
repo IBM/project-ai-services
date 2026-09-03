@@ -16,9 +16,14 @@ const (
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
 
-	WorkerAppName         = "ai-services"
+	WorkerAppName = "ai-services"
+	// WorkerAppTemplate is the app name passed to the template provider.
+	// Resolves to assets/worker/<runtime>/templates/.
 	WorkerAppTemplate     = "worker"
 	WorkerHelmReleaseName = "ai-services-worker"
+
+	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod.
+	WorkerCaddyPodName = "ai-services--caddy"
 
 	// BaseDirEnvVar is injected into the Caddy container at deploy time; read back by uninstall.
 	BaseDirEnvVar = "AI_SERVICES_BASE_DIR"
