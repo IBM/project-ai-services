@@ -2,14 +2,15 @@ FROM localhost/prebuilder as prebuilder
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
-RUN microdnf install -y python3.12-devel \
+RUN microdnf install -y python3.12-devel python3.12-pip \
         lcms2-devel openblas-devel freetype libicu libjpeg-turbo && \
     curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     rpm -ivh /tmp/epel-release.rpm && \
     rm -f /tmp/epel-release.rpm && \
     microdnf install -y spatialindex-devel && \
     microdnf clean all && \
-    curl -sSL https://bootstrap.pypa.io/get-pip.py | python3.12 - && \
+    pip install --upgrade pip && \
+    microdnf remove python3.12-pip && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
     ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
 
