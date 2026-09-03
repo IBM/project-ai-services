@@ -10,6 +10,7 @@ import {
   InlineNotification,
 } from "@carbon/react";
 import { Information } from "@carbon/icons-react";
+import { formatVersion } from "@/utils/string";
 import styles from "../DeployFlow.shared.module.scss";
 import type { DeployFormData } from "../types";
 
@@ -52,7 +53,7 @@ export const SharedStepOne = ({
   onComponentError,
 }: SharedStepOneProps) => {
   const isNameValid = !!formData.name.trim();
-  const versionOptions = [{ id: version, text: version }];
+  const versionOptions = [{ id: version, text: formatVersion(version) }];
 
   useEffect(() => {
     onComponentError?.(failedComponentNames.length > 0);

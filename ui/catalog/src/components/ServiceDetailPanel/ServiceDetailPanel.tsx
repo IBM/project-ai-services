@@ -7,6 +7,7 @@ import {
   type AboutSection,
 } from "@/services/serviceDetails.api";
 import { transformServiceDetails } from "@/utils/serviceDetailsTransform";
+import { formatVersion } from "@/utils/string";
 import { useServiceDetailsStore } from "@/store/serviceDetails.store";
 import styles from "./ServiceDetailPanel.module.scss";
 
@@ -73,7 +74,11 @@ const renderNestedFields = (
 const renderSection = (section: AboutSection, sectionIndex: number) => {
   // Handle single value field
   if (section.value) {
-    return renderField(section.title, section.value);
+    const displayValue =
+      section.title.toLowerCase() === "version"
+        ? formatVersion(section.value)
+        : section.value;
+    return renderField(section.title, displayValue);
   }
 
   // Handle array of values
