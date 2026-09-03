@@ -6,12 +6,11 @@ metadata:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    haproxy.router.openshift.io/h2c: "true"
 spec:
   port:
     targetPort: worker-gateway
   to:
     kind: Service
     name: "catalog-api"
-  tls:
-    termination: passthrough
-    insecureEdgeTerminationPolicy: None
