@@ -3,6 +3,7 @@ package deployment
 import (
 	"context"
 	"fmt"
+	"path"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -142,7 +143,7 @@ func (p *DeploymentPlanner) processService(
 
 	servicePlan := &ServicePlan{
 		CatalogID:     svc.CatalogID,
-		CatalogPath:   fmt.Sprintf("%s/%s", servicePath, runtimeType),
+		CatalogPath:   path.Join(servicePath, runtimeType),
 		Version:       svc.Version,
 		ComponentRefs: make([]string, 0),
 	}
@@ -218,7 +219,7 @@ func (p *DeploymentPlanner) processComponent(
 		Hash:           componentHash,
 		ComponentType:  comp.ComponentType,
 		ProviderID:     comp.ProviderID,
-		CatalogPath:    fmt.Sprintf("%s/%s", componentPath, runtimeType),
+		CatalogPath:    path.Join(componentPath, runtimeType),
 		Version:        comp.Version,
 		Params:         comp.Params,
 		UsedByServices: []string{catalogID},

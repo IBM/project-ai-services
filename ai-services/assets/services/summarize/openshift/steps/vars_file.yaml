@@ -1,5 +1,6 @@
 containers:
   - name: "summarize-api"
+    workload: "summarize-api"
     format: ".Status"
     alias: API_STATUS
 

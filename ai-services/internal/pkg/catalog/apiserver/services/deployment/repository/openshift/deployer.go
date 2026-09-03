@@ -3,6 +3,7 @@ package openshift
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"maps"
 	"strings"
 	"time"
@@ -133,7 +134,7 @@ func (d *OpenShiftDeployer) deployPrerequisites(ctx context.Context, ns string) 
 		chartPath := prereqRoot + "/" + entry.Name()
 		release := entry.Name() // e.g. "serving-runtime-cpu"
 
-		if err := helmInstallOrUpgrade(ctx, ns, release, chartPath, map[string]any{}, ""); err != nil {
+		if err := helmInstallOrUpgrade(ctx, ns, release, chartPath, &assets.CatalogFS, map[string]any{}, ""); err != nil {
 			return fmt.Errorf("failed to deploy prerequisite '%s': %w", release, err)
 		}
 	}
@@ -168,7 +169,14 @@ func (d *OpenShiftDeployer) deployComponentsConcurrently(ctx context.Context, ns
 // deployComponent installs or upgrades the Helm chart for a single component,
 // then registers the deterministic KServe predictor endpoint in the database.
 func (d *OpenShiftDeployer) deployComponent(ctx context.Context, ns string, plan *DeploymentPlan, comp *ComponentPlan) error {
-	if err := helmInstallOrUpgrade(ctx, ns, catalogutils.HelmReleaseName(plan.ApplicationID, strings.ReplaceAll(comp.ComponentType, "_", "-")), comp.CatalogPath, comp.Values, comp.DatabaseID.String()); err != nil {
+	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ProviderID)
+
+	fsys, err := d.catalogProvider.GetItemFS(componentKey)
+	if err != nil {
+		return fmt.Errorf("failed to get filesystem for component %s: %w", componentKey, err)
+	}
+
+	if err := helmInstallOrUpgrade(ctx, ns, catalogutils.HelmReleaseName(plan.ApplicationID, strings.ReplaceAll(comp.ComponentType, "_", "-")), comp.CatalogPath, fsys, comp.Values, comp.DatabaseID.String()); err != nil {
 		return err
 	}
 
@@ -225,7 +233,12 @@ func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, ns s
 func (d *OpenShiftDeployer) deployService(ctx context.Context, ns string, plan *DeploymentPlan, svc *ServicePlan) error {
 	releaseName := catalogutils.HelmReleaseName(plan.ApplicationID, svc.CatalogID)
 
-	if err := helmInstallOrUpgrade(ctx, ns, releaseName, svc.CatalogPath, svc.Values, svc.DatabaseID.String()); err != nil {
+	fsys, err := d.catalogProvider.GetItemFS(svc.CatalogID)
+	if err != nil {
+		return fmt.Errorf("failed to get filesystem for service %s: %w", svc.CatalogID, err)
+	}
+
+	if err := helmInstallOrUpgrade(ctx, ns, releaseName, svc.CatalogPath, fsys, svc.Values, svc.DatabaseID.String()); err != nil {
 		return err
 	}
 
@@ -305,12 +318,12 @@ func (d *OpenShiftDeployer) updateComponentEndpoint(ctx context.Context, ns stri
 	return nil
 }
 
-// helmInstallOrUpgrade loads the chart at catalogPath from the embedded CatalogFS and
+// helmInstallOrUpgrade loads the chart at catalogPath from fsys and
 // performs helm install (if the release doesn't exist) or upgrade.
 // templateID is injected as a --set override (not part of values.yaml) so that
 // ai-services.io/template labels carry the DB UUID, matching the Podman convention.
-func helmInstallOrUpgrade(ctx context.Context, namespace, release, catalogPath string, values map[string]any, templateID string) error {
-	chart, err := catalogutils.LoadChartFromCatalogFS(catalogPath)
+func helmInstallOrUpgrade(ctx context.Context, namespace, release, catalogPath string, fsys fs.FS, values map[string]any, templateID string) error {
+	chart, err := catalogutils.LoadChartFromFS(fsys, catalogPath)
 	if err != nil {
 		return fmt.Errorf("failed to load chart at %s: %w", catalogPath, err)
 	}
