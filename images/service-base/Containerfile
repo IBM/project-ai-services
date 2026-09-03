@@ -2,16 +2,17 @@ FROM localhost/prebuilder as prebuilder
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
-RUN microdnf install -y python3.12-devel \
+RUN microdnf install -y python3.12-devel python3.12-pip \
         lcms2-devel openblas-devel freetype libicu libjpeg-turbo && \
     curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     rpm -ivh /tmp/epel-release.rpm && \
     rm -f /tmp/epel-release.rpm && \
     microdnf install -y spatialindex-devel && \
     microdnf clean all && \
-    curl -sSL https://bootstrap.pypa.io/get-pip.py | python3.12 - && \
+    python3.12 -m pip install --upgrade pip && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \
-    ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
+    ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3 && \
+    microdnf remove -y python3.12-pip
 
 ENV DOCLING_MODELS_PATH=/var/docling-models
 
@@ -20,7 +21,7 @@ COPY download_docling_models.py .
 
 RUN --mount=type=bind,from=prebuilder,source=/wheels,target=/wheels,ro \
     python -m venv /var/venv && source /var/venv/bin/activate && \
-    pip install --upgrade pip && \
+    pip install --upgrade pip setuptools wheel && \
     pip install /wheels/*.whl -r requirements.txt \
         --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
         --prefer-binary && \

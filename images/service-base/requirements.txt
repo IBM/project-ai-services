@@ -7,12 +7,12 @@ attrs==26.1.0
 beautifulsoup4==4.14.3
 brotli==1.2.0
 certifi==2026.4.22
-cffi==2.0.0
+cffi==2.1.1
 charset-normalizer==3.4.7
 click==8.4.0
 cohere==7.0.3
 colorlog==6.10.1
-cryptography==49.0.0
+cryptography==50.0.0
 defusedxml==0.7.1
 dill==0.4.1
 distro==1.9.0
@@ -72,7 +72,7 @@ paramiko==5.0.0
 pandas==3.0.3
 pdfminer.six==20251230
 pdfplumber==0.11.9
-pillow==12.2.0
+pillow==12.3.0
 pluggy==1.6.0
 polyfactory==3.3.0
 psutil==7.2.2
@@ -131,7 +131,7 @@ tree-sitter-python==0.25.0
 tree-sitter-typescript==0.23.2
 typer==0.21.2
 types-requests==2.33.0.20260408
-typing_extensions==4.15.0
+typing_extensions==4.16.0
 typing-inspection==0.4.2
 tzdata==2025.3
 ujson==5.13.0
