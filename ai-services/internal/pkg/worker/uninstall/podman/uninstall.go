@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
@@ -76,7 +76,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 		return err
 	}
 
-	secretsToDelete := []string{vars.PodmanAuthSecret}
+	secretsToDelete := []string{constants.PodmanAuthSecret}
 	if err := podmanutils.DeleteSecrets(ctx, rt, secretsToDelete); err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 func fetchVolumesToDelete(pods []types.Pod) []string {
 	volumesToDelete := []string{}
 	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[vars.VolumeLabel]; ok && volumeNames != "" {
+		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
 			volumes := strings.Split(volumeNames, ",")
 			volumesToDelete = append(volumesToDelete, volumes...)
 		}

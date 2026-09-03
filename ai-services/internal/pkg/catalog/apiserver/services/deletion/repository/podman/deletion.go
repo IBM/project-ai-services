@@ -11,12 +11,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // PodmanDeletion handles application deletion operations.
@@ -260,7 +260,7 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 
 	// Extract volume names from pod labels
 	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[vars.VolumeLabel]; ok && volumeNames != "" {
+		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
 			// Split comma-separated volume names (in case a pod has multiple volumes)
 			volumes := strings.Split(volumeNames, ",")
 			for _, volumeName := range volumes {

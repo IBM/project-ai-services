@@ -6,9 +6,9 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 func ResetPodmanAuth(ctx context.Context) error {
@@ -29,8 +29,8 @@ func ResetPodmanAuth(ctx context.Context) error {
 	}
 
 	// Delete podman auth secret.
-	logger.InfofCtx(ctx, "Deleting catalog podman auth secret %s", vars.PodmanAuthSecret)
-	err = deployCtx.Runtime.DeleteSecret(ctx, vars.PodmanAuthSecret)
+	logger.InfofCtx(ctx, "Deleting catalog podman auth secret %s", constants.PodmanAuthSecret)
+	err = deployCtx.Runtime.DeleteSecret(ctx, constants.PodmanAuthSecret)
 	if err != nil {
 		return fmt.Errorf("failed to delete existing catalog podman auth secret: %w", err)
 	}

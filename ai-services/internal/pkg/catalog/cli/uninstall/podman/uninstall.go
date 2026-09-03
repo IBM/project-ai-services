@@ -12,11 +12,11 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
@@ -59,7 +59,7 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
-	secretsToDelete = append(secretsToDelete, vars.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName)
+	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName)
 
 	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
 	// If secret is created adding it to 'secretsToDelete' list
@@ -149,7 +149,7 @@ func fetchVolumesToDelete(pods []types.Pod) ([]string, []string) {
 
 	for _, pod := range pods {
 		// fetch volume names from pod labels
-		if volumeNames, ok := pod.Labels[vars.VolumeLabel]; ok && volumeNames != "" {
+		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
 			// Check if this pod has skip-cleanup label for volumes
 			_, hasSkipLabel := pod.Labels[catalogConstants.CatalogVolumeSkipLabel]
 

@@ -33,10 +33,3 @@ var (
 	RetryCount    = 3
 	RetryInterval = 5 * time.Second
 )
-
-const (
-	// PodmanAuthSecret represents podman auth secret name.
-	PodmanAuthSecret = "podman-auth-secret"
-	// VolumeLabel represents the volume name associated with Pod.
-	VolumeLabel = "ai-services.io/volume"
-)
