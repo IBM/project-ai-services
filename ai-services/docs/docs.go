@@ -3244,6 +3244,9 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
+                },
+                "worker": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker"
                 }
             }
         },
@@ -3368,6 +3371,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime_type": {
                     "type": "string"
                 }
             }
