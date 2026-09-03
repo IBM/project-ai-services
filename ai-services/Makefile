@@ -41,15 +41,20 @@ REPORT_DIR := tests/e2e/reports
 RUN_ID := $(shell date +%s)
 export RUN_ID
 
-TEST_BASE = ginkgo -r --tags "$(BUILDTAGS)"
+TEST_BASE = ginkgo -r --procs=1 --tags "$(BUILDTAGS)"
 TEST_PKG = ./tests/e2e
 TEST_ARGS ?=
-JUNIT_FLAG = --junit-report=report-$(RUN_ID).xml --output-dir=$(REPORT_DIR)
+# Exclude the standalone catalog-configure suite from the full e2e run.
+# Run it independently with: ginkgo --label-filter="catalog-configure" ./tests/e2e
+TEST_FILTER = --label-filter="!catalog-configure"
+JUNIT_FLAG  = --junit-report=report-$(RUN_ID).xml --output-dir=$(REPORT_DIR)
 
-TEST_CMD = $(TEST_BASE) $(TEST_ARGS) $(TEST_PKG) \
-	-- $(if $(APP_NAME),--app-name=$(APP_NAME),) \
-        $(if $(DELETE_APP),--delete-app=$(DELETE_APP),) \
-	$(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),)
+# Shared passthrough args (app-name, delete-app, runtime)
+TEST_PASSTHROUGH = -- $(if $(APP_NAME),--app-name=$(APP_NAME),) \
+                      $(if $(DELETE_APP),--delete-app=$(DELETE_APP),) \
+                      $(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),)
+
+TEST_CMD = $(TEST_BASE) $(TEST_FILTER) $(TEST_ARGS) $(TEST_PKG) $(TEST_PASSTHROUGH)
 
 .PHONY: default
 default:
@@ -111,10 +116,7 @@ test:
 
 test-generate-report:
 	@echo "Using RUN_ID=$(RUN_ID)"
-	$(TEST_BASE) $(TEST_ARGS) $(JUNIT_FLAG) $(TEST_PKG) \
-	-- $(if $(APP_NAME),--app-name=$(APP_NAME),) \
-	   $(if $(DELETE_APP),--delete-app=$(DELETE_APP),) \
-	   $(if $(APP_RUNTIME),--runtime=$(APP_RUNTIME),)
+	$(TEST_BASE) $(TEST_FILTER) $(TEST_ARGS) $(JUNIT_FLAG) $(TEST_PKG) $(TEST_PASSTHROUGH)
 
 .PHONY: swagger
 swagger:

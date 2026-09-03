@@ -519,6 +519,12 @@ func ValidateApplicationLogs(output, _, _ string) error {
 
 func GetApplicationNameFromPSOutput(psOutput string) (appName string) {
 	lines := strings.Split(psOutput, "\n")
+	// lines[0] = header, lines[1] = separator, lines[2] = first data row.
+	// Guard against output that has no data rows (no app running).
+	if len(lines) < 3 {
+		return ""
+	}
+
 	parts := strings.Fields(lines[2])
 	if len(parts) > 0 {
 		return parts[0]

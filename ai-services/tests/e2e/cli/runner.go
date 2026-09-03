@@ -206,7 +206,7 @@ func CreateRAGAppAndValidate(
 	appRuntime string,
 ) (string, error) {
 	const (
-		maxRetries            = 10               //nolint:mnd
+		maxRetries            = 30               //nolint:mnd
 		waitTime              = 15 * time.Second //nolint:mnd
 		defaultCommandTimeout = 10 * time.Second //nolint:mnd
 	)
@@ -684,6 +684,11 @@ func StartApplication(
 	appRuntime string,
 	opts StartOptions,
 ) (string, error) {
+	const (
+		startPollInterval = 15 * time.Second //nolint:mnd
+		startMaxRetries   = 30               //nolint:mnd
+	)
+
 	args := []string{"application", "start", appName, "--yes"}
 
 	if opts.Pod != "" {
@@ -710,16 +715,27 @@ func StartApplication(
 		return output, err
 	}
 
-	psOutput, err := ApplicationPS(ctx, cfg, appName, appRuntime)
-	if err != nil {
-		return output, err
+	// Poll until all main pods reach Running state.
+	// On slower hardware (ppc64le/Jenkins) pods may still be starting
+	// when the CLI returns, so a single immediate check is not sufficient.
+	var lastErr error
+	for i := 1; i <= startMaxRetries; i++ {
+		psOutput, psErr := ApplicationPS(ctx, cfg, appName, appRuntime)
+		if psErr != nil {
+			return output, psErr
+		}
+
+		lastErr = ValidatePodsRunningAfterStart(psOutput, appName, appRuntime)
+		if lastErr == nil {
+			return output, nil
+		}
+
+		logger.Infof("[START] Pods not yet running (attempt %d/%d): %v — retrying in %s",
+			i, startMaxRetries, lastErr, startPollInterval)
+		time.Sleep(startPollInterval)
 	}
 
-	if err := ValidatePodsRunningAfterStart(psOutput, appName, appRuntime); err != nil {
-		return output, err
-	}
-
-	return output, nil
+	return output, lastErr
 }
 
 func deleteAppWithArgs(ctx context.Context, cfg *config.Config, appName string, appRuntime string, errLabel string, args []string) (string, error) {

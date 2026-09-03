@@ -50,9 +50,19 @@ func GetLLMasJudgeModelDetails() (downloadPath string, modelName string) {
 	return os.Getenv("LLM_JUDGE_MODEL_PATH"), os.Getenv("LLM_JUDGE_MODEL")
 }
 
+// defaultLLMJudgePort is the fallback port for the vLLM judge container when
+// LLM_JUDGE_PORT is not set in the environment.
+const defaultLLMJudgePort = "8000"
+
 // GetLLMasJudgePodDetails returns the LLM-as-Judge container port and image.
+// Port falls back to defaultLLMJudgePort when LLM_JUDGE_PORT is unset, matching
+// the getEnvWithDefault("LLM_JUDGE_PORT", "8000") used in the suite setup.
 func GetLLMasJudgePodDetails() (portNumber string, llmImage string) {
-	return os.Getenv("LLM_JUDGE_PORT"), os.Getenv("LLM_JUDGE_IMAGE")
+	port := os.Getenv("LLM_JUDGE_PORT")
+	if port == "" {
+		port = defaultLLMJudgePort
+	}
+	return port, os.Getenv("LLM_JUDGE_IMAGE")
 }
 
 // GetCatalogCreds returns catalog credentials from environment variables.
