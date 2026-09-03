@@ -267,7 +267,6 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 		return fmt.Errorf("worker setup: template %q not found", tmplName)
 	}
 
-	fmt.Println(params)
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, params); err != nil {
 		return fmt.Errorf("worker setup: render %s: %w", tmplName, err)
