@@ -145,6 +145,8 @@ func (j *ConnectorSyncJob) syncLoop(ctx context.Context) {
 			j.performSync(ctx)
 		case <-j.stopChan:
 			return
+		case <-ctx.Done():
+			return
 		}
 	}
 }
