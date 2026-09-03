@@ -53,7 +53,7 @@ const (
 )
 
 var kacp = keepalive.ClientParameters{
-	Time:                20 * time.Second, // Send a ping every 20 seconds of silence
+	Time:                15 * time.Second, // Send a ping every 15 seconds of silence
 	Timeout:             5 * time.Second,  // Wait 5 seconds for a response
 	PermitWithoutStream: true,             // Ping even if no active RPCs are moving
 }
