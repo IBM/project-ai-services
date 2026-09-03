@@ -39,6 +39,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
@@ -62,6 +63,8 @@ type APIServerOptions struct {
 	// WorkerRegistry holds the in-memory state of all connected workers and owns
 	// the bootstrap token store.
 	WorkerRegistry *registry.Registry
+	// WorkerRepository is the DB-backed store for worker rows.
+	WorkerRepository dbrepo.WorkerRepository
 }
 
 // APIserver represents the API server instance, holding the configuration and authentication provider.
@@ -77,6 +80,7 @@ type APIserver struct {
 
 	workerGatewayPort int
 	workerRegistry    *registry.Registry
+	workerRepository  dbrepo.WorkerRepository
 }
 
 // NewAPIserver creates a new instance of the API server with the provided options, setting default values where necessary.
@@ -100,6 +104,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		catalogProvider:    options.CatalogProvider,
 		workerGatewayPort:  options.WorkerGatewayPort,
 		workerRegistry:     options.WorkerRegistry,
+		workerRepository:   options.WorkerRepository,
 	}
 }
 
@@ -120,7 +125,7 @@ func (a *APIserver) Start(ctx context.Context) error {
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.datasourceService, a.bundleService, a.catalogProvider)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.workerRepository, a.datasourceService, a.bundleService, a.catalogProvider)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err

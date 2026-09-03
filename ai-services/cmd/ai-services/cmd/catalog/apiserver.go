@@ -177,6 +177,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		CatalogProvider:    catalogProvider,
 		WorkerGatewayPort:  workerGatewayPort,
 		WorkerRegistry:     workerReg,
+		WorkerRepository:   workerRepo,
 	}
 	cleanup := func() {
 		blacklist.Stop()

@@ -20,7 +20,6 @@ package join
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -31,12 +30,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
+	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
 const (
@@ -53,91 +50,22 @@ const (
 	retryBackoffFactor = 2
 )
 
-// Options carries everything needed to join a worker to the catalog control plane.
-type Options struct {
-	// GatewayAddr is the host:port of the catalog gRPC worker-gateway,
-	// e.g. "catalog.example.com:9090".
-	GatewayAddr string
-
-	// Token is the single-use bootstrap token issued by
-	// `ai-services catalog worker register`.
-	Token string
-
-	// RuntimeType is the execution environment of this worker node
-	// ("podman" or "openshift"). Sent to the control plane during Register.
-	RuntimeType types.RuntimeType
-
-	// Setup holds the options for setting up this worker node (Caddy proxy,
-	// model storage, etc.). Setup runs before the gRPC handshake so the
-	// worker is ready to serve routes as soon as it connects.
-	Setup workerdeploy.Options
-}
-
-// Run executes the complete worker join workflow and blocks until ctx is
-// cancelled or an unrecoverable error occurs.
-//
-// The steps are:
-//   - Deploy Caddy on the worker node (idempotent).
-//   - Dial the catalog gRPC gateway.
-//   - Call Register with the bootstrap token.
-//   - Open CommandStream and hold it, retrying on transient failures.
-func Run(ctx context.Context, opts Options) error {
-	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
-	if err != nil {
-		return fmt.Errorf("worker join: init runtime: %w", err)
-	}
-
-	// Setup worker node
-	if err := workerdeploy.Setup(ctx, rt, opts.Setup, opts.GatewayAddr, opts.Token); err != nil {
-		return fmt.Errorf("worker join: setup: %w", err)
-	}
-
-	return nil
-}
-
-// GrpcServer dials the catalog gRPC worker-gateway, registers with the
+// StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
-func GrpcServer(ctx context.Context, opts Options) error {
-	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-	if err != nil {
-		return err
-	}
-
-	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
-	if err != nil {
-		return fmt.Errorf("worker grpcserver: init runtime: %w", err)
-	}
-
-	// ── Step 1: Build Caddy proxy router (Podman only) ──────────────────────
-	// Must happen after Setup so the Caddy pod is running and its admin port
-	// is discoverable. For OpenShift workers routes are managed natively.
-	var pr *workercaddy.ProxyRouter
-	if opts.RuntimeType == types.RuntimeTypePodman {
-		var err error
-		if pr, err = workercaddy.New(ctx, rt); err != nil {
-			return fmt.Errorf("worker grpcserver: init local Caddy manager: %w", err)
-		}
-	}
-
-	// ── Step 2: Dial the gateway ─────────────────────────────────────────────
+func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
+	// ── Step 1: Dial the gateway ─────────────────────────────────────────────
 	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
 
 	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return fmt.Errorf("worker grpcserver: create client for %s: %w", opts.GatewayAddr, err)
+		return fmt.Errorf("worker grpcstream: create client for %s: %w", opts.GatewayAddr, err)
 	}
 	defer func() { _ = conn.Close() }()
 
 	client := workerpb.NewWorkerGatewayClient(conn)
 
-	// ── Step 3: Register + stream loop ───────────────────────────────────────
-	meta := map[string]string{
-		workerconstants.MetaKeyBaseDir:      opts.Setup.BaseDir,
-		workerconstants.MetaKeyDomainSuffix: domainSuffix,
-		workerconstants.MetaKeyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
-	}
-
-	return runRegistrationLoop(ctx, rt, pr, client, opts.Token, meta)
+	// ── Step 2: Register + stream loop ───────────────────────────────────────
+	return runRegistrationLoop(ctx, rt, pr, client, opts.Token)
 }
 
 // ─── registration loop ────────────────────────────────────────────────────────
@@ -145,8 +73,8 @@ func GrpcServer(ctx context.Context, opts Options) error {
 // runRegistrationLoop calls Register and then enters the CommandStream retry
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
-func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, token string, meta map[string]string) error {
-	workerName, err := register(ctx, client, token, rt.Type(), meta)
+func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, token string) error {
+	workerName, err := register(ctx, client, token, rt.Type())
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
 	}
@@ -158,13 +86,12 @@ func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercadd
 
 // register calls the Register RPC once and returns the worker name bound by
 // the control plane.
-func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType, meta map[string]string) (string, error) {
+func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker with catalog control plane...")
 
 	resp, err := client.Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    rt.String(),
-		Metadata:       meta,
 	})
 	// TODO: When registrations fails due to "token already used" error
 	// attempt registretion without token.

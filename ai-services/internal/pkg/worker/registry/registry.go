@@ -203,7 +203,11 @@ func (r *Registry) Disconnect(ctx context.Context, workerName string) {
 	r.mu.Unlock()
 
 	if ok && r.repo != nil && entry.DBID != uuid.Nil {
-		if err := r.repo.Update(ctx, entry.DBID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
+		msg := MsgDisconnected
+		if err := r.repo.Update(ctx, entry.DBID, repository.WorkerUpdate{
+			Status:  utils.Ptr(models.WorkerStatusDisconnected),
+			Message: &msg,
+		}); err != nil {
 			logger.WarningfCtx(ctx, "worker registry: DB disconnect update failed for %s: %v", workerName, err)
 		}
 	}
@@ -233,7 +237,11 @@ func (r *Registry) SweepStale(ctx context.Context, timeout time.Duration) {
 		}
 		if w.LastHeartbeat == nil || now.Sub(*w.LastHeartbeat) > timeout {
 			logger.WarningfCtx(ctx, "worker registry: worker %s heartbeat timed out — marking disconnected", w.Name)
-			if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
+			msg := MsgLostHeartbeat
+			if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{
+				Status:  utils.Ptr(models.WorkerStatusDisconnected),
+				Message: &msg,
+			}); err != nil {
 				logger.WarningfCtx(ctx, "worker registry: failed to update stale worker %s: %v", w.Name, err)
 			}
 		}

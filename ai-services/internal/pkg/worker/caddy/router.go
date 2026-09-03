@@ -7,10 +7,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 )
 
@@ -21,16 +18,14 @@ type ProxyRouter struct {
 	pm proxy.ProxyManager
 }
 
-// New builds a ProxyRouter by discovering the Caddy admin port from the
-// named pod via the runtime and pointing the HTTP client at it.
-func New(ctx context.Context, rt runtime.Runtime) (*ProxyRouter, error) {
-	adminPort, err := proxy.GetCaddyAdminPort(ctx, rt, workerdeploy.WorkerCaddyPodName)
+// NewProxyRouter builds a ProxyRouter pointed at the local Caddy admin API.
+// CADDY_ADMIN_URL is injected into the worker pod at deploy time;
+// GetCaddyProxyManager reads it directly.
+func NewProxyRouter(ctx context.Context) (*ProxyRouter, error) {
+	pm, err := proxy.GetCaddyProxyManager()
 	if err != nil {
-		return nil, fmt.Errorf("caddy router: discover admin port: %w", err)
+		return nil, fmt.Errorf("caddy router: %w", err)
 	}
-
-	adminURL := fmt.Sprintf("http://localhost:%s", adminPort)
-	pm := proxy.NewCaddyManager(adminURL, constants.CaddyServerName)
 
 	return &ProxyRouter{pm: pm}, nil
 }
@@ -47,7 +42,21 @@ func (pr *ProxyRouter) ManageProxyRoute(ctx context.Context, op payload.ProxyRou
 
 	switch op {
 	case payload.ProxyRouteOpRegister:
-		return nil, pr.pm.RegisterRoute(ctx, r)
+		// RegisterRoute returns the external URL built from the worker's own
+		// CADDY_HTTPS_PORT env var — the correct port for this machine.
+		externalURL, err := pr.pm.RegisterRoute(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+
+		return &payload.Route{
+			ID:          r.ID,
+			Domain:      r.Domain,
+			Upstream:    r.Upstream,
+			Terminal:    r.Terminal,
+			Type:        r.Type,
+			ExternalURL: externalURL,
+		}, nil
 
 	case payload.ProxyRouteOpUnregister:
 		return nil, pr.pm.UnregisterRoute(ctx, route.ID)

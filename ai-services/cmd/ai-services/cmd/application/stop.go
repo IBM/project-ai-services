@@ -61,7 +61,7 @@ Note:
 		ctx := cmd.Context()
 		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		// For podman runtime with default mode, validate application name using catalog API
+		// For podman runtime with default mode, validate application name using catalog API.
 		if !legacyStop && rt == types.RuntimeTypePodman {
 			appClient, err := catalogClient.NewApplicationClient(ctx)
 			if err != nil {

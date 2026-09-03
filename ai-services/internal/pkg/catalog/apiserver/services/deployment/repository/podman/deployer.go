@@ -54,14 +54,6 @@ type (
 	SpyreCardPool  = deploymenttypes.SpyreCardPool
 )
 
-// PodmanWorkerConfig holds configuration sourced from a remote worker's
-// registration metadata.
-type PodmanWorkerConfig struct {
-	DomainSuffix string
-	HTTPSPort    string
-	BaseDir      string
-}
-
 // PodmanDeployer implements deployment execution for Podman runtime.
 type PodmanDeployer struct {
 	runtime         runtime.Runtime
@@ -69,9 +61,6 @@ type PodmanDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
-	// workerConfig is non-nil for remote worker deployments. When set,
-	// getCaddyConfiguration uses its values instead of local env vars.
-	workerConfig *PodmanWorkerConfig
 }
 
 // NewPodmanDeployer creates a new PodmanDeployer instance.
@@ -89,13 +78,6 @@ func NewPodmanDeployer(
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
 	}
-}
-
-// SetPodmanWorkerConfig injects the Caddy configuration for a remote worker
-// deployment. When set, getCaddyConfiguration uses these values instead of
-// local env vars.
-func (d *PodmanDeployer) SetPodmanWorkerConfig(cfg PodmanWorkerConfig) {
-	d.workerConfig = &cfg
 }
 
 // ExecuteDeployment executes the deployment plan for an application or standalone service.
@@ -238,17 +220,16 @@ func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet
 }
 
 // downloadModels downloads all models in the provided set.
-// For remote workers the command is sent over the gRPC stream so the download
-// runs on the worker node where the models directory lives; for local workers
-// helpers.DownloadModelContainer is called directly.
+// For remote workers the command is forwarded over the gRPC stream; the worker
+// resolves AI_SERVICES_BASE_DIR from its own environment to find the models
+// directory. For local deployments helpers.DownloadModelContainer is called
+// directly with the local models path.
 func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		modelsPath := d.workerConfig.BaseDir + "/models"
 		for modelName := range modelSet {
 			logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
 			_, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
-				Model:     modelName,
-				TargetDir: modelsPath,
+				Model: modelName,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to download model %s: %w", modelName, err)
@@ -1114,7 +1095,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Registering routes for application '%s'\n", plan.ApplicationName)
 
-	domainSuffix, httpsPort, proxyManager, err := d.getCaddyConfiguration()
+	proxyManager, err := d.getProxyManager()
 	if err != nil {
 		return err
 	}
@@ -1126,7 +1107,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			continue
 		}
 
-		if err := d.registerServiceRoutes(ctx, svc, proxyManager, domainSuffix, httpsPort, &registrationErrors); err != nil {
+		if err := d.registerServiceRoutes(ctx, svc, proxyManager, &registrationErrors); err != nil {
 			registrationErrors = append(registrationErrors, err)
 		}
 	}
@@ -1140,40 +1121,24 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 	return nil
 }
 
-// getCaddyConfiguration retrieves Caddy configuration and creates a ProxyManager.
-// For a remote runtime the domain/port come from the worker's registration
-// metadata (via workerConfig) and a RemoteProxyManager is returned.
-// For a local runtime both values are read from environment variables and a
-// local Caddy ProxyManager is returned.
-func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
+// getProxyManager returns the appropriate ProxyManager for this deployment.
+// domainSuffix and httpsPort are intentionally not returned — RegisterRoute
+// on the ProxyManager reads both from its own environment (local or worker)
+// so the correct values are always used regardless of where Caddy is running.
+func (d *PodmanDeployer) getProxyManager() (proxy.ProxyManager, error) {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		pm := proxy.NewRemoteProxyManager(rt.Sender)
-
-		return d.workerConfig.DomainSuffix, d.workerConfig.HTTPSPort, pm, nil
+		return proxy.NewRemoteProxyManager(rt.Sender), nil
 	}
 
-	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
-	if domainSuffix == "" {
-		return "", "", nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
-	}
-
-	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
-
-	proxyManager, err := proxy.GetCaddyProxyManager()
-	if err != nil {
-		return "", "", nil, err
-	}
-
-	return domainSuffix, httpsPort, proxyManager, nil
+	return proxy.GetCaddyProxyManager()
 }
 
 // registerServiceRoutes registers routes for a single service and updates its endpoints in the database.
+// domainSuffix and httpsPort are resolved by RegisterRoute from the ProxyManager's own environment.
 func (d *PodmanDeployer) registerServiceRoutes(
 	ctx context.Context,
 	svc *ServicePlan,
 	proxyManager proxy.ProxyManager,
-	domainSuffix string,
-	httpsPort string,
 	registrationErrors *[]error,
 ) error {
 	var serviceEndpoints []map[string]any
@@ -1185,7 +1150,6 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			catalogconstants.CatalogAppName,
 			proxyManager,
 			routesAnnotation,
-			domainSuffix,
 			podName,
 		)
 		if err != nil {
@@ -1194,13 +1158,10 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			continue
 		}
 
-		// Convert registered routes to endpoint format using route type
 		for _, route := range registeredRoutes {
-			url := catalogutils.BuildExternalURL(route.Domain, httpsPort)
-
 			endpoint := map[string]any{
 				"type": route.Type,
-				"url":  url,
+				"url":  route.ExternalURL,
 			}
 			serviceEndpoints = append(serviceEndpoints, endpoint)
 		}

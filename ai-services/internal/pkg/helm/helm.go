@@ -16,6 +16,8 @@ import (
 	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
+const uninstallHelmTimeout = 5 * time.Minute
+
 type Helm struct {
 	namespace    string
 	actionConfig *action.Configuration
@@ -164,4 +166,17 @@ func (h *Helm) Uninstall(release string, opts *UninstallOpts) error {
 	}
 
 	return nil
+}
+
+func (h *Helm) UninstallRelease(release string) error {
+	exists, err := h.IsReleaseExist(release)
+	if err != nil {
+		return fmt.Errorf("failed to check '%s' release existence: %w", release, err)
+	}
+
+	if !exists {
+		return driver.ErrReleaseNotFound
+	}
+
+	return h.Uninstall(release, &UninstallOpts{Timeout: uninstallHelmTimeout})
 }

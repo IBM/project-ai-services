@@ -1,5 +1,6 @@
 containers:
   - name: "extract-api"
+    workload: "extract-api"
     format: ".Status"
     alias: API_STATUS
 

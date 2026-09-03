@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/project-ai-services/ai-services/assets"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -110,16 +109,16 @@ func SanitizeFilePath(path string) string {
 	return cleanPath
 }
 
-// LoadChartFromCatalogFS walks assets.CatalogFS at catalogPath and returns a Helm chart.
-func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
+// LoadChartFromFS walks the given filesystem at catalogPath and returns a Helm chart.
+func LoadChartFromFS(fsys fs.FS, catalogPath string) (helmchart.Charter, error) {
 	var files []*archive.BufferedFile
 
-	err := fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, catalogPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 
-		data, err := assets.CatalogFS.ReadFile(p)
+		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}

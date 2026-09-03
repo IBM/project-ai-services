@@ -28,12 +28,9 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 	return appservice.ValidatePaginationParams(page, pageSize)
 }
 
-// NewApplicationService creates the appropriate ApplicationServiceInterface implementation
-// based on the runtime type. It is the single construction point for the apiserver.
-//
-// reg wires the worker registry into the deployment executor so that requests
-// carrying a non-empty WorkerName are routed to the named remote worker over the
-// gRPC CommandStream. This applies to both Podman and OpenShift local runtimes.
+// NewApplicationService creates an ApplicationServiceInterface for the given runtime type.
+// reg wires the worker registry so that requests carrying a WorkerName are routed to the
+// named remote worker over the gRPC CommandStream.
 func NewApplicationService(
 	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
@@ -43,7 +40,11 @@ func NewApplicationService(
 	runtimeType runtimeTypes.RuntimeType,
 	reg stream.WorkerRegistry,
 ) ApplicationServiceInterface {
-	base := appservice.ApplicationServiceBase{
+	if runtimeType != runtimeTypes.RuntimeTypePodman && runtimeType != runtimeTypes.RuntimeTypeOpenShift {
+		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
+	}
+
+	return &appservice.ApplicationServiceBase{
 		AppRepo:               appRepo,
 		ServiceRepo:           serviceRepo,
 		ComponentRepo:         componentRepo,
@@ -53,14 +54,8 @@ func NewApplicationService(
 		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo).WithWorkerRegistry(reg),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validators.NewApplicationValidator(provider),
-	}
-
-	switch runtimeType {
-	case runtimeTypes.RuntimeTypePodman:
-		return appservice.NewPodmanApplicationService(base)
-	case runtimeTypes.RuntimeTypeOpenShift:
-		return appservice.NewOpenShiftApplicationService(base)
-	default:
-		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
+		RuntimeType:           runtimeType,
+		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
+		WorkerRegistry:        reg,
 	}
 }
