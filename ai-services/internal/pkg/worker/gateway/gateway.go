@@ -5,25 +5,25 @@
 package gateway
 
 import (
-"context"
-"crypto/ecdsa"
-"crypto/tls"
-"crypto/x509"
-"errors"
-"fmt"
-"math"
-"net"
-"time"
+	"context"
+	"crypto/ecdsa"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	"math"
+	"net"
+	"time"
 
-"github.com/project-ai-services/ai-services/internal/pkg/logger"
-workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
-"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
-"google.golang.org/grpc"
-"google.golang.org/grpc/codes"
-"google.golang.org/grpc/credentials"
-"google.golang.org/grpc/keepalive"
-"google.golang.org/grpc/status"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -75,34 +75,34 @@ func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, add
 		return fmt.Errorf("worker gateway: listen on %s: %w", addr, err)
 	}
 
-// Hybrid TLS: allow connections without client certs (for bootstrap Register)
-// but verify them rigorously if they are provided (for mTLS CommandStream).
-tlsConfig := &tls.Config{
-	Certificates: []tls.Certificate{g.serverCert},
-	ClientCAs:    g.caCertPool,
-	ClientAuth:   tls.VerifyClientCertIfGiven,
-}
+	// Hybrid TLS: allow connections without client certs (for bootstrap Register)
+	// but verify them rigorously if they are provided (for mTLS CommandStream).
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{g.serverCert},
+		ClientCAs:    g.caCertPool,
+		ClientAuth:   tls.VerifyClientCertIfGiven,
+	}
 
-serverParams := keepalive.ServerParameters{
-	MaxConnectionIdle:     time.Duration(math.MaxInt64), // Infinite idle time
-	MaxConnectionAge:      time.Duration(math.MaxInt64), // Infinite connection age
-	MaxConnectionAgeGrace: time.Duration(math.MaxInt64), // Infinite grace period
-	Time:                  10 * time.Second,             // Ping client every 10s if idle
-	Timeout:               3 * time.Second,              // Wait 3s for client ping response
-}
+	serverParams := keepalive.ServerParameters{
+		MaxConnectionIdle:     time.Duration(math.MaxInt64), // Infinite idle time
+		MaxConnectionAge:      time.Duration(math.MaxInt64), // Infinite connection age
+		MaxConnectionAgeGrace: time.Duration(math.MaxInt64), // Infinite grace period
+		Time:                  10 * time.Second,             // Ping client every 10s if idle
+		Timeout:               3 * time.Second,              // Wait 3s for client ping response
+	}
 
-enforcementPolicy := keepalive.EnforcementPolicy{
-	MinTime:             5 * time.Second, // Allow clients to ping as often as every 5s
-	PermitWithoutStream: true,            // Allow pings even if no active RPCs exist
-}
+	enforcementPolicy := keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second, // Allow clients to ping as often as every 5s
+		PermitWithoutStream: true,            // Allow pings even if no active RPCs exist
+	}
 
-g.grpcServer = grpc.NewServer(
-	grpc.Creds(credentials.NewTLS(tlsConfig)),
-	grpc.KeepaliveParams(serverParams),
-	grpc.KeepaliveEnforcementPolicy(enforcementPolicy),
-	grpc.UnaryInterceptor(g.authUnaryInterceptor),
-	grpc.StreamInterceptor(g.authStreamInterceptor),
-)
+	g.grpcServer = grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.KeepaliveParams(serverParams),
+		grpc.KeepaliveEnforcementPolicy(enforcementPolicy),
+		grpc.UnaryInterceptor(g.authUnaryInterceptor),
+		grpc.StreamInterceptor(g.authStreamInterceptor),
+	)
 	workerpb.RegisterWorkerGatewayServer(g.grpcServer, g)
 
 	go func() {

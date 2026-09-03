@@ -53,6 +53,8 @@ spec:
           value: "{{ .Values.caddy.httpsPort }}"
         - name: DOMAIN_SUFFIX
           value: "{{ .DomainSuffix }}"
+        - name: GRPC_ENFORCE_ALPN_ENABLED
+          value: "false"
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.worker.podman.uri }}
