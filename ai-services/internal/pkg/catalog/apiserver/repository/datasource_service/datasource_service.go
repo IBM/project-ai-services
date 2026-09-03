@@ -1121,14 +1121,18 @@ func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
 	return ""
 }
 
-// ListApplicationDatasources returns a paginated list of datasource connectors linked to
-// the given application.
+// ListApplicationDatasources returns a paginated list of datasource connectors linked to the
+// given application, enriched with live sync state from the connected service pod.
 //
-// Service calls are minimised: GET /v1/connectors is called once per page to bulk-fetch
-// status, last_sync, total_files, and message for all connectors on the page.
-// All connectors in an application share the same service pod so one base URL is resolved
-// from the first connector's linked service rows via the existing extractAPIEndpointURL helper.
-// Pagination is translated to limit/offset matching the downstream service API.
+// Pagination is driven entirely by the service response:
+//  1. All connector IDs for the application are fetched from the DB in one query.
+//  2. The service pod is called once with the requested limit/offset; its Total field
+//     drives the pagination metadata returned to the caller.
+//  3. The DB connectors for the IDs returned by the service are fetched in one bulk query.
+//
+// This eliminates both the DB-vs-service pagination mismatch (the old per-page DB offset
+// could return a different slice than the service's own offset) and the N per-connector
+// DB round-trips.
 //
 // Returns a *ValidationError with code 404 when the application does not exist.
 func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req apimodels.ListApplicationDatasourcesRequest) (*apimodels.ApplicationDatasourceListResponse, error) {
@@ -1146,27 +1150,24 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 		return nil, &ValidationError{Code: http.StatusNotFound, Message: "application not found"}
 	}
 
-	connectorIDs, total, err := s.svcDepRepo.GetConnectorsByAppID(ctx, appID, req.PageSize, (req.Page-1)*req.PageSize)
+	// Fetch all connector IDs for this app so we can locate the service base URL.
+	allConnectorIDs, err := s.svcDepRepo.GetConnectorsByAppID(ctx, appID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list application connectors: %w", err)
 	}
 
-	// Resolve base URL and bulk-fetch all service connectors once for the whole page.
-	// Uses the first connector to locate the shared service pod endpoint.
-	// limit and offset are passed through to match the downstream pagination API.
 	offset := (req.Page - 1) * req.PageSize
-	baseURL, serviceConnectors := s.fetchServiceConnectors(ctx, connectorIDs, req.PageSize, offset)
 
-	data := make([]apimodels.ApplicationDatasourceItem, 0, len(connectorIDs))
-	for _, cid := range connectorIDs {
-		item, buildErr := s.buildApplicationDatasourceItem(ctx, cid, baseURL, serviceConnectors)
-		if buildErr != nil {
-			return nil, buildErr
-		}
+	// Resolve the service base URL and call GET /v1/connectors with the caller's pagination
+	// params. The service response is authoritative for both the page content and total count.
+	baseURL, servicePage := s.fetchServiceConnectors(ctx, allConnectorIDs, req.PageSize, offset)
 
-		data = append(data, *item)
+	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID)
+	if err != nil {
+		return nil, err
 	}
 
+	total := servicePage.Total
 	totalPages := 0
 	if total > 0 {
 		totalPages = (total + req.PageSize - 1) / req.PageSize
@@ -1185,20 +1186,22 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 	}, nil
 }
 
-// fetchServiceConnectors resolves the service base URL from the first connector in the
-// list (using the existing GetLinkedServiceEndpoints + extractAPIEndpointURL path), then
-// calls GET /v1/connectors once with limit/offset pagination to return a map keyed by
-// connector ID. Returns an empty string and nil map when no endpoint is found or the call fails.
-func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connectorIDs []uuid.UUID, limit, offset int) (string, map[string]apimodels.ConnectorItem) {
+// fetchServiceConnectors resolves the service base URL from the first connector ID in the
+// list (via the existing GetLinkedServiceEndpoints + extractAPIEndpointURL path), then calls
+// GET /v1/connectors once with the given limit/offset. Returns an empty-page result when no
+// endpoint is found or the call fails.
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
+	empty := catalogclient.ServiceConnectorPage{ByID: make(map[string]apimodels.ConnectorItem)}
+
 	if len(connectorIDs) == 0 {
-		return "", nil
+		return "", empty
 	}
 
 	linkedRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, connectorIDs[0], dbmodels.DependencyTypeConnector)
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to resolve service endpoint for connector %s: %v", connectorIDs[0], err)
 
-		return "", nil
+		return "", empty
 	}
 
 	baseURL := ""
@@ -1211,63 +1214,74 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connecto
 	}
 
 	if baseURL == "" {
-		return "", nil
+		return "", empty
 	}
 
-	connectors, err := catalogclient.NewServiceClient(baseURL).ListConnectors(ctx, limit, offset)
+	page, err := catalogclient.NewServiceClient(baseURL).ListConnectors(ctx, limit, offset)
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to list connectors from service at %s: %v", baseURL, err)
 
-		return baseURL, nil
+		return baseURL, empty
 	}
 
-	return baseURL, connectors
+	return baseURL, *page
 }
 
-// buildApplicationDatasourceItem fetches connector metadata from the DB and enriches it
-// with sync state from the pre-fetched serviceConnectors map (status, last_sync, total_files,
-// message). The message field is sourced directly from the service — no separate sync-log
-// call is needed.
-func (s *DatasourceService) buildApplicationDatasourceItem(ctx context.Context, connectorID uuid.UUID, baseURL string, serviceConnectors map[string]apimodels.ConnectorItem) (*apimodels.ApplicationDatasourceItem, error) {
-	connector, err := s.connectorRepo.GetByID(ctx, connectorID, false)
+// buildDatasourcePage bulk-fetches the DB connector rows for the IDs in serviceItems and
+// assembles the slice of ApplicationDatasourceItem for the current page.
+// IDs in serviceItems are UUIDs stored by this service, so no parse-error handling is needed.
+func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL string, serviceItems map[string]apimodels.ConnectorItem) ([]apimodels.ApplicationDatasourceItem, error) {
+	ids := make([]uuid.UUID, 0, len(serviceItems))
+	for idStr := range serviceItems {
+		ids = append(ids, uuid.MustParse(idStr))
+	}
+
+	dbConnectors, err := s.connectorRepo.GetByIDs(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch connector: %w", err)
+		return nil, fmt.Errorf("failed to fetch connector details: %w", err)
 	}
 
-	providerName := connector.Provider
-	if catalogConn, loadErr := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, connector.Provider); loadErr == nil {
-		providerName = catalogConn.Name
+	items := make([]apimodels.ApplicationDatasourceItem, 0, len(serviceItems))
+	for _, serviceConn := range serviceItems {
+		item := s.buildApplicationDatasourceItem(uuid.MustParse(serviceConn.ID), serviceConn, baseURL, dbConnectors)
+		items = append(items, *item)
 	}
 
+	return items, nil
+}
+
+// buildApplicationDatasourceItem assembles one ApplicationDatasourceItem from the pre-fetched
+// service connector entry and the pre-fetched DB connector map — no additional DB or HTTP calls.
+func (s *DatasourceService) buildApplicationDatasourceItem(connectorID uuid.UUID, serviceConn apimodels.ConnectorItem, baseURL string, dbConnectors map[uuid.UUID]dbmodels.Connector) *apimodels.ApplicationDatasourceItem {
 	item := &apimodels.ApplicationDatasourceItem{
-		ID:   connector.ID.String(),
-		Name: connector.Name,
-		Provider: apimodels.DatasourceProviderInfo{
-			ID:   connector.Provider,
-			Name: providerName,
-		},
-		Status: "unknown",
+		ID:       connectorID.String(),
+		Status:   serviceConn.SyncStatus,
+		LastSync: serviceConn.LastSyncAt,
+		Files:    serviceConn.TotalFiles,
+		Message:  serviceConn.Message,
 	}
 
 	if baseURL == "" {
+		item.Status = "unknown"
 		item.ErrMsg = "no api endpoint registered for this service"
-
-		return item, nil
 	}
 
-	serviceConn, found := serviceConnectors[connectorID.String()]
-	if !found {
-		item.ErrMsg = "connector not found on service pod"
+	connector, found := dbConnectors[connectorID]
+	if found {
+		item.Name = connector.Name
 
-		return item, nil
+		providerName := connector.Provider
+		if catalogConn, loadErr := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, connector.Provider); loadErr == nil {
+			providerName = catalogConn.Name
+		}
+
+		item.Provider = apimodels.DatasourceProviderInfo{
+			ID:   connector.Provider,
+			Name: providerName,
+		}
 	}
 
-	item.Status = serviceConn.SyncStatus
-	item.LastSync = serviceConn.LastSyncAt
-	item.Files = serviceConn.TotalFiles
-	item.Message = serviceConn.Message
-
-	return item, nil
+	return item
 }
 
 // Made with Bob

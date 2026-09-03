@@ -21,6 +21,13 @@ type serviceConnectorListResponse struct {
 	Items  []apimodels.ConnectorItem `json:"items"`
 }
 
+// ServiceConnectorPage is the parsed result of a ListConnectors call: the page items keyed by
+// connector ID for O(1) lookup, plus the Total count reported by the service for pagination.
+type ServiceConnectorPage struct {
+	ByID  map[string]apimodels.ConnectorItem
+	Total int
+}
+
 const (
 	// serviceHTTPTimeout is the per-request timeout for calls to a downstream service pod.
 	serviceHTTPTimeout = 15 * time.Second
@@ -119,12 +126,13 @@ func (c *ServiceClient) GetConnectorSync(ctx context.Context, connectorID string
 }
 
 // ListConnectors calls GET /v1/connectors on the service pod with limit/offset pagination
-// and returns all connectors in the page as a map keyed by connector ID for O(1) lookup.
+// and returns a ServiceConnectorPage containing a map keyed by connector ID for O(1) lookup
+// and the Total count from the service response — used to drive API-level pagination.
 // The ConnectorListItem already includes the message field covering all status phases and
 // error details — no separate sync-log call is required.
 // Pass limit=0 to use the service default (50). offset is zero-based.
 // Returns an error when the HTTP call fails or the pod returns a non-200 status.
-func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int) (map[string]apimodels.ConnectorItem, error) {
+func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int) (*ServiceConnectorPage, error) {
 	var result serviceConnectorListResponse
 
 	req := c.http.R().
@@ -153,7 +161,7 @@ func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int) (
 		byID[item.ID] = item
 	}
 
-	return byID, nil
+	return &ServiceConnectorPage{ByID: byID, Total: result.Total}, nil
 }
 
 // Connect calls POST /v1/connectors on the given service base URL.

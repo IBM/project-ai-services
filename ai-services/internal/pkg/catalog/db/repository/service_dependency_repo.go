@@ -56,10 +56,10 @@ type ServiceDependencyRepository interface {
 	// linked service. Consumers are responsible for extracting the specific endpoint URL they
 	// need from EndpointsJSON.
 	GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error)
-	// GetConnectorsByAppID returns the distinct connector dependency_ids for all services
-	// belonging to the given application, with pagination applied at the DB level.
-	// The total count across all pages is also returned.
-	GetConnectorsByAppID(ctx context.Context, appID uuid.UUID, limit, offset int) (connectorIDs []uuid.UUID, total int, err error)
+	// GetConnectorsByAppID returns all distinct connector dependency_ids for all services
+	// belonging to the given application, with no pagination applied.
+	// Pagination is the responsibility of the downstream service.
+	GetConnectorsByAppID(ctx context.Context, appID uuid.UUID) (connectorIDs []uuid.UUID, err error)
 }
 
 // serviceDependencyRepo implements ServiceDependencyRepository using pgx.
@@ -261,45 +261,41 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 	return results, nil
 }
 
-// GetConnectorsByAppID returns the distinct connector dependency_ids attached to services
-// belonging to the given application, together with the total count — all in one query
-// using a window function so no separate COUNT round-trip is needed.
-func (r *serviceDependencyRepo) GetConnectorsByAppID(ctx context.Context, appID uuid.UUID, limit, offset int) ([]uuid.UUID, int, error) {
+// GetConnectorsByAppID returns all distinct connector dependency_ids attached to services
+// belonging to the given application. No pagination is applied here — pagination is owned
+// by the downstream service response.
+func (r *serviceDependencyRepo) GetConnectorsByAppID(ctx context.Context, appID uuid.UUID) ([]uuid.UUID, error) {
 	query := `
-		SELECT dependency_id, COUNT(*) OVER () AS total
-		FROM (
-			SELECT DISTINCT sd.dependency_id
-			FROM service_dependencies sd
-			INNER JOIN services s ON s.id = sd.service_id
-			WHERE s.app_id           = $1
-			  AND sd.dependency_type = $2
-			ORDER BY sd.dependency_id
-		) sub
-		LIMIT $3 OFFSET $4
+		SELECT DISTINCT sd.dependency_id
+		FROM service_dependencies sd
+		INNER JOIN services s ON s.id = sd.service_id
+		WHERE s.app_id           = $1
+		  AND sd.dependency_type = $2
+		ORDER BY sd.dependency_id
 	`
 
-	rows, err := r.pool.Query(ctx, query, appID, models.DependencyTypeConnector, limit, offset)
+	rows, err := r.pool.Query(ctx, query, appID, models.DependencyTypeConnector)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to query application connectors: %w", err)
+		return nil, fmt.Errorf("failed to query application connectors: %w", err)
 	}
 	defer rows.Close()
 
 	var ids []uuid.UUID
-	total := 0
 
 	for rows.Next() {
 		var id uuid.UUID
-		if err := rows.Scan(&id, &total); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan connector ID: %w", err)
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan connector ID: %w", err)
 		}
+
 		ids = append(ids, id)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating application connector IDs: %w", err)
+		return nil, fmt.Errorf("error iterating application connector IDs: %w", err)
 	}
 
-	return ids, total, nil
+	return ids, nil
 }
 
 // Made with Bob
