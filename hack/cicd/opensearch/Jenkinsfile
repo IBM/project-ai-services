@@ -8,6 +8,11 @@ pipeline {
             choices: ['3.8.0', '3.7.0'],
             description: 'OpenSearch version to build'
         )
+        string(
+            name: 'BUILD_SCRIPTS_BRANCH',
+            defaultValue: 'opensearch-3.8.0',
+            description: 'Branch or tag of the build-scripts repository to checkout'
+        )
         booleanParam(
             name: 'PUSH_RELEASE_TAG',
             defaultValue: false,
@@ -54,7 +59,7 @@ pipeline {
                     def ver = params.OPENSEARCH_VERSION
 
                     env.OPENSEARCH_BUILD_BRANCH = ver
-                    env.BUILD_SCRIPTS_BRANCH    = "opensearch-${ver}"
+                    env.BUILD_SCRIPTS_BRANCH    = params.BUILD_SCRIPTS_BRANCH
                     env.DOCKERFILE_DIR          = "o/opensearch-project-opensearch-build/Dockerfiles/${ver}_ubi9.7"
                     env.PATCH_FILE              = "${env.DOCKERFILE_DIR}/ppc64le-${ver}-ai-services.patch"
                     env.BUILD_ENV_IMAGE         = "opensearch-build-env:${ver}-ppc64le"
@@ -72,14 +77,6 @@ pipeline {
         stage('Clean Workspace') {
             steps {
                 deleteDir()
-                sh """
-                    echo "=== Reclaiming Podman space ==="
-                    # Remove stopped containers and dangling (untagged) images only;
-                    # named images, volumes, and networks are left untouched.
-                    podman system prune -f || true
-                    echo "=== Disk after prune ==="
-                    df -h /
-                """
             }
         }
 
