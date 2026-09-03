@@ -364,6 +364,30 @@ pipeline {
             }
         }
 
+        stage('Validate AI-Services Compatibility') {
+
+            steps {
+
+                // Non-fatal: a failure marks the stage unstable but does not
+                // prevent the image from being pushed.  The validate.sh script
+                // tests the exact ai-services RAG usage pattern (security plugin
+                // enabled, hybrid search pipeline, HNSW/lucene k-NN index,
+                // bulk insert, dense/sparse/hybrid search, delete_by_query).
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+
+                    sh """
+                        set -euo pipefail
+                        chmod +x hack/cicd/opensearch/validate.sh
+                        hack/cicd/opensearch/validate.sh \
+                            --image  ${IMAGE_NAME}:${IMAGE_TAG} \
+                            --version ${OPENSEARCH_VERSION} \
+                            --port    9202 \
+                            --timeout 180
+                    """
+                }
+            }
+        }
+
         stage('Trivy Security Scan') {
 
             steps {
