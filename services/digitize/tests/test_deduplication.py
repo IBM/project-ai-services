@@ -748,7 +748,10 @@ def jobs_test_client(monkeypatch, tmp_path, mock_db_operations):
     # Stub out pipeline background tasks.
     # Must be AsyncMock — asyncio.create_task() requires a coroutine.
     monkeypatch.setattr(jobs_router_module, "_run_digitize", AsyncMock())
-    monkeypatch.setattr(jobs_router_module, "_run_ingest", AsyncMock())
+    monkeypatch.setattr(digitize_app.dg_util, "launch_ingest_pipeline", AsyncMock())
+    monkeypatch.setattr(
+        digitize_app.dg_util, "initialize_and_launch", AsyncMock(return_value={"novel.pdf": "doc-1"})
+    )
 
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-x"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
@@ -864,8 +867,8 @@ class TestDuplicateDetectionEndpoint:
             files=[self._pdf("old.pdf"), self._pdf("new.pdf")],
         )
 
-        init_call = cast(Mock, digitize_app.dg_util.initialize_job_state).call_args
-        already_exists_arg = init_call[1].get("already_exists_files", init_call[0][-1])
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        already_exists_arg = init_call.kwargs.get("already_exists_files", [])
         assert len(already_exists_arg) == 1
         assert already_exists_arg[0].filename == "old.pdf"
         assert already_exists_arg[0].existing_doc_id == "old-doc"
@@ -884,8 +887,8 @@ class TestDuplicateDetectionEndpoint:
             files=[self._pdf("new.pdf")],
         )
 
-        init_call = cast(Mock, digitize_app.dg_util.initialize_job_state).call_args
-        already_exists_arg = init_call[1].get("already_exists_files", [])
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        already_exists_arg = init_call.kwargs.get("already_exists_files", [])
         assert already_exists_arg == []
 
     def test_digitization_also_checks_ingestion_hash(self, jobs_test_client, monkeypatch):

@@ -60,7 +60,10 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     # Stub out pipeline background tasks so TestClient doesn't execute them.
     # Must be AsyncMock — asyncio.create_task() requires a coroutine.
     monkeypatch.setattr(jobs_router, "_run_digitize", AsyncMock())
-    monkeypatch.setattr(jobs_router, "_run_ingest", AsyncMock())
+    monkeypatch.setattr(digitize_app.dg_util, "launch_ingest_pipeline", AsyncMock())
+    monkeypatch.setattr(
+        digitize_app.dg_util, "initialize_and_launch", AsyncMock(return_value={"sample.pdf": "doc-1"})
+    )
     monkeypatch.setattr(digitize_app.dg_util, "generate_uuid", Mock(return_value="job-123"))
     monkeypatch.setattr(digitize_app.dg_util, "stage_upload_files", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "initialize_job_state", Mock(return_value={"sample.pdf": "doc-1"}))
@@ -111,7 +114,7 @@ class TestRequestIdMiddleware:
 class TestCreateJobs:
     def test_successful_digitization_job_creation(self, digitize_test_client):
         stage_upload_files_mock = cast(AsyncMock, digitize_app.dg_util.stage_upload_files)
-        initialize_job_state_mock = cast(Mock, digitize_app.dg_util.initialize_job_state)
+        initialize_and_launch_mock = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch)
 
         response = digitize_test_client.post(
             "/v1/jobs?operation=digitization&output_format=json",
@@ -122,14 +125,14 @@ class TestCreateJobs:
         assert response.json()["job_id"] == "job-123"
         assert "warnings" not in response.json()
         stage_upload_files_mock.assert_awaited_once()
-        initialize_job_state_mock.assert_called_once_with(
-            "job-123",
-            OperationType.DIGITIZATION,
-            OutputFormat.JSON,
-            ["sample.pdf"],
-            None,
-            already_exists_files=[],
-        )
+        initialize_and_launch_mock.assert_awaited_once()
+        call_kwargs = initialize_and_launch_mock.call_args.kwargs
+        assert call_kwargs["job_id"] == "job-123"
+        assert call_kwargs["operation"] == OperationType.DIGITIZATION
+        assert call_kwargs["output_format"] == OutputFormat.JSON
+        assert call_kwargs["filenames"] == ["sample.pdf"]
+        assert call_kwargs["job_name"] is None
+        assert call_kwargs["already_exists_files"] == []
 
     def test_successful_ingestion_job_creation(self, digitize_test_client):
         response = digitize_test_client.post(
@@ -172,7 +175,7 @@ class TestCreateJobs:
         assert response.status_code == 415
 
     def test_output_format_and_job_name_parameters(self, digitize_test_client):
-        initialize_job_state_mock = cast(Mock, digitize_app.dg_util.initialize_job_state)
+        initialize_and_launch_mock = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch)
 
         response = digitize_test_client.post(
             "/v1/jobs?operation=digitization&output_format=md&job_name=My+Job",
@@ -180,23 +183,23 @@ class TestCreateJobs:
         )
 
         assert response.status_code == 202
-        initialize_job_state_mock.assert_called_with(
-            "job-123",
-            OperationType.DIGITIZATION,
-            OutputFormat.MD,
-            ["sample.pdf"],
-            "My Job",
-            already_exists_files=[],
-        )
+        initialize_and_launch_mock.assert_awaited()
+        call_kwargs = initialize_and_launch_mock.call_args.kwargs
+        assert call_kwargs["job_id"] == "job-123"
+        assert call_kwargs["operation"] == OperationType.DIGITIZATION
+        assert call_kwargs["output_format"] == OutputFormat.MD
+        assert call_kwargs["filenames"] == ["sample.pdf"]
+        assert call_kwargs["job_name"] == "My Job"
+        assert call_kwargs["already_exists_files"] == []
 
     def test_successful_digitization_job_creation_with_docx(self, digitize_test_client):
         """Test successful digitization job creation with DOCX file."""
         stage_upload_files_mock = cast(AsyncMock, digitize_app.dg_util.stage_upload_files)
-        initialize_job_state_mock = cast(Mock, digitize_app.dg_util.initialize_job_state)
+        initialize_and_launch_mock = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch)
 
         # DOCX file signature: PK\x03\x04 (ZIP format)
         docx_header = b"PK\x03\x04\x14\x00\x06\x00"
-        
+
         response = digitize_test_client.post(
             "/v1/jobs?operation=digitization&output_format=json",
             files=[("files", ("document.docx", docx_header, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
@@ -206,14 +209,14 @@ class TestCreateJobs:
         assert response.json()["job_id"] == "job-123"
         assert "warnings" not in response.json()
         stage_upload_files_mock.assert_awaited_once()
-        initialize_job_state_mock.assert_called_once_with(
-            "job-123",
-            OperationType.DIGITIZATION,
-            OutputFormat.JSON,
-            ["document.docx"],
-            None,
-            already_exists_files=[],
-        )
+        initialize_and_launch_mock.assert_awaited_once()
+        call_kwargs = initialize_and_launch_mock.call_args.kwargs
+        assert call_kwargs["job_id"] == "job-123"
+        assert call_kwargs["operation"] == OperationType.DIGITIZATION
+        assert call_kwargs["output_format"] == OutputFormat.JSON
+        assert call_kwargs["filenames"] == ["document.docx"]
+        assert call_kwargs["job_name"] is None
+        assert call_kwargs["already_exists_files"] == []
 
     def test_successful_ingestion_job_creation_with_docx(self, digitize_test_client):
         """Test successful ingestion job creation with DOCX file."""
