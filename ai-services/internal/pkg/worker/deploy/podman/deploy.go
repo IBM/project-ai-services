@@ -16,6 +16,7 @@ import (
 	ttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -31,19 +32,6 @@ import (
 )
 
 const (
-	caddyfileSubDir = "worker/caddy"
-	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
-
-	dirPerm  = 0o750
-	filePerm = 0o644
-	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod deployed by
-	// Setup. Exported so join.go can look up the pod's admin port after setup.
-	WorkerCaddyPodName = "ai-services--caddy"
-
-	// workerApp is the app name passed to the template provider.
-	// Resolves to assets/worker/<runtime>/templates/.
-	workerApp = "worker"
-
 	caddyfilePath = "worker/podman/Caddyfile.tmpl"
 )
 
@@ -101,8 +89,11 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return err
 	}
 
-	// TODO: Load SSL certs if certs flags are set.
-	// Q: Can we move GetHostAdminURL to utils as we need url to call "LoadUserCertificates()"
+	caddyCtx, err := setupCaddyContext(ctx, opts)
+	// Load SSL certificates if provided
+	if err := caddyCtx.LoadSSLCertificates(ctx, opts.Setup.BaseDir, opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath); err != nil {
+		return err
+	}
 
 	logger.InfolnCtx(ctx, "Worker node setup complete.")
 
@@ -294,4 +285,23 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)
+}
+
+// setupCaddyContext sets up the Caddy context with domain configuration and Caddyfile generation.
+// This function:
+// 1. Computes domain configuration (cert domain extraction + domain suffix resolution)
+// 2. Creates Caddy context with pod name and domain suffix.
+func setupCaddyContext(ctx context.Context, opts workertypes.PodmanWorkerOptions) (*caddy.Context, error) {
+	// Compute domain configuration (cert domain extraction + domain suffix resolution)
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.DebugfCtx(ctx, "Using domain suffix: %s\n", domainSuffix)
+
+	// Create Caddy context with pod name and domain suffix (NO template dependencies)
+	caddyCtx := caddy.NewContext(workerconstants.WorkerCaddyPodName, domainSuffix)
+
+	return caddyCtx, nil
 }
