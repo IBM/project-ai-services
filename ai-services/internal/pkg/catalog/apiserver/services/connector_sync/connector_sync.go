@@ -44,9 +44,8 @@ type ConnectorSyncJob struct {
 	sensitiveFields map[string]map[string]bool // provider → sensitive field set; pre-computed at construction
 	encryptionKey   string
 	syncInterval    time.Duration
-	stopChan        chan struct{}
-	syncMutex       sync.Mutex // prevents overlapping sync cycles
-	isSyncing       bool       // true while a sync cycle is in progress
+	stopChan  chan struct{}
+	syncMutex sync.Mutex // held for the duration of a sync cycle; TryLock skips overlapping cycles
 }
 
 // NewConnectorSyncJob creates a new ConnectorSyncJob.
@@ -154,21 +153,12 @@ func (j *ConnectorSyncJob) syncLoop(ctx context.Context) {
 // performSync executes one full sync cycle. If a cycle is already in progress it
 // is skipped — identical to the SyncService overlap guard.
 func (j *ConnectorSyncJob) performSync(ctx context.Context) {
-	j.syncMutex.Lock()
-	if j.isSyncing {
+	if !j.syncMutex.TryLock() {
 		logger.DebuglnCtx(ctx, "Connector sync already in progress, skipping this cycle")
-		j.syncMutex.Unlock()
 
 		return
 	}
-	j.isSyncing = true
-	j.syncMutex.Unlock()
-
-	defer func() {
-		j.syncMutex.Lock()
-		j.isSyncing = false
-		j.syncMutex.Unlock()
-	}()
+	defer j.syncMutex.Unlock()
 
 	logger.DebuglnCtx(ctx, "Starting connector sync cycle")
 
