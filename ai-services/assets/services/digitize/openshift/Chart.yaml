@@ -5,5 +5,5 @@ type: application
 
 # Below are chart and app version numbers.
 # Both needs to be incremented each time when we make a new AI Services binary release
-version: 1.0.0
+version: "1.0.0"
 appVersion: "1.0.0"
