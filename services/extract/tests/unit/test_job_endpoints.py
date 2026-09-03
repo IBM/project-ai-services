@@ -57,6 +57,8 @@ def _mock_doc_row(
     source_type="txt",
     status="completed",
     error=None,
+    usage_input_tokens=None,
+    usage_output_tokens=None,
 ):
     row = Mock()
     row.doc_id = doc_id
@@ -67,6 +69,8 @@ def _mock_doc_row(
     row.error = error
     row.word_count = None
     row.input_tokens = None
+    row.usage_input_tokens = usage_input_tokens
+    row.usage_output_tokens = usage_output_tokens
     row.doc_metadata = None
     row.started_at = None
     row.completed_at = datetime(2026, 7, 7, 10, 5, 0, tzinfo=timezone.utc)
@@ -110,8 +114,8 @@ class TestCreateExtractJob:
              patch("extract.api.v1.jobs.stage_multiple_files"), \
              patch("extract.api.v1.jobs.db_repo.create_job", return_value=_mock_job_row(status="accepted")), \
              patch("extract.api.v1.jobs.db_repo.create_documents", return_value=True), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
-             patch("extract.api.v1.jobs._process_batch_job", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.process_batch_job", new=AsyncMock()), \
              _patch_extract_limiter_free():
             resp = self._post_single(extract_test_client)
 
@@ -127,8 +131,8 @@ class TestCreateExtractJob:
              patch("extract.api.v1.jobs.db_repo.create_job",
                    return_value=_mock_job_row(status="accepted", file_count=3)), \
              patch("extract.api.v1.jobs.db_repo.create_documents", return_value=True), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
-             patch("extract.api.v1.jobs._process_batch_job", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.process_batch_job", new=AsyncMock()), \
              _patch_extract_limiter_free():
             resp = self._post_batch(
                 extract_test_client,
@@ -153,7 +157,7 @@ class TestCreateExtractJob:
     def test_400_duplicate_filenames(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=_mock_schema_row()), \
              patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
              _patch_extract_limiter_free():
             files = [
                 ("files", ("same.txt", b"content a", "text/plain")),
@@ -171,7 +175,7 @@ class TestCreateExtractJob:
         from extract.settings import settings
         limit = settings.extract.max_files_per_job
         with patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
              _patch_extract_limiter_free():
             files = [
                 ("files", (f"file_{i}.txt", b"content", "text/plain"))
@@ -188,7 +192,7 @@ class TestCreateExtractJob:
     def test_404_unknown_schema(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=None), \
              patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
              _patch_extract_limiter_free():
             resp = self._post_single(extract_test_client, schema_id="nonexistent")
 
@@ -214,7 +218,7 @@ class TestCreateExtractJob:
 
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=_mock_schema_row()), \
              patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
-             patch("extract.api.v1.jobs._validate_file_content", side_effect=_side_effect), \
+             patch("extract.api.v1.jobs.validate_file_content", side_effect=_side_effect), \
              _patch_extract_limiter_free():
             files = [
                 ("files", ("ok.txt", b"good content", "text/plain")),
@@ -243,7 +247,7 @@ class TestCreateExtractJob:
     def test_500_staging_failure(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=_mock_schema_row()), \
              patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
              patch("extract.api.v1.jobs.stage_multiple_files", side_effect=IOError("disk full")), \
              _patch_extract_limiter_free():
             resp = self._post_single(extract_test_client)
@@ -254,7 +258,7 @@ class TestCreateExtractJob:
     def test_500_db_create_returns_none(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=_mock_schema_row()), \
              patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
              patch("extract.api.v1.jobs.stage_multiple_files"), \
              patch("extract.api.v1.jobs.db_repo.create_job", return_value=None), \
              patch("extract.api.v1.jobs.cleanup_staging_directory"), \
@@ -267,7 +271,7 @@ class TestCreateExtractJob:
     def test_500_documents_create_fails(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=_mock_schema_row()), \
              patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
-             patch("extract.api.v1.jobs._validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
              patch("extract.api.v1.jobs.stage_multiple_files"), \
              patch("extract.api.v1.jobs.db_repo.create_job", return_value=_mock_job_row(status="accepted")), \
              patch("extract.api.v1.jobs.db_repo.create_documents", return_value=False), \
@@ -372,22 +376,27 @@ class TestListExtractJobs:
 # ---------------------------------------------------------------------------
 
 class TestGetExtractJobSingleFile:
+    """Single-file jobs are stored as batch jobs with one document row."""
+
     def test_200_completed_job(self, extract_test_client):
         row = _mock_job_row()
+        doc = _mock_doc_row(status="completed")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
-             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[]):
+             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[doc]):
             resp = extract_test_client.get("/v1/extract/jobs/job-001")
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["job_id"] == "job-001"
         assert body["status"] == "completed"
-        assert body["documents"] is None
+        assert body["documents"] is not None
+        assert len(body["documents"]) == 1
 
     def test_200_in_progress_job(self, extract_test_client):
         row = _mock_job_row(status="in_progress", completed_at=None, job_metadata={"phase": "extracting"})
+        doc = _mock_doc_row(status="in_progress")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
-             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[]):
+             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[doc]):
             resp = extract_test_client.get("/v1/extract/jobs/job-001")
 
         assert resp.status_code == 200
@@ -403,8 +412,9 @@ class TestGetExtractJobSingleFile:
 
     def test_error_field_present_on_failed_job(self, extract_test_client):
         row = _mock_job_row(status="failed", error="CONTEXT_LIMIT_EXCEEDED")
+        doc = _mock_doc_row(status="failed", error="CONTEXT_LIMIT_EXCEEDED")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
-             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[]):
+             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[doc]):
             resp = extract_test_client.get("/v1/extract/jobs/job-001")
 
         assert resp.status_code == 200
@@ -478,24 +488,28 @@ class TestGetExtractJobBatch:
 
 
 # ---------------------------------------------------------------------------
-# GET /v1/extract/jobs/{job_id}/result — single-file backward compat
+# GET /v1/extract/jobs/{job_id}/results/{doc_id} — single-file result via
+# the per-document endpoint (single-file jobs are batch jobs with one doc)
 # ---------------------------------------------------------------------------
 
-class TestGetExtractJobResult:
-    _RESULT_PAYLOAD = {
-        "data": {"extraction": {"invoice_number": "INV-001"}, "schema_id": "schema-001", "source": {}},
-        "status": "completed",
-        "meta": {"model": "granite", "processing_time_ms": 1200, "validation_attempts": 1},
-        "usage": {"input_tokens": 400, "output_tokens": 60, "total_tokens": 460},
-    }
+_RECONSTRUCTED_PAYLOAD = {
+    "data": {"extraction": {"invoice_number": "INV-001"}, "schema_id": "schema-001", "source": {}},
+    "status": "completed",
+    "meta": {"model": "granite", "processing_time_ms": 1200, "validation_attempts": 1},
+    "usage": {"input_tokens": 400, "output_tokens": 60, "total_tokens": 460},
+}
+_FILE_DATA = {"extraction": {"invoice_number": "INV-001"}}
 
+
+class TestGetExtractJobResult:
     def test_200_completed_returns_result(self, extract_test_client):
         row = _mock_job_row(status="completed")
         doc = _mock_doc_row(doc_id="doc-001", status="completed")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
-             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[doc]), \
-             patch("extract.api.v1.jobs.read_doc_result_file", return_value=self._RESULT_PAYLOAD):
-            resp = extract_test_client.get("/v1/extract/jobs/job-001/result")
+             patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc), \
+             patch("extract.api.v1.jobs.read_doc_result_file", return_value=_FILE_DATA), \
+             patch("extract.api.v1.jobs.build_result_payload", return_value=_RECONSTRUCTED_PAYLOAD):
+            resp = extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001")
 
         assert resp.status_code == 200
         body = resp.json()
@@ -504,52 +518,48 @@ class TestGetExtractJobResult:
         assert "usage" in body
         assert body["status"] == "completed"
 
-    def test_400_on_batch_job(self, extract_test_client):
-        """Calling /result on a multi-file batch job returns 400."""
-        row = _mock_job_row(status="completed", file_count=3)
-        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row):
-            resp = extract_test_client.get("/v1/extract/jobs/job-001/result")
-
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "USE_PER_DOCUMENT_ENDPOINT"
-
     def test_202_while_in_progress(self, extract_test_client):
         row = _mock_job_row(status="in_progress")
-        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row):
-            resp = extract_test_client.get("/v1/extract/jobs/job-001/result")
+        doc = _mock_doc_row(doc_id="doc-001", status="in_progress")
+        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
+             patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc):
+            resp = extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001")
 
         assert resp.status_code == 202
         assert resp.json()["status"] == "in_progress"
 
     def test_202_while_accepted(self, extract_test_client):
         row = _mock_job_row(status="accepted")
-        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row):
-            resp = extract_test_client.get("/v1/extract/jobs/job-001/result")
+        doc = _mock_doc_row(doc_id="doc-001", status="pending")
+        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
+             patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc):
+            resp = extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001")
 
         assert resp.status_code == 202
 
     def test_404_unknown_job(self, extract_test_client):
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=None):
-            resp = extract_test_client.get("/v1/extract/jobs/nonexistent/result")
+            resp = extract_test_client.get("/v1/extract/jobs/nonexistent/results/doc-001")
 
         assert resp.status_code == 404
         assert resp.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
 
-    def test_409_failed_job(self, extract_test_client):
-        row = _mock_job_row(status="failed")
-        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row):
-            resp = extract_test_client.get("/v1/extract/jobs/job-001/result")
+    def test_410_failed_doc(self, extract_test_client):
+        row = _mock_job_row(status="completed_with_errors")
+        doc = _mock_doc_row(doc_id="doc-001", status="failed")
+        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
+             patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc):
+            resp = extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001")
 
-        assert resp.status_code == 409
-        assert resp.json()["error"]["code"] == "JOB_FAILED"
+        assert resp.status_code == 410
 
     def test_500_missing_result_file(self, extract_test_client):
         row = _mock_job_row(status="completed")
         doc = _mock_doc_row(doc_id="doc-001", status="completed")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=row), \
-             patch("extract.api.v1.jobs.db_repo.get_documents_by_job", return_value=[doc]), \
+             patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc), \
              patch("extract.api.v1.jobs.read_doc_result_file", return_value=None):
-            resp = extract_test_client.get("/v1/extract/jobs/job-001/result")
+            resp = extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001")
 
         assert resp.status_code == 500
         assert resp.json()["error"]["code"] == "INTERNAL_SERVER_ERROR"
@@ -560,25 +570,34 @@ class TestGetExtractJobResult:
 # ---------------------------------------------------------------------------
 
 class TestGetDocumentResult:
-    _RESULT_PAYLOAD = {
-        "data": {"extraction": {"invoice_number": "INV-001"}, "schema_id": "schema-001", "source": {}},
-        "status": "completed",
-        "meta": {"model": "granite", "processing_time_ms": 3200, "validation_attempts": 1},
-        "usage": {"input_tokens": 1150, "output_tokens": 96, "total_tokens": 1246},
-    }
-
     def test_200_completed_doc(self, extract_test_client):
         job_row = _mock_job_row(status="completed", file_count=3)
         doc_row = _mock_doc_row(doc_id="doc-001", job_id="job-001", status="completed")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=job_row), \
              patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc_row), \
-             patch("extract.api.v1.jobs.read_doc_result_file", return_value=self._RESULT_PAYLOAD):
+             patch("extract.api.v1.jobs.read_doc_result_file", return_value=_FILE_DATA), \
+             patch("extract.api.v1.jobs.build_result_payload", return_value=_RECONSTRUCTED_PAYLOAD):
             resp = extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001")
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "completed"
         assert "data" in body
+
+    def test_payload_reconstructed_from_db(self, extract_test_client):
+        """build_result_payload is called with the job row, doc row, and file data."""
+        job_row = _mock_job_row(status="completed", file_count=1)
+        doc_row = _mock_doc_row(
+            doc_id="doc-001", job_id="job-001", status="completed",
+            usage_input_tokens=400, usage_output_tokens=60,
+        )
+        with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=job_row), \
+             patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc_row), \
+             patch("extract.api.v1.jobs.read_doc_result_file", return_value=_FILE_DATA), \
+             patch("extract.api.v1.jobs.build_result_payload", return_value=_RECONSTRUCTED_PAYLOAD) as mock_build:
+            extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001")
+
+        mock_build.assert_called_once_with(job_row, doc_row, _FILE_DATA)
 
     def test_202_pending_doc(self, extract_test_client):
         job_row = _mock_job_row(status="in_progress", file_count=3)
@@ -648,19 +667,13 @@ class TestGetDocumentResult:
 # ---------------------------------------------------------------------------
 
 class TestDownloadDocumentResult:
-    _RESULT_PAYLOAD = {
-        "data": {"extraction": {"invoice_number": "INV-001"}},
-        "status": "completed",
-        "meta": {},
-        "usage": {},
-    }
-
     def test_200_download_completed(self, extract_test_client):
         job_row = _mock_job_row(status="completed", file_count=2)
         doc_row = _mock_doc_row(doc_id="doc-001", filename="invoice_001.txt", status="completed")
         with patch("extract.api.v1.jobs.db_repo.get_job_by_id", return_value=job_row), \
              patch("extract.api.v1.jobs.db_repo.get_document_by_id", return_value=doc_row), \
-             patch("extract.api.v1.jobs.read_doc_result_file", return_value=self._RESULT_PAYLOAD):
+             patch("extract.api.v1.jobs.read_doc_result_file", return_value=_FILE_DATA), \
+             patch("extract.api.v1.jobs.build_result_payload", return_value=_RECONSTRUCTED_PAYLOAD):
             resp = extract_test_client.get("/v1/extract/jobs/job-001/results/doc-001/download")
 
         assert resp.status_code == 200

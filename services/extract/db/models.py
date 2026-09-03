@@ -154,6 +154,8 @@ class ExtractDocument(Base):
 
     word_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    usage_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    usage_output_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     doc_metadata: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 

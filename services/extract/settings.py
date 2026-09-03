@@ -139,7 +139,7 @@ class ExtractionConfig(BaseSettings):
 
     # Batch submission
     max_files_per_job: int = Field(
-        default=64,
+        default=32,
         ge=1,
         description="Maximum number of files allowed in a single batch job submission",
     )

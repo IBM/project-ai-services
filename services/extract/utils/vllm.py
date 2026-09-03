@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 
 from common.misc_utils import get_logger
 from extract.settings import settings
+from extract.state import concurrency_limiter
 from extract.utils.exceptions import ExtractException
 
 logger = get_logger("vllm_utils")
@@ -220,9 +221,10 @@ async def validate_with_retry(
         },
     ]
 
-    retry_resp = await call_vllm_safe(
-        retry_messages, reserved_output, json_schema, llm_endpoint, llm_model, is_retry=True
-    )
+    async with concurrency_limiter:
+        retry_resp = await call_vllm_safe(
+            retry_messages, reserved_output, json_schema, llm_endpoint, llm_model, is_retry=True
+        )
 
     retry_choices = retry_resp.get("choices", [])
     if not retry_choices:

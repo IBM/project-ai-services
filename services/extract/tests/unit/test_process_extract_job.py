@@ -198,16 +198,16 @@ def _standard_batch_patches(
 
     return {
         "extract.state.extract_limiter": _make_async_cm_mock(),
-        "extract.api.v1.jobs.get_llm_endpoint": Mock(return_value=LLM_DICT),
-        "extract.api.v1.jobs.db_repo.get_job_by_id": Mock(return_value=job_row),
-        "extract.api.v1.jobs.db_repo.update_job": Mock(return_value=update_job_return),
-        "extract.api.v1.jobs.db_repo.update_document": Mock(return_value=update_doc_return),
-        "extract.api.v1.jobs.db_repo.get_documents_by_job": Mock(
+        "extract.utils.job.get_llm_endpoint": Mock(return_value=LLM_DICT),
+        "extract.utils.job.db_repo.get_job_by_id": Mock(return_value=job_row),
+        "extract.utils.job.db_repo.update_job": Mock(return_value=update_job_return),
+        "extract.utils.job.db_repo.update_document": Mock(return_value=update_doc_return),
+        "extract.utils.job.db_repo.get_documents_by_job": Mock(
             side_effect=[doc_rows, completed_doc_rows]
         ),
-        "extract.api.v1.jobs._resolve_schema": Mock(return_value=schema_row),
-        "extract.api.v1.jobs._process_file": AsyncMock(),
-        "extract.api.v1.jobs.cleanup_staging_directory": Mock(),
+        "extract.utils.job.resolve_schema": Mock(return_value=schema_row),
+        "extract.utils.job.process_file": AsyncMock(),
+        "extract.utils.job.cleanup_staging_directory": Mock(),
     }
 
 
@@ -254,17 +254,17 @@ def _standard_file_patches(
 
     return {
         "extract.state.parallel_file_limiter": _make_async_cm_mock(),
-        "extract.api.v1.jobs.concurrency_limiter": _make_async_cm_mock(),
-        "extract.api.v1.jobs.db_repo.update_document": Mock(return_value=update_doc_return),
-        "extract.api.v1.jobs._tokenize": Mock(return_value=input_tokens),
-        "extract.api.v1.jobs.check_extraction_budget": Mock(return_value=reserved_output),
-        "extract.api.v1.jobs.render_few_shot_block": Mock(return_value=""),
-        "extract.api.v1.jobs.build_messages": Mock(return_value=[{"role": "user", "content": "..."}]),
-        "extract.api.v1.jobs.call_vllm_safe": AsyncMock(return_value=vllm_response),
-        "extract.api.v1.jobs.validate_with_retry": AsyncMock(return_value=validate_return),
+        "extract.utils.job.concurrency_limiter": _make_async_cm_mock(),
+        "extract.utils.job.db_repo.update_document": Mock(return_value=update_doc_return),
+        "extract.utils.job._tokenize": Mock(return_value=input_tokens),
+        "extract.utils.job.check_extraction_budget": Mock(return_value=reserved_output),
+        "extract.utils.job.render_few_shot_block": Mock(return_value=""),
+        "extract.utils.job.build_messages": Mock(return_value=[{"role": "user", "content": "..."}]),
+        "extract.utils.job.call_vllm_safe": AsyncMock(return_value=vllm_response),
+        "extract.utils.job.validate_with_retry": AsyncMock(return_value=validate_return),
         # Default settings mock — prevents real /var/cache writes in any test that
         # reaches the write stage without explicitly overriding settings.
-        "extract.api.v1.jobs.settings": _make_default_settings_mock(),
+        "extract.utils.job.settings": _make_default_settings_mock(),
     }
 
 
@@ -272,7 +272,7 @@ def _standard_file_patches(
 # Import targets under test
 # ---------------------------------------------------------------------------
 
-from extract.api.v1.jobs import _process_batch_job, _process_file  # noqa: E402
+from extract.utils.job import process_batch_job, process_file  # noqa: E402
 
 
 # ===========================================================================
@@ -284,87 +284,87 @@ class TestStep1BatchOrchestrator:
         """_process_batch_job immediately marks the job in_progress."""
         p = _standard_batch_patches()
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        first_call = p["extract.api.v1.jobs.db_repo.update_job"].call_args_list[0]
+        first_call = p["extract.utils.job.db_repo.update_job"].call_args_list[0]
         assert first_call == call(job_id="job-001", status="in_progress")
 
     def test_job_row_not_found_aborts_silently(self):
         """If the DB row is gone at worker start the worker exits without exception."""
         p = _standard_batch_patches()
-        p["extract.api.v1.jobs.db_repo.get_job_by_id"] = Mock(return_value=None)
+        p["extract.utils.job.db_repo.get_job_by_id"] = Mock(return_value=None)
 
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))  # must not raise
+            _run(process_batch_job("job-001"))  # must not raise
 
         # Only in_progress update should have been attempted (no further updates)
-        assert p["extract.api.v1.jobs.db_repo.update_job"].call_count == 1
+        assert p["extract.utils.job.db_repo.update_job"].call_count == 1
 
     def test_schema_not_found_marks_job_failed(self):
         from extract.utils.exceptions import ExtractException
         p = _standard_batch_patches()
-        p["extract.api.v1.jobs._resolve_schema"] = Mock(
+        p["extract.utils.job.resolve_schema"] = Mock(
             side_effect=ExtractException(404, "SCHEMA_NOT_FOUND", "No schema")
         )
 
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        calls = p["extract.api.v1.jobs.db_repo.update_job"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_job"].call_args_list
         failed_call = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert failed_call.kwargs["error"] == "SCHEMA_NOT_FOUND"
-        p["extract.api.v1.jobs.cleanup_staging_directory"].assert_called_once()
+        p["extract.utils.job.cleanup_staging_directory"].assert_called_once()
 
     def test_no_document_rows_marks_job_failed(self):
         """If the document table is empty for a job the worker marks it failed."""
         p = _standard_batch_patches()
-        p["extract.api.v1.jobs.db_repo.get_documents_by_job"] = Mock(return_value=[])
+        p["extract.utils.job.db_repo.get_documents_by_job"] = Mock(return_value=[])
 
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        calls = p["extract.api.v1.jobs.db_repo.update_job"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_job"].call_args_list
         failed_call = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert failed_call.kwargs["error"] == "NO_DOCUMENTS"
-        p["extract.api.v1.jobs.cleanup_staging_directory"].assert_called_once()
+        p["extract.utils.job.cleanup_staging_directory"].assert_called_once()
 
     def test_all_completed_marks_job_completed(self):
         p = _standard_batch_patches()
         # Both calls return all-completed docs
         completed_docs = [Mock(status="completed"), Mock(status="completed")]
-        p["extract.api.v1.jobs.db_repo.get_documents_by_job"] = Mock(
+        p["extract.utils.job.db_repo.get_documents_by_job"] = Mock(
             side_effect=[[_mock_doc_row()], completed_docs]
         )
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        calls = p["extract.api.v1.jobs.db_repo.update_job"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_job"].call_args_list
         final = next(c for c in calls if c.kwargs.get("status") in ("completed", "failed", "completed_with_errors"))
         assert final.kwargs["status"] == "completed"
 
     def test_all_failed_marks_job_failed(self):
         p = _standard_batch_patches()
         failed_docs = [Mock(status="failed"), Mock(status="failed")]
-        p["extract.api.v1.jobs.db_repo.get_documents_by_job"] = Mock(
+        p["extract.utils.job.db_repo.get_documents_by_job"] = Mock(
             side_effect=[[_mock_doc_row()], failed_docs]
         )
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        calls = p["extract.api.v1.jobs.db_repo.update_job"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_job"].call_args_list
         final = next(c for c in calls if c.kwargs.get("status") in ("completed", "failed", "completed_with_errors"))
         assert final.kwargs["status"] == "failed"
 
     def test_mixed_outcome_marks_completed_with_errors(self):
         p = _standard_batch_patches()
         mixed_docs = [Mock(status="completed"), Mock(status="failed")]
-        p["extract.api.v1.jobs.db_repo.get_documents_by_job"] = Mock(
+        p["extract.utils.job.db_repo.get_documents_by_job"] = Mock(
             side_effect=[[_mock_doc_row(), _mock_doc_row(doc_id="doc-002")], mixed_docs]
         )
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        calls = p["extract.api.v1.jobs.db_repo.update_job"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_job"].call_args_list
         final = next(c for c in calls if c.kwargs.get("status") in ("completed", "failed", "completed_with_errors"))
         assert final.kwargs["status"] == "completed_with_errors"
 
@@ -372,13 +372,13 @@ class TestStep1BatchOrchestrator:
         """cleanup_staging_directory is called even when job fails early."""
         from extract.utils.exceptions import ExtractException
         p = _standard_batch_patches()
-        p["extract.api.v1.jobs._resolve_schema"] = Mock(
+        p["extract.utils.job.resolve_schema"] = Mock(
             side_effect=ExtractException(404, "SCHEMA_NOT_FOUND", "No schema")
         )
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        p["extract.api.v1.jobs.cleanup_staging_directory"].assert_called_once()
+        p["extract.utils.job.cleanup_staging_directory"].assert_called_once()
 
 
 # ===========================================================================
@@ -399,7 +399,7 @@ def _run_process_file(
     fake_path = _FakePath(staged_content, name="invoice.txt")
 
     with _apply_patches(patches)[0]:
-        _run(_process_file(
+        _run(process_file(
             job_id=job_id,
             doc_id=doc_id,
             staged_path=fake_path,
@@ -421,7 +421,7 @@ class TestStep2ReadFile:
         p = _standard_file_patches()
         _run_process_file(p, b"\xff\xfe binary garbage")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert "could not be decoded" in failed.kwargs.get("error", "") or "Failed to read" in failed.kwargs.get("error", "")
 
@@ -429,7 +429,7 @@ class TestStep2ReadFile:
         p = _standard_file_patches()
         _run_process_file(p, b"valid content")
 
-        first_call = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list[0]
+        first_call = p["extract.utils.job.db_repo.update_document"].call_args_list[0]
         assert first_call.kwargs.get("status") == "in_progress"
 
 
@@ -440,17 +440,17 @@ class TestStep2ReadFile:
 class TestStep3TokenGuard:
     def test_tokenization_failure_marks_doc_failed(self):
         p = _standard_file_patches()
-        p["extract.api.v1.jobs._tokenize"] = Mock(side_effect=RuntimeError("vllm down"))
+        p["extract.utils.job._tokenize"] = Mock(side_effect=RuntimeError("vllm down"))
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert "tokenise" in failed.kwargs.get("error", "")
 
     def test_context_limit_exceeded_marks_doc_failed(self):
         from extract.utils.exceptions import ExtractException
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.check_extraction_budget"] = Mock(
+        p["extract.utils.job.check_extraction_budget"] = Mock(
             side_effect=ExtractException(
                 413, "CONTEXT_LIMIT_EXCEEDED", "Too large",
                 details={"excess_tokens": 500},
@@ -458,7 +458,7 @@ class TestStep3TokenGuard:
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert failed.kwargs.get("status") == "failed"
 
@@ -466,12 +466,12 @@ class TestStep3TokenGuard:
         from extract.utils.exceptions import ExtractException
         details = {"excess_tokens": 200, "total_required_tokens": 33000}
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.check_extraction_budget"] = Mock(
+        p["extract.utils.job.check_extraction_budget"] = Mock(
             side_effect=ExtractException(413, "CONTEXT_LIMIT_EXCEEDED", "x", details=details)
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert failed.kwargs.get("metadata", {}).get("token_diagnostics") == details
 
@@ -485,23 +485,23 @@ class TestStep4VllmCall:
     def test_vllm_connection_error_marks_doc_failed(self):
         from extract.utils.exceptions import ExtractException
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.call_vllm_safe"] = AsyncMock(
+        p["extract.utils.job.call_vllm_safe"] = AsyncMock(
             side_effect=ExtractException(503, "LLM_UNAVAILABLE", "unreachable")
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert failed.kwargs.get("status") == "failed"
 
     def test_empty_choices_marks_doc_failed(self):
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.call_vllm_safe"] = AsyncMock(
+        p["extract.utils.job.call_vllm_safe"] = AsyncMock(
             return_value={"choices": [], "usage": {}}
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert "empty choices" in failed.kwargs.get("error", "")
 
@@ -518,12 +518,12 @@ class TestStep5LengthRetry:
         second_resp = _vllm_response(VALID_EXTRACTION_JSON, finish_reason="stop")
 
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.call_vllm_safe"] = AsyncMock(
+        p["extract.utils.job.call_vllm_safe"] = AsyncMock(
             side_effect=[first_resp, second_resp]
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         statuses = [c.kwargs.get("status") for c in calls if "status" in c.kwargs]
         assert "completed" in statuses
 
@@ -532,12 +532,12 @@ class TestStep5LengthRetry:
         length_resp = _vllm_response("", finish_reason="length")
 
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.call_vllm_safe"] = AsyncMock(
+        p["extract.utils.job.call_vllm_safe"] = AsyncMock(
             side_effect=[length_resp, length_resp]
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert "truncated" in failed.kwargs.get("error", "")
 
@@ -546,12 +546,12 @@ class TestStep5LengthRetry:
         length_resp = _vllm_response("", finish_reason="length")
 
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.call_vllm_safe"] = AsyncMock(
+        p["extract.utils.job.call_vllm_safe"] = AsyncMock(
             side_effect=[length_resp, ExtractException(500, "LLM_ERROR", "crash on retry")]
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert failed.kwargs.get("error") == "crash on retry"
 
@@ -561,11 +561,11 @@ class TestStep5LengthRetry:
         good_resp = _vllm_response(VALID_EXTRACTION_JSON)
 
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.call_vllm_safe"] = AsyncMock(
+        p["extract.utils.job.call_vllm_safe"] = AsyncMock(
             side_effect=[length_resp, good_resp]
         )
         compute_mock = Mock(return_value=768)
-        p["extract.api.v1.jobs.compute_reserved_output"] = compute_mock
+        p["extract.utils.job.compute_reserved_output"] = compute_mock
 
         schema_row = _mock_schema_row()
         _run_process_file(p, b"text content", schema_row=schema_row)
@@ -587,7 +587,7 @@ class TestStep6Validation:
     def test_validation_failure_marks_doc_failed(self):
         from extract.utils.exceptions import ExtractException
         p = _standard_file_patches()
-        p["extract.api.v1.jobs.validate_with_retry"] = AsyncMock(
+        p["extract.utils.job.validate_with_retry"] = AsyncMock(
             side_effect=ExtractException(
                 422, "EXTRACTION_VALIDATION_FAILED", "schema mismatch",
                 details={"validation_errors": "missing field", "raw_output": "{}"},
@@ -595,7 +595,7 @@ class TestStep6Validation:
         )
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert failed.kwargs.get("status") == "failed"
 
@@ -623,11 +623,11 @@ class TestStep7ResultWrite:
         mock_settings = Mock()
         mock_settings.extract.results_dir = fake_results_root
         mock_settings.extract.output_token_factor = 2.0
-        p["extract.api.v1.jobs.settings"] = mock_settings
+        p["extract.utils.job.settings"] = mock_settings
 
         _run_process_file(p, b"text content")
 
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
         assert "result file" in failed.kwargs.get("error", "")
 
@@ -655,7 +655,7 @@ class TestHappyPath:
         mock_settings = Mock()
         mock_settings.extract.results_dir = fake_results_root
         mock_settings.extract.output_token_factor = 2.0
-        p["extract.api.v1.jobs.settings"] = mock_settings
+        p["extract.utils.job.settings"] = mock_settings
 
         if extra_patches:
             p.update(extra_patches)
@@ -665,86 +665,81 @@ class TestHappyPath:
 
     def test_doc_marked_completed(self):
         p, _, _ = self._run_happy_path()
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         statuses = [c.kwargs.get("status") for c in calls if "status" in c.kwargs]
         assert "completed" in statuses
 
     def test_completed_at_set(self):
         p, _, _ = self._run_happy_path()
-        calls = p["extract.api.v1.jobs.db_repo.update_document"].call_args_list
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         completed_call = next(c for c in calls if c.kwargs.get("status") == "completed")
         assert completed_call.kwargs.get("completed_at") is not None
 
     def test_result_file_written(self):
+        # File now only contains the parsed extraction output.
         _, written, _ = self._run_happy_path()
         assert len(written) == 1
         payload = json.loads(written[0])
-        assert payload["status"] == "completed"
+        assert "invoice_number" in payload
+        assert list(payload.keys()) == ["invoice_number"]
 
-    def test_result_payload_structure(self):
+    def test_result_file_contains_extraction(self):
         _, written, _ = self._run_happy_path()
         payload = json.loads(written[0])
-        assert "data" in payload
-        assert "extraction" in payload["data"]
-        assert "source" in payload["data"]
-        assert payload["data"]["source"]["input_type"] == "file"
-        assert "meta" in payload
-        assert "usage" in payload
+        assert payload == VALID_EXTRACTION
 
-    def test_result_meta_contains_timing(self):
-        _, written, _ = self._run_happy_path()
-        payload = json.loads(written[0])
-        assert "timing_in_secs" in payload["meta"]
-        assert "extracting" in payload["meta"]["timing_in_secs"]
-        assert "validating" in payload["meta"]["timing_in_secs"]
+    def test_completed_update_saves_usage_tokens(self):
+        # usage_input_tokens and usage_output_tokens must be persisted on the
+        # completion update_document call so the result endpoint can reconstruct them.
+        p, _, _ = self._run_happy_path()
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
+        completed_call = next(c for c in calls if c.kwargs.get("status") == "completed")
+        assert completed_call.kwargs["usage_input_tokens"] == 500   # default prompt_tokens
+        assert completed_call.kwargs["usage_output_tokens"] == 80   # default completion_tokens
 
-    def test_result_meta_validation_attempts(self):
-        _, written, _ = self._run_happy_path()
-        payload = json.loads(written[0])
-        assert payload["meta"]["validation_attempts"] == 1
+    def test_completed_update_saves_timing_in_metadata(self):
+        p, _, _ = self._run_happy_path()
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
+        completed_call = next(c for c in calls if c.kwargs.get("status") == "completed")
+        meta = completed_call.kwargs.get("metadata", {})
+        assert "timing_in_secs" in meta
+        assert "extracting" in meta["timing_in_secs"]
+        assert "validating" in meta["timing_in_secs"]
+
+    def test_completed_update_saves_validation_attempts(self):
+        p, _, _ = self._run_happy_path()
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
+        completed_call = next(c for c in calls if c.kwargs.get("status") == "completed")
+        meta = completed_call.kwargs.get("metadata", {})
+        assert meta.get("validation", {}).get("attempts") == 1
 
     def test_validation_attempts_2_when_retry_needed(self):
         extra = {
-            "extract.api.v1.jobs.validate_with_retry": AsyncMock(
+            "extract.utils.job.validate_with_retry": AsyncMock(
                 return_value=(VALID_EXTRACTION, 2, 50, 30)
             )
         }
-        _, written, _ = self._run_happy_path(extra_patches=extra)
-        payload = json.loads(written[0])
-        assert payload["meta"]["validation_attempts"] == 2
+        p, _, _ = self._run_happy_path(extra_patches=extra)
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
+        completed_call = next(c for c in calls if c.kwargs.get("status") == "completed")
+        meta = completed_call.kwargs.get("metadata", {})
+        assert meta.get("validation", {}).get("attempts") == 2
 
     def test_usage_totals_include_retry_tokens(self):
         extra = {
-            "extract.api.v1.jobs.validate_with_retry": AsyncMock(
+            "extract.utils.job.validate_with_retry": AsyncMock(
                 return_value=(VALID_EXTRACTION, 2, 50, 30)
             ),
-            "extract.api.v1.jobs.call_vllm_safe": AsyncMock(
+            "extract.utils.job.call_vllm_safe": AsyncMock(
                 return_value=_vllm_response(VALID_EXTRACTION_JSON, prompt_tokens=400, completion_tokens=80)
             ),
         }
-        _, written, _ = self._run_happy_path(extra_patches=extra)
-        payload = json.loads(written[0])
+        p, _, _ = self._run_happy_path(extra_patches=extra)
+        calls = p["extract.utils.job.db_repo.update_document"].call_args_list
+        completed_call = next(c for c in calls if c.kwargs.get("status") == "completed")
         # 400 prompt + 50 retry_prompt = 450; 80 completion + 30 retry_completion = 110
-        assert payload["usage"]["input_tokens"] == 450
-        assert payload["usage"]["output_tokens"] == 110
-        assert payload["usage"]["total_tokens"] == 560
-
-    def test_word_count_included_in_source(self):
-        """input_words reflects the word count of the staged file content."""
-        _, written, _ = self._run_happy_path()
-        payload = json.loads(written[0])
-        # "INVOICE #INV-001 Vendor: Acme" → 4 words
-        assert payload["data"]["source"]["input_words"] == 4
-
-    def test_document_name_in_source(self):
-        _, written, _ = self._run_happy_path()
-        payload = json.loads(written[0])
-        assert payload["data"]["source"]["document_name"] == "invoice.txt"
-
-    def test_schema_id_in_data(self):
-        _, written, _ = self._run_happy_path()
-        payload = json.loads(written[0])
-        assert payload["data"]["schema_id"] == "schema-001"
+        assert completed_call.kwargs["usage_input_tokens"] == 450
+        assert completed_call.kwargs["usage_output_tokens"] == 110
 
 
 # ===========================================================================
@@ -755,8 +750,8 @@ class TestStep9StagingCleanup:
     def test_staging_cleaned_after_all_docs_processed(self):
         p = _standard_batch_patches()
         with _apply_patches(p)[0]:
-            _run(_process_batch_job("job-001"))
+            _run(process_batch_job("job-001"))
 
-        p["extract.api.v1.jobs.cleanup_staging_directory"].assert_called_once_with(
-            "job-001", p["extract.api.v1.jobs.cleanup_staging_directory"].call_args[0][1]
+        p["extract.utils.job.cleanup_staging_directory"].assert_called_once_with(
+            "job-001", p["extract.utils.job.cleanup_staging_directory"].call_args[0][1]
         )

@@ -510,7 +510,9 @@ class DatabaseManager:
                     _ = (
                         row.doc_id, row.job_id, row.filename, row.source_type,
                         row.status, row.error,
-                        row.word_count, row.input_tokens, row.doc_metadata,
+                        row.word_count, row.input_tokens,
+                        row.usage_input_tokens, row.usage_output_tokens,
+                        row.doc_metadata,
                         row.started_at, row.completed_at, row.created_at,
                     )
                     session.expunge(row)
@@ -526,6 +528,8 @@ class DatabaseManager:
         error: Optional[str] = None,
         word_count: Optional[int] = None,
         input_tokens: Optional[int] = None,
+        usage_input_tokens: Optional[int] = None,
+        usage_output_tokens: Optional[int] = None,
         started_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -542,6 +546,10 @@ class DatabaseManager:
                     updates["word_count"] = word_count
                 if input_tokens is not None:
                     updates["input_tokens"] = input_tokens
+                if usage_input_tokens is not None:
+                    updates["usage_input_tokens"] = usage_input_tokens
+                if usage_output_tokens is not None:
+                    updates["usage_output_tokens"] = usage_output_tokens
                 if started_at is not None:
                     updates["started_at"] = started_at
                 if completed_at is not None:
