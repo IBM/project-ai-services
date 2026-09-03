@@ -3,10 +3,10 @@ package podman
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
+	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -77,17 +77,17 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 	}
 
 	// Delete volumes (only those without skip-cleanup label)
-	if err := deleteVolumes(ctx, rt, volumesToDelete); err != nil {
+	if err := podmanutils.DeleteVolumes(ctx, rt, volumesToDelete); err != nil {
 		return err
 	}
 
-	if err := deletePods(ctx, rt, pods); err != nil {
+	if err := podmanutils.DeletePods(ctx, rt, pods); err != nil {
 		return err
 	}
 
 	workerDataPath := filepath.Join(baseDir, workerconstants.WorkerDataSubDir)
 
-	return removeDataDir(ctx, workerDataPath)
+	return podmanutils.RemoveDataDir(ctx, workerDataPath)
 }
 func fetchVolumesToDelete(pods []types.Pod) []string {
 	volumesToDelete := []string{}
@@ -97,7 +97,7 @@ func fetchVolumesToDelete(pods []types.Pod) []string {
 			volumesToDelete = append(volumesToDelete, volumes...)
 		}
 	}
-	
+
 	return volumesToDelete
 }
 
@@ -152,102 +152,24 @@ func getWorkerPodList(ctx context.Context, rt runtime.Runtime) ([]types.Pod, err
 
 		podList = append(podList, pods...)
 	}
-	
+
 	return podList, nil
-}
-
-// deletePods force-deletes every pod in the list and aggregates any errors.
-func deletePods(ctx context.Context, rt runtime.Runtime, pods []types.Pod) error {
-	var errs []string
-
-	for _, p := range pods {
-		logger.InfofCtx(ctx, "Deleting pod: %s\n", p.Name)
-
-		if err := rt.DeletePod(ctx, p.ID, utils.BoolPtr(true)); err != nil {
-			errs = append(errs, fmt.Sprintf("pod %s: %v", p.Name, err))
-
-			continue
-		}
-
-		logger.InfofCtx(ctx, "Deleted pod: %s\n", p.Name)
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("failed to delete pods:\n%s", strings.Join(errs, "\n"))
-	}
-
-	return nil
 }
 
 // deleteSecrets removes the specified secrets.
 func deleteSecrets(ctx context.Context, rt runtime.Runtime, secrets []string) error {
 	for _, secret := range secrets {
-		exists, err := rt.SecretExists(ctx, workerconstants.WorkerPodmanAuthSecretName)
-		if err != nil {
-			return err
-		}
-		if exists {
-			if err := rt.DeleteSecret(ctx, secret); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-// deleteVolumes removes the specified volumes.
-func deleteVolumes(ctx context.Context, rt runtime.Runtime, volumeNames []string) error {
-	if len(volumeNames) == 0 {
-		// Just return if there are no volumes to delete.
-		return nil
-	}
-
-	logger.Infof("Deleting %d volume(s)\n", len(volumeNames))
-
-	var errors []string
-	for _, volumeName := range volumeNames {
-		logger.Infof("Deleting volume: %s\n", volumeName)
-
-		if err := rt.DeleteVolume(ctx, volumeName); err != nil {
-			// Ignore "not found" errors - volume already deleted or never existed
+		if err := rt.DeleteSecret(ctx, secret); err != nil {
 			if utils.IsNotFoundError(err) {
-				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)
+				logger.Infof("Secret %s already deleted or does not exist\n", secret)
 
 				continue
 			}
 
-			errors = append(errors, fmt.Sprintf("volume %s: %v", volumeName, err))
-
-			continue
+			return err
 		}
-
-		logger.Infof("Successfully deleted volume: %s\n", volumeName)
+		logger.Infof("Successfully deleted secret: %s\n", secret)
 	}
-
-	// Aggregate errors at the end
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to remove volumes: \n%s", strings.Join(errors, "\n"))
-	}
-
-	return nil
-}
-
-// removeDataDir deletes path if it exists, logging a note when absent.
-func removeDataDir(ctx context.Context, dataPath string) error {
-	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
-		logger.InfofCtx(ctx, "data directory does not exist, skipping: %s\n", dataPath)
-
-		return nil
-	}
-
-	logger.InfofCtx(ctx, "Deleting data at: %s\n", dataPath)
-
-	if err := os.RemoveAll(dataPath); err != nil {
-		return fmt.Errorf("failed to remove data directory %s: %w", dataPath, err)
-	}
-
-	logger.InfofCtx(ctx, "Successfully removed data at: %s\n", dataPath)
 
 	return nil
 }

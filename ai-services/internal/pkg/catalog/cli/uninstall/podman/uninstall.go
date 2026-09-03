@@ -3,7 +3,6 @@ package podman
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 
+	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -75,7 +75,7 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	volumesToDelete, volumesToSkip := fetchVolumesToDelete(pods)
 
 	// Delete catalog pods
-	if err := podsDeletion(ctx, rt, pods); err != nil {
+	if err := podmanutils.DeletePods(ctx, rt, pods); err != nil {
 		return err
 	}
 
@@ -85,13 +85,13 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	}
 
 	// Delete volumes (only those without skip-cleanup label)
-	if err := deleteVolumes(ctx, rt, volumesToDelete); err != nil {
+	if err := podmanutils.DeleteVolumes(ctx, rt, volumesToDelete); err != nil {
 		return err
 	}
 
 	// Delete models data
 	modelsDataPath := filepath.Join(baseDir, "models")
-	if err := dataDeletion(modelsDataPath); err != nil {
+	if err := podmanutils.RemoveDataDir(ctx, modelsDataPath); err != nil {
 		return err
 	}
 
@@ -130,31 +130,7 @@ func cleanupSkippedResources(ctx context.Context, rt *podman.PodmanClient, secre
 	}
 
 	// Delete volumes with skip-cleanup label (only when --skip-cleanup is not set)
-	return deleteVolumes(ctx, rt, volumesToSkip)
-}
-
-// podsDeletion removes all catalog pods.
-func podsDeletion(ctx context.Context, rt *podman.PodmanClient, pods []types.Pod) error {
-	var errors []string
-
-	for _, pod := range pods {
-		logger.Infof("Deleting pod: %s\n", pod.Name)
-
-		if err := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); err != nil {
-			errors = append(errors, fmt.Sprintf("pod %s: %v", pod.Name, err))
-
-			continue
-		}
-
-		logger.Infof("Successfully removed pod: %s\n", pod.Name)
-	}
-
-	// Aggregate errors at the end
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to remove pods: \n%s", strings.Join(errors, "\n"))
-	}
-
-	return nil
+	return podmanutils.DeleteVolumes(ctx, rt, volumesToSkip)
 }
 
 // We are currently associating secret names with pods via pod labels and relying on those labels for secret cleanup.
@@ -216,64 +192,6 @@ func fetchVolumesToDelete(pods []types.Pod) ([]string, []string) {
 	}
 
 	return volumesToDelete, volumesToSkip
-}
-
-// dataDeletion removes the specified data directory.
-func dataDeletion(dataPath string) error {
-	// Check if data directory exists
-	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
-		logger.Infof("data directory does not exist: %s\n", dataPath)
-
-		return nil
-	}
-
-	logger.Infof("Deleting data at: %s\n", dataPath)
-
-	// Remove the data directory
-	if err := os.RemoveAll(dataPath); err != nil {
-		return fmt.Errorf("failed to remove database data directory: %w", err)
-	}
-
-	logger.Infof("Successfully removed data at: %s\n", dataPath)
-
-	return nil
-}
-
-// deleteVolumes removes the specified volumes.
-func deleteVolumes(ctx context.Context, rt *podman.PodmanClient, volumeNames []string) error {
-	if len(volumeNames) == 0 {
-		// Just return if there are no volumes to delete.
-		return nil
-	}
-
-	logger.Infof("Deleting %d volume(s)\n", len(volumeNames))
-
-	var errors []string
-	for _, volumeName := range volumeNames {
-		logger.Infof("Deleting volume: %s\n", volumeName)
-
-		if err := rt.DeleteVolume(ctx, volumeName); err != nil {
-			// Ignore "not found" errors - volume already deleted or never existed
-			if utils.IsNotFoundError(err) {
-				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)
-
-				continue
-			}
-
-			errors = append(errors, fmt.Sprintf("volume %s: %v", volumeName, err))
-
-			continue
-		}
-
-		logger.Infof("Successfully deleted volume: %s\n", volumeName)
-	}
-
-	// Aggregate errors at the end
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to remove volumes: \n%s", strings.Join(errors, "\n"))
-	}
-
-	return nil
 }
 
 // Made with Bob
