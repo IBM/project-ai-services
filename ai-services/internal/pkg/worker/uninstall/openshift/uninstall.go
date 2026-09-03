@@ -12,6 +12,7 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 	"helm.sh/helm/v4/pkg/storage/driver"
+	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 )
 
 // Uninstall removes all worker components deployed by `worker join`.
@@ -38,7 +39,7 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 	}
 
 	// Confirm Uninstall unless auto-yes is set
-	if confirmed, err := workerutils.ConfirmUninstall(ctx, pods, opts.AutoYes); err != nil || !confirmed {
+	if confirmed, err := clituils.ConfirmUninstall(ctx, pods, opts.AutoYes); err != nil || !confirmed {
 		return err
 	}
 

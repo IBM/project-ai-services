@@ -35,10 +35,8 @@ func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error
 	logger.Warningln("Ensure no applications are running before uninstalling the catalog, as they may go stale when the catalog is uninstalled and will need to be deleted manually")
 
 	// Confirm deletion if not auto-yes
-	if !opts.AutoYes {
-		if confirmed, err := cliutils.ConfirmDeletion(ctx, pods); !confirmed || err != nil {
-			return err
-		}
+	if confirmed, err := podmanutils.ConfirmUninstall(ctx, pods, opts.AutoYes); !confirmed || err != nil {
+		return err
 	}
 
 	return performCleanup(ctx, rt, pods, opts.SkipCleanup)

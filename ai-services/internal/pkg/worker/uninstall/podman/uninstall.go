@@ -35,7 +35,7 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 
 	logger.Warningln("Ensure no application pods are running on this worker before uninstalling, as they will become unreachable and will need to be deleted manually.")
 
-	if ok, err := workerutils.ConfirmUninstall(ctx, pods, opts.AutoYes); err != nil || !ok {
+	if ok, err := podmanutils.ConfirmUninstall(ctx, pods, opts.AutoYes); err != nil || !ok {
 		return err
 	}
 
