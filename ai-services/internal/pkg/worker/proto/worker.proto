@@ -37,9 +37,6 @@ message RegisterRequest {
 }
 
 message RegisterResponse {
-  // Deprecated: worker_name is no longer populated. Workers derive their name
-  // from the CN of the signed certificate returned in tls_cert_pem.
-  string worker_name  = 1 [deprecated = true];
   // tls_cert_pem is the CA-signed client certificate (written to tls.crt on the worker).
   bytes  tls_cert_pem = 2;
   // ca_cert_pem is the root CA public cert (written to ca.crt on the worker for server verification).

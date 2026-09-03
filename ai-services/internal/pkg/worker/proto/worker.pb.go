@@ -235,8 +235,7 @@ func (x *RegisterRequest) GetCsrPem() []byte {
 }
 
 type RegisterResponse struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	WorkerName string                 `protobuf:"bytes,1,opt,name=worker_name,json=workerName,proto3" json:"worker_name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
 	// tls_cert_pem is the CA-signed client certificate (written to tls.crt on the worker).
 	TlsCertPem []byte `protobuf:"bytes,2,opt,name=tls_cert_pem,json=tlsCertPem,proto3" json:"tls_cert_pem,omitempty"`
 	// ca_cert_pem is the root CA public cert (written to ca.crt on the worker for server verification).
@@ -273,13 +272,6 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
 	return file_internal_pkg_worker_proto_worker_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *RegisterResponse) GetWorkerName() string {
-	if x != nil {
-		return x.WorkerName
-	}
-	return ""
 }
 
 func (x *RegisterResponse) GetTlsCertPem() []byte {
@@ -454,10 +446,8 @@ const file_internal_pkg_worker_proto_worker_proto_rawDesc = "" +
 	"\acsr_pem\x18\x05 \x01(\fR\x06csrPem\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"u\n" +
-	"\x10RegisterResponse\x12\x1f\n" +
-	"\vworker_name\x18\x01 \x01(\tR\n" +
-	"workerName\x12 \n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"T\n" +
+	"\x10RegisterResponse\x12 \n" +
 	"\ftls_cert_pem\x18\x02 \x01(\fR\n" +
 	"tlsCertPem\x12\x1e\n" +
 	"\vca_cert_pem\x18\x03 \x01(\fR\tcaCertPem\"n\n" +

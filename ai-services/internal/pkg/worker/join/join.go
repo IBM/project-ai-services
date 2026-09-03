@@ -121,12 +121,14 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 
 	// 3. Call Register with token + CSR.
 	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
-	var resp *workerpb.RegisterResponse
-	resp, err = workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
+	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: opts.Token,
 		RuntimeType:    rt.String(),
 		CsrPem:         csrPEM,
 	})
+	if err != nil {
+		return "", fmt.Errorf("worker join: register RPC: %w", err)
+	}
 
 	// 4. Write TLS material to disk (see tls.go: writeTLSMaterial).
 	if len(resp.GetTlsCertPem()) == 0 {
