@@ -7,6 +7,7 @@ metadata:
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
   annotations:
+    ingress.operator.openshift.io/default-to-http2: "true"
     haproxy.router.openshift.io/timeout: 1d 
 spec:
   port:
@@ -14,5 +15,3 @@ spec:
   to:
     kind: Service
     name: "catalog-api"
-  tls:
-    termination: passthrough
