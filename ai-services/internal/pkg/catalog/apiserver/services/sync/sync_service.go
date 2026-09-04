@@ -59,8 +59,8 @@ type SyncService struct {
 	catalogProvider *catalogpkg.CatalogProvider
 	syncInterval    time.Duration
 	stopChan        chan struct{}
-	syncMutex       sync.Mutex            // Prevents overlapping sync cycles
-	isSyncing       bool                  // Tracks if a sync is currently running
+	syncMutex       sync.Mutex // Prevents overlapping sync cycles
+	isSyncing       bool       // Tracks if a sync is currently running
 	runtimeSyncs    map[runtimeTypes.RuntimeType]RuntimeSync
 	workerRegistry  stream.WorkerRegistry // nil on servers with no remote workers
 }

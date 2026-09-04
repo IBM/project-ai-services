@@ -15,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -49,7 +50,7 @@ func NewPodmanDeletion(
 // When keepData is true, preserves underlying data (pods, volumes, orphaned components).
 // When keepData is false, deletes all data including application data directory.
 func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, orphanedComponentIDs []uuid.UUID, keepData bool) {
-	proxyManager, err := proxy.GetCaddyProxyManager()
+	proxyManager, err := s.getProxyManager()
 	if err != nil {
 		common.HandleStepError(ctx, s.appRepo, appID, "failed to get Caddy proxy manager for app", err)
 
@@ -78,6 +79,16 @@ func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, s
 	}
 
 	logger.InfofCtx(ctx, "Application %s deleted successfully", appID)
+}
+
+// getProxyManager returns a proxy manager bound to the same target as the runtime.
+// For remote worker deletions this routes proxy operations over the worker stream.
+func (s *PodmanDeletion) getProxyManager() (proxy.ProxyManager, error) {
+	if rt, ok := s.rt.(*remoteruntime.RemoteRuntime); ok {
+		return proxy.NewRemoteProxyManager(rt.Sender), nil
+	}
+
+	return proxy.GetCaddyProxyManager()
 }
 
 // unregisterServiceRoutes performs best-effort route cleanup for a service.
