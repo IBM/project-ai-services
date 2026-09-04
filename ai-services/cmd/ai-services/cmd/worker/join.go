@@ -1,17 +1,23 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
@@ -24,8 +30,12 @@ const defaultJoinHTTPSPort = 443
 
 // Flag variables for the worker join command.
 var (
+	// common flags.
 	token       string
 	runtimeType string
+	skipChecks  []string
+
+	// podman flags.
 	baseDir     string
 	httpsPort   int
 	domainName  string
@@ -60,7 +70,12 @@ Obtain a token first by running on the catalog node:
   ai-services worker join catalog.example.com:9090 \
       --token    <bootstrap-token> \
       --ssl-cert /path/to/cert.pem \
-      --ssl-key  /path/to/key.pem`,
+      --ssl-key  /path/to/key.pem
+
+  # Skip specific bootstrap validation checks
+  ai-services worker join catalog.example.com:9090 \
+      --token           <bootstrap-token> \
+      --skip-validation rhn,power`,
 	Args:    cobra.ExactArgs(1),
 	PreRunE: joinPreRunE,
 	RunE:    joinRunE,
@@ -73,11 +88,50 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if err := validateSkipChecksFlag(cmd); err != nil {
+		return err
+	}
+
 	if httpsPort < 1 || httpsPort > 65535 {
 		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 	}
 
 	return utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName)
+}
+
+func validateSkipChecksFlag(cmd *cobra.Command) error {
+	if len(skipChecks) == 0 {
+		return nil
+	}
+
+	validChecks := make(map[string]bool, len(bootstrap.GetRulesForRuntime()))
+	for _, r := range bootstrap.GetRulesForRuntime() {
+		validChecks[r.Name()] = true
+	}
+
+	for _, s := range skipChecks {
+		if !validChecks[s] {
+			return fmt.Errorf("invalid skip-validation value '%s' for runtime '%s'", s, vars.RuntimeFactory.GetRuntimeType())
+		}
+	}
+
+	return nil
+}
+
+func doBootstrapValidate(ctx context.Context) error {
+	skip := helpers.ParseSkipChecks(skipChecks)
+	if len(skip) > 0 {
+		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
+	}
+
+	// Create bootstrap instance based on runtime
+	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
+
+	if err := factory.Validate(ctx, skip); err != nil {
+		return fmt.Errorf("bootstrap validation failed: %w", err)
+	}
+
+	return nil
 }
 
 // joinRunE provisions the worker node for the given runtime type and returns once
@@ -88,6 +142,10 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 func joinRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	gatewayAddr := args[0]
+
+	if err := doBootstrapValidate(ctx); err != nil {
+		return err
+	}
 
 	switch types.RuntimeType(runtimeType) {
 	case types.RuntimeTypePodman:
@@ -135,10 +193,13 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// configureFlags registers the flags shared by the join and grpcstream
-// commands: --token (required), --runtime, --basedir, --https-port,
-// --ssl-cert, and --ssl-key.
+// configureFlags registers the flags shared by the join and grpcstream commands.
 func configureFlags(c *cobra.Command) {
+	initJoinCommonFlags(c)
+	initJoinPodmanFlags(c)
+}
+
+func initJoinCommonFlags(c *cobra.Command) {
 	c.Flags().StringVar(&token, "token", "",
 		"Single-use bootstrap token issued by 'catalog worker register' (required).\n"+
 			"Example: --token <uuid>\n")
@@ -146,6 +207,11 @@ func configureFlags(c *cobra.Command) {
 
 	cmdcommon.ConfigureRuntimeFlag(c, &runtimeType)
 
+	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
+	c.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+}
+
+func initJoinPodmanFlags(c *cobra.Command) {
 	c.Flags().StringVar(&baseDir, "basedir", "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
