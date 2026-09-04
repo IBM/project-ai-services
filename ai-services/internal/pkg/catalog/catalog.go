@@ -43,9 +43,10 @@ type catalogItem struct {
 // It is safe for concurrent use; all reads are protected by a read lock and
 // Reload acquires the write lock while rebuilding the items map.
 type CatalogProvider struct {
-	mu         sync.RWMutex
-	items      map[string]*catalogItem
-	bundleRepo dbrepo.BundleRepository // nil on CLI / test paths — skips bundle loading
+	mu          sync.RWMutex
+	items       map[string]*catalogItem
+	bundleRepo  dbrepo.BundleRepository // nil on CLI / test paths — skips bundle loading
+	runtimeType runtimeTypes.RuntimeType
 }
 
 // NewCatalogProvider creates a new CatalogProvider, loading all embedded items and
@@ -53,7 +54,15 @@ type CatalogProvider struct {
 //
 // bundleRepo may be nil (CLI / test paths) — in that case only embedded items are loaded.
 func NewCatalogProvider(bundleRepo dbrepo.BundleRepository) (*CatalogProvider, error) {
-	p := &CatalogProvider{bundleRepo: bundleRepo}
+	var runtimeType runtimeTypes.RuntimeType
+	if vars.RuntimeFactory != nil {
+		runtimeType = vars.RuntimeFactory.GetRuntimeType()
+	}
+
+	p := &CatalogProvider{
+		bundleRepo:  bundleRepo,
+		runtimeType: runtimeType,
+	}
 
 	items := make(map[string]*catalogItem)
 	if err := p.loadEmbeddedItems(context.Background(), items); err != nil {
@@ -68,6 +77,39 @@ func NewCatalogProvider(bundleRepo dbrepo.BundleRepository) (*CatalogProvider, e
 	p.items = items
 
 	return p, nil
+}
+
+func (p *CatalogProvider) resolveRuntimeType(runtimeType string) (string, error) {
+	if runtimeType != "" {
+		rt := runtimeTypes.RuntimeType(runtimeType)
+		if !rt.Valid() {
+			return "", fmt.Errorf("invalid runtime type: %q", runtimeType)
+		}
+
+		return runtimeType, nil
+	}
+
+	if p.runtimeType.Valid() {
+		return p.runtimeType.String(), nil
+	}
+
+	return "", fmt.Errorf("runtime type is not configured")
+}
+
+// WithRuntime returns a shallow runtime-scoped provider copy.
+// The returned provider shares the same immutable catalog items but resolves
+// default runtime-dependent reads against the provided runtime.
+func (p *CatalogProvider) WithRuntime(runtimeType string) (*CatalogProvider, error) {
+	runtimePath, err := p.resolveRuntimeType(runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	return &CatalogProvider{
+		items:       p.allItems(),
+		bundleRepo:  p.bundleRepo,
+		runtimeType: runtimeTypes.RuntimeType(runtimePath),
+	}, nil
 }
 
 // Reload rebuilds the items map from scratch under the write lock.
@@ -488,10 +530,9 @@ func (p *CatalogProvider) ListAllConnectors() []*types.Connector {
 	return result
 }
 
-// ListServicesWithRuntime lists all available deployable services
-// Runtime parameter kept for API compatibility but not used
+// ListServicesWithRuntime lists all available deployable services.
 // Only returns services where DependencyOnly is false (default).
-func (p *CatalogProvider) ListServicesWithRuntime(runtime runtimeTypes.RuntimeType) ([]types.Service, error) {
+func (p *CatalogProvider) ListServicesWithRuntime() ([]types.Service, error) {
 	return p.ListServices()
 }
 
@@ -705,8 +746,13 @@ func (p *CatalogProvider) ValidateDependencies(serviceIDs []string) error {
 // LoadServiceValues loads the values.yaml for a service with optional parameter overrides.
 // Returns a map of values that can be used for template rendering.
 func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[string]string) (map[string]any, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Verify service exists and get its path from catalog
-	_, err := p.LoadService(serviceID)
+	_, err = p.LoadService(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("service not found: %w", err)
 	}
@@ -717,17 +763,13 @@ func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[stri
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	// Get runtime
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-
 	// Read values.yaml using the item's own filesystem (embedded or bundle os.DirFS)
 	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
 
-	valuesPath := filepath.Join(servicePath, runtimeStr, "values.yaml")
+	valuesPath := filepath.Join(servicePath, runtimePath, "values.yaml")
 	valuesData, err := fs.ReadFile(itemFS, valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
@@ -756,8 +798,13 @@ func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[stri
 // LoadComponentValues loads the values.yaml for a component with optional parameter overrides.
 // Returns a map of values that can be used for template rendering.
 func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, argParams map[string]string) (map[string]any, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Verify component exists and get its path from catalog
-	_, err := p.LoadComponent(componentType, providerID)
+	_, err = p.LoadComponent(componentType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("component not found: %w", err)
 	}
@@ -769,17 +816,13 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 		return nil, fmt.Errorf("failed to get component path: %w", err)
 	}
 
-	// Get runtime
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-
 	// Read values.yaml using the item's own filesystem (embedded or bundle os.DirFS)
 	itemFS, err := p.GetItemFS(componentKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
 
-	valuesPath := filepath.Join(componentPath, runtimeStr, "values.yaml")
+	valuesPath := filepath.Join(componentPath, runtimePath, "values.yaml")
 	valuesData, err := fs.ReadFile(itemFS, valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
@@ -807,9 +850,12 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 
 // LoadComponentRuntimeMetadata loads runtime-specific metadata for a component.
 // This includes PodTemplateExecutions and other runtime configuration.
-// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
-// Pass string(vars.RuntimeFactory.GetRuntimeType()) when targeting the local runtime.
-func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID, runtimeType string) (*clitemplates.AppMetadata, error) {
+func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID string) (*clitemplates.AppMetadata, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Get component path from catalog
 	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
 	componentPath, err := p.GetCatalogItemPath(componentKey)
@@ -818,7 +864,7 @@ func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID
 	}
 
 	// Build catalog path with runtime
-	catalogPath := filepath.Join(componentPath, runtimeType)
+	catalogPath := filepath.Join(componentPath, runtimePath)
 
 	// Read metadata.yaml using the item's own filesystem
 	itemFS, err := p.GetItemFS(componentKey)
@@ -843,6 +889,11 @@ func (p *CatalogProvider) LoadComponentRuntimeMetadata(componentType, providerID
 // LoadComponentTemplates loads all pod templates for a component.
 // Returns a map of template name to parsed template.
 func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID string) (map[string]*texttemplate.Template, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Get component path from catalog
 	componentKey := fmt.Sprintf("%s/%s", componentType, providerID)
 	componentPath, err := p.GetCatalogItemPath(componentKey)
@@ -850,12 +901,8 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 		return nil, fmt.Errorf("failed to get component path: %w", err)
 	}
 
-	// Get runtime
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-
 	// Build catalog path with runtime
-	catalogPath := filepath.Join(componentPath, runtimeStr, "templates")
+	catalogPath := filepath.Join(componentPath, runtimePath, "templates")
 
 	// Load all template files using the item's own filesystem
 	itemFS, err := p.GetItemFS(componentKey)
@@ -863,56 +910,17 @@ func (p *CatalogProvider) LoadComponentTemplates(componentType, providerID strin
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
 
-	templates := make(map[string]*texttemplate.Template)
-
-	err = fs.WalkDir(itemFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		// Only process .tmpl and .yaml.tmpl files
-		if !strings.HasSuffix(path, ".tmpl") {
-			return nil
-		}
-
-		// Read template file
-		templateData, err := fs.ReadFile(itemFS, path)
-		if err != nil {
-			return fmt.Errorf("failed to read template %s: %w", path, err)
-		}
-
-		// Parse template
-		templateName := filepath.Base(path)
-		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
-		if err != nil {
-			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
-		}
-
-		templates[templateName] = tmpl
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to load component templates: %w", err)
-	}
-
-	if len(templates) == 0 {
-		return nil, fmt.Errorf("no templates found in %s", catalogPath)
-	}
-
-	return templates, nil
+	return p.loadTemplatesFromPath(itemFS, catalogPath, ".tmpl", "component templates", "templates")
 }
 
 // LoadServiceRuntimeMetadata loads runtime-specific metadata for a service.
 // This includes PodTemplateExecutions and other runtime configuration.
-// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
-// Pass string(vars.RuntimeFactory.GetRuntimeType()) when targeting the local runtime.
-func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID, runtimeType string) (*clitemplates.AppMetadata, error) {
+func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID string) (*clitemplates.AppMetadata, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Get service path from catalog
 	servicePath, err := p.GetCatalogItemPath(serviceID)
 	if err != nil {
@@ -920,7 +928,7 @@ func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID, runtimeType stri
 	}
 
 	// Build catalog path with runtime
-	catalogPath := filepath.Join(servicePath, runtimeType)
+	catalogPath := filepath.Join(servicePath, runtimePath)
 
 	// Read metadata.yaml using the item's own filesystem
 	itemFS, err := p.GetItemFS(serviceID)
@@ -945,18 +953,19 @@ func (p *CatalogProvider) LoadServiceRuntimeMetadata(serviceID, runtimeType stri
 // LoadServiceTemplates loads all pod templates for a service.
 // Returns a map of template name to parsed template.
 func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*texttemplate.Template, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Get service path from catalog
 	servicePath, err := p.GetCatalogItemPath(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	// Get runtime
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
-
 	// Build catalog path with runtime
-	catalogPath := filepath.Join(servicePath, runtimeStr, "templates")
+	catalogPath := filepath.Join(servicePath, runtimePath, "templates")
 
 	// Load all template files using the item's own filesystem
 	itemFS, err := p.GetItemFS(serviceID)
@@ -964,49 +973,7 @@ func (p *CatalogProvider) LoadServiceTemplates(serviceID string) (map[string]*te
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
 
-	templates := make(map[string]*texttemplate.Template)
-
-	err = fs.WalkDir(itemFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		// Only process .tmpl and .yaml.tmpl files
-		if !strings.HasSuffix(path, ".tmpl") {
-			return nil
-		}
-
-		// Read template file
-		templateData, err := fs.ReadFile(itemFS, path)
-		if err != nil {
-			return fmt.Errorf("failed to read template %s: %w", path, err)
-		}
-
-		// Parse template
-		templateName := filepath.Base(path)
-		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
-		if err != nil {
-			return fmt.Errorf("failed to parse template %s: %w", templateName, err)
-		}
-
-		templates[templateName] = tmpl
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to load service templates: %w", err)
-	}
-
-	if len(templates) == 0 {
-		return nil, fmt.Errorf("no templates found in %s", catalogPath)
-	}
-
-	return templates, nil
+	return p.loadTemplatesFromPath(itemFS, catalogPath, ".tmpl", "service templates", "templates")
 }
 
 // LoadServicesMD loads all steps md files for a service.
@@ -1018,9 +985,10 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	// Get runtime
-	runtime := vars.RuntimeFactory.GetRuntimeType()
-	runtimeStr := string(runtime)
+	runtimeStr, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
 
 	// Build catalog path with runtime
 	catalogPath := filepath.Join(servicePath, runtimeStr, "steps")
@@ -1031,29 +999,28 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
 	}
 
+	return p.loadTemplatesFromPath(itemFS, catalogPath, ".md", "service md files", "md files")
+}
+
+func (p *CatalogProvider) loadTemplatesFromPath(
+	itemFS fs.FS,
+	catalogPath, suffix, operation, emptyKind string,
+) (map[string]*texttemplate.Template, error) {
 	templates := make(map[string]*texttemplate.Template)
 
-	err = fs.WalkDir(itemFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(itemFS, catalogPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
-		if d.IsDir() {
+		if d.IsDir() || !strings.HasSuffix(path, suffix) {
 			return nil
 		}
 
-		// Only process .md files
-		if !strings.HasSuffix(path, ".md") {
-			return nil
-		}
-
-		// Read template file
 		templateData, err := fs.ReadFile(itemFS, path)
 		if err != nil {
 			return fmt.Errorf("failed to read template %s: %w", path, err)
 		}
 
-		// Parse template
 		templateName := filepath.Base(path)
 		tmpl, err := texttemplate.New(templateName).Parse(string(templateData))
 		if err != nil {
@@ -1064,13 +1031,11 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 
 		return nil
 	})
-
 	if err != nil {
-		return nil, fmt.Errorf("failed to load service md files: %w", err)
+		return nil, fmt.Errorf("failed to load %s: %w", operation, err)
 	}
-
 	if len(templates) == 0 {
-		return nil, fmt.Errorf("no md files found in %s", catalogPath)
+		return nil, fmt.Errorf("no %s found in %s", emptyKind, catalogPath)
 	}
 
 	return templates, nil
@@ -1078,10 +1043,9 @@ func (p *CatalogProvider) LoadServicesMD(serviceID string) (map[string]*texttemp
 
 // GetServiceSteps returns the raw contents of every file under <runtime>/steps/ for
 // the given service, keyed by filename (e.g. "info.md", "next.md", "vars_file.yaml").
-// runtime must be a valid RuntimeType ("podman" or "openshift").
 // Both embedded and custom bundle services are supported.
 // Returns ErrCatalogItemNotFound when the service ID is unknown.
-func (p *CatalogProvider) GetServiceSteps(serviceID string, runtime runtimeTypes.RuntimeType) (map[string][]byte, error) {
+func (p *CatalogProvider) GetServiceSteps(serviceID string) (map[string][]byte, error) {
 	if !p.ServiceExists(serviceID) {
 		return nil, fmt.Errorf("%w: service '%s'", ErrCatalogItemNotFound, serviceID)
 	}
@@ -1091,7 +1055,12 @@ func (p *CatalogProvider) GetServiceSteps(serviceID string, runtime runtimeTypes
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	stepsPath := filepath.Join(servicePath, string(runtime), "steps")
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
+	stepsPath := filepath.Join(servicePath, runtimePath, "steps")
 
 	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {

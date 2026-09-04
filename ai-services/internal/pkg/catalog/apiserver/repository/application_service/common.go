@@ -25,6 +25,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -422,13 +423,13 @@ func (s *ApplicationServiceBase) loadServiceComponents(ctx context.Context, sd [
 }
 
 // filterComponentMetadata filters component parameters to exclude sensitive data.
-func (s *ApplicationServiceBase) filterComponentMetadata(ctx context.Context, componentType, providerID string, params map[string]any) (map[string]any, error) {
+func (s *ApplicationServiceBase) filterComponentMetadata(ctx context.Context, provider *catalog.CatalogProvider, componentType, providerID string, params map[string]any) (map[string]any, error) {
 	if params == nil {
 		return nil, nil
 	}
 
 	// Load component schema to determine which fields are sensitive
-	schema, err := s.Provider.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
+	schema, err := provider.GetComponentProviderParams(ctx, componentType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load schema for component %s/%s: %w", componentType, providerID, err)
 	}
@@ -555,12 +556,16 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 	plan *deployment.DeploymentPlan,
 ) (map[string]uuid.UUID, error) {
 	componentIDMap := make(map[string]uuid.UUID)
+	scopedProvider, err := s.Provider.WithRuntime(plan.RuntimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", plan.RuntimeType, err)
+	}
 
 	for hash, comp := range plan.Components {
 		instanceUUID := uuid.New()
 
 		// Filter metadata to exclude sensitive data based on schema
-		metadata, err := s.filterComponentMetadata(ctx, comp.ComponentType, comp.ProviderID, comp.Params)
+		metadata, err := s.filterComponentMetadata(ctx, scopedProvider, comp.ComponentType, comp.ProviderID, comp.Params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to filter component metadata for %s: %w", hash, err)
 		}
@@ -698,57 +703,103 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // for the given runtime type.
 func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
-	// Phase 1: check for duplicate name
+	effectiveRuntimeType, err := s.resolveRuntimeForCreateApplication(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.validateCreateApplicationRequest(ctx, req, effectiveRuntimeType); err != nil {
+		return nil, err
+	}
+
+	runtimeScopedPlanner, err := s.DeploymentPlanner.WithRuntime(effectiveRuntimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope deployment planner for runtime %q: %w", effectiveRuntimeType, err)
+	}
+
+	plan, err := s.createDeploymentPlan(ctx, runtimeScopedPlanner, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.InsertDeploymentRecords(ctx, plan, req.CreatedBy); err != nil {
+		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
+	}
+
+	deployCtx := s.prepareCreateDeploymentContext(ctx, plan.ApplicationID)
+	go s.executeDeploymentAsync(deployCtx, plan, req)
+
+	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
+}
+
+func (s *ApplicationServiceBase) resolveRuntimeForCreateApplication(ctx context.Context, req *apimodels.CreateApplicationRequest) (string, error) {
+	if req.WorkerName == "" {
+		req.WorkerName = workerconstants.LocalWorkerName
+	}
+
+	return s.DeploymentPlanner.ResolveRuntimeType(ctx, req.WorkerName)
+}
+
+func (s *ApplicationServiceBase) validateCreateApplicationRequest(
+	ctx context.Context,
+	req apimodels.CreateApplicationRequest,
+	runtimeType string,
+) error {
 	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check for existing application: %w", err)
+		return fmt.Errorf("failed to check for existing application: %w", err)
 	}
 	if existingApp != nil {
-		return nil, &ValidationError{
+		return &ValidationError{
 			Code:    http.StatusConflict,
 			Message: fmt.Sprintf(ErrMsgApplicationNameExists, req.Name),
 		}
 	}
 
-	// Phase 2: validate payload
-	if err := s.Validator.ValidateDeploymentRequest(ctx, req); err != nil {
-		return nil, err
+	scopedProvider, err := s.Provider.WithRuntime(runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeType, err)
 	}
 
-	// Phase 3: create deployment plan
-	plan, err := s.DeploymentPlanner.PlanDeployment(ctx, req, s.RuntimeType.String())
+	requestValidator := validators.NewApplicationValidator(scopedProvider)
+	if err := requestValidator.ValidateDeploymentRequest(ctx, req); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *ApplicationServiceBase) createDeploymentPlan(
+	ctx context.Context,
+	planner *deployment.DeploymentPlanner,
+	req apimodels.CreateApplicationRequest,
+) (*deployment.DeploymentPlan, error) {
+	plan, err := planner.PlanDeployment(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
 	}
 
-	// Phase 4: persist DB records
-	if err := s.InsertDeploymentRecords(ctx, plan, req.CreatedBy); err != nil {
-		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
-	}
+	return plan, nil
+}
 
-	// Phase 5: async deployment.
-	// Build the deployment context here, before launching the goroutine, so that
-	// Register is called synchronously. This closes the race where a concurrent
-	// DeleteApplication could call Cancel before the goroutine has had a chance
-	// to call Register, causing cancellation to be silently missed.
+func (s *ApplicationServiceBase) prepareCreateDeploymentContext(ctx context.Context, applicationID uuid.UUID) context.Context {
+	// Build the deployment context before launching the goroutine so Register is
+	// called synchronously and cancellation cannot race with registration.
 	deployCtx := context.Background()
 	if id, ok := ctx.Value(logger.RequestIDKey).(string); ok && id != "" {
 		deployCtx = context.WithValue(deployCtx, logger.RequestIDKey, id)
 	}
 
 	if s.DeploymentRegistry != nil {
-		deployCtx = s.DeploymentRegistry.Register(deployCtx, plan.ApplicationID)
+		deployCtx = s.DeploymentRegistry.Register(deployCtx, applicationID)
 	}
 
-	go s.executeDeploymentAsync(deployCtx, plan, req)
-
-	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
+	return deployCtx
 }
 
-// executeDeploymentAsync runs the deployment in a background goroutine for the given runtime type.
+// executeDeploymentAsync runs the deployment in a background goroutine.
 // deployCtx is already derived and registered with the DeploymentRegistry by the caller.
 func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
-	runtimeType := s.RuntimeType
 	ctx := deployCtx
 
 	// Deregister on any exit path — success, error, or panic.
@@ -767,7 +818,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 		}
 	}()
 
-	err := s.DeploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeType)
+	err := s.DeploymentExecutor.ExecuteWithPlan(ctx, plan, req)
 	if err != nil {
 		// Context cancelled — deletion is in charge of status, exit silently.
 		if ctx.Err() != nil {
@@ -865,7 +916,12 @@ func (s *ApplicationServiceBase) addServiceResources(
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
 ) error {
-	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID, string(vars.RuntimeFactory.GetRuntimeType()))
+	scopedProvider, err := catalogProvider.WithRuntime(runtimeClient.Type().String())
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeClient.Type().String(), err)
+	}
+
+	runtimeMetadata, err := scopedProvider.LoadServiceRuntimeMetadata(service.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
 	}
@@ -919,7 +975,12 @@ func (s *ApplicationServiceBase) processComponentResources(
 		return fmt.Errorf("failed to get component %s: %w", componentID, err)
 	}
 
-	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider, string(vars.RuntimeFactory.GetRuntimeType()))
+	scopedProvider, err := catalogProvider.WithRuntime(runtimeClient.Type().String())
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeClient.Type().String(), err)
+	}
+
+	runtimeMetadata, err := scopedProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
 	if err != nil {
 		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
 	}

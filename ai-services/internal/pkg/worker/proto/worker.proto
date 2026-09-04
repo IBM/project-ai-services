@@ -99,4 +99,6 @@ enum CommandType {
   COMMAND_TYPE_HTTP_PROXY                = 26;
 
   COMMAND_TYPE_DOWNLOAD_MODEL            = 27;
+  COMMAND_TYPE_FIND_FREE_SPYRE_CARDS    = 28;
+  COMMAND_TYPE_GET_BASE_DIR             = 29;
 }

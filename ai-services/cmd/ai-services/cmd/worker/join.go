@@ -2,7 +2,9 @@ package worker
 
 import (
 	"fmt"
+	"net"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,7 +22,10 @@ import (
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
-const defaultJoinHTTPSPort = 443
+const (
+	defaultJoinHTTPSPort = 443
+	hostAliasSplitParts  = 2
+)
 
 // Flag variables for the worker join command.
 var (
@@ -31,6 +36,7 @@ var (
 	domainName  string
 	sslCertPath string
 	sslKeyPath  string
+	addHosts    []string
 )
 
 var cmd = &cobra.Command{
@@ -77,7 +83,56 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 	}
 
-	return utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName)
+	if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
+		return err
+	}
+
+	for _, h := range addHosts {
+		if err := validateAddHost(h); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateAddHost checks that an --add-host value has the form DOMAIN:IP.
+func validateAddHost(h string) error {
+	parts := strings.SplitN(h, ":", hostAliasSplitParts)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("invalid --add-host value %q: expected DOMAIN:IP", h)
+	}
+
+	if net.ParseIP(parts[1]) == nil {
+		return fmt.Errorf("invalid --add-host value %q: %q is not a valid IP address", h, parts[1])
+	}
+
+	return nil
+}
+
+// parseAddHosts converts the raw --add-host strings into HostAlias structs,
+// merging multiple hostnames that share the same IP into a single entry.
+func parseAddHosts(raw []string) []workertypes.HostAlias {
+	byIP := make(map[string][]string, len(raw))
+	order := make([]string, 0, len(raw))
+
+	for _, h := range raw {
+		parts := strings.SplitN(h, ":", hostAliasSplitParts)
+		domain, ip := parts[0], parts[1]
+
+		if _, seen := byIP[ip]; !seen {
+			order = append(order, ip)
+		}
+
+		byIP[ip] = append(byIP[ip], domain)
+	}
+
+	aliases := make([]workertypes.HostAlias, 0, len(order))
+	for _, ip := range order {
+		aliases = append(aliases, workertypes.HostAlias{IP: ip, Hostnames: byIP[ip]})
+	}
+
+	return aliases
 }
 
 // joinRunE provisions the worker node for the given runtime type and returns once
@@ -111,6 +166,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 				DomainName:  domainName,
 				SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
 				SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
+				HostAliases: parseAddHosts(addHosts),
 			},
 		}
 
@@ -176,6 +232,12 @@ func configureFlags(c *cobra.Command) {
 			"Must be used together with --ssl-cert.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-key /path/to/key.pem\n")
+
+	c.Flags().StringArrayVar(&addHosts, "add-host", nil,
+		"Add an extra entry to the worker pod's /etc/hosts (repeatable).\n"+
+			"Format: DOMAIN:IP\n"+
+			"Note: Supported for podman runtime only.\n"+
+			"Example: --add-host catalog.example.com:10.20.188.75\n")
 }
 
 func newJoinCmd() *cobra.Command {

@@ -293,6 +293,14 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		return marshalOr(info, err)
 
+	case workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS:
+		cards, err := helpers.FindFreeSpyreCards(ctx)
+
+		return marshalOr(cards, err)
+
+	case workerpb.CommandType_COMMAND_TYPE_GET_BASE_DIR:
+		return marshalOr(utils.GetBaseDir(), nil)
+
 	case workerpb.CommandType_COMMAND_TYPE_RUNTIME_TYPE:
 		return marshalOr(rt.Type().String(), nil)
 

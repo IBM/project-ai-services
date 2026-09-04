@@ -81,6 +81,7 @@ spec:
             - --admin-username=admin
             - --admin-password-hash=$(ADMIN_PASSWORD)
             - --runtime={{ .Values.backend.runtime }}
+            - --workergateway-port={{ .Values.backend.workerGatewayPort }}
           env:
             - name: ADMIN_PASSWORD
               valueFrom:
@@ -109,8 +110,12 @@ spec:
               value: "5432"
             - name: DB_USER
               value: "{{ .Values.db.user }}"
+            - name: WORKER_GATEWAY_PORT
+              value: "{{ .Values.backend.workerGatewayPort }}"
           ports:
             - containerPort: 8080
+              protocol: TCP
+            - containerPort: {{ .Values.backend.workerGatewayPort }}
               protocol: TCP
           livenessProbe:
             httpGet:
@@ -131,6 +136,8 @@ spec:
           volumeMounts:
             - name: catalog-bundles
               mountPath: /data/catalog-bundles
+            - name: gateway-pki
+              mountPath: /var/lib/ai-services/gateway-pki
           resources:
             requests:
               memory: "{{ .Values.backend.resources.requests.memory }}"
@@ -142,3 +149,6 @@ spec:
         - name: catalog-bundles
           persistentVolumeClaim:
             claimName: catalog-bundles
+        - name: gateway-pki
+          persistentVolumeClaim:
+            claimName: gateway-pki

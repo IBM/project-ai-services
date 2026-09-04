@@ -154,7 +154,12 @@ func (s *apiSource) GetServiceParams(ctx context.Context, serviceID, runtimeType
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetServiceParams unreachable, falling back to embedded: %v", err)
 
-		return s.embedded.GetServiceParams(ctx, serviceID, runtimeType)
+		scopedCatalog, scopeErr := s.embedded.WithRuntime(runtimeType)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+
+		return scopedCatalog.GetServiceParams(ctx, serviceID)
 	}
 
 	return schema, err
@@ -165,7 +170,12 @@ func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentTyp
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetComponentProviderParams unreachable, falling back to embedded: %v", err)
 
-		return s.embedded.GetComponentProviderParams(ctx, componentType, providerID, runtimeType)
+		scopedCatalog, scopeErr := s.embedded.WithRuntime(runtimeType)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+
+		return scopedCatalog.GetComponentProviderParams(ctx, componentType, providerID)
 	}
 
 	return schema, err
@@ -184,8 +194,7 @@ type EmbeddedCatalog interface {
 	ListComponents() ([]types.Component, error)
 	LoadArchitecture(id string) (*types.Architecture, error)
 	LoadService(id string) (*types.Service, error)
-	GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error)
-	GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error)
+	WithRuntime(runtimeType string) (*catalog.CatalogProvider, error)
 }
 
 type embeddedOnlySource struct {
@@ -213,11 +222,21 @@ func (s *embeddedOnlySource) LoadService(_ context.Context, id string) (*types.S
 }
 
 func (s *embeddedOnlySource) GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error) {
-	return s.embedded.GetServiceParams(ctx, serviceID, runtimeType)
+	scopedCatalog, err := s.embedded.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	return scopedCatalog.GetServiceParams(ctx, serviceID)
 }
 
 func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error) {
-	return s.embedded.GetComponentProviderParams(ctx, componentType, providerID, runtimeType)
+	scopedCatalog, err := s.embedded.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	return scopedCatalog.GetComponentProviderParams(ctx, componentType, providerID)
 }
 
 // --------------------------------------------------------------------------

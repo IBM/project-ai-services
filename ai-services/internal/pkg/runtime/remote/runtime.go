@@ -359,6 +359,36 @@ func (r *RemoteRuntime) GetSystemInfo(ctx context.Context) (*models.SystemInfo, 
 	return &info, nil
 }
 
+// FindFreeSpyreCards returns free Spyre PCI addresses discovered on the worker host.
+func (r *RemoteRuntime) FindFreeSpyreCards(ctx context.Context) ([]string, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var cards []string
+	if err := unmarshalData(res, &cards); err != nil {
+		return nil, err
+	}
+
+	return cards, nil
+}
+
+// GetBaseDir returns the AI services base directory configured on the worker host.
+func (r *RemoteRuntime) GetBaseDir(ctx context.Context) (string, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_BASE_DIR, nil)
+	if err != nil {
+		return "", err
+	}
+
+	var baseDir string
+	if err := unmarshalData(res, &baseDir); err != nil {
+		return "", err
+	}
+
+	return baseDir, nil
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 // send delegates to the embedded Sender for convenience.
