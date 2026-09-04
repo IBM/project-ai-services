@@ -39,6 +39,7 @@ func GatewayRouteHost(ctx context.Context) (string, error) {
 			if r.HostPort == "" {
 				return "", fmt.Errorf("worker gateway: route %q exists but has no host assigned yet", gatewayRouteName)
 			}
+
 			return r.HostPort, nil
 		}
 	}

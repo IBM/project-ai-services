@@ -91,6 +91,21 @@ type (
 	ServicePlan    = types.ServicePlan
 )
 
+// resolveIsArchitecture reports whether the given catalogID refers to an
+// architecture. It returns false (and nil error) when it is a standalone
+// service, and a non-nil error when the catalogID is not found in either form.
+func (p *DeploymentPlanner) resolveIsArchitecture(catalogID string) (bool, error) {
+	if _, err := p.catalogProvider.LoadArchitecture(catalogID); err == nil {
+		return true, nil
+	}
+
+	if _, err := p.catalogProvider.LoadService(catalogID); err != nil {
+		return false, fmt.Errorf("catalog_id '%s' not found as architecture or service", catalogID)
+	}
+
+	return false, nil
+}
+
 // PlanDeployment creates a deployment plan for an application (architecture or standalone service).
 func (p *DeploymentPlanner) PlanDeployment(
 	ctx context.Context,
@@ -111,17 +126,9 @@ func (p *DeploymentPlanner) PlanDeployment(
 		workerName = workerconstants.LocalWorkerName
 	}
 
-	// First, determine if this is an architecture or standalone service
-	isArchitecture := false
-	_, archErr := p.catalogProvider.LoadArchitecture(req.CatalogID)
-	if archErr == nil {
-		isArchitecture = true
-	} else {
-		// Try loading as service
-		_, svcErr := p.catalogProvider.LoadService(req.CatalogID)
-		if svcErr != nil {
-			return nil, fmt.Errorf("catalog_id '%s' not found as architecture or service", req.CatalogID)
-		}
+	isArchitecture, err := p.resolveIsArchitecture(req.CatalogID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create deployment plan

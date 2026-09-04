@@ -1070,6 +1070,11 @@ func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[strin
 	return spyreCards, spyreCardContainerMap, nil
 }
 
+// joinPCIAddresses joins a slice of PCI address strings with a space separator.
+func joinPCIAddresses(addrs []string) string {
+	return strings.Join(addrs, " ")
+}
+
 // getEnvParamsForComponent returns environment parameters for a component including Spyre card PCI addresses.
 func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *podmodels.PodSpec, plan *DeploymentPlan) (map[string]map[string]string, error) {
 	env := make(map[string]map[string]string)
@@ -1099,27 +1104,21 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 
 	// Allocate PCI addresses to containers that need them
 	for containerName, spyreCount := range spyreCardContainerMap {
-		if spyreCount != 0 {
-			// Allocate addresses from the pool (thread-safe)
-			allocatedAddresses, err := plan.SpyreCardPool.Allocate(spyreCount)
-			if err != nil {
-				return env, fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
-			}
-
-			// Join addresses with space separator
-			pciAddressStr := ""
-			for i, addr := range allocatedAddresses {
-				if i > 0 {
-					pciAddressStr += " "
-				}
-				pciAddressStr += addr
-			}
-
-			env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
-
-			logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
-				spyreCount, containerName, podSpec.Name, pciAddressStr)
+		if spyreCount == 0 {
+			continue
 		}
+
+		// Allocate addresses from the pool (thread-safe)
+		allocatedAddresses, err := plan.SpyreCardPool.Allocate(spyreCount)
+		if err != nil {
+			return env, fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
+		}
+
+		pciAddressStr := joinPCIAddresses(allocatedAddresses)
+		env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
+
+		logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
+			spyreCount, containerName, podSpec.Name, pciAddressStr)
 	}
 
 	return env, nil

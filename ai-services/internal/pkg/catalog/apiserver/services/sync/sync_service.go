@@ -33,6 +33,9 @@ const (
 	// Component catalogID format: "type/provider" has 2 parts.
 	componentCatalogIDParts = 2
 
+	// numRuntimeTypes is the number of supported runtime types (Podman + OpenShift).
+	numRuntimeTypes = 2
+
 	// Error message templates.
 	errMsgPodNotFound = "Pod not found or error: %v"
 )
@@ -115,7 +118,7 @@ func NewSyncService(
 }
 
 func initializeRuntimeSyncs(catalogProvider *catalogpkg.CatalogProvider) (map[runtimeTypes.RuntimeType]RuntimeSync, error) {
-	runtimeSyncs := make(map[runtimeTypes.RuntimeType]RuntimeSync, 2)
+	runtimeSyncs := make(map[runtimeTypes.RuntimeType]RuntimeSync, numRuntimeTypes)
 
 	podmanSync, err := newRuntimeSync(runtimeTypes.RuntimeTypePodman, catalogProvider)
 	if err != nil {
@@ -311,41 +314,41 @@ func (s *SyncService) collectApplicationSyncState(
 func (s *SyncService) createRuntime(ctx context.Context, app *models.Application) (runtime.Runtime, error) {
 	// TODO: Once remote runtime is enabled by default this check is not needed
 	// and the last return line must be deleted.
-	if app.WorkerID != nil {
-		if s.workerRegistry == nil {
-			return nil, errWorkerDisconnected
-		}
+	if app.WorkerID == nil {
+		logger.DebugfCtx(ctx, "Using local runtime %q for application %s sync", s.runtimeType, app.ID)
 
-		workerName, ok := s.workerRegistry.WorkerNameByID(*app.WorkerID)
-		if !ok {
-			return nil, errWorkerDisconnected
-		}
-
-		if !s.workerRegistry.IsWorkerConnected(ctx, workerName) {
-			return nil, fmt.Errorf("worker %q not connected: %w", workerName, errWorkerDisconnected)
-		}
-
-		rtStr, ok := s.workerRegistry.WorkerRuntimeType(workerName)
-		if !ok || rtStr == "" {
-			return nil, fmt.Errorf("worker %q runtime type not available: %w", workerName, errWorkerDisconnected)
-		}
-
-		rtType := runtimeTypes.RuntimeType(rtStr)
-		if !rtType.Valid() {
-			return nil, fmt.Errorf("worker %q has unsupported runtime type %q", workerName, rtType)
-		}
-
-		rt, err := runtime.NewRuntimeFactory(rtType).CreateRemote(workerName, s.workerRegistry)
-		if err != nil {
-			return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
-		}
-
-		return rt, nil
+		return s.runtimeFactory.Create(catalogutils.AppNamespace(app.ID))
 	}
 
-	logger.DebugfCtx(ctx, "Using local runtime %q for application %s sync", s.runtimeType, app.ID)
+	if s.workerRegistry == nil {
+		return nil, errWorkerDisconnected
+	}
 
-	return s.runtimeFactory.Create(catalogutils.AppNamespace(app.ID))
+	workerName, ok := s.workerRegistry.WorkerNameByID(*app.WorkerID)
+	if !ok {
+		return nil, errWorkerDisconnected
+	}
+
+	if !s.workerRegistry.IsWorkerConnected(ctx, workerName) {
+		return nil, fmt.Errorf("worker %q not connected: %w", workerName, errWorkerDisconnected)
+	}
+
+	rtStr, ok := s.workerRegistry.WorkerRuntimeType(workerName)
+	if !ok || rtStr == "" {
+		return nil, fmt.Errorf("worker %q runtime type not available: %w", workerName, errWorkerDisconnected)
+	}
+
+	rtType := runtimeTypes.RuntimeType(rtStr)
+	if !rtType.Valid() {
+		return nil, fmt.Errorf("worker %q has unsupported runtime type %q", workerName, rtType)
+	}
+
+	rt, err := runtime.NewRuntimeFactory(rtType).CreateRemote(workerName, s.workerRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
+	}
+
+	return rt, nil
 }
 
 func (s *SyncService) getRuntimeSync(rt runtimeTypes.RuntimeType) (RuntimeSync, error) {
