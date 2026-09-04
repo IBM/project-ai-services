@@ -228,13 +228,17 @@ async def validate_with_retry(
 
     retry_choices = retry_resp.get("choices", [])
     if not retry_choices:
-        raise ExtractException(500, "LLM_ERROR", "vLLM returned an empty choices list on retry.")
+        msg = "vLLM returned an empty choices list on retry."
+        logger.error(msg)
+        raise ExtractException(500, "LLM_ERROR", msg)
 
     retry_choice = retry_choices[0]
     if retry_choice.get("finish_reason") == "length":
+        msg = "The model output was truncated on the validation retry."
+        logger.error(f"{msg} (reserved_output_tokens={reserved_output})")
         raise ExtractException(
             413, "OUTPUT_BUDGET_EXCEEDED",
-            "The model output was truncated on the validation retry.",
+            msg,
             details={"reserved_output_tokens": reserved_output, "finish_reason": "length"},
         )
 
@@ -246,6 +250,8 @@ async def validate_with_retry(
     try:
         parsed_output = validate_output(raw_retry_output, json_schema)
     except ValueError as retry_err:
+        msg = f"Model output failed schema validation after one retry: {retry_err}"
+        logger.error(msg)
         raise ExtractException(
             422, "EXTRACTION_VALIDATION_FAILED",
             "Model output failed schema validation after one retry.",

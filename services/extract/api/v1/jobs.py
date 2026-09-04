@@ -107,16 +107,20 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
     # 1. Basic field validation
     # ------------------------------------------------------------------
     if not body.text.strip():
-        raise ExtractException(400, "INVALID_REQUEST", "text field is empty")
+        msg = "text field is empty"
+        logger.error(msg)
+        raise ExtractException(400, "INVALID_REQUEST", msg)
     schema_row = resolve_schema(body.schema_id)
 
     # ------------------------------------------------------------------
     # 2. Semaphore check (non-blocking — reject immediately if saturated)
     # ------------------------------------------------------------------
     if concurrency_limiter.locked():
+        msg = "Server is at maximum vLLM concurrency. Please retry later."
+        logger.error(msg)
         raise ExtractException(
             429, "RATE_LIMIT_EXCEEDED",
-            "Server is at maximum vLLM concurrency. Please retry later.",
+            msg,
         )
 
     llm_model_dict = get_llm_endpoint()
@@ -181,7 +185,9 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
 
         choices = vllm_resp.get("choices", [])
         if not choices:
-            raise ExtractException(500, "LLM_ERROR", "vLLM returned an empty choices list.")
+            msg = "vLLM returned an empty choices list."
+            logger.error(msg)
+            raise ExtractException(500, "LLM_ERROR", msg)
 
         choice = choices[0]
         finish_reason: str = choice.get("finish_reason", "")
@@ -203,14 +209,20 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
             )
             choices = vllm_resp.get("choices", [])
             if not choices:
-                raise ExtractException(500, "LLM_ERROR", "vLLM returned an empty choices list.")
+                msg = "vLLM returned an empty choices list."
+                logger.error(msg)
+                raise ExtractException(500, "LLM_ERROR", msg)
             choice = choices[0]
             finish_reason = choice.get("finish_reason", "")
             if finish_reason == "length":
+                msg = (
+                    "The model output was truncated because it reached the reserved "
+                    "output token limit."
+                )
+                logger.error(f"{msg} (boosted_reserved_output={boosted_reserved_output})")
                 raise ExtractException(
                     413, "OUTPUT_BUDGET_EXCEEDED",
-                    "The model output was truncated because it reached the reserved "
-                    "output token limit.",
+                    msg,
                     details={
                         "reserved_output_tokens": boosted_reserved_output,
                         "finish_reason": "length",
@@ -471,9 +483,11 @@ async def list_extract_jobs(
     """Retrieve a list of extraction jobs with pagination and optional status/schema filtering."""
     _VALID_STATUSES = {s.value for s in JobStatus}
     if status is not None and status not in _VALID_STATUSES:
+        msg = f"Invalid status value. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
+        logger.error(msg)
         raise ExtractException(
             400, "INVALID_PARAMETER",
-            f"Invalid status value. Must be one of: {', '.join(sorted(_VALID_STATUSES))}",
+            msg,
         )
 
     rows, total = db_repo.list_jobs(
@@ -526,7 +540,9 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
     """Retrieve the full status and detail metadata of a specific extraction job."""
     row = db_repo.get_job_by_id(job_id)
     if row is None:
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
+        msg = f"Job {job_id!r} not found."
+        logger.error(msg)
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
 
     doc_rows = db_repo.get_documents_by_job(job_id)
 
@@ -561,7 +577,9 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
             error=row.error,
         )
     else:
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"No documents found for job {job_id!r}")
+        msg = f"No documents found for job {job_id!r}"
+        logger.error(msg)
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
 
 
 # ---------------------------------------------------------------------------
@@ -593,13 +611,17 @@ async def get_document_result(job_id: str, doc_id: str):
     # Verify parent job exists
     job_row = db_repo.get_job_by_id(job_id)
     if job_row is None:
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
+        msg = f"Job {job_id!r} not found."
+        logger.error(msg)
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
 
     doc_row = db_repo.get_document_by_id(doc_id)
     if doc_row is None or doc_row.job_id != job_id:
+        msg = f"Document {doc_id!r} not found in job {job_id!r}."
+        logger.error(msg)
         raise ExtractException(
             404, "RESOURCE_NOT_FOUND",
-            f"Document {doc_id!r} not found in job {job_id!r}.",
+            msg,
         )
 
     if doc_row.status in (DocumentStatus.PENDING, DocumentStatus.IN_PROGRESS):
@@ -672,13 +694,17 @@ async def download_document_result(job_id: str, doc_id: str):
     """Download the extraction result JSON for one document in a batch job."""
     job_row = db_repo.get_job_by_id(job_id)
     if job_row is None:
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
+        msg = f"Job {job_id!r} not found."
+        logger.error(msg)
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
 
     doc_row = db_repo.get_document_by_id(doc_id)
     if doc_row is None or doc_row.job_id != job_id:
+        msg = f"Document {doc_id!r} not found in job {job_id!r}."
+        logger.error(msg)
         raise ExtractException(
             404, "RESOURCE_NOT_FOUND",
-            f"Document {doc_id!r} not found in job {job_id!r}.",
+            msg,
         )
 
     if doc_row.status == DocumentStatus.FAILED:
@@ -697,16 +723,20 @@ async def download_document_result(job_id: str, doc_id: str):
         )
 
     if doc_row.status != DocumentStatus.COMPLETED:
+        msg = f"No result available for document {doc_id!r} (status={doc_row.status!r})."
+        logger.error(msg)
         raise ExtractException(
             404, "RESOURCE_NOT_FOUND",
-            f"No result available for document {doc_id!r} (status={doc_row.status!r}).",
+            msg,
         )
 
     result_data = read_doc_result_file(job_id, doc_id)
     if result_data is None:
+        msg = f"Result file not found for document {doc_id!r}."
+        logger.error(msg)
         raise ExtractException(
             404, "RESOURCE_NOT_FOUND",
-            f"Result file not found for document {doc_id!r}.",
+            msg,
         )
 
     filename_stem = os.path.splitext(doc_row.filename)[0]
@@ -745,20 +775,26 @@ async def delete_extract_job(job_id: str) -> Response:
     """Delete a specific completed or failed extraction job record and its associated result files."""
     row = db_repo.get_job_by_id(job_id)
     if row is None:
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", f"Job {job_id!r} not found.")
+        msg = f"Job {job_id!r} not found."
+        logger.error(msg)
+        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
 
     if row.status not in (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED):
+        msg = f"Cannot delete active job {job_id!r}. Current status: {row.status}."
+        logger.error(msg)
         raise ExtractException(
             409, "RESOURCE_LOCKED",
-            f"Cannot delete active job {job_id!r}. Current status: {row.status}.",
+            msg,
         )
 
     delete_job_files(job_id)
 
     success = db_repo.delete_job(job_id)
     if not success:
+        msg = "Failed to delete job from database."
+        logger.error(f"Failed to delete job {job_id} from database.")
         raise ExtractException(
-            500, "INTERNAL_SERVER_ERROR", "Failed to delete job from database."
+            500, "INTERNAL_SERVER_ERROR", msg
         )
 
     logger.info(f"Deleted job {job_id!r}")
@@ -795,21 +831,29 @@ async def bulk_delete_extract_jobs(
 ) -> Response:
     """Delete all extraction jobs and their result files after receiving explicit confirmation."""
     if confirm != "true":
-        raise ExtractException(400, "CONFIRMATION_REQUIRED", "Bulk delete requires ?confirm=true.")
+        msg = "Bulk delete requires ?confirm=true."
+        logger.error(msg)
+        raise ExtractException(400, "CONFIRMATION_REQUIRED", msg)
 
     if db_repo.has_active_jobs():
+        msg = (
+            "Cannot bulk-delete: one or more active jobs exist. "
+            "Wait for them to complete or cancel them individually."
+        )
+        logger.error(msg)
         raise ExtractException(
             409, "RESOURCE_LOCKED",
-            "Cannot bulk-delete: one or more active jobs exist. "
-            "Wait for them to complete or cancel them individually.",
+            msg,
         )
 
     delete_all_job_files()
 
     success = db_repo.delete_all_jobs()
     if not success:
+        msg = "Failed to delete jobs from database."
+        logger.error(msg)
         raise ExtractException(
-            500, "INTERNAL_SERVER_ERROR", "Failed to delete jobs from database."
+            500, "INTERNAL_SERVER_ERROR", msg
         )
 
     logger.info("Bulk deleted all extraction jobs")
