@@ -101,4 +101,32 @@ enum CommandType {
   COMMAND_TYPE_DOWNLOAD_MODEL            = 27;
   COMMAND_TYPE_FIND_FREE_SPYRE_CARDS    = 28;
   COMMAND_TYPE_GET_BASE_DIR             = 29;
+
+  // Helm chart install-or-upgrade on an OpenShift worker.
+  // The control plane serialises the chart files and values and sends them
+  // over the stream; the worker runs `helm install|upgrade` against the cluster
+  // it has access to.
+  COMMAND_TYPE_HELM_INSTALL              = 30;
+
+  // Helm release uninstall on an OpenShift worker.
+  // The control plane sends the release name and namespace; the worker runs
+  // `helm uninstall` against the cluster it has access to.
+  COMMAND_TYPE_HELM_UNINSTALL            = 31;
+
+  // Wait for a KServe InferenceService to reach Ready=True on an OpenShift worker.
+  // The control plane sends the InferenceService name and namespace; the worker
+  // polls the InferenceService status and returns when it is ready or the
+  // context deadline is exceeded.
+  COMMAND_TYPE_WAIT_INFERENCE_SERVICE    = 32;
+
+  // List CRD resources on an OpenShift worker.
+  // The control plane sends the GVK, namespace, and label filters; the worker
+  // queries the cluster and returns the matching resource names and labels.
+  COMMAND_TYPE_LIST_CRD                  = 33;
+
+  // Delete a namespace on an OpenShift worker.
+  COMMAND_TYPE_DELETE_NAMESPACE          = 34;
+
+  // Update a Kubernetes secret and restart the associated deployment on an OpenShift worker.
+  COMMAND_TYPE_UPDATE_SECRET             = 35;
 }

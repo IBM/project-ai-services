@@ -25,6 +25,9 @@ import (
 type RemoteRuntime struct {
 	*stream.Sender
 	runtimeType types.RuntimeType
+	// namespace is the target namespace for namespace-scoped operations on
+	// OpenShift (e.g. ListPods, ListRoutes, DeletePVCs). Empty for Podman.
+	namespace string
 }
 
 // New returns a RemoteRuntime targeting the named worker.
@@ -35,6 +38,16 @@ func New(workerName string, runtimeType types.RuntimeType, reg stream.WorkerRegi
 		Sender:      stream.New(workerName, reg),
 		runtimeType: runtimeType,
 	}
+}
+
+// WithNamespace returns a shallow copy of the RemoteRuntime scoped to the
+// given namespace. Use this when driving operations against an application
+// namespace on an OpenShift worker.
+func (r *RemoteRuntime) WithNamespace(ns string) *RemoteRuntime {
+	copy := *r
+	copy.namespace = ns
+
+	return &copy
 }
 
 // Type returns the runtime type declared by the worker at registration.
@@ -67,7 +80,7 @@ func (r *RemoteRuntime) PullImage(ctx context.Context, image string) error {
 // ─── Pod operations ───────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListPods(ctx context.Context, filters map[string][]string) ([]types.Pod, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_PODS, payload.ListPods{Filters: filters})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_PODS, payload.ListPods{Namespace: r.namespace, Filters: filters})
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +187,7 @@ func (r *RemoteRuntime) GetNamespace(_ context.Context) (string, error) {
 // ─── Secret operations ────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListSecrets(ctx context.Context, filters map[string][]string) ([]string, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_SECRETS, payload.ListSecrets{Filters: filters})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_SECRETS, payload.ListSecrets{Namespace: r.namespace, Filters: filters})
 	if err != nil {
 		return nil, err
 	}
@@ -188,13 +201,13 @@ func (r *RemoteRuntime) ListSecrets(ctx context.Context, filters map[string][]st
 }
 
 func (r *RemoteRuntime) DeleteSecret(ctx context.Context, name string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_SECRET, payload.Name{Name: name})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_SECRET, payload.Name{Namespace: r.namespace, Name: name})
 
 	return err
 }
 
 func (r *RemoteRuntime) SecretExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -207,10 +220,16 @@ func (r *RemoteRuntime) SecretExists(ctx context.Context, nameOrID string) (bool
 	return exists, nil
 }
 
-// UpdateSecret is not yet supported over the remote worker protocol.
-// TODO: implement when required.
-func (r *RemoteRuntime) UpdateSecret(_ context.Context, _, _ string, _ map[string][]byte) error {
-	return fmt.Errorf("remote runtime: UpdateSecret not yet supported on remote workers")
+// UpdateSecret forwards a secret update + deployment restart to the remote OpenShift worker.
+func (r *RemoteRuntime) UpdateSecret(ctx context.Context, name, deploymentName string, data map[string][]byte) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_UPDATE_SECRET, payload.UpdateSecret{
+		Namespace:      r.namespace,
+		Name:           name,
+		DeploymentName: deploymentName,
+		Data:           data,
+	})
+
+	return err
 }
 
 // ─── Volume operations ────────────────────────────────────────────────────────
@@ -222,7 +241,7 @@ func (r *RemoteRuntime) DeleteVolume(ctx context.Context, name string) error {
 }
 
 func (r *RemoteRuntime) VolumeExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -314,7 +333,7 @@ func (r *RemoteRuntime) HTTPProxy(ctx context.Context, method, targetURL string,
 // ─── Network operations ───────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListRoutes(ctx context.Context, labelSelector string) ([]types.Route, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_ROUTES, payload.ListRoutes{LabelSelector: labelSelector})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_ROUTES, payload.ListRoutes{Namespace: r.namespace, LabelSelector: labelSelector})
 	if err != nil {
 		return nil, err
 	}
@@ -327,20 +346,62 @@ func (r *RemoteRuntime) ListRoutes(ctx context.Context, labelSelector string) ([
 	return routes, nil
 }
 
-// ─── CRD / namespace / PVC / system operations ────────────────────────────────
+// ─── OpenShift-specific operations ───────────────────────────────────────────
 
-// ListCRD is not supported on remote workers (OpenShift-only).
-func (r *RemoteRuntime) ListCRD(_ context.Context, _ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
-	return nil, fmt.Errorf("remote runtime: ListCRD not supported on remote workers")
+// WaitForInferenceServiceReady forwards a KServe InferenceService readiness wait
+// to the remote OpenShift worker. The worker polls the InferenceService until
+// Ready=True or the context deadline is exceeded. The context timeout is
+// authoritative — the worker respects ctx.Done() via the gRPC deadline.
+func (r *RemoteRuntime) WaitForInferenceServiceReady(ctx context.Context, isvcName string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE, payload.WaitInferenceService{
+		Namespace: r.namespace,
+		Name:      isvcName,
+	})
+
+	return err
 }
 
-// DeleteNamespace is not supported on remote workers (OpenShift-only).
-func (r *RemoteRuntime) DeleteNamespace(_ context.Context, _ string) error {
-	return fmt.Errorf("remote runtime: DeleteNamespace not supported on remote workers")
+// ─── CRD / namespace / PVC / system operations ────────────────────────────────
+
+// ListCRD forwards a CRD list query to the remote OpenShift worker.
+// The GVK is extracted from list and sent alongside the namespace and label filters.
+func (r *RemoteRuntime) ListCRD(ctx context.Context, list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
+	gvk := list.GroupVersionKind()
+	labelKeys := filters["label"]
+
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_CRD, payload.ListCRD{
+		Namespace: r.namespace,
+		Group:     gvk.Group,
+		Version:   gvk.Version,
+		Kind:      gvk.Kind,
+		LabelKeys: labelKeys,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var items []payload.CRDResource
+	if err := unmarshalData(res, &items); err != nil {
+		return nil, err
+	}
+
+	result := make([]types.CRDResource, len(items))
+	for i, item := range items {
+		result[i] = types.CRDResource{Name: item.Name, Labels: item.Labels}
+	}
+
+	return result, nil
+}
+
+// DeleteNamespace forwards a namespace deletion to the remote OpenShift worker.
+func (r *RemoteRuntime) DeleteNamespace(ctx context.Context, name string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_NAMESPACE, payload.DeleteNamespace{Name: name})
+
+	return err
 }
 
 func (r *RemoteRuntime) DeletePVCs(ctx context.Context, appLabel string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_PVCS, payload.Name{Name: appLabel})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_PVCS, payload.Name{Namespace: r.namespace, Name: appLabel})
 
 	return err
 }

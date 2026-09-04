@@ -213,7 +213,7 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 	r.workers[workerName] = entry
 	r.mu.Unlock()
 
-	if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusReady)}); err != nil {
+	if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusReady), Message: utils.Ptr("")}); err != nil {
 		logger.WarningfCtx(ctx, "worker registry: DB status update failed on restore for %s: %v", workerName, err)
 	}
 

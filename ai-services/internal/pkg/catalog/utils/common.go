@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	helmchart "helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/chart/loader/archive"
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
+	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
 const uninstallHelmTimeout = 5 * time.Minute
@@ -141,18 +143,17 @@ func HelmUninstall(ctx context.Context, namespace, release string) error {
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	exists, err := helmClient.IsReleaseExist(release)
-	if err != nil {
-		return fmt.Errorf("failed to check '%s' release existence: %w", release, err)
+	if err := helmClient.Uninstall(release, &helm.UninstallOpts{Timeout: uninstallHelmTimeout}); err != nil {
+		if errors.Is(err, driver.ErrReleaseNotFound) {
+			logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
+
+			return nil
+		}
+
+		return err
 	}
 
-	if !exists {
-		logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
-
-		return nil
-	}
-
-	return helmClient.Uninstall(release, &helm.UninstallOpts{Timeout: uninstallHelmTimeout})
+	return nil
 }
 
 // Made with Bob

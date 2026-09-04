@@ -10,8 +10,10 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -19,17 +21,19 @@ import (
 // OpenshiftDeletion handles application deletion operations.
 type OpenshiftDeletion struct {
 	rt                    runtime.Runtime
-	ns                    string
+	helm                  helmutil.HelmManager
 	appRepo               dbrepo.ApplicationRepository
 	serviceRepo           dbrepo.ServiceRepository
 	componentRepo         dbrepo.ComponentRepository
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository
 }
 
-// NewOpenshiftDeletion creates a new deletion service instance.
+// NewOpenshiftDeletion creates a deletion service for the OpenShift runtime.
+// HelmManager is resolved from rt: LocalHelmManager for a local runtime,
+// RemoteHelmManager for a RemoteRuntime. Namespace scoping for RemoteRuntime
+// is deferred to PerformDeletion, where appID is available to derive ns.
 func NewOpenshiftDeletion(
 	rt runtime.Runtime,
-	ns string,
 	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
 	componentRepo dbrepo.ComponentRepository,
@@ -37,7 +41,6 @@ func NewOpenshiftDeletion(
 ) *OpenshiftDeletion {
 	return &OpenshiftDeletion{
 		rt:                    rt,
-		ns:                    ns,
 		appRepo:               appRepo,
 		serviceRepo:           serviceRepo,
 		componentRepo:         componentRepo,
@@ -51,25 +54,33 @@ func NewOpenshiftDeletion(
 // 3. ServiceRuntime: helm-uninstall serving-runtimes for both cpu and spyre-cards.
 // 4. Namespace: Delete application namespace based on keepData flag.
 func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, orphanedComponentIDs []uuid.UUID, keepData bool) {
+	ns := catalogutils.AppNamespace(appID)
+
+	if rrt, ok := s.rt.(*remoteruntime.RemoteRuntime); ok {
+		s.helm = helmutil.NewRemoteHelmManager(rrt.Sender, ns)
+	} else {
+		s.helm = helmutil.NewLocalHelmManager(ns)
+	}
+
 	logger.InfofCtx(ctx, "Deleting OpenShift deployment with application id '%s'  in namespace '%s'\n",
-		appID, s.ns)
+		appID, ns)
 
 	// Uninstall application services
-	errorMessages := s.deleteServices(ctx, s.ns, appID, services, keepData)
+	errorMessages := s.deleteServices(ctx, appID, services, keepData)
 
 	// Uninstall application components
-	componentErr := s.deleteComponents(ctx, s.ns, appID, orphanedComponentIDs, keepData)
+	componentErr := s.deleteComponents(ctx, appID, orphanedComponentIDs, keepData)
 	errorMessages = append(errorMessages, componentErr...)
 
 	// Uninstall Serving runtimes
-	servingRuntimeErr := s.deleteServingRuntimeRelease(ctx, s.ns)
+	servingRuntimeErr := s.deleteServingRuntimeRelease(ctx)
 	errorMessages = append(errorMessages, servingRuntimeErr...)
 
 	// Delete namespace of the application
 	if !keepData && len(errorMessages) == 0 {
-		logger.InfofCtx(ctx, "Deleting '%s' namespace.", s.ns)
-		if err := s.rt.DeleteNamespace(ctx, s.ns); err != nil {
-			errMsg := fmt.Sprintf("failed to delete '%s' namespace: %v", s.ns, err)
+		logger.InfofCtx(ctx, "Deleting '%s' namespace.", ns)
+		if err := s.rt.DeleteNamespace(ctx, ns); err != nil {
+			errMsg := fmt.Sprintf("failed to delete '%s' namespace: %v", ns, err)
 			logger.ErrorlnCtx(ctx, errMsg)
 			errorMessages = append(errorMessages, errMsg)
 		}
@@ -93,14 +104,14 @@ func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID
 
 // deleteServices uninstalls all service Helm releases sequentially and removes their DB records.
 // Collects and returns all errors rather than stopping on the first failure.
-func (s *OpenshiftDeletion) deleteServices(ctx context.Context, ns string, appID uuid.UUID, services []models.Service, keepData bool) []string {
+func (s *OpenshiftDeletion) deleteServices(ctx context.Context, appID uuid.UUID, services []models.Service, keepData bool) []string {
 	var errorMessages []string
 
 	for _, svc := range services {
 		release := catalogutils.HelmReleaseName(appID, svc.CatalogID)
 		logger.InfofCtx(ctx, "Uninstalling %s release.", release)
 
-		if err := catalogutils.HelmUninstall(ctx, ns, release); err != nil {
+		if err := s.helm.Uninstall(ctx, release); err != nil {
 			errMsg := fmt.Sprintf("service %s: helm uninstall failed: %v", svc.ID, err)
 			errorMessages = append(errorMessages, errMsg)
 			_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError, fmt.Sprintf("helm uninstall failed: %v", err))
@@ -126,7 +137,7 @@ func (s *OpenshiftDeletion) deleteServices(ctx context.Context, ns string, appID
 
 // deleteComponents uninstalls all orphaned component Helm releases sequentially and removes their DB records.
 // Collects and returns all errors rather than stopping on the first failure.
-func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, ns string, appID uuid.UUID, componentIDs []uuid.UUID, keepData bool) []string {
+func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, appID uuid.UUID, componentIDs []uuid.UUID, keepData bool) []string {
 	var errorMessages []string
 
 	for _, id := range componentIDs {
@@ -142,7 +153,7 @@ func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, ns string, app
 		release := catalogutils.HelmReleaseName(appID, componentData.Type)
 		logger.InfofCtx(ctx, "Uninstalling %s release.", release)
 
-		if err := catalogutils.HelmUninstall(ctx, ns, release); err != nil {
+		if err := s.helm.Uninstall(ctx, release); err != nil {
 			errMsg := fmt.Sprintf("component %s: helm uninstall failed: %v", id, err)
 			errorMessages = append(errorMessages, errMsg)
 			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, id, models.ComponentStatusError, fmt.Sprintf("helm uninstall failed: %v", err))
@@ -166,7 +177,7 @@ func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, ns string, app
 	return errorMessages
 }
 
-func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns string) []string {
+func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context) []string {
 	var errorMessages []string
 
 	list := &unstructured.UnstructuredList{}
@@ -194,7 +205,7 @@ func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns 
 
 		logger.InfofCtx(ctx, "Uninstalling '%s' serving runtime release.", release)
 
-		if err := catalogutils.HelmUninstall(ctx, ns, release); err != nil {
+		if err := s.helm.Uninstall(ctx, release); err != nil {
 			errMsg := fmt.Sprintf("serving runtime '%s': helm uninstall failed: %s", release, err)
 			errorMessages = append(errorMessages, errMsg)
 
@@ -208,7 +219,7 @@ func (s *OpenshiftDeletion) deleteServingRuntimeRelease(ctx context.Context, ns 
 // deleteVolume deletes PVCs associated with the given resource ID when keepData is false.
 func (s *OpenshiftDeletion) deleteVolume(ctx context.Context, appID uuid.UUID, resourceID string) string {
 	templateLabel := fmt.Sprintf("%s=%s", constants.ApplicationTemplateKey, resourceID)
-	logger.InfofCtx(ctx, "Deleting PVC with '%s' label, from %s namespace", templateLabel, s.ns)
+	logger.InfofCtx(ctx, "Deleting PVC with '%s' label for app '%s'", templateLabel, appID)
 
 	if err := s.rt.DeletePVCs(ctx, templateLabel); err != nil {
 		errMsg := fmt.Sprintf("failed to delete PVC with label '%s' for app '%s': %s", templateLabel, appID.String(), err.Error())
