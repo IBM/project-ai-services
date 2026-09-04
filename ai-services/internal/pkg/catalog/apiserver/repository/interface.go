@@ -29,7 +29,6 @@ type DatasourceServiceInterface interface {
 	// ListDatasources returns a paginated, optionally filtered list of datasource connectors.
 	// Sensitive credential fields are never included in any returned item.
 	ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error)
-
 	// UpdateDatasource updates only the updatable credential fields for a datasource.
 	// It re-runs the connectivity test with the merged (new credentials + existing structural
 	// fields) metadata. If the test passes, the DB record is updated and the new credentials
@@ -38,6 +37,11 @@ type DatasourceServiceInterface interface {
 	// A 200 is returned even when propagation to some Digitize services fails; in that case,
 	// the response body contains a non-empty PropagationErrors list.
 	UpdateDatasource(ctx context.Context, id uuid.UUID, req apimodels.UpdateDatasourceRequest) (*apimodels.UpdateDatasourceResponse, error)
+	// ListApplicationDatasources returns a paginated list of datasource connectors linked to
+	// the given application, enriched with live sync state (status, files, last_sync, message)
+	// from each connector's Digitize pod.
+	// Returns a *ValidationError with code 404 when the application does not exist.
+	ListApplicationDatasources(ctx context.Context, req apimodels.ListApplicationDatasourcesRequest) (*apimodels.ApplicationDatasourceListResponse, error)
 
 	// GetDatasourceApplications returns the list of applications currently connected to a datasource,
 	// each enriched with live sync state from its downstream service pod.
