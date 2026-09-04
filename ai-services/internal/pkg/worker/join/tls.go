@@ -10,12 +10,13 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
@@ -65,10 +66,10 @@ func loadClientCert(tlsDir string) (tls.Certificate, error) {
 	return cert, nil
 }
 
-// buildTLSConfig returns a *tls.Config for dialling the gateway. For OpenShift,
-// the verified server name must match the passthrough route host; for podman, we
-// keep the internal gateway hostname.
-func buildTLSConfig(runtimeType types.RuntimeType, tlsDir string, clientCert *tls.Certificate) (*tls.Config, error) {
+// buildTLSConfig returns a *tls.Config for dialing the gateway. When the target
+// includes a host or IP, we verify against that exact address. Otherwise we fall
+// back to the podman/internal default name.
+func buildTLSConfig(gatewayAddr, tlsDir string, clientCert *tls.Certificate) (*tls.Config, error) {
 	cfg := &tls.Config{}
 	if clientCert != nil {
 		cfg.Certificates = []tls.Certificate{*clientCert}
@@ -86,7 +87,7 @@ func buildTLSConfig(runtimeType types.RuntimeType, tlsDir string, clientCert *tl
 			return nil, fmt.Errorf("parse ca.crt: no valid certificates found")
 		}
 		cfg.RootCAs = pool
-		cfg.ServerName = workerconstants.GatewayServerNameForRuntime(runtimeType)
+		cfg.ServerName = gatewayServerName(gatewayAddr)
 	case os.IsNotExist(err):
 		cfg.InsecureSkipVerify = true //nolint:gosec // intentional TOFU bootstrap fallback
 	default:
@@ -94,6 +95,26 @@ func buildTLSConfig(runtimeType types.RuntimeType, tlsDir string, clientCert *tl
 	}
 
 	return cfg, nil
+}
+
+func gatewayServerName(gatewayAddr string) string {
+	if gatewayAddr == "" {
+		return workerconstants.GatewayServerName
+	}
+	if parsed, err := url.Parse(gatewayAddr); err == nil && parsed.Host != "" {
+		gatewayAddr = parsed.Host
+	}
+	if host, _, err := net.SplitHostPort(gatewayAddr); err == nil {
+		gatewayAddr = host
+	}
+	if gatewayAddr == "" {
+		return workerconstants.GatewayServerName
+	}
+	if ip := net.ParseIP(gatewayAddr); ip != nil {
+		return workerconstants.GatewayServerName
+	}
+
+	return gatewayAddr
 }
 
 // writeTLSMaterial creates tlsDir (mode 0700) and writes the three PEM files
