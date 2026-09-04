@@ -24,13 +24,14 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
@@ -53,19 +54,25 @@ const (
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
 func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
-	// ── Step 1: Dial the gateway ─────────────────────────────────────────────
-	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
+	tlsDir := workerconstants.WorkerTLSDir
+	// ── Step 1: Check for existing valid mTLS credentials & stream loop ────────────────────
+	if hasValidTLSCredentials(ctx, tlsDir) {
+		logger.InfofCtx(ctx, "worker join: valid mTLS credentials found in %s, skipping registration", tlsDir)
 
-	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fmt.Errorf("worker grpcstream: create client for %s: %w", opts.GatewayAddr, err)
+		workerName, err := workerNameFromCert(tlsDir)
+		if err != nil {
+			return fmt.Errorf("worker join: recover worker name from cert: %w", err)
+		}
+
+		return connectAndStream(ctx, rt, pr, opts.GatewayAddr, workerName)
 	}
-	defer func() { _ = conn.Close() }()
 
-	client := workerpb.NewWorkerGatewayClient(conn)
+	if opts.Token == "" {
+		return fmt.Errorf("worker join: no valid mTLS credentials found in %s and no --token provided", tlsDir)
+	}
 
 	// ── Step 2: Register + stream loop ───────────────────────────────────────
-	return runRegistrationLoop(ctx, rt, pr, client, opts.Token)
+	return runRegistrationLoop(ctx, rt, pr, opts)
 }
 
 // ─── registration loop ────────────────────────────────────────────────────────
@@ -73,36 +80,98 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 // runRegistrationLoop calls Register and then enters the CommandStream retry
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
-func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, token string) error {
-	workerName, err := register(ctx, client, token, rt.Type())
+func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
+	workerName, err := register(ctx, opts, rt.Type())
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
 	}
 
 	logger.InfofCtx(ctx, "Worker %q registered with control plane.\n", workerName)
 
-	return runStreamLoop(ctx, rt, pr, client, workerName)
+	return connectAndStream(ctx, rt, pr, opts.GatewayAddr, workerName)
 }
 
 // register calls the Register RPC once and returns the worker name bound by
 // the control plane.
-func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType) (string, error) {
+func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.RuntimeType) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker with catalog control plane...")
 
-	resp, err := client.Register(ctx, &workerpb.RegisterRequest{
-		PreSharedToken: token,
-		RuntimeType:    rt.String(),
-	})
-	// TODO: When registrations fails due to "token already used" error
-	// attempt registretion without token.
+	tlsDir := workerconstants.WorkerTLSDir
+	// 1. Generate local ECDSA P-256 key + CSR — private key never transmitted.
+	keyPEM, csrPEM, err := generateKeyAndCSR()
 	if err != nil {
-		return "", fmt.Errorf("register RPC: %w", err)
+		return "", err
 	}
 
-	return resp.GetWorkerName(), nil
+	// 2. Dial the gateway for bootstrap. ca.crt may not exist yet on first run,
+	//    so buildTLSConfig falls back to InsecureSkipVerify (TOFU) if absent.
+	tlsCfg, err := buildTLSConfig(tlsDir, nil)
+	if err != nil {
+		return "", err
+	}
+	if tlsCfg.InsecureSkipVerify {
+		logger.WarningfCtx(ctx, "worker join: ca.crt not present, bootstrap connection will use InsecureSkipVerify")
+	}
+
+	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	if err != nil {
+		return "", fmt.Errorf("dial %s: %w", opts.GatewayAddr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// 3. Call Register with token + CSR.
+	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
+	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
+		PreSharedToken: opts.Token,
+		RuntimeType:    rt.String(),
+		CsrPem:         csrPEM,
+	})
+	if err != nil {
+		return "", fmt.Errorf("worker join: register RPC: %w", err)
+	}
+
+	// 4. Write TLS material to disk (see tls.go: writeTLSMaterial).
+	if len(resp.GetTlsCertPem()) == 0 {
+		return "", fmt.Errorf("gateway returned empty certificate — registration failed")
+	}
+	if err := writeTLSMaterial(tlsDir, resp.GetTlsCertPem(), keyPEM, resp.GetCaCertPem()); err != nil {
+		return "", err
+	}
+	logger.InfofCtx(ctx, "worker join: mTLS credentials written to %s", tlsDir)
+
+	// Recover the worker name from the signed cert — the gateway embeds the
+	// token-bound worker name as the cert CN, so no separate response field is needed.
+	return workerNameFromCert(tlsDir)
 }
 
 // ─── command-stream loop ──────────────────────────────────────────────────────
+
+// connectAndStream loads mTLS credentials from tlsDir, dials the gateway with
+// mTLS, and runs the CommandStream retry loop.
+// workerName is sent in the first stream message so the gateway can identify
+// this worker; it is empty on reconnect (the gateway will read it from the message).
+func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, gatewayAddr, workerName string) error {
+	tlsDir := workerconstants.WorkerTLSDir
+	cert, err := loadClientCert(tlsDir)
+	if err != nil {
+		return fmt.Errorf("worker join: %w", err)
+	}
+
+	tlsCfg, err := buildTLSConfig(tlsDir, &cert)
+	if err != nil {
+		return fmt.Errorf("worker join: build TLS config for stream: %w", err)
+	}
+
+	conn, err := grpc.NewClient(gatewayAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	if err != nil {
+		return fmt.Errorf("worker join: dial %s: %w", gatewayAddr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	logger.InfofCtx(ctx, "worker join: connecting as %q to %s", workerName, gatewayAddr)
+
+	return runStreamLoop(ctx, rt, pr, workerpb.NewWorkerGatewayClient(conn), workerName)
+}
 
 // runStreamLoop opens the CommandStream and retries on transient failures.
 // An Unauthenticated status from the gateway means the control plane restarted
