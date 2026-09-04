@@ -86,14 +86,20 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return nil
 	}
 
-	if err := deployAll(ctx, rt, tp, opts, existingResource); err != nil {
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
+		return fmt.Errorf("worker join: compute domain suffix: %w", err)
+	}
+
+	if err := deployAll(ctx, rt, tp, opts, existingResource, domainSuffix); err != nil {
 		return err
 	}
 
-	caddyCtx, err := setupCaddyContext(ctx, opts)
-	if err != nil {
-		return err
-	}
+	logger.DebugfCtx(ctx, "Using domain suffix: %s\n", domainSuffix)
+
+	// Create Caddy context with pod name and domain suffix (NO template dependencies)
+	caddyCtx := caddy.NewContext(workerconstants.WorkerCaddyPodName, domainSuffix)
+
 	// Load SSL certificates if provided
 	if err := caddyCtx.LoadSSLCertificates(ctx, opts.Setup.BaseDir, opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath); err != nil {
 		return err
@@ -155,7 +161,7 @@ func readCaddyConfig(sslCertPath, sslKeyPath string) (string, string, string, er
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string) error {
+func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string, domainSuffix string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerconstants.WorkerAppTemplate, true, &appMetadata); err != nil {
 		return fmt.Errorf("worker setup: load metadata: %w", err)
@@ -164,11 +170,6 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
 		return fmt.Errorf("worker setup: load templates: %w", err)
-	}
-
-	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-	if err != nil {
-		return fmt.Errorf("worker setup: compute domain suffix: %w", err)
 	}
 
 	argParams, err := buildArgParams(opts)
@@ -289,23 +290,4 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)
-}
-
-// setupCaddyContext sets up the Caddy context with domain configuration and Caddyfile generation.
-// This function:
-// 1. Computes domain configuration (cert domain extraction + domain suffix resolution)
-// 2. Creates Caddy context with pod name and domain suffix.
-func setupCaddyContext(ctx context.Context, opts workertypes.PodmanWorkerOptions) (*caddy.Context, error) {
-	// Compute domain configuration (cert domain extraction + domain suffix resolution)
-	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-	if err != nil {
-		return nil, err
-	}
-
-	logger.DebugfCtx(ctx, "Using domain suffix: %s\n", domainSuffix)
-
-	// Create Caddy context with pod name and domain suffix (NO template dependencies)
-	caddyCtx := caddy.NewContext(workerconstants.WorkerCaddyPodName, domainSuffix)
-
-	return caddyCtx, nil
 }
