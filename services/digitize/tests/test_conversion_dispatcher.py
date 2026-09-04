@@ -437,7 +437,14 @@ class TestRunConversion:
         result_path = str(tmp_path / "output.json")
 
         async def _run():
+            # get_conversion_task is called at Check 1 (before RUNNING) and
+            # Check 2 (after conversion returns).  Both must return a non-cancel-pending
+            # stub so the happy path continues through to COMPLETED.
+            from digitize.db.models import ConversionTaskStatus
+            running_stub = Mock(status=ConversionTaskStatus.RUNNING)
+
             with patch.object(mod.db_manager, "update_task_status") as mock_update, \
+                 patch.object(mod.db_manager, "get_conversion_task", return_value=running_stub), \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock) as mock_release, \
                  patch("digitize.utils.db.get_status_manager") as mock_gsm, \
                  patch("asyncio.get_running_loop") as mock_loop, \
@@ -491,7 +498,14 @@ class TestRunConversion:
         (tmp_path / "file.pdf").write_bytes(b"%PDF-1.4")
 
         async def _run():
+            from digitize.db.models import ConversionTaskStatus
+            # get_conversion_task is called at Check 1 (before RUNNING) and in the
+            # except block (Check 3).  Return RUNNING so neither check triggers a
+            # cancel path — the genuine exception must produce FAILED, not CANCELLED.
+            running_stub = Mock(status=ConversionTaskStatus.RUNNING)
+
             with patch.object(mod.db_manager, "update_task_status") as mock_update, \
+                 patch.object(mod.db_manager, "get_conversion_task", return_value=running_stub), \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock) as mock_release, \
                  patch("digitize.utils.db.get_status_manager") as mock_gsm, \
                  patch("asyncio.get_running_loop") as mock_loop:
@@ -554,9 +568,13 @@ class TestRunConversionUpdated:
         task_status_calls = []
 
         async def _run():
+            from digitize.db.models import ConversionTaskStatus
+            running_stub = Mock(status=ConversionTaskStatus.RUNNING)
+
             with patch.object(
                     mod.db_manager, "update_task_status",
                     side_effect=lambda *a, **kw: task_status_calls.append((a, kw))) as mock_uts, \
+                 patch.object(mod.db_manager, "get_conversion_task", return_value=running_stub), \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
                  patch("asyncio.get_running_loop") as mock_loop:
 
@@ -598,7 +616,11 @@ class TestRunConversionUpdated:
         result_path = str(tmp_path / "output.json")
 
         async def _run():
+            from digitize.db.models import ConversionTaskStatus
+            running_stub = Mock(status=ConversionTaskStatus.RUNNING)
+
             with patch.object(mod.db_manager, "update_task_status"), \
+                 patch.object(mod.db_manager, "get_conversion_task", return_value=running_stub), \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
                  patch("asyncio.get_running_loop") as mock_loop:
 
@@ -609,7 +631,9 @@ class TestRunConversionUpdated:
                 await mod._run_conversion(task, weight=1)
 
         asyncio.run(_run())
-        assert cached.exists(), "Staged input file must be preserved for the pipeline layer"
+        # The dispatcher no longer deletes the staged input file — that is now
+        # the pipeline layer's responsibility (via cleanup_staging_directory).
+        assert cached.exists(), "Dispatcher must NOT delete the staged file; pipeline owns cleanup"
 
     def test_cached_file_preserved_on_failure(self, tmp_path):
         """The staged file must NOT be removed when conversion raises.
@@ -625,7 +649,11 @@ class TestRunConversionUpdated:
         task.page_count = 10
 
         async def _run():
+            from digitize.db.models import ConversionTaskStatus
+            running_stub = Mock(status=ConversionTaskStatus.RUNNING)
+
             with patch.object(mod.db_manager, "update_task_status"), \
+                 patch.object(mod.db_manager, "get_conversion_task", return_value=running_stub), \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
                  patch("asyncio.get_running_loop") as mock_loop:
 
@@ -638,4 +666,6 @@ class TestRunConversionUpdated:
                 await mod._run_conversion(task, weight=1)
 
         asyncio.run(_run())
-        assert cached.exists(), "Staged file must be preserved for the pipeline layer even on failure"
+        # The dispatcher no longer deletes the staged input file — that is now
+        # the pipeline layer's responsibility (via cleanup_staging_directory).
+        assert cached.exists(), "Dispatcher must NOT delete the staged file; pipeline owns cleanup"

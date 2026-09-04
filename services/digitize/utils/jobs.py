@@ -18,6 +18,7 @@ from digitize.models import (
 )
 from digitize.parsing.pdf import get_document_page_count
 from digitize.settings import settings
+from digitize.db.manager import db_manager
 from digitize.utils.db import (
     create_job,
     create_document,
@@ -31,6 +32,34 @@ from common.misc_utils import get_utc_timestamp, cleanup_staging_directory
 
 
 logger = get_logger("digitize_utils")
+
+# Statuses that cannot transition to CANCEL_PENDING.
+# Used by both the HTTP cancel endpoint and sync_tick's interrupt handler.
+NON_CANCELLABLE_JOB_STATUSES = frozenset({
+    JobStatus.COMPLETED.value,
+    JobStatus.FAILED.value,
+    JobStatus.CANCEL_PENDING.value,
+    JobStatus.CANCELLED.value,
+})
+
+
+def request_job_cancellation(job_id: str, *, clean_files: bool = False) -> None:
+    """Mark *job_id* as ``CANCEL_PENDING`` in the database.
+
+    Preserves any existing ``stats`` on the job and merges in the
+    ``clean_files`` flag so the background pipeline can read it when it
+    handles the cancellation.
+
+    This is the single authoritative place that writes the cancel-pending
+    state.  Both the HTTP cancel endpoint and sync_tick call this function
+    rather than reaching into ``db_manager`` directly.
+    """
+    job_data = get_job(job_id)
+    current_stats = (job_data or {}).get("stats") or {}
+    updated_stats = {**current_stats, "clean_files": clean_files}
+    db_manager.update_job(job_id, status=JobStatus.CANCEL_PENDING, stats=updated_stats)
+    logger.info(f"Job '{job_id}' marked as CANCEL_PENDING (clean_files={clean_files})")
+
 
 def get_job_document_stats(job_id: str) -> dict:
     """

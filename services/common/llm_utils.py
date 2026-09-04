@@ -1,8 +1,9 @@
 import os
 import requests
+import threading
 import time
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from common.misc_utils import get_logger, resolve_model_max_len
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
@@ -108,12 +109,23 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
         logger.error(f"Error summarizing/classifying table: {e}")
         raise
 
-def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32, stop_event: threading.Event | None = None):
     """Combined function to summarize and classify tables using a single prompt.
 
-    Returns tuple: (summaries, decisions, failures).
-    failures is a dict mapping table index to error message for failed tables.
-    Table failures are non-fatal: failed tables use fallback values and processing continues.
+    Args:
+        table_mds: List of table markdown strings.
+        gen_model: LLM model name.
+        llm_endpoint: LLM endpoint URL.
+        doc_path: Document path (used for logging).
+        prompt_template: Prompt template string with a {content} placeholder.
+        max_tokens: Maximum tokens for the LLM response.
+        max_workers: Maximum parallel LLM workers.
+        stop_event: Optional threading.Event. When set, the function stops
+                    collecting further LLM results between table calls and
+                    cancels any queued futures that have not yet started.
+
+    Returns tuple: (summaries, decisions)
+    Raises JobCancelledError if stop_event is set mid-processing.
     """
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
@@ -130,16 +142,33 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
             executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens): idx
             for idx, prompt in enumerate(all_prompts)
         }
-        for future in as_completed(futures):
-            idx = futures[future]
-            try:
-                results[idx] = future.result()
-                logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
-            except Exception as e:
-                error_msg = f"Failed to process table {idx}: {str(e)}"
-                logger.error(error_msg)
-                results[idx] = ("No summary.", False)
-                failures[idx] = error_msg
+        pending = dict(futures)  # future -> idx, shrinks as futures complete
+        while pending:
+            for fut in list(pending):
+                if not fut.done():
+                    # Cancel queued (not-yet-running) futures if stop_event is set.
+                    if stop_event is not None and stop_event.is_set() and not fut.running():
+                        fut.cancel()
+                        del pending[fut]
+                    continue
+                idx = pending.pop(fut)
+                try:
+                    results[idx] = fut.result()
+                    logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
+                except Exception as e:
+                    error_msg = f"Failed to process table {idx}: {str(e)}"
+                    logger.error(error_msg)
+                    results[idx] = ("No summary.", False)
+                    failures[idx] = error_msg
+
+            if stop_event is not None and stop_event.is_set() and not pending:
+                from digitize.exceptions import JobCancelledError
+                raise JobCancelledError(
+                    f"Job cancelled during table summarization for '{doc_path}'"
+                )
+
+            if pending:
+                time.sleep(0.5)
 
     # Unpack results in index order. Every slot starts as the fallback
     # and is overwritten either by a successful future or left as-is on failure.

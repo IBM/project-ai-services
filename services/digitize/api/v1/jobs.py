@@ -9,19 +9,22 @@ Exposes one router:
 """
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 
 from common.misc_utils import get_logger, validate_document_file, cleanup_staging_directory, generate_file_checksum
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 import digitize.utils.jobs as dg_util
+from digitize.utils.jobs import request_job_cancellation, NON_CANCELLABLE_JOB_STATUSES
 import digitize.models as models
 from digitize.utils.db import get_status_manager
 import digitize.utils.db as db_ops
 from digitize.settings import settings
 from digitize.db.manager import db_manager
+from digitize.exceptions import JobCancelledError
 
 router = APIRouter()
 logger = get_logger("jobs_router")
@@ -29,6 +32,32 @@ logger = get_logger("jobs_router")
 # ------------------------------------------------------------------ #
 # Background pipeline helpers                                         #
 # ------------------------------------------------------------------ #
+
+_TERMINAL_DOC_STATUSES = (
+    models.DocStatus.COMPLETED.value,
+    models.DocStatus.FAILED.value,
+    models.DocStatus.CANCELLED.value,
+    models.DocStatus.ALREADY_EXISTS.value,
+)
+
+
+def _cancel_job_docs(job_id: str, status_mgr, *, force: bool = False) -> None:
+    """Mark documents for *job_id* as CANCELLED, then set the job to CANCELLED.
+
+    When *force* is ``False`` (default) terminal documents (COMPLETED, FAILED,
+    CANCELLED, ALREADY_EXISTS) are left untouched.  Pass ``force=True`` after a
+    VDB cleanup so that COMPLETED docs — whose vector chunks have just been
+    removed — are also marked CANCELLED.
+    """
+    docs = db_manager.get_documents_by_job_id(job_id)
+    for doc in docs:
+        if force or doc.status not in _TERMINAL_DOC_STATUSES:
+            status_mgr.update_doc_metadata(
+                doc.doc_id,
+                {"status": models.DocStatus.CANCELLED, "completed_at": datetime.now(timezone.utc).isoformat()},
+            )
+    status_mgr.update_job_progress("", models.DocStatus.CANCELLED, models.JobStatus.CANCELLED)
+
 
 async def _run_digitize(
     job_id: str,
@@ -40,14 +69,17 @@ async def _run_digitize(
 
     Runs the blocking pipeline call in a thread so the event loop stays free.
     """
+    status_mgr = get_status_manager(job_id)
     try:
         logger.info(f"🚀 Digitization started for job: {job_id}")
         from digitize.pipeline.digitize import digitize
         await asyncio.to_thread(digitize, job_id, doc_id_dict)
         logger.info(f"Digitization for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Digitization job {job_id} was cancelled")
+        _cancel_job_docs(job_id, status_mgr)
     except Exception as exc:
         logger.error(f"Error in digitization job {job_id}: {exc}", exc_info=True)
-        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
@@ -70,14 +102,45 @@ async def _run_ingest(
     Runs the blocking pipeline call in a thread so the event loop stays free.
     """
     job_staging_path = settings.digitize.staging_dir / job_id
+    status_mgr = get_status_manager(job_id)
     try:
         logger.info(f"🚀 Ingestion started for job: {job_id}")
         from digitize.pipeline.ingest import ingest
         await asyncio.to_thread(ingest, job_staging_path, job_id, doc_id_dict, file_checksum_dict)
         logger.info(f"Ingestion for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Ingestion job {job_id} was cancelled")
+
+        # Clean vector DB before marking docs CANCELLED so the filter on
+        # CHUNKED/COMPLETED statuses still reflects pre-cancellation state.
+        vdb_cleaned = False
+        try:
+            job_row = db_manager.get_job_by_id(job_id)
+            if job_row and job_row.stats.get("clean_files"):
+                import common.db_utils as db_utils
+                indexed_statuses = {
+                    models.DocStatus.CHUNKED.value,
+                    models.DocStatus.COMPLETED.value,
+                }
+                all_docs = db_manager.get_documents_by_job_id(job_id)
+                doc_ids_to_clean = [
+                    d.doc_id for d in all_docs
+                    if d.status in indexed_statuses
+                ]
+                if doc_ids_to_clean:
+                    vector_store = db_utils.get_vector_store()
+                    deleted = vector_store.remove_docs_from_index(doc_ids_to_clean)
+                    logger.info(f"Cancelled job {job_id}: removed {deleted} vector chunks (clean_files=true)")
+                    vdb_cleaned = True
+        except Exception as vdb_exc:
+            logger.warning(f"Vector DB cleanup failed for cancelled job {job_id}: {vdb_exc}")
+
+        # If VDB cleanup ran, force-cancel all docs (including COMPLETED ones
+        # whose vectors were just removed).  Otherwise respect terminal statuses.
+        _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
+
     except Exception as exc:
         logger.error(f"Error in ingestion job {job_id}: {exc}", exc_info=True)
-        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             models.DocStatus.FAILED,
@@ -473,3 +536,66 @@ async def delete_job(job_id: str):
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"Failed to delete job '{job_id}'",
         )
+
+
+
+# ------------------------------------------------------------------ #
+# Cancel endpoint                                                     #
+# ------------------------------------------------------------------ #
+
+@router.post(
+    "/{job_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_class=Response,
+    responses={
+        404: http_error_responses[404],
+        409: http_error_responses[409],
+        500: http_error_responses[500],
+    },
+    summary="Cancel a job",
+    description=(
+        "Request cancellation of an active job (accepted or in_progress). "
+        "The job status is immediately set to 'cancel_pending' in the database; "
+        "the background pipeline will observe this at its next checkpoint, stop, "
+        "and then mark the job as 'cancelled'. "
+        "Pass clean_files=true to also delete any vector-DB chunks already indexed "
+        "for this job's documents (ingestion jobs only)."
+    ),
+    response_description="Cancellation accepted",
+)
+async def cancel_job(
+    job_id: str,
+    clean_files: bool = Query(False, description="Delete already-indexed vector DB chunks for this job"),
+):
+    """Mark an active job as CANCEL_PENDING. The pipeline will stop at its next checkpoint and write CANCELLED."""
+    try:
+        from digitize.utils.db import get_job as _get_job
+
+        job_data = _get_job(job_id)
+
+        if job_data is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"No job found with id '{job_id}'",
+            )
+
+        job_status = job_data.get("status", "")
+        if job_status in NON_CANCELLABLE_JOB_STATUSES:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Job '{job_id}' is already in terminal state '{job_status}' and cannot be cancelled",
+            )
+
+        request_job_cancellation(job_id, clean_files=clean_files)
+        return
+
+    except HTTPException as http_exc:
+        logger.warning(f"HTTP error while cancelling job '{job_id}': {http_exc.status_code} {http_exc.detail}")
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to cancel job {job_id}: {exc}", exc_info=True)
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to cancel job '{job_id}'",
+        )
+

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')),
+    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed', 'cancel_pending', 'cancelled')),
     CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization')),
     CONSTRAINT chk_job_source CHECK (source IN ('user', 'connector'))
 );
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS documents (
     error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists')),
+    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists', 'cancelled')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
     CONSTRAINT chk_doc_source CHECK (source IN ('user', 'connector')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS conversion_tasks (
     completed_at    TIMESTAMPTZ,
     CONSTRAINT chk_ct_operation    CHECK (operation IN ('ingestion', 'digitization')),
     CONSTRAINT chk_ct_output_format CHECK (output_format IN ('json', 'md', 'txt')),
-    CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed'))
+    CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed', 'cancel_pending', 'cancelled'))
 );
 
 -- Supports dispatcher pick query (ORDER BY queued_at per status + operation)

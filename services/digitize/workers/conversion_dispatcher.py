@@ -64,6 +64,18 @@ def _other(op: str) -> str:
     return "digitization" if op == "ingestion" else "ingestion"
 
 
+def _cancel_if_pending(task_id: str, error: str, log_msg: str) -> bool:
+    """Re-read *task_id* from the DB and, if it is ``CANCEL_PENDING``, write
+    ``CANCELLED`` and return ``True``.  Returns ``False`` when the task is not
+    in the cancel-pending state or the row is missing."""
+    fresh = db_manager.get_conversion_task(task_id)
+    if fresh is not None and fresh.status == ConversionTaskStatus.CANCEL_PENDING:
+        db_manager.update_task_status(task_id, ConversionTaskStatus.CANCELLED, error=error)
+        logger.info(log_msg)
+        return True
+    return False
+
+
 def _try_claim_if_fits(operation: str, available: int) -> ConversionTask | None:
     """
     Peek at the head of ``operation``'s queue.  If it fits within
@@ -92,9 +104,28 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
     Responsibility boundary
     -----------------------
     This function owns only the conversion_tasks row — it writes task status
-    (queued → running → completed / failed) and result_path / error.
+    (queued → running → completed / failed / cancelled) and result_path / error.
     All job and document status updates (JobStatus, DocStatus) are the
     responsibility of the pipeline layer that polls task.status.
+
+    Cancellation
+    ------------
+    The pipeline calls ``db_manager.cancel_tasks_for_job`` which sets
+    non-terminal tasks to ``cancel_pending``.  This function checks that
+    flag at three points:
+
+    1. Before marking the task RUNNING — if already cancel_pending (task was
+       cancelled while still queued) we skip the conversion entirely.
+    2. Inside the worker process between 100-page chunks — ``task_id`` is passed
+       to ``convert_document_format`` which builds a DB-polling cancel check
+       callable (``_make_db_cancel_check``) that is invoked between chunks inside
+       ``convert_doc``.  When the task's DB row shows ``cancel_pending`` the
+       callable returns True, ``JobCancelledError`` is raised in the worker, and
+       the ``except`` block below maps it to ``CANCELLED``.
+    3. After the process-pool future returns — if the task was set to
+       cancel_pending while the conversion was running we write CANCELLED
+       instead of COMPLETED so the pipeline's poll loop sees a terminal state
+       it can map to job/doc CANCELLED rather than treating the output as valid.
     """
     try:
         cached_path = Path(task.cached_file)
@@ -106,10 +137,21 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
             logger.warning(f"Task {task.task_id}: cached file missing — marked failed")
             return
 
+        # Check 1: bail out early if the job was cancelled while this task
+        # was still in the queue (cancel_pending was set before claim_head).
+        if _cancel_if_pending(
+            task.task_id,
+            error="Job cancelled before conversion started",
+            log_msg=f"Task {task.task_id} cancelled before starting (was cancel_pending)",
+        ):
+            return
+
         # Mark task as running — pipeline layer picks this up via poll.
         db_manager.update_task_status(task.task_id, ConversionTaskStatus.RUNNING)
 
-        # Convert in a child process — CPU-bound, no GIL release
+        # Convert in a child process — CPU-bound, no GIL release.
+        # task_id is forwarded so the worker can poll the DB for cancel_pending
+        # between 100-page chunks and stop early for large files.
         out_dir = settings.digitize.digitized_docs_dir
         loop = asyncio.get_running_loop()
         result_path, _ = await loop.run_in_executor(
@@ -119,14 +161,33 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
             out_dir,
             task.doc_id or task.task_id,
             OutputFormat(task.output_format),
+            task.task_id,
         )
+
+        # Check 2: if the job was cancelled while we were converting, write
+        # CANCELLED so the pipeline's poll loop reaches the correct terminal state.
+        if _cancel_if_pending(
+            task.task_id,
+            error="Job cancelled during conversion",
+            log_msg=f"Task {task.task_id} cancelled after conversion completed",
+        ):
+            return
 
         db_manager.update_task_status(task.task_id, ConversionTaskStatus.COMPLETED, result_path=result_path)
         logger.info(f"Task {task.task_id} completed → {result_path}")
 
     except Exception as exc:
-        logger.error(f"Task {task.task_id} failed: {exc}", exc_info=True)
-        db_manager.update_task_status(task.task_id, ConversionTaskStatus.FAILED, error=str(exc))
+        # Re-read the task to distinguish a cancellation-induced exception
+        # (e.g. JobCancelledError from convert_doc chunk loop) from a genuine failure.
+        if _cancel_if_pending(
+            task.task_id,
+            error="Job cancelled during conversion",
+            log_msg=f"Task {task.task_id} cancelled mid-conversion: {exc}",
+        ):
+            pass
+        else:
+            logger.error(f"Task {task.task_id} failed: {exc}", exc_info=True)
+            db_manager.update_task_status(task.task_id, ConversionTaskStatus.FAILED, error=str(exc))
 
     finally:
         # Do NOT delete task.cached_file here — the pipeline layer owns staging

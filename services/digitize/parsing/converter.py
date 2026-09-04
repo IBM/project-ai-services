@@ -4,12 +4,11 @@ Docling conversion engine wrapper.
 Encapsulates all interaction with the Docling library:
 DocumentConverter setup, chunked conversion, format export.
 """
-import logging
 import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 # Local application imports
 from common.misc_utils import get_logger, DoclingConversionError
@@ -17,6 +16,7 @@ from common.retry_utils import retry_on_transient_error
 from digitize.settings import settings
 from digitize.parsing.pdf import get_document_page_count
 from digitize.models import OutputFormat
+from digitize.exceptions import JobCancelledError
 
 # Docling document conversion libraries
 from docling.datamodel.document import ConversionResult
@@ -24,6 +24,28 @@ from docling.document_converter import DocumentConverter
 from docling_core.types.doc.document import DoclingDocument
 
 logger = get_logger("docling_utils")
+
+
+def _make_db_cancel_check(task_id: str):
+    """
+    Return a zero-argument callable that queries the DB for the task's current
+    status and returns True when the task has been set to ``cancel_pending``.
+
+    Importing db_manager is deferred to call time so this module stays
+    importable in contexts where the DB is not yet configured (e.g. tests).
+    The callable is created in the dispatcher's async context but *called*
+    inside the worker process, where SQLAlchemy opens its own connections.
+    """
+    def _is_cancelled() -> bool:
+        try:
+            from digitize.db.manager import db_manager
+            from digitize.db.models import ConversionTaskStatus
+            task = db_manager.get_conversion_task(task_id)
+            return task is not None and task.status == ConversionTaskStatus.CANCEL_PENDING
+        except Exception:
+            # Never let a DB error abort an otherwise healthy conversion.
+            return False
+    return _is_cancelled
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, start_page: int, end_page: int, chunk_cache_dir: Path):
@@ -59,7 +81,11 @@ def convert_chunk(doc_converter: DocumentConverter, path: Path, chunk_num: int, 
         logger.error(error_msg)
         raise DoclingConversionError(error_msg) from e
 
-def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDocument:
+def convert_doc(
+    path: str | Path,
+    cache_dir: Optional[Path] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> DoclingDocument:
     """
     Convert a document to DoclingDocument, processing in 100-page chunks.
 
@@ -67,6 +93,9 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         path: Path to the document file to convert
         cache_dir: Optional cache directory for storing chunk results.
                    Will be cleaned up after processing.
+        cancel_check: Optional zero-argument callable returning True when the
+                      job/task has been cancelled.  Checked between chunks
+                      so large-file conversions can be interrupted early.
 
     Returns:
         DoclingDocument containing the concatenated result
@@ -121,6 +150,14 @@ def convert_doc(path: str | Path, cache_dir: Optional[Path] = None) -> DoclingDo
         for start_page in range(1, total_pages + 1, settings.digitize.doc_chunk_size):
             end_page = min(start_page + settings.digitize.doc_chunk_size - 1, total_pages)
             chunk_num = (start_page - 1) // settings.digitize.doc_chunk_size + 1
+
+            # Check for job cancellation between chunks so a large-file
+            # conversion can be cut short without waiting for all chunks.
+            if cancel_check is not None and cancel_check():
+                raise JobCancelledError(
+                    f"Job cancelled during chunk conversion "
+                    f"(chunk {chunk_num}/{total_chunks} of {path})"
+                )
 
             logger.debug(f"Processing {path}'s chunk {chunk_num}/{total_chunks} (pages {start_page}-{end_page})")
             chunk_file = convert_chunk(doc_converter, path, chunk_num, start_page, end_page, chunk_cache_dir)
@@ -182,11 +219,27 @@ def get_doc_converter():
 
     return doc_converter
 
-def convert_document_format(doc_path: str, out_path: Path, doc_id: str, output_format: OutputFormat):
+def convert_document_format(
+    doc_path: str,
+    out_path: Path,
+    doc_id: str,
+    output_format: OutputFormat,
+    task_id: Optional[str] = None,
+) -> tuple[str, float]:
     """Convert a document's format and write the resulting output files.
 
     Performs the docling-based conversion, measures performance metrics, and saves the formatted
     output (JSON, MD, TXT, or HTML) to the target directory.
+
+    Args:
+        doc_path:      Path to the source document.
+        out_path:      Directory for output files.
+        doc_id:        Base name used for the output filename.
+        output_format: Desired output format.
+        task_id:       Optional ConversionTask primary key.  When supplied,
+                       the worker process polls the DB for ``cancel_pending``
+                       between 100-page chunks so large-file conversions can be
+                       interrupted early without waiting for all chunks.
     """
     logger.info(f"Processing '{doc_path}'")
 
@@ -195,8 +248,12 @@ def convert_document_format(doc_path: str, out_path: Path, doc_id: str, output_f
 
     t0 = time.time()
 
+    # Build a DB-backed cancel check when a task_id is available so the worker
+    # process can react to cancellation between page chunks.
+    cancel_check = _make_db_cancel_check(task_id) if task_id else None
+
     # Convert document → DoclingDocument
-    doc_obj = convert_doc(doc_path, cache_dir=out_path / doc_id)
+    doc_obj = convert_doc(doc_path, cache_dir=out_path / doc_id, cancel_check=cancel_check)
 
     conversion_time = time.time() - t0
 
@@ -216,24 +273,3 @@ def convert_document_format(doc_path: str, out_path: Path, doc_id: str, output_f
     logger.debug(f"Saved converted file to '{out_file}'")
     return str(out_file), conversion_time
 
-def convert_document(doc_path, out_path, file_name):
-    """
-    Convert a single document to JSON format.
-    This function runs in a separate process via ProcessPoolExecutor.
-    """
-    try:
-        logger.info(f"Processing '{doc_path}'")
-        converted_json = (Path(out_path) / f"{file_name}.json")
-        converted_json_f = str(converted_json)
-        logger.debug(f"Converting '{doc_path}'")
-        t0 = time.time()
-
-        converted_doc: DoclingDocument = convert_doc(doc_path, cache_dir=out_path / file_name)
-        converted_doc.save_as_json(str(converted_json_f))
-
-        conversion_time = time.time() - t0
-        logger.debug(f"'{doc_path}' converted")
-        return converted_json_f, conversion_time
-    except Exception as e:
-        logger.error(f"Error converting '{doc_path}': {e}")
-    return None, None
