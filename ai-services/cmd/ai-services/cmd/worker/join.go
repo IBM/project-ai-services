@@ -238,11 +238,19 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
 	}
 
+	// For the local worker (empty token) set the reserved worker name so
+	// StartGrpcStream can apply the local-bypass registration path.
+	requestedWorkerName := ""
+	if token == "" {
+		requestedWorkerName = workerconstants.LocalWorkerName
+	}
+
 	opts := workertypes.GrpcStreamOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
 			GatewayAddr: gatewayAddr,
 			Token:       token,
 		},
+		RequestedWorkerName: requestedWorkerName,
 	}
 
 	return join.StartGrpcStream(ctx, rt, pr, opts)

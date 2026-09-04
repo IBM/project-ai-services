@@ -48,7 +48,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx)
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts)
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
@@ -109,8 +109,9 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	return caddyCtx, nil
 }
 
-// handlePostDeployment handles route registration and next steps display after catalog deployment.
-func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {
+// handlePostDeployment handles route registration, optional local worker join,
+// and next steps display after catalog deployment.
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -123,6 +124,13 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	routeURLs, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
+	}
+
+	// Join the catalog host itself as the reserved local worker.
+	if !opts.SkipLocalWorker {
+		if err := JoinAsLocalWorker(ctx, opts); err != nil {
+			logger.WarningfCtx(ctx, "local worker join failed (catalog is still running): %v\n", err)
+		}
 	}
 
 	// Print next steps with proxy route information
