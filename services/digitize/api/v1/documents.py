@@ -159,7 +159,11 @@ async def get_document_metadata(
     Allows optionally including deeper page/table/timing processing metrics.
     """
     try:
-        from digitize.utils.db import get_document, is_connector_sourced_document
+        from digitize.utils.db import (
+            get_document,
+            get_shadow_documents_for,
+            is_connector_sourced_document,
+        )
 
         if is_connector_sourced_document(doc_id):
             APIError.raise_error(
@@ -167,7 +171,9 @@ async def get_document_metadata(
                 f"Document with ID '{doc_id}' is connector-sourced and cannot be accessed via this endpoint",
             )
 
-        return get_document(doc_id, include_details=details)
+        doc = get_document(doc_id, include_details=details)
+        doc.duplicate_names = get_shadow_documents_for(doc_id)
+        return doc
     except FileNotFoundError as exc:
         logger.warning(f"Document '{doc_id}' not found: {exc}")
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))

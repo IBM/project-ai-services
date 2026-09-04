@@ -416,11 +416,8 @@ class TestDocumentEndpoints:
             output_format="json"
         )
         get_document_mock = Mock(return_value=mock_doc)
-        monkeypatch.setattr(
-            db_ops,
-            "get_document",
-            get_document_mock,
-        )
+        monkeypatch.setattr(db_ops, "get_document", get_document_mock)
+        monkeypatch.setattr(db_ops, "get_shadow_documents_for", Mock(return_value=[]))
 
         response = digitize_test_client.get("/v1/documents/doc-1")
         detailed = digitize_test_client.get("/v1/documents/doc-1?details=true")
@@ -429,6 +426,49 @@ class TestDocumentEndpoints:
         assert detailed.status_code == 200
         assert get_document_mock.call_args_list[0][1]["include_details"] is False
         assert get_document_mock.call_args_list[1][1]["include_details"] is True
+
+    def test_get_document_metadata_includes_duplicate_names(self, digitize_test_client, monkeypatch):
+        """GET /v1/documents/{id} must include duplicate_names from get_shadow_documents_for."""
+        from digitize.models import DocumentDetailResponse
+        mock_doc = DocumentDetailResponse(
+            id="doc-1",
+            job_id="job-1",
+            name="original.pdf",
+            type="ingestion",
+            status="completed",
+            output_format="json",
+        )
+        monkeypatch.setattr(db_ops, "get_document", Mock(return_value=mock_doc))
+        monkeypatch.setattr(
+            db_ops,
+            "get_shadow_documents_for",
+            Mock(return_value=["copy1.pdf", "copy2.pdf"]),
+        )
+
+        response = digitize_test_client.get("/v1/documents/doc-1")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["duplicate_names"] == ["copy1.pdf", "copy2.pdf"]
+
+    def test_get_document_metadata_no_duplicates_returns_empty_list(self, digitize_test_client, monkeypatch):
+        """GET /v1/documents/{id} returns duplicate_names: [] when there are no shadows."""
+        from digitize.models import DocumentDetailResponse
+        mock_doc = DocumentDetailResponse(
+            id="doc-2",
+            job_id="job-2",
+            name="unique.pdf",
+            type="ingestion",
+            status="completed",
+            output_format="json",
+        )
+        monkeypatch.setattr(db_ops, "get_document", Mock(return_value=mock_doc))
+        monkeypatch.setattr(db_ops, "get_shadow_documents_for", Mock(return_value=[]))
+
+        response = digitize_test_client.get("/v1/documents/doc-2")
+
+        assert response.status_code == 200
+        assert response.json()["duplicate_names"] == []
 
     def test_get_missing_document_returns_404(self, digitize_test_client, monkeypatch):
         # Mock get_document to raise FileNotFoundError which should be caught and converted to 404
