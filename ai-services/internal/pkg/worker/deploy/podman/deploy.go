@@ -107,6 +107,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		}
 
 		for _, pod := range pods {
+			logger.InfofCtx(ctx, "Deleting '%s' pod, as failed to connect with control plane", pod.Name)
 			if delErr := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); delErr != nil {
 				logger.ErrorfCtx(ctx, "worker setup: failed to delete worker pod %s: %v\n", pod.Name, delErr)
 			}
@@ -333,9 +334,7 @@ func checkWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
 
 			for _, line := range strings.Split(string(out), "\n") {
 				if strings.Contains(line, grpcStreamErr) {
-					logger.ErrorfCtx(ctx, "worker setup: container %s: %s\n", container.Name, line)
-
-					return fmt.Errorf("worker setup: container %s: %s", container.Name, grpcStreamErr)
+					return fmt.Errorf("worker setup: container %s: %s", container.Name, line)
 				}
 			}
 		}
