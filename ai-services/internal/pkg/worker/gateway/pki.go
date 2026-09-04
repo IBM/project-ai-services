@@ -101,7 +101,7 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, runti
 	srvSerial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), serialBitSize))
 	srvTemplate := &x509.Certificate{
 		SerialNumber: srvSerial,
-		Subject:      pkix.Name{CommonName: workerconstants.GatewayServerNameForRuntime(runtimeType)},
+		Subject:      pkix.Name{CommonName: "Catalog"},
 		DNSNames:     []string{workerconstants.GatewayServerNameForRuntime(runtimeType)},
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(serverCertTTL),
