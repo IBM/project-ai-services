@@ -11,7 +11,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"time"
 
@@ -22,7 +21,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 )
 
@@ -83,23 +81,8 @@ func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, add
 		ClientAuth:   tls.VerifyClientCertIfGiven,
 	}
 
-	serverParams := keepalive.ServerParameters{
-		MaxConnectionIdle:     time.Duration(math.MaxInt64), // Infinite idle time
-		MaxConnectionAge:      time.Duration(math.MaxInt64), // Infinite connection age
-		MaxConnectionAgeGrace: time.Duration(math.MaxInt64), // Infinite grace period
-		Time:                  10 * time.Second,             // Ping client every 10s if idle
-		Timeout:               3 * time.Second,              // Wait 3s for client ping response
-	}
-
-	enforcementPolicy := keepalive.EnforcementPolicy{
-		MinTime:             5 * time.Second, // Allow clients to ping as often as every 5s
-		PermitWithoutStream: true,            // Allow pings even if no active RPCs exist
-	}
-
 	g.grpcServer = grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.KeepaliveParams(serverParams),
-		grpc.KeepaliveEnforcementPolicy(enforcementPolicy),
 		grpc.UnaryInterceptor(g.authUnaryInterceptor),
 		grpc.StreamInterceptor(g.authStreamInterceptor),
 	)
