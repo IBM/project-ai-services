@@ -37,7 +37,7 @@ export type AppAction = {
 export const HEADERS: DataTableHeader[] = [
   { header: "Name", key: "name" },
   { header: "Status", key: "status" },
-  { header: "Runtime", key: "runtime_type" },
+  { header: "Type", key: "runtime_type" },
   { header: "Services", key: "services" },
   { header: "Message", key: "messages" },
   { header: "", key: "actions" },

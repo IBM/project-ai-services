@@ -15,7 +15,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "https://catalog-api.10.20.179.49.nip.io",
+        target: "http://localhost:8080",
         changeOrigin: true,
         secure: false,
       },

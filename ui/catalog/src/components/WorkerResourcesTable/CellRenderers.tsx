@@ -8,6 +8,7 @@ import {
   NameCell as SharedNameCell,
 } from "@/components/Table/components/CellRenderers";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
+import { RUNTIME_TYPE_LABELS } from "@/constants/app.constants";
 
 export { StatusCell };
 
@@ -38,6 +39,11 @@ export const ActionCell = () => (
 
 type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 
+export const RuntimeTypeCell = ({ value }: CellRendererProps) => {
+  const raw = String(value ?? "");
+  return <span>{RUNTIME_TYPE_LABELS[raw] ?? raw}</span>;
+};
+
 export const ServicesCell = ({ value }: CellRendererProps) => {
   const count = value as number;
   return <span>{count === 0 ? "--" : String(count)}</span>;
@@ -50,6 +56,7 @@ export const MessageCell = ({ value }: CellRendererProps) => (
 export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
+  runtime_type: RuntimeTypeCell as RendererFn,
   services: ServicesCell as RendererFn,
   messages: MessageCell as RendererFn,
   actions: ActionCell,
