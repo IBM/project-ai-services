@@ -1,6 +1,7 @@
 # Component identification
 type: component
 id: vllm-spyre
+version: "1.0.0"
 name: "RedHat AI Inference with Spyre"
 description: "Deploy instruct models on vLLM inference engine with Spyre acceleration"
 

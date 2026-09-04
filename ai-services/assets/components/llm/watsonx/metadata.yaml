@@ -1,6 +1,7 @@
 # Component identification
 type: component
 id: watsonx
+version: "1.0.0"
 name: "IBM watsonx.ai on IBM Cloud"
 description: "Deploy llm models using watsonx"
 
