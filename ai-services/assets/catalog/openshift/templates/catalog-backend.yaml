@@ -136,6 +136,8 @@ spec:
           volumeMounts:
             - name: catalog-bundles
               mountPath: /data/catalog-bundles
+            - name: gateway-pki
+              mountPath: /var/lib/ai-services/gateway-pki
           resources:
             requests:
               memory: "{{ .Values.backend.resources.requests.memory }}"
@@ -147,3 +149,6 @@ spec:
         - name: catalog-bundles
           persistentVolumeClaim:
             claimName: catalog-bundles
+        - name: gateway-pki
+          persistentVolumeClaim:
+            claimName: gateway-pki
