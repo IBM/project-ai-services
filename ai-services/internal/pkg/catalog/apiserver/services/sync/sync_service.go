@@ -56,11 +56,12 @@ type SyncService struct {
 	serviceDepsRepo dbrepo.ServiceDependencyRepository
 	runtimeType     runtimeTypes.RuntimeType
 	runtimeFactory  *runtime.RuntimeFactory
+	catalogProvider *catalogpkg.CatalogProvider
 	syncInterval    time.Duration
 	stopChan        chan struct{}
 	syncMutex       sync.Mutex            // Prevents overlapping sync cycles
 	isSyncing       bool                  // Tracks if a sync is currently running
-	runtimeSync     RuntimeSync           // Runtime-specific sync backend
+	runtimeSyncs    map[runtimeTypes.RuntimeType]RuntimeSync
 	workerRegistry  stream.WorkerRegistry // nil on servers with no remote workers
 }
 
@@ -93,9 +94,9 @@ func NewSyncService(
 	runtimeType := vars.RuntimeFactory.GetRuntimeType()
 	runtimeFactory := runtime.NewRuntimeFactory(runtimeType)
 
-	runtimeSync, err := newRuntimeSync(runtimeType, catalogProvider)
+	runtimeSyncs, err := initializeRuntimeSyncs(catalogProvider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create runtime sync: %w", err)
+		return nil, fmt.Errorf("failed to initialize runtime sync backends: %w", err)
 	}
 
 	return &SyncService{
@@ -105,11 +106,30 @@ func NewSyncService(
 		serviceDepsRepo: serviceDepsRepo,
 		runtimeType:     runtimeType,
 		runtimeFactory:  runtimeFactory,
+		catalogProvider: catalogProvider,
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
-		runtimeSync:     runtimeSync,
+		runtimeSyncs:    runtimeSyncs,
 		workerRegistry:  reg,
 	}, nil
+}
+
+func initializeRuntimeSyncs(catalogProvider *catalogpkg.CatalogProvider) (map[runtimeTypes.RuntimeType]RuntimeSync, error) {
+	runtimeSyncs := make(map[runtimeTypes.RuntimeType]RuntimeSync, 2)
+
+	podmanSync, err := newRuntimeSync(runtimeTypes.RuntimeTypePodman, catalogProvider)
+	if err != nil {
+		return nil, err
+	}
+	runtimeSyncs[runtimeTypes.RuntimeTypePodman] = podmanSync
+
+	openshiftSync, err := newRuntimeSync(runtimeTypes.RuntimeTypeOpenShift, catalogProvider)
+	if err != nil {
+		return nil, err
+	}
+	runtimeSyncs[runtimeTypes.RuntimeTypeOpenShift] = openshiftSync
+
+	return runtimeSyncs, nil
 }
 
 // Start begins the sync goroutine.
@@ -209,7 +229,12 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 		return fmt.Errorf("failed to create runtime client: %w", err)
 	}
 
-	runtimeSync, err := s.runtimeSync.WithRuntime(rt)
+	baseRuntimeSync, err := s.getRuntimeSync(rt.Type())
+	if err != nil {
+		return err
+	}
+
+	runtimeSync, err := baseRuntimeSync.WithRuntime(rt)
 	if err != nil {
 		return fmt.Errorf("failed to configure runtime sync backend: %w", err)
 	}
@@ -300,8 +325,17 @@ func (s *SyncService) createRuntime(ctx context.Context, app *models.Application
 			return nil, fmt.Errorf("worker %q not connected: %w", workerName, errWorkerDisconnected)
 		}
 
-		rtStr, _ := s.workerRegistry.WorkerRuntimeType(workerName)
-		rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.workerRegistry)
+		rtStr, ok := s.workerRegistry.WorkerRuntimeType(workerName)
+		if !ok || rtStr == "" {
+			return nil, fmt.Errorf("worker %q runtime type not available: %w", workerName, errWorkerDisconnected)
+		}
+
+		rtType := runtimeTypes.RuntimeType(rtStr)
+		if !rtType.Valid() {
+			return nil, fmt.Errorf("worker %q has unsupported runtime type %q", workerName, rtType)
+		}
+
+		rt, err := runtime.NewRuntimeFactory(rtType).CreateRemote(workerName, s.workerRegistry)
 		if err != nil {
 			return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
 		}
@@ -312,6 +346,20 @@ func (s *SyncService) createRuntime(ctx context.Context, app *models.Application
 	logger.DebugfCtx(ctx, "Using local runtime %q for application %s sync", s.runtimeType, app.ID)
 
 	return s.runtimeFactory.Create(catalogutils.AppNamespace(app.ID))
+}
+
+func (s *SyncService) getRuntimeSync(rt runtimeTypes.RuntimeType) (RuntimeSync, error) {
+	if runtimeSync, ok := s.runtimeSyncs[rt]; ok {
+		return runtimeSync, nil
+	}
+
+	runtimeSync, err := newRuntimeSync(rt, s.catalogProvider)
+	if err != nil {
+		return nil, err
+	}
+	s.runtimeSyncs[rt] = runtimeSync
+
+	return runtimeSync, nil
 }
 
 // syncAllComponents syncs all components for an application.
