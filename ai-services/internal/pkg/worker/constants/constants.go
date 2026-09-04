@@ -2,6 +2,8 @@
 // (deploy, join, uninstall, gateway, etc.) to avoid duplication.
 package constants
 
+import "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+
 const (
 	// LocalWorkerName is the sentinel value used when no remote worker is specified.
 	// It means "deploy on this machine using the local runtime".
@@ -51,9 +53,20 @@ const (
 	ArgParamWorkerPodmanURI   = "worker.podman.uri"
 	ArgParamWorkerAuthFile    = "worker.podman.authFileContent"
 
-	// GatewayServerName is the fixed DNS SAN embedded in the auto-generated gateway server
-	// certificate. Workers set tls.Config.ServerName to this value so hostname verification
-	// succeeds regardless of the IP or public DNS name used to reach the gateway.
-	// This is the single source of truth — gateway/pki.go imports this package.
+	// GatewayServerName is the default DNS SAN embedded in the auto-generated
+	// gateway server certificate for the local/podman flow.
 	GatewayServerName = "gateway.ai-services.internal"
+
+	// GatewayServerNameOpenShift is the passthrough route hostname used on
+	// OpenShift for the worker gateway.
+	GatewayServerNameOpenShift = "catalog-worker-gateway-ai-services.apps.ais-orch-1.example.com"
 )
+
+// GatewayServerNameForRuntime returns the hostname that must match the gateway
+// certificate for the selected runtime.
+func GatewayServerNameForRuntime(rt types.RuntimeType) string {
+	if rt == types.RuntimeTypeOpenShift {
+		return GatewayServerNameOpenShift
+	}
+	return GatewayServerName
+}

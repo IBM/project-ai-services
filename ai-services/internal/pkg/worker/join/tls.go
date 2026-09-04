@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
@@ -64,12 +65,10 @@ func loadClientCert(tlsDir string) (tls.Certificate, error) {
 	return cert, nil
 }
 
-// buildTLSConfig returns a *tls.Config for dialling the gateway.
-// If ca.crt exists in tlsDir, server verification uses it and ServerName is set
-// to workerconstants.GatewayServerName (the SAN embedded in the gateway cert).
-// If ca.crt is absent (first bootstrap), InsecureSkipVerify is set as a TOFU
-// fallback — it is logged as a warning and only applies to that one dial.
-func buildTLSConfig(tlsDir string, clientCert *tls.Certificate) (*tls.Config, error) {
+// buildTLSConfig returns a *tls.Config for dialling the gateway. For OpenShift,
+// the verified server name must match the passthrough route host; for podman, we
+// keep the internal gateway hostname.
+func buildTLSConfig(runtimeType types.RuntimeType, tlsDir string, clientCert *tls.Certificate) (*tls.Config, error) {
 	cfg := &tls.Config{}
 	if clientCert != nil {
 		cfg.Certificates = []tls.Certificate{*clientCert}
@@ -87,8 +86,7 @@ func buildTLSConfig(tlsDir string, clientCert *tls.Certificate) (*tls.Config, er
 			return nil, fmt.Errorf("parse ca.crt: no valid certificates found")
 		}
 		cfg.RootCAs = pool
-		// ServerName must match the SAN in the gateway's server cert.
-		cfg.ServerName = workerconstants.GatewayServerName
+		cfg.ServerName = workerconstants.GatewayServerNameForRuntime(runtimeType)
 	case os.IsNotExist(err):
 		cfg.InsecureSkipVerify = true //nolint:gosec // intentional TOFU bootstrap fallback
 	default:

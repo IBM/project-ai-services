@@ -41,6 +41,8 @@ import (
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
@@ -118,7 +120,11 @@ func (a *APIserver) Start(ctx context.Context) error {
 	defer cancel(nil)
 
 	// Start the gRPC worker gateway.
-	gw, err := gateway.New(ctx, a.workerRegistry)
+	runtimeType := types.RuntimeTypePodman
+	if vars.RuntimeFactory != nil {
+		runtimeType = vars.RuntimeFactory.GetRuntimeType()
+	}
+	gw, err := gateway.New(ctx, a.workerRegistry, runtimeType)
 	if err != nil {
 		return fmt.Errorf("failed to initialise worker gateway: %w", err)
 	}

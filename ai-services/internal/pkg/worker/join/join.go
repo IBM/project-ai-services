@@ -105,7 +105,7 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 
 	// 2. Dial the gateway for bootstrap. ca.crt may not exist yet on first run,
 	//    so buildTLSConfig falls back to InsecureSkipVerify (TOFU) if absent.
-	tlsCfg, err := buildTLSConfig(tlsDir, nil)
+	tlsCfg, err := buildTLSConfig(rt, tlsDir, nil)
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +157,7 @@ func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.P
 		return fmt.Errorf("worker join: %w", err)
 	}
 
-	tlsCfg, err := buildTLSConfig(tlsDir, &cert)
+	tlsCfg, err := buildTLSConfig(rt.Type(), tlsDir, &cert)
 	if err != nil {
 		return fmt.Errorf("worker join: build TLS config for stream: %w", err)
 	}
