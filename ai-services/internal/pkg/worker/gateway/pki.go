@@ -93,7 +93,8 @@ func generateCA() (*ecdsa.PrivateKey, *x509.Certificate, []byte, error) {
 }
 
 // generateServerCert creates a new ECDSA P-256 server key and signs it with the CA.
-func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, runtimeType types.RuntimeType) (*ecdsa.PrivateKey, []byte, error) {
+// serverName is the hostname embedded as the DNS SAN (must match what workers dial).
+func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, serverName string) (*ecdsa.PrivateKey, []byte, error) {
 	srvKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate server key: %w", err)
@@ -102,7 +103,7 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, runti
 	srvTemplate := &x509.Certificate{
 		SerialNumber: srvSerial,
 		Subject:      pkix.Name{CommonName: "Catalog"},
-		DNSNames:     []string{workerconstants.GatewayServerNameForRuntime(runtimeType)},
+		DNSNames:     []string{serverName},
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(serverCertTTL),
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
@@ -117,11 +118,22 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, runti
 }
 
 // generateAndPersistPKI creates a new ECDSA P-256 root CA and signs a server
-// certificate, then writes all four PEM files to pkiDir. The server cert uses
-// the runtime-specific gateway hostname so workers can verify the server
-// regardless of whether they reach the local or OpenShift passthrough route.
+// certificate, then writes all four PEM files to pkiDir.
+//
+// For OpenShift the server cert's DNS SAN is populated by fetching the live
+// passthrough route host via GatewayRouteHost rather than using a hardcoded
+// hostname. For all other runtimes the static internal name is used.
 func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	empty := pkiResult{}
+
+	serverName := workerconstants.GatewayServerName
+	if runtimeType == types.RuntimeTypeOpenShift {
+		host, err := GatewayRouteHost(ctx)
+		if err != nil {
+			return empty, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
+		}
+		serverName = host
+	}
 
 	if err := os.MkdirAll(pkiDir, dirPerm); err != nil {
 		return empty, fmt.Errorf("mkdir %s: %w", pkiDir, err)
@@ -132,7 +144,7 @@ func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types
 		return empty, err
 	}
 
-	srvKey, srvCertDER, err := generateServerCert(caCert, caKey, runtimeType)
+	srvKey, srvCertDER, err := generateServerCert(caCert, caKey, serverName)
 	if err != nil {
 		return empty, err
 	}
