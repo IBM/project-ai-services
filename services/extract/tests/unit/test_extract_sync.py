@@ -320,6 +320,23 @@ class TestExtractionRequestModel:
         req = ExtractionRequest(text="hello")
         assert req.schema_id is None
         assert req.schema_name is None
+    def test_no_schema_source_rejected(self):
+        with pytest.raises(Exception):
+            ExtractionRequest(text="hello")
+
+    def test_schema_name_accepted(self):
+        req = ExtractionRequest(text="hello", schema_name="my-schema")
+        assert req.schema_name == "my-schema"
+        assert req.schema_id is None
+
+    def test_json_schema_accepted(self):
+        schema = {"type": "object", "properties": {"x": {"type": "string"}}}
+        req = ExtractionRequest(text="hello", json_schema=schema)
+        assert req.json_schema == schema
+
+    def test_json_example_accepted(self):
+        req = ExtractionRequest(text="hello", json_example={"name": "Alice"})
+        assert req.json_example == {"name": "Alice"}
 
 
 # ---------------------------------------------------------------------------
@@ -399,9 +416,12 @@ class TestExtractSyncEndpoint:
 
     def test_400_missing_schema_id_and_name(self, extract_test_client):
         """Neither schema_id nor schema_name → 400 INVALID_REQUEST."""
+    def test_422_no_schema_source(self, extract_test_client):
         resp = extract_test_client.post("/v1/extract", json={"text": "hello"})
         assert resp.status_code == 400
         assert resp.json()["error"]["code"] == "INVALID_REQUEST"
+        assert resp.status_code == 422
+        assert resp.json()["detail"][0]["type"] == "value_error"
 
     def test_400_missing_text(self, extract_test_client):
         resp = extract_test_client.post("/v1/extract", json={"schema_id": "abc"})

@@ -208,11 +208,52 @@ class JobResultResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ExtractionRequest(BaseModel):
-    """Request body for POST /v1/extract."""
+    """Request body for POST /v1/extract.
+
+    Exactly one schema source must be supplied, resolved in priority order:
+    ``schema_id`` → ``schema_name`` → ``json_schema`` → ``json_example``.
+    """
 
     text: str = Field(..., min_length=1, description="Raw text to extract from")
-    schema_id: Optional[str] = Field(default=None, min_length=1, description="ID of a registered schema")
-    schema_name: Optional[str] = Field(default=None, min_length=1, description="Registered schema name")
+    schema_id: Optional[str] = Field(
+        None, min_length=1, description="ID of a registered schema"
+    )
+    schema_name: Optional[str] = Field(
+        None, min_length=1, description="Name of a registered schema"
+    )
+    json_schema: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Raw JSON Schema draft 2020-12 (root must be type:object). "
+            "Used as an ephemeral, unregistered schema for this request."
+        ),
+    )
+    json_example: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "A single JSON object whose structure is used to infer an ephemeral "
+            "schema for this request."
+        ),
+    )
+
+    @field_validator("json_schema", "json_example", "schema_name", "schema_id", mode="before")
+    @classmethod
+    def _at_least_one_schema_source(cls, v: Any, info: Any) -> Any:  # noqa: N805
+        # Individual field validators cannot see sibling fields; mutual-exclusivity
+        # is enforced in the model-level validator below.
+        return v
+
+    def model_post_init(self, __context: Any) -> None:  # noqa: D401
+        """Ensure exactly one schema source is present."""
+        provided = [
+            f
+            for f in ("schema_id", "schema_name", "json_schema", "json_example")
+            if getattr(self, f) is not None
+        ]
+        if not provided:
+            raise ValueError(
+                "One of schema_id, schema_name, json_schema, or json_example must be provided."
+            )
 
 
 class ExtractionSourceInfo(BaseModel):

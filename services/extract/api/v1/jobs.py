@@ -59,10 +59,12 @@ from extract.utils.job import (
     validate_file_extension,
 )
 from extract.utils.schema import (
+    SchemaValidationError,
     _tokenize,
     check_extraction_budget,
     compute_reserved_output,
     fmt_dt,
+    resolve_schema_input,
 )
 
 router = APIRouter()
@@ -131,23 +133,26 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
     # 1. Basic field validation
     # ------------------------------------------------------------------
     if not body.text.strip():
+        raise ExtractException(400, "INVALID_REQUEST", "text field is empty")
+
+    llm_model_dict = get_llm_endpoint()
+    llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
+    llm_model: str = llm_model_dict.get("llm_model", "")
+    max_model_len: int = llm_model_dict.get('max_model_len', "")
+
+    try:
+        schema_row = resolve_schema_input(
+            schema_id=body.schema_id,
+            schema_name=body.schema_name,
+            json_schema=body.json_schema,
+            json_example=body.json_example,
+            llm_endpoint=llm_endpoint,
+        )
+    except SchemaValidationError as exc:
         msg = "text field is empty"
         logger.error(msg)
         raise ExtractException(400, "INVALID_REQUEST", msg)
-    if not body.schema_name and not body.schema_id:
-        raise ExtractException(
-            400,
-            "INVALID_REQUEST",
-            "Either schema_id or schema_name must be provided.")
-    elif body.schema_id:
-        schema_row = _resolve_schema_id(body.schema_id)
-        if body.schema_name and schema_row.name != body.schema_name:
-            raise ExtractException(
-                400,
-                "INVALID_REQUEST",
-                "Schema name and id are not for the same record")
-    else:
-        schema_row = _resolve_schema_name(body.schema_name)
+
 
     # ------------------------------------------------------------------
     # 2. Semaphore check (non-blocking — reject immediately if saturated)
@@ -160,10 +165,6 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
             msg,
         )
 
-    llm_model_dict = get_llm_endpoint()
-    llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
-    llm_model: str = llm_model_dict.get("llm_model", "")
-    max_model_len: int = llm_model_dict.get("max_model_len", 0)
 
     # ------------------------------------------------------------------
     # 3–8. Core extraction
