@@ -19,6 +19,7 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -34,6 +35,8 @@ import (
 const (
 	caddyfileSubDir = "worker/caddy"
 	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
+
+	grpcStreamErr = "failed to start grpc stream"
 
 	dirPerm  = 0o750
 	filePerm = 0o644
@@ -94,6 +97,10 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	}
 
 	if err := deployAll(ctx, rt, tp, opts, existingResource); err != nil {
+		return err
+	}
+
+	if err := checkWorkerContainerLogs(ctx, rt); err != nil {
 		return err
 	}
 
@@ -284,4 +291,44 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)
+}
+
+// checkWorkerContainerLogs inspects the worker pod, fetches current logs for
+// every container whose name starts with "ai-services", and returns an error if
+// the line "failed to start grpc stream" is found in any of them.
+func checkWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
+	pods, err := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
+	if err != nil {
+		return fmt.Errorf("worker setup: list worker pods: %w", err)
+	}
+
+	for _, pod := range pods {
+		podInfo, err := rt.InspectPod(ctx, pod.ID)
+		if err != nil {
+			return fmt.Errorf("worker setup: inspect pod %s: %w", pod.Name, err)
+		}
+
+		for _, container := range podInfo.Containers {
+			if container.ID == podInfo.InfraContainerID || !strings.HasPrefix(container.Name, workerconstants.WorkerAppName) {
+				continue
+			}
+
+			out, err := cliutils.PodmanRun("logs", container.Name)
+			if err != nil {
+				logger.WarningfCtx(ctx, "worker setup: could not fetch logs for container %s: %v\n", container.Name, err)
+
+				continue
+			}
+
+			for _, line := range strings.Split(string(out), "\n") {
+				if strings.Contains(line, grpcStreamErr) {
+					logger.ErrorfCtx(ctx, "worker setup: container %s: %s\n", container.Name, line)
+
+					return fmt.Errorf("worker setup: container %s: %s", container.Name, grpcStreamErr)
+				}
+			}
+		}
+	}
+
+	return nil
 }
