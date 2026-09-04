@@ -118,7 +118,10 @@ func (a *APIserver) Start(ctx context.Context) error {
 	defer cancel(nil)
 
 	// Start the gRPC worker gateway.
-	gw := gateway.New(a.workerRegistry)
+	gw, err := gateway.New(ctx, a.workerRegistry)
+	if err != nil {
+		return fmt.Errorf("failed to initialise worker gateway: %w", err)
+	}
 	gatewayAddr := fmt.Sprintf(":%d", a.workerGatewayPort)
 	if err := gw.Start(ctx, cancel, gatewayAddr); err != nil {
 		return fmt.Errorf("failed to start worker gateway: %w", err)

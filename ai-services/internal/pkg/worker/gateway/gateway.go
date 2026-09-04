@@ -6,16 +6,21 @@ package gateway
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 )
 
@@ -34,11 +39,28 @@ type Gateway struct {
 
 	registry   *registry.Registry
 	grpcServer *grpc.Server
+
+	// PKI material — loaded or generated from pkiDir on first start (see pki.go).
+	caCert     *x509.Certificate
+	caKey      *ecdsa.PrivateKey
+	serverCert tls.Certificate
+	caCertPool *x509.CertPool
 }
 
 // New creates a Gateway backed by the given registry.
-func New(reg *registry.Registry) *Gateway {
-	return &Gateway{registry: reg}
+func New(ctx context.Context, reg *registry.Registry) (*Gateway, error) {
+	pki, err := loadOrGeneratePKI(ctx, workerconstants.GatewayPKIDir)
+	if err != nil {
+		return nil, fmt.Errorf("worker gateway: PKI init failed: %w", err)
+	}
+
+	return &Gateway{
+		registry:   reg,
+		caCert:     pki.caCert,
+		caKey:      pki.caKey,
+		serverCert: pki.serverCert,
+		caCertPool: pki.caCertPool,
+	}, nil
 }
 
 // Start begins listening on addr (e.g. ":9090") and serves gRPC in a background goroutine.
@@ -51,7 +73,19 @@ func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, add
 		return fmt.Errorf("worker gateway: listen on %s: %w", addr, err)
 	}
 
-	g.grpcServer = grpc.NewServer()
+	// Hybrid TLS: allow connections without client certs (for bootstrap Register)
+	// but verify them rigorously if they are provided (for mTLS CommandStream).
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{g.serverCert},
+		ClientCAs:    g.caCertPool,
+		ClientAuth:   tls.VerifyClientCertIfGiven,
+	}
+
+	g.grpcServer = grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.UnaryInterceptor(g.authUnaryInterceptor),
+		grpc.StreamInterceptor(g.authStreamInterceptor),
+	)
 	workerpb.RegisterWorkerGatewayServer(g.grpcServer, g)
 
 	go func() {
@@ -100,16 +134,30 @@ func (g *Gateway) runSweeper(ctx context.Context) {
 // cannot self-assign a name different from what was pre-registered by an admin.
 // Metadata supplied in the request is persisted to the DB metadata JSON column.
 func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (*workerpb.RegisterResponse, error) {
-	logger.InfofCtx(ctx, "WorkerGateway: Register request received")
-
-	// Validate token and recover the pre-registered worker name.
+	// 1. Validate token — worker name is bound to the token, not the request.
 	workerName, err := g.registry.ValidateToken(req.GetPreSharedToken())
 	if err != nil {
 		logger.WarningfCtx(ctx, "WorkerGateway: rejected registration: %v", err)
 
-		return nil, fmt.Errorf("registration rejected: %w", err)
+		return nil, status.Errorf(codes.Unauthenticated, "registration rejected: %v", err)
 	}
 
+	// 2. Parse, validate, and sign the CSR (required for mTLS). See sign.go: signWorkerCSR.
+	csrPEM := req.GetCsrPem()
+	if len(csrPEM) == 0 {
+		logger.ErrorfCtx(ctx, "WorkerGateway: registration rejected for worker=%s: CSR is required", workerName)
+
+		return nil, status.Errorf(codes.InvalidArgument, "CSR is required")
+	}
+
+	tlsCertPEM, caCertPEM, notAfter, signErr := signWorkerCSR(csrPEM, workerName, g.caCert, g.caKey)
+	if signErr != nil {
+		logger.WarningfCtx(ctx, "WorkerGateway: CSR error for worker=%s: %v", workerName, signErr)
+
+		return nil, status.Errorf(codes.InvalidArgument, "CSR rejected: %v", signErr)
+	}
+
+	// 3. Register in-memory and persist to DB.
 	if _, err := g.registry.Register(ctx, workerName, req.GetRuntimeType(), req.GetMetadata()); err != nil {
 		if errors.Is(err, registry.ErrWorkerAlreadyActive) {
 			return nil, status.Errorf(codes.AlreadyExists, "worker %s is already active", workerName)
@@ -118,11 +166,12 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 		return nil, fmt.Errorf("failed to register worker: %w", err)
 	}
 
-	logger.InfofCtx(ctx, "WorkerGateway: worker %s registered", workerName)
+	logger.InfofCtx(ctx, "WorkerGateway: worker %q registered, cert valid until %s",
+		workerName, notAfter.UTC().Format("2006-01-02"))
 
 	return &workerpb.RegisterResponse{
-		WorkerName: workerName,
-		// TlsCertPem / TlsKeyPem intentionally empty; mTLS added in a future iteration.
+		TlsCertPem: tlsCertPEM,
+		CaCertPem:  caCertPEM,
 	}, nil
 }
 
@@ -174,10 +223,18 @@ func (g *Gateway) CommandStream(stream grpc.BidiStreamingServer[workerpb.Command
 // identifyWorker reads the first message from the stream, validates the worker is known,
 // and returns the worker name and registry entry.
 //
+// On a registry miss, identifyWorker checks the DB using the worker's verified mTLS
+// client certificate as proof of identity and re-populates the in-memory entry if the
+// worker was previously registered (status ready or disconnected). This covers two
+// cases transparently:
+//   - Control-plane restart: registry is empty but DB rows survive.
+//   - Worker reconnect after a clean disconnect: DB status is disconnected.
+//
 // Error codes used by the worker daemon to decide its retry strategy:
-//   - codes.Unauthenticated — worker not in registry; must call Register before retrying CommandStream.
+//   - codes.Unauthenticated — worker not in DB or status pending; must call Register
+//     (with a new token) before retrying CommandStream.
 //   - codes.InvalidArgument  — first message is malformed; worker has a bug.
-//   - any other error        — transient; retry CommandStream with backoff (no re-registration needed).
+//   - any other error        — transient; retry CommandStream with backoff.
 func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingServer[workerpb.CommandResult, workerpb.Command]) (string, *registry.WorkerEntry, error) {
 	firstMsg, err := stream.Recv()
 	if err != nil {
@@ -190,12 +247,24 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 
 	entry, ok := g.registry.Get(workerName)
 	if !ok {
-		// The control plane has no in-memory entry for this worker — either it never
-		// registered or the control plane restarted and lost its registry.
-		// Return Unauthenticated so the worker knows it must call Register again
-		// before opening a new CommandStream.
-		return "", nil, status.Errorf(codes.Unauthenticated,
-			"CommandStream: worker %s not registered — call Register first", workerName)
+		// No in-memory entry — either the control plane restarted or the worker is
+		// reconnecting after a clean disconnect. Attempt to restore the entry from
+		// the DB. The authStreamInterceptor already verified the cert chain via
+		// enforceClientCert, and the worker name in the first message is derived from
+		// the cert CN on the worker side, so it is trustworthy.
+		restored, restoreErr := g.registry.Restore(ctx, workerName)
+		if restoreErr != nil {
+			if errors.Is(restoreErr, registry.ErrWorkerNotFound) {
+				return "", nil, status.Errorf(codes.Unauthenticated,
+					"CommandStream: worker %s not registered — call Register first", workerName)
+			}
+
+			return "", nil, fmt.Errorf("CommandStream: restore registry entry for %s: %w", workerName, restoreErr)
+		}
+
+		logger.InfofCtx(ctx, "WorkerGateway: restored registry entry for worker %s (DB status was %s)",
+			workerName, "disconnected or ready")
+		entry = restored
 	}
 
 	logger.InfofCtx(ctx, "WorkerGateway: CommandStream opened for worker %s", workerName)
