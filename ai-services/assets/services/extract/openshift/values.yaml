@@ -1,5 +1,5 @@
 extract:
-  image: icr.io/ai-services-cicd/extract-service:v0.0.7
+  image: icr.io/ai-services-cicd/extract-service:v0.0.8
   log_level: "INFO"
   database: "extract_metadata"
   resources:

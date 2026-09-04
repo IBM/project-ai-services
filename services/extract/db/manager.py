@@ -91,6 +91,27 @@ class DatabaseManager:
             return None
 
     @staticmethod
+    def get_schema_by_name(schema_name: str) -> Optional[ExtractionSchema]:
+        """Return a schema row or None if not found."""
+        try:
+            with get_db_session() as session:
+                row = session.scalar(
+                    select(ExtractionSchema).where(ExtractionSchema.name == schema_name)
+                )
+                if row:
+                    # Eagerly load all columns before session closes.
+                    _ = (
+                        row.schema_id, row.name, row.description, row.json_schema,
+                        row.examples, row.custom_prompt, row.schema_tokens,
+                        row.examples_tokens, row.custom_prompt_tokens, row.created_at,
+                    )
+                    session.expunge(row)
+                return row
+        except SQLAlchemyError as exc:
+            logger.error(f"DB error retrieving schema {schema_name}: {exc}", exc_info=True)
+            return None
+
+    @staticmethod
     def schema_name_exists(name: str) -> bool:
         """Return True when a schema with *name* already exists."""
         try:
@@ -229,6 +250,7 @@ class DatabaseManager:
         source_type: str,
         job_name: Optional[str] = None,
         submitted_at: Optional[datetime] = None,
+        schema_name: Optional[str] = None,
     ) -> Optional[ExtractJob]:
         """Insert a new extract_jobs row with status='accepted'."""
         try:
@@ -237,6 +259,7 @@ class DatabaseManager:
                     job_id=job_id,
                     job_name=job_name,
                     schema_id=schema_id,
+                    schema_name=schema_name,
                     status="accepted",
                     document_name=document_name,
                     source_type=source_type,
@@ -264,8 +287,8 @@ class DatabaseManager:
                 )
                 if row:
                     _ = (
-                        row.job_id, row.job_name, row.schema_id, row.status,
-                        row.submitted_at, row.completed_at, row.error,
+                        row.job_id, row.job_name, row.schema_id, row.schema_name,
+                        row.status, row.submitted_at, row.completed_at, row.error,
                         row.document_name, row.source_type, row.document_word_count,
                         row.digitize_job_id, row.digitize_doc_id,
                         row.job_metadata, row.updated_at,
@@ -337,6 +360,7 @@ class DatabaseManager:
     def list_jobs(
         status: Optional[str] = None,
         schema_id: Optional[str] = None,
+        schema_name: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
         latest: bool = False,
@@ -349,6 +373,8 @@ class DatabaseManager:
                     stmt = stmt.where(ExtractJob.status == status)
                 if schema_id:
                     stmt = stmt.where(ExtractJob.schema_id == schema_id)
+                if schema_name:
+                    stmt = stmt.where(ExtractJob.schema_name == schema_name)
 
                 count_stmt = select(func.count()).select_from(stmt.subquery())
                 total = session.scalar(count_stmt) or 0

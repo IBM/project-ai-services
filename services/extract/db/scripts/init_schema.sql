@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS extract_jobs (
     job_name            VARCHAR(500),
     schema_id           VARCHAR(255) NOT NULL
                             REFERENCES schemas(schema_id) ON DELETE RESTRICT,
+    schema_name         VARCHAR(255),
     status              VARCHAR(50)  NOT NULL,
     submitted_at        TIMESTAMP WITH TIME ZONE NOT NULL,
     completed_at        TIMESTAMP WITH TIME ZONE,
@@ -45,6 +46,12 @@ CREATE INDEX IF NOT EXISTS idx_extract_jobs_submitted_at_status
 
 CREATE INDEX IF NOT EXISTS idx_extract_jobs_schema_id
     ON extract_jobs(schema_id);
+
+CREATE INDEX IF NOT EXISTS idx_extract_jobs_schema_name
+    ON extract_jobs(schema_name);
+
+-- Migration: add schema_name to existing deployments
+ALTER TABLE extract_jobs ADD COLUMN IF NOT EXISTS schema_name VARCHAR(255);
 
 -- updated_at auto-maintenance trigger (jobs only — schemas are immutable after INSERT)
 CREATE OR REPLACE FUNCTION update_extract_jobs_updated_at_column()

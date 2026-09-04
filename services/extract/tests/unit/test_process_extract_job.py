@@ -141,7 +141,7 @@ def _standard_patches(
         "extract.api.v1.jobs.get_llm_endpoint": Mock(return_value=LLM_DICT),
         "extract.api.v1.jobs.db_repo.get_job_by_id": Mock(return_value=job_row),
         "extract.api.v1.jobs.db_repo.update_job": Mock(return_value=update_job_return),
-        "extract.api.v1.jobs._resolve_schema": Mock(return_value=schema_row),
+        "extract.api.v1.jobs._resolve_schema_id": Mock(return_value=schema_row),
         "extract.api.v1.jobs._tokenize": Mock(return_value=input_tokens),
         "extract.api.v1.jobs.check_extraction_budget": Mock(return_value=reserved_output),
         "extract.api.v1.jobs.render_few_shot_block": Mock(return_value=""),
@@ -274,7 +274,7 @@ class TestStep1InProgress:
     def test_schema_not_found_marks_failed(self):
         from extract.utils.exceptions import ExtractException
         p = _standard_patches()
-        p["extract.api.v1.jobs._resolve_schema"] = Mock(
+        p["extract.api.v1.jobs._resolve_schema_id"] = Mock(
             side_effect=ExtractException(404, "SCHEMA_NOT_FOUND", "No schema")
         )
         mock_settings, _, _ = _patch_settings_with_staging(b"text")
