@@ -60,19 +60,17 @@ var configureCmd = &cobra.Command{
 	Long: `Configure and deploy the AI Services catalog service with the specified runtime.
 
 This command performs the following operations:
-  - Deploys the catalog services
-  - Creates an admin user (if not already present)
-  - Initializes directory structure for applications and models
-
-Use --workergateway-port to set the gRPC port that workers connect to (default 9090).
-The worker gateway is always started; only the port number is configurable.
+	 - Deploys the catalog services
+	 - Creates an admin user (if not already present)
+	 - Initializes directory structure for applications and models
 
 Additional configuration options include base directory customization, domain name setup,
-SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
+SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
+Note: --workergateway-port is supported for podman runtime only (default 9090).`,
 	Example: `  # Configure catalog service for podman (worker gateway on default port 9090)
 	 ai-services catalog configure --runtime podman
 
-	 # Configure with a custom worker gateway port
+	 # Configure with a custom worker gateway port (podman only)
 	 ai-services catalog configure --runtime podman --workergateway-port 9191
 
 	 # Configure with custom HTTPS port
@@ -157,9 +155,8 @@ func runConfigure(ctx context.Context) error {
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace:         catalogConstants.CatalogAppName,
-			Timeout:           timeout,
-			WorkerGatewayPort: workerGatewayPort,
+			Namespace: catalogConstants.CatalogAppName,
+			Timeout:   timeout,
 		}
 
 		return catalogOpenShift.DeployCatalog(ctx, opts)
@@ -279,7 +276,7 @@ func initConfigurePodmanDeployFlags() {
 		&workerGatewayPort,
 		"workergateway-port",
 		defaultWorkerGatewayPort,
-		"Port for the gRPC worker gateway that workers connect to (always active).\n"+
+		"Port for the gRPC worker gateway that workers connect to.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --workergateway-port 9090\n",
 	)
@@ -345,10 +342,10 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 
 	// Common flags, valid for all runtimes.
 	builder.AddCommonFlag("reset-password", nil)
-	builder.AddCommonFlag("workergateway-port", nil)
 
 	// Podman-only flags.
 	builder.
+		AddPodmanFlag("workergateway-port", nil).
 		AddPodmanFlag("basedir", nil).
 		AddPodmanFlag("https-port", nil).
 		AddPodmanFlag("domain-name", nil).

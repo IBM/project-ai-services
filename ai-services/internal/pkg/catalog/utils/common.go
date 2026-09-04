@@ -36,9 +36,8 @@ type PodmanConfigureOptions struct {
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
 type OpenShiftConfigureOptions struct {
-	Namespace         string
-	Timeout           time.Duration
-	WorkerGatewayPort int // gRPC worker gateway port; always active, default 9090
+	Namespace string
+	Timeout   time.Duration
 }
 
 // GetCatalogPodConfig retrieves catalog pod configuration by inspecting the running pod and its containers.
