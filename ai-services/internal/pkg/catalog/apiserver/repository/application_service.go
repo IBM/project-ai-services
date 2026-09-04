@@ -54,12 +54,16 @@ func NewApplicationService(
 	connectorRepo dbrepo.ConnectorRepository,
 	datasourceSvc appservice.DatasourceConnector,
 ) ApplicationServiceInterface {
+	if runtimeType != runtimeTypes.RuntimeTypePodman && runtimeType != runtimeTypes.RuntimeTypeOpenShift {
+		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
+	}
+
 	validator := validators.NewApplicationValidator(provider)
 	if connectorRepo != nil {
 		validator = validator.WithConnectorRepo(connectorRepo)
 	}
 
-	base := appservice.ApplicationServiceBase{
+	return &appservice.ApplicationServiceBase{
 		AppRepo:               appRepo,
 		ServiceRepo:           serviceRepo,
 		ComponentRepo:         componentRepo,
@@ -69,15 +73,9 @@ func NewApplicationService(
 		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo).WithWorkerRegistry(reg),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validator,
+		RuntimeType:           runtimeType,
+		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
+		WorkerRegistry:        reg,
 		DatasourceService:     datasourceSvc,
-	}
-
-	switch runtimeType {
-	case runtimeTypes.RuntimeTypePodman:
-		return appservice.NewPodmanApplicationService(base)
-	case runtimeTypes.RuntimeTypeOpenShift:
-		return appservice.NewOpenShiftApplicationService(base)
-	default:
-		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
 	}
 }

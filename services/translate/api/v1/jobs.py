@@ -334,6 +334,7 @@ async def get_job_result(job_id: str) -> Union[JobResultResponse, JSONResponse]:
 
 @router.get(
     "/{job_id}/result/download",
+    response_class=PlainTextResponse,
     response_description="Translated file stream with Content-Disposition attachment header.",
     summary="Download translated file",
     description=(
@@ -348,7 +349,7 @@ async def get_job_result(job_id: str) -> Union[JobResultResponse, JSONResponse]:
         500: http_error_responses[500],
     },
 )
-async def download_job_result(job_id: str) -> Union[PlainTextResponse, JSONResponse]:
+async def download_job_result(job_id: str):
     """Download the translated output file for a completed job."""
     job = db_manager.get_job_by_id(job_id)
     if job is None:

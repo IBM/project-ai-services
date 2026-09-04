@@ -23,6 +23,10 @@ import (
 // has an active in-memory entry (i.e. a live CommandStream is open).
 var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
 
+// ErrWorkerNotFound is returned by Restore when the named worker has no DB row,
+// or its status is pending (never completed bootstrap).
+var ErrWorkerNotFound = fmt.Errorf("worker not found")
+
 // ErrUnsupportedRuntimeType is returned by Register when runtimeType is not a
 // recognised value (podman or openshift).
 var ErrUnsupportedRuntimeType = fmt.Errorf("unsupported runtime_type")
@@ -152,6 +156,70 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 	return entry, nil
 }
 
+// Restore re-creates the in-memory entry for a previously-registered worker whose
+// record exists in the DB but whose in-memory entry is absent (e.g. after a
+// control-plane restart, or after a worker reconnects following a clean disconnect).
+// The caller must have already verified the worker's identity via mTLS — this
+// method does not consult the token store.
+//
+// Returns ErrWorkerNotFound if the worker has no DB row or its status is pending
+// (it was pre-registered but never completed the bootstrap flow; a cert alone is
+// not sufficient proof of identity in that state).
+//
+// If the worker is already in the in-memory map (concurrent reconnect), the
+// existing entry is returned unchanged — Restore is idempotent.
+//
+// On success the DB status is updated to ready and the new entry is returned.
+func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry, error) {
+	// Fast path: already in memory (e.g. concurrent reconnect races).
+	r.mu.RLock()
+	if entry, ok := r.workers[workerName]; ok {
+		r.mu.RUnlock()
+
+		return entry, nil
+	}
+	r.mu.RUnlock()
+
+	if r.repo == nil {
+		return nil, ErrWorkerNotFound
+	}
+
+	w, err := r.repo.GetByName(ctx, workerName)
+	if err != nil {
+		return nil, fmt.Errorf("worker registry: DB lookup for %s: %w", workerName, err)
+	}
+	// Pending means the worker was pre-registered but never completed the initial
+	// bootstrap (Register RPC + token exchange). Require the full flow.
+	if w == nil || w.Status == models.WorkerStatusPending {
+		return nil, ErrWorkerNotFound
+	}
+
+	entry := &WorkerEntry{
+		DBID:        w.ID,
+		WorkerName:  workerName,
+		RuntimeType: string(w.RuntimeType),
+		Metadata:    metadataToString(w.Metadata),
+		CommandCh:   make(chan *workerpb.Command, commandChannelSize),
+		results:     make(map[string]chan *workerpb.CommandResult),
+	}
+
+	r.mu.Lock()
+	// Re-check under write lock to guard against a concurrent Restore.
+	if existing, ok := r.workers[workerName]; ok {
+		r.mu.Unlock()
+
+		return existing, nil
+	}
+	r.workers[workerName] = entry
+	r.mu.Unlock()
+
+	if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusReady)}); err != nil {
+		logger.WarningfCtx(ctx, "worker registry: DB status update failed on restore for %s: %v", workerName, err)
+	}
+
+	return entry, nil
+}
+
 // Preregister creates a pending DB row for a named worker and returns a single-use
 // bootstrap token the operator passes to the worker daemon at startup.
 // If a row already exists (re-registration), it is reset to pending and a new token
@@ -203,7 +271,11 @@ func (r *Registry) Disconnect(ctx context.Context, workerName string) {
 	r.mu.Unlock()
 
 	if ok && r.repo != nil && entry.DBID != uuid.Nil {
-		if err := r.repo.Update(ctx, entry.DBID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
+		msg := MsgDisconnected
+		if err := r.repo.Update(ctx, entry.DBID, repository.WorkerUpdate{
+			Status:  utils.Ptr(models.WorkerStatusDisconnected),
+			Message: &msg,
+		}); err != nil {
 			logger.WarningfCtx(ctx, "worker registry: DB disconnect update failed for %s: %v", workerName, err)
 		}
 	}
@@ -233,7 +305,11 @@ func (r *Registry) SweepStale(ctx context.Context, timeout time.Duration) {
 		}
 		if w.LastHeartbeat == nil || now.Sub(*w.LastHeartbeat) > timeout {
 			logger.WarningfCtx(ctx, "worker registry: worker %s heartbeat timed out — marking disconnected", w.Name)
-			if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
+			msg := MsgLostHeartbeat
+			if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{
+				Status:  utils.Ptr(models.WorkerStatusDisconnected),
+				Message: &msg,
+			}); err != nil {
 				logger.WarningfCtx(ctx, "worker registry: failed to update stale worker %s: %v", w.Name, err)
 			}
 		}
@@ -416,6 +492,24 @@ func metadataToAny(m map[string]string) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
 		out[k] = v
+	}
+
+	return out
+}
+
+// metadataToString converts a map[string]any (from the DB model) back to map[string]string
+// for use in a WorkerEntry. Non-string values are converted via fmt.Sprintf.
+func metadataToString(m map[string]any) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		} else {
+			out[k] = fmt.Sprintf("%v", v)
+		}
 	}
 
 	return out

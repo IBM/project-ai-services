@@ -311,7 +311,7 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 		return nil, fmt.Errorf("failed to get component path: %w", err)
 	}
 
-	itemFS, err := p.getItemFS(componentKey)
+	itemFS, err := p.GetItemFS(componentKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get component filesystem: %w", err)
 	}
@@ -353,7 +353,7 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 		return nil, fmt.Errorf("failed to get connector path: %w", err)
 	}
 
-	itemFS, err := p.getItemFS(connectorKey)
+	itemFS, err := p.GetItemFS(connectorKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connector filesystem: %w", err)
 	}
@@ -396,7 +396,7 @@ func (p *CatalogProvider) GetServiceParams(ctx context.Context, serviceID, runti
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	itemFS, err := p.getItemFS(serviceID)
+	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service filesystem: %w", err)
 	}

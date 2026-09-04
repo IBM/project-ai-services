@@ -528,38 +528,6 @@ class TestRunConversion:
 
 
 # ---------------------------------------------------------------------------
-# _safe_remove()
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-class TestSafeRemove:
-    def test_deletes_existing_file(self, tmp_path):
-        from digitize.workers.conversion_dispatcher import _safe_remove
-
-        f = tmp_path / "staged.pdf"
-        f.write_bytes(b"%PDF")
-        assert f.exists()
-
-        _safe_remove(str(f))
-        assert not f.exists()
-
-    def test_silently_ignores_missing_file(self, tmp_path):
-        from digitize.workers.conversion_dispatcher import _safe_remove
-
-        missing = str(tmp_path / "ghost.pdf")
-        # Must not raise
-        _safe_remove(missing)
-
-    def test_silently_ignores_permission_error(self, tmp_path):
-        from digitize.workers.conversion_dispatcher import _safe_remove
-        from unittest.mock import patch
-
-        with patch("pathlib.Path.unlink", side_effect=PermissionError("no write")):
-            # Must not propagate
-            _safe_remove(str(tmp_path / "locked.pdf"))
-
-
-# ---------------------------------------------------------------------------
 # _run_conversion() — page_count from task row + file cleanup
 # ---------------------------------------------------------------------------
 
@@ -612,8 +580,11 @@ class TestRunConversionUpdated:
         # Confirm no pages metadata was written anywhere in this call.
         # (page_count lives on the task row for the pipeline to consume.)
 
-    def test_cached_file_deleted_on_success(self, tmp_path):
-        """After successful conversion the staged input file must be removed."""
+    def test_cached_file_preserved_on_success(self, tmp_path):
+        """After successful conversion the staged input file must NOT be removed.
+        Cleanup is the responsibility of the pipeline layer (_run_ingest /
+        _run_digitize / sync_tick) which reads the result and then calls
+        cleanup_staging_directory() after all post-conversion processing."""
         import digitize.workers.conversion_dispatcher as mod
 
         cached = tmp_path / "file.pdf"
@@ -629,24 +600,20 @@ class TestRunConversionUpdated:
         async def _run():
             with patch.object(mod.db_manager, "update_task_status"), \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
-                 patch("digitize.utils.db.get_status_manager") as mock_gsm, \
-                 patch("asyncio.get_running_loop") as mock_loop, \
-                 patch("common.misc_utils.get_utc_timestamp", return_value="ts"):
+                 patch("asyncio.get_running_loop") as mock_loop:
 
                 mock_event_loop = MagicMock()
                 mock_event_loop.run_in_executor = AsyncMock(return_value=(result_path, 1.0))
                 mock_loop.return_value = mock_event_loop
-                mock_gsm.return_value = Mock()
-                mock_gsm.return_value.update_doc_metadata = Mock()
-                mock_gsm.return_value.update_job_progress = Mock()
 
                 await mod._run_conversion(task, weight=1)
 
         asyncio.run(_run())
-        assert not cached.exists(), "Staged input file should be deleted after success"
+        assert cached.exists(), "Staged input file must be preserved for the pipeline layer"
 
-    def test_cached_file_deleted_on_failure(self, tmp_path):
-        """The staged file is removed even when the conversion raises."""
+    def test_cached_file_preserved_on_failure(self, tmp_path):
+        """The staged file must NOT be removed when conversion raises.
+        The pipeline layer is responsible for cleanup regardless of outcome."""
         import digitize.workers.conversion_dispatcher as mod
 
         cached = tmp_path / "file.pdf"
@@ -660,7 +627,6 @@ class TestRunConversionUpdated:
         async def _run():
             with patch.object(mod.db_manager, "update_task_status"), \
                  patch.object(mod.conversion_semaphore, "release", new_callable=AsyncMock), \
-                 patch("digitize.utils.db.get_status_manager") as mock_gsm, \
                  patch("asyncio.get_running_loop") as mock_loop:
 
                 mock_event_loop = MagicMock()
@@ -668,11 +634,8 @@ class TestRunConversionUpdated:
                     side_effect=RuntimeError("conversion crashed")
                 )
                 mock_loop.return_value = mock_event_loop
-                mock_gsm.return_value = Mock()
-                mock_gsm.return_value.update_doc_metadata = Mock()
-                mock_gsm.return_value.update_job_progress = Mock()
 
                 await mod._run_conversion(task, weight=1)
 
         asyncio.run(_run())
-        assert not cached.exists(), "Staged file should be deleted even on conversion failure"
+        assert cached.exists(), "Staged file must be preserved for the pipeline layer even on failure"

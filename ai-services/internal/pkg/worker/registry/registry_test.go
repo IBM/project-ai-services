@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -73,6 +74,15 @@ func (r *fakeWorkerRepo) GetAll(_ context.Context) ([]models.Worker, error) {
 	return out, nil
 }
 
+func (r *fakeWorkerRepo) GetByID(_ context.Context, id uuid.UUID) (*models.Worker, error) {
+	w, ok := r.byID[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *w
+	return &cp, nil
+}
+
 func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Worker, error) {
 	w, ok := r.workers[name]
 	if !ok {
@@ -80,6 +90,10 @@ func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Work
 	}
 	cp := *w
 	return &cp, nil
+}
+
+func (r *fakeWorkerRepo) GetApplicationIDsByWorkerIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	return map[uuid.UUID][]uuid.UUID{}, nil
 }
 
 var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
@@ -539,5 +553,162 @@ func TestRegistry_WorkerCommandChannel_NotConnected(t *testing.T) {
 	}
 	if ch != nil {
 		t.Error("expected nil channel for unknown worker")
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Restore tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+// TestRegistry_Restore_AfterRestartReturnsEntry simulates a control-plane restart:
+// a worker was previously registered (DB row exists with status=ready), the
+// in-memory registry is empty, and Restore should recreate the entry.
+func TestRegistry_Restore_AfterRestartReturnsEntry(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	id := uuid.New()
+	repo.workers["worker-r1"] = &models.Worker{
+		ID:          id,
+		Name:        "worker-r1",
+		RuntimeType: models.WorkerRuntimeTypePodman,
+		Status:      models.WorkerStatusReady,
+		Metadata:    map[string]any{"base_dir": "/data"},
+	}
+	repo.byID[id] = repo.workers["worker-r1"]
+
+	if _, ok := reg.Get("worker-r1"); ok {
+		t.Fatal("expected worker-r1 not in memory before Restore")
+	}
+
+	entry, err := reg.Restore(context.Background(), "worker-r1")
+	if err != nil {
+		t.Fatalf("Restore: unexpected error: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("Restore: expected non-nil entry")
+	}
+	if entry.WorkerName != "worker-r1" {
+		t.Errorf("expected WorkerName %q, got %q", "worker-r1", entry.WorkerName)
+	}
+	if entry.CommandCh == nil {
+		t.Error("expected non-nil CommandCh after Restore")
+	}
+	if entry.Metadata["base_dir"] != "/data" {
+		t.Errorf("expected metadata base_dir=/data, got %q", entry.Metadata["base_dir"])
+	}
+	if _, ok := reg.Get("worker-r1"); !ok {
+		t.Error("expected worker-r1 in registry after Restore")
+	}
+	if repo.workers["worker-r1"].Status != models.WorkerStatusReady {
+		t.Errorf("expected DB status ready after Restore, got %q", repo.workers["worker-r1"].Status)
+	}
+}
+
+// TestRegistry_Restore_DisconnectedWorkerReturnsEntry simulates a worker reconnecting
+// after a clean disconnect: DB status is disconnected, registry is empty.
+func TestRegistry_Restore_DisconnectedWorkerReturnsEntry(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	id := uuid.New()
+	repo.workers["worker-dc"] = &models.Worker{
+		ID:          id,
+		Name:        "worker-dc",
+		RuntimeType: models.WorkerRuntimeTypePodman,
+		Status:      models.WorkerStatusDisconnected,
+	}
+	repo.byID[id] = repo.workers["worker-dc"]
+
+	entry, err := reg.Restore(context.Background(), "worker-dc")
+	if err != nil {
+		t.Fatalf("Restore: unexpected error: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("expected non-nil entry for disconnected worker")
+	}
+	// DB must be updated to ready.
+	if repo.workers["worker-dc"].Status != models.WorkerStatusReady {
+		t.Errorf("expected DB status ready after Restore, got %q", repo.workers["worker-dc"].Status)
+	}
+}
+
+// TestRegistry_Restore_PendingWorkerReturnsNotFound ensures a worker that was
+// pre-registered but never completed the bootstrap flow cannot be restored via a
+// cert alone — it must go through the full Register token flow.
+func TestRegistry_Restore_PendingWorkerReturnsNotFound(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	id := uuid.New()
+	repo.workers["worker-pending"] = &models.Worker{
+		ID:     id,
+		Name:   "worker-pending",
+		Status: models.WorkerStatusPending,
+	}
+	repo.byID[id] = repo.workers["worker-pending"]
+
+	_, err := reg.Restore(context.Background(), "worker-pending")
+	if err == nil {
+		t.Fatal("expected error for pending worker")
+	}
+	if !errors.Is(err, ErrWorkerNotFound) {
+		t.Errorf("expected ErrWorkerNotFound, got %v", err)
+	}
+}
+
+// TestRegistry_Restore_UnknownWorkerReturnsNotFound ensures a worker with no DB
+// row at all is correctly rejected.
+func TestRegistry_Restore_UnknownWorkerReturnsNotFound(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	_, err := reg.Restore(context.Background(), "nobody")
+	if err == nil {
+		t.Fatal("expected error for unknown worker")
+	}
+	if !errors.Is(err, ErrWorkerNotFound) {
+		t.Errorf("expected ErrWorkerNotFound, got %v", err)
+	}
+}
+
+// TestRegistry_Restore_NoRepoReturnsNotFound covers the nil-repo (test-only) case.
+func TestRegistry_Restore_NoRepoReturnsNotFound(t *testing.T) {
+	reg := New(nil)
+
+	_, err := reg.Restore(context.Background(), "worker-x")
+	if err == nil {
+		t.Fatal("expected error when no repo configured")
+	}
+	if !errors.Is(err, ErrWorkerNotFound) {
+		t.Errorf("expected ErrWorkerNotFound, got %v", err)
+	}
+}
+
+// TestRegistry_Restore_Idempotent verifies that calling Restore twice returns
+// the same entry without creating a duplicate in-memory entry.
+func TestRegistry_Restore_Idempotent(t *testing.T) {
+	repo := newFakeWorkerRepo()
+	reg := New(repo)
+
+	id := uuid.New()
+	repo.workers["worker-idem"] = &models.Worker{
+		ID:          id,
+		Name:        "worker-idem",
+		RuntimeType: models.WorkerRuntimeTypePodman,
+		Status:      models.WorkerStatusReady,
+	}
+	repo.byID[id] = repo.workers["worker-idem"]
+
+	e1, err := reg.Restore(context.Background(), "worker-idem")
+	if err != nil {
+		t.Fatalf("first Restore: %v", err)
+	}
+	e2, err := reg.Restore(context.Background(), "worker-idem")
+	if err != nil {
+		t.Fatalf("second Restore: %v", err)
+	}
+	if e1 != e2 {
+		t.Error("expected both Restore calls to return the same WorkerEntry pointer")
 	}
 }

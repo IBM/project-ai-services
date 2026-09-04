@@ -8,14 +8,19 @@ import (
 	"text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
 
 // getCaddyAdminPort retrieves the host port mapped to Caddy's admin API (container port 2019).
-func getCaddyAdminPort(ctx context.Context, runtime *podman.PodmanClient, podName string) (string, error) {
-	pod, err := runtime.InspectPod(ctx, podName)
+func getCaddyAdminPort(ctx context.Context, podName string) (string, error) {
+	pc, err := podman.NewPodmanClient()
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize podman client: %w", err)
+	}
+
+	pod, err := pc.InspectPod(ctx, podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to inspect Caddy pod: %w", err)
 	}
@@ -44,19 +49,19 @@ func getHTTPSPort(ctx context.Context, runtime *podman.PodmanClient, caddyPodNam
 	// Look for the HTTPS port mapping
 	// Ports is a map[string][]string where key is "containerPort/protocol" (e.g., "443/tcp")
 	// and value is list of host ports
-	httpsPortKey := catalogconstants.DefaultHTTPSPort + "/tcp"
+	httpsPortKey := proxy.DefaultHTTPSPort + "/tcp"
 	if hostPorts, ok := pod.Ports[httpsPortKey]; ok && len(hostPorts) > 0 {
 		return hostPorts[0], nil
 	}
 
 	// Also check without protocol suffix for compatibility
-	if hostPorts, ok := pod.Ports[catalogconstants.DefaultHTTPSPort]; ok && len(hostPorts) > 0 {
+	if hostPorts, ok := pod.Ports[proxy.DefaultHTTPSPort]; ok && len(hostPorts) > 0 {
 		return hostPorts[0], nil
 	}
 
 	// Fallback: search through all port mappings
 	for portKey, hostPorts := range pod.Ports {
-		if strings.HasPrefix(portKey, catalogconstants.DefaultHTTPSPort+"/") && len(hostPorts) > 0 {
+		if strings.HasPrefix(portKey, proxy.DefaultHTTPSPort+"/") && len(hostPorts) > 0 {
 			return hostPorts[0], nil
 		}
 	}

@@ -58,8 +58,7 @@ type ExecInContainer struct {
 }
 
 type DownloadModel struct {
-	Model     string `json:"model"`
-	TargetDir string `json:"targetDir"`
+	Model string `json:"model"`
 }
 
 // ─── Network ──────────────────────────────────────────────────────────────────
@@ -96,11 +95,12 @@ type ProxyRoute struct {
 
 // Route represents a Caddy reverse-proxy route on a worker node.
 type Route struct {
-	ID       string // unique route identifier used as @id in Caddy config
-	Domain   string // hostname to match (e.g. "service.example.com")
-	Upstream string // backend address (e.g. "10.88.0.5:8080")
-	Terminal bool   // stop route matching after this route
-	Type     string // endpoint type label (e.g. "ui", "api")
+	ID          string // unique route identifier used as @id in Caddy config
+	Domain      string // hostname to match (e.g. "service.example.com")
+	Upstream    string // backend address (e.g. "10.88.0.5:8080")
+	Terminal    bool   // stop route matching after this route
+	Type        string // endpoint type label (e.g. "ui", "api")
+	ExternalURL string // fully-qualified HTTPS URL built by the worker from its own env
 }
 
 // ─── HTTP proxy ───────────────────────────────────────────────────────────────

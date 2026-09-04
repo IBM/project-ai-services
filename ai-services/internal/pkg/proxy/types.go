@@ -4,8 +4,9 @@ import "context"
 
 // ProxyManager defines the interface for managing reverse proxy routes.
 type ProxyManager interface {
-	// RegisterRoute registers a new route with the proxy
-	RegisterRoute(ctx context.Context, route Route) error
+	// RegisterRoute registers a new route with the proxy and returns the
+	// fully-qualified external URL for the route.
+	RegisterRoute(ctx context.Context, route Route) (string, error)
 
 	// UnregisterRoute removes a route from the proxy by its ID
 	UnregisterRoute(ctx context.Context, routeID string) error
@@ -33,6 +34,12 @@ type Route struct {
 
 	// Type indicates the endpoint type
 	Type string
+
+	// ExternalURL is the fully-qualified HTTPS URL for this route
+	// (e.g., "https://service.example.com" or "https://service.example.com:8443").
+	// Populated by RegisterRoutesForAppAndReturn; empty when routes are built
+	// without a known HTTPS port.
+	ExternalURL string
 }
 
 // Made with Bob

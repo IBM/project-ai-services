@@ -8,11 +8,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
-
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -39,77 +37,64 @@ func NewDeletionExecutor(
 	}
 }
 
+// Execute carries out the deletion using the already-resolved runtime.
+// The caller (ApplicationServiceBase.executeDeletionAsync) is responsible for
+// resolving the correct runtime — local or RemoteRuntime for worker apps.
 func (e *DeletionExecutor) Execute(
 	ctx context.Context,
 	appID uuid.UUID,
 	services []models.Service,
 	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
-	runtimeType types.RuntimeType,
+	rt runtime.Runtime,
 ) error {
-	// Execute deployment based on runtime type using the provided plan
-	switch runtimeType {
+	switch rt.Type() {
 	case types.RuntimeTypePodman:
-		return e.executePodmanDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
+		return e.executePodmanDeletion(ctx, appID, services, orphanedComponentIDs, keepData, rt)
 	case types.RuntimeTypeOpenShift:
-		return e.executeOpenShiftDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
+		return e.executeOpenShiftDeletion(ctx, appID, services, orphanedComponentIDs, keepData, rt)
 	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
+		return fmt.Errorf("unsupported runtime type: %s", rt.Type())
 	}
 }
 
-// executePodmanDeletion executes application deletion for Podman runtime.
+// executePodmanDeletion performs deletion for the Podman runtime.
 func (e *DeletionExecutor) executePodmanDeletion(
 	ctx context.Context,
 	appID uuid.UUID,
 	services []models.Service,
 	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
+	rt runtime.Runtime,
 ) error {
-	// Initialize Podman runtime client
-	rt, err := podmanRuntime.NewPodmanClient()
-	if err != nil {
-		return fmt.Errorf("failed to initialize Podman runtime: %w", err)
-	}
-
-	// Create podman deployer
-	deleteService := podman.NewPodmanDeletion(
+	podman.NewPodmanDeletion(
 		rt,
 		e.appRepo,
 		e.serviceRepo,
 		e.componentRepo,
 		e.serviceDependencyRepo,
-	)
-
-	deleteService.PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
+	).PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 
 	return nil
 }
 
-// executeOpenShiftDeletion executes application deletion for the OpenShift runtime via Helm.
+// executeOpenShiftDeletion performs deletion for the OpenShift runtime.
 func (e *DeletionExecutor) executeOpenShiftDeletion(
 	ctx context.Context,
 	appID uuid.UUID,
 	services []models.Service,
 	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
+	rt runtime.Runtime,
 ) error {
-	ns := catalogutils.AppNamespace(appID)
-	rt, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
-	if err != nil {
-		return fmt.Errorf("failed to initialize openshift runtime: %w", err)
-	}
-
-	deletionService := openshift.NewOpenshiftDeletion(
+	openshift.NewOpenshiftDeletion(
 		rt,
-		ns,
+		catalogutils.AppNamespace(appID),
 		e.appRepo,
 		e.serviceRepo,
 		e.componentRepo,
 		e.serviceDependencyRepo,
-	)
-
-	deletionService.PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
+	).PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 
 	return nil
 }
