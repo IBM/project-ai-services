@@ -101,6 +101,17 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	}
 
 	if err := checkWorkerContainerLogs(ctx, rt); err != nil {
+		pods, listErr := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
+		if listErr != nil {
+			logger.ErrorfCtx(ctx, "worker setup: failed to list worker pods for cleanup: %v\n", listErr)
+		}
+
+		for _, pod := range pods {
+			if delErr := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); delErr != nil {
+				logger.ErrorfCtx(ctx, "worker setup: failed to delete worker pod %s: %v\n", pod.Name, delErr)
+			}
+		}
+
 		return err
 	}
 
