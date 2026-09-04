@@ -1,4 +1,4 @@
-export const APP_NAME = "AI Launchpad";
+export const APP_NAME = "IBM Power AI Launchpad";
 
 export const COMPONENT_TYPES = {
   LLM: "llm",
