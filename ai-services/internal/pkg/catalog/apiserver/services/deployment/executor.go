@@ -14,7 +14,6 @@ import (
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -124,10 +123,7 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 	}
 }
 
-// runPodmanDeployer creates a PodmanDeployer backed by the RemoteRuntime and
-// injects the worker's registration metadata (domain suffix, HTTPS port, base
-// dir) via SetPodmanWorkerConfig so the deployer uses the correct values
-// instead of local environment variables.
+// runPodmanDeployer creates a PodmanDeployer backed by the RemoteRuntime.
 func (e *DeploymentExecutor) runPodmanDeployer(
 	ctx context.Context,
 	plan *DeploymentPlan,
@@ -135,13 +131,6 @@ func (e *DeploymentExecutor) runPodmanDeployer(
 	rt runtime.Runtime,
 ) error {
 	deployer := podman.NewPodmanDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo)
-
-	meta, _ := e.workerRegistry.WorkerMetadata(plan.WorkerName)
-	deployer.SetPodmanWorkerConfig(podman.PodmanWorkerConfig{
-		DomainSuffix: meta[workerconstants.MetaKeyDomainSuffix],
-		HTTPSPort:    meta[workerconstants.MetaKeyHTTPSPort],
-		BaseDir:      meta[workerconstants.MetaKeyBaseDir],
-	})
 
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }

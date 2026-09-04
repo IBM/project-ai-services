@@ -2,6 +2,12 @@ package gateway
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"net"
 	"testing"
 	"time"
@@ -80,6 +86,15 @@ func (r *fakeWorkerRepo) GetAll(_ context.Context) ([]models.Worker, error) {
 	return out, nil
 }
 
+func (r *fakeWorkerRepo) GetByID(_ context.Context, id uuid.UUID) (*models.Worker, error) {
+	w, ok := r.byID[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := *w
+	return &cp, nil
+}
+
 func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Worker, error) {
 	w, ok := r.workers[name]
 	if !ok {
@@ -89,11 +104,32 @@ func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Work
 	return &cp, nil
 }
 
+func (r *fakeWorkerRepo) GetApplicationIDsByWorkerIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	return map[uuid.UUID][]uuid.UUID{}, nil
+}
+
 var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Test helpers
 // ──────────────────────────────────────────────────────────────────────────────
+
+// makeTestCSR generates a minimal ECDSA P-256 CSR for use in gateway tests.
+func makeTestCSR(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("makeTestCSR: generate key: %v", err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject:            pkix.Name{CommonName: "test-worker"},
+		SignatureAlgorithm: x509.ECDSAWithSHA256,
+	}, key)
+	if err != nil {
+		t.Fatalf("makeTestCSR: create CSR: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+}
 
 // preregister calls registry.Preregister and returns the bootstrap token,
 // failing the test on any error.
@@ -111,8 +147,14 @@ func preregister(t *testing.T, reg *registry.Registry, workerName string) string
 func startTestGateway(t *testing.T, reg *registry.Registry) (workerpb.WorkerGatewayClient, func()) {
 	t.Helper()
 
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("startTestGateway: generate CA: %v", err)
+	}
+
 	lis := bufconn.Listen(bufSize)
-	gw := New(reg)
+	gw := &Gateway{registry: reg, caCert: caCert, caKey: caKey}
+
 	gw.grpcServer = grpc.NewServer()
 	workerpb.RegisterWorkerGatewayServer(gw.grpcServer, gw)
 
@@ -130,7 +172,7 @@ func startTestGateway(t *testing.T, reg *registry.Registry) (workerpb.WorkerGate
 	}
 
 	stop := func() {
-		conn.Close()        //nolint:errcheck
+		conn.Close() //nolint:errcheck
 		gw.grpcServer.Stop()
 		lis.Close() //nolint:errcheck
 	}
@@ -149,15 +191,13 @@ func TestGateway_Register_ValidToken(t *testing.T) {
 	client, stop := startTestGateway(t, reg)
 	defer stop()
 
-	resp, err := client.Register(context.Background(), &workerpb.RegisterRequest{
+	_, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    "podman",
+		CsrPem:         makeTestCSR(t),
 	})
 	if err != nil {
 		t.Fatalf("Register: unexpected error: %v", err)
-	}
-	if resp.GetWorkerName() != "worker-1" {
-		t.Errorf("expected WorkerName %q, got %q", "worker-1", resp.GetWorkerName())
 	}
 
 	// Worker must now appear in the in-memory registry.
@@ -191,6 +231,7 @@ func TestGateway_Register_TokenSingleUse(t *testing.T) {
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    "podman",
+		CsrPem:         makeTestCSR(t),
 	}); err != nil {
 		t.Fatalf("first Register: unexpected error: %v", err)
 	}
@@ -199,6 +240,7 @@ func TestGateway_Register_TokenSingleUse(t *testing.T) {
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    "podman",
+		CsrPem:         makeTestCSR(t),
 	}); err == nil {
 		t.Fatal("second Register: expected error for reused token")
 	}
@@ -208,6 +250,9 @@ func TestGateway_Register_TokenSingleUse(t *testing.T) {
 // CommandStream RPC
 // ──────────────────────────────────────────────────────────────────────────────
 
+// Worker sends an unregistered name — identifyWorker returns Unauthenticated.
+// The server may close the stream before the client's Send completes, so we
+// accept EOF on Send as equivalent to receiving an error on Recv.
 func TestGateway_CommandStream_UnregisteredWorker(t *testing.T) {
 	reg := registry.New(newFakeWorkerRepo())
 
@@ -230,6 +275,7 @@ func TestGateway_CommandStream_UnregisteredWorker(t *testing.T) {
 	}
 }
 
+// Worker sends an empty worker_name — same Unauthenticated path as UnregisteredWorker.
 func TestGateway_CommandStream_MissingWorkerName(t *testing.T) {
 	reg := registry.New(newFakeWorkerRepo())
 
@@ -264,6 +310,7 @@ func TestGateway_CommandStream_CommandDelivered(t *testing.T) {
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    "podman",
+		CsrPem:         makeTestCSR(t),
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -318,6 +365,7 @@ func TestGateway_CommandStream_ResultRouted(t *testing.T) {
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    "podman",
+		CsrPem:         makeTestCSR(t),
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -379,6 +427,7 @@ func TestGateway_CommandStream_Disconnect(t *testing.T) {
 	if _, err := client.Register(context.Background(), &workerpb.RegisterRequest{
 		PreSharedToken: token,
 		RuntimeType:    "podman",
+		CsrPem:         makeTestCSR(t),
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}

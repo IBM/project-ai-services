@@ -11,10 +11,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // PodmanDeletion handles application deletion operations.
@@ -47,7 +49,6 @@ func NewPodmanDeletion(
 // When keepData is true, preserves underlying data (pods, volumes, orphaned components).
 // When keepData is false, deletes all data including application data directory.
 func (s *PodmanDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID, services []models.Service, orphanedComponentIDs []uuid.UUID, keepData bool) {
-	// Get Caddy proxy manager - fail if CADDY_ADMIN_URL not set
 	proxyManager, err := proxy.GetCaddyProxyManager()
 	if err != nil {
 		common.HandleStepError(ctx, s.appRepo, appID, "failed to get Caddy proxy manager for app", err)
@@ -176,7 +177,7 @@ func (s *PodmanDeletion) deletePods(ctx context.Context, pods []runtimeTypes.Pod
 	for _, pod := range pods {
 		if err := s.rt.DeletePod(ctx, pod.ID, &forceDelete); err != nil {
 			// Ignore "not found" errors - pod already deleted or never existed
-			if catalogutils.IsNotFoundError(err) {
+			if utils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Pod %s already deleted or does not exist", pod.ID)
 
 				continue
@@ -259,7 +260,7 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 
 	// Extract volume names from pod labels
 	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[catalogconstants.CatalogVolumeLabel]; ok && volumeNames != "" {
+		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
 			// Split comma-separated volume names (in case a pod has multiple volumes)
 			volumes := strings.Split(volumeNames, ",")
 			for _, volumeName := range volumes {
@@ -282,7 +283,7 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 	for volumeName := range volumesToDelete {
 		if err := s.rt.DeleteVolume(ctx, volumeName); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
-			if catalogutils.IsNotFoundError(err) {
+			if utils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Volume %s already deleted or does not exist", volumeName)
 
 				continue
@@ -336,7 +337,7 @@ func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runti
 	for secretName := range secretsToDelete {
 		if err := s.rt.DeleteSecret(ctx, secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed
-			if catalogutils.IsNotFoundError(err) {
+			if utils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Secret %s already deleted or does not exist", secretName)
 
 				continue

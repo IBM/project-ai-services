@@ -1,13 +1,12 @@
 package worker
 
 import (
-	"context"
-
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
+	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
 
 // Flag variables for the worker uninstall command.
@@ -40,8 +39,8 @@ Application pods deployed on this worker by the catalog are not touched.`,
 
 			return cmdcommon.InitAndValidateRuntimeFlag(uninstallRuntimeType)
 		},
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return workeruninstall.Uninstall(context.Background(), workeruninstall.Options{
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return workeruninstall.Uninstall(cmd.Context(), workerutils.UninstallOptions{
 				RuntimeType: vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes:     uninstallAutoYes,
 			})

@@ -1,5 +1,12 @@
-from re import I
+from __future__ import annotations
+
+import threading
+from typing import Dict
+
+import spacy
 from lingua import Language, LanguageDetectorBuilder
+from sentence_splitter import SentenceSplitter
+from spacy.language import Language as SpacyLanguage
 
 from common.misc_utils import get_logger
 from common.settings import settings
@@ -8,24 +15,27 @@ logger = get_logger("LANG")
 
 _language_detector = None
 
-# Language codes class
+# ---------------------------------------------------------------------------
+# Language codes
+# ---------------------------------------------------------------------------
+
 class LanguageCodes:
     """Language codes as class attributes for easy access without dictionary keys.
-    
-    Provides both uppercase ISO codes (for LLM APIs) and lowercase codes (for sentence splitter).
+
+    Provides both uppercase ISO codes (for LLM APIs) and lowercase codes (for
+    sentence splitting).
     """
     ENGLISH = "EN"
     GERMAN = "DE"
     ITALIAN = "IT"
     FRENCH = "FR"
-    
-    # Mapping from uppercase ISO codes to SentenceSplitter language codes
-    # Using class variables to avoid duplication
+
+    # Mapping from uppercase ISO codes to ISO-639-1 lowercase splitter codes
     _TO_SENTENCE_SPLITTER = {
         ENGLISH: "en",
         GERMAN: "de",
         ITALIAN: "it",
-        FRENCH: "fr"
+        FRENCH: "fr",
     }
 
     _SUPPORTED: frozenset = frozenset({"EN", "DE", "IT", "FR"})
@@ -33,23 +43,95 @@ class LanguageCodes:
     @classmethod
     def supported_languages(cls) -> frozenset:
         """Get set of supported language codes.
-        
+
         Returns:
             frozenset of supported language codes (e.g., {'EN', 'DE', 'IT', 'FR'})
         """
         return cls._SUPPORTED
-    
+
+
 def to_sentence_splitter_lang(lingua_code: str) -> str:
-    """
-    Convert lingua ISO code to SentenceSplitter language code.
-    
+    """Convert a lingua ISO code to a lowercase sentence-splitter language code.
+
     Args:
         lingua_code: Lingua ISO code (e.g., 'EN', 'DE', 'IT', 'FR')
-        
+
     Returns:
-        SentenceSplitter language code (e.g., 'en', 'de', 'it', 'fr')
+        Lowercase ISO-639-1 language code (e.g., 'en', 'de', 'it', 'fr').
+        Falls back to 'en' for unrecognised codes.
     """
-    return LanguageCodes._TO_SENTENCE_SPLITTER.get(lingua_code, 'en')
+    return LanguageCodes._TO_SENTENCE_SPLITTER.get(lingua_code, "en")
+
+
+# ---------------------------------------------------------------------------
+# Sentence splitting
+#
+# Routing:
+#   "ja" → spaCy ja_core_news_sm  (requires sudachipy + sudachidict-core)
+#   all others → sentence-splitter (rule-based, falls back to "en")
+# ---------------------------------------------------------------------------
+
+_JA_MODEL = "ja_core_news_sm"
+_JA_LANG = "ja"
+
+_spacy_cache: Dict[str, SpacyLanguage] = {}
+_spacy_cache_lock = threading.Lock()
+
+
+def _load_ja_model() -> SpacyLanguage:
+    """Load and cache the Japanese spaCy model."""
+    with _spacy_cache_lock:
+        if _JA_LANG not in _spacy_cache:
+            logger.debug(f"Loading spaCy model '{_JA_MODEL}' for language 'ja'")
+            nlp = spacy.load(_JA_MODEL, exclude=["ner", "lemmatizer", "morphologizer"])
+            if "sentencizer" not in nlp.pipe_names and "senter" not in nlp.pipe_names and "parser" not in nlp.pipe_names:
+                nlp.add_pipe("sentencizer")
+            _spacy_cache[_JA_LANG] = nlp
+        return _spacy_cache[_JA_LANG]
+
+
+_SENTENCE_SPLITTER_LANGS = {"en", "de", "it", "fr"}
+_DEFAULT_SPLIT_LANG = "en"
+
+_splitter_cache: Dict[str, SentenceSplitter] = {}
+_splitter_cache_lock = threading.Lock()
+
+
+def _get_splitter(lang: str) -> SentenceSplitter:
+    """Return a cached SentenceSplitter instance for *lang*."""
+    resolved = lang if lang in _SENTENCE_SPLITTER_LANGS else _DEFAULT_SPLIT_LANG
+    with _splitter_cache_lock:
+        if resolved not in _splitter_cache:
+            logger.debug(f"Creating SentenceSplitter for language '{resolved}'")
+            _splitter_cache[resolved] = SentenceSplitter(language=resolved)
+        return _splitter_cache[resolved]
+
+
+def split_sentences(text: str, lang: str = _DEFAULT_SPLIT_LANG) -> list[str]:
+    """Split *text* into a list of sentence strings.
+
+    Uses spaCy for Japanese (``"ja"``); uses ``sentence-splitter`` for all
+    other languages, falling back to ``"en"`` for unrecognised codes.
+
+    Args:
+        text: Input text to split.
+        lang: Lowercase ISO-639-1 language code (e.g. ``"en"``, ``"ja"``).
+              Defaults to ``"en"``.
+
+    Returns:
+        List of non-empty sentence strings in document order.
+    """
+    if not text or not text.strip():
+        return []
+
+    if lang == _JA_LANG:
+        nlp = _load_ja_model()
+        doc = nlp(text)
+        return [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+
+    splitter = _get_splitter(lang)
+    return [s.strip() for s in splitter.split(text) if s.strip()]
+
 
 def get_prompt_for_language(lang: str, prompts: dict[str, str]) -> str:
     """

@@ -19,6 +19,7 @@ import (
 	apiModels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -26,6 +27,7 @@ import (
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
@@ -546,46 +548,66 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
+	// Fetch pod/container status for vars_file.yaml-driven status population
+	appPS, err := appClient.GetApplicationPS(ctx, app.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get application pods for next steps: %w", err)
+	}
+
+	rt := vars.RuntimeFactory.GetRuntimeType()
+
+	// InstanceSlug is derived from the application UUID — same as at deploy time
+	instanceSlug := catalogUtils.GenerateInstanceSlug(app.ID)
+
 	logger.Infoln("\nNext Steps:")
 	logger.Infoln("-------")
 
 	for _, service := range application.Services {
-		params := map[string]string{}
-		params["SERVICE_NAME"] = service.Type
-
-		// Add endpoint URLs to params
-		for _, endpoint := range service.Endpoints {
-			urlType, urlTypeOk := endpoint["type"].(string)
-			url, urlOk := endpoint["url"].(string)
-			if urlTypeOk && urlOk {
-				params[strings.ToUpper(urlType)+"_URL"] = url
-			}
-		}
-
-		rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, runtimeType)
-		if err != nil {
-			logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
-
-			continue
-		}
-
-		tmpls, err := parseStepsTemplates(rawFiles)
-		if err != nil {
-			logger.Warningf("Failed to parse next steps templates for service '%s': %v\n", service.CatalogID, err)
-
-			continue
-		}
-
-		err = printNextStepsMD(tmpls, params)
-		if err != nil {
-			logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
-		}
+		printServiceNextSteps(ctx, appClient, appPS, service, instanceSlug, rt)
 	}
 
 	// Print the info command regardless of whether any service has next.md
 	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", application.Name, runtimeType)
 
 	return nil
+}
+
+// printServiceNextSteps renders and prints the next.md template for a single service.
+func printServiceNextSteps(ctx context.Context, appClient *catalogClient.ApplicationClient, appPS *catalogTypes.ApplicationPSResponse, service catalogTypes.ApplicationService, instanceSlug string, rt runtimeTypes.RuntimeType) {
+	params := map[string]string{}
+	params["SERVICE_NAME"] = service.Type
+
+	// Populate endpoint URLs from the service endpoints stored in the DB
+	for _, endpoint := range service.Endpoints {
+		urlType, urlTypeOk := endpoint["type"].(string)
+		url, urlOk := endpoint["url"].(string)
+		if urlTypeOk && urlOk {
+			params[strings.ToUpper(urlType)+"_URL"] = url
+		}
+	}
+
+	rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, runtimeType)
+	if err != nil {
+		logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
+
+		return
+	}
+
+	// Populate status params generically from vars_file.yaml
+	if err := populateStatusFromVarsFile(rawFiles, params, appPS.Services, instanceSlug, rt); err != nil {
+		logger.WarningfCtx(ctx, "failed to populate status for '%s': %v\n", service.CatalogID, err)
+	}
+
+	tmpls, err := parseStepsTemplates(rawFiles)
+	if err != nil {
+		logger.Warningf("Failed to parse next steps templates for service '%s': %v\n", service.CatalogID, err)
+
+		return
+	}
+
+	if err = printNextStepsMD(tmpls, params); err != nil {
+		logger.Warningf("Failed to render next steps for service '%s': %v\n", service.CatalogID, err)
+	}
 }
 
 // printNextStepsMD renders and prints the next.md template for a service.

@@ -2609,7 +2609,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns all registered workers and their current status from the database.",
+                "description": "Returns all registered workers, their current status, human-readable message, and connected application IDs.",
                 "produces": [
                     "application/json"
                 ],
@@ -2689,6 +2689,59 @@ const docTemplate = `{
             }
         },
         "/workers/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the worker with the given ID, including its status message and connected application IDs.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workers"
+                ],
+                "summary": "Get a single worker",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Worker ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Worker details",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid worker ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Worker not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -3369,6 +3422,9 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
+                },
+                "worker": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker"
                 }
             }
         },
@@ -3493,6 +3549,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "runtime_type": {
                     "type": "string"
                 }
             }
@@ -3976,10 +4046,19 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker": {
             "type": "object",
             "properties": {
+                "application_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "id": {
                     "type": "string"
                 },
                 "last_heartbeat": {
+                    "type": "string"
+                },
+                "message": {
                     "type": "string"
                 },
                 "metadata": {

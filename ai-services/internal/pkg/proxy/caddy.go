@@ -49,9 +49,9 @@ func NewCaddyManager(adminURL, serverName string) ProxyManager {
 
 // GetCaddyProxyManager retrieves the Caddy admin URL from environment and creates a ProxyManager.
 func GetCaddyProxyManager() (ProxyManager, error) {
-	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
+	adminURL := utils.GetEnv(CaddyAdminURLEnvVar, "")
 	if adminURL == "" {
-		return nil, fmt.Errorf("CADDY_ADMIN_URL environment variable not set")
+		return nil, fmt.Errorf("%s environment variable not set", CaddyAdminURLEnvVar)
 	}
 
 	return NewCaddyManager(adminURL, constants.CaddyServerName), nil
@@ -76,14 +76,36 @@ func (c *caddyManager) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
+// RegisterRoute registers a route with Caddy and returns its external URL.
+// DOMAIN_SUFFIX and CADDY_HTTPS_PORT are read from the local environment —
+// the same machine that is running this Caddy instance — so the domain and
+// URL are always correct regardless of whether this is the catalog or a
+// remote worker. Route.Domain carries the subdomain; the full hostname is
+// built as "<route.Domain>.<DOMAIN_SUFFIX>".
+func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, error) {
 	if route.ID == "" {
-		return fmt.Errorf("cannot register route: route ID is empty")
+		return "", fmt.Errorf("cannot register route: route ID is empty")
+	}
+
+	if route.Domain == "" {
+		return "", fmt.Errorf("cannot register route %s: domain/subdomain is empty", route.ID)
+	}
+
+	domainSuffix := utils.GetEnv(DomainSuffixEnvVar, "")
+	if domainSuffix == "" {
+		return "", fmt.Errorf("cannot register route %s: %s environment variable not set", route.ID, DomainSuffixEnvVar)
+	}
+
+	domain := route.Domain + "." + domainSuffix
+
+	// Verify Caddy is reachable before attempting registration.
+	if err := c.HealthCheck(ctx); err != nil {
+		return "", fmt.Errorf("caddy health check failed: %w", err)
 	}
 
 	routeConfig := map[string]any{
 		"@id":   route.ID,
-		"match": []map[string]any{{"host": []string{route.Domain}}},
+		"match": []map[string]any{{"host": []string{domain}}},
 		"handle": []map[string]any{{
 			"handler":   "reverse_proxy",
 			"upstreams": []map[string]any{{"dial": route.Upstream}},
@@ -93,24 +115,27 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) error {
 
 	idURL, err := url.JoinPath(c.adminURL, "id", route.ID)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Check if route already exists
 	checkResp, err := c.httpClient.R().SetContext(ctx).Get(idURL)
 	if err != nil {
-		return fmt.Errorf("failed to check route existence: %w", err)
+		return "", fmt.Errorf("failed to check route existence: %w", err)
 	}
 
 	if checkResp.StatusCode() == http.StatusOK {
 		// Route already exists, skip registration
 		logger.DebugfCtx(ctx, "Route %s already exists, skipping registration\n", route.ID)
-
-		return nil
+	} else {
+		if err := c.createRoute(ctx, routeConfig); err != nil {
+			return "", err
+		}
 	}
 
-	// Route doesn't exist, create it
-	return c.createRoute(ctx, routeConfig)
+	httpsPort := utils.GetEnv(CaddyHTTPSPortEnvVar, DefaultHTTPSPort)
+
+	return buildExternalURL(domain, httpsPort), nil
 }
 
 // Helper to append a new route to the server's route array.
@@ -190,9 +215,12 @@ func (c *caddyManager) GetRouteByID(ctx context.Context, routeID string) (*Route
 		return nil, fmt.Errorf("failed to extract domain from route %s: %w", routeID, err)
 	}
 
+	httpsPort := utils.GetEnv(CaddyHTTPSPortEnvVar, DefaultHTTPSPort)
+
 	return &Route{
-		ID:     routeID,
-		Domain: domain,
+		ID:          routeID,
+		Domain:      domain,
+		ExternalURL: buildExternalURL(domain, httpsPort),
 	}, nil
 }
 
@@ -224,47 +252,37 @@ func (c *caddyManager) UnregisterRoute(ctx context.Context, routeID string) erro
 	}
 }
 
-// RegisterRoutesForAppAndReturn registers routes for an application with Caddy proxy and returns the built routes.
-//
-// Parameters:
-//   - rt: Runtime interface for interacting with pods
-//   - appName: Name of the application (e.g., "ai-services" for catalog)
-//   - proxyManager: ProxyManager instance for route operations (reuse to avoid creating multiple instances)
-//   - routesAnnotation: Routes annotation value in format "port:subdomain,port:subdomain,..."
-//   - domainSuffix: Pre-computed domain suffix (e.g., "example.com" or "192.168.1.100.nip.io")
-//   - servicePodName: Name of the service pod for upstream configuration
-//
-// Returns:
-//   - []Route: List of successfully built and registered routes
-//   - error: nil if routes were registered successfully, error otherwise
+// RegisterRoutesForAppAndReturn registers routes for an application with Caddy
+// proxy and returns the built routes.
+// RegisterRoute reads DOMAIN_SUFFIX and CADDY_HTTPS_PORT from the process
+// environment to build the external URL — set by the pod template (in-pod) or
+// by RegisterCatalogRoutes before calling this function (configure-CLI).
 func RegisterRoutesForAppAndReturn(
 	ctx context.Context,
 	appName string,
 	proxyManager ProxyManager,
 	routesAnnotation string,
-	domainSuffix string,
 	servicePodName string,
 ) ([]Route, error) {
-	// Step 1: Perform health check on Caddy
-	if err := proxyManager.HealthCheck(ctx); err != nil {
-		return nil, fmt.Errorf(
-			"caddy health check failed, routes not registered: %w",
-			err,
-		)
-	}
-
-	// Step 2: Build routes from the annotation string using service pod name for upstreams
-	routes, err := BuildRoutesFromAnnotation(routesAnnotation, domainSuffix, servicePodName)
+	routes, err := BuildRoutesFromAnnotation(routesAnnotation, servicePodName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build routes: %w", err)
 	}
 
-	// Step 3: Register each route with Caddy
+	// Register each route with Caddy.
+	// RegisterRoute returns the fully-qualified ExternalURL, reading
+	// CADDY_HTTPS_PORT from the process env (set by the pod template,
+	// or temporarily set by RegisterCatalogRoutes).
 	var registrationErrors []error
-	for _, route := range routes {
-		if err := proxyManager.RegisterRoute(ctx, route); err != nil {
-			registrationErrors = append(registrationErrors, fmt.Errorf("route %s: %w", route.ID, err))
+	for i := range routes {
+		externalURL, err := proxyManager.RegisterRoute(ctx, routes[i])
+		if err != nil {
+			registrationErrors = append(registrationErrors, fmt.Errorf("route %s: %w", routes[i].ID, err))
+
+			continue
 		}
+
+		routes[i].ExternalURL = externalURL
 	}
 
 	// Return error if any routes failed to register
@@ -368,6 +386,16 @@ func unregisterRoutes(ctx context.Context, proxyManager ProxyManager, routeIDs m
 	}
 
 	return nil
+}
+
+// buildExternalURL constructs the HTTPS URL for a route domain and port.
+// Port is omitted when it equals the default HTTPS port (443).
+func buildExternalURL(domain, httpsPort string) string {
+	if httpsPort == DefaultHTTPSPort {
+		return fmt.Sprintf("https://%s", domain)
+	}
+
+	return fmt.Sprintf("https://%s:%s", domain, httpsPort)
 }
 
 // Made with Bob

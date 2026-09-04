@@ -101,3 +101,10 @@ const (
 	Starting HealthStatus = "starting"
 	NotReady HealthStatus = "unhealthy"
 )
+
+const (
+	// PodmanAuthSecret represents podman auth secret name.
+	PodmanAuthSecret = "podman-auth-secret"
+	// VolumeLabel represents the volume name associated with Pod.
+	VolumeLabel = "ai-services.io/volume"
+)

@@ -12,12 +12,14 @@ type WorkerRuntimeType string
 // It uses plain strings for timestamps so the wire format is stable
 // regardless of DB model changes.
 type Worker struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	RuntimeType   WorkerRuntimeType `json:"runtime_type"`
-	Status        WorkerStatus      `json:"status"`
-	LastHeartbeat *time.Time        `json:"last_heartbeat,omitempty"`
-	Metadata      map[string]any    `json:"metadata,omitempty"`
-	RegisteredAt  string            `json:"registered_at"`
-	UpdatedAt     string            `json:"updated_at"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	RuntimeType    WorkerRuntimeType `json:"runtime_type"`
+	Status         WorkerStatus      `json:"status"`
+	Message        string            `json:"message,omitempty"`
+	LastHeartbeat  *time.Time        `json:"last_heartbeat,omitempty"`
+	Metadata       map[string]any    `json:"metadata,omitempty"`
+	ApplicationIDs []string          `json:"application_ids,omitempty"`
+	RegisteredAt   string            `json:"registered_at"`
+	UpdatedAt      string            `json:"updated_at"`
 }

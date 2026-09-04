@@ -7,7 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-secret"
-    ai-services.io/volume: "podman-auth-secret,catalog-secret,catalog-db-encryption-secret,catalog-bundles,catalog-caddy-cert-secret"
+    ai-services.io/volume: "podman-auth-secret,catalog-secret,catalog-db-encryption-secret,catalog-bundles,catalog-caddy-cert-secret,gateway-pki"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
     run.oci.keep_original_groups: "1"
@@ -153,6 +153,8 @@ spec:
           readOnly: true
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
+        - name: gateway-pki
+          mountPath: /var/lib/ai-services/gateway-pki
         - name: catalog-secret
           mountPath: /etc/secret/catalog-secret
           readOnly: true
@@ -200,3 +202,6 @@ spec:
     - name: catalog-bundles
       persistentVolumeClaim:
         claimName: catalog-bundles
+    - name: gateway-pki
+      persistentVolumeClaim:
+        claimName: gateway-pki

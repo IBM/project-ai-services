@@ -32,14 +32,6 @@ import (
 )
 
 const (
-	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod deployed by
-	// Setup. Exported so join.go can look up the pod's admin port after setup.
-	WorkerCaddyPodName = "ai-services--caddy"
-
-	// workerApp is the app name passed to the template provider.
-	// Resolves to assets/worker/<runtime>/templates/.
-	workerApp = "worker"
-
 	caddyfileSubDir = "worker/caddy"
 	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
 
@@ -130,7 +122,7 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 
 	logger.InfofCtx(ctx, "List of existing resources: %v", existingResources)
 
-	tmpls, err := tp.LoadAllTemplates(workerApp)
+	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
 		return false, nil, fmt.Errorf("worker setup: load templates: %w", err)
 	}
@@ -168,13 +160,18 @@ func writeCaddyfile(baseDir string) error {
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
 func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string) error {
 	var appMetadata templates.AppMetadata
-	if err := tp.LoadMetadata(workerApp, true, &appMetadata); err != nil {
+	if err := tp.LoadMetadata(workerconstants.WorkerAppTemplate, true, &appMetadata); err != nil {
 		return fmt.Errorf("worker setup: load metadata: %w", err)
 	}
 
-	tmpls, err := tp.LoadAllTemplates(workerApp)
+	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
 		return fmt.Errorf("worker setup: load templates: %w", err)
+	}
+
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
+		return fmt.Errorf("worker setup: compute domain suffix: %w", err)
 	}
 
 	argParams, err := buildArgParams(opts)
@@ -182,7 +179,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 		return err
 	}
 
-	values, err := tp.LoadValues(workerApp, nil, argParams)
+	values, err := tp.LoadValues(workerconstants.WorkerAppTemplate, nil, argParams)
 	if err != nil {
 		return fmt.Errorf("worker setup: load values: %w", err)
 	}
@@ -190,8 +187,10 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 	params := map[string]any{
 		"BaseDir":         opts.Setup.BaseDir,
 		"AppName":         workerconstants.WorkerAppName,
-		"AppTemplateName": workerApp,
+		"AppTemplateName": workerconstants.WorkerAppTemplate,
 		"Version":         appMetadata.Version,
+		"CaddyAdminURL":   fmt.Sprintf("http://%s:2019", workerconstants.WorkerCaddyPodName),
+		"DomainSuffix":    domainSuffix,
 		"Values":          values,
 	}
 
@@ -222,12 +221,11 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 	}
 
 	return map[string]string{
-		workerconstants.ArgParamCaddyHTTPSPort:      strconv.Itoa(opts.Setup.HTTPSPort),
-		workerconstants.ArgParamWorkerToken:         opts.Token,
-		workerconstants.ArgParamWorkerGatewayAddr:   opts.GatewayAddr,
-		workerconstants.ArgParamWorkerOptionalFlags: getOptionalFlags(opts.Setup),
-		workerconstants.ArgParamWorkerPodmanURI:     strings.TrimPrefix(podmanURI, "unix://"),
-		workerconstants.ArgParamWorkerAuthFile:      authFileBase64,
+		workerconstants.ArgParamCaddyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
+		workerconstants.ArgParamWorkerToken:       opts.Token,
+		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
+		workerconstants.ArgParamWorkerPodmanURI:   strings.TrimPrefix(podmanURI, "unix://"),
+		workerconstants.ArgParamWorkerAuthFile:    authFileBase64,
 	}, nil
 }
 
@@ -286,25 +284,4 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)
-}
-
-// getOptionalFlags builds the optional CLI flags string that is forwarded from
-// the 'worker join' command to the 'worker grpcstream' command running inside
-// the container.
-func getOptionalFlags(opts workertypes.Options) string {
-	var flags string
-	if opts.BaseDir != "" {
-		flags += fmt.Sprintf("--basedir '%s' ", opts.BaseDir)
-	}
-	if opts.SSLCertPath != "" && opts.SSLKeyPath != "" {
-		flags += fmt.Sprintf("--ssl-cert '%s' --ssl-key '%s' ", opts.SSLCertPath, opts.SSLKeyPath)
-	}
-	if opts.DomainName != "" {
-		flags += fmt.Sprintf("--domain-name %s ", opts.DomainName)
-	}
-	if opts.HTTPSPort > 0 {
-		flags += fmt.Sprintf("--https-port %d", opts.HTTPSPort)
-	}
-
-	return flags
 }
