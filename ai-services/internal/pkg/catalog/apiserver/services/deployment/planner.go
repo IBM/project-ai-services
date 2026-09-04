@@ -144,8 +144,9 @@ func (p *DeploymentPlanner) PlanDeployment(
 		}
 	}
 
-	// Calculate and allocate Spyre cards after all components are planned. Only needed for Podman.
-	if runtimeType == runtimeTypes.RuntimeTypePodman.String() {
+	// Calculate and allocate Spyre cards only for local Podman deployments.
+	// Remote-worker deployments must not probe local /dev/vfio on the API server.
+	if runtimeType == runtimeTypes.RuntimeTypePodman.String() && isLocalWorkerName(workerName) {
 		if err := p.calculateAndAllocateSpyreCards(ctx, plan); err != nil {
 			return nil, fmt.Errorf("failed to allocate Spyre cards: %w", err)
 		}

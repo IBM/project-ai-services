@@ -39,6 +39,9 @@ const (
 	// BaseDirEnvVar is injected into the Caddy container at deploy time; read back by uninstall.
 	BaseDirEnvVar = "AI_SERVICES_BASE_DIR"
 
+	// Worker metadata keys sent during Register and stored in worker.metadata JSON.
+	MetaKeyBaseDir = "baseDir"
+
 	// ArgParamCaddyHTTPSPort, ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
 	// ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile are template
 	// value-override keys used when deploying worker pods.
