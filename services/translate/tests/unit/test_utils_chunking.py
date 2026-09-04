@@ -4,7 +4,7 @@ Unit tests for translate/utils/chunking.py — token-based document chunker.
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from translate.models import TranslationChunk
 from translate.utils.chunking import (
@@ -209,10 +209,13 @@ class TestBuildTranslationChunks:
         async def fake_count(text, endpoint):
             return token_map.get(text, 5)
 
+        mock_splitter = MagicMock()
+        mock_splitter.split.return_value = ["Oversized block text."]
+
         with patch("translate.utils.chunking.get_chunk_token_budget", return_value=100), \
              patch("translate.utils.chunking.to_sentence_splitter_lang", return_value="en"), \
              patch("translate.utils.chunking._count_tokens", side_effect=fake_count), \
-             patch("translate.utils.chunking.split_sentences", return_value=["Oversized block text."]), \
+             patch("translate.utils.chunking.SentenceSplitter", return_value=mock_splitter), \
              patch("translate.utils.chunking._pack_sentences_greedily",
                    new=AsyncMock(return_value=[
                        TranslationChunk(index=1, text="Oversized block text.", token_count=200)
@@ -235,7 +238,8 @@ class TestBuildTranslationChunks:
 
         with patch("translate.utils.chunking.get_chunk_token_budget", return_value=100), \
              patch("translate.utils.chunking.to_sentence_splitter_lang", return_value="en"), \
-             patch("translate.utils.chunking._count_tokens", side_effect=fake_count):
+             patch("translate.utils.chunking._count_tokens", side_effect=fake_count), \
+             patch("translate.utils.chunking.SentenceSplitter") as mock_ss:
             chunks = await build_translation_chunks(text, llm_endpoint="http://vllm:8000")
 
         # Table chunk should be present and NOT sentence-split
@@ -250,7 +254,8 @@ class TestBuildTranslationChunks:
         with patch("translate.utils.chunking.get_chunk_token_budget", return_value=20), \
              patch("translate.utils.chunking.to_sentence_splitter_lang", return_value="en"), \
              patch("translate.utils.chunking._count_tokens", new=AsyncMock(return_value=8)), \
-             patch("translate.utils.chunking.split_sentences", return_value=["A sentence."]):
+             patch("translate.utils.chunking.SentenceSplitter") as mock_ss:
+            mock_ss.return_value.split.return_value = ["A sentence."]
             chunks = await build_translation_chunks(text, llm_endpoint="http://vllm:8000")
 
         indices = [c.index for c in chunks]
@@ -262,7 +267,10 @@ class TestBuildTranslationChunks:
 
         with patch("translate.utils.chunking.get_chunk_token_budget", return_value=1000), \
              patch("translate.utils.chunking.to_sentence_splitter_lang", return_value="de") as mock_lang, \
-             patch("translate.utils.chunking._count_tokens", new=AsyncMock(return_value=5)):
+             patch("translate.utils.chunking._count_tokens", new=AsyncMock(return_value=5)), \
+             patch("translate.utils.chunking.SentenceSplitter") as mock_ss_cls:
+            mock_ss_cls.return_value = MagicMock()
+            mock_ss_cls.return_value.split.return_value = [text]
 
             await build_translation_chunks(
                 text, llm_endpoint="http://vllm:8000", source_language_code="DE"
@@ -276,7 +284,9 @@ class TestBuildTranslationChunks:
 
         with patch("translate.utils.chunking.get_chunk_token_budget", return_value=1000), \
              patch("translate.utils.chunking.to_sentence_splitter_lang", return_value="en") as mock_lang, \
-             patch("translate.utils.chunking._count_tokens", new=AsyncMock(return_value=5)):
+             patch("translate.utils.chunking._count_tokens", new=AsyncMock(return_value=5)), \
+             patch("translate.utils.chunking.SentenceSplitter") as mock_ss_cls:
+            mock_ss_cls.return_value = MagicMock()
 
             await build_translation_chunks(text, llm_endpoint="http://vllm:8000", source_language_code=None)
 

@@ -7,12 +7,16 @@ for processing large documents that exceed the context window.
 
 import re
 from typing import List, Tuple
+from sentence_splitter import SentenceSplitter
+
 from common.misc_utils import get_logger
-from common.lang_utils import split_sentences
 from summarize.settings import settings
 from summarize.summ_utils import word_count, MAX_INPUT_WORDS
 
 logger = get_logger("chunk_utils")
+
+# Initialize sentence splitter (supports multiple languages)
+sentence_splitter = SentenceSplitter(language='en')
 
 
 def split_text_into_chunks(
@@ -140,7 +144,7 @@ def _split_paragraph_into_chunks(
         List of sentence-based chunks
     """
     # Split into sentences
-    sentences = split_sentences(paragraph)
+    sentences = sentence_splitter.split(paragraph)
     sentences = [s.strip() for s in sentences if s.strip()]
     
     if not sentences:
@@ -203,7 +207,7 @@ def _extract_last_sentences(text: str, n: int) -> List[str]:
     if n <= 0:
         return []
     
-    sentences = split_sentences(text)
+    sentences = sentence_splitter.split(text)
     sentences = [s.strip() for s in sentences if s.strip()]
     
     return sentences[-n:] if len(sentences) >= n else sentences
