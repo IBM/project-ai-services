@@ -1,3 +1,9 @@
+// runtime mapping for the workers table
+export const RUNTIME_TYPE_LABELS: Record<string, string> = {
+  podman: "RHAIIS",
+  openshift: "RHOAI",
+};
+
 export const COMPONENT_TYPES = {
   LLM: "llm",
   RERANKER: "reranker",
