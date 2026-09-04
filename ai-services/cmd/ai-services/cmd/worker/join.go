@@ -245,6 +245,11 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		},
 	}
 
+	err := join.StartGrpcStream(ctx, rt, pr, opts)
+	if err != nil {
+		return fmt.Errorf("failed to start grpc stream: %w", err)
+	}
+
 	return join.StartGrpcStream(ctx, rt, pr, opts)
 }
 
