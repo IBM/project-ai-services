@@ -329,7 +329,7 @@ async def create_extract_job(
                 f"File at index {idx} ({filename!r}) has extension: {raw_ext}",
             )
         source_type = (ext or "").lstrip(".")
-        validated.append((filename, source_type))
+        validated.append((file.filename, source_type))
 
     # Duplicate filename check
     filenames_seen: set[str] = set()
