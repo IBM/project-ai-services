@@ -11,6 +11,7 @@ export function transformWorkerToRow(
     name: worker.name,
     status: worker.status,
     runtime_type: worker.runtime_type,
+    services: worker.application_ids?.length ?? 0,
     messages: worker.message ?? "",
     actions: "actions",
   };
