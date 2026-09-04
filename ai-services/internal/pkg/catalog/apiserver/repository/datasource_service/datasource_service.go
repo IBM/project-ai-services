@@ -137,7 +137,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}
 
-	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFieldsFromSchema(schema), s.encryptionKey)
+	encryptedParams, err := encryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -201,7 +201,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
 	}
 
-	sensitiveFields := sensitiveFieldsFromSchema(schema)
+	sensitiveFields := catalogutils.SensitiveFieldsFromSchema(schema)
 
 	// Steps 3–4: fetch linked applications and enrich each with live Digitize sync state.
 	applications, err := s.buildConnectedApplications(ctx, id)
@@ -600,7 +600,7 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
 	}
 
-	return catalogutils.DecryptSensitiveFields(connector.Metadata, sensitiveFieldsFromSchema(schema), s.encryptionKey)
+	return catalogutils.DecryptSensitiveFields(connector.Metadata, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
 }
 
 // sendToService POSTs the connector payload to a single eligible service and records the
@@ -692,8 +692,8 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", existing.Provider, err)
 	}
 
-	updatable := updatableFieldsFromSchema(schema)
-	sensitive := sensitiveFieldsFromSchema(schema)
+	updatable := catalogutils.UpdatableFieldsFromSchema(schema)
+	sensitive := catalogutils.SensitiveFieldsFromSchema(schema)
 
 	// Phase 3: look up the ConnectionTester for this provider.
 	tester, ok := s.testers[existing.Provider]

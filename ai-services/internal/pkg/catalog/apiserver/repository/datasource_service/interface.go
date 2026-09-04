@@ -42,44 +42,4 @@ type ConnectionTester interface {
 	TestConnection(ctx context.Context, params map[string]any) error
 }
 
-// sensitiveFieldsFromSchema inspects the top-level properties of a JSON Schema map and
-// returns the set of property names whose "format" is "password". This allows the set of
-// fields that require encryption to be driven by the connector's schema.json rather than
-// being hardcoded in each provider implementation.
-func sensitiveFieldsFromSchema(schema map[string]any) map[string]bool {
-	return schemaFieldsBySection(schema, "format", "password")
-}
-
-// updatableFieldsFromSchema inspects the top-level properties of a JSON Schema map and
-// returns the set of property names whose "ui:section" is "Authentication". These are the
-// only fields that may be changed after a datasource is created; structural fields
-// (Location, File filters, etc.) are immutable.
-func updatableFieldsFromSchema(schema map[string]any) map[string]bool {
-	return schemaFieldsBySection(schema, "ui:section", "Authentication")
-}
-
-// schemaFieldsBySection returns the set of top-level property names from a JSON Schema
-// where the given key equals the given value. Used to derive both sensitive fields
-// (format=password) and updatable fields (ui:section=Authentication) from the schema.
-func schemaFieldsBySection(schema map[string]any, key, value string) map[string]bool {
-	result := make(map[string]bool)
-
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return result
-	}
-
-	for name, raw := range properties {
-		prop, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if v, ok := prop[key].(string); ok && v == value {
-			result[name] = true
-		}
-	}
-
-	return result
-}
-
 // Made with Bob
