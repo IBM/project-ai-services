@@ -184,13 +184,12 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 
 // validateConfigureFlags validates the configure command flags.
 func validateConfigureFlags() error {
-	// Validate workergateway-port is a valid port number (applies to all runtimes)
-	if workerGatewayPort < 1 || workerGatewayPort > 65535 {
-		return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
-	}
-
-	// Validate SSL flags (Podman only)
+	// Podman-only validations
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
+			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
+		}
+
 		if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
 			return err
 		}
