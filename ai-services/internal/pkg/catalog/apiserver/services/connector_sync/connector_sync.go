@@ -44,8 +44,8 @@ type ConnectorSyncJob struct {
 	sensitiveFields map[string]map[string]bool // provider → sensitive field set; pre-computed at construction
 	encryptionKey   string
 	syncInterval    time.Duration
-	stopChan  chan struct{}
-	syncMutex sync.Mutex // held for the duration of a sync cycle; TryLock skips overlapping cycles
+	stopChan        chan struct{}
+	syncMutex       sync.Mutex // held for the duration of a sync cycle; TryLock skips overlapping cycles
 }
 
 // NewConnectorSyncJob creates a new ConnectorSyncJob.
