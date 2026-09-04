@@ -108,3 +108,10 @@ const (
 	// VolumeLabel represents the volume name associated with Pod.
 	VolumeLabel = "ai-services.io/volume"
 )
+
+const (
+	ArgParamCaddyHTTPSPort     = "caddy.httpsPort"
+	ArgParamCaddyFileContent   = "caddy.caddyFileContent"
+	ArgParamSSLCertFileContent = "caddy.sslCertContent"
+	ArgParamSSLKeyFileContent  = "caddy.sslKeyContent"
+)

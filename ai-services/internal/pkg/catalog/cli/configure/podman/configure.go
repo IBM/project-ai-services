@@ -13,14 +13,10 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-)
-
-const (
-	caddyFileIndent   = 10
-	certContentIndent = 4
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
@@ -216,11 +212,11 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 	argParams[configure.ArgParamPodmanAuthFileContent] = authFileBase64
 	argParams[configure.ArgParamPodmanURI] = podmanSocketPath
 	argParams[configure.ArgParamDBPassword] = dbPassword
-	argParams[configure.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
+	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
-	argParams[configure.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, caddyFileIndent)
-	argParams[configure.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, certContentIndent)
-	argParams[configure.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, certContentIndent)
+	argParams[constants.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, utils.CaddyFileIndent)
+	argParams[constants.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, utils.CertContentIndent)
+	argParams[constants.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, utils.CertContentIndent)
 
 	return argParams, nil
 }
