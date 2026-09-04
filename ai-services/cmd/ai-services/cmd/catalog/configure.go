@@ -67,8 +67,11 @@ This command performs the following operations:
 Additional configuration options include base directory customization, domain name setup,
 SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
 Note: --workergateway-port is supported for podman runtime only (default 9090).`,
-	Example: `  # Configure catalog service for podman (worker gateway on default port 9090)
+	Example: `  # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
+
+	 # Configure catalog service for OpenShift
+	 ai-services catalog configure --runtime openshift
 
 	 # Configure with a custom worker gateway port (podman only)
 	 ai-services catalog configure --runtime podman --workergateway-port 9191
