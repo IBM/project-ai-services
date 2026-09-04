@@ -108,6 +108,10 @@ safetensors==0.7.0
 scipy==1.17.1
 semchunk==3.2.5
 sentence-splitter==1.4
+spacy==3.8.7
+# Japanese model only — requires sudachipy (built in prebuilder) + sudachidict-core
+https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl
+sudachidict-core==20260723
 sentry-sdk==2.55.0
 setuptools==81.0.0
 shapely==2.1.2
