@@ -54,9 +54,14 @@ type CatalogProvider struct {
 //
 // bundleRepo may be nil (CLI / test paths) — in that case only embedded items are loaded.
 func NewCatalogProvider(bundleRepo dbrepo.BundleRepository) (*CatalogProvider, error) {
+	var runtimeType runtimeTypes.RuntimeType
+	if vars.RuntimeFactory != nil {
+		runtimeType = vars.RuntimeFactory.GetRuntimeType()
+	}
+
 	p := &CatalogProvider{
 		bundleRepo:  bundleRepo,
-		runtimeType: vars.RuntimeFactory.GetRuntimeType(),
+		runtimeType: runtimeType,
 	}
 
 	items := make(map[string]*catalogItem)
