@@ -658,12 +658,14 @@ def check_extraction_budget(
             "total_required_tokens": total,
             "excess_tokens": total - max_model_len,
         }
+        msg = (
+            "Input does not fit in the model context window. "
+            "Reduce input size or use the async job path with a smaller document."
+        )
+        logger.error(f"{msg} (details={details})")
         raise ExtractException(413,
             "CONTEXT_LIMIT_EXCEEDED",
-            (
-                "Input does not fit in the model context window. "
-                "Reduce input size or use the async job path with a smaller document."
-            ),
+            msg,
             details=details,
         )
 

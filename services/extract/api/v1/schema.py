@@ -153,7 +153,7 @@ async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
         schema_id=row.schema_id,
         name=row.name,
         description=row.description,
-        created_at=fmt_dt(row.created_at),
+        created_at=fmt_dt(row.created_at) or "",
     )
 
 

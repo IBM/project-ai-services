@@ -27,17 +27,13 @@ CREATE TABLE IF NOT EXISTS extract_jobs (
     submitted_at        TIMESTAMP WITH TIME ZONE NOT NULL,
     completed_at        TIMESTAMP WITH TIME ZONE,
     error               TEXT,
-    document_name       VARCHAR(500) NOT NULL,
-    source_type         VARCHAR(10)  NOT NULL,
-    document_word_count INTEGER,
     digitize_job_id     VARCHAR(255),
     digitize_doc_id     VARCHAR(255),
     metadata            JSONB,
     updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    file_count          INTEGER NOT NULL DEFAULT 1,
     CONSTRAINT chk_extract_job_status
-        CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed')),
-    CONSTRAINT chk_extract_source_type
-        CHECK (source_type IN ('txt', 'md'))
+        CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_extract_jobs_submitted_at_status
@@ -45,6 +41,59 @@ CREATE INDEX IF NOT EXISTS idx_extract_jobs_submitted_at_status
 
 CREATE INDEX IF NOT EXISTS idx_extract_jobs_schema_id
     ON extract_jobs(schema_id);
+
+-- Batch columns migration (idempotent)
+ALTER TABLE extract_jobs ADD COLUMN IF NOT EXISTS file_count INTEGER NOT NULL DEFAULT 1;
+
+-- Update status constraint to include completed_with_errors (drop old, add new)
+ALTER TABLE extract_jobs DROP CONSTRAINT IF EXISTS chk_extract_job_status;
+ALTER TABLE extract_jobs ADD CONSTRAINT chk_extract_job_status CHECK (
+    status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')
+);
+
+-- Documents table
+CREATE TABLE IF NOT EXISTS extract_documents (
+    doc_id                VARCHAR(255) PRIMARY KEY,
+    job_id                VARCHAR(255) NOT NULL REFERENCES extract_jobs(job_id) ON DELETE CASCADE,
+    filename              VARCHAR(500) NOT NULL,
+    source_type           VARCHAR(10)  NOT NULL,
+    status                VARCHAR(50)  NOT NULL DEFAULT 'pending',
+    error                 TEXT,
+    word_count            INTEGER,
+    input_tokens          INTEGER,
+    usage_input_tokens    INTEGER,
+    usage_output_tokens   INTEGER,
+    metadata              JSONB,
+    started_at            TIMESTAMP WITH TIME ZONE,
+    completed_at          TIMESTAMP WITH TIME ZONE,
+    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_doc_status      CHECK (status IN ('pending','in_progress','completed','failed')),
+    CONSTRAINT chk_doc_source_type CHECK (source_type IN ('txt','md'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_extract_documents_job_id
+    ON extract_documents(job_id);
+CREATE INDEX IF NOT EXISTS idx_extract_documents_job_status
+    ON extract_documents(job_id, status);
+
+-- updated_at auto-maintenance trigger for documents (reuses shared function name)
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE 'plpgsql';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_extract_documents_updated_at') THEN
+        CREATE TRIGGER update_extract_documents_updated_at BEFORE UPDATE ON extract_documents
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
 
 -- updated_at auto-maintenance trigger (jobs only — schemas are immutable after INSERT)
 CREATE OR REPLACE FUNCTION update_extract_jobs_updated_at_column()
@@ -81,6 +130,7 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'extract_user') THEN
         EXECUTE 'GRANT SELECT, INSERT, DELETE ON schemas      TO extract_user';
         EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON extract_jobs TO extract_user';
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON extract_documents TO extract_user';
     END IF;
 END
 $$;

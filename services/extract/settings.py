@@ -131,10 +131,24 @@ class ExtractionConfig(BaseSettings):
     )
 
     # Concurrency
-    max_concurrent_jobs: int = Field(
+    max_concurrent_requests: int = Field(
+        default=8,
+        ge=1,
+        description="Maximum number of async + sync extraction requests running in parallel",
+    )
+
+    # Batch submission
+    max_files_per_job: int = Field(
         default=32,
         ge=1,
-        description="Maximum number of async extraction jobs running in parallel",
+        description="Maximum number of files allowed in a single batch job submission",
+    )
+
+    # Maximum number of files processed in parallel within a single batch job
+    parallel_files_per_job: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum number of files processed concurrently within one batch job",
     )
 
     @property
