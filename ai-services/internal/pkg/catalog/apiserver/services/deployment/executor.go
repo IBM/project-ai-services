@@ -3,6 +3,7 @@ package deployment
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -14,6 +15,7 @@ import (
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -58,38 +60,36 @@ func (e *DeploymentExecutor) ExecuteWithPlan(
 	ctx context.Context,
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
-	runtimeType types.RuntimeType,
 ) error {
-	if err := e.executeDeployment(ctx, plan, req, runtimeType); err != nil {
+	if err := e.executeDeployment(ctx, plan, req); err != nil {
 		return fmt.Errorf("failed to execute deployment: %w", err)
 	}
 
 	return nil
 }
 
-// executeDeployment routes to the correct deployer based on plan.WorkerName.
-// WorkerName is always set by PlanDeployment.
+// executeDeployment routes to the correct deployer based on plan.WorkerName and
+// plan.RuntimeType, which are both set by PlanDeployment.
 func (e *DeploymentExecutor) executeDeployment(
 	ctx context.Context,
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
-	runtimeType types.RuntimeType,
 ) error {
 	// ── Remote worker deployment ──────────────────────────────────────────────
 	// TODO Remove the check when remote deployment is by default
 	// and the remaining code will be dead
-	if plan.WorkerName != "" {
+	if plan.WorkerName != "" && !strings.EqualFold(plan.WorkerName, workerconstants.LocalWorkerName) {
 		return e.executeWorkerDeployment(ctx, plan, req)
 	}
 
 	// ── Local deployment ──────────────────────────────────────────────────────
-	switch runtimeType {
+	switch types.RuntimeType(plan.RuntimeType) {
 	case types.RuntimeTypePodman:
 		return e.executePodmanDeployment(ctx, plan, req)
 	case types.RuntimeTypeOpenShift:
 		return e.executeOpenShiftDeployment(ctx, plan, req)
 	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
+		return fmt.Errorf("unsupported runtime type: %s", plan.RuntimeType)
 	}
 }
 
@@ -103,8 +103,14 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 	req apimodels.CreateApplicationRequest,
 ) error {
 	// Connectivity was already confirmed by ValidateWorker; just read the type.
-	rtStr, _ := e.workerRegistry.WorkerRuntimeType(plan.WorkerName)
+	rtStr, ok := e.workerRegistry.WorkerRuntimeType(plan.WorkerName)
+	if !ok || rtStr == "" {
+		return fmt.Errorf("worker %q runtime type not available", plan.WorkerName)
+	}
 	workerType := types.RuntimeType(rtStr)
+	if !workerType.Valid() {
+		return fmt.Errorf("worker %q has unsupported runtime type %q", plan.WorkerName, workerType)
+	}
 
 	// RemoteRuntime forwards every call over the gRPC CommandStream — the
 	// deployer does not need to know it is talking to a remote machine.

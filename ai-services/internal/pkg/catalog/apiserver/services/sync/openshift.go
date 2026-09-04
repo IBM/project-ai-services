@@ -23,15 +23,29 @@ import (
 const yamlDecoderBufSz = 4096
 
 // openShiftSync implements RuntimeSync for the OpenShift runtime.
-type openShiftSync struct{}
+type openShiftSync struct {
+	runtimeClient runtime.Runtime
+}
 
 func newOpenShiftSync() *openShiftSync {
-	return &openShiftSync{}
+	return &openShiftSync{runtimeClient: nil}
+}
+
+func (s *openShiftSync) WithRuntime(rt runtime.Runtime) (RuntimeSync, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("runtime client is nil")
+	}
+
+	return &openShiftSync{runtimeClient: rt}, nil
 }
 
 // FetchPodStatuses fetches all pods labelled with the given templateID using the OpenShift runtime.
-func (s *openShiftSync) FetchPodStatuses(ctx context.Context, rt runtime.Runtime, templateID string) ([]*PodStatus, error) {
-	filteredPods, err := common.FetchFilteredPods(ctx, rt, templateID)
+func (s *openShiftSync) FetchPodStatuses(ctx context.Context, templateID string) ([]*PodStatus, error) {
+	if s.runtimeClient == nil {
+		return nil, fmt.Errorf("runtime client not configured")
+	}
+
+	filteredPods, err := common.FetchFilteredPods(ctx, s.runtimeClient, templateID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pods: %w", err)
 	}
@@ -74,7 +88,11 @@ func derivePodHealth(containers []runtimetypes.Container) string {
 // 3. Extract the expected resources from that manifest.
 // 4. Validate that the deployed resources still exist in the runtime.
 // ValidateResources validates OpenShift resources using the deployed Helm release manifest.
-func (s *openShiftSync) ValidateResources(ctx context.Context, input ResourceValidationInput, rt runtime.Runtime) string {
+func (s *openShiftSync) ValidateResources(ctx context.Context, input ResourceValidationInput) string {
+	if s.runtimeClient == nil {
+		return "runtime client not configured"
+	}
+
 	// Use the deployed release manifest as the source of truth for expected resources.
 	manifest, err := s.getReleaseManifest(input.AppID, input.CatalogID, input.ItemType)
 	if err != nil {
@@ -99,7 +117,7 @@ func (s *openShiftSync) ValidateResources(ctx context.Context, input ResourceVal
 	}
 
 	// Reuse shared existence checks for secrets and PVC-backed volumes.
-	if resourceValidationMsg := validateResourceExistenceChecks(ctx, expectedCounts.SecretNames, expectedCounts.VolumeNames, rt); resourceValidationMsg != "" {
+	if resourceValidationMsg := validateResourceExistenceChecks(ctx, expectedCounts.SecretNames, expectedCounts.VolumeNames, s.runtimeClient); resourceValidationMsg != "" {
 		errorMessages = append(errorMessages, resourceValidationMsg)
 	}
 

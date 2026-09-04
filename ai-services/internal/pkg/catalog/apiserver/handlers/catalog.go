@@ -93,10 +93,16 @@ func (h *CatalogHandler) GetArchitectureDetails(c *gin.Context) {
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/services [get]
 func (h *CatalogHandler) ListServices(c *gin.Context) {
-	// Get runtime from global factory
-	runtime := vars.RuntimeFactory.GetRuntimeType()
+	provider, err := h.provider.WithRuntime(string(vars.RuntimeFactory.GetRuntimeType()))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to resolve runtime: %v", err),
+		})
 
-	servicesList, err := h.provider.ListServicesWithRuntime(runtime)
+		return
+	}
+
+	servicesList, err := provider.ListServicesWithRuntime()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to list services: %v", err),
@@ -167,7 +173,14 @@ func (h *CatalogHandler) GetArchitectureDeployOptions(c *gin.Context) {
 		return
 	}
 
-	deployOptions, err := h.provider.GetArchitectureDeployOptions(c.Request.Context(), architectureID, rt)
+	provider, err := h.provider.WithRuntime(rt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	deployOptions, err := provider.GetArchitectureDeployOptions(c.Request.Context(), architectureID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get deploy options for architecture '%s': %v", architectureID, err),
@@ -204,7 +217,14 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 		return
 	}
 
-	deployOptions, err := h.provider.GetServiceDeployOptions(c.Request.Context(), serviceID, rt)
+	provider, err := h.provider.WithRuntime(rt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	deployOptions, err := provider.GetServiceDeployOptions(c.Request.Context(), serviceID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get deploy options for service '%s': %v", serviceID, err),
@@ -243,7 +263,14 @@ func (h *CatalogHandler) GetComponentProviderParams(c *gin.Context) {
 		return
 	}
 
-	schema, err := h.provider.GetComponentProviderParams(c.Request.Context(), componentType, providerID, rt)
+	provider, err := h.provider.WithRuntime(rt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	schema, err := provider.GetComponentProviderParams(c.Request.Context(), componentType, providerID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for provider '%s/%s': %v", componentType, providerID, err),
@@ -348,7 +375,14 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 		return
 	}
 
-	schema, err := h.provider.GetServiceParams(c.Request.Context(), serviceID, rt)
+	provider, err := h.provider.WithRuntime(rt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	schema, err := provider.GetServiceParams(c.Request.Context(), serviceID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get parameters for service '%s': %v", serviceID, err),
@@ -550,7 +584,16 @@ func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
 		return
 	}
 
-	files, err := h.provider.GetServiceSteps(id, rt)
+	provider, err := h.provider.WithRuntime(rt.String())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: err.Error(),
+		})
+
+		return
+	}
+
+	files, err := provider.GetServiceSteps(id)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, catalog.ErrCatalogItemNotFound) {

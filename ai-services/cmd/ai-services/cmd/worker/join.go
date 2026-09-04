@@ -22,7 +22,10 @@ import (
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
-const defaultJoinHTTPSPort = 443
+const (
+	defaultJoinHTTPSPort = 443
+	hostAliasSplitParts  = 2
+)
 
 // Flag variables for the worker join command.
 var (
@@ -95,7 +98,7 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 
 // validateAddHost checks that an --add-host value has the form DOMAIN:IP.
 func validateAddHost(h string) error {
-	parts := strings.SplitN(h, ":", 2)
+	parts := strings.SplitN(h, ":", hostAliasSplitParts)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return fmt.Errorf("invalid --add-host value %q: expected DOMAIN:IP", h)
 	}
@@ -114,7 +117,7 @@ func parseAddHosts(raw []string) []workertypes.HostAlias {
 	order := make([]string, 0, len(raw))
 
 	for _, h := range raw {
-		parts := strings.SplitN(h, ":", 2)
+		parts := strings.SplitN(h, ":", hostAliasSplitParts)
 		domain, ip := parts[0], parts[1]
 
 		if _, seen := byIP[ip]; !seen {

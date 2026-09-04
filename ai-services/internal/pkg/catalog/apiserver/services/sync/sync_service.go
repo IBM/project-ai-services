@@ -54,6 +54,8 @@ type SyncService struct {
 	serviceRepo     dbrepo.ServiceRepository
 	componentRepo   dbrepo.ComponentRepository
 	serviceDepsRepo dbrepo.ServiceDependencyRepository
+	runtimeType     runtimeTypes.RuntimeType
+	runtimeFactory  *runtime.RuntimeFactory
 	syncInterval    time.Duration
 	stopChan        chan struct{}
 	syncMutex       sync.Mutex            // Prevents overlapping sync cycles
@@ -66,7 +68,7 @@ type SyncService struct {
 func newRuntimeSync(rt runtimeTypes.RuntimeType, catalogProvider *catalogpkg.CatalogProvider) (RuntimeSync, error) {
 	switch rt {
 	case runtimeTypes.RuntimeTypePodman:
-		return newPodmanSync(catalogProvider), nil
+		return newPodmanSync(catalogProvider, rt.String())
 	case runtimeTypes.RuntimeTypeOpenShift:
 		return newOpenShiftSync(), nil
 	default:
@@ -88,7 +90,10 @@ func NewSyncService(
 		syncInterval = DefaultSyncInterval
 	}
 
-	runtimeSync, err := newRuntimeSync(vars.RuntimeFactory.GetRuntimeType(), catalogProvider)
+	runtimeType := vars.RuntimeFactory.GetRuntimeType()
+	runtimeFactory := runtime.NewRuntimeFactory(runtimeType)
+
+	runtimeSync, err := newRuntimeSync(runtimeType, catalogProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime sync: %w", err)
 	}
@@ -98,6 +103,8 @@ func NewSyncService(
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
 		serviceDepsRepo: serviceDepsRepo,
+		runtimeType:     runtimeType,
+		runtimeFactory:  runtimeFactory,
 		syncInterval:    syncInterval,
 		stopChan:        make(chan struct{}),
 		runtimeSync:     runtimeSync,
@@ -202,36 +209,23 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 		return fmt.Errorf("failed to create runtime client: %w", err)
 	}
 
+	runtimeSync, err := s.runtimeSync.WithRuntime(rt)
+	if err != nil {
+		return fmt.Errorf("failed to configure runtime sync backend: %w", err)
+	}
+
 	logger.InfofCtx(ctx, "Syncing application: %s (ID: %s)", app.Name, app.ID)
 
 	// Fail early if the namespace does not exist
-	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
-		if _, err := rt.GetNamespace(ctx); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
-			return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
-		}
+	if err := s.validateApplicationNamespace(ctx, app, rt); err != nil {
+		return err
 	}
 
-	// Track errors during sync
-	errorMessages := []string{}
-	allHealthy := true
-
-	// Step 1: Sync all components first (bottom of dependency tree)
-	componentErrors, componentsPending := s.syncAllComponents(ctx, rt, app)
-	if len(componentErrors) > 0 {
-		errorMessages = append(errorMessages, componentErrors...)
-		allHealthy = false
-	}
-
-	// Step 2: Sync services (middle of dependency tree)
-	serviceErrors, servicesPending := s.syncAllServices(ctx, rt, app)
-	if len(serviceErrors) > 0 {
-		errorMessages = append(errorMessages, serviceErrors...)
-		allHealthy = false
-	}
+	allHealthy, errorMessages, pending := s.collectApplicationSyncState(ctx, runtimeSync, app)
 
 	// Step 3: If any service or component is still initialising, skip updating the
 	// application status this cycle — we don't have a complete picture yet.
-	if componentsPending || servicesPending {
+	if pending {
 		logger.InfofCtx(ctx, "Skipping application %s status update: some services/components are still in Initializing state", app.Name)
 
 		return nil
@@ -245,6 +239,40 @@ func (s *SyncService) syncApplication(ctx context.Context, app *models.Applicati
 	logger.InfofCtx(ctx, "Completed sync for application: %s", app.Name)
 
 	return nil
+}
+
+func (s *SyncService) validateApplicationNamespace(ctx context.Context, app *models.Application, rt runtime.Runtime) error {
+	if rt.Type() != runtimeTypes.RuntimeTypeOpenShift {
+		return nil
+	}
+	if _, err := rt.GetNamespace(ctx); errors.Is(err, openshiftRuntime.ErrNamespaceNotFound) {
+		return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
+	}
+
+	return nil
+}
+
+func (s *SyncService) collectApplicationSyncState(
+	ctx context.Context,
+	runtimeSync RuntimeSync,
+	app *models.Application,
+) (bool, []string, bool) {
+	errorMessages := []string{}
+	allHealthy := true
+
+	componentErrors, componentsPending := s.syncAllComponents(ctx, runtimeSync, app)
+	if len(componentErrors) > 0 {
+		errorMessages = append(errorMessages, componentErrors...)
+		allHealthy = false
+	}
+
+	serviceErrors, servicesPending := s.syncAllServices(ctx, runtimeSync, app)
+	if len(serviceErrors) > 0 {
+		errorMessages = append(errorMessages, serviceErrors...)
+		allHealthy = false
+	}
+
+	return allHealthy, errorMessages, componentsPending || servicesPending
 }
 
 // createRuntime returns the appropriate runtime.Runtime for the given application.
@@ -281,13 +309,15 @@ func (s *SyncService) createRuntime(ctx context.Context, app *models.Application
 		return rt, nil
 	}
 
-	return vars.RuntimeFactory.Create(catalogutils.AppNamespace(app.ID))
+	logger.DebugfCtx(ctx, "Using local runtime %q for application %s sync", s.runtimeType, app.ID)
+
+	return s.runtimeFactory.Create(catalogutils.AppNamespace(app.ID))
 }
 
 // syncAllComponents syncs all components for an application.
 // Returns error messages and a pending flag — pending is true if any component was
 // skipped because it has not yet reached a stable (Running/Error) state.
-func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) { //nolint:cyclop
+func (s *SyncService) syncAllComponents(ctx context.Context, runtimeSync RuntimeSync, app *models.Application) ([]string, bool) { //nolint:cyclop
 	processedComponents := make(map[uuid.UUID]bool)
 	errorMessages := []string{}
 	pending := false
@@ -329,7 +359,7 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 			}
 
 			// Sync component pod status, passing the already-fetched component to avoid a second DB call
-			status, componentMsg, err := s.syncComponentPod(ctx, rt, app.ID.String(), component)
+			status, componentMsg, err := s.syncComponentPod(ctx, runtimeSync, app.ID.String(), component)
 			if err != nil {
 				logger.ErrorfCtx(ctx, "Failed to sync component %s: %v", dep.DependencyID, err)
 			} else if status == models.ComponentStatusError && componentMsg != "" {
@@ -348,7 +378,7 @@ func (s *SyncService) syncAllComponents(ctx context.Context, rt runtime.Runtime,
 // Service status is determined ONLY by the service pod health, not component health.
 // Returns error messages and a pending flag — pending is true if any service was
 // skipped because it has not yet reached a stable (Running/Error) state.
-func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, app *models.Application) ([]string, bool) {
+func (s *SyncService) syncAllServices(ctx context.Context, runtimeSync RuntimeSync, app *models.Application) ([]string, bool) {
 	errorMessages := []string{}
 	pending := false
 
@@ -361,7 +391,7 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 			continue
 		}
 
-		serviceMsg, err := s.syncServicePod(ctx, rt, service)
+		serviceMsg, err := s.syncServicePod(ctx, runtimeSync, service)
 		if err != nil {
 			logger.ErrorfCtx(ctx, "Failed to sync service %s: %v", service.ID, err)
 			// Continue with other services even if one fails
@@ -377,15 +407,15 @@ func (s *SyncService) syncAllServices(ctx context.Context, rt runtime.Runtime, a
 
 // syncServicePod syncs a single service's pod status
 // Returns: error message (if any) and error.
-func (s *SyncService) syncServicePod(ctx context.Context, rt runtime.Runtime, service models.Service) (string, error) {
+func (s *SyncService) syncServicePod(ctx context.Context, runtimeSync RuntimeSync, service models.Service) (string, error) {
 	// Fetch all pods using service ID as template label
-	pods, err := s.runtimeSync.FetchPodStatuses(ctx, rt, service.ID.String())
+	pods, err := runtimeSync.FetchPodStatuses(ctx, service.ID.String())
 	if err != nil {
 		return s.handleServicePodFetchError(ctx, service, err)
 	}
 
 	// Determine service status based on pods and resources.
-	newStatus, message := s.determineServiceStatusFromPods(ctx, service.AppID.String(), service.CatalogID, service.AppID.String(), pods, rt)
+	newStatus, message := s.determineServiceStatusFromPods(ctx, runtimeSync, service.AppID.String(), service.CatalogID, service.AppID.String(), pods)
 
 	// Update service status if changed
 	if err := s.updateServiceStatusIfChanged(ctx, service, newStatus, message); err != nil {
@@ -416,14 +446,14 @@ func (s *SyncService) handleServicePodFetchError(ctx context.Context, service mo
 }
 
 // determineServiceStatusFromPods determines service status based on pods and resource validation.
-func (s *SyncService) determineServiceStatusFromPods(ctx context.Context, appID, catalogID, instanceID string, pods []*PodStatus, rt runtime.Runtime) (models.ServiceStatus, string) {
-	resourceValidationMsg := s.runtimeSync.ValidateResources(ctx, ResourceValidationInput{
+func (s *SyncService) determineServiceStatusFromPods(ctx context.Context, runtimeSync RuntimeSync, appID, catalogID, instanceID string, pods []*PodStatus) (models.ServiceStatus, string) {
+	resourceValidationMsg := runtimeSync.ValidateResources(ctx, ResourceValidationInput{
 		AppID:          appID,
 		CatalogID:      catalogID,
 		InstanceID:     instanceID,
 		ItemType:       resourceItemTypeService,
 		ActualPodCount: len(pods),
-	}, rt)
+	})
 
 	// Check all pods - if any pod is unhealthy, service is in error
 	newStatus := models.ServiceStatusRunning
@@ -461,11 +491,11 @@ func (s *SyncService) updateServiceStatusIfChanged(ctx context.Context, service 
 // syncComponentPod syncs a single component's pod status.
 // The component must already be fetched by the caller to avoid a redundant DB lookup.
 // Returns: status, error message (if any), and error.
-func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, appID string, component *models.Component) (models.ComponentStatus, string, error) {
+func (s *SyncService) syncComponentPod(ctx context.Context, runtimeSync RuntimeSync, appID string, component *models.Component) (models.ComponentStatus, string, error) {
 	componentID := component.ID
 
 	// Fetch all pods using component ID as template label
-	pods, err := s.runtimeSync.FetchPodStatuses(ctx, rt, componentID.String())
+	pods, err := runtimeSync.FetchPodStatuses(ctx, componentID.String())
 	if err != nil {
 		return s.handleComponentPodFetchError(ctx, component, componentID, err)
 	}
@@ -473,13 +503,13 @@ func (s *SyncService) syncComponentPod(ctx context.Context, rt runtime.Runtime, 
 	// Build component catalogID in format "type/provider"
 	componentCatalogID := fmt.Sprintf("%s/%s", component.Type, component.Provider)
 
-	resourceValidationMsg := s.runtimeSync.ValidateResources(ctx, ResourceValidationInput{
+	resourceValidationMsg := runtimeSync.ValidateResources(ctx, ResourceValidationInput{
 		AppID:          appID,
 		CatalogID:      componentCatalogID,
 		InstanceID:     componentID.String(),
 		ItemType:       resourceItemTypeComponent,
 		ActualPodCount: len(pods),
-	}, rt)
+	})
 
 	// Check all pods health
 	newStatus, message := s.checkPodsHealth(pods)

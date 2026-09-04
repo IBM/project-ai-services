@@ -57,6 +57,7 @@ type (
 // PodmanDeployer implements deployment execution for Podman runtime.
 type PodmanDeployer struct {
 	runtime         runtime.Runtime
+	runtimeType     string
 	catalogProvider *catalog.CatalogProvider
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
@@ -73,6 +74,7 @@ func NewPodmanDeployer(
 ) *PodmanDeployer {
 	return &PodmanDeployer{
 		runtime:         rt,
+		runtimeType:     rt.Type().String(),
 		catalogProvider: catalogProvider,
 		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
@@ -302,14 +304,19 @@ func (d *PodmanDeployer) collectImagesFromPlan(ctx context.Context, plan *Deploy
 
 // extractImagesFromComponent extracts container images from a component's templates.
 func (d *PodmanDeployer) extractImagesFromComponent(ctx context.Context, comp *ComponentPlan, imageSet map[string]bool) error {
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	// Load component templates
-	templates, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	templates, err := scopedProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return fmt.Errorf("failed to load component templates for %s/%s: %w", comp.ComponentType, comp.ProviderID, err)
 	}
 
 	// Extract images from templates with custom values directly into imageSet
-	if err := d.catalogProvider.CollectImagesFromTemplates(ctx, templates, comp.Values, imageSet); err != nil {
+	if err := scopedProvider.CollectImagesFromTemplates(ctx, templates, comp.Values, imageSet); err != nil {
 		return fmt.Errorf("failed to extract images from component %s/%s: %w", comp.ComponentType, comp.ProviderID, err)
 	}
 
@@ -318,14 +325,19 @@ func (d *PodmanDeployer) extractImagesFromComponent(ctx context.Context, comp *C
 
 // extractImagesFromService extracts container images from a service's templates.
 func (d *PodmanDeployer) extractImagesFromService(ctx context.Context, svc *ServicePlan, imageSet map[string]bool) error {
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	// Load service templates
-	templates, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
+	templates, err := scopedProvider.LoadServiceTemplates(svc.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service templates for %s: %w", svc.CatalogID, err)
 	}
 
 	// Extract images from templates with custom values directly into imageSet
-	if err := d.catalogProvider.CollectImagesFromTemplates(ctx, templates, svc.Values, imageSet); err != nil {
+	if err := scopedProvider.CollectImagesFromTemplates(ctx, templates, svc.Values, imageSet); err != nil {
 		return fmt.Errorf("failed to extract images from service %s: %w", svc.CatalogID, err)
 	}
 
@@ -428,17 +440,22 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 
 // loadComponentResources loads all necessary resources for a component.
 func (d *PodmanDeployer) loadComponentResources(comp *ComponentPlan) (*types.Component, *templates.AppMetadata, map[string]*template.Template, error) {
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	component, err := d.catalogProvider.LoadComponent(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component from catalog: %w", err)
 	}
 
-	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID, string(vars.RuntimeFactory.GetRuntimeType()))
+	metadata, err := scopedProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component runtime metadata: %w", err)
 	}
 
-	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	tmpls, err := scopedProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component templates: %w", err)
 	}
@@ -626,14 +643,19 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	}
 	logger.InfofCtx(ctx, "Service %s loaded: %s\n", service.ID, service.Name)
 
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	// Load runtime-specific metadata (contains PodTemplateExecutions)
-	serviceAppMetadata, err := d.catalogProvider.LoadServiceRuntimeMetadata(svc.CatalogID, string(vars.RuntimeFactory.GetRuntimeType()))
+	serviceAppMetadata, err := scopedProvider.LoadServiceRuntimeMetadata(svc.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata: %w", err)
 	}
 
 	// Load service templates
-	tmpls, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
+	tmpls, err := scopedProvider.LoadServiceTemplates(svc.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service templates: %w", err)
 	}

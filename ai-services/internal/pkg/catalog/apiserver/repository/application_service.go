@@ -50,7 +50,7 @@ func NewApplicationService(
 		ComponentRepo:         componentRepo,
 		ServiceDependencyRepo: serviceDependencyRepo,
 		Provider:              provider,
-		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo).WithWorkerRegistry(reg),
+		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo, runtimeType.String()).WithWorkerRegistry(reg),
 		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo).WithWorkerRegistry(reg),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validators.NewApplicationValidator(provider),

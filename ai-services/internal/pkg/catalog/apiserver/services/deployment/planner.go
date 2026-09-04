@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -15,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -23,23 +25,29 @@ import (
 // 2. Deduplicating components (same type + provider + params = single deployment)
 // 3. Creating deployment plan with shared components.
 type DeploymentPlanner struct {
-	catalogProvider *catalog.CatalogProvider
-	componentRepo   repository.ComponentRepository
-	paramBuilder    *params.ParamBuilder
+	catalogProvider   *catalog.CatalogProvider
+	componentRepo     repository.ComponentRepository
+	paramBuilder      *params.ParamBuilder
+	serverRuntimeType string
+	runtimeType       string
 	// workerRegistry is optional; when set, PlanDeployment validates remote
 	// worker metadata (e.g. Caddy config) before any DB records are written.
 	workerRegistry stream.WorkerRegistry
 }
 
 // NewDeploymentPlanner creates a new deployment planner.
+// serverRuntimeType is the runtime the server itself is configured with (e.g.
+// "podman" or "openshift") and is used as the default when no worker overrides it.
 func NewDeploymentPlanner(
 	provider *catalog.CatalogProvider,
 	componentRepo repository.ComponentRepository,
+	serverRuntimeType string,
 ) *DeploymentPlanner {
 	return &DeploymentPlanner{
-		catalogProvider: provider,
-		componentRepo:   componentRepo,
-		paramBuilder:    params.NewParamBuilder(provider),
+		catalogProvider:   provider,
+		componentRepo:     componentRepo,
+		paramBuilder:      params.NewParamBuilder(provider),
+		serverRuntimeType: serverRuntimeType,
 	}
 }
 
@@ -50,6 +58,30 @@ func (p *DeploymentPlanner) WithWorkerRegistry(reg stream.WorkerRegistry) *Deplo
 	p.workerRegistry = reg
 
 	return p
+}
+
+// WithRuntime returns a runtime-scoped planner copy.
+func (p *DeploymentPlanner) WithRuntime(runtimeType string) (*DeploymentPlanner, error) {
+	if !runtimeTypes.RuntimeType(runtimeType).Valid() {
+		return nil, fmt.Errorf("invalid runtime type: %q", runtimeType)
+	}
+
+	scopedProvider, err := p.catalogProvider.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeType, err)
+	}
+
+	scopedParamBuilder, err := p.paramBuilder.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope param builder for runtime %q: %w", runtimeType, err)
+	}
+
+	cp := *p
+	cp.catalogProvider = scopedProvider
+	cp.paramBuilder = scopedParamBuilder
+	cp.runtimeType = runtimeType
+
+	return &cp, nil
 }
 
 // Type aliases for deployment plan types.
@@ -63,27 +95,20 @@ type (
 func (p *DeploymentPlanner) PlanDeployment(
 	ctx context.Context,
 	req apimodels.CreateApplicationRequest,
-	runtimeType string,
 ) (*DeploymentPlan, error) {
-	// Default to local when the caller did not specify a worker so that
-	// WorkerName is always set and no downstream code needs to treat "" as local.
-	// TODO: Enable this to test local worker by default
-	// if req.WorkerName == "" {
-	// 	req.WorkerName = workerconstants.LocalWorkerName
-	// }
-
-	// For remote workers, validate connectivity and Caddy metadata before
-	// touching the DB so the Create API returns an immediate error on failure.
-	if err := p.ValidateWorker(ctx, req.WorkerName); err != nil {
-		return nil, err
+	runtimeType := p.runtimeType
+	if runtimeType == "" {
+		// TODO: Remove this fallback once all callers provide a runtime-scoped planner.
+		var err error
+		runtimeType, err = p.ResolveRuntimeType(ctx, req.WorkerName)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// When deploying to a named worker, use the worker's registered runtime type
-	// for catalog path resolution and Spyre card allocation — not the server's.
-	if req.WorkerName != "" {
-		if workerRT, ok := p.workerRegistry.WorkerRuntimeType(req.WorkerName); ok {
-			runtimeType = workerRT
-		}
+	workerName := req.WorkerName
+	if workerName == "" {
+		workerName = workerconstants.LocalWorkerName
 	}
 
 	// First, determine if this is an architecture or standalone service
@@ -108,12 +133,13 @@ func (p *DeploymentPlanner) PlanDeployment(
 		IsArchitecture:  isArchitecture,
 		Components:      make(map[string]*ComponentPlan),
 		Services:        make(map[string]*ServicePlan),
-		WorkerName:      req.WorkerName,
+		WorkerName:      workerName,
+		RuntimeType:     runtimeType,
 	}
 
 	// Process each service from request
 	for _, svc := range req.Services {
-		if err := p.processService(ctx, svc, plan, runtimeType); err != nil {
+		if err := p.processService(ctx, svc, plan); err != nil {
 			return nil, fmt.Errorf("failed to process service '%s': %w", svc.CatalogID, err)
 		}
 	}
@@ -133,7 +159,6 @@ func (p *DeploymentPlanner) processService(
 	ctx context.Context,
 	svc apimodels.Service,
 	plan *DeploymentPlan,
-	runtimeType string,
 ) error {
 	// Get service path from catalog provider
 	servicePath, err := p.catalogProvider.GetCatalogItemPath(svc.CatalogID)
@@ -143,14 +168,14 @@ func (p *DeploymentPlanner) processService(
 
 	servicePlan := &ServicePlan{
 		CatalogID:     svc.CatalogID,
-		CatalogPath:   path.Join(servicePath, runtimeType),
+		CatalogPath:   path.Join(servicePath, plan.RuntimeType),
 		Version:       svc.Version,
 		ComponentRefs: make([]string, 0),
 	}
 
 	// Process each component in the service
 	for _, comp := range svc.Components {
-		componentHash, err := p.processComponent(comp, svc.CatalogID, plan, runtimeType)
+		componentHash, err := p.processComponent(comp, svc.CatalogID, plan)
 		if err != nil {
 			return fmt.Errorf("failed to process component '%s': %w", comp.ComponentType, err)
 		}
@@ -189,7 +214,6 @@ func (p *DeploymentPlanner) processComponent(
 	comp apimodels.Component,
 	catalogID string,
 	plan *DeploymentPlan,
-	runtimeType string,
 ) (string, error) {
 	// Calculate component hash based on type + provider + params
 	// This allows deduplication: same config = same deployment
@@ -219,7 +243,7 @@ func (p *DeploymentPlanner) processComponent(
 		Hash:           componentHash,
 		ComponentType:  comp.ComponentType,
 		ProviderID:     comp.ProviderID,
-		CatalogPath:    path.Join(componentPath, runtimeType),
+		CatalogPath:    path.Join(componentPath, plan.RuntimeType),
 		Version:        comp.Version,
 		Params:         comp.Params,
 		UsedByServices: []string{catalogID},
@@ -237,7 +261,7 @@ func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(ctx context.Context, 
 
 	// Calculate total required Spyre cards from all components
 	for _, comp := range plan.Components {
-		required, err := p.getRequiredSpyreCardsForComponent(ctx, comp)
+		required, err := p.getRequiredSpyreCardsForComponent(ctx, comp, plan)
 		if err != nil {
 			return fmt.Errorf("failed to get Spyre card requirements for component %s: %w", comp.ComponentType, err)
 		}
@@ -278,16 +302,21 @@ func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(ctx context.Context, 
 }
 
 // getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component.
-func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Context, comp *ComponentPlan) (int, error) {
+func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Context, comp *ComponentPlan, plan *DeploymentPlan) (int, error) {
+	scopedProvider, err := p.catalogProvider.WithRuntime(plan.RuntimeType)
+	if err != nil {
+		return 0, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", plan.RuntimeType, err)
+	}
+
 	// Load component templates using catalog provider
-	tmpls, err := p.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	tmpls, err := scopedProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to load component templates: %w", err)
 	}
 
 	// Use the catalog provider's CollectSpyreCardsFromTemplates function
 	// Use comp.Values instead of comp.Params to include defaults from values.yaml
-	totalSpyreCards, err := p.catalogProvider.CollectSpyreCardsFromTemplates(ctx, tmpls, comp.Values)
+	totalSpyreCards, err := scopedProvider.CollectSpyreCardsFromTemplates(ctx, tmpls, comp.Values)
 	if err != nil {
 		return 0, fmt.Errorf("failed to collect Spyre cards from templates: %w", err)
 	}
@@ -299,6 +328,10 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 // in-memory registry. Returns (uuid.Nil, false) when the worker is not
 // connected or the registry is nil (local-only server).
 func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
+	if isLocalWorkerName(workerName) {
+		return uuid.Nil, false
+	}
+
 	if p.workerRegistry == nil {
 		return uuid.Nil, false
 	}
@@ -310,6 +343,10 @@ func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
 // PlanDeployment before any DB records are written so the Create API can
 // return an error immediately on failure.
 func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName string) error {
+	if isLocalWorkerName(workerName) {
+		return nil
+	}
+
 	if p.workerRegistry == nil {
 		return fmt.Errorf("worker deployment is not configured on this server")
 	}
@@ -324,6 +361,32 @@ func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName strin
 	}
 
 	return nil
+}
+
+// ResolveRuntimeType returns the effective runtime for a create-application
+// request: worker runtime when workerName is set, otherwise server runtime.
+func (p *DeploymentPlanner) ResolveRuntimeType(ctx context.Context, workerName string) (string, error) {
+	if isLocalWorkerName(workerName) {
+		return p.serverRuntimeType, nil
+	}
+
+	if err := p.ValidateWorker(ctx, workerName); err != nil {
+		return "", err
+	}
+
+	workerRT, ok := p.workerRegistry.WorkerRuntimeType(workerName)
+	if !ok || workerRT == "" {
+		return "", fmt.Errorf("worker %q runtime type not available", workerName)
+	}
+	if !runtimeTypes.RuntimeType(workerRT).Valid() {
+		return "", fmt.Errorf("worker %q has unsupported runtime type %q", workerName, workerRT)
+	}
+
+	return workerRT, nil
+}
+
+func isLocalWorkerName(workerName string) bool {
+	return workerName == "" || strings.EqualFold(workerName, workerconstants.LocalWorkerName)
 }
 
 // Made with Bob

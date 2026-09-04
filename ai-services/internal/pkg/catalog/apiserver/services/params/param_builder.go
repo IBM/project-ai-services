@@ -18,6 +18,7 @@ import (
 // 3. Loads service values which merges component values under component_type keys.
 type ParamBuilder struct {
 	catalogProvider *catalog.CatalogProvider
+	runtimeType     string
 }
 
 // NewParamBuilder creates a new parameter builder instance.
@@ -27,6 +28,20 @@ func NewParamBuilder(
 	return &ParamBuilder{
 		catalogProvider: provider,
 	}
+}
+
+// WithRuntime returns a runtime-scoped parameter builder copy.
+func (b *ParamBuilder) WithRuntime(runtimeType string) (*ParamBuilder, error) {
+	scopedProvider, err := b.catalogProvider.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeType, err)
+	}
+
+	cp := *b
+	cp.catalogProvider = scopedProvider
+	cp.runtimeType = runtimeType
+
+	return &cp, nil
 }
 
 // ComponentParams holds all parameters needed to deploy a component.

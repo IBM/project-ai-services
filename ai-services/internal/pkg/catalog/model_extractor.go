@@ -129,8 +129,13 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 // addComponentModels adds component models to the provided map.
 // For components, models are read from values.schema.json file using GetComponentProviderParams.
 func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType, componentID string, allModels map[string]bool) error {
-	// Use existing GetComponentProviderParams to load the schema
-	schema, err := p.GetComponentProviderParams(ctx, componentType, componentID, string(vars.RuntimeFactory.GetRuntimeType()))
+	// Use existing GetComponentProviderParams to load the schema.
+	provider, err := p.WithRuntime(string(vars.RuntimeFactory.GetRuntimeType()))
+	if err != nil {
+		return fmt.Errorf("failed to resolve runtime for component schema %s/%s: %w", componentType, componentID, err)
+	}
+
+	schema, err := provider.GetComponentProviderParams(ctx, componentType, componentID)
 	if err != nil {
 		return fmt.Errorf("failed to get component schema for %s/%s: %w", componentType, componentID, err)
 	}
