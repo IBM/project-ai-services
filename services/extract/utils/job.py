@@ -241,9 +241,11 @@ def check_job_admission() -> None:
     """Raise 429 if the concurrency slot is exhausted."""
     from extract import state
     if state.extract_limiter.locked():
+        msg = "Job concurrency limit reached. Please try again later."
+        logger.error(msg)
         raise ExtractException(
             429, "RATE_LIMIT_EXCEEDED",
-            "Job concurrency limit reached. Please try again later.",
+            msg,
         )
 
 
@@ -264,9 +266,11 @@ def validate_and_resolve_file(file: UploadFile) -> tuple[str, str]:
     is_valid, ext = validate_file_extension(filename)
     if not is_valid:
         raw_ext = os.path.splitext(filename)[1] or "unknown"
+        msg = f"Only .txt and .md files are accepted. Received: {raw_ext}"
+        logger.error(msg)
         raise ExtractException(
             415, "UNSUPPORTED_FILE_TYPE",
-            f"Only .txt and .md files are accepted. Received: {raw_ext}",
+            msg,
         )
     return filename, (ext or "").lstrip(".")
 
@@ -279,9 +283,12 @@ def resolve_schema(schema_id: str):
     """
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
+        msg = f"No schema with id {schema_id!r}."
+        logger.error(msg)
         raise ExtractException(
             404, "SCHEMA_NOT_FOUND",
-            f"No schema with id {schema_id!r}.")
+            msg,
+        )
     return row
 
 
@@ -305,16 +312,22 @@ async def validate_file_content(file: UploadFile) -> None:
     await file.seek(0)
 
     if not probe or not probe.strip():
-        raise ExtractException(400, "BAD_REQUEST", "File is empty.")
+        msg = "File is empty."
+        logger.error(f"Content validation failed for {file.filename}: {msg}")
+        raise ExtractException(400, "BAD_REQUEST", msg)
 
     try:
         decoded = probe.decode("utf-8")
     except UnicodeDecodeError:
-        raise ExtractException(400, "BAD_REQUEST", "File content is not valid UTF-8 text.")
+        msg = "File content is not valid UTF-8 text."
+        logger.error(f"Content validation failed for {file.filename}: {msg}")
+        raise ExtractException(400, "BAD_REQUEST", msg)
     # Gate 2: no null bytes
     if b"\x00" in probe:
+        msg = "File contains null bytes and appears to be binary."
+        logger.error(f"Content validation failed for {file.filename}: {msg}")
         raise ExtractException(
-            415, "BAD_REQUEST", "File contains null bytes and appears to be binary."
+            415, "BAD_REQUEST", msg
         )
     # Gate 3: low control character ratio
     control_count = sum(
@@ -323,15 +336,19 @@ async def validate_file_content(file: UploadFile) -> None:
         and ch not in ("\n", "\r", "\t", "\f")
     )
     if len(decoded) > 0 and (control_count / len(decoded)) > 0.05:
+        msg = "File contains excessive control characters and appears to be binary."
+        logger.error(f"Content validation failed for {file.filename}: {msg}")
         raise ExtractException(
             415, "BAD_REQUEST",
-            "File contains excessive control characters and appears to be binary.",
+            msg,
         )
     # Gate 4: reject text files that are actually PDFs
     if probe[:4] == b"%PDF":
         ext = os.path.splitext(file.filename or "")[1].lower()
+        msg = f"File has {ext} extension but contains PDF content."
+        logger.error(f"Content validation failed for {file.filename}: {msg}")
         raise ExtractException(
-            415, "BAD_REQUEST", f"File has {ext} extension but contains PDF content."
+            415, "BAD_REQUEST", msg
         )
 
 

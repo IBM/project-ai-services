@@ -302,13 +302,19 @@ async def create_extract_job(
     # 1. File count validation
     # ------------------------------------------------------------------
     if not files:
-        raise ExtractException(400, "INVALID_REQUEST", "At least one file is required.")
+        msg = "At least one file is required."
+        logger.error(msg)
+        raise ExtractException(400, "INVALID_REQUEST", msg)
 
     if len(files) > settings.extract.max_files_per_job:
+        msg = (
+            f"Too many files: {len(files)} submitted, maximum is "
+            f"{settings.extract.max_files_per_job}."
+        )
+        logger.error(msg)
         raise ExtractException(
             413, "TOO_MANY_FILES",
-            f"Too many files: {len(files)} submitted, maximum is "
-            f"{settings.extract.max_files_per_job}.",
+            msg,
             details={"submitted": len(files), "limit": settings.extract.max_files_per_job},
         )
 
@@ -323,10 +329,14 @@ async def create_extract_job(
         is_valid, ext = validate_file_extension(filename)
         if not is_valid:
             raw_ext = os.path.splitext(filename)[1] or "unknown"
+            msg = (
+                f"Only .txt and .md files are accepted. "
+                f"File at index {idx} ({filename!r}) has extension: {raw_ext}"
+            )
+            logger.error(msg)
             raise ExtractException(
                 415, "UNSUPPORTED_FILE_TYPE",
-                f"Only .txt and .md files are accepted. "
-                f"File at index {idx} ({filename!r}) has extension: {raw_ext}",
+                msg,
             )
         source_type = (ext or "").lstrip(".")
         validated.append((file.filename, source_type))
@@ -335,10 +345,14 @@ async def create_extract_job(
     filenames_seen: set[str] = set()
     for idx, (filename, _) in enumerate(validated):
         if filename in filenames_seen:
+            msg = (
+                f"Duplicate filename detected at index {idx}: {filename!r}. "
+                "All file names must be unique within a batch."
+            )
+            logger.error(msg)
             raise ExtractException(
                 400, "DUPLICATE_FILE",
-                f"Duplicate filename detected at index {idx}: {filename!r}. "
-                "All file names must be unique within a batch.",
+                msg,
             )
         filenames_seen.add(filename)
 
@@ -354,6 +368,8 @@ async def create_extract_job(
             })
 
     if content_errors:
+        msg = f"One or more files failed content validation: {content_errors}"
+        logger.error(msg)
         raise ExtractException(
             415, "INVALID_FILE_CONTENT",
             "One or more files failed content validation.",
