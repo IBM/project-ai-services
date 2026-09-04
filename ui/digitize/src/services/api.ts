@@ -188,6 +188,11 @@ export const bulkDeleteJobs = async (jobIds: string[]): Promise<{ message: strin
   return response.data;
 };
 
+export const cancelJob = async (jobId: string): Promise<{ message: string }> => {
+  const response: AxiosResponse<{ message: string }> = await api.post(`/jobs/${jobId}/cancel`);
+  return response.data;
+};
+
 export default api;
 
 // Made with Bob
