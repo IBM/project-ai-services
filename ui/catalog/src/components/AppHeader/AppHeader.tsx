@@ -13,6 +13,7 @@ import styles from "./AppHeader.module.scss";
 import { useReducer, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { getUserInfo } from "@/services/auth";
+import { APP_NAME } from "@/constants";
 import { useAuthStore } from "@/store/auth.store";
 
 type AppHeaderProps =
@@ -104,7 +105,7 @@ const AppHeader = (props: AppHeaderProps) => {
   return (
     <Theme theme="g100">
       <div className={styles.appHeader}>
-        <Header aria-label="AI Services">
+        <Header aria-label={APP_NAME}>
           {!minimal && (
             <HeaderMenuButton
               aria-label="Open menu"
@@ -122,7 +123,7 @@ const AppHeader = (props: AppHeaderProps) => {
             onClick={() => navigate("/")}
             className={styles.headerName}
           >
-            AI Services
+            {APP_NAME}
           </HeaderName>
 
           {!minimal && (
@@ -167,7 +168,7 @@ const AppHeader = (props: AppHeaderProps) => {
                   size="sm"
                   primaryButtonText="Log out"
                   secondaryButtonText="Cancel"
-                  modalHeading="Are you sure you want to log out of AI Services?"
+                  modalHeading={`Are you sure you want to log out of ${APP_NAME}?`}
                   onRequestClose={() => {
                     dispatch({ type: "CLOSE_LOGOUT_MODAL" });
                   }}
