@@ -15,9 +15,9 @@ import (
 // JoinAsLocalWorker joins the catalog machine itself as the reserved "Local"
 // worker. It can be skipped with --skip-local-worker.
 //
-// The gateway address is localhost:<workerGatewayPort>. An empty bootstrap
-// token is passed; the gateway applies the local-bypass registration path when
-// it sees an empty token together with worker_name == LocalWorkerName.
+// The gateway address uses the host's outbound IP. An empty bootstrap token is passed; the gateway applies the
+// local-bypass registration path when it sees an empty token together with
+// worker_name == LocalWorkerName.
 func JoinAsLocalWorker(ctx context.Context, opts catalogUtils.PodmanConfigureOptions) error {
 	logger.InfolnCtx(ctx, "Joining local machine as worker...")
 
@@ -30,7 +30,12 @@ func JoinAsLocalWorker(ctx context.Context, opts catalogUtils.PodmanConfigureOpt
 		return fmt.Errorf("local worker join: failed to create model directory: %w", err)
 	}
 
-	gatewayAddr := fmt.Sprintf("localhost:%d", opts.WorkerGatewayPort)
+	hostIP, err := utils.GetHostIP()
+	if err != nil {
+		return fmt.Errorf("local worker join: resolve host IP: %w", err)
+	}
+
+	gatewayAddr := fmt.Sprintf("%s:%d", hostIP, opts.WorkerGatewayPort)
 
 	workerOpts := workertypes.PodmanWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
