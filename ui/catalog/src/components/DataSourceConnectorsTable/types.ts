@@ -35,10 +35,7 @@ export const ACTION_TYPES = {
 
 export type AppAction = {
   type: typeof ACTION_TYPES.FETCH_CONNECTORS_SUCCESS;
-  payload: {
-    rows: DataSourceConnectorRow[];
-    total: number;
-  };
+  payload: { rows: DataSourceConnectorRow[]; total: number };
 };
 
 export const HEADERS: DataTableHeader[] = [

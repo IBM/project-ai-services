@@ -41,4 +41,8 @@ export const CONNECTORS_ENDPOINTS = {
   LIST_CONNECTORS: "/connectors/datasources",
   GET_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
   DELETE_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
+  GET_CONNECTOR_TYPES: "/connectors",
+  GET_CONNECTOR_PARAMS: (connectorId: string) =>
+    `/connectors/datasource/providers/${connectorId}/params`,
+  CREATE_DATASOURCE: "/datasources",
 };
