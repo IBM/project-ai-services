@@ -1,5 +1,5 @@
 import type { DataTableHeader } from "@carbon/react";
-import type { ConnectorStatus } from "@/types/api.types";
+import type { ConnectorStatus, PaginationMetadata } from "@/types/api.types";
 import type {
   BaseTableState,
   SharedTableAction,
@@ -35,10 +35,7 @@ export const ACTION_TYPES = {
 
 export type AppAction = {
   type: typeof ACTION_TYPES.FETCH_CONNECTORS_SUCCESS;
-  payload: {
-    rows: DataSourceConnectorRow[];
-    total: number;
-  };
+  payload: { rows: DataSourceConnectorRow[]; pagination: PaginationMetadata };
 };
 
 export const HEADERS: DataTableHeader[] = [
@@ -52,8 +49,8 @@ export const HEADERS: DataTableHeader[] = [
 
 // Status column sort order — offline floats to the top
 export const STATUS_SORT_ORDER: Record<ConnectorStatus, number> = {
-  Offline: 1,
-  Connected: 2,
+  offline: 1,
+  connected: 2,
 };
 
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -99,11 +96,9 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ...state,
         ...setLoading(false),
         rowsData: [...action.payload.rows].sort(
-          (a, b) =>
-            STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] ||
-            a.name.localeCompare(b.name),
+          (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
         ),
-        totalItems: action.payload.total,
+        totalItems: action.payload.pagination.total_items,
         fetchError: null,
       };
     default:

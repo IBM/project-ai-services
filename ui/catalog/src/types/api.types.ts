@@ -396,7 +396,7 @@ export type DeploymentPayload =
   | ArchitectureDeploymentPayload
   | ServiceDeploymentPayload;
 
-export type ConnectorStatus = "Connected" | "Offline";
+export type ConnectorStatus = "connected" | "offline";
 
 export interface ConnectorProvider {
   id: string;
@@ -418,7 +418,5 @@ export interface DataSourceConnectorApiResponse {
 
 export interface DataSourceConnectorsListResponse {
   data: DataSourceConnectorApiResponse[];
-  total: number;
-  page: number;
-  page_size: number;
+  pagination: PaginationMetadata;
 }
