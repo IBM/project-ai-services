@@ -56,6 +56,7 @@ type ListSecrets struct {
 // ─── Container ────────────────────────────────────────────────────────────────
 
 type ExecInContainer struct {
+	Namespace     string   `json:"namespace,omitempty"`
 	PodName       string   `json:"podName"`
 	ContainerName string   `json:"containerName"`
 	Command       []string `json:"command"`

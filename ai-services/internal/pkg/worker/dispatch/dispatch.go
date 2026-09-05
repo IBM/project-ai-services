@@ -243,7 +243,8 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode exec_in_container payload: %w", err)
 		}
-		out, err := rt.ExecInContainerWithCmd(ctx, req.PodName, req.ContainerName, req.Command)
+		nrt := rtInNamespace(rt, req.Namespace)
+		out, err := nrt.ExecInContainerWithCmd(ctx, req.PodName, req.ContainerName, req.Command)
 
 		return marshalOr(out, err)
 
