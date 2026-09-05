@@ -14,9 +14,9 @@ import (
 	"helm.sh/helm/v4/pkg/kube"
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 	"helm.sh/helm/v4/pkg/storage/driver"
-)
 
-const uninstallHelmTimeout = 5 * time.Minute
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+)
 
 type Helm struct {
 	namespace    string
@@ -53,7 +53,7 @@ type InstallOpts struct {
 	Timeout time.Duration
 }
 
-func (h *Helm) Install(ctx context.Context, release string, chart chart.Charter, opts *InstallOpts) error {
+func (h *Helm) install(ctx context.Context, release string, chart chart.Charter, opts *InstallOpts) error {
 	// Configure the Installer client
 	installClient := action.NewInstall(h.actionConfig)
 	installClient.ReleaseName = release
@@ -66,7 +66,7 @@ func (h *Helm) Install(ctx context.Context, release string, chart chart.Charter,
 	// Perform helm install
 	_, err := installClient.RunWithContext(ctx, chart, opts.Values)
 	if err != nil {
-		return fmt.Errorf("Install failed: %w", err)
+		return fmt.Errorf("install failed: %w", err)
 	}
 
 	return nil
@@ -77,7 +77,7 @@ type UpgradeOpts struct {
 	Timeout time.Duration
 }
 
-func (h *Helm) Upgrade(ctx context.Context, release string, chart chart.Charter, opts *UpgradeOpts) error {
+func (h *Helm) upgrade(ctx context.Context, release string, chart chart.Charter, opts *UpgradeOpts) error {
 	// Configure the Upgrade client
 	upgradeClient := action.NewUpgrade(h.actionConfig)
 	upgradeClient.Namespace = h.namespace
@@ -91,7 +91,7 @@ func (h *Helm) Upgrade(ctx context.Context, release string, chart chart.Charter,
 	// Perform helm upgrade
 	_, err := upgradeClient.RunWithContext(ctx, release, chart, opts.Values)
 	if err != nil {
-		return fmt.Errorf("Upgrade failed: %w", err)
+		return fmt.Errorf("upgrade failed: %w", err)
 	}
 
 	return nil
@@ -105,10 +105,10 @@ func (h *Helm) InstallOrUpgrade(ctx context.Context, release string, chart chart
 	}
 
 	if !exists {
-		return h.Install(ctx, release, chart, &InstallOpts{Values: values, Timeout: timeout})
+		return h.install(ctx, release, chart, &InstallOpts{Values: values, Timeout: timeout})
 	}
 
-	return h.Upgrade(ctx, release, chart, &UpgradeOpts{Values: values, Timeout: timeout})
+	return h.upgrade(ctx, release, chart, &UpgradeOpts{Values: values, Timeout: timeout})
 }
 
 func (h *Helm) IsReleaseExist(release string) (bool, error) {
@@ -130,7 +130,7 @@ func (h *Helm) IsReleaseExist(release string) (bool, error) {
 	return true, nil
 }
 
-func (h *Helm) GetReleaseManifest(release string) (string, error) {
+func (h *Helm) getReleaseManifest(release string) (string, error) {
 	client := action.NewGet(h.actionConfig)
 	client.Version = 0
 
@@ -152,23 +152,6 @@ type UninstallOpts struct {
 }
 
 func (h *Helm) Uninstall(release string, opts *UninstallOpts) error {
-	// Configure the Uninstall client
-	uninstallClient := action.NewUninstall(h.actionConfig)
-	uninstallClient.WaitStrategy = kube.StatusWatcherStrategy
-	if opts != nil {
-		uninstallClient.Timeout = opts.Timeout
-	}
-
-	// Perform helm uninstall
-	_, err := uninstallClient.Run(release)
-	if err != nil {
-		return fmt.Errorf("Uninstall failed: %w", err)
-	}
-
-	return nil
-}
-
-func (h *Helm) UninstallRelease(release string) error {
 	exists, err := h.IsReleaseExist(release)
 	if err != nil {
 		return fmt.Errorf("failed to check '%s' release existence: %w", release, err)
@@ -178,5 +161,21 @@ func (h *Helm) UninstallRelease(release string) error {
 		return driver.ErrReleaseNotFound
 	}
 
-	return h.Uninstall(release, &UninstallOpts{Timeout: uninstallHelmTimeout})
+	// Configure the Uninstall client
+	uninstallClient := action.NewUninstall(h.actionConfig)
+	uninstallClient.WaitStrategy = kube.StatusWatcherStrategy
+
+	timeout := constants.HelmUninstallTimeout
+	if opts != nil && opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+	uninstallClient.Timeout = timeout
+
+	// Perform helm uninstall
+	_, err = uninstallClient.Run(release)
+	if err != nil {
+		return fmt.Errorf("Uninstall failed: %w", err)
+	}
+
+	return nil
 }

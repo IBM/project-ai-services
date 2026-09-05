@@ -905,3 +905,9 @@ func (pc *PodmanClient) HTTPProxy(ctx context.Context, method, targetURL string,
 		Body:       resp.Body(),
 	}, nil
 }
+
+// WaitForInferenceServiceReady is a no-op for Podman — KServe InferenceServices
+// are an OpenShift-only concept.
+func (pc *PodmanClient) WaitForInferenceServiceReady(_ context.Context, _ string) error {
+	return nil
+}

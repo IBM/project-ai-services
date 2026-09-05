@@ -113,7 +113,7 @@ type ApplicationServiceBase struct {
 // over the gRPC CommandStream — this covers both the "Local" worker and actual remote workers.
 // When WorkerID is nil (existing/legacy flow, pre-worker feature) it falls back to
 // vars.RuntimeFactory directly, deriving the namespace from app.ID when needed (OpenShift).
-func (s *ApplicationServiceBase) createRuntime(ctx context.Context, app *models.Application) (runtime.Runtime, error) {
+func (s *ApplicationServiceBase) createRuntime(app *models.Application) (runtime.Runtime, error) {
 	if app.WorkerID != nil {
 		if s.WorkerRegistry == nil {
 			return nil, fmt.Errorf("worker deployment not configured on this server")
@@ -125,7 +125,7 @@ func (s *ApplicationServiceBase) createRuntime(ctx context.Context, app *models.
 		}
 
 		rtStr, _ := s.WorkerRegistry.WorkerRuntimeType(workerName)
-		rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.WorkerRegistry)
+		rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.WorkerRegistry, catalogutils.AppNamespace(app.ID))
 		if err != nil {
 			return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
 		}
@@ -852,7 +852,7 @@ func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id
 		}
 	}
 
-	runtimeClient, err := s.createRuntime(ctx, app)
+	runtimeClient, err := s.createRuntime(app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client: %w", err)
 	}
@@ -1066,7 +1066,7 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		}
 	}
 
-	rt, err := s.createRuntime(ctx, app)
+	rt, err := s.createRuntime(app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init runtime client: %w", err)
 	}
@@ -1226,7 +1226,7 @@ func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.
 
 	// Resolve the runtime before cancelling or launching the goroutine so that
 	// worker connectivity errors surface synchronously to the HTTP caller.
-	rt, err := s.createRuntime(ctx, app)
+	rt, err := s.createRuntime(app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve runtime for deletion: %w", err)
 	}

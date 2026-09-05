@@ -7,7 +7,6 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	runtimeopenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 const (
@@ -28,7 +27,7 @@ func GatewayRouteHost(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("worker gateway: create OpenShift client to look up gateway route: %w", err)
 	}
 
-	labelSelector := fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, workerconstants.WorkerHelmReleaseName)
+	labelSelector := fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalogconstants.CatalogAppName)
 	routes, err := oc.ListRoutes(ctx, labelSelector)
 	if err != nil {
 		return "", fmt.Errorf("worker gateway: list routes (selector=%s): %w", labelSelector, err)

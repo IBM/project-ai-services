@@ -32,14 +32,22 @@ func (f *RuntimeFactory) Create(namespace string) (Runtime, error) {
 // over the gRPC CommandStream. The worker's runtime type is looked up from the
 // registry (stored there at Register time) and used only for Type() reporting —
 // the gRPC protocol itself is runtime-agnostic.
+// For OpenShift workers, namespace is applied so that namespace-scoped operations
+// (ListPods, ListRoutes, DeletePVCs…) target the correct application namespace.
+// For Podman workers namespace is ignored.
 // Returns an error if the worker is not currently connected.
-func (f *RuntimeFactory) CreateRemote(workerName string, reg stream.WorkerRegistry) (Runtime, error) {
+func (f *RuntimeFactory) CreateRemote(workerName string, reg stream.WorkerRegistry, namespace string) (Runtime, error) {
 	rtStr, ok := reg.WorkerRuntimeType(workerName)
 	if !ok {
 		return nil, fmt.Errorf("worker %s is not connected", workerName)
 	}
 
-	return remote.New(workerName, types.RuntimeType(rtStr), reg), nil
+	rt := remote.New(workerName, types.RuntimeType(rtStr), reg)
+	if f.runtimeType == types.RuntimeTypeOpenShift && namespace != "" {
+		return rt.WithNamespace(namespace), nil
+	}
+
+	return rt, nil
 }
 
 // GetRuntimeType returns the configured runtime type.

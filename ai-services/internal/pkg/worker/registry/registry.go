@@ -213,7 +213,7 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 	r.workers[workerName] = entry
 	r.mu.Unlock()
 
-	if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusReady)}); err != nil {
+	if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusReady), Message: utils.Ptr("")}); err != nil {
 		logger.WarningfCtx(ctx, "worker registry: DB status update failed on restore for %s: %v", workerName, err)
 	}
 
@@ -223,12 +223,19 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 // Preregister creates a pending DB row for a named worker and returns a single-use
 // bootstrap token the operator passes to the worker daemon at startup.
 // If a row already exists (re-registration), it is reset to pending and a new token
-// supersedes the old one. The registry's in-memory map is not touched — the worker
-// is not "connected" until it calls Register via gRPC.
+// supersedes the old one.
+//
+// If the worker is currently active in the in-memory map (i.e. its stream is still
+// open), it is evicted first so that the stale connection can no longer update the
+// heartbeat on the now-pending row.
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
 	}
+
+	// Evict any live in-memory entry so UpdateHeartbeat stops updating the row
+	// we are about to reset to pending.
+	r.Disconnect(ctx, workerName)
 
 	w := &models.Worker{
 		Name:        workerName,

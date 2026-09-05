@@ -114,7 +114,7 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 
 	// RemoteRuntime forwards every call over the gRPC CommandStream — the
 	// deployer does not need to know it is talking to a remote machine.
-	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry)
+	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry, catalogutils.AppNamespace(plan.ApplicationID))
 	if err != nil {
 		return fmt.Errorf("create remote runtime for worker %q: %w", plan.WorkerName, err)
 	}
@@ -141,9 +141,8 @@ func (e *DeploymentExecutor) runPodmanDeployer(
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }
 
-// runOpenShiftDeployer creates an OpenShiftDeployer backed by the RemoteRuntime
-// and runs the deployment. OpenShift workers manage routes natively via the
-// Kubernetes API so no config is needed.
+// runOpenShiftDeployer creates an OpenShiftDeployer backed by the given runtime.
+// HelmManager is resolved inside NewOpenShiftDeployer based on the runtime type.
 func (e *DeploymentExecutor) runOpenShiftDeployer(
 	ctx context.Context,
 	plan *DeploymentPlan,

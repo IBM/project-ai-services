@@ -343,7 +343,7 @@ func (s *SyncService) createRuntime(ctx context.Context, app *models.Application
 		return nil, fmt.Errorf("worker %q has unsupported runtime type %q", workerName, rtType)
 	}
 
-	rt, err := runtime.NewRuntimeFactory(rtType).CreateRemote(workerName, s.workerRegistry)
+	rt, err := runtime.NewRuntimeFactory(rtType).CreateRemote(workerName, s.workerRegistry, catalogutils.AppNamespace(app.ID))
 	if err != nil {
 		return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
 	}

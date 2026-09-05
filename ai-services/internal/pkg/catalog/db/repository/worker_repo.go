@@ -69,6 +69,7 @@ func (r *workerRepo) Upsert(ctx context.Context, worker *models.Worker) error {
 		ON CONFLICT (name) DO UPDATE
 			SET runtime_type   = EXCLUDED.runtime_type,
 			    status         = EXCLUDED.status,
+			    message        = '',
 			    metadata       = EXCLUDED.metadata,
 			    registered_at  = NOW(),
 			    updated_at     = NOW()

@@ -102,6 +102,15 @@ func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error)
 	}, nil
 }
 
+// WithNamespace returns a shallow copy of the client scoped to the given namespace.
+// The underlying k8s clients are shared — no new connections are made.
+func (kc *OpenshiftClient) WithNamespace(ns string) *OpenshiftClient {
+	copy := *kc
+	copy.Namespace = ns
+
+	return &copy
+}
+
 // initializeClients initializes all three clients once using sync.Once.
 func initializeClients() error {
 	clientsOnce.Do(func() {
@@ -822,7 +831,7 @@ func (kc *OpenshiftClient) isDeploymentReady(ctx context.Context, name string) (
 
 // WaitForInferenceServiceReady polls the KServe InferenceService with the given name in the
 // client's namespace until its Ready condition is True, or the context is cancelled.
-func (kc *OpenshiftClient) WaitForInferenceServiceReady(ctx context.Context, isvcName string, pollInterval time.Duration) error {
+func (kc *OpenshiftClient) WaitForInferenceServiceReady(ctx context.Context, isvcName string) error {
 	isvc := &unstructured.Unstructured{}
 	isvc.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "serving.kserve.io",
@@ -858,12 +867,12 @@ func (kc *OpenshiftClient) WaitForInferenceServiceReady(ctx context.Context, isv
 			}
 		}
 
-		logger.InfofCtx(ctx, "InferenceService %q not ready yet, retrying in %s\n", isvcName, pollInterval)
+		logger.InfofCtx(ctx, "InferenceService %q not ready yet, retrying in %s\n", isvcName, constants.IsvcPollInterval)
 
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timed out waiting for InferenceService %q to become ready: %w", isvcName, ctx.Err())
-		case <-time.After(pollInterval):
+		case <-time.After(constants.IsvcPollInterval):
 		}
 	}
 }

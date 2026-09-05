@@ -63,6 +63,20 @@ const (
 	CommandType_COMMAND_TYPE_DOWNLOAD_MODEL        CommandType = 27
 	CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS CommandType = 28
 	CommandType_COMMAND_TYPE_GET_BASE_DIR          CommandType = 29
+	// Helm chart install-or-upgrade on an OpenShift worker.
+	CommandType_COMMAND_TYPE_HELM_INSTALL CommandType = 30
+	// Helm release uninstall on an OpenShift worker.
+	CommandType_COMMAND_TYPE_HELM_UNINSTALL CommandType = 31
+	// Fetch the deployed Helm release manifest from an OpenShift worker.
+	CommandType_COMMAND_TYPE_HELM_GET_MANIFEST CommandType = 32
+	// Wait for a KServe InferenceService to reach Ready=True on an OpenShift worker.
+	CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE CommandType = 33
+	// List CRD resources on an OpenShift worker.
+	CommandType_COMMAND_TYPE_LIST_CRD CommandType = 34
+	// Delete a namespace on an OpenShift worker.
+	CommandType_COMMAND_TYPE_DELETE_NAMESPACE CommandType = 35
+	// Update a Kubernetes secret and restart the associated deployment on an OpenShift worker.
+	CommandType_COMMAND_TYPE_UPDATE_SECRET CommandType = 36
 )
 
 // Enum value maps for CommandType.
@@ -98,38 +112,52 @@ var (
 		27: "COMMAND_TYPE_DOWNLOAD_MODEL",
 		28: "COMMAND_TYPE_FIND_FREE_SPYRE_CARDS",
 		29: "COMMAND_TYPE_GET_BASE_DIR",
+		30: "COMMAND_TYPE_HELM_INSTALL",
+		31: "COMMAND_TYPE_HELM_UNINSTALL",
+		32: "COMMAND_TYPE_HELM_GET_MANIFEST",
+		33: "COMMAND_TYPE_WAIT_INFERENCE_SERVICE",
+		34: "COMMAND_TYPE_LIST_CRD",
+		35: "COMMAND_TYPE_DELETE_NAMESPACE",
+		36: "COMMAND_TYPE_UPDATE_SECRET",
 	}
 	CommandType_value = map[string]int32{
-		"COMMAND_TYPE_UNSPECIFIED":           0,
-		"COMMAND_TYPE_LIST_IMAGES":           1,
-		"COMMAND_TYPE_PULL_IMAGE":            2,
-		"COMMAND_TYPE_LIST_PODS":             3,
-		"COMMAND_TYPE_CREATE_POD":            4,
-		"COMMAND_TYPE_DELETE_POD":            5,
-		"COMMAND_TYPE_STOP_POD":              6,
-		"COMMAND_TYPE_START_POD":             7,
-		"COMMAND_TYPE_INSPECT_POD":           8,
-		"COMMAND_TYPE_POD_EXISTS":            9,
-		"COMMAND_TYPE_POD_LOGS":              10,
-		"COMMAND_TYPE_GET_POD_RESOURCES":     11,
-		"COMMAND_TYPE_LIST_SECRETS":          12,
-		"COMMAND_TYPE_DELETE_SECRET":         13,
-		"COMMAND_TYPE_SECRET_EXISTS":         14,
-		"COMMAND_TYPE_DELETE_VOLUME":         15,
-		"COMMAND_TYPE_VOLUME_EXISTS":         16,
-		"COMMAND_TYPE_INSPECT_CONTAINER":     17,
-		"COMMAND_TYPE_CONTAINER_EXISTS":      18,
-		"COMMAND_TYPE_CONTAINER_LOGS":        19,
-		"COMMAND_TYPE_LIST_ROUTES":           20,
-		"COMMAND_TYPE_DELETE_PVCS":           21,
-		"COMMAND_TYPE_GET_SYSTEM_INFO":       22,
-		"COMMAND_TYPE_RUNTIME_TYPE":          23,
-		"COMMAND_TYPE_EXEC_IN_CONTAINER":     24,
-		"COMMAND_TYPE_PROXY_ROUTE":           25,
-		"COMMAND_TYPE_HTTP_PROXY":            26,
-		"COMMAND_TYPE_DOWNLOAD_MODEL":        27,
-		"COMMAND_TYPE_FIND_FREE_SPYRE_CARDS": 28,
-		"COMMAND_TYPE_GET_BASE_DIR":          29,
+		"COMMAND_TYPE_UNSPECIFIED":            0,
+		"COMMAND_TYPE_LIST_IMAGES":            1,
+		"COMMAND_TYPE_PULL_IMAGE":             2,
+		"COMMAND_TYPE_LIST_PODS":              3,
+		"COMMAND_TYPE_CREATE_POD":             4,
+		"COMMAND_TYPE_DELETE_POD":             5,
+		"COMMAND_TYPE_STOP_POD":               6,
+		"COMMAND_TYPE_START_POD":              7,
+		"COMMAND_TYPE_INSPECT_POD":            8,
+		"COMMAND_TYPE_POD_EXISTS":             9,
+		"COMMAND_TYPE_POD_LOGS":               10,
+		"COMMAND_TYPE_GET_POD_RESOURCES":      11,
+		"COMMAND_TYPE_LIST_SECRETS":           12,
+		"COMMAND_TYPE_DELETE_SECRET":          13,
+		"COMMAND_TYPE_SECRET_EXISTS":          14,
+		"COMMAND_TYPE_DELETE_VOLUME":          15,
+		"COMMAND_TYPE_VOLUME_EXISTS":          16,
+		"COMMAND_TYPE_INSPECT_CONTAINER":      17,
+		"COMMAND_TYPE_CONTAINER_EXISTS":       18,
+		"COMMAND_TYPE_CONTAINER_LOGS":         19,
+		"COMMAND_TYPE_LIST_ROUTES":            20,
+		"COMMAND_TYPE_DELETE_PVCS":            21,
+		"COMMAND_TYPE_GET_SYSTEM_INFO":        22,
+		"COMMAND_TYPE_RUNTIME_TYPE":           23,
+		"COMMAND_TYPE_EXEC_IN_CONTAINER":      24,
+		"COMMAND_TYPE_PROXY_ROUTE":            25,
+		"COMMAND_TYPE_HTTP_PROXY":             26,
+		"COMMAND_TYPE_DOWNLOAD_MODEL":         27,
+		"COMMAND_TYPE_FIND_FREE_SPYRE_CARDS":  28,
+		"COMMAND_TYPE_GET_BASE_DIR":           29,
+		"COMMAND_TYPE_HELM_INSTALL":           30,
+		"COMMAND_TYPE_HELM_UNINSTALL":         31,
+		"COMMAND_TYPE_HELM_GET_MANIFEST":      32,
+		"COMMAND_TYPE_WAIT_INFERENCE_SERVICE": 33,
+		"COMMAND_TYPE_LIST_CRD":               34,
+		"COMMAND_TYPE_DELETE_NAMESPACE":       35,
+		"COMMAND_TYPE_UPDATE_SECRET":          36,
 	}
 )
 

@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
+	remoteRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	runtimetypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apiyaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -94,7 +95,7 @@ func (s *openShiftSync) ValidateResources(ctx context.Context, input ResourceVal
 	}
 
 	// Use the deployed release manifest as the source of truth for expected resources.
-	manifest, err := s.getReleaseManifest(input.AppID, input.CatalogID, input.ItemType)
+	manifest, err := s.getReleaseManifest(ctx, input.AppID, input.CatalogID, input.ItemType)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Failed to get Helm release manifest for %s %s: %v", input.ItemType, input.CatalogID, err)
 
@@ -219,7 +220,9 @@ func manifestPVCVolumeName(volumeMap map[string]any) string {
 }
 
 // getReleaseManifest resolves the namespace and release name, then fetches the deployed manifest.
-func (s *openShiftSync) getReleaseManifest(appID, catalogID, itemType string) (string, error) {
+// It uses the stored helmManager (local or remote) so the manifest is always read
+// from the correct cluster — either the local kubeconfig or the worker's gRPC stream.
+func (s *openShiftSync) getReleaseManifest(ctx context.Context, appID, catalogID, itemType string) (string, error) {
 	appUUID, err := uuid.Parse(appID)
 	if err != nil {
 		return "", fmt.Errorf("invalid application ID: %w", err)
@@ -232,17 +235,14 @@ func (s *openShiftSync) getReleaseManifest(appID, catalogID, itemType string) (s
 		return "", err
 	}
 
-	helm, err := helmclient.NewHelm(namespace)
-	if err != nil {
-		return "", fmt.Errorf("failed to create helm client: %w", err)
+	var hm helmclient.HelmManager
+	if rrt, ok := s.runtimeClient.(*remoteRuntime.RemoteRuntime); ok {
+		hm = helmclient.NewRemoteHelmManager(rrt.Sender, namespace)
+	} else {
+		hm = helmclient.NewLocalHelmManager(namespace)
 	}
 
-	manifest, err := helm.GetReleaseManifest(releaseName)
-	if err != nil {
-		return "", err
-	}
-
-	return manifest, nil
+	return hm.GetReleaseManifest(ctx, releaseName)
 }
 
 // releaseName mirrors the naming used by the OpenShift deployer for services and components.

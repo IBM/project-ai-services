@@ -1,4 +1,4 @@
-image: icr.io/ai-services-cicd/opensearch:3.7.0-ppc64le
+image: icr.io/ppc64le-oss/opensearch-ppc64le:3.5.0
 memoryLimit: 8Gi
 auth:
   username: "admin"

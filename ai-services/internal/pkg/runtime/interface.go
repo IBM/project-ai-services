@@ -67,6 +67,11 @@ type Runtime interface {
 	// response headers, and body.
 	HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error)
 
+	// WaitForInferenceServiceReady polls a KServe InferenceService until its
+	// Ready condition is True or the context deadline is exceeded.
+	// Non-OpenShift runtimes return nil immediately (no-op).
+	WaitForInferenceServiceReady(ctx context.Context, isvcName string) error
+
 	// Runtime type identification
 	Type() types.RuntimeType
 }
