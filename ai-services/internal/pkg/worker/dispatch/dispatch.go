@@ -330,7 +330,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 	case workerpb.CommandType_COMMAND_TYPE_RUNTIME_TYPE:
 		return marshalOr(rt.Type().String(), nil)
 
-	// ── Helm install / uninstall ──────────────────────────────────────────────
+	// ── Helm ─────────────────────────────────────────────────────────────────
 
 	case workerpb.CommandType_COMMAND_TYPE_HELM_INSTALL:
 		var req payload.HelmInstall
@@ -351,12 +351,25 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		return nil, helmutil.InstallOrUpgrade(ctx, req.Release, req.Namespace, chart, req.Values, req.TemplateID, timeout)
 
 	case workerpb.CommandType_COMMAND_TYPE_HELM_UNINSTALL:
-		var req payload.HelmUninstall
+		var req payload.HelmRelease
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("helm uninstall: decode payload: %w", err)
 		}
 
 		return nil, helmutil.UninstallRelease(ctx, req.Release, req.Namespace)
+
+	case workerpb.CommandType_COMMAND_TYPE_HELM_GET_MANIFEST:
+		var req payload.HelmRelease
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("helm_get_manifest: decode payload: %w", err)
+		}
+
+		manifest, err := helmutil.GetReleaseManifest(req.Namespace, req.Release)
+		if err != nil {
+			return nil, err
+		}
+
+		return marshalOr(payload.HelmManifest{Manifest: manifest}, nil)
 
 	case workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE:
 		var req payload.WaitInferenceService

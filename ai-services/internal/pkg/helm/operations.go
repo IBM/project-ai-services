@@ -32,6 +32,17 @@ func InstallOrUpgrade(ctx context.Context, release, namespace string, chart helm
 	return h.InstallOrUpgrade(ctx, release, chart, overrides, timeout)
 }
 
+// GetReleaseManifest returns the raw multi-document YAML manifest for release
+// in namespace as stored by Helm. Called by the worker dispatcher.
+func GetReleaseManifest(namespace, release string) (string, error) {
+	h, err := NewHelm(namespace)
+	if err != nil {
+		return "", fmt.Errorf("helm: create client for namespace %q: %w", namespace, err)
+	}
+
+	return h.getReleaseManifest(release)
+}
+
 // UninstallRelease removes a Helm release from the given namespace.
 // If the release does not exist the call is a no-op (returns nil).
 // Called by both LocalHelmManager and the worker dispatcher.

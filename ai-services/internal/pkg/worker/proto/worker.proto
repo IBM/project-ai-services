@@ -113,20 +113,25 @@ enum CommandType {
   // `helm uninstall` against the cluster it has access to.
   COMMAND_TYPE_HELM_UNINSTALL            = 31;
 
+  // Fetch the deployed Helm release manifest from an OpenShift worker.
+  // The control plane sends the release name and namespace; the worker returns
+  // the raw multi-document YAML manifest stored by Helm.
+  COMMAND_TYPE_HELM_GET_MANIFEST         = 32;
+
   // Wait for a KServe InferenceService to reach Ready=True on an OpenShift worker.
   // The control plane sends the InferenceService name and namespace; the worker
   // polls the InferenceService status and returns when it is ready or the
   // context deadline is exceeded.
-  COMMAND_TYPE_WAIT_INFERENCE_SERVICE    = 32;
+  COMMAND_TYPE_WAIT_INFERENCE_SERVICE    = 33;
 
   // List CRD resources on an OpenShift worker.
   // The control plane sends the GVK, namespace, and label filters; the worker
   // queries the cluster and returns the matching resource names and labels.
-  COMMAND_TYPE_LIST_CRD                  = 33;
+  COMMAND_TYPE_LIST_CRD                  = 34;
 
   // Delete a namespace on an OpenShift worker.
-  COMMAND_TYPE_DELETE_NAMESPACE          = 34;
+  COMMAND_TYPE_DELETE_NAMESPACE          = 35;
 
   // Update a Kubernetes secret and restart the associated deployment on an OpenShift worker.
-  COMMAND_TYPE_UPDATE_SECRET             = 35;
+  COMMAND_TYPE_UPDATE_SECRET             = 36;
 }

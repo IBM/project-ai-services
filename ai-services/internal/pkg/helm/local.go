@@ -17,6 +17,9 @@ type HelmManager interface {
 	InstallOrUpgrade(ctx context.Context, release string, chart helmchart.Charter, values map[string]any, templateID string, timeout time.Duration) error
 	// Uninstall removes a Helm release. No-op if the release does not exist.
 	Uninstall(ctx context.Context, release string) error
+	// GetReleaseManifest returns the raw multi-document YAML manifest for the
+	// named release as stored by Helm in the target namespace.
+	GetReleaseManifest(ctx context.Context, release string) (string, error)
 }
 
 // LocalHelmManager runs Helm operations directly against the local kubeconfig.
@@ -36,4 +39,8 @@ func (m *LocalHelmManager) InstallOrUpgrade(ctx context.Context, release string,
 
 func (m *LocalHelmManager) Uninstall(ctx context.Context, release string) error {
 	return UninstallRelease(ctx, release, m.namespace)
+}
+
+func (m *LocalHelmManager) GetReleaseManifest(_ context.Context, release string) (string, error) {
+	return GetReleaseManifest(m.namespace, release)
 }

@@ -67,14 +67,16 @@ const (
 	CommandType_COMMAND_TYPE_HELM_INSTALL CommandType = 30
 	// Helm release uninstall on an OpenShift worker.
 	CommandType_COMMAND_TYPE_HELM_UNINSTALL CommandType = 31
+	// Fetch the deployed Helm release manifest from an OpenShift worker.
+	CommandType_COMMAND_TYPE_HELM_GET_MANIFEST CommandType = 32
 	// Wait for a KServe InferenceService to reach Ready=True on an OpenShift worker.
-	CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE CommandType = 32
+	CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE CommandType = 33
 	// List CRD resources on an OpenShift worker.
-	CommandType_COMMAND_TYPE_LIST_CRD CommandType = 33
+	CommandType_COMMAND_TYPE_LIST_CRD CommandType = 34
 	// Delete a namespace on an OpenShift worker.
-	CommandType_COMMAND_TYPE_DELETE_NAMESPACE CommandType = 34
+	CommandType_COMMAND_TYPE_DELETE_NAMESPACE CommandType = 35
 	// Update a Kubernetes secret and restart the associated deployment on an OpenShift worker.
-	CommandType_COMMAND_TYPE_UPDATE_SECRET CommandType = 35
+	CommandType_COMMAND_TYPE_UPDATE_SECRET CommandType = 36
 )
 
 // Enum value maps for CommandType.
@@ -112,10 +114,11 @@ var (
 		29: "COMMAND_TYPE_GET_BASE_DIR",
 		30: "COMMAND_TYPE_HELM_INSTALL",
 		31: "COMMAND_TYPE_HELM_UNINSTALL",
-		32: "COMMAND_TYPE_WAIT_INFERENCE_SERVICE",
-		33: "COMMAND_TYPE_LIST_CRD",
-		34: "COMMAND_TYPE_DELETE_NAMESPACE",
-		35: "COMMAND_TYPE_UPDATE_SECRET",
+		32: "COMMAND_TYPE_HELM_GET_MANIFEST",
+		33: "COMMAND_TYPE_WAIT_INFERENCE_SERVICE",
+		34: "COMMAND_TYPE_LIST_CRD",
+		35: "COMMAND_TYPE_DELETE_NAMESPACE",
+		36: "COMMAND_TYPE_UPDATE_SECRET",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":            0,
@@ -150,10 +153,11 @@ var (
 		"COMMAND_TYPE_GET_BASE_DIR":           29,
 		"COMMAND_TYPE_HELM_INSTALL":           30,
 		"COMMAND_TYPE_HELM_UNINSTALL":         31,
-		"COMMAND_TYPE_WAIT_INFERENCE_SERVICE": 32,
-		"COMMAND_TYPE_LIST_CRD":               33,
-		"COMMAND_TYPE_DELETE_NAMESPACE":       34,
-		"COMMAND_TYPE_UPDATE_SECRET":          35,
+		"COMMAND_TYPE_HELM_GET_MANIFEST":      32,
+		"COMMAND_TYPE_WAIT_INFERENCE_SERVICE": 33,
+		"COMMAND_TYPE_LIST_CRD":               34,
+		"COMMAND_TYPE_DELETE_NAMESPACE":       35,
+		"COMMAND_TYPE_UPDATE_SECRET":          36,
 	}
 )
 

@@ -141,10 +141,17 @@ type HelmInstall struct {
 	TimeoutSec int64          `json:"timeout_sec,omitempty"`
 }
 
-// HelmUninstall is the wire payload for COMMAND_TYPE_HELM_UNINSTALL.
-type HelmUninstall struct {
+// HelmRelease identifies a Helm release by name and namespace.
+// Used as the wire payload for commands that operate on an existing release
+// (COMMAND_TYPE_HELM_UNINSTALL, COMMAND_TYPE_HELM_GET_MANIFEST).
+type HelmRelease struct {
 	Release   string `json:"release"`
 	Namespace string `json:"namespace"`
+}
+
+// HelmManifest is the wire response for COMMAND_TYPE_HELM_GET_MANIFEST.
+type HelmManifest struct {
+	Manifest string `json:"manifest"`
 }
 
 // ListCRD is the wire payload for COMMAND_TYPE_LIST_CRD.

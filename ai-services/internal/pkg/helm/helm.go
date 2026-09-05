@@ -66,7 +66,7 @@ func (h *Helm) install(ctx context.Context, release string, chart chart.Charter,
 	// Perform helm install
 	_, err := installClient.RunWithContext(ctx, chart, opts.Values)
 	if err != nil {
-		return fmt.Errorf("Install failed: %w", err)
+		return fmt.Errorf("install failed: %w", err)
 	}
 
 	return nil
@@ -91,7 +91,7 @@ func (h *Helm) upgrade(ctx context.Context, release string, chart chart.Charter,
 	// Perform helm upgrade
 	_, err := upgradeClient.RunWithContext(ctx, release, chart, opts.Values)
 	if err != nil {
-		return fmt.Errorf("Upgrade failed: %w", err)
+		return fmt.Errorf("upgrade failed: %w", err)
 	}
 
 	return nil
@@ -130,7 +130,7 @@ func (h *Helm) IsReleaseExist(release string) (bool, error) {
 	return true, nil
 }
 
-func (h *Helm) GetReleaseManifest(release string) (string, error) {
+func (h *Helm) getReleaseManifest(release string) (string, error) {
 	client := action.NewGet(h.actionConfig)
 	client.Version = 0
 
