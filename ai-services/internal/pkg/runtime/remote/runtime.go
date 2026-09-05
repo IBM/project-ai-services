@@ -119,19 +119,19 @@ func (r *RemoteRuntime) DeletePod(ctx context.Context, nameOrID string, force *b
 }
 
 func (r *RemoteRuntime) StopPod(ctx context.Context, nameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_STOP_POD, payload.NameOrID{NameOrID: nameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_STOP_POD, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) StartPod(ctx context.Context, nameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_START_POD, payload.NameOrID{NameOrID: nameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_START_POD, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) InspectPod(ctx context.Context, nameOrID string) (*types.Pod, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_POD, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_POD, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (r *RemoteRuntime) InspectPod(ctx context.Context, nameOrID string) (*types
 }
 
 func (r *RemoteRuntime) PodExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -159,13 +159,13 @@ func (r *RemoteRuntime) PodExists(ctx context.Context, nameOrID string) (bool, e
 }
 
 func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{NameOrID: nameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func (r *RemoteRuntime) UpdateSecret(ctx context.Context, name, deploymentName s
 // ─── Volume operations ────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) DeleteVolume(ctx context.Context, name string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_VOLUME, payload.Name{Name: name})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_VOLUME, payload.Name{Namespace: r.namespace, Name: name})
 
 	return err
 }
@@ -257,7 +257,7 @@ func (r *RemoteRuntime) VolumeExists(ctx context.Context, nameOrID string) (bool
 // ─── Container operations ─────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) InspectContainer(ctx context.Context, nameOrID string) (*types.Container, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_CONTAINER, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_CONTAINER, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func (r *RemoteRuntime) InspectContainer(ctx context.Context, nameOrID string) (
 }
 
 func (r *RemoteRuntime) ContainerExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -285,7 +285,7 @@ func (r *RemoteRuntime) ContainerExists(ctx context.Context, nameOrID string) (b
 }
 
 func (r *RemoteRuntime) ContainerLogs(ctx context.Context, containerNameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_LOGS, payload.NameOrID{NameOrID: containerNameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: containerNameOrID})
 
 	return err
 }
