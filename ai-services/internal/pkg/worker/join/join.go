@@ -53,6 +53,10 @@ const (
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
+//
+// Local-worker path: when opts.RequestedWorkerName == LocalWorkerName the
+// caller has identified this as the co-located local worker. An empty token
+// is permitted; the gateway applies the local-bypass registration path.
 func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
 	tlsDir := workerconstants.WorkerTLSDir
 	// ── Step 1: Check for existing valid mTLS credentials & stream loop ────────────────────
@@ -67,7 +71,8 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 		return connectAndStream(ctx, rt, pr, opts.GatewayAddr, workerName)
 	}
 
-	if opts.Token == "" {
+	// Require a token for all workers except the explicitly identified local worker.
+	if opts.Token == "" && opts.RequestedWorkerName != workerconstants.LocalWorkerName {
 		return fmt.Errorf("worker join: no valid mTLS credentials found in %s and no --token provided", tlsDir)
 	}
 
@@ -122,6 +127,7 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 	// 3. Call Register with token + CSR.
 	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
 	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
+		WorkerName:     opts.RequestedWorkerName,
 		PreSharedToken: opts.Token,
 		RuntimeType:    rt.String(),
 		CsrPem:         csrPEM,

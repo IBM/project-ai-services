@@ -30,6 +30,12 @@ type OpenshiftWorkerOptions struct {
 // GrpcStreamOptions carries everything needed to join a worker to the catalog control plane.
 type GrpcStreamOptions struct {
 	WorkerConnectionOptions
+
+	// RequestedWorkerName is forwarded in the RegisterRequest.worker_name field.
+	// For normal (token-authenticated) workers this is empty, the gateway derives
+	// the name from the token. Set to workerconstants.LocalWorkerName when joining
+	// the catalog host as the local worker so the gateway applies the local-bypass path.
+	RequestedWorkerName string
 }
 
 // HostAlias maps an IP address to one or more hostnames, injected into the

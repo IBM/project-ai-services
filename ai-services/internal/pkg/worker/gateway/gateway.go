@@ -131,16 +131,40 @@ func (g *Gateway) runSweeper(ctx context.Context) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Register implements WorkerGatewayServer. Workers call this once at bootstrap.
-// The worker name is taken from the token, not from the request — the worker
-// cannot self-assign a name different from what was pre-registered by an admin.
+//
+// Normal path: the worker name is recovered from the single-use bootstrap token
+// issued by `catalog worker register`; the worker cannot self-assign a different name.
+//
+// Local-worker path: when the request carries an empty pre_shared_token and
+// worker_name == workerconstants.LocalWorkerName ("local"), the gateway
+// self-issues the pre-registration and registers the worker directly — no
+// external token management is required.
+//
 // Metadata supplied in the request is persisted to the DB metadata JSON column.
 func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (*workerpb.RegisterResponse, error) {
-	// 1. Validate token — worker name is bound to the token, not the request.
-	workerName, err := g.registry.ValidateToken(req.GetPreSharedToken())
-	if err != nil {
-		logger.WarningfCtx(ctx, "WorkerGateway: rejected registration: %v", err)
+	var workerName string
 
-		return nil, status.Errorf(codes.Unauthenticated, "registration rejected: %v", err)
+	if req.GetPreSharedToken() == "" && req.GetWorkerName() == workerconstants.LocalWorkerName {
+		// Local-worker bypass: catalog and worker share the same host.
+		// Self-issue the pre-registration so we can proceed without a token.
+		logger.DebuglnCtx(ctx, "WorkerGateway: local worker detected — bypassing token validation")
+
+		if _, err := g.registry.Preregister(ctx, workerconstants.LocalWorkerName); err != nil {
+			logger.WarningfCtx(ctx, "WorkerGateway: local preregister: %v (continuing)", err)
+		}
+
+		workerName = workerconstants.LocalWorkerName
+	} else {
+		// Normal path: validate the single-use bootstrap token and recover the
+		// pre-registered worker name bound to it.
+		var err error
+
+		workerName, err = g.registry.ValidateToken(req.GetPreSharedToken())
+		if err != nil {
+			logger.WarningfCtx(ctx, "WorkerGateway: rejected registration: %v", err)
+
+			return nil, status.Errorf(codes.Unauthenticated, "registration rejected: %v", err)
+		}
 	}
 
 	// 2. Parse, validate, and sign the CSR (required for mTLS). See sign.go: signWorkerCSR.

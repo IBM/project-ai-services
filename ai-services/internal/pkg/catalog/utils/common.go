@@ -31,7 +31,8 @@ type PodmanConfigureOptions struct {
 	SSLCertPath       string // Path to user-provided SSL certificate
 	SSLKeyPath        string // Path to user-provided SSL private key
 	HttpsPort         int
-	WorkerGatewayPort int // gRPC worker gateway port; always active, default 9090
+	WorkerGatewayPort int  // gRPC worker gateway port; always active, default 9090
+	SkipLocalWorker   bool // Skip auto-joining host machine as the local worker
 }
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
