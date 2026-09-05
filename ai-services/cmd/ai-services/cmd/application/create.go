@@ -407,7 +407,7 @@ func createApp(ctx context.Context, appName string) error {
 	}
 
 	// 3. Build the catalog API payload
-	payload, err := buildCatalogPayload(ctx, appName)
+	payload, err := buildCatalogPayload(ctx, appClient, appName)
 	if err != nil {
 		return err
 	}
@@ -448,21 +448,24 @@ func checkApplicationExists(ctx context.Context, appClient *catalogClient.Applic
 // buildCatalogPayload builds the catalog API payload for the given template.
 // It uses CatalogSource so that custom bundle templates (not in the embedded catalog)
 // are resolved via the catalog API.
-func buildCatalogPayload(ctx context.Context, appName string) (*apiModels.CreateApplicationRequest, error) {
+func buildCatalogPayload(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) (*apiModels.CreateApplicationRequest, error) {
 	source, err := catalogClient.NewCatalogSource(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialise catalog source: %w", err)
 	}
 
+	// Resolve the target runtime once here so all downstream calls use the same value.
+	deployRT := resolveDeployRuntimeType(ctx)
+
 	// Try architecture first; fall through to service on not-found.
 	arch, err := source.LoadArchitecture(ctx, templateName)
 	if err == nil {
-		return buildArchitecturePayload(ctx, source, arch, appName)
+		return buildArchitecturePayload(ctx, appClient, source, arch, appName, deployRT)
 	}
 
 	svc, err := source.LoadService(ctx, templateName)
 	if err == nil {
-		return buildServicePayload(ctx, svc.ID, appName)
+		return buildServicePayload(ctx, appClient, svc.ID, appName, deployRT)
 	}
 
 	return nil, fmt.Errorf("template '%s' not found as architecture or service", templateName)
@@ -555,6 +558,12 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 	}
 
 	rt := vars.RuntimeFactory.GetRuntimeType()
+	// When the application is deployed on a remote worker, use the worker's
+	// runtime type to select the correct service steps (vars_file.yaml, next.md).
+	// TODO: worker will always exist so we do not need to read from cmd
+	if application.Worker != nil && application.Worker.RuntimeType != "" {
+		rt = runtimeTypes.RuntimeType(application.Worker.RuntimeType)
+	}
 
 	// InstanceSlug is derived from the application UUID — same as at deploy time
 	instanceSlug := catalogUtils.GenerateInstanceSlug(app.ID)
@@ -586,7 +595,7 @@ func printServiceNextSteps(ctx context.Context, appClient *catalogClient.Applica
 		}
 	}
 
-	rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, runtimeType)
+	rawFiles, err := appClient.GetServiceSteps(ctx, service.CatalogID, string(rt))
 	if err != nil {
 		logger.Warningf("Failed to load next steps for service '%s': %v\n", service.CatalogID, err)
 
@@ -633,16 +642,40 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 	return nil
 }
 
-// buildArchitecturePayload builds the payload for an architecture deployment.
-func buildArchitecturePayload(ctx context.Context, _ catalogClient.CatalogSource, arch *catalogTypes.Architecture, appName string) (*apiModels.CreateApplicationRequest, error) {
-	// Create application client for API calls
-	appClient, err := catalogClient.NewApplicationClient(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create application client: %w", err)
+// resolveDeployRuntimeType returns the RuntimeType to use when fetching deploy
+// options. When a --worker flag is given and the worker is connected, its
+// declared runtime type is returned so that the server serves the correct
+// runtime-specific assets (schemas, resource specs, vars_file).
+// Falls back to the locally configured runtime when the worker is absent or
+// its runtime type cannot be determined.
+func resolveDeployRuntimeType(ctx context.Context) runtimeTypes.RuntimeType {
+	if workerName == "" {
+		return vars.RuntimeFactory.GetRuntimeType()
 	}
 
-	// Get deploy options for the architecture
-	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, arch.ID, "")
+	wc, err := catalogClient.NewWorkerClient(ctx)
+	if err != nil {
+		return vars.RuntimeFactory.GetRuntimeType()
+	}
+
+	workers, err := wc.ListWorkers(ctx)
+	if err != nil {
+		return vars.RuntimeFactory.GetRuntimeType()
+	}
+
+	for _, w := range workers {
+		if w.Name == workerName {
+			return runtimeTypes.RuntimeType(w.RuntimeType)
+		}
+	}
+
+	return vars.RuntimeFactory.GetRuntimeType()
+}
+
+// buildArchitecturePayload builds the payload for an architecture deployment.
+func buildArchitecturePayload(ctx context.Context, appClient *catalogClient.ApplicationClient, _ catalogClient.CatalogSource, arch *catalogTypes.Architecture, appName string, deployRT runtimeTypes.RuntimeType) (*apiModels.CreateApplicationRequest, error) {
+	// Get deploy options for the architecture, scoped to the target runtime.
+	deployOptions, err := appClient.GetArchitectureDeployOptions(ctx, arch.ID, string(deployRT))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
@@ -664,7 +697,7 @@ func buildArchitecturePayload(ctx context.Context, _ catalogClient.CatalogSource
 			return nil, fmt.Errorf("deploy options not found for service '%s'", svcRef.ID)
 		}
 
-		svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, svcRef.ID, svcDeployOpts)
+		svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, svcRef.ID, svcDeployOpts, deployRT)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build service '%s': %w", svcRef.ID, err)
 		}
@@ -681,20 +714,14 @@ func buildArchitecturePayload(ctx context.Context, _ catalogClient.CatalogSource
 }
 
 // buildServicePayload builds the payload for a standalone service deployment.
-func buildServicePayload(ctx context.Context, serviceID, appName string) (*apiModels.CreateApplicationRequest, error) {
-	// Create application client for API calls
-	appClient, err := catalogClient.NewApplicationClient(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create application client: %w", err)
-	}
-
-	// Get deploy options for the service
-	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID, "")
+func buildServicePayload(ctx context.Context, appClient *catalogClient.ApplicationClient, serviceID, appName string, deployRT runtimeTypes.RuntimeType) (*apiModels.CreateApplicationRequest, error) {
+	// Get deploy options for the service, scoped to the target runtime.
+	deployOptions, err := appClient.GetServiceDeployOptions(ctx, serviceID, string(deployRT))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
 	}
 
-	svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, serviceID, deployOptions)
+	svc, err := buildServiceEntryWithDeployOptions(ctx, appClient, serviceID, deployOptions, deployRT)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build service: %w", err)
 	}
@@ -709,7 +736,7 @@ func buildServicePayload(ctx context.Context, serviceID, appName string) (*apiMo
 }
 
 // buildServiceEntryWithDeployOptions builds a single service entry with its components using deploy options.
-func buildServiceEntryWithDeployOptions(ctx context.Context, appClient *catalogClient.ApplicationClient, serviceID string, deployOptions *catalogTypes.DeployOptionsService) (apiModels.Service, error) {
+func buildServiceEntryWithDeployOptions(ctx context.Context, appClient *catalogClient.ApplicationClient, serviceID string, deployOptions *catalogTypes.DeployOptionsService, deployRT runtimeTypes.RuntimeType) (apiModels.Service, error) {
 	// Build components list from deploy options
 	components := make([]apiModels.Component, 0, len(deployOptions.Components))
 	for _, compDeployOpt := range deployOptions.Components {
@@ -744,7 +771,7 @@ func buildServiceEntryWithDeployOptions(ctx context.Context, appClient *catalogC
 		}
 
 		// Fetch schema and apply defaults, merging with user params
-		componentParamsAny, err := applySchemaDefaults(ctx, appClient, compDeployOpt.Type, providerID, userParams)
+		componentParamsAny, err := applySchemaDefaults(ctx, appClient, compDeployOpt.Type, providerID, deployRT, userParams)
 		if err != nil {
 			logger.Warningf("Failed to apply schema defaults for %s/%s: %v\n", compDeployOpt.Type, providerID, err)
 			// Continue with user-provided params only
@@ -972,9 +999,9 @@ func collectProviderSelection(compDeployOpt catalogTypes.DeployOptionsComponent,
 
 // applySchemaDefaults fetches the component provider schema and applies default values.
 // User-provided params override defaults.
-func applySchemaDefaults(ctx context.Context, appClient *catalogClient.ApplicationClient, componentType, providerID string, userParams map[string]string) (map[string]any, error) {
+func applySchemaDefaults(ctx context.Context, appClient *catalogClient.ApplicationClient, componentType, providerID string, rt runtimeTypes.RuntimeType, userParams map[string]string) (map[string]any, error) {
 	// Fetch schema from API
-	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID, string(vars.RuntimeFactory.GetRuntimeType()))
+	schema, err := appClient.GetComponentProviderParams(ctx, componentType, providerID, string(rt))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch schema: %w", err)
 	}
