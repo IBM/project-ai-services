@@ -597,7 +597,17 @@ def process_documents(
                 timeout_s = settings.digitize.conversion_timeout_s
                 for task_id in list(pending_task_ids):
                     if is_cancelled:
-                        # Drop remaining pending tasks without submitting downstream work
+                        # For tasks still mid-conversion (CANCEL_PENDING), the dispatcher
+                        # has been signalled but may still be finishing its current 100-page
+                        # chunk before it observes the flag and writes CANCELLED.  Keep the
+                        # task in pending_task_ids and keep polling until it reaches a
+                        # terminal state — otherwise the orchestrator exits while
+                        # _run_conversion is still running.
+                        task = db_manager.get_conversion_task(task_id)
+                        if task is not None and task.status == ConversionTaskStatus.CANCEL_PENDING:
+                            continue  # still draining — re-poll next tick
+                        # Task is already terminal (CANCELLED / FAILED / COMPLETED) or
+                        # was never dispatched — safe to drop without submitting downstream work.
                         logger.info(f"Job {job_id} cancelled — skipping conversion task {task_id}")
                         pending_task_ids.discard(task_id)
                         task_deadlines.pop(task_id, None)
@@ -896,9 +906,13 @@ def process_documents(
                             f"Indexing failed for document {doc_id}: {e}", exc_info=True
                         )
 
-                if is_cancelled and not process_futures and not chunk_futures and not indexing_futures:
-                    # All in-flight downstream work has drained; exit the loop and raise
-                    pending_task_ids.clear()
+                if is_cancelled and not process_futures and not chunk_futures and not indexing_futures \
+                        and not pending_task_ids:
+                    # All in-flight downstream work has drained and every conversion task
+                    # has reached a terminal state (CANCELLED/FAILED/COMPLETED).
+                    # CANCEL_PENDING tasks are kept in pending_task_ids (section A above)
+                    # until _run_conversion writes the final CANCELLED — only once
+                    # pending_task_ids is empty do we know it's safe to exit.
                     break
 
                 time.sleep(settings.digitize.conversion_poll_interval)

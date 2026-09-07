@@ -38,6 +38,7 @@ from pathlib import Path
 from common.misc_utils import get_logger
 from digitize.db.manager import db_manager
 from digitize.db.models import ConversionTask, ConversionTaskStatus
+from digitize.exceptions import JobCancelledError
 from digitize.models import OutputFormat
 from digitize.parsing.converter import convert_document_format
 from digitize.settings import settings
@@ -177,18 +178,18 @@ async def _run_conversion(task: ConversionTask, weight: int) -> None:
         db_manager.update_task_status(task.task_id, ConversionTaskStatus.COMPLETED, result_path=result_path)
         logger.info(f"Task {task.task_id} completed → {result_path}")
 
-    except Exception as exc:
-        # Re-read the task to distinguish a cancellation-induced exception
-        # (e.g. JobCancelledError from convert_doc chunk loop) from a genuine failure.
-        if _cancel_if_pending(
-            task.task_id,
+    except JobCancelledError as exc:
+        # JobCancelledError is raised inside the worker process between 100-page chunks
+        # and re-raised here when run_in_executor unwraps the process-pool future.
+        # The task is already CANCEL_PENDING; write the final CANCELLED state.
+        db_manager.update_task_status(
+            task.task_id, ConversionTaskStatus.CANCELLED,
             error="Job cancelled during conversion",
-            log_msg=f"Task {task.task_id} cancelled mid-conversion: {exc}",
-        ):
-            pass
-        else:
-            logger.error(f"Task {task.task_id} failed: {exc}", exc_info=True)
-            db_manager.update_task_status(task.task_id, ConversionTaskStatus.FAILED, error=str(exc))
+        )
+        logger.info(f"Task {task.task_id} cancelled mid-conversion: {exc}")
+    except Exception as exc:
+        logger.error(f"Task {task.task_id} failed: {exc}", exc_info=True)
+        db_manager.update_task_status(task.task_id, ConversionTaskStatus.FAILED, error=str(exc))
 
     finally:
         # Do NOT delete task.cached_file here — the pipeline layer owns staging
