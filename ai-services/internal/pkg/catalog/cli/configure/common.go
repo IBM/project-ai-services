@@ -16,5 +16,4 @@ const (
 	ArgParamCaddyFileContent      = "caddy.caddyFileContent"
 	ArgParamSSLCertFileContent    = "caddy.sslCertContent"
 	ArgParamSSLKeyFileContent     = "caddy.sslKeyContent"
-	ArgParamWorkerGatewayPort     = "backend.workerGatewayPort"
 )
