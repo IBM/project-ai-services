@@ -7,10 +7,29 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "proxy"
+    ai-services.io/volume: "caddy-worker"
   annotations:
     ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
 spec:
   restartPolicy: always
+  initContainers:
+    - name: generate-caddyfile
+      image: "{{ .Values.caddy.image }}"
+      imagePullPolicy: IfNotPresent
+      command:
+        - "sh"
+        - "-c"
+        - |
+          cat << 'EOF' > /data/caddy/Caddyfile
+          {{- if .Values.caddy.caddyFileContent }}
+{{ .Values.caddy.caddyFileContent }}
+          {{- else }}
+          # No Caddyfile
+          {{- end }}
+          EOF
+      volumeMounts:
+        - name: caddy-data
+          mountPath: /data:z
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
@@ -27,9 +46,14 @@ spec:
           value: "{{ .BaseDir }}"
       volumeMounts:
         - name: caddy-data
-          mountPath: /data/caddy:z
-        - name: caddy-config
+          mountPath: /data:z
+        - name: caddy-data
           mountPath: /config:z
+        {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
+        - name: caddy-certs
+          mountPath: /etc/secret/ssl
+          readOnly: true
+        {{- end }}
       resources:
         requests:
           memory: "256Mi"
@@ -46,10 +70,10 @@ spec:
         failureThreshold: 3
   volumes:
     - name: caddy-data
-      hostPath:
-        path: {{ .BaseDir }}/worker/caddy
-        type: DirectoryOrCreate
-    - name: caddy-config
-      hostPath:
-        path: {{ .BaseDir }}/worker/caddy-config
-        type: DirectoryOrCreate
+      persistentVolumeClaim:
+        claimName: "caddy-worker"
+    {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
+    - name: caddy-certs
+      secret:
+        secretName: caddy-cert-secret
+    {{- end }}

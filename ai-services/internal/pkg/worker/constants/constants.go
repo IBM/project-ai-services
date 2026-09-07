@@ -48,7 +48,6 @@ const (
 	// ArgParamCaddyHTTPSPort, ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
 	// ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile are template
 	// value-override keys used when deploying worker pods.
-	ArgParamCaddyHTTPSPort    = "caddy.httpsPort"
 	ArgParamWorkerToken       = "worker.token"
 	ArgParamWorkerGatewayAddr = "worker.gatewayAddr"
 	ArgParamWorkerPodmanURI   = "worker.podman.uri"

@@ -45,7 +45,7 @@ spec:
         - name: caddy-data
           mountPath: /config:z
         {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
-        - name: caddy-cert-certs
+        - name: caddy-certs
           mountPath: /etc/secret/ssl
           readOnly: true
         {{- end }}
@@ -68,7 +68,7 @@ spec:
       persistentVolumeClaim:
         claimName: "caddy-catalog"
     {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
-    - name: caddy-cert-certs
+    - name: caddy-certs
       secret:
         secretName: catalog-caddy-cert-secret
     {{- end }}
