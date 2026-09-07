@@ -274,36 +274,76 @@ func (pc *PodmanClient) InspectPod(ctx context.Context, nameOrID string) (*types
 	return toPodInspectReport(podInspectReport), nil
 }
 
-// streamContainerLogs follows a container's logs live, stopping on context
-// cancellation or when the container exits. It wraps collectContainerLogs,
-// adding a container-wait goroutine that cancels the log stream as soon as
-// the container process exits.
+// streamContainerLogs streams logs from a container using channels.
 func (pc *PodmanClient) streamContainerLogs(ctx context.Context, containerNameOrID string) error {
+	opts := &containers.LogOptions{
+		Follow: utils.BoolPtr(true),
+		Stderr: utils.BoolPtr(true),
+		Stdout: utils.BoolPtr(true),
+	}
+
+	stdoutChan := make(chan string, logChannelBufferSize)
+	stderrChan := make(chan string, logChannelBufferSize)
+
 	podCtx, cancel := pc.podmanCtx(ctx)
 	defer cancel()
 
-	// logsCtx is cancelled either by the parent (Ctrl+C) or when the container exits.
 	logsCtx, cancelLogs := context.WithCancel(podCtx)
 	defer cancelLogs()
 
-	// Watch for container exit and cancel logsCtx so collectContainerLogs stops.
-	waitDone := make(chan struct{})
+	// Channel to signal goroutine completion
+	done := make(chan struct{})
 
 	go func() {
-		defer close(waitDone)
-		_, err := containers.Wait(logsCtx, containerNameOrID, nil)
-		if err == nil {
-			cancelLogs()
-		}
+		defer close(done)
+		waitDone := make(chan struct{})
+		go func() {
+			defer close(waitDone)
+			_, err := containers.Wait(logsCtx, containerNameOrID, nil)
+			if err == nil {
+				// Container exited, cancel the logs streaming
+				cancelLogs()
+			}
+		}()
+
+		// Stream logs
+		_ = containers.Logs(logsCtx, containerNameOrID, opts, stdoutChan, stderrChan)
+
+		// Wait for container wait to complete
+		<-waitDone
 	}()
 
-	err := pc.collectContainerLogs(logsCtx, containerNameOrID, func(line string) {
-		logger.Infoln(line)
-	})
+	// passing both contexts so it respects Ctrl+C and container exit
+	pc.printLogsFromChannels(ctx, logsCtx, stdoutChan, stderrChan)
 
-	<-waitDone
+	// Wait for goroutine to complete
+	<-done
 
-	return err
+	return nil
+}
+
+// printLogsFromChannels reads from stdout and stderr channels and prints logs.
+func (pc *PodmanClient) printLogsFromChannels(parentCtx, logsCtx context.Context, stdoutChan, stderrChan <-chan string) {
+	for {
+		select {
+		case <-parentCtx.Done():
+			// Parent context cancelled (e.g., Ctrl+C)
+			return
+		case <-logsCtx.Done():
+			// Logs context cancelled (e.g., container exited)
+			return
+		case line, ok := <-stdoutChan:
+			if !ok {
+				return
+			}
+			logger.Infoln(line)
+		case line, ok := <-stderrChan:
+			if !ok {
+				return
+			}
+			logger.Infoln(line)
+		}
+	}
 }
 
 // PodLogs retrieves logs for all non-infra containers in a pod.
@@ -325,27 +365,27 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 
 	var lines []string
 
-	// Install signal handling for the follow path; harmless for snapshot.
-	logCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	for _, container := range podInspect.Containers {
 		if container.ID == podInspect.InfraContainerID {
 			continue
 		}
 
 		if stream {
+			// Install signal handling so Ctrl+C / SIGTERM stops the tail gracefully.
+			sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			defer stop()
+
 			logger.Infof("Streaming logs for container: %s", container.Name)
 
-			if err := pc.streamContainerLogs(logCtx, container.ID); err != nil {
+			if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
 				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
 			}
 
-			if logCtx.Err() == context.Canceled || logCtx.Err() == context.DeadlineExceeded {
+			if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
 				return nil, nil
 			}
 		} else {
-			if err := pc.collectContainerLogs(logCtx, container.ID, func(line string) {
+			if err := pc.collectContainerLogs(ctx, container.ID, func(line string) {
 				lines = append(lines, line)
 			}); err != nil {
 				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
@@ -357,8 +397,8 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 }
 
 // collectContainerLogs opens a log stream for a single container and calls
-// onLine for every line received. The stream closes naturally (snapshot) or
-// when ctx is cancelled (follow path via streamContainerLogs).
+// onLine for every line received. follow=false snapshots and returns when the
+// stream closes naturally; follow=true tails until ctx is cancelled.
 // This is the shared core used by both PodLogs and streamContainerLogs.
 func (pc *PodmanClient) collectContainerLogs(ctx context.Context, containerID string, onLine func(string)) error {
 	opts := &containers.LogOptions{
@@ -386,12 +426,14 @@ func (pc *PodmanClient) collectContainerLogs(ctx context.Context, containerID st
 		case line, ok := <-stdoutChan:
 			if !ok {
 				stdoutChan = nil
+				
 				continue
 			}
 			onLine(line)
 		case line, ok := <-stderrChan:
 			if !ok {
 				stderrChan = nil
+				
 				continue
 			}
 			onLine(line)

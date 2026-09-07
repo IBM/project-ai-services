@@ -97,6 +97,6 @@ const (
 )
 
 const (
-	// GrpcStreamErr is the error log message emitted by the worker container when it fails to establish a gRPC stream connection to the gateway.
-	GrpcStreamErr = "failed to start grpc stream"
+	// WorkerJoinErr is the error log message emitted by the worker container when it fails to establish a gRPC stream connection to the gateway.
+	WorkerJoinErr = "failed to join the worker"
 )
