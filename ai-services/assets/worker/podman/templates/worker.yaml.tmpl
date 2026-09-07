@@ -12,6 +12,16 @@ metadata:
     run.oci.keep_original_groups: "1"
 spec:
   restartPolicy: always
+  {{- if .Values.hostAliases }}
+  hostAliases:
+  {{- range .Values.hostAliases }}
+  - ip: "{{ .IP }}"
+    hostnames:
+    {{- range .Hostnames }}
+      - "{{ . }}"
+    {{- end }}
+  {{- end }}
+  {{- end }}
   containers:
     - name: worker
       image: "{{ .Values.worker.image }}"

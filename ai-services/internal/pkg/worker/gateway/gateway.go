@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
@@ -48,8 +49,8 @@ type Gateway struct {
 }
 
 // New creates a Gateway backed by the given registry.
-func New(ctx context.Context, reg *registry.Registry) (*Gateway, error) {
-	pki, err := loadOrGeneratePKI(ctx, workerconstants.GatewayPKIDir)
+func New(ctx context.Context, reg *registry.Registry, runtimeType types.RuntimeType) (*Gateway, error) {
+	pki, err := loadOrGeneratePKI(ctx, workerconstants.GatewayPKIDir, runtimeType)
 	if err != nil {
 		return nil, fmt.Errorf("worker gateway: PKI init failed: %w", err)
 	}

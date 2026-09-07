@@ -8,12 +8,22 @@ const (
 	PodStartOff          = "off"
 	OperatorPollInterval = 5 * time.Second
 	OperatorPollTimeout  = 3 * time.Minute
-	VersionV2            = "v2"
-	DSCKind              = "DataScienceCluster"
-	DSCIKind             = "DSCInitialization"
-	SMTLevel             = 2
-	ErrSecretNotFound    = "no secret with name or id"
-	CaddyServerName      = "ai_services" // Caddy server name used for route registration
+
+	// HelmTimeout is the default timeout for a Helm install/upgrade operation.
+	HelmTimeout = 10 * time.Minute
+	// HelmUninstallTimeout is the default timeout for a Helm uninstall operation.
+	HelmUninstallTimeout = 5 * time.Minute
+	// PredictorWaitTimeout is the maximum time to wait for a KServe InferenceService
+	// to reach Ready=True after a Helm install.
+	PredictorWaitTimeout = 15 * time.Minute
+	// IsvcPollInterval is the interval between KServe InferenceService readiness polls.
+	IsvcPollInterval  = 15 * time.Second
+	VersionV2         = "v2"
+	DSCKind           = "DataScienceCluster"
+	DSCIKind          = "DSCInitialization"
+	SMTLevel          = 2
+	ErrSecretNotFound = "no secret with name or id"
+	CaddyServerName   = "ai_services" // Caddy server name used for route registration
 )
 
 const (

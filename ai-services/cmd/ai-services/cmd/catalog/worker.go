@@ -53,7 +53,7 @@ Pass the token to the worker node and run:
 
 			ctx := cmd.Context()
 
-			c, err := client.New(ctx)
+			c, err := client.NewWorkerClient(ctx)
 			if err != nil {
 				return err
 			}
@@ -89,7 +89,7 @@ func newWorkerListCmd() *cobra.Command {
 
 			ctx := cmd.Context()
 
-			c, err := client.New(ctx)
+			c, err := client.NewWorkerClient(ctx)
 			if err != nil {
 				return err
 			}
@@ -122,7 +122,7 @@ If the worker is currently connected its gRPC stream is also cleaned up.`,
 
 			ctx := cmd.Context()
 
-			c, err := client.New(ctx)
+			c, err := client.NewWorkerClient(ctx)
 			if err != nil {
 				return err
 			}

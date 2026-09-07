@@ -5,11 +5,28 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-resty/resty/v2"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 )
+
+// serviceConnectorListResponse is the paginated envelope returned by
+// GET /v1/connectors on the downstream service pod.
+type serviceConnectorListResponse struct {
+	Total  int                       `json:"total"`
+	Limit  int                       `json:"limit"`
+	Offset int                       `json:"offset"`
+	Items  []apimodels.ConnectorItem `json:"items"`
+}
+
+// ServiceConnectorPage is the parsed result of a ListConnectors call: the page items keyed by
+// connector ID for O(1) lookup, plus the Total count reported by the service for pagination.
+type ServiceConnectorPage struct {
+	ByID  map[string]apimodels.ConnectorItem
+	Total int
+}
 
 const (
 	// serviceHTTPTimeout is the per-request timeout for calls to a downstream service pod.
@@ -106,6 +123,45 @@ func (c *ServiceClient) GetConnectorSync(ctx context.Context, connectorID string
 	}
 
 	return &result, nil
+}
+
+// ListConnectors calls GET /v1/connectors on the service pod with limit/offset pagination
+// and returns a ServiceConnectorPage containing a map keyed by connector ID for O(1) lookup
+// and the Total count from the service response — used to drive API-level pagination.
+// The ConnectorListItem already includes the message field covering all status phases and
+// error details — no separate sync-log call is required.
+// Pass limit=0 to use the service default (50). offset is zero-based.
+// Returns an error when the HTTP call fails or the pod returns a non-200 status.
+func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int) (*ServiceConnectorPage, error) {
+	var result serviceConnectorListResponse
+
+	req := c.http.R().
+		SetContext(ctx).
+		SetResult(&result)
+
+	if limit > 0 {
+		req = req.SetQueryParam("limit", strconv.Itoa(limit))
+	}
+
+	if offset > 0 {
+		req = req.SetQueryParam("offset", strconv.Itoa(offset))
+	}
+
+	resp, err := req.Get(serviceConnectPath)
+	if err != nil {
+		return nil, fmt.Errorf("service request failed: %w", err)
+	}
+
+	if resp.IsError() {
+		return nil, fmt.Errorf("service returned status %d", resp.StatusCode())
+	}
+
+	byID := make(map[string]apimodels.ConnectorItem, len(result.Items))
+	for _, item := range result.Items {
+		byID[item.ID] = item
+	}
+
+	return &ServiceConnectorPage{ByID: byID, Total: result.Total}, nil
 }
 
 // Connect calls POST /v1/connectors on the given service base URL.

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
@@ -45,7 +46,7 @@ type pkiResult struct {
 
 // loadOrGeneratePKI loads the four PKI files from pkiDir when they all exist,
 // or generates a new ECDSA P-256 root CA and server certificate on first start.
-func loadOrGeneratePKI(ctx context.Context, pkiDir string) (pkiResult, error) {
+func loadOrGeneratePKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	caKeyPath := filepath.Join(pkiDir, "ca.key")
 	caCrtPath := filepath.Join(pkiDir, "ca.crt")
 	srvKeyPath := filepath.Join(pkiDir, "server.key")
@@ -59,7 +60,7 @@ func loadOrGeneratePKI(ctx context.Context, pkiDir string) (pkiResult, error) {
 
 	logger.InfofCtx(ctx, "worker gateway: PKI directory empty or incomplete — generating new CA and server certificate in %s", pkiDir)
 
-	return generateAndPersistPKI(ctx, pkiDir)
+	return generateAndPersistPKI(ctx, pkiDir, runtimeType)
 }
 
 // generateCA creates a new ECDSA P-256 root CA key and certificate.
@@ -92,7 +93,8 @@ func generateCA() (*ecdsa.PrivateKey, *x509.Certificate, []byte, error) {
 }
 
 // generateServerCert creates a new ECDSA P-256 server key and signs it with the CA.
-func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey) (*ecdsa.PrivateKey, []byte, error) {
+// serverName is the hostname embedded as the DNS SAN (must match what workers dial).
+func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, serverName string) (*ecdsa.PrivateKey, []byte, error) {
 	srvKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate server key: %w", err)
@@ -101,7 +103,7 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey) (*ecd
 	srvTemplate := &x509.Certificate{
 		SerialNumber: srvSerial,
 		Subject:      pkix.Name{CommonName: "Catalog"},
-		DNSNames:     []string{workerconstants.GatewayServerName},
+		DNSNames:     []string{serverName},
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(serverCertTTL),
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
@@ -117,10 +119,21 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey) (*ecd
 
 // generateAndPersistPKI creates a new ECDSA P-256 root CA and signs a server
 // certificate, then writes all four PEM files to pkiDir.
-// The server cert carries workerconstants.GatewayServerName as its DNS SAN so
-// workers can verify the server without knowing its actual IP or public hostname.
-func generateAndPersistPKI(ctx context.Context, pkiDir string) (pkiResult, error) {
+//
+// For OpenShift the server cert's DNS SAN is populated by fetching the live
+// passthrough route host via GatewayRouteHost rather than using a hardcoded
+// hostname. For all other runtimes the static internal name is used.
+func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	empty := pkiResult{}
+
+	serverName := workerconstants.GatewayServerName
+	if runtimeType == types.RuntimeTypeOpenShift {
+		host, err := GatewayRouteHost(ctx)
+		if err != nil {
+			return empty, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
+		}
+		serverName = host
+	}
 
 	if err := os.MkdirAll(pkiDir, dirPerm); err != nil {
 		return empty, fmt.Errorf("mkdir %s: %w", pkiDir, err)
@@ -131,7 +144,7 @@ func generateAndPersistPKI(ctx context.Context, pkiDir string) (pkiResult, error
 		return empty, err
 	}
 
-	srvKey, srvCertDER, err := generateServerCert(caCert, caKey)
+	srvKey, srvCertDER, err := generateServerCert(caCert, caKey, serverName)
 	if err != nil {
 		return empty, err
 	}

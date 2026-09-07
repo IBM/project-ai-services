@@ -97,6 +97,14 @@ func renderApplicationInfo(ctx context.Context, appName string, rt types.Runtime
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
+	// When the application is deployed on a remote worker, use the worker's
+	// runtime type to select the correct service steps (vars_file.yaml, info.md).
+	// The CLI's own --runtime flag reflects the local machine, not the worker.
+	// TODO: worker will always exist so we do not need to read from cmd
+	if application.Worker != nil && application.Worker.RuntimeType != "" {
+		rt = types.RuntimeType(application.Worker.RuntimeType)
+	}
+
 	appPS, err := appClient.GetApplicationPS(ctx, app.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get application pods: %w", err)
