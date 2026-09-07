@@ -60,7 +60,7 @@ from digitize.utils.db import (
 )
 from digitize.db.models import JobSource
 
-from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_and_launch, initialize_job_state, request_job_cancellation, NON_CANCELLABLE_JOB_STATUSES
+from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_and_launch, request_job_cancellation, NON_CANCELLABLE_JOB_STATUSES
 
 logger = get_logger("sync_tick")
 

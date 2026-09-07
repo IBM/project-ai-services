@@ -124,7 +124,12 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
                     collecting further LLM results between table calls and
                     cancels any queued futures that have not yet started.
 
-    Returns tuple: (summaries, decisions)
+    Returns tuple: (summaries, decisions, failures).
+        summaries:  List of summary strings in table-index order.
+        decisions:  List of booleans (keep/discard) in table-index order.
+        failures:   Dict mapping table index to error message for tables that
+                    could not be processed; those tables use fallback values
+                    and processing continues.
     Raises JobCancelledError if stop_event is set mid-processing.
     """
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
@@ -167,6 +172,9 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
                     f"Job cancelled during table summarization for '{doc_path}'"
                 )
 
+            # Sleep once per outer-loop cycle so the loop never spins when all
+            # remaining futures are still running.  Skipped only when pending is
+            # empty (the while condition will end the loop on the next check).
             if pending:
                 time.sleep(0.5)
 

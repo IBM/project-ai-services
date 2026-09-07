@@ -37,7 +37,9 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
 
     Returns the task object (possibly in a terminal state) or ``None`` if the
     row disappeared.  Raises ``_DeadlineExceeded`` when the deadline is hit so
-    the caller can apply a consistent failure path.
+    the caller can apply a consistent failure path.  Raises ``JobCancelledError``
+    immediately if the job row is found to be ``cancel_pending`` or ``cancelled``
+    during polling (the task is also marked cancelled before raising).
 
     Args:
         job_id:           Job identifier used to look up the task row.
@@ -58,6 +60,13 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
         task = db_manager.get_conversion_task_by_job_id(job_id)
         if task is None:
             logger.warning(f"Task for job {job_id} disappeared during polling")
+            break
+        # Check job-level cancellation flag on every tick so a CANCEL_PENDING
+        # job whose task is still QUEUED is observed here rather than waiting
+        # for the dispatcher to write CANCELLED to the task row first.
+        if db_manager.is_job_cancelled(job_id):
+            db_manager.cancel_tasks_for_job(job_id)
+            raise JobCancelledError(f"Job {job_id} was cancelled during {phase_label} polling")
     return task
 
 
@@ -111,8 +120,6 @@ def digitize(
 
     try:
         # Phase 1: wait until the dispatcher picks up the task (queued → running).
-        # Also stops on CANCELLED so a cancel that arrives during the queued phase
-        # is observed immediately without waiting for the deadline.
         task = _poll_until(
             job_id,
             {
@@ -123,17 +130,6 @@ def digitize(
             },
             deadline, timeout_s, "start",
         )
-
-        # CANCELLED observed in phase 1 — signal the dispatcher (idempotent) and
-        # raise so the caller handles the cancellation cleanup.
-        if task is not None and task.status == ConversionTaskStatus.CANCELLED:
-            raise JobCancelledError(f"Job {job_id} conversion task was cancelled")
-
-        # Also check the job flag in case cancellation arrived between the check
-        # above and the dispatcher setting the task status.
-        if job_id and db_manager.is_job_cancelled(job_id):
-            db_manager.cancel_tasks_for_job(job_id)
-            raise JobCancelledError(f"Job {job_id} was cancelled during conversion")
 
         # Mark IN_PROGRESS as soon as the dispatcher starts running.
         if task is not None and task.status == ConversionTaskStatus.RUNNING and doc_id:
@@ -146,10 +142,6 @@ def digitize(
             _POLL_TERMINAL,
             deadline, timeout_s, "complete",
         )
-
-        # CANCELLED observed in phase 2
-        if task is not None and task.status == ConversionTaskStatus.CANCELLED:
-            raise JobCancelledError(f"Job {job_id} conversion task was cancelled during execution")
 
     except _DeadlineExceeded as exc:
         _fail(str(exc))
