@@ -522,15 +522,6 @@ async def _handle_interrupt(
     elif interrupt_type == InterruptType.DELETE_CONNECTOR:
         logger.info(f"Handling delete connector for {connector_id!r}")
         _cancel_tick(sync_seq, connector_id)
-        # Purge conversion tasks the tick may have enqueued before being interrupted.
-        # Must happen here (Case A only) — _run_teardown is shared with Case B where
-        # no tick was running so no in-flight tasks exist to purge.
-        from digitize.db.manager import db_manager
-        deleted_tasks = db_manager.delete_conversion_tasks_for_connector(connector_id)
-        if deleted_tasks:
-            logger.info(
-                f"Purged {deleted_tasks} queued conversion task(s) for connector {connector_id!r}"
-            )
         # Run full teardown: remove checksums, delete orphaned docs, delete connector row
         from digitize.api.v1.connectors import _run_teardown
         await _run_teardown(connector_id)

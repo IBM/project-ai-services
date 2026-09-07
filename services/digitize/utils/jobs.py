@@ -5,6 +5,7 @@ job initialisation, file staging, active-job guards, document content
 retrieval, and bulk deletion helpers.
 """
 import asyncio
+from datetime import datetime, timezone
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,7 @@ from digitize.models import (
 )
 from digitize.parsing.pdf import get_document_page_count
 from digitize.settings import settings
+from digitize.db.manager import db_manager
 from digitize.utils.db import (
     create_job,
     create_document,
@@ -29,6 +31,8 @@ from digitize.utils.db import (
 )
 
 from common.misc_utils import get_utc_timestamp, cleanup_staging_directory
+from services.digitize import models
+from services.digitize.exceptions import JobCancelledError
 
 
 logger = get_logger("digitize_utils")
@@ -238,7 +242,6 @@ async def enqueue_conversion_tasks(
         queued_for_op: Number of tasks already queued for this operation (user jobs only).
         connector_id:  Owning connector UUID; None for user-submitted jobs.
     """
-    from digitize.db.manager import db_manager
 
     slots_free = max(0, quota - queued_for_op)
     tasks = []
@@ -275,6 +278,28 @@ async def enqueue_conversion_tasks(
 
     db_manager.create_conversion_tasks_batch(tasks)
 
+_TERMINAL_DOC_STATUSES = (
+    models.DocStatus.COMPLETED.value,
+    models.DocStatus.FAILED.value,
+    models.DocStatus.CANCELLED.value,
+    models.DocStatus.ALREADY_EXISTS.value,
+)
+def _cancel_job_docs(job_id: str, status_mgr, *, force: bool = False) -> None:
+    """Mark documents for *job_id* as CANCELLED, then set the job to CANCELLED.
+
+    When *force* is ``False`` (default) terminal documents (COMPLETED, FAILED,
+    CANCELLED, ALREADY_EXISTS) are left untouched.  Pass ``force=True`` after a
+    VDB cleanup so that COMPLETED docs — whose vector chunks have just been
+    removed — are also marked CANCELLED.
+    """
+    docs = db_manager.get_documents_by_job_id(job_id)
+    for doc in docs:
+        if force or doc.status not in _TERMINAL_DOC_STATUSES:
+            status_mgr.update_doc_metadata(
+                doc.doc_id,
+                {"status": models.DocStatus.CANCELLED, "completed_at": datetime.now(timezone.utc).isoformat()},
+            )
+    status_mgr.update_job_progress("", models.DocStatus.CANCELLED, models.JobStatus.CANCELLED)
 
 async def initialize_and_launch(
     job_id: str,
@@ -403,14 +428,17 @@ async def launch_digitize_pipeline(
     from digitize.models import DocStatus, JobStatus
     from digitize.utils.db import get_status_manager
 
+    status_mgr = get_status_manager(job_id)
     try:
         logger.info(f"🚀 Digitization pipeline started for job: {job_id}")
         from digitize.pipeline.digitize import digitize
         await asyncio.to_thread(digitize, job_id, doc_id_dict)
         logger.info(f"Digitization pipeline for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Digitization job {job_id} was cancelled")
+        _cancel_job_docs(job_id, status_mgr)
     except Exception as exc:
         logger.error(f"Error in digitization pipeline for job {job_id}: {exc}", exc_info=True)
-        status_mgr = get_status_manager(job_id)
         status_mgr.update_job_progress(
             "",
             DocStatus.FAILED,
@@ -461,12 +489,42 @@ async def launch_ingest_pipeline(
     from digitize.utils.db import get_status_manager
 
     resolved: Path = staging_dir if staging_dir is not None else settings.digitize.staging_dir / job_id
-
+    status_mgr = get_status_manager(job_id)
     try:
         logger.info(f"🚀 Ingestion pipeline started for job: {job_id}")
         from digitize.pipeline.ingest import ingest
         await asyncio.to_thread(ingest, resolved, job_id, doc_id_dict, file_checksum_dict)
         logger.info(f"Ingestion pipeline for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Ingestion job {job_id} was cancelled")
+
+        # Clean vector DB before marking docs CANCELLED so the filter on
+        # CHUNKED/COMPLETED statuses still reflects pre-cancellation state.
+        vdb_cleaned = False
+        try:
+            job_row = db_manager.get_job_by_id(job_id)
+            if job_row and job_row.stats.get("clean_files"):
+                import common.db_utils as db_utils
+                indexed_statuses = {
+                    models.DocStatus.CHUNKED.value,
+                    models.DocStatus.COMPLETED.value,
+                }
+                all_docs = db_manager.get_documents_by_job_id(job_id)
+                doc_ids_to_clean = [
+                    d.doc_id for d in all_docs
+                    if d.status in indexed_statuses
+                ]
+                if doc_ids_to_clean:
+                    vector_store = db_utils.get_vector_store()
+                    deleted = vector_store.remove_docs_from_index(doc_ids_to_clean)
+                    logger.info(f"Cancelled job {job_id}: removed {deleted} vector chunks (clean_files=true)")
+                    vdb_cleaned = True
+        except Exception as vdb_exc:
+            logger.warning(f"Vector DB cleanup failed for cancelled job {job_id}: {vdb_exc}")
+
+        # If VDB cleanup ran, force-cancel all docs (including COMPLETED ones
+        # whose vectors were just removed).  Otherwise respect terminal statuses.
+        _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
     except Exception as exc:
         logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
