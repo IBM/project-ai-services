@@ -33,7 +33,9 @@ type PodmanConfigureOptions struct {
 	SSLCertPath       string // Path to user-provided SSL certificate
 	SSLKeyPath        string // Path to user-provided SSL private key
 	HttpsPort         int
-	WorkerGatewayPort int // gRPC worker gateway port; always active, default 9090
+	WorkerGatewayPort int  // gRPC worker gateway port; always active, default 9090
+	SkipLocalWorker   bool // When true, skip joining this machine as the Local worker
+	LocalWorker       bool // Reflects LOCAL_WORKER env var from the running catalog-backend container
 }
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
@@ -98,6 +100,9 @@ func extractConfigFromEnv(podEnv map[string]string, config *PodmanConfigureOptio
 	}
 	if value, ok := podEnv["WORKER_GATEWAY_PORT"]; ok {
 		config.WorkerGatewayPort, _ = strconv.Atoi(value)
+	}
+	if value, ok := podEnv["LOCAL_WORKER"]; ok {
+		config.LocalWorker = value == "true"
 	}
 }
 

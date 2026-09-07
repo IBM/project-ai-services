@@ -95,20 +95,29 @@ func (w *WorkerEntry) deliverResult(res *workerpb.CommandResult) {
 
 // Registry tracks all currently-connected workers by name.
 type Registry struct {
-	mu         sync.RWMutex
-	workers    map[string]*WorkerEntry
-	repo       repository.WorkerRepository // may be nil in tests
-	tokenStore *TokenStore
+	mu          sync.RWMutex
+	workers     map[string]*WorkerEntry
+	repo        repository.WorkerRepository // may be nil in tests
+	tokenStore  *TokenStore
+	localWorker bool
 }
 
 // New creates a new Registry backed by the given WorkerRepository.
 // Pass nil for tests that do not need DB persistence.
-func New(repo repository.WorkerRepository) *Registry {
+// Set localWorker to true to skip the DB upsert in Preregister (local worker mode).
+func New(repo repository.WorkerRepository, localWorker bool) *Registry {
 	return &Registry{
-		workers:    make(map[string]*WorkerEntry),
-		repo:       repo,
-		tokenStore: NewTokenStore(),
+		workers:     make(map[string]*WorkerEntry),
+		repo:        repo,
+		tokenStore:  NewTokenStore(),
+		localWorker: localWorker,
 	}
+}
+
+// IsLocalWorker reports whether this registry is running in local-worker mode.
+// When true, the gateway skips token validation for the LocalWorkerName self-join.
+func (r *Registry) IsLocalWorker() bool {
+	return r.localWorker
 }
 
 // Register upserts the worker into the DB (status=ready, with provided metadata)
@@ -228,7 +237,15 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 // If the worker is currently active in the in-memory map (i.e. its stream is still
 // open), it is evicted first so that the stale connection can no longer update the
 // heartbeat on the now-pending row.
+//
+// When the LOCAL_WORKER environment variable is "true" the catalog-backend is
+// running as the local worker itself. In that case the DB upsert is skipped —
+// only a token is issued so the worker pod can connect via gRPC.
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
+	if r.localWorker {
+		return r.tokenStore.IssueToken(workerName), nil
+	}
+
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
 	}

@@ -135,12 +135,23 @@ func (g *Gateway) runSweeper(ctx context.Context) {
 // cannot self-assign a name different from what was pre-registered by an admin.
 // Metadata supplied in the request is persisted to the DB metadata JSON column.
 func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (*workerpb.RegisterResponse, error) {
-	// 1. Validate token — worker name is bound to the token, not the request.
-	workerName, err := g.registry.ValidateToken(req.GetPreSharedToken())
-	if err != nil {
-		logger.WarningfCtx(ctx, "WorkerGateway: rejected registration: %v", err)
+	// 1. Resolve worker name from token or bypass for the local self-join.
+	//
+	// When LOCAL_WORKER=true the catalog-backend trusts its own worker pod
+	// unconditionally: no token is required. The worker sends an empty token and
+	// the gateway assigns the reserved LocalWorkerName without any DB lookup.
+	var workerName string
+	if g.registry.IsLocalWorker() && req.GetPreSharedToken() == workerconstants.LocalWorkerToken {
+		workerName = workerconstants.LocalWorkerName
+		logger.InfofCtx(ctx, "WorkerGateway: local self-join for %q — skipping token validation", workerName)
+	} else {
+		var err error
+		workerName, err = g.registry.ValidateToken(req.GetPreSharedToken())
+		if err != nil {
+			logger.WarningfCtx(ctx, "WorkerGateway: rejected registration: %v", err)
 
-		return nil, status.Errorf(codes.Unauthenticated, "registration rejected: %v", err)
+			return nil, status.Errorf(codes.Unauthenticated, "registration rejected: %v", err)
+		}
 	}
 
 	// 2. Parse, validate, and sign the CSR (required for mTLS). See sign.go: signWorkerCSR.

@@ -44,7 +44,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx)
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts)
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
@@ -75,8 +75,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 	if !isDeployed {
 		// Prepare deployment with domain suffix computation and create Caddy context
-		err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, opts.HttpsPort, opts.WorkerGatewayPort)
-		if err != nil {
+		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
 			s.Fail("failed to load param values")
 
 			return nil, err
@@ -106,7 +105,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
-func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -121,6 +120,14 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
+	if !opts.SkipLocalWorker {
+		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts); err != nil {
+			// Non-fatal: log and continue so the catalog itself is not
+			// considered failed if the local worker join fails.
+			logger.Warningf("local worker join failed: %v\n", err)
+		}
+	}
+
 	// Print next steps with proxy route information
 	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeURLs); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
@@ -130,20 +137,18 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	return nil
 }
 
-// loadCatalogParamValues prepares all necessary data for deployment including domain suffix computation.
-func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int) error {
+// loadCatalogParamValues prepares all necessary data for deployment.
+func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) error {
 	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
-	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, httpsPort, workerGatewayPort)
+	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, httpsPort, workerGatewayPort, skipLocalWorker)
 	if err != nil {
 		return fmt.Errorf("failed to generate arg params: %w", err)
 	}
-	// Fill caddy config
 
 	// Prepare values with configure-specific configuration
-	err = deployCtx.PrepareValues(argParams)
-	if err != nil {
+	if err := deployCtx.PrepareValues(argParams); err != nil {
 		return fmt.Errorf("failed to load values: %w", err)
 	}
 
@@ -151,7 +156,7 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCe
 }
 
 // generateArgParams generates the argument parameters for template rendering.
-func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int) (map[string]string, error) {
+func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
 	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
@@ -214,6 +219,9 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
+	if skipLocalWorker {
+		argParams[configure.ArgParamLocalWorker] = "false"
+	}
 	argParams[constants.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, utils.CaddyFileIndent)
 	argParams[constants.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, utils.CertContentIndent)
 	argParams[constants.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, utils.CertContentIndent)

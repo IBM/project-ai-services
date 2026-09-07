@@ -44,6 +44,8 @@ var (
 	resetPodmanAuthFlag bool
 	// Reset certificate flag for catalog configure command.
 	resetCertificateFlag bool
+	// Skip joining this machine as the Local worker.
+	skipLocalWorkerFlag bool
 
 	// openShift flags.
 	timeout time.Duration
@@ -152,6 +154,7 @@ func runConfigure(ctx context.Context) error {
 			SSLKeyPath:        catalogUtils.SanitizeFilePath(sslKeyPath),
 			HttpsPort:         httpsPort,
 			WorkerGatewayPort: workerGatewayPort,
+			SkipLocalWorker:   skipLocalWorkerFlag,
 		}
 
 		return catalogPodman.DeployCatalog(ctx, opts)
@@ -251,8 +254,19 @@ func initConfigureCommonFlags() {
 }
 
 func initConfigurePodmanFlags() {
+	initConfigurePodmanWorkerFlags()
 	initConfigurePodmanDeployFlags()
 	initConfigurePodmanResetFlags()
+}
+
+func initConfigurePodmanWorkerFlags() {
+	configureCmd.Flags().BoolVar(
+		&skipLocalWorkerFlag,
+		"skip-local-worker",
+		false,
+		"Skip automatically joining this machine as the local worker after catalog deployment.\n"+
+			"Note: Supported for podman runtime only.\n",
+	)
 }
 
 func initConfigurePodmanDeployFlags() {
@@ -354,7 +368,8 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 		AddPodmanFlag("ssl-cert", nil).
 		AddPodmanFlag("ssl-key", nil).
 		AddPodmanFlag("reset-podman-auth", nil).
-		AddPodmanFlag("reset-certificate", nil)
+		AddPodmanFlag("reset-certificate", nil).
+		AddPodmanFlag("skip-local-worker", nil)
 
 	// OpenShift-only flags.
 	builder.AddOpenShiftFlag("timeout", nil)
