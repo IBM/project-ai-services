@@ -38,7 +38,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 
 	auth := middleware.AuthMiddleware(tokenMgr, blacklist)
 	datasourceH := handlers.NewDatasourceHandler(datasourceSvc)
-	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(), auth)
+	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(workerReg), auth)
 	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), datasourceH, auth)
 	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg, workerRepo), auth)
 	registerDatasourceRoutes(v1, datasourceH, auth)
