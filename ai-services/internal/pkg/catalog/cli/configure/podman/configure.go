@@ -157,65 +157,36 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCe
 
 // generateArgParams generates the argument parameters for template rendering.
 func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
-	// Generate database password
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate database password: %w", err)
 	}
 
-	// Determine auth file path
-	// Read and encode auth file content for secret
-	// If auth file doesn't exist, use empty content
-	authFilePath, err := utils.GetAuthFilePath()
+	authFileBase64, err := readAuthFileBase64()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get auth file path: %w", err)
+		return nil, err
 	}
 
-	authFileContent, err := os.ReadFile(authFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Auth file doesn't exist - user hasn't logged into podman
-			logger.Warningln("Podman auth file not found. Deployment may fail since deployment may require pulling images.")
-			logger.Warningln("If you need to update registry credentials later, you can use the '--reset-podman-auth' flag after running 'podman login'.")
-			authFileContent = []byte("{}")
-		} else {
-			return nil, fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
-		}
-	}
-
-	// Base64 encode the auth file content for Kubernetes secret
-	authFileBase64 := base64.StdEncoding.EncodeToString(authFileContent)
-
-	// Determine the podman URI
-	// Strip unix:// prefix from podmanURI for hostPath volume mount
-	// The CONTAINER_HOST env var needs the full URI, but the hostPath needs just the file path
 	podmanURI, err := utils.ResolvePodmanURI()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate podman uri: %w", err)
 	}
-	podmanSocketPath := strings.TrimPrefix(podmanURI, "unix://")
 
-	// Caddy configuration
 	caddyFileContent, err := caddy.GetCaddyFileContent()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate caddy file: %w", err)
 	}
-	var sslCertContent, sslKeyContent string
-	if sslCertPath != "" && sslKeyPath != "" {
-		certbyte, keyBytes, _, err := utils.ReadAndParseCertificates(sslCertPath, sslKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load ssl certs: %w", err)
-		}
-		sslCertContent = string(certbyte)
-		sslKeyContent = string(keyBytes)
+
+	sslCertContent, sslKeyContent, err := readSSLContents(sslCertPath, sslKeyPath)
+	if err != nil {
+		return nil, err
 	}
 
-	// Set configure-specific values
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
 	argParams[configure.ArgParamRuntime] = "podman"
 	argParams[configure.ArgParamPodmanAuthFileContent] = authFileBase64
-	argParams[configure.ArgParamPodmanURI] = podmanSocketPath
+	argParams[configure.ArgParamPodmanURI] = strings.TrimPrefix(podmanURI, "unix://")
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
@@ -227,6 +198,43 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 	argParams[constants.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, utils.CertContentIndent)
 
 	return argParams, nil
+}
+
+// readAuthFileBase64 reads the podman auth file and returns it base64-encoded.
+// If the file does not exist, an encoded empty JSON object is returned.
+func readAuthFileBase64() (string, error) {
+	authFilePath, err := utils.GetAuthFilePath()
+	if err != nil {
+		return "", fmt.Errorf("failed to get auth file path: %w", err)
+	}
+
+	content, err := os.ReadFile(authFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Warningln("Podman auth file not found. Deployment may fail since deployment may require pulling images.")
+			logger.Warningln("If you need to update registry credentials later, you can use the '--reset-podman-auth' flag after running 'podman login'.")
+			content = []byte("{}")
+		} else {
+			return "", fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString(content), nil
+}
+
+// readSSLContents reads and returns the PEM contents of the cert and key files.
+// Returns empty strings when either path is empty.
+func readSSLContents(certPath, keyPath string) (string, string, error) {
+	if certPath == "" || keyPath == "" {
+		return "", "", nil
+	}
+
+	certBytes, keyBytes, _, err := utils.ReadAndParseCertificates(certPath, keyPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to load ssl certs: %w", err)
+	}
+
+	return string(certBytes), string(keyBytes), nil
 }
 
 // setupCaddyContext sets up the Caddy context with domain configuration and Caddyfile generation.
