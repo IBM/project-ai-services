@@ -422,3 +422,43 @@ export interface DataSourceConnectorsListResponse {
   page: number;
   page_size: number;
 }
+
+// Sync-state status values produced by the Digitize service pod.
+// "unknown" is set by the Go catalog when the pod is unreachable.
+export type DatasourceSyncStatus =
+  | "up to date"
+  | "syncing"
+  | "out of sync"
+  | "delete pending"
+  | "unknown";
+
+// Matches backend ApplicationDatasourceItem (GET /applications/:id/datasources).
+export interface ApplicationDatasourceApiItem {
+  id: string;
+  name: string;
+  provider: {
+    id: string;
+    name: string;
+  };
+  status: DatasourceSyncStatus;
+  // Always a number — defaults to 0 before any sync has run, never null.
+  files: number;
+  // ISO-8601 timestamp of the last completed sync, or null when no sync has run yet.
+  last_sync: string | null;
+  // Status/phase message from the Digitize pod (omitempty — absent when empty).
+  message?: string;
+  // Populated when the catalog could not reach the Digitize pod (omitempty — absent on success).
+  err_msg?: string;
+}
+
+export interface ApplicationDatasourcesListResponse {
+  data: ApplicationDatasourceApiItem[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
+}

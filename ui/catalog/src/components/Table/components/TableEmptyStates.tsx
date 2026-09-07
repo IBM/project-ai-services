@@ -12,6 +12,10 @@ interface TableEmptyStatesProps {
    * Used to generate human-readable titles and subtitles.
    */
   entityName: string;
+  /** Override the default "no data" title. */
+  noDataTitle?: string;
+  /** Override the default "no data" subtitle. */
+  noDataSubtitle?: string;
   /** Optional CSS class forwarded to the NoDataEmptyState root element. */
   className?: string;
 }
@@ -21,6 +25,8 @@ const TableEmptyStates = ({
   noData,
   noSearchResults,
   entityName,
+  noDataTitle,
+  noDataSubtitle,
   className,
 }: TableEmptyStatesProps) => {
   if (fetchError) {
@@ -36,8 +42,10 @@ const TableEmptyStates = ({
   if (noData) {
     return (
       <NoDataEmptyState
-        title={`Start by adding a ${entityName}`}
-        subtitle={`To deploy a new ${entityName}, click Deploy.`}
+        title={noDataTitle ?? `Start by adding a ${entityName}`}
+        subtitle={
+          noDataSubtitle ?? `To deploy a new ${entityName}, click Deploy.`
+        }
         className={className}
       />
     );
