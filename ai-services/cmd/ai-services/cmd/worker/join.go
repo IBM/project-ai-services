@@ -205,7 +205,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 
 		// Setup worker node
 		if err := workerpodman.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("worker join: setup: %w", err)
+			return fmt.Errorf("failed to deploy worker: %w", err)
 		}
 	case types.RuntimeTypeOpenShift:
 		opts := workertypes.OpenshiftWorkerOptions{
@@ -218,7 +218,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 			},
 		}
 		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("worker join: failed to install worker helm chart: %w", err)
+			return fmt.Errorf("failed to deploy worker: %w", err)
 		}
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)

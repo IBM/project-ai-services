@@ -48,13 +48,13 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 
 	rt, err := runtime.CreateRuntime(runtimetypes.RuntimeTypeOpenShift, namespace)
 	if err != nil {
-		return fmt.Errorf("worker setup: init runtime: %w", err)
+		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
 	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
 		uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
 		if uninstallErr != nil {
-			logger.ErrorfCtx(ctx, "worker setup: failed to delete worker release %s: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
+			logger.ErrorfCtx(ctx, "failed to delete '%s' release: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
 		}
 
 		return err
