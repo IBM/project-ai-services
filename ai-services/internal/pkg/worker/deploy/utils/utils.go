@@ -10,7 +10,6 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
-
 // CheckWorkerContainerLogs lists all worker pods, fetches a snapshot of current
 // logs for each pod, and returns an error if the line "failed to start grpc stream"
 // is found in any of them.

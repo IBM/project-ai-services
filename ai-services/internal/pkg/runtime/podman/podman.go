@@ -363,33 +363,38 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 		return nil, errors.New("no containers found in pod")
 	}
 
-	if stream {
-		// creating context here that listens for Ctrl+C
-		sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-		defer stop()
-
-		for _, container := range podInspect.Containers {
-			// Skip infra container
-			if container.ID == podInspect.InfraContainerID {
-				continue
-			}
-
-			logger.Infof("Streaming logs for container: %s", container.Name)
-
-			if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
-				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
-			}
-
-			// Check if context was cancelled
-			if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
-				return nil, nil
-			}
-		}
-
-		return nil, nil
+	// Return pods logs lines in a array, when stream flag is false
+	if !stream {
+		return pc.snapshotPodLogs(ctx, podInspect)
 	}
 
-	// Snapshot mode: collect current logs without following.
+	// creating context here that listens for Ctrl+C
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	for _, container := range podInspect.Containers {
+		// Skip infra container
+		if container.ID == podInspect.InfraContainerID {
+			continue
+		}
+
+		logger.Infof("Streaming logs for container: %s", container.Name)
+
+		if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
+			return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
+		}
+
+		// Check if context was cancelled
+		if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
+			return nil, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// snapshotPodLogs collects current logs for all non-infra containers in a pod without following.
+func (pc *PodmanClient) snapshotPodLogs(ctx context.Context, podInspect *types.Pod) ([]string, error) {
 	opts := &containers.LogOptions{
 		Follow: utils.BoolPtr(false),
 		Stderr: utils.BoolPtr(true),
@@ -420,12 +425,14 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 			case line, ok := <-stdoutChan:
 				if !ok {
 					stdoutChan = nil
+
 					continue
 				}
 				lines = append(lines, line)
 			case line, ok := <-stderrChan:
 				if !ok {
 					stderrChan = nil
+
 					continue
 				}
 				lines = append(lines, line)

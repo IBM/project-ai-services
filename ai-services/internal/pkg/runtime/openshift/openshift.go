@@ -299,15 +299,17 @@ func (kc *OpenshiftClient) PodLogs(ctx context.Context, podNameOrID string, stre
 		return nil, fmt.Errorf("failed to get the pod: %w", err)
 	}
 
-	if stream {
-		opts := &corev1.PodLogOptions{Follow: true}
+	opts := &corev1.PodLogOptions{Follow: stream}
 
+	if stream {
 		return nil, followLogs(ctx, kc, podName, opts)
 	}
 
-	// Snapshot mode: collect current logs without following.
-	opts := &corev1.PodLogOptions{Follow: false}
+	return kc.snapshotPodLogs(ctx, podName, opts)
+}
 
+// snapshotPodLogs collects current logs for a pod without following.
+func (kc *OpenshiftClient) snapshotPodLogs(ctx context.Context, podName string, opts *corev1.PodLogOptions) ([]string, error) {
 	req := kc.KubeClient.CoreV1().Pods(kc.Namespace).GetLogs(podName, opts)
 
 	logStream, err := req.Stream(ctx)
@@ -315,7 +317,11 @@ func (kc *OpenshiftClient) PodLogs(ctx context.Context, podNameOrID string, stre
 		return nil, fmt.Errorf("failed to get log stream for pod %s: %w", podName, err)
 	}
 
-	defer logStream.Close()
+	defer func() {
+		if err := logStream.Close(); err != nil {
+			logger.Errorf("error closing log stream: %v", err)
+		}
+	}()
 
 	var lines []string
 

@@ -53,10 +53,10 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 
 	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
 		uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
-		if uninstallErr != nil{
+		if uninstallErr != nil {
 			logger.ErrorfCtx(ctx, "worker setup: failed to delete worker release %s: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
 		}
-		
+
 		return err
 	}
 
