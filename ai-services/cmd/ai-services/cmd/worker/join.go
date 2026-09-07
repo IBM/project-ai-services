@@ -177,15 +177,15 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 				Token:       token,
 			},
 			Setup: workertypes.Options{
-					CommonWorkerOptions: workertypes.CommonWorkerOptions{
-						HostAliases: parseAddHosts(addHosts),
-					},
-					BaseDir:     aiServicesDir,
-					HTTPSPort:   httpsPort,
-					DomainName:  domainName,
-					SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
-					SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
+				CommonWorkerOptions: workertypes.CommonWorkerOptions{
+					HostAliases: parseAddHosts(addHosts),
 				},
+				BaseDir:     aiServicesDir,
+				HTTPSPort:   httpsPort,
+				DomainName:  domainName,
+				SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
+				SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
+			},
 		}
 
 		// Setup worker node
