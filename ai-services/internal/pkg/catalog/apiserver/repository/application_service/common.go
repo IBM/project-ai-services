@@ -857,6 +857,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 	// Failures here do NOT revert the Running status — the deployment succeeded; only
 	// the connector attachment is partial. Errors are logged for operator visibility.
 	s.attachConnectorsPostDeploy(ctx, plan.ApplicationID, req.Services)
+	logger.InfolnCtx(ctx, fmt.Sprintf("Post-deploy connector attachment completed for application %s", plan.ApplicationName))
 }
 
 // attachConnectorsPostDeploy calls ConnectDatasourcesToApplication with all unique connector
@@ -865,11 +866,15 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 // DatasourceService is nil or when no service in the request carries connector refs.
 func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context, applicationID uuid.UUID, services []apimodels.Service) {
 	if s.DatasourceService == nil {
+		logger.WarningfCtx(ctx, "DatasourceService is nil; skipping post-deploy connector attachment for application %s", applicationID)
+
 		return
 	}
 
 	datasourceIDs := collectDatasourceIDs(ctx, services)
 	if len(datasourceIDs) == 0 {
+		logger.WarningfCtx(ctx, "No datasource IDs collected; skipping post-deploy connector attachment for application %s", applicationID)
+
 		return
 	}
 
@@ -918,7 +923,7 @@ func logConnectErrors(ctx context.Context, applicationID uuid.UUID, resp *apimod
 	}
 
 	for _, connErr := range resp.Errors {
-		logger.WarningfCtx(ctx, "post-deploy connector %s failed for application %s: %s",
+		logger.ErrorfCtx(ctx, "post-deploy connector %s failed for application %s: %s",
 			connErr.DatasourceID, applicationID, connErr.Error)
 	}
 }
