@@ -45,7 +45,7 @@ func Dispatch(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 }
 
 // defaultHelmTimeout is used when the caller does not supply a timeout.
-const defaultHelmTimeout = 10 * time.Minute
+const defaultHelmTimeout = 20 * time.Minute
 
 // ─── router ───────────────────────────────────────────────────────────────────
 
