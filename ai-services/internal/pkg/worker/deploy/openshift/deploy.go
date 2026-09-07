@@ -9,9 +9,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	runtimetypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 	"helm.sh/helm/v4/pkg/chart"
 )
@@ -40,6 +43,20 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 
 	// Step 3: Deploy the worker using Helm
 	if err := deployWorkerHelm(ctx, chartData, values, namespace); err != nil {
+		return err
+	}
+
+	rt, err := runtime.CreateRuntime(runtimetypes.RuntimeTypeOpenShift, namespace)
+	if err != nil {
+		return fmt.Errorf("worker setup: init runtime: %w", err)
+	}
+
+	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
+		uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
+		if uninstallErr != nil{
+			logger.ErrorfCtx(ctx, "worker setup: failed to delete worker release %s: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
+		}
+		
 		return err
 	}
 

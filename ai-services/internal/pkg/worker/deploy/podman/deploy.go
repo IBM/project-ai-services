@@ -17,11 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-<<<<<<< HEAD
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-=======
-	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
->>>>>>> 670c7563 (Verify grpc stream status via container logs)
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -29,17 +25,16 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
 
 const (
-	caddyfilePath = "worker/podman/Caddyfile.tmpl"
+	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
 	caddyfileSubDir = "worker/caddy"
 	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
-
-	grpcStreamErr = "failed to start grpc stream"
 
 	dirPerm  = 0o750
 	filePerm = 0o644
@@ -114,7 +109,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return err
 	}
 
-	if err := checkWorkerContainerLogs(ctx, rt); err != nil {
+	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
 		pods, listErr := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
 		if listErr != nil {
 			logger.ErrorfCtx(ctx, "worker setup: failed to list worker pods for cleanup: %v\n", listErr)
@@ -300,42 +295,4 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)
-}
-
-// checkWorkerContainerLogs inspects the worker pod, fetches current logs for
-// every container whose name starts with "ai-services", and returns an error if
-// the line "failed to start grpc stream" is found in any of them.
-func checkWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
-	pods, err := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
-	if err != nil {
-		return fmt.Errorf("worker setup: list worker pods: %w", err)
-	}
-
-	for _, pod := range pods {
-		podInfo, err := rt.InspectPod(ctx, pod.ID)
-		if err != nil {
-			return fmt.Errorf("worker setup: inspect pod %s: %w", pod.Name, err)
-		}
-
-		for _, container := range podInfo.Containers {
-			if container.ID == podInfo.InfraContainerID || !strings.HasPrefix(container.Name, workerconstants.WorkerAppName) {
-				continue
-			}
-
-			out, err := cliutils.PodmanRun("logs", container.Name)
-			if err != nil {
-				logger.WarningfCtx(ctx, "worker setup: could not fetch logs for container %s: %v\n", container.Name, err)
-
-				continue
-			}
-
-			for _, line := range strings.Split(string(out), "\n") {
-				if strings.Contains(line, grpcStreamErr) {
-					return fmt.Errorf("worker setup: container %s: %s", container.Name, line)
-				}
-			}
-		}
-	}
-
-	return nil
 }

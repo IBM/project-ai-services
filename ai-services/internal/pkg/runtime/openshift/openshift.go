@@ -291,18 +291,44 @@ func (kc *OpenshiftClient) StartPod(_ context.Context, id string) error {
 }
 
 // PodLogs retrieves logs from a pod.
-func (kc *OpenshiftClient) PodLogs(ctx context.Context, podNameOrID string) error {
+// When stream is true it follows logs until interrupted (prints to logger).
+// When stream is false it snapshots current logs and returns all lines.
+func (kc *OpenshiftClient) PodLogs(ctx context.Context, podNameOrID string, stream bool) ([]string, error) {
 	podName, err := getPodNameWithPrefix(ctx, kc, podNameOrID)
 	if err != nil {
-		return fmt.Errorf("failed to get the pod: %w", err)
+		return nil, fmt.Errorf("failed to get the pod: %w", err)
 	}
 
-	// Defaults to only container if there is one container in the pod.
-	opts := &corev1.PodLogOptions{
-		Follow: true,
+	if stream {
+		opts := &corev1.PodLogOptions{Follow: true}
+
+		return nil, followLogs(ctx, kc, podName, opts)
 	}
 
-	return followLogs(ctx, kc, podName, opts)
+	// Snapshot mode: collect current logs without following.
+	opts := &corev1.PodLogOptions{Follow: false}
+
+	req := kc.KubeClient.CoreV1().Pods(kc.Namespace).GetLogs(podName, opts)
+
+	logStream, err := req.Stream(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get log stream for pod %s: %w", podName, err)
+	}
+
+	defer logStream.Close()
+
+	var lines []string
+
+	scanner := bufio.NewScanner(logStream)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading log stream for pod %s: %w", podName, err)
+	}
+
+	return lines, nil
 }
 
 // InspectContainer inspects a container.

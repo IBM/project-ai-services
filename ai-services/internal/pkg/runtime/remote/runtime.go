@@ -158,10 +158,10 @@ func (r *RemoteRuntime) PodExists(ctx context.Context, nameOrID string) (bool, e
 	return exists, nil
 }
 
-func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string) error {
+func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string, stream bool) ([]string, error) {
 	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 
-	return err
+	return nil, err
 }
 
 func (r *RemoteRuntime) GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error) {

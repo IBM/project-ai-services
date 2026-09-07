@@ -346,43 +346,94 @@ func (pc *PodmanClient) printLogsFromChannels(parentCtx, logsCtx context.Context
 	}
 }
 
-func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string) error {
+// PodLogs retrieves logs for all non-infra containers in a pod.
+// When stream is true it follows logs until interrupted (prints to logger).
+// When stream is false it snapshots current logs and returns all lines.
+func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream bool) ([]string, error) {
 	if podNameOrID == "" {
-		return errors.New("pod name or ID cannot be empty")
+		return nil, errors.New("pod name or ID cannot be empty")
 	}
 
 	podInspect, err := pc.InspectPod(ctx, podNameOrID)
 	if err != nil {
-		return fmt.Errorf("failed to inspect pod: %w", err)
+		return nil, fmt.Errorf("failed to inspect pod: %w", err)
 	}
 
 	if len(podInspect.Containers) == 0 {
-		return errors.New("no containers found in pod")
+		return nil, errors.New("no containers found in pod")
 	}
 
-	// creating context here that listens for Ctrl+C
-	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	if stream {
+		// creating context here that listens for Ctrl+C
+		sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
+		for _, container := range podInspect.Containers {
+			// Skip infra container
+			if container.ID == podInspect.InfraContainerID {
+				continue
+			}
+
+			logger.Infof("Streaming logs for container: %s", container.Name)
+
+			if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
+				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
+			}
+
+			// Check if context was cancelled
+			if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
+				return nil, nil
+			}
+		}
+
+		return nil, nil
+	}
+
+	// Snapshot mode: collect current logs without following.
+	opts := &containers.LogOptions{
+		Follow: utils.BoolPtr(false),
+		Stderr: utils.BoolPtr(true),
+		Stdout: utils.BoolPtr(true),
+	}
+
+	var lines []string
 
 	for _, container := range podInspect.Containers {
-		// Skip infra container
 		if container.ID == podInspect.InfraContainerID {
 			continue
 		}
 
-		logger.Infof("Streaming logs for container: %s", container.Name)
+		stdoutChan := make(chan string, logChannelBufferSize)
+		stderrChan := make(chan string, logChannelBufferSize)
 
-		if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
-			return fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
-		}
+		podCtx, cancel := pc.podmanCtx(ctx)
 
-		// Check if context was cancelled
-		if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
-			return nil
+		go func() {
+			defer cancel()
+			defer close(stdoutChan)
+			defer close(stderrChan)
+			_ = containers.Logs(podCtx, container.ID, opts, stdoutChan, stderrChan)
+		}()
+
+		for stdoutChan != nil || stderrChan != nil {
+			select {
+			case line, ok := <-stdoutChan:
+				if !ok {
+					stdoutChan = nil
+					continue
+				}
+				lines = append(lines, line)
+			case line, ok := <-stderrChan:
+				if !ok {
+					stderrChan = nil
+					continue
+				}
+				lines = append(lines, line)
+			}
 		}
 	}
 
-	return nil
+	return lines, nil
 }
 
 func (pc *PodmanClient) PodExists(ctx context.Context, nameOrID string) (bool, error) {

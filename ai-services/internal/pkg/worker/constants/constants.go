@@ -95,3 +95,7 @@ const (
 	// Sourced from the catalog-mtls-encryption-secret Podman/OpenShift secret at runtime.
 	MTLSEncryptionKeyEnv = "MTLS_ENCRYPTION_KEY"
 )
+
+ const (
+	GrpcStreamErr = "failed to start grpc stream"
+ )

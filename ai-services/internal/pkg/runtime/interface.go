@@ -22,7 +22,7 @@ type Runtime interface {
 	StartPod(ctx context.Context, id string) error
 	InspectPod(ctx context.Context, nameOrId string) (*types.Pod, error)
 	PodExists(ctx context.Context, nameOrID string) (bool, error)
-	PodLogs(ctx context.Context, nameOrID string) error
+	PodLogs(ctx context.Context, nameOrID string, stream bool) ([]string, error)
 	GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error)
 	GetNamespace(ctx context.Context) (string, error)
 
