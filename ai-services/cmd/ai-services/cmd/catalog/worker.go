@@ -2,7 +2,9 @@ package catalog
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -66,8 +68,10 @@ Pass the token to the worker node and run:
 			logger.Infoln("Worker registered successfully.")
 			logger.Infof("  Name:  %s\n", resp.WorkerName)
 			logger.Infof("  Token: %s\n", resp.Token)
-			logger.Infoln("\nPass this token to the worker daemon with --token.")
-			logger.Infoln("The token is single-use and expires after 24 hours.")
+			logger.Infoln("\nRun the following command on the worker node:")
+			logger.Infof("  ai-services worker join %s --token %s --runtime <runtime>\n",
+				gatewayAddrFromServerURL(c.ServerURL()), resp.Token)
+			logger.Infoln("\nThe token is single-use and expires after 24 hours.")
 
 			return nil
 		},
@@ -138,6 +142,27 @@ If the worker is currently connected its gRPC stream is also cleaned up.`,
 	}
 
 	return cmd
+}
+
+// gatewayAddrFromServerURL derives the worker gateway dial address from the
+// catalog API server URL stored in credentials.
+// e.g. "https://catalog-api.10.0.0.1.nip.io" → "gateway.10.0.0.1.nip.io:9090"
+// Falls back to "<catalog-server-host>:9090" if the subdomain cannot be parsed.
+func gatewayAddrFromServerURL(serverURL string) string {
+	const defaultGatewayPort = "9090"
+
+	parsed, err := url.Parse(serverURL)
+	if err != nil || parsed.Host == "" {
+		return serverURL + ":" + defaultGatewayPort
+	}
+
+	host := parsed.Hostname()
+	// Replace the first subdomain (e.g. "catalog-api") with "gateway".
+	if idx := strings.Index(host, "."); idx != -1 {
+		return "gateway" + host[idx:] + ":" + defaultGatewayPort
+	}
+
+	return host + ":" + defaultGatewayPort
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

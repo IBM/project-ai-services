@@ -40,6 +40,11 @@ func NewWorkerClient(ctx context.Context) (*WorkerClient, error) {
 	return &WorkerClient{client: c}, nil
 }
 
+// ServerURL returns the catalog API server URL this client is connected to.
+func (c *WorkerClient) ServerURL() string {
+	return c.client.ServerURL()
+}
+
 // CreateWorker pre-registers a new worker by name and returns its bootstrap token.
 func (c *WorkerClient) CreateWorker(ctx context.Context, name string) (*CreateWorkerResponse, error) {
 	var result CreateWorkerResponse
