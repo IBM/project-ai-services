@@ -283,7 +283,12 @@ async def _wait_for_job(
     Raises ``asyncio.CancelledError`` if the connector is marked for deletion
     or a stop-sync request is issued during the wait.
     """
-    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value}
+    _TERMINAL = {
+        JobStatus.COMPLETED.value,
+        JobStatus.COMPLETED_WITH_ERRORS.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    }
     prev_completed_count = 0
     while True:
         await asyncio.sleep(_JOB_POLL_INTERVAL)

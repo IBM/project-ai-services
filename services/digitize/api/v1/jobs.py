@@ -9,7 +9,6 @@ Exposes one router:
 """
 
 import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -23,7 +22,6 @@ import digitize.models as models
 import digitize.utils.db as db_ops
 from digitize.settings import settings
 from digitize.db.manager import db_manager
-from digitize.exceptions import JobCancelledError
 
 router = APIRouter()
 logger = get_logger("jobs_router")
@@ -445,7 +443,6 @@ async def cancel_job(
             )
 
         request_job_cancellation(job_id, clean_files=clean_files)
-        return
 
     except HTTPException as http_exc:
         logger.warning(f"HTTP error while cancelling job '{job_id}': {http_exc.status_code} {http_exc.detail}")

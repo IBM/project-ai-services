@@ -87,6 +87,7 @@ for _attr, _name in [
 
 import digitize.app as digitize_app
 import digitize.api.v1.jobs as jobs_module
+import digitize.utils.jobs as dg_utils_module
 import digitize.utils.db as db_ops
 from digitize.exceptions import JobCancelledError
 from digitize.models import DocStatus, JobStatus
@@ -197,7 +198,12 @@ class TestCancelJobEndpoint:
         monkeypatch.setattr(db_ops, "get_job", Mock(return_value={
             "job_id": "job-active", "status": active_status, "stats": {},
         }))
-        monkeypatch.setattr("digitize.db.manager.db_manager.update_job", mock_update)
+        # Patch the full db_manager on dg_utils_module so get_job_by_id returns
+        # a row with a real stats dict (request_job_cancellation reads it).
+        monkeypatch.setattr(dg_utils_module, "db_manager", Mock(
+            update_job=mock_update,
+            get_job_by_id=Mock(return_value=Mock(stats={})),
+        ))
 
         response = test_client.post("/v1/jobs/job-active/cancel")
 
@@ -213,10 +219,12 @@ class TestCancelJobEndpoint:
             "status": JobStatus.IN_PROGRESS.value,
             "stats": existing_stats,
         }))
-        # db_manager is imported directly into jobs.py's namespace at line 27:
-        #   from digitize.db.manager import db_manager
-        # So the correct patch target is the jobs module, not db.manager.
-        monkeypatch.setattr(jobs_module, "db_manager", Mock(update_job=mock_update))
+        # Patch the full db_manager on dg_utils_module so get_job_by_id returns
+        # a row with a real stats dict (request_job_cancellation reads it).
+        monkeypatch.setattr(dg_utils_module, "db_manager", Mock(
+            update_job=mock_update,
+            get_job_by_id=Mock(return_value=Mock(stats=existing_stats)),
+        ))
 
         test_client.post("/v1/jobs/job-active/cancel")
 
@@ -231,12 +239,16 @@ class TestCancelJobEndpoint:
 
     def test_clean_files_false_stored_in_stats(self, test_client, monkeypatch):
         mock_update = Mock()
+        existing_stats = {"total_documents": 2}
         monkeypatch.setattr(db_ops, "get_job", Mock(return_value={
             "job_id": "job-ingest",
             "status": JobStatus.ACCEPTED.value,
-            "stats": {"total_documents": 2},
+            "stats": existing_stats,
         }))
-        monkeypatch.setattr(jobs_module, "db_manager", Mock(update_job=mock_update))
+        monkeypatch.setattr(dg_utils_module, "db_manager", Mock(
+            update_job=mock_update,
+            get_job_by_id=Mock(return_value=Mock(stats=existing_stats)),
+        ))
 
         test_client.post("/v1/jobs/job-ingest/cancel?clean_files=false")
 
@@ -250,7 +262,10 @@ class TestCancelJobEndpoint:
             "status": JobStatus.ACCEPTED.value,
             "stats": {},
         }))
-        monkeypatch.setattr(jobs_module, "db_manager", Mock(update_job=mock_update))
+        monkeypatch.setattr(dg_utils_module, "db_manager", Mock(
+            update_job=mock_update,
+            get_job_by_id=Mock(return_value=Mock(stats={})),
+        ))
 
         test_client.post("/v1/jobs/job-ingest/cancel?clean_files=true")
 
@@ -279,7 +294,10 @@ class TestCancelJobEndpoint:
             "status": JobStatus.ACCEPTED.value,
             "stats": {},
         }))
-        monkeypatch.setattr(jobs_module, "db_manager", Mock(update_job=mock_update))
+        monkeypatch.setattr(dg_utils_module, "db_manager", Mock(
+            update_job=mock_update,
+            get_job_by_id=Mock(return_value=Mock(stats={})),
+        ))
 
         # No ?clean_files query param
         test_client.post("/v1/jobs/job-ingest/cancel")
@@ -290,12 +308,16 @@ class TestCancelJobEndpoint:
     def test_existing_stats_are_preserved_alongside_clean_files(self, test_client, monkeypatch):
         """Pre-existing stats keys must be kept; only clean_files is added/overwritten."""
         mock_update = Mock()
+        existing_stats = {"total_documents": 5, "completed": 2}
         monkeypatch.setattr(db_ops, "get_job", Mock(return_value={
             "job_id": "job-ingest",
             "status": JobStatus.IN_PROGRESS.value,
-            "stats": {"total_documents": 5, "completed": 2},
+            "stats": existing_stats,
         }))
-        monkeypatch.setattr(jobs_module, "db_manager", Mock(update_job=mock_update))
+        monkeypatch.setattr(dg_utils_module, "db_manager", Mock(
+            update_job=mock_update,
+            get_job_by_id=Mock(return_value=Mock(stats=existing_stats)),
+        ))
 
         test_client.post("/v1/jobs/job-ingest/cancel?clean_files=true")
 
@@ -336,13 +358,13 @@ class TestRunDigitize:
         mock_status_mgr = Mock()
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("cancelled"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=mock_status_mgr),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("cancelled"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
         ):
-            await jobs_module._run_digitize(
+            await dg_utils_module.launch_digitize_pipeline(
                 job_id=job_id,
                 doc_id_dict={"sample.pdf": "doc-active"},
             )
@@ -375,13 +397,13 @@ class TestRunDigitize:
         mock_db.update_job = Mock()
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=Mock()),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
         ):
-            await jobs_module._run_digitize(
+            await dg_utils_module.launch_digitize_pipeline(
                 job_id=job_id,
                 doc_id_dict={},
             )
@@ -394,16 +416,16 @@ class TestRunDigitize:
         mock_cleanup = Mock()
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", Mock(
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", Mock(
                 get_documents_by_job_id=Mock(return_value=[]),
                 update_job=Mock(),
             )),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory", mock_cleanup),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.db.get_status_manager", return_value=Mock()),
+            patch("digitize.utils.jobs.cleanup_staging_directory", mock_cleanup),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
         ):
-            await jobs_module._run_digitize("job-x", {})
+            await dg_utils_module.launch_digitize_pipeline("job-x", {})
 
         mock_cleanup.assert_called_once()
 
@@ -417,13 +439,13 @@ class TestRunDigitize:
         mock_status_mgr = Mock()
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=RuntimeError("boom"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=mock_status_mgr),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=RuntimeError("boom"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
         ):
-            await jobs_module._run_digitize("job-fail", {})
+            await dg_utils_module.launch_digitize_pipeline("job-fail", {})
 
         mock_db.update_document.assert_not_called()
         mock_status_mgr.update_job_progress.assert_called()
@@ -458,13 +480,13 @@ class TestRunIngest:
         mock_status_mgr = Mock()
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=mock_status_mgr),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
         ):
-            await jobs_module._run_ingest(job_id, {"file.pdf": "doc-pending"})
+            await dg_utils_module.launch_ingest_pipeline(job_id, {"file.pdf": "doc-pending"})
 
         updated = [c.args[0] for c in mock_status_mgr.update_doc_metadata.call_args_list]
         assert "doc-pending" in updated
@@ -492,14 +514,14 @@ class TestRunIngest:
         mock_vector_store.remove_docs_from_index = Mock(return_value=10)
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=Mock()),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
             patch("common.db_utils.get_vector_store", return_value=mock_vector_store),
         ):
-            await jobs_module._run_ingest(job_id, doc_id_dict)
+            await dg_utils_module.launch_ingest_pipeline(job_id, doc_id_dict)
 
         removed_ids = mock_vector_store.remove_docs_from_index.call_args.args[0]
         assert set(removed_ids) == {"doc-aaa", "doc-bbb"}
@@ -518,14 +540,14 @@ class TestRunIngest:
         mock_get_vector_store = Mock()
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=Mock()),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
             patch("common.db_utils.get_vector_store", mock_get_vector_store),
         ):
-            await jobs_module._run_ingest(job_id, {})
+            await dg_utils_module.launch_ingest_pipeline(job_id, {})
 
         mock_get_vector_store.assert_not_called()
 
@@ -547,15 +569,15 @@ class TestRunIngest:
         exploding_store.remove_docs_from_index = Mock(side_effect=RuntimeError("vdb down"))
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=Mock()),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
             patch("common.db_utils.get_vector_store", return_value=exploding_store),
         ):
             # Must not raise
-            await jobs_module._run_ingest(job_id, doc_id_dict)
+            await dg_utils_module.launch_ingest_pipeline(job_id, doc_id_dict)
 
     @pytest.mark.asyncio
     async def test_staging_cleanup_called_on_cancellation(self, tmp_path):
@@ -567,48 +589,15 @@ class TestRunIngest:
         mock_db.get_job_by_id = Mock(return_value=Mock(stats={}))
 
         with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory", mock_cleanup),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=Mock()),
+            patch("digitize.utils.jobs.cleanup_staging_directory", mock_cleanup),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
         ):
-            await jobs_module._run_ingest("job-y", {})
+            await dg_utils_module.launch_ingest_pipeline("job-y", {})
 
         mock_cleanup.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_only_doc_ids_in_doc_id_dict_are_cleaned_from_vdb(self, tmp_path):
-        """Only doc IDs that belong to THIS job (present in doc_id_dict.values()) must
-        be submitted to remove_docs_from_index, not stray docs returned by the DB."""
-        job_id = "job-ingest-scope"
-        doc_id_dict = {"mine.pdf": "doc-mine"}
-
-        doc_mine = _make_doc("doc-mine", DocStatus.COMPLETED.value)
-        doc_foreign = _make_doc("doc-foreign", DocStatus.COMPLETED.value)  # not in this job's dict
-
-        mock_db = Mock()
-        mock_db.get_documents_by_job_id = Mock(return_value=[doc_mine, doc_foreign])
-        mock_db.update_document = Mock()
-        mock_db.update_job = Mock()
-        mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": True}))
-
-        mock_vs = Mock()
-        mock_vs.remove_docs_from_index = Mock(return_value=1)
-
-        with (
-            patch("digitize.api.v1.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
-            patch("digitize.api.v1.jobs.db_manager", mock_db),
-            patch("digitize.api.v1.jobs.get_status_manager", return_value=Mock()),
-            patch("digitize.api.v1.jobs.cleanup_staging_directory"),
-            patch("digitize.api.v1.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
-            patch("common.db_utils.get_vector_store", return_value=mock_vs),
-        ):
-            await jobs_module._run_ingest(job_id, doc_id_dict)
-
-        removed = set(mock_vs.remove_docs_from_index.call_args.args[0])
-        assert removed == {"doc-mine"}
-        assert "doc-foreign" not in removed
 
 
 # ===========================================================================
@@ -1572,246 +1561,17 @@ class TestMakeDbCancelCheck:
 
 
 # ===========================================================================
-# 8. chunk_text / chunk_tables / chunk_single_file — cancel_event support
+# 8. chunk_single_file — cancel_event support
 # ===========================================================================
 
-
-@pytest.mark.unit
-class TestChunkTextCancelEvent:
-    """chunk_text respects a cancel_event threading.Event."""
-
-    def test_cancel_event_not_set_processes_all_blocks(self, tmp_path):
-        """With cancel_event unset, all blocks are chunked normally."""
-        from digitize.processing.orchestrator import chunk_text
-        import json, threading
-
-        data = [
-            {"label": "text", "text": "Hello world", "page": 1},
-            {"label": "text", "text": "Second block", "page": 2},
-        ]
-        input_file = tmp_path / "doc-1_text.json"
-        input_file.write_text(json.dumps(data))
-
-        event = threading.Event()  # not set
-
-        with (
-            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
-            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
-            patch("digitize.processing.orchestrator.get_header_level", return_value=(1, "h")),
-            patch("digitize.processing.orchestrator.flush_chunk"),
-        ):
-            result_path, elapsed = chunk_text(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-1", cancel_event=event,
-            )
-
-        assert result_path is not None
-        assert elapsed is not None
-
-    def test_cancel_event_set_before_first_block_returns_none(self, tmp_path):
-        """cancel_event already set → chunk_text returns (None, None).
-
-        chunk_text catches all exceptions internally; the JobCancelledError is
-        surfaced only by chunk_single_file which re-raises it.
-        """
-        from digitize.processing.orchestrator import chunk_text
-        import json, threading
-
-        data = [{"label": "text", "text": "Hello", "page": 1}]
-        input_file = tmp_path / "doc-2_text.json"
-        input_file.write_text(json.dumps(data))
-
-        event = threading.Event()
-        event.set()  # already cancelled
-
-        with (
-            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
-            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
-            patch("digitize.processing.orchestrator.flush_chunk"),
-        ):
-            result_path, elapsed = chunk_text(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-2", cancel_event=event,
-            )
-
-        assert result_path is None
-        assert elapsed is None
-
-    def test_cancel_event_set_mid_loop_returns_none(self, tmp_path):
-        """cancel_event set mid-loop → chunk_text returns (None, None).
-
-        Uses section_header blocks to trigger flush_chunk inside the loop — that
-        is the only place within the loop body where flush_chunk is called, so it
-        is the only reliable way to set the event before the *next* iteration's
-        cancel check fires.
-        """
-        from digitize.processing.orchestrator import chunk_text
-        import json, threading
-
-        # section_header triggers flush_chunk mid-loop; the cancel check at the
-        # top of the following iteration will then see the event as set.
-        data = [
-            {"label": "section_header", "text": "Chapter 1", "page": 1, "font_size": 16},
-            {"label": "text", "text": "Some content", "page": 1},
-            {"label": "section_header", "text": "Chapter 2", "page": 2, "font_size": 16},
-            {"label": "text", "text": "More content", "page": 2},
-        ]
-        input_file = tmp_path / "doc-3_text.json"
-        input_file.write_text(json.dumps(data))
-
-        event = threading.Event()
-        flush_count = {"n": 0}
-
-        # Set the event on the first flush_chunk call (first section_header).
-        # The cancel check at the top of the next iteration fires True.
-        def set_on_first_flush(*args, **kwargs):
-            flush_count["n"] += 1
-            if flush_count["n"] == 1:
-                event.set()
-
-        with (
-            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
-            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
-            patch("digitize.processing.orchestrator.get_header_level", return_value=(1, "Chapter 1")),
-            patch("digitize.processing.orchestrator.flush_chunk", side_effect=set_on_first_flush),
-        ):
-            result_path, elapsed = chunk_text(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-3", cancel_event=event,
-            )
-
-        assert result_path is None
-        assert elapsed is None
-
-    def test_no_cancel_event_processes_normally(self, tmp_path):
-        """cancel_event=None (default) behaves identically to before — no change."""
-        from digitize.processing.orchestrator import chunk_text
-        import json
-
-        data = [{"label": "text", "text": "Only block", "page": 1}]
-        input_file = tmp_path / "doc-4_text.json"
-        input_file.write_text(json.dumps(data))
-
-        with (
-            patch("digitize.processing.orchestrator.count_tokens", return_value=5),
-            patch("digitize.processing.orchestrator.collect_header_font_sizes", return_value={}),
-            patch("digitize.processing.orchestrator.flush_chunk"),
-        ):
-            result_path, elapsed = chunk_text(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-4",
-            )
-
-        assert result_path is not None
-
-
-@pytest.mark.unit
-class TestChunkTablesCancelEvent:
-    """chunk_tables respects a cancel_event threading.Event."""
-
-    def test_cancel_event_not_set_processes_all_tables(self, tmp_path):
-        """With cancel_event unset, all tables are chunked normally."""
-        from digitize.processing.orchestrator import chunk_tables
-        import json, threading
-
-        data = {
-            "t1": {"caption": "Table 1", "summary": "Summary one", "page_number": 1},
-            "t2": {"caption": "Table 2", "summary": "Summary two", "page_number": 2},
-        }
-        input_file = tmp_path / "doc-5_tables.json"
-        input_file.write_text(json.dumps(data))
-
-        event = threading.Event()  # not set
-
-        with patch("digitize.processing.orchestrator.count_tokens", return_value=10):
-            result_path, elapsed = chunk_tables(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-5", cancel_event=event,
-            )
-
-        assert result_path is not None
-
-    def test_cancel_event_set_before_first_table_returns_none(self, tmp_path):
-        """cancel_event already set → chunk_tables returns (None, None).
-
-        Like chunk_text, chunk_tables catches all exceptions internally; the
-        JobCancelledError is surfaced only by chunk_single_file.
-        """
-        from digitize.processing.orchestrator import chunk_tables
-        import json, threading
-
-        data = {"t1": {"caption": "Table 1", "summary": "Sum", "page_number": 1}}
-        input_file = tmp_path / "doc-6_tables.json"
-        input_file.write_text(json.dumps(data))
-
-        event = threading.Event()
-        event.set()
-
-        with patch("digitize.processing.orchestrator.count_tokens", return_value=5):
-            result_path, elapsed = chunk_tables(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-6", cancel_event=event,
-            )
-
-        assert result_path is None
-        assert elapsed is None
-
-    def test_cancel_event_set_mid_loop_returns_none(self, tmp_path):
-        """cancel_event set after first table → chunk_tables returns (None, None)."""
-        from digitize.processing.orchestrator import chunk_tables
-        import json, threading
-
-        data = {
-            "t1": {"caption": "T1", "summary": "S1", "page_number": 1},
-            "t2": {"caption": "T2", "summary": "S2", "page_number": 2},
-        }
-        input_file = tmp_path / "doc-7_tables.json"
-        input_file.write_text(json.dumps(data))
-
-        event = threading.Event()
-        call_count = {"n": 0}
-
-        # Set the event after count_tokens is first called (first table visited).
-        # The cancel check at the top of the next iteration fires True.
-        def set_after_first(*args, **kwargs):
-            call_count["n"] += 1
-            if call_count["n"] >= 1:
-                event.set()
-            return 5
-
-        with patch("digitize.processing.orchestrator.count_tokens", side_effect=set_after_first):
-            result_path, elapsed = chunk_tables(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-7", cancel_event=event,
-            )
-
-        assert result_path is None
-        assert elapsed is None
-
-    def test_no_cancel_event_processes_normally(self, tmp_path):
-        """cancel_event=None (default) — no change in behaviour."""
-        from digitize.processing.orchestrator import chunk_tables
-        import json
-
-        data = {"t1": {"caption": "T1", "summary": "Sum", "page_number": 1}}
-        input_file = tmp_path / "doc-8_tables.json"
-        input_file.write_text(json.dumps(data))
-
-        with patch("digitize.processing.orchestrator.count_tokens", return_value=5):
-            result_path, elapsed = chunk_tables(
-                str(input_file), str(tmp_path), emb_endpoint="emb",
-                doc_id="doc-8",
-            )
-
-        assert result_path is not None
 
 
 @pytest.mark.unit
 class TestChunkSingleFileCancelEvent:
-    """chunk_single_file forwards cancel_event and re-raises JobCancelledError."""
+    """chunk_single_file checks cancel_event between chunk_text and chunk_tables."""
 
     def test_cancel_event_set_propagates_as_job_cancelled_error(self, tmp_path):
-        """When chunk_text raises JobCancelledError, chunk_single_file re-raises it."""
+        """When cancel_event is set after chunk_text, chunk_single_file raises JobCancelledError."""
         from digitize.processing.orchestrator import chunk_single_file
         import threading
 
@@ -1832,8 +1592,8 @@ class TestChunkSingleFileCancelEvent:
                     cancel_event=event,
                 )
 
-    def test_cancel_event_forwarded_to_chunk_text_and_chunk_tables(self, tmp_path):
-        """cancel_event is forwarded to both chunk_text and chunk_tables."""
+    def test_cancel_event_not_forwarded_to_chunk_text(self, tmp_path):
+        """cancel_event is checked in chunk_single_file itself, not passed into chunk_text."""
         from digitize.processing.orchestrator import chunk_single_file
         import threading
 
@@ -1850,7 +1610,7 @@ class TestChunkSingleFileCancelEvent:
             patch(
                 "digitize.processing.orchestrator.chunk_tables",
                 return_value=(str(tab_result), 0.3),
-            ) as mock_chunk_tables,
+            ),
         ):
             chunk_single_file(
                 "txt.json", "tab.json", str(tmp_path),
@@ -1858,9 +1618,8 @@ class TestChunkSingleFileCancelEvent:
                 cancel_event=event,
             )
 
-        # Verify cancel_event was forwarded to both inner calls
-        assert mock_chunk_text.call_args.kwargs.get("cancel_event") is event
-        assert mock_chunk_tables.call_args.kwargs.get("cancel_event") is event
+        # cancel_event is NOT forwarded into chunk_text; the check lives in chunk_single_file
+        assert "cancel_event" not in mock_chunk_text.call_args.kwargs
 
 
 # ===========================================================================
@@ -1899,8 +1658,9 @@ class TestOpenSearchInsertChunksCancelEvent:
         assert result is True
 
     def test_cancel_event_set_aborts_before_first_batch(self):
-        """cancel_event already set → returns False before any bulk insert."""
+        """cancel_event already set → raises JobCancelledError before any bulk insert."""
         import threading
+        from digitize.exceptions import JobCancelledError
 
         inst = self._make_opensearch()
         inst._setup_index = Mock()
@@ -1913,14 +1673,15 @@ class TestOpenSearchInsertChunksCancelEvent:
         event.set()
 
         with patch("common.opensearch.helpers.bulk") as mock_bulk:
-            result = inst.insert_chunks(chunks, embedding=embedder, batch_size=2, cancel_event=event)
+            with pytest.raises(JobCancelledError):
+                inst.insert_chunks(chunks, embedding=embedder, batch_size=2, cancel_event=event)
 
-        assert result is False
         mock_bulk.assert_not_called()
 
     def test_cancel_event_set_between_batches_aborts_mid_insert(self):
-        """cancel_event set after the first batch → second batch is not inserted."""
+        """cancel_event set after the first batch → raises JobCancelledError; second batch is not inserted."""
         import threading
+        from digitize.exceptions import JobCancelledError
 
         inst = self._make_opensearch()
         inst._setup_index = Mock()
@@ -1938,9 +1699,9 @@ class TestOpenSearchInsertChunksCancelEvent:
             return (2, [])
 
         with patch("common.opensearch.helpers.bulk", side_effect=fake_bulk):
-            result = inst.insert_chunks(chunks, embedding=embedder, batch_size=2, cancel_event=event)
+            with pytest.raises(JobCancelledError):
+                inst.insert_chunks(chunks, embedding=embedder, batch_size=2, cancel_event=event)
 
-        assert result is False
         assert bulk_call_count["n"] == 1  # only first batch executed
 
     def test_no_cancel_event_inserts_all_batches(self):

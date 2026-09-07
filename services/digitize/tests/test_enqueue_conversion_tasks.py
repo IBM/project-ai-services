@@ -15,7 +15,7 @@ import pytest
 
 
 # The db_manager singleton import path used at runtime inside enqueue_conversion_tasks
-_DB_MANAGER_PATH = "digitize.db.manager.db_manager"
+_DB_MANAGER_PATH = "digitize.utils.jobs.db_manager"
 
 
 def _run_enqueue(tmp_path, filenames, *, page_count=10, queued_for_op=0,

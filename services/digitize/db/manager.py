@@ -1994,6 +1994,7 @@ class DatabaseManager:
             logger.error(f"DB error updating task {task_id}: {e}", exc_info=True)
             return False
 
+    @staticmethod
     def cancel_tasks_for_job(job_id: str) -> int:
         """
         Cancel all non-terminal ConversionTask rows for ``job_id``.

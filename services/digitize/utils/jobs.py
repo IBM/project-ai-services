@@ -31,8 +31,8 @@ from digitize.utils.db import (
 )
 
 from common.misc_utils import get_utc_timestamp, cleanup_staging_directory
-from services.digitize import models
-from services.digitize.exceptions import JobCancelledError
+from digitize import models
+from digitize.exceptions import JobCancelledError
 
 
 logger = get_logger("digitize_utils")
@@ -284,6 +284,14 @@ _TERMINAL_DOC_STATUSES = (
     models.DocStatus.CANCELLED.value,
     models.DocStatus.ALREADY_EXISTS.value,
 )
+
+NON_CANCELLABLE_JOB_STATUSES = (
+    models.JobStatus.COMPLETED.value,
+    models.JobStatus.FAILED.value,
+    models.JobStatus.CANCEL_PENDING.value,
+    models.JobStatus.CANCELLED.value,
+)
+
 def _cancel_job_docs(job_id: str, status_mgr, *, force: bool = False) -> None:
     """Mark documents for *job_id* as CANCELLED, then set the job to CANCELLED.
 
@@ -300,6 +308,29 @@ def _cancel_job_docs(job_id: str, status_mgr, *, force: bool = False) -> None:
                 {"status": models.DocStatus.CANCELLED, "completed_at": datetime.now(timezone.utc).isoformat()},
             )
     status_mgr.update_job_progress("", models.DocStatus.CANCELLED, models.JobStatus.CANCELLED)
+
+
+def request_job_cancellation(job_id: str, *, clean_files: bool = False) -> None:
+    """Mark *job_id* as CANCEL_PENDING and persist the *clean_files* flag in stats.
+
+    Sets the job to CANCEL_PENDING so the background pipeline stops at its
+    next checkpoint.
+
+    Parameters
+    ----------
+    job_id:
+        The job to cancel.
+    clean_files:
+        When ``True`` the background task should also remove staged/output
+        files when it handles the cancellation.
+    """
+    job_row = db_manager.get_job_by_id(job_id)
+    current_stats = (job_row.stats if job_row and job_row.stats else {})
+    updated_stats = {**current_stats, "clean_files": clean_files}
+
+    db_manager.update_job(job_id, status=models.JobStatus.CANCEL_PENDING, stats=updated_stats)
+    logger.info(f"Job '{job_id}' marked as CANCEL_PENDING (clean_files={clean_files})")
+
 
 async def initialize_and_launch(
     job_id: str,
