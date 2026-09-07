@@ -99,7 +99,7 @@ func buildTLSConfig(gatewayAddr, tlsDir string, clientCert *tls.Certificate) (*t
 
 func gatewayServerName(gatewayAddr string) string {
 	if gatewayAddr == "" {
-		return workerconstants.GatewayServerName
+		return workerconstants.PodmanGatewayServerName
 	}
 	if parsed, err := url.Parse(gatewayAddr); err == nil && parsed.Host != "" {
 		gatewayAddr = parsed.Host
@@ -108,10 +108,10 @@ func gatewayServerName(gatewayAddr string) string {
 		gatewayAddr = host
 	}
 	if gatewayAddr == "" {
-		return workerconstants.GatewayServerName
+		return workerconstants.PodmanGatewayServerName
 	}
 	if ip := net.ParseIP(gatewayAddr); ip != nil {
-		return workerconstants.GatewayServerName
+		return workerconstants.PodmanGatewayServerName
 	}
 
 	return gatewayAddr

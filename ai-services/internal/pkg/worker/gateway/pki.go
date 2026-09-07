@@ -133,9 +133,9 @@ func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types
 		if err != nil {
 			return empty, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
 		}
-		serverNames = []string{route, workerconstants.GatewayServiceEndpoint}
+		serverNames = []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}
 	case types.RuntimeTypePodman:
-		serverNames = []string{workerconstants.GatewayServerName, workerconstants.GatewayPodName}
+		serverNames = []string{workerconstants.PodmanGatewayServerName, workerconstants.PodmanGatewayPodName}
 	}
 
 	if err := os.MkdirAll(pkiDir, dirPerm); err != nil {
