@@ -14,49 +14,16 @@ from typing import List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
-from common.misc_utils import get_logger, validate_document_file, cleanup_staging_directory, generate_file_checksum
+from common.misc_utils import get_logger, validate_document_file, generate_file_checksum
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 import digitize.utils.jobs as dg_util
 import digitize.models as models
-from digitize.utils.db import get_status_manager
 import digitize.utils.db as db_ops
 from digitize.settings import settings
 from digitize.db.manager import db_manager
 
 router = APIRouter()
 logger = get_logger("jobs_router")
-
-# ------------------------------------------------------------------ #
-# Background pipeline helpers                                         #
-# ------------------------------------------------------------------ #
-
-async def _run_digitize(
-    job_id: str,
-    doc_id_dict: dict,
-) -> None:
-    """
-    Poll the conversion_tasks row for this digitization job until the
-    dispatcher marks it terminal, then surface the result.
-
-    Runs the blocking pipeline call in a thread so the event loop stays free.
-    """
-    try:
-        logger.info(f"🚀 Digitization started for job: {job_id}")
-        from digitize.pipeline.digitize import digitize
-        await asyncio.to_thread(digitize, job_id, doc_id_dict)
-        logger.info(f"Digitization for job {job_id} completed successfully")
-    except Exception as exc:
-        logger.error(f"Error in digitization job {job_id}: {exc}", exc_info=True)
-        status_mgr = get_status_manager(job_id)
-        status_mgr.update_job_progress(
-            "",
-            models.DocStatus.FAILED,
-            models.JobStatus.FAILED,
-            error=f"Error occurred while processing digitization pipeline: {exc}",
-        )
-    finally:
-        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
-
 
 
 # ------------------------------------------------------------------ #
@@ -267,7 +234,7 @@ async def create_job(
         )
 
         # 7, 8 & 9. Create DB rows, enqueue conversion tasks, launch pipeline.
-        doc_id_dict = await dg_util.initialize_and_launch(
+        await dg_util.initialize_and_launch(
             job_id=job_id,
             operation=operation,
             output_format=output_format,
@@ -279,10 +246,6 @@ async def create_job(
             already_exists_files=already_exists_files,
             file_checksum_dict=file_checksum_dict,
         )
-
-        # Digitization jobs need a separate pipeline task (not launch_ingest_pipeline).
-        if operation == models.OperationType.DIGITIZATION:
-            asyncio.create_task(_run_digitize(job_id, doc_id_dict))
 
         logger.info(
             f"Job {job_id} accepted — {len(filenames)} file(s), "

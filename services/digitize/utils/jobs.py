@@ -285,7 +285,7 @@ async def initialize_and_launch(
     quota: int,
     queued_for_op: int,
     job_name: Optional[str] = None,
-    source: "JobSource" = None,
+    source: Optional[JobSource] = None,
     already_exists_files: Optional[list] = None,
     file_checksum_dict: Optional[dict] = None,
     connector_id: Optional[str] = None,
@@ -297,8 +297,7 @@ async def initialize_and_launch(
       7. ``initialize_job_state``       — create jobs + documents DB rows.
       8. ``enqueue_conversion_tasks``   — insert conversion_tasks rows.
       9. ``launch_ingest_pipeline``     — fire-and-forget ingestion task.
-         (Digitization jobs skip step 9 here; the caller creates
-         ``_run_digitize`` after this function returns.)
+         ``launch_digitize_pipeline``   — fire-and-forget digitization task.
 
     If step 7 or 8 raises, staged files under *staging_dir* are cleaned up
     immediately and the exception is re-raised.
@@ -375,9 +374,7 @@ async def initialize_and_launch(
         cleanup_staging_directory(staging_dir.name, staging_dir.parent)
         raise
 
-    # Step 9: fire-and-forget ingestion pipeline.
-    # Digitization jobs use _run_digitize (owned by the caller); only ingestion
-    # uses launch_ingest_pipeline.
+    # Step 9: fire-and-forget pipeline task.
     if op_key == OperationType.INGESTION.value:
         asyncio.create_task(
             launch_ingest_pipeline(
@@ -387,8 +384,41 @@ async def initialize_and_launch(
                 staging_dir=staging_dir,
             )
         )
+    elif op_key == OperationType.DIGITIZATION.value:
+        asyncio.create_task(launch_digitize_pipeline(job_id, doc_id_dict))
 
     return doc_id_dict
+
+
+async def launch_digitize_pipeline(
+    job_id: str,
+    doc_id_dict: dict,
+) -> None:
+    """
+    Fire-and-forget coroutine that drives the digitization pipeline for *job_id*.
+
+    Runs the blocking ``digitize()`` call in a thread so the asyncio event loop
+    stays free.  Cleans up the staging directory when done regardless of outcome.
+    """
+    from digitize.models import DocStatus, JobStatus
+    from digitize.utils.db import get_status_manager
+
+    try:
+        logger.info(f"🚀 Digitization pipeline started for job: {job_id}")
+        from digitize.pipeline.digitize import digitize
+        await asyncio.to_thread(digitize, job_id, doc_id_dict)
+        logger.info(f"Digitization pipeline for job {job_id} completed successfully")
+    except Exception as exc:
+        logger.error(f"Error in digitization pipeline for job {job_id}: {exc}", exc_info=True)
+        status_mgr = get_status_manager(job_id)
+        status_mgr.update_job_progress(
+            "",
+            DocStatus.FAILED,
+            JobStatus.FAILED,
+            error=f"Error occurred while processing digitization pipeline: {exc}",
+        )
+    finally:
+        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
 
 async def launch_ingest_pipeline(
