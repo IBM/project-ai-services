@@ -2174,7 +2174,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves system resource information including CPU, memory, and accelerator availability",
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability.\nWhen the optional ` + "`" + `worker` + "`" + ` query parameter is provided, the resources are fetched from\nthat remote worker node instead of the local runtime.",
                 "produces": [
                     "application/json"
                 ],
@@ -2182,11 +2182,25 @@ const docTemplate = `{
                     "Catalog"
                 ],
                 "summary": "Get system resources",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Worker name to query resources from",
+                        "name": "worker",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Worker not connected",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {

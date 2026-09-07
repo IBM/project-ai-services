@@ -68,7 +68,6 @@ func (h *ResourcesHandler) GetResources(c *gin.Context) {
 		rt = remoteRuntime.New(workerName, runtimeTypes.RuntimeType(rtStr), h.workerRegistry)
 	} else {
 		var err error
-		// TODO: Remove older way of runtime once worker migration is completed
 		rt, err = vars.RuntimeFactory.Create("")
 		if err != nil {
 			logger.ErrorfCtx(ctx, "Could not create runtime client: %v", err)
