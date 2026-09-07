@@ -22,6 +22,16 @@ spec:
     spec:
       serviceAccountName: ai-services-sa
       automountServiceAccountToken: true
+      {{- if .Values.hostAliases }}
+      hostAliases:
+      {{- range .Values.hostAliases }}
+      - ip: "{{ .IP }}"
+        hostnames:
+        {{- range .Hostnames }}
+          - "{{ . }}"
+        {{- end }}
+      {{- end }}
+      {{- end }}
       containers:
         - name: worker
           image: "{{ .Values.worker.image }}"

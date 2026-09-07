@@ -177,13 +177,15 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 				Token:       token,
 			},
 			Setup: workertypes.Options{
-				BaseDir:     aiServicesDir,
-				HTTPSPort:   httpsPort,
-				DomainName:  domainName,
-				SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
-				SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
-				HostAliases: parseAddHosts(addHosts),
-			},
+					CommonWorkerOptions: workertypes.CommonWorkerOptions{
+						HostAliases: parseAddHosts(addHosts),
+					},
+					BaseDir:     aiServicesDir,
+					HTTPSPort:   httpsPort,
+					DomainName:  domainName,
+					SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
+					SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
+				},
 		}
 
 		// Setup worker node
@@ -195,6 +197,9 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 			WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
 				GatewayAddr: gatewayAddr,
 				Token:       token,
+			},
+			CommonWorkerOptions: workertypes.CommonWorkerOptions{
+				HostAliases: parseAddHosts(addHosts),
 			},
 		}
 		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
