@@ -42,6 +42,9 @@ const (
 	// MetaKeyBaseDir is the worker metadata key sent during Register and stored in worker.metadata JSON.
 	MetaKeyBaseDir = "baseDir"
 
+	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
+	WorkerGatewayPort = 9090
+
 	// ArgParamCaddyHTTPSPort, ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
 	// ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile are template
 	// value-override keys used when deploying worker pods.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // NewWorkerCmd returns the parent command for worker management.
@@ -149,7 +151,7 @@ If the worker is currently connected its gRPC stream is also cleaned up.`,
 // e.g. "https://catalog-api.10.0.0.1.nip.io" → "gateway.10.0.0.1.nip.io:9090"
 // Falls back to "<catalog-server-host>:9090" if the subdomain cannot be parsed.
 func gatewayAddrFromServerURL(serverURL string) string {
-	const defaultGatewayPort = "9090"
+	defaultGatewayPort := strconv.Itoa(workerconstants.WorkerGatewayPort)
 
 	parsed, err := url.Parse(serverURL)
 	if err != nil || parsed.Host == "" {
