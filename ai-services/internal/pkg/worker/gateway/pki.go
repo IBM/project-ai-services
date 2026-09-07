@@ -126,14 +126,14 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, serve
 func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	empty := pkiResult{}
 
-	serverNames := []string{workerconstants.GatewayServerName}
+	serverNames := []string{}
 	switch runtimeType {
 	case types.RuntimeTypeOpenShift:
-		host, err := GatewayRouteHost(ctx)
+		route, err := GatewayRouteHost(ctx)
 		if err != nil {
 			return empty, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
 		}
-		serverNames = []string{host, workerconstants.GatewayServiceEndpoint}
+		serverNames = []string{route, workerconstants.GatewayServiceEndpoint}
 	case types.RuntimeTypePodman:
 		serverNames = []string{workerconstants.GatewayServerName, workerconstants.GatewayPodName}
 	}
