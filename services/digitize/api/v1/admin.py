@@ -9,13 +9,18 @@ Exposes one router:
 - ``router`` → mounted at ``/v1`` (for /import and /export)
 """
 
+from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from common.misc_utils import get_logger
 import digitize.models as models
 import digitize.utils.db as db_ops
 import digitize.utils.jobs as dg_util
+from digitize.db.manager import db_manager
+from digitize.db.models import ConversionTaskStatus
 
 router = APIRouter()
 logger = get_logger("admin_router")
@@ -155,3 +160,108 @@ async def export_metadata(
             "Database query failed during export",
         )
 
+
+
+# ------------------------------------------------------------------ #
+# Conversion task response model                                      #
+# ------------------------------------------------------------------ #
+
+class ConversionTaskResponse(BaseModel):
+    """Serialisable representation of a ConversionTask row."""
+
+    task_id: str
+    job_id: Optional[str]
+    doc_id: Optional[str]
+    connector_id: Optional[str]
+    operation: str
+    cached_file: str
+    output_format: str
+    page_count: Optional[int]
+    is_large: bool
+    status: str
+    result_path: Optional[str]
+    error: Optional[str]
+    queued_at: str
+    started_at: Optional[str]
+    completed_at: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+# ------------------------------------------------------------------ #
+# Conversion tasks endpoint                                           #
+# ------------------------------------------------------------------ #
+
+_VALID_STATUSES = {s.value for s in ConversionTaskStatus}
+
+
+@router.get(
+    "/conversion-tasks",
+    response_model=List[ConversionTaskResponse],
+    responses={
+        400: http_error_responses[400],
+        500: http_error_responses[500],
+    },
+    summary="List conversion tasks by status (test/debug)",
+    description=(
+        "Return ConversionTask rows whose status matches the requested value(s). "
+        "Accepts a single `status` query parameter or multiple repetitions of it. "
+        "Defaults to all statuses when the parameter is omitted."
+    ),
+    response_description="List of matching conversion tasks ordered by queued_at",
+)
+async def get_conversion_tasks(
+    status: Optional[List[str]] = Query(
+        None,
+        description=(
+            "One or more task statuses to filter by. "
+            f"Valid values: {', '.join(sorted(_VALID_STATUSES))}. "
+            "Omit to return tasks in every status."
+        ),
+    ),
+):
+    """Retrieve conversion tasks filtered by status for testing purposes."""
+    statuses_to_query: List[str]
+
+    if status is None:
+        statuses_to_query = list(_VALID_STATUSES)
+    else:
+        invalid = [s for s in status if s not in _VALID_STATUSES]
+        if invalid:
+            APIError.raise_error(
+                ErrorCode.INVALID_REQUEST,
+                f"Invalid status value(s): {', '.join(invalid)}. "
+                f"Valid values: {', '.join(sorted(_VALID_STATUSES))}",
+            )
+        statuses_to_query = status
+
+    try:
+        tasks = db_manager.get_conversion_tasks(statuses_to_query)
+    except Exception as exc:
+        logger.error(f"Failed to retrieve conversion tasks: {exc}", exc_info=True)
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            "Database query failed while retrieving conversion tasks",
+        )
+
+    return [
+        ConversionTaskResponse(
+            task_id=t.task_id,
+            job_id=t.job_id,
+            doc_id=t.doc_id,
+            connector_id=t.connector_id,
+            operation=t.operation,
+            cached_file=t.cached_file,
+            output_format=t.output_format,
+            page_count=t.page_count,
+            is_large=t.is_large,
+            status=t.status,
+            result_path=t.result_path,
+            error=t.error,
+            queued_at=t.queued_at.isoformat(),
+            started_at=t.started_at.isoformat() if t.started_at else None,
+            completed_at=t.completed_at.isoformat() if t.completed_at else None,
+        )
+        for t in tasks
+    ]
