@@ -46,6 +46,8 @@ pipeline {
         SCRIPTS_DIR = "${WORKSPACE}/build-scripts"
 
         // IBM Container Registry
+        // Pushes <OPENSEARCH_VERSION>-<ARCHITECTURE>-<BUILD_NUMBER> to ai-services-private for each build run
+        // Pushes <OPENSEARCH_VERSION>-<ARCHITECTURE> to ai-services-cicd when PUSH_RELEASE_TAG toggle is enabled
         ICR_REGISTRY           = "icr.io"
         IMAGE_NAME             = "icr.io/ai-services-private/opensearch"
         RELEASE_TAG_IMAGE_NAME = "icr.io/ai-services-cicd/opensearch"
