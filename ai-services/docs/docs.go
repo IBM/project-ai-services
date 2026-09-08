@@ -4207,6 +4207,9 @@ const docTemplate = `{
         "internal_pkg_catalog_apiserver_handlers.createWorkerResp": {
             "type": "object",
             "properties": {
+                "gateway_address": {
+                    "type": "string"
+                },
                 "token": {
                     "type": "string"
                 },
