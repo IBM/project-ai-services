@@ -47,9 +47,9 @@ spec:
           value: "{{ .BaseDir }}"
       volumeMounts:
         - name: caddy-data
-          mountPath: /data
+          mountPath: /data:z
         - name: caddy-data
-          mountPath: /config
+          mountPath: /config:z
         {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
         - name: caddy-certs
           mountPath: /etc/secret/ssl
