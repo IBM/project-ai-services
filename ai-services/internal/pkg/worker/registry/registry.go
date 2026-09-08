@@ -228,10 +228,6 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 // If the worker is currently active in the in-memory map (i.e. its stream is still
 // open), it is evicted first so that the stale connection can no longer update the
 // heartbeat on the now-pending row.
-//
-// When the LOCAL_WORKER environment variable is "true" the catalog-backend is
-// running as the local worker itself. In that case the DB upsert is skipped —
-// only a token is issued so the worker pod can connect via gRPC.
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
