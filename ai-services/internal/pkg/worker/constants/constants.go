@@ -54,13 +54,8 @@ const (
 	ArgParamWorkerPodmanURI   = "worker.podman.uri"
 	ArgParamWorkerAuthFile    = "worker.podman.authFileContent"
 
-	// PodmanGatewayServerName is the default DNS SAN embedded in the auto-generated
-	// gateway server certificate for the Podman runtime.
-	PodmanGatewayServerName = "gateway.ai-services.internal"
-
-	// PodmanGatewayPodName is the Podman catalog pod DNS name embedded in the
-	// auto-generated gateway server certificate.
-	PodmanGatewayPodName = "ai-services--catalog"
+	// WorkerGatewayName is the DNS name used by the catalog worker gateway route.
+	WorkerGatewayName = "catalog-worker-gateway"
 
 	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
 	// auto-generated gateway server certificate for internal cluster communication.

@@ -21,8 +21,9 @@ type CreateWorkerRequest struct {
 
 // CreateWorkerResponse is the payload returned by POST /api/v1/workers.
 type CreateWorkerResponse struct {
-	WorkerName string `json:"worker_name"`
-	Token      string `json:"token"`
+	WorkerName     string `json:"worker_name"`
+	GatewayAddress string `json:"gateway_address"`
+	Token          string `json:"token"`
 }
 
 // WorkerClient provides methods for interacting with the worker management API.

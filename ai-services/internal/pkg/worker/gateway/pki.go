@@ -123,31 +123,35 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNa
 // certificate, then writes all four PEM files to pkiDir.
 //
 // For OpenShift the server cert's DNS SANs include both the live passthrough
-// route host and the internal service endpoint. For Podman the SAN is
-// "gateway.<DOMAIN_SUFFIX>" — DOMAIN_SUFFIX is injected into the backend
-// container by the pod template and covers nip.io auto-suffix, --domain-name,
-// and cert-extracted domains. Workers must always dial by domain name; dialling
-// by raw IP is not supported.
-func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
-	empty := pkiResult{}
-
-	var dnsNames []string
-
+// route host and the internal service endpoint. For Podman the SAN includes the
+// domain-derived gateway name.
+func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]string, error) {
 	switch runtimeType {
 	case types.RuntimeTypeOpenShift:
 		route, err := GatewayRouteHost(ctx)
 		if err != nil {
-			return empty, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
+			return nil, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
 		}
-		dnsNames = []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}
+
+		return []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}, nil
 	case types.RuntimeTypePodman:
 		domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 		if domainSuffix == "" {
-			return empty, fmt.Errorf("DOMAIN_SUFFIX environment variable not set — cannot generate gateway server cert")
+			return nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set — cannot generate gateway server cert")
 		}
-		dnsNames = []string{"gateway." + domainSuffix, workerconstants.PodmanGatewayServerName, workerconstants.PodmanGatewayPodName}
+
+		return []string{workerconstants.WorkerGatewayName + "." + domainSuffix}, nil
 	default:
-		return empty, fmt.Errorf("unsupported runtime type %q for gateway PKI generation", runtimeType)
+		return nil, fmt.Errorf("unsupported runtime type %q for gateway PKI generation", runtimeType)
+	}
+}
+
+func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
+	empty := pkiResult{}
+
+	dnsNames, err := serverCertDNSNames(ctx, runtimeType)
+	if err != nil {
+		return empty, err
 	}
 
 	logger.InfofCtx(ctx, "worker gateway: generating server cert with SANs: %v", dnsNames)

@@ -474,7 +474,7 @@ func TestGenerateServerCert_MultiSAN(t *testing.T) {
 		t.Fatalf("generateCA: %v", err)
 	}
 
-	sans := []string{"gateway.ai-services.internal", "gateway.10.0.0.1.nip.io"}
+	sans := []string{"catalog-worker-gateway.example.com"}
 	_, certDER, err := generateServerCert(caCert, caKey, sans)
 	if err != nil {
 		t.Fatalf("generateServerCert: %v", err)
@@ -498,8 +498,7 @@ func TestGenerateServerCert_MultiSAN(t *testing.T) {
 
 func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 	dir := t.TempDir()
-
-	t.Setenv("DOMAIN_SUFFIX", "10.0.0.1.nip.io")
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
 
 	res, err := generateAndPersistPKI(t.Context(), dir, "podman")
 	if err != nil {
@@ -511,19 +510,15 @@ func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 		t.Fatalf("ParseCertificate: %v", err)
 	}
 
-	// Exactly one SAN: the domain-derived name only — no internal constant.
-	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "gateway.10.0.0.1.nip.io" {
-		t.Errorf("expected SAN [gateway.10.0.0.1.nip.io]; got DNSNames=%v", leaf.DNSNames)
+	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "catalog-worker-gateway.example.com" {
+		t.Errorf("expected SANs [catalog-worker-gateway.example.com]; got DNSNames=%v", leaf.DNSNames)
 	}
 }
 
-func TestGenerateAndPersistPKI_PodmanNoEnv(t *testing.T) {
-	dir := t.TempDir()
-
-	// DOMAIN_SUFFIX not set: must return an error, not a partial cert.
+func TestGenerateAndPersistPKI_PodmanNoDomain(t *testing.T) {
 	t.Setenv("DOMAIN_SUFFIX", "")
 
-	_, err := generateAndPersistPKI(t.Context(), dir, "podman")
+	_, err := generateAndPersistPKI(t.Context(), t.TempDir(), "podman")
 	if err == nil {
 		t.Fatal("expected error when DOMAIN_SUFFIX is unset, got nil")
 	}
