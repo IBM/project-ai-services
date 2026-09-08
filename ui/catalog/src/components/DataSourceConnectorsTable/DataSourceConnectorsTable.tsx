@@ -109,8 +109,8 @@ const DataSourceConnectorsTable = ({
         // Guard: if the deleted item was the last one on a non-first page,
         // the API returns an empty page. Correct back to the last valid page
         // and re-fetch — same pattern used in DigitalAssistants.
-        const totalPages = Math.max(1, Math.ceil(response.total / pageSize));
-        if (page > totalPages) {
+        const totalPages = response.pagination?.total_pages ?? 1;
+        if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
           void loadConnectors(totalPages, pageSize);
@@ -119,7 +119,7 @@ const DataSourceConnectorsTable = ({
 
         dispatch({
           type: ACTION_TYPES.FETCH_CONNECTORS_SUCCESS,
-          payload: { rows, total: response.total },
+          payload: { rows, pagination: response.pagination },
         });
       } catch (error) {
         const errorMessage =
@@ -320,7 +320,7 @@ const DataSourceConnectorsTable = ({
                         <Pagination
                           page={state.page}
                           pageSize={state.pageSize}
-                          pageSizes={[10, 20, 30, 50]}
+                          pageSizes={[20, 30, 50]}
                           totalItems={state.totalItems}
                           onChange={({ page, pageSize }) => {
                             pageRef.current = page;
