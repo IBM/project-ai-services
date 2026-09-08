@@ -421,6 +421,7 @@ export interface WorkerListResponse {
 
 export interface WorkerRegisterResponse {
   worker_name: string;
+  gateway_address: string;
   token: string;
 }
 

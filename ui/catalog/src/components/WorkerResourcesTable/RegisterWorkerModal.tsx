@@ -16,6 +16,7 @@ export interface RegisterWorkerModalProps {
   phase: RegisterPhase;
   workerName: string;
   token: string;
+  gatewayAddress: string;
   onWorkerNameChange: (value: string) => void;
   onGenerateToken: () => void;
   onClose: () => void;
@@ -26,6 +27,7 @@ const RegisterWorkerModal = ({
   phase,
   workerName,
   token,
+  gatewayAddress,
   onWorkerNameChange,
   onGenerateToken,
   onClose,
@@ -35,13 +37,13 @@ const RegisterWorkerModal = ({
 
   const runCommand = useMemo(() => {
     if (!isSuccess) return "";
+    const gateway = gatewayAddress || "<catalog-host>:9090";
     return [
-      "ai-services worker join \\",
-      "  --server <host>:<port> \\",
-      `  --name "${workerName}" \\`,
+      `ai-services worker join ${gateway} \\`,
+      "  --runtime <podman|openshift> \\",
       `  --token "${token}"`,
     ].join("\n");
-  }, [isSuccess, workerName, token]);
+  }, [isSuccess, token, gatewayAddress]);
 
   return (
     <Modal
