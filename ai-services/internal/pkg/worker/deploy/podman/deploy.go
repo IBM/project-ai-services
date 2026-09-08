@@ -34,9 +34,6 @@ import (
 const (
 	caddyfileSubDir = "worker/caddy"
 	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
-
-	dirPerm  = 0o750
-	filePerm = 0o644
 )
 
 // Options carries the parameters needed to set up the worker node.

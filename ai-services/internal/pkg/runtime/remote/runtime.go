@@ -165,6 +165,7 @@ func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string, _ bool) ([
 	if err := unmarshalData(res, &podLogsLines); err != nil {
 		return nil, err
 	}
+
 	return podLogsLines, err
 }
 

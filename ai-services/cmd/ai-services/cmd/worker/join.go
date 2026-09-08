@@ -347,6 +347,7 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 	err := join.StartGrpcStream(ctx, rt, pr, opts)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "%s: %v\n", workerconstants.WorkerJoinErr, err)
+
 		return fmt.Errorf("%s: %w", workerconstants.WorkerJoinErr, err)
 	}
 
