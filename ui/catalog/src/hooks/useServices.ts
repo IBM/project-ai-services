@@ -23,8 +23,8 @@ export const useServices = (autoFetch = true) => {
   const refetch = useCallback(async () => {
     if (useServiceDeployStore.getState().servicesLoading) return;
 
-    setServicesLoading(true);
     setServicesError(null);
+    setServicesLoading(true);
 
     try {
       const data = await fetchServices();
