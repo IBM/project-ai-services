@@ -30,7 +30,7 @@ spec:
           EOF
       volumeMounts:
         - name: caddy-data
-          mountPath: /data
+          mountPath: /data:z
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
