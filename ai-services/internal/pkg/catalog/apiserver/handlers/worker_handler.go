@@ -101,16 +101,11 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 }
 
 func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
-	port := fmt.Sprintf("%d", h.gatewayPort)
 	if h.runtimeType == types.RuntimeTypeOpenShift {
-		host, err := gateway.GatewayRouteHost(ctx)
-		if err != nil {
-			return "", err
-		}
-
-		return host + ":" + port, nil
+		return gateway.GatewayRouteHost(ctx)
 	}
 
+	port := fmt.Sprintf("%d", h.gatewayPort)
 	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 	if domainSuffix == "" {
 		return "", fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
