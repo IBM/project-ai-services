@@ -1,9 +1,14 @@
 package worker
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
@@ -42,9 +47,20 @@ Application pods deployed on this worker by the catalog are not touched.`,
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
+			ctx := context.Background()
+			runtimeType := vars.RuntimeFactory.GetRuntimeType()
+			rt, err := runtime.CreateRuntime(runtimeType, "")
+			if err != nil {
+				return fmt.Errorf("worker uninstall: init runtime: %w", err)
+			}
+			if isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt); err != nil {
+				logger.WarningfCtx(ctx, "worker uninstall: could not determine LOCAL_WORKER from catalog pod: %v\n", err)
+			} else if isLocalWorker {
+				return fmt.Errorf("the worker is co-located with the control plane and cannot be uninstalled independently")
+			}
 
 			return workeruninstall.Uninstall(cmd.Context(), workerutils.UninstallOptions{
-				RuntimeType: vars.RuntimeFactory.GetRuntimeType(),
+				RuntimeType: runtimeType,
 				AutoYes:     uninstallAutoYes,
 				SkipCleanup: skipCleanup,
 			})

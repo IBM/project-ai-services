@@ -617,9 +617,9 @@ func getPodmanURIAsRoot() (string, error) {
 	), nil
 }
 
-// GetAuthFilePath determines the auth.json file path based on the current user.
+// getAuthFilePath determines the auth.json file path based on the current user.
 // Returns the path to the Podman auth.json file for container registry authentication.
-func GetAuthFilePath() (string, error) {
+func getAuthFilePath() (string, error) {
 	if os.Geteuid() == 0 {
 		return "/run/user/0/containers/auth.json", nil
 	}
@@ -631,7 +631,7 @@ func GetAuthFilePath() (string, error) {
 // base64-encoded. If the file does not exist, an encoded empty JSON object is
 // returned and a warning is logged.
 func ReadAuthFileBase64() (string, error) {
-	authFilePath, err := GetAuthFilePath()
+	authFilePath, err := getAuthFilePath()
 	if err != nil {
 		return "", fmt.Errorf("failed to get auth file path: %w", err)
 	}

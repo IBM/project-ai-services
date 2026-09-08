@@ -333,17 +333,8 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 }
 
 // WorkerDBID returns the database UUID for the named worker by consulting the
-// in-memory registry. Returns (uuid.Nil, false) when the worker is not
-// connected or the registry is nil (local-only server).
+// in-memory registry.
 func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
-	if p.workerRegistry == nil {
-		return uuid.Nil, false
-	}
-
-	if isLocalWorkerName(workerName) {
-		workerName = workerconstants.LocalWorkerName
-	}
-
 	return p.workerRegistry.WorkerID(workerName)
 }
 
@@ -394,7 +385,7 @@ func (p *DeploymentPlanner) ResolveRuntimeType(ctx context.Context, workerName s
 }
 
 func isLocalWorkerName(workerName string) bool {
-	return workerName == "" || strings.EqualFold(workerName, workerconstants.LocalWorkerName)
+	return strings.EqualFold(workerName, workerconstants.LocalWorkerName)
 }
 
 // Made with Bob
