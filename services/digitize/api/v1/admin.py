@@ -193,9 +193,6 @@ class ConversionTaskResponse(BaseModel):
 # Conversion tasks endpoint                                           #
 # ------------------------------------------------------------------ #
 
-_VALID_STATUSES = {s.value for s in ConversionTaskStatus}
-
-
 @router.get(
     "/conversion-tasks",
     response_model=List[ConversionTaskResponse],
@@ -216,7 +213,7 @@ async def get_conversion_tasks(
         None,
         description=(
             "One or more task statuses to filter by. "
-            f"Valid values: {', '.join(sorted(_VALID_STATUSES))}. "
+            f"Valid values: {', '.join(sorted(ConversionTaskStatus))}. "
             "Omit to return tasks in every status."
         ),
     ),
@@ -225,14 +222,14 @@ async def get_conversion_tasks(
     statuses_to_query: List[str]
 
     if status is None:
-        statuses_to_query = list(_VALID_STATUSES)
+        statuses_to_query = list(ConversionTaskStatus)
     else:
-        invalid = [s for s in status if s not in _VALID_STATUSES]
+        invalid = [s for s in status if s not in ConversionTaskStatus]
         if invalid:
             APIError.raise_error(
                 ErrorCode.INVALID_REQUEST,
                 f"Invalid status value(s): {', '.join(invalid)}. "
-                f"Valid values: {', '.join(sorted(_VALID_STATUSES))}",
+                f"Valid values: {', '.join(sorted(ConversionTaskStatus))}",
             )
         statuses_to_query = status
 
