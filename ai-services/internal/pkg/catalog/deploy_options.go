@@ -207,11 +207,12 @@ func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID
 	}
 
 	deployOptions := &types.DeployOptionsService{
-		ID:         service.ID,
-		Name:       service.Name,
-		Version:    serviceVersion,
-		Components: components,
-		Resources:  resources,
+		ID:                service.ID,
+		Name:              service.Name,
+		Version:           serviceVersion,
+		Components:        components,
+		Resources:         resources,
+		AcceptsDatasource: service.AcceptsDatasource,
 	}
 
 	// Only add schema if the service has non-empty schema properties.
