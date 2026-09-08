@@ -58,7 +58,7 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
-	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName)
+	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName, catalogConstants.CatalogMTLSSecretName)
 
 	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
 	// If secret is created adding it to 'secretsToDelete' list

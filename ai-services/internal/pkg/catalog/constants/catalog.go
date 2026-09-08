@@ -54,6 +54,8 @@ const (
 	CatalogDBSecretName = "catalog-db-secret"
 	// CatalogConnectorSecretName represents the catalog connector encryption key secret name.
 	CatalogConnectorSecretName = "catalog-db-encryption-secret"
+	// CatalogMTLSSecretName represents the catalog mTLS encryption key secret name.
+	CatalogMTLSSecretName = "catalog-mtls-encryption-secret"
 	// CatalogDeploymentName represent the catalog deployment name.
 	CatalogDeploymentName = "catalog-backend"
 )

@@ -98,6 +98,11 @@ spec:
                 secretKeyRef:
                   name: catalog-db-encryption-secret
                   key: db-encryption-key
+            - name: MTLS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-mtls-encryption-secret
+                  key: mtls-encryption-key
             - name: GIN_MODE
               value: "release"
             - name: AI_SERVICES_LOG_LEVEL
