@@ -42,6 +42,7 @@ Application pods deployed on this worker by the catalog are not touched.`,
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
+
 			return workeruninstall.Uninstall(cmd.Context(), workerutils.UninstallOptions{
 				RuntimeType: vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes:     uninstallAutoYes,
