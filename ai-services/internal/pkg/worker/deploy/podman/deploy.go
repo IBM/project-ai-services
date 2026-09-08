@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strconv"
 	"strings"

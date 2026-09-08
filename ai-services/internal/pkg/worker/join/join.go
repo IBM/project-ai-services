@@ -261,19 +261,7 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 	senderErrCh, senderDone := startSender(stream, sendCh)
 
 	var wg sync.WaitGroup
-
-	drainAndClose := func(recvErr error) error {
-		wg.Wait()
-		close(sendCh)
-		<-senderDone
-
-		select {
-		case sErr := <-senderErrCh:
-			return sErr
-		default:
-			return recvErr
-		}
-	}
+	drain := makeDrainer(&wg, sendCh, senderDone, senderErrCh)
 
 	// Heartbeat ticker — keep-alives go through sendCh so they share the
 	// same stream.Send goroutine as command results.
@@ -289,7 +277,7 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 	for {
 		select {
 		case <-ctx.Done():
-			return drainAndClose(ctx.Err())
+			return drain(ctx.Err())
 
 		case <-ticker.C:
 			select {
@@ -299,19 +287,16 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 
 		case msg := <-recvCh:
 			if msg.err != nil {
-				return drainAndClose(msg.err)
+				return drain(msg.err)
 			}
 
-			logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s at=%d\n",
-				workerName, msg.cmd.GetCommandId(), msg.cmd.GetType(), time.Now().UnixMilli())
+			logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
+				workerName, msg.cmd.GetCommandId(), msg.cmd.GetType())
 
 			wg.Add(1)
 
 			go func(c *workerpb.Command) {
 				defer wg.Done()
-
-				logger.InfofCtx(ctx, "Worker %q dispatching command id=%s type=%s at=%d\n",
-					workerName, c.GetCommandId(), c.GetType(), time.Now().UnixMilli())
 
 				result := dispatch.Dispatch(ctx, rt, pr, c)
 				result.WorkerName = workerName
@@ -321,6 +306,24 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 				case <-ctx.Done():
 				}
 			}(msg.cmd)
+		}
+	}
+}
+
+// makeDrainer returns a function that waits for all in-flight dispatch
+// goroutines to finish, closes sendCh, waits for the sender goroutine to
+// exit, and returns any sender error in preference to the recv error.
+func makeDrainer(wg *sync.WaitGroup, sendCh chan *workerpb.CommandResult, senderDone <-chan struct{}, senderErrCh <-chan error) func(error) error {
+	return func(recvErr error) error {
+		wg.Wait()
+		close(sendCh)
+		<-senderDone
+
+		select {
+		case sErr := <-senderErrCh:
+			return sErr
+		default:
+			return recvErr
 		}
 	}
 }
