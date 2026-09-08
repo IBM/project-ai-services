@@ -13,6 +13,7 @@ import (
 var (
 	uninstallRuntimeType string
 	uninstallAutoYes     bool
+	skipCleanup          bool
 )
 
 func newUninstallCmd() *cobra.Command {
@@ -43,6 +44,7 @@ Application pods deployed on this worker by the catalog are not touched.`,
 			return workeruninstall.Uninstall(cmd.Context(), workerutils.UninstallOptions{
 				RuntimeType: vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes:     uninstallAutoYes,
+				SkipCleanup: skipCleanup,
 			})
 		},
 	}
@@ -51,6 +53,9 @@ Application pods deployed on this worker by the catalog are not touched.`,
 
 	cmd.Flags().BoolVarP(&uninstallAutoYes, "yes", "y", false,
 		"Automatically accept all confirmation prompts.")
+
+	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false,
+		"Skip deleting worker voulme (default=false)")
 
 	return cmd
 }

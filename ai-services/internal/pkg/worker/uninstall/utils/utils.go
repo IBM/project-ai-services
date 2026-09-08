@@ -11,4 +11,6 @@ type UninstallOptions struct {
 
 	// AutoYes skips the interactive confirmation prompt.
 	AutoYes bool
+
+	SkipCleanup bool
 }

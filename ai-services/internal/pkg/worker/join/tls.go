@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 const (
@@ -66,9 +65,8 @@ func loadClientCert(tlsDir string) (tls.Certificate, error) {
 	return cert, nil
 }
 
-// buildTLSConfig returns a *tls.Config for dialing the gateway. When the target
-// includes a host or IP, we verify against that exact address. Otherwise we fall
-// back to the podman/internal default name.
+// buildTLSConfig returns a *tls.Config for dialing the gateway. The gateway
+// address must contain a DNS hostname so it can be verified against the server certificate SANs.
 func buildTLSConfig(gatewayAddr, tlsDir string, clientCert *tls.Certificate) (*tls.Config, error) {
 	cfg := &tls.Config{}
 	if clientCert != nil {
@@ -87,7 +85,11 @@ func buildTLSConfig(gatewayAddr, tlsDir string, clientCert *tls.Certificate) (*t
 			return nil, fmt.Errorf("parse ca.crt: no valid certificates found")
 		}
 		cfg.RootCAs = pool
-		cfg.ServerName = gatewayServerName(gatewayAddr)
+		serverName, err := gatewayServerName(gatewayAddr)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ServerName = serverName
 	case os.IsNotExist(err):
 		cfg.InsecureSkipVerify = true //nolint:gosec // intentional TOFU bootstrap fallback
 	default:
@@ -97,24 +99,25 @@ func buildTLSConfig(gatewayAddr, tlsDir string, clientCert *tls.Certificate) (*t
 	return cfg, nil
 }
 
-func gatewayServerName(gatewayAddr string) string {
+func gatewayServerName(gatewayAddr string) (string, error) {
 	if gatewayAddr == "" {
-		return workerconstants.GatewayServerName
+		return "", fmt.Errorf("gateway address is empty")
 	}
 	if parsed, err := url.Parse(gatewayAddr); err == nil && parsed.Host != "" {
 		gatewayAddr = parsed.Host
 	}
-	if host, _, err := net.SplitHostPort(gatewayAddr); err == nil {
-		gatewayAddr = host
+	host, _, err := net.SplitHostPort(gatewayAddr)
+	if err != nil {
+		return "", fmt.Errorf("invalid gateway address %q: must be host:port", gatewayAddr)
 	}
-	if gatewayAddr == "" {
-		return workerconstants.GatewayServerName
+	if host == "" {
+		return "", fmt.Errorf("invalid gateway address %q: hostname is empty", gatewayAddr)
 	}
-	if ip := net.ParseIP(gatewayAddr); ip != nil {
-		return workerconstants.GatewayServerName
+	if net.ParseIP(host) != nil {
+		return "", fmt.Errorf("invalid gateway address %q: IP addresses are not supported", gatewayAddr)
 	}
 
-	return gatewayAddr
+	return host, nil
 }
 
 // writeTLSMaterial creates tlsDir (mode 0700) and writes the three PEM files

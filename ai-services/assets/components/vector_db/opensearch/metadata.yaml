@@ -1,6 +1,7 @@
 # Component identification
 type: component
 id: opensearch
+version: "1.0.0"
 name: "OpenSearch"
 description: "Distributed search and analytics engine for vector storage"
 
