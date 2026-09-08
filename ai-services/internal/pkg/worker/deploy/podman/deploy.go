@@ -281,7 +281,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 		return nil
 	}
-	
+
 	var podSpec podmodels.PodSpec
 	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
 		return fmt.Errorf("worker setup: parse pod spec %s: %w", tmplName, err)
