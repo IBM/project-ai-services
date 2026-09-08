@@ -12,7 +12,6 @@ import (
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -102,9 +101,11 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
-	if isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt); err != nil {
-		logger.WarningfCtx(ctx, "worker join: could not determine LOCAL_WORKER from catalog pod: %v\n", err)
-	} else if isLocalWorker {
+	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
+	}
+	if isLocalWorker {
 		return fmt.Errorf("the worker is already co-located with the control plane and cannot be joined independently")
 	}
 

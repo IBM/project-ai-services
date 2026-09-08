@@ -335,6 +335,10 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 // WorkerDBID returns the database UUID for the named worker by consulting the
 // in-memory registry.
 func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
+	if p.workerRegistry == nil {
+		return uuid.Nil, false
+	}
+
 	return p.workerRegistry.WorkerID(workerName)
 }
 

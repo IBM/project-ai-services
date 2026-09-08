@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
@@ -53,9 +52,11 @@ Application pods deployed on this worker by the catalog are not touched.`,
 			if err != nil {
 				return fmt.Errorf("worker uninstall: init runtime: %w", err)
 			}
-			if isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt); err != nil {
-				logger.WarningfCtx(ctx, "worker uninstall: could not determine LOCAL_WORKER from catalog pod: %v\n", err)
-			} else if isLocalWorker {
+			isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+			if err != nil {
+				return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
+			}
+			if isLocalWorker {
 				return fmt.Errorf("the worker is co-located with the control plane and cannot be uninstalled independently")
 			}
 

@@ -64,7 +64,7 @@ func IsCatalogLocalWorker(ctx context.Context, rt runtime.Runtime) (bool, error)
 	for _, container := range pod.Containers {
 		cInfo, err := rt.InspectContainer(ctx, container.ID)
 		if err != nil {
-			continue
+			return false, fmt.Errorf("inspect container %s failed: %w", container.ID, err)
 		}
 		if cInfo.Env[workerconstants.LocalWorkerEnvVar] == "true" {
 			return true, nil
