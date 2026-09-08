@@ -14,6 +14,7 @@ import (
 
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -233,6 +234,8 @@ func extractEntries(tr *tar.Reader, destDir string) (int64, error) {
 
 // processEntry handles a single tar entry: it strips the top-level directory
 // prefix, enforces path-traversal and size guards, and writes the entry to disk.
+// OS-generated metadata files (macOS AppleDouble/.DS_Store, Windows Thumbs.db/
+// desktop.ini) are skipped so they never land in the extracted bundle directory.
 // Returns the number of bytes written (0 for directories and skipped entries).
 func processEntry(tr *tar.Reader, hdr *tar.Header, destDir string, topDir *string) (int64, error) {
 	// Strip the top-level directory prefix (e.g. "my-bundle/") on the first
@@ -244,6 +247,10 @@ func processEntry(tr *tar.Reader, hdr *tar.Header, destDir string, topDir *strin
 
 	relName := strings.TrimPrefix(name, *topDir)
 	if relName == "" || relName == "." {
+		return 0, nil
+	}
+
+	if utils.IsOSMetadataFile(relName) {
 		return 0, nil
 	}
 

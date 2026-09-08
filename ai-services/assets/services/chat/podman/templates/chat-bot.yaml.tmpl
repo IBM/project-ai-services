@@ -5,7 +5,7 @@ metadata:
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
   annotations:
-    ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api"
+    ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api,5001:chat-bot-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   restartPolicy: always
@@ -122,3 +122,32 @@ spec:
         - mountPath: /etc/secret/opensearch-secret
           name: opensearch-secret
           readOnly: true
+    - name: mcp-sidecar
+      image: "{{ .Values.mcp.image }}"
+      args:
+        - "--description"
+        - "http://localhost:5000/openapi.json"
+        - "--endpoint"
+        - "http://localhost:5000"
+        - "--tag"
+        - "mcp"
+        - "--port"
+        - "{{ .Values.mcp.port }}"
+        - "--auth-passthrough"
+        - "--http"
+      ports:
+        - containerPort: {{ .Values.mcp.port }}
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: {{ .Values.mcp.port }}
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "128Mi"
+        limits:
+          memory: "128Mi"

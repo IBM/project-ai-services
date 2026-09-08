@@ -28,6 +28,9 @@ import (
 const (
 	maxKeyValueParts  = 2
 	maxHostnameLength = 63
+
+	CaddyFileIndent   = 10
+	CertContentIndent = 4
 )
 
 // IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
@@ -81,6 +84,21 @@ func CopyMap[K comparable, V any](src map[K]V) map[K]V {
 	maps.Copy(dst, src)
 
 	return dst
+}
+
+// MergeMaps returns a new map that starts with all keys from base, then overlays overrides.
+// Neither input map is modified.
+func MergeMaps(base, overrides map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(overrides))
+	for k, v := range base {
+		merged[k] = v
+	}
+
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	return merged
 }
 
 // JoinAndRemove joins the first `count` elements using `sep`,
@@ -645,6 +663,19 @@ func ExtractTarGz(srcFile, destDir string) error {
 	return nil
 }
 
+// IsOSMetadataFile reports whether name is an OS-generated metadata file
+// (macOS AppleDouble/.DS_Store, Windows Thumbs.db/desktop.ini) that should be
+// skipped when validating or extracting archive entries.
+func IsOSMetadataFile(name string) bool {
+	base := filepath.Base(name)
+
+	if strings.HasPrefix(base, "._") || base == ".DS_Store" {
+		return true
+	}
+
+	return strings.EqualFold(base, "Thumbs.db") || strings.EqualFold(base, "desktop.ini")
+}
+
 // extractTarEntry extracts a single tar entry.
 func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
 	// Get the absolute path of the destination directory
@@ -764,4 +795,34 @@ func ConvertRawJsontoMap(raw json.RawMessage) (map[string]any, error) {
 	}
 
 	return result, nil
+}
+
+// IndentString adds indentation (leading spaces) to every line of the input string.
+func IndentString(s string, spaces int) string {
+	if s == "" {
+		return ""
+	}
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			lines[i] = prefix + line
+		}
+	}
+
+	return prefix + strings.Join(lines, "\n")
+}
+
+// IsNotFoundError checks if an error indicates a resource was not found.
+// Returns true for "no such pod", "no such secret", "no such volume" errors.
+func IsNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+
+	return strings.Contains(errMsg, "no such pod") ||
+		strings.Contains(errMsg, "no pod with name or ID") ||
+		strings.Contains(errMsg, "no such secret") ||
+		strings.Contains(errMsg, "no such volume")
 }

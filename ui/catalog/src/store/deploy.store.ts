@@ -14,7 +14,7 @@ interface ProviderParamsCache {
   fetchedAt: number;
 }
 
-interface ServiceParamsCache {
+export interface ServiceParamsCache {
   data: ProviderSchema;
   fetchedAt: number;
 }

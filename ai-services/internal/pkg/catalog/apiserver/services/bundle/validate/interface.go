@@ -30,6 +30,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // BundleValidator is implemented by each runtime-specific validator.
@@ -84,18 +85,19 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 			}
 		}
 
-		var content []byte
-		if hdr.Typeflag == tar.TypeReg {
-			content, err = io.ReadAll(tr)
-			if err != nil {
-				return &validators.ValidationError{
-					Code:    http.StatusBadRequest,
-					Message: fmt.Sprintf("error reading archive entry %q: %s", hdr.Name, err),
-				}
+		name := filepath.ToSlash(hdr.Name)
+		if shouldSkipEntry(hdr) || utils.IsOSMetadataFile(name) {
+			continue
+		}
+
+		content, err := readEntryContent(tr, hdr)
+		if err != nil {
+			return &validators.ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("error reading archive entry %q: %s", hdr.Name, err),
 			}
 		}
 
-		name := filepath.ToSlash(hdr.Name)
 		stop, visitErr := visit(name, hdr, content)
 		if visitErr != nil {
 			return visitErr
@@ -106,6 +108,26 @@ func scanEntriesWithContent(archiveBytes []byte, visit func(name string, hdr *ta
 	}
 
 	return nil
+}
+
+// shouldSkipEntry reports whether a tar entry should be ignored.
+// It skips non-regular/non-directory entries.
+func shouldSkipEntry(hdr *tar.Header) bool {
+	return hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir
+}
+
+// readEntryContent reads and returns the content of a regular tar entry.
+// Directory entries return nil content.
+func readEntryContent(tr *tar.Reader, hdr *tar.Header) ([]byte, error) {
+	if hdr.Typeflag != tar.TypeReg {
+		return nil, nil
+	}
+	content, err := io.ReadAll(tr)
+	if err != nil {
+		return nil, err
+	}
+
+	return content, nil
 }
 
 // stripTopDir removes the optional single top-level directory prefix from path.

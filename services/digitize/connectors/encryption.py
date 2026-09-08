@@ -24,8 +24,8 @@ logger = get_logger("connector_encryption")
 # Secret fields per connector type that must be encrypted before storage
 # and stripped before API responses.
 _SECRET_FIELDS: dict[str, set[str]] = {
-    "ssh": {"private_key"},
-    "s3": {"secret_access_key"},
+    "file_system": {"private_key"},
+    "object_storage": {"secret_access_key"},
 }
 
 _NONCE_SIZE = 12  # 96-bit nonce recommended for GCM

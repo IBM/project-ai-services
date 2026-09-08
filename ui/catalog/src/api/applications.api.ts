@@ -4,6 +4,7 @@ import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
 } from "@/constants/api-endpoints.constants";
+import { COMPONENT_TYPES } from "@/constants";
 import type {
   ArchitectureSummary,
   ServiceSummary,
@@ -123,7 +124,7 @@ export async function fetchLLMOptionsWithModels(
   const options = deployOptions || (await fetchServiceDeployOptions(serviceId));
 
   const llmComponent = options.components.find(
-    (component) => component.type === "llm",
+    (component) => component.type === COMPONENT_TYPES.LLM,
   );
 
   if (!llmComponent || !llmComponent.providers) {
@@ -142,10 +143,10 @@ export async function fetchLLMOptionsWithModels(
       ];
     }
 
-    const schema = await fetchProviderSchema("llm", provider.id);
+    const schema = await fetchProviderSchema(COMPONENT_TYPES.LLM, provider.id);
 
     if (setProviderSchema) {
-      setProviderSchema(serviceId, "llm", provider.id, schema);
+      setProviderSchema(serviceId, COMPONENT_TYPES.LLM, provider.id, schema);
     }
 
     if (schema.properties.model?.oneOf) {

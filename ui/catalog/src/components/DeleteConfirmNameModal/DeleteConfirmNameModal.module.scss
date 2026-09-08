@@ -1,0 +1,24 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+}
+
+.inlineNotification {
+  // Allow the notification to span the full modal body width
+  max-width: 100%;
+  margin-bottom: spacing.$spacing-06;
+}
+
+.errorNotification {
+  // Sits at the top; spacing below it separates it from the info notification
+  max-width: 100%;
+  margin-bottom: spacing.$spacing-05;
+}
+
+.warningText {
+  @include type.type-style("body-long-01");
+  margin: 0 0 spacing.$spacing-06;
+}

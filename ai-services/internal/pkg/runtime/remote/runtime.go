@@ -10,41 +10,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"time"
 
-	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
-)
-
-const (
-	// commandTimeout is the maximum time to wait for a worker to respond to a
-	// single command. Long-running operations such as PullImage can exceed a
-	// few minutes; callers can pass a context with a tighter deadline if needed.
-	commandTimeout = 10 * time.Minute
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // RemoteRuntime implements runtime.Runtime by forwarding each call as a
 // Command over the gRPC CommandStream to the named worker.
 type RemoteRuntime struct {
-	workerName  string
+	*stream.Sender
 	runtimeType types.RuntimeType
-	registry    WorkerRegistry
+	// namespace is the target namespace for namespace-scoped operations on
+	// OpenShift (e.g. ListPods, ListRoutes, DeletePVCs). Empty for Podman.
+	namespace string
 }
 
 // New returns a RemoteRuntime targeting the named worker.
 // runtimeType is the worker's declared runtime (stored in the DB at Register
 // time) — used only by the Type() method; the gRPC protocol is runtime-agnostic.
-func New(workerName string, runtimeType types.RuntimeType, reg WorkerRegistry) *RemoteRuntime {
+func New(workerName string, runtimeType types.RuntimeType, reg stream.WorkerRegistry) *RemoteRuntime {
 	return &RemoteRuntime{
-		workerName:  workerName,
+		Sender:      stream.New(workerName, reg),
 		runtimeType: runtimeType,
-		registry:    reg,
 	}
+}
+
+// WithNamespace returns a shallow copy of the RemoteRuntime scoped to the
+// given namespace. Use this when driving operations against an application
+// namespace on an OpenShift worker.
+func (r *RemoteRuntime) WithNamespace(ns string) *RemoteRuntime {
+	copy := *r
+	copy.namespace = ns
+
+	return &copy
 }
 
 // Type returns the runtime type declared by the worker at registration.
@@ -77,7 +80,7 @@ func (r *RemoteRuntime) PullImage(ctx context.Context, image string) error {
 // ─── Pod operations ───────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListPods(ctx context.Context, filters map[string][]string) ([]types.Pod, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_PODS, payload.ListPods{Filters: filters})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_PODS, payload.ListPods{Namespace: r.namespace, Filters: filters})
 	if err != nil {
 		return nil, err
 	}
@@ -116,19 +119,19 @@ func (r *RemoteRuntime) DeletePod(ctx context.Context, nameOrID string, force *b
 }
 
 func (r *RemoteRuntime) StopPod(ctx context.Context, nameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_STOP_POD, payload.NameOrID{NameOrID: nameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_STOP_POD, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) StartPod(ctx context.Context, nameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_START_POD, payload.NameOrID{NameOrID: nameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_START_POD, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) InspectPod(ctx context.Context, nameOrID string) (*types.Pod, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_POD, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_POD, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +145,7 @@ func (r *RemoteRuntime) InspectPod(ctx context.Context, nameOrID string) (*types
 }
 
 func (r *RemoteRuntime) PodExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -156,13 +159,13 @@ func (r *RemoteRuntime) PodExists(ctx context.Context, nameOrID string) (bool, e
 }
 
 func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{NameOrID: nameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +187,7 @@ func (r *RemoteRuntime) GetNamespace(_ context.Context) (string, error) {
 // ─── Secret operations ────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListSecrets(ctx context.Context, filters map[string][]string) ([]string, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_SECRETS, payload.ListSecrets{Filters: filters})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_SECRETS, payload.ListSecrets{Namespace: r.namespace, Filters: filters})
 	if err != nil {
 		return nil, err
 	}
@@ -198,13 +201,13 @@ func (r *RemoteRuntime) ListSecrets(ctx context.Context, filters map[string][]st
 }
 
 func (r *RemoteRuntime) DeleteSecret(ctx context.Context, name string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_SECRET, payload.Name{Name: name})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_SECRET, payload.Name{Namespace: r.namespace, Name: name})
 
 	return err
 }
 
 func (r *RemoteRuntime) SecretExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -217,22 +220,28 @@ func (r *RemoteRuntime) SecretExists(ctx context.Context, nameOrID string) (bool
 	return exists, nil
 }
 
-// UpdateSecret is not yet supported over the remote worker protocol.
-// TODO: implement when required.
-func (r *RemoteRuntime) UpdateSecret(_ context.Context, _, _ string, _ map[string][]byte) error {
-	return fmt.Errorf("remote runtime: UpdateSecret not yet supported on remote workers")
+// UpdateSecret forwards a secret update + deployment restart to the remote OpenShift worker.
+func (r *RemoteRuntime) UpdateSecret(ctx context.Context, name, deploymentName string, data map[string][]byte) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_UPDATE_SECRET, payload.UpdateSecret{
+		Namespace:      r.namespace,
+		Name:           name,
+		DeploymentName: deploymentName,
+		Data:           data,
+	})
+
+	return err
 }
 
 // ─── Volume operations ────────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) DeleteVolume(ctx context.Context, name string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_VOLUME, payload.Name{Name: name})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_VOLUME, payload.Name{Namespace: r.namespace, Name: name})
 
 	return err
 }
 
 func (r *RemoteRuntime) VolumeExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -248,7 +257,7 @@ func (r *RemoteRuntime) VolumeExists(ctx context.Context, nameOrID string) (bool
 // ─── Container operations ─────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) InspectContainer(ctx context.Context, nameOrID string) (*types.Container, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_CONTAINER, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_INSPECT_CONTAINER, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +271,7 @@ func (r *RemoteRuntime) InspectContainer(ctx context.Context, nameOrID string) (
 }
 
 func (r *RemoteRuntime) ContainerExists(ctx context.Context, nameOrID string) (bool, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_EXISTS, payload.NameOrID{NameOrID: nameOrID})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_EXISTS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
 	if err != nil {
 		return false, err
 	}
@@ -276,14 +285,14 @@ func (r *RemoteRuntime) ContainerExists(ctx context.Context, nameOrID string) (b
 }
 
 func (r *RemoteRuntime) ContainerLogs(ctx context.Context, containerNameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_LOGS, payload.NameOrID{NameOrID: containerNameOrID})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_CONTAINER_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: containerNameOrID})
 
 	return err
 }
 
 func (r *RemoteRuntime) ExecInContainerWithCmd(ctx context.Context, podName, containerName string, command []string) (string, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER,
-		payload.ExecInContainer{PodName: podName, ContainerName: containerName, Command: command})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_EXEC_IN_CONTAINER,
+		payload.ExecInContainer{Namespace: r.namespace, PodName: podName, ContainerName: containerName, Command: command})
 	if err != nil {
 		return "", err
 	}
@@ -324,7 +333,7 @@ func (r *RemoteRuntime) HTTPProxy(ctx context.Context, method, targetURL string,
 // ─── Network operations ───────────────────────────────────────────────────────
 
 func (r *RemoteRuntime) ListRoutes(ctx context.Context, labelSelector string) ([]types.Route, error) {
-	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_ROUTES, payload.ListRoutes{LabelSelector: labelSelector})
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_ROUTES, payload.ListRoutes{Namespace: r.namespace, LabelSelector: labelSelector})
 	if err != nil {
 		return nil, err
 	}
@@ -337,20 +346,62 @@ func (r *RemoteRuntime) ListRoutes(ctx context.Context, labelSelector string) ([
 	return routes, nil
 }
 
-// ─── CRD / namespace / PVC / system operations ────────────────────────────────
+// ─── OpenShift-specific operations ───────────────────────────────────────────
 
-// ListCRD is not supported on remote workers (OpenShift-only).
-func (r *RemoteRuntime) ListCRD(_ context.Context, _ *unstructured.UnstructuredList, _ map[string][]string) ([]types.CRDResource, error) {
-	return nil, fmt.Errorf("remote runtime: ListCRD not supported on remote workers")
+// WaitForInferenceServiceReady forwards a KServe InferenceService readiness wait
+// to the remote OpenShift worker. The worker polls the InferenceService until
+// Ready=True or the context deadline is exceeded. The context timeout is
+// authoritative — the worker respects ctx.Done() via the gRPC deadline.
+func (r *RemoteRuntime) WaitForInferenceServiceReady(ctx context.Context, isvcName string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE, payload.WaitInferenceService{
+		Namespace: r.namespace,
+		Name:      isvcName,
+	})
+
+	return err
 }
 
-// DeleteNamespace is not supported on remote workers (OpenShift-only).
-func (r *RemoteRuntime) DeleteNamespace(_ context.Context, _ string) error {
-	return fmt.Errorf("remote runtime: DeleteNamespace not supported on remote workers")
+// ─── CRD / namespace / PVC / system operations ────────────────────────────────
+
+// ListCRD forwards a CRD list query to the remote OpenShift worker.
+// The GVK is extracted from list and sent alongside the namespace and label filters.
+func (r *RemoteRuntime) ListCRD(ctx context.Context, list *unstructured.UnstructuredList, filters map[string][]string) ([]types.CRDResource, error) {
+	gvk := list.GroupVersionKind()
+	labelKeys := filters["label"]
+
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_LIST_CRD, payload.ListCRD{
+		Namespace: r.namespace,
+		Group:     gvk.Group,
+		Version:   gvk.Version,
+		Kind:      gvk.Kind,
+		LabelKeys: labelKeys,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var items []payload.CRDResource
+	if err := unmarshalData(res, &items); err != nil {
+		return nil, err
+	}
+
+	result := make([]types.CRDResource, len(items))
+	for i, item := range items {
+		result[i] = types.CRDResource{Name: item.Name, Labels: item.Labels}
+	}
+
+	return result, nil
+}
+
+// DeleteNamespace forwards a namespace deletion to the remote OpenShift worker.
+func (r *RemoteRuntime) DeleteNamespace(ctx context.Context, name string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_NAMESPACE, payload.DeleteNamespace{Name: name})
+
+	return err
 }
 
 func (r *RemoteRuntime) DeletePVCs(ctx context.Context, appLabel string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_PVCS, payload.Name{Name: appLabel})
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_PVCS, payload.Name{Namespace: r.namespace, Name: appLabel})
 
 	return err
 }
@@ -369,62 +420,41 @@ func (r *RemoteRuntime) GetSystemInfo(ctx context.Context) (*models.SystemInfo, 
 	return &info, nil
 }
 
-// ─── send / receive ───────────────────────────────────────────────────────────
-
-// send encodes payload as JSON, enqueues the Command on the worker's channel,
-// and blocks until the worker returns a CommandResult or ctx/timeout expires.
-func (r *RemoteRuntime) send(ctx context.Context, cmdType workerpb.CommandType, payload any) (*workerpb.CommandResult, error) {
-	commandID := uuid.New().String()
-
-	var payloadBytes []byte
-	if payload != nil {
-		var err error
-		payloadBytes, err = json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("remote runtime: marshal payload for %s: %w", cmdType, err)
-		}
-	}
-
-	// Register result channel BEFORE sending to avoid a race where the worker
-	// responds before we start listening.
-	resultCh, err := r.registry.WaitForResult(r.workerName, commandID)
+// FindFreeSpyreCards returns free Spyre PCI addresses discovered on the worker host.
+func (r *RemoteRuntime) FindFreeSpyreCards(ctx context.Context) ([]string, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS, nil)
 	if err != nil {
-		return nil, fmt.Errorf("remote runtime: worker %s not connected: %w", r.workerName, err)
+		return nil, err
 	}
 
-	cmdCh, ok := r.registry.WorkerCommandChannel(r.workerName)
-	if !ok {
-		return nil, fmt.Errorf("remote runtime: worker %s disconnected", r.workerName)
+	var cards []string
+	if err := unmarshalData(res, &cards); err != nil {
+		return nil, err
 	}
 
-	cmd := &workerpb.Command{
-		CommandId: commandID,
-		Type:      cmdType,
-		Payload:   payloadBytes,
+	return cards, nil
+}
+
+// GetBaseDir returns the AI services base directory configured on the worker host.
+func (r *RemoteRuntime) GetBaseDir(ctx context.Context) (string, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_BASE_DIR, nil)
+	if err != nil {
+		return "", err
 	}
 
-	select {
-	case cmdCh <- cmd:
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	var baseDir string
+	if err := unmarshalData(res, &baseDir); err != nil {
+		return "", err
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, commandTimeout)
-	defer cancel()
+	return baseDir, nil
+}
 
-	select {
-	case res := <-resultCh:
-		if !res.GetSuccess() {
-			return nil, fmt.Errorf("remote runtime: worker %s: command %s failed: %s",
-				r.workerName, cmdType, res.GetError())
-		}
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-		return res, nil
-
-	case <-timeoutCtx.Done():
-		return nil, fmt.Errorf("remote runtime: worker %s: command %s timed out after %s",
-			r.workerName, cmdType, commandTimeout)
-	}
+// send delegates to the embedded Sender for convenience.
+func (r *RemoteRuntime) send(ctx context.Context, cmdType workerpb.CommandType, p any) (*workerpb.CommandResult, error) {
+	return r.Send(ctx, cmdType, p)
 }
 
 // unmarshalData decodes CommandResult.data into v.

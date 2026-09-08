@@ -6,8 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/project-ai-services/mcp/internal/tool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/project-ai-services/mcp/internal/tool"
 )
 
 // StartStdioServer starts the stdio MCP server using the official MCP SDK

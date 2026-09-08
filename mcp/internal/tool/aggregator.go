@@ -23,7 +23,6 @@ type Aggregator struct {
 // NewAggregator creates a new tool aggregator
 func NewAggregator(intf *openapi.Interface, endpoint string, auth authenticator.Authenticator,
 	globalQuery, globalHeaders map[string]string, tlsSkipVerify bool) (*Aggregator, error) {
-
 	aggregator := &Aggregator{
 		intf:          intf,
 		endpoint:      endpoint,
@@ -70,6 +69,7 @@ func (a *Aggregator) GetTools(tags []string) []*mcp.Tool {
 			for _, providerTag := range provider.operation.Tags {
 				if tagSet[providerTag] {
 					hasTag = true
+
 					break
 				}
 			}
@@ -124,5 +124,6 @@ func canonicalizeHeaders(headers map[string]string) map[string]string {
 	for k, v := range headers {
 		canonical[strings.ToLower(k)] = v
 	}
+
 	return canonical
 }

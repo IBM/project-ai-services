@@ -31,10 +31,15 @@ import type {
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
 } from "@/types/api.types";
+import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
 import axios from "axios";
-import { APPLICATION_ENDPOINTS, SERVICE_ENDPOINTS } from "@/constants";
+import {
+  APPLICATION_ENDPOINTS,
+  SERVICE_ENDPOINTS,
+  COMPONENT_TYPES,
+} from "@/constants";
 
 interface DeploymentDetailsProps {
   deployment: DeploymentDetailsType;
@@ -194,16 +199,16 @@ const DeploymentDetails = ({
         const transformedServices: DeploymentServiceData[] =
           deploymentServices.map((service) => {
             const llmComponent = service.components.find(
-              (c) => c.type === "llm",
+              (c) => c.type === COMPONENT_TYPES.LLM,
             );
             const embeddingComponent = service.components.find(
-              (c) => c.type === "embedding",
+              (c) => c.type === COMPONENT_TYPES.EMBEDDING,
             );
             const vectorStoreComponent = service.components.find(
-              (c) => c.type === "vector_store",
+              (c) => c.type === COMPONENT_TYPES.VECTOR_STORE,
             );
             const rerankerComponent = service.components.find(
-              (c) => c.type === "reranker",
+              (c) => c.type === COMPONENT_TYPES.RERANKER,
             );
             const serviceDescription =
               serviceMetadataById[service.catalog_id]?.description ??
@@ -685,7 +690,7 @@ const DeploymentDetails = ({
                           Service version
                         </span>
                         <span className={styles.serviceDetailValue}>
-                          {deploymentServiceData.serviceVersion}
+                          {formatVersion(deploymentServiceData.serviceVersion)}
                         </span>
                       </div>
 

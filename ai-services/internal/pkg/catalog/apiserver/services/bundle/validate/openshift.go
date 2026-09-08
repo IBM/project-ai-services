@@ -13,6 +13,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart/loader/archive"
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
 	"helm.sh/helm/v4/pkg/engine"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 // OpenShift runtime directory constant.
@@ -65,6 +66,10 @@ func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVer
 		return err
 	}
 
+	if err := validateValuesSchema(found.schemaBytes, "openshift/values.schema.json"); err != nil {
+		return err
+	}
+
 	// Parse openshift/metadata.yaml and retrieve its version for the three-way check below.
 	metaVersion, err := bundlemetadata.ParseAndValidateOpenShiftMetadata(found.metadataBytes)
 	if err != nil {
@@ -82,14 +87,16 @@ func (v *OpenShiftBundleValidator) Validate(archiveBytes []byte, topDir, rootVer
 // carries the raw bytes of openshift/metadata.yaml for semantic validation, and
 // accumulates the []*archive.BufferedFile slice used by Helm loading — all
 // collected in a single archive scan.
+// hasSchema is derived from schemaBytes; hasTemplFile cannot be derived from
+// bufferedFiles (which holds all files) so it is kept as an explicit flag.
 type openShiftPaths struct {
 	runtimeDirSeen bool // set on the first entry under openshift/
 	hasMetadata    bool
 	hasChart       bool
 	hasValues      bool
-	hasSchema      bool
 	hasTemplFile   bool
 	metadataBytes  []byte                  // raw content of openshift/metadata.yaml
+	schemaBytes    []byte                  // raw content of openshift/values.schema.json; non-nil means present
 	bufferedFiles  []*archive.BufferedFile // all openshift/ files, for loader.LoadFiles
 }
 
@@ -130,7 +137,7 @@ func (found *openShiftPaths) recordEntry(sub string, hdr *tar.Header, content []
 	case sub == "values.yaml":
 		found.hasValues = true
 	case sub == "values.schema.json":
-		found.hasSchema = true
+		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml"):
 		found.hasTemplFile = true
 	}
@@ -167,7 +174,7 @@ func collectMissingOpenShiftFiles(found *openShiftPaths) []string {
 	if !found.hasValues {
 		missing = append(missing, "openshift/values.yaml")
 	}
-	if !found.hasSchema {
+	if found.schemaBytes == nil {
 		missing = append(missing, "openshift/values.schema.json")
 	}
 	if !found.hasTemplFile {
@@ -236,10 +243,41 @@ func helmValidateOpenShift(files []*archive.BufferedFile, rootVersion, metaVersi
 		}
 	}
 
-	if _, err := engine.Render(chrt, renderVals); err != nil {
+	rendered, err := engine.Render(chrt, renderVals)
+	if err != nil {
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: fmt.Sprintf("openshift Helm templates failed to render: %s", err),
+		}
+	}
+
+	return checkOpenShiftTemplateLabels(rendered)
+}
+
+// checkOpenShiftTemplateLabels walks every rendered template YAML and delegates
+// the required-field checks to the shared checkTemplateSpec helper.
+// requireLabelValue is true because Helm renders {{ .Chart.Name }} to a real
+// non-empty string, so an empty value here means the label is genuinely absent.
+func checkOpenShiftTemplateLabels(rendered map[string]string) error {
+	for file, content := range rendered {
+		// Skip NOTES.txt and any non-YAML output Helm may emit.
+		if !strings.HasSuffix(file, ".yaml") {
+			continue
+		}
+
+		var doc map[string]any
+		if err := k8syaml.Unmarshal([]byte(content), &doc); err != nil {
+			// Helm already validated the render; an unmarshal failure here is
+			// unexpected but not fatal for spec checking — skip the file.
+			continue
+		}
+
+		path := openShiftRuntime + "/templates"
+
+		// Use only the base filename to avoid the "chartname/templates/" prefix.
+		base := file[strings.LastIndex(file, "/")+1:]
+		if err := checkTemplateSpec(doc, path, base); err != nil {
+			return err
 		}
 	}
 

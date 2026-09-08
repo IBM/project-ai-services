@@ -18,21 +18,49 @@ import (
 // podmanSync implements RuntimeSync for the Podman runtime.
 type podmanSync struct {
 	catalogProvider *catalogpkg.CatalogProvider
+	runtimeType     string
+	runtimeClient   runtime.Runtime
 	resourceCache   map[string]*ResourceCounts
-	cacheMutex      sync.RWMutex
+	cacheMutex      *sync.RWMutex
 }
 
-func newPodmanSync(catalogProvider *catalogpkg.CatalogProvider) *podmanSync {
-	return &podmanSync{
-		catalogProvider: catalogProvider,
-		resourceCache:   make(map[string]*ResourceCounts),
+func newPodmanSync(catalogProvider *catalogpkg.CatalogProvider, runtimeType string) (*podmanSync, error) {
+	scopedProvider, err := catalogProvider.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeType, err)
 	}
+
+	return &podmanSync{
+		catalogProvider: scopedProvider,
+		runtimeType:     runtimeType,
+		runtimeClient:   nil,
+		resourceCache:   make(map[string]*ResourceCounts),
+		cacheMutex:      &sync.RWMutex{},
+	}, nil
+}
+
+func (s *podmanSync) WithRuntime(rt runtime.Runtime) (RuntimeSync, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("runtime client is nil")
+	}
+
+	return &podmanSync{
+		catalogProvider: s.catalogProvider,
+		runtimeType:     s.runtimeType,
+		runtimeClient:   rt,
+		resourceCache:   s.resourceCache,
+		cacheMutex:      s.cacheMutex,
+	}, nil
 }
 
 // FetchPodStatuses fetches all pods labelled with the given templateID and returns their statuses.
 // It uses InspectPod and InspectContainer (via common.ProcessPod) to derive state and health.
-func (s *podmanSync) FetchPodStatuses(ctx context.Context, rt runtime.Runtime, templateID string) ([]*PodStatus, error) {
-	filteredPods, err := common.FetchFilteredPods(ctx, rt, templateID)
+func (s *podmanSync) FetchPodStatuses(ctx context.Context, templateID string) ([]*PodStatus, error) {
+	if s.runtimeClient == nil {
+		return nil, fmt.Errorf("runtime client not configured")
+	}
+
+	filteredPods, err := common.FetchFilteredPods(ctx, s.runtimeClient, templateID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch pods: %w", err)
 	}
@@ -43,7 +71,7 @@ func (s *podmanSync) FetchPodStatuses(ctx context.Context, rt runtime.Runtime, t
 
 	var podStatuses []*PodStatus
 	for _, pod := range filteredPods {
-		processedPod, err := common.ProcessPod(ctx, rt, pod)
+		processedPod, err := common.ProcessPod(ctx, s.runtimeClient, pod)
 		if err != nil {
 			return nil, fmt.Errorf("failed to process pod: %w", err)
 		}
@@ -62,8 +90,14 @@ func (s *podmanSync) FetchPodStatuses(ctx context.Context, rt runtime.Runtime, t
 	return podStatuses, nil
 }
 
-// ValidateResources validates Podman resources using expected counts derived from Podman templates.
-func (s *podmanSync) ValidateResources(ctx context.Context, input ResourceValidationInput, rt runtime.Runtime) string {
+// ValidateResources validates runtime resources using expected counts derived from catalog templates.
+// runtimeType is the resolved runtime for this application and is used to select the correct
+// catalog subdirectory (e.g. "podman/templates") rather than any server-global default.
+func (s *podmanSync) ValidateResources(ctx context.Context, input ResourceValidationInput) string {
+	if s.runtimeClient == nil {
+		return "runtime client not configured"
+	}
+
 	expectedCounts := s.getOrCountTemplateResources(ctx, input.CatalogID, input.InstanceID, input.ItemType)
 	if expectedCounts == nil {
 		return ""
@@ -76,7 +110,7 @@ func (s *podmanSync) ValidateResources(ctx context.Context, input ResourceValida
 			fmt.Sprintf("Pod count mismatch: expected %d, found %d", expectedCounts.Pods, input.ActualPodCount))
 	}
 
-	if resourceValidationMsg := validateResourceExistenceChecks(ctx, expectedCounts.SecretNames, expectedCounts.VolumeNames, rt); resourceValidationMsg != "" {
+	if resourceValidationMsg := validateResourceExistenceChecks(ctx, expectedCounts.SecretNames, expectedCounts.VolumeNames, s.runtimeClient); resourceValidationMsg != "" {
 		errorMessages = append(errorMessages, resourceValidationMsg)
 	}
 
@@ -280,7 +314,7 @@ func (s *podmanSync) getOrCountTemplateResources(ctx context.Context, catalogID,
 
 	counts, err := s.countResourcesFromTemplates(ctx, catalogID, instanceID, itemType)
 	if err != nil {
-		logger.ErrorfCtx(ctx, "Failed to count resources from templates for %s %s: %v", itemType, catalogID, err)
+		logger.ErrorfCtx(ctx, "Failed to count resources from templates for %s %s (runtime: %s): %v", itemType, catalogID, s.runtimeType, err)
 
 		return nil
 	}

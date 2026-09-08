@@ -2,7 +2,7 @@ package types
 
 import "github.com/google/jsonschema-go/jsonschema"
 
-// This file contains non-MCP types used throughout the application.
+// This file contains non-MCP types used throughout the application
 // All MCP-related types should use the official SDK directly:
 // import "github.com/modelcontextprotocol/go-sdk/mcp"
 

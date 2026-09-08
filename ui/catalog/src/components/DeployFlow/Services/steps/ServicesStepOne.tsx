@@ -6,6 +6,7 @@ import {
   SharedStepOne,
   type StepOneComponentRow,
 } from "../../Shared/steps/SharedStepOne";
+import { COMPONENT_TYPES } from "@/constants";
 
 export const StepOne: React.FC<StepProps> = ({
   title,
@@ -29,7 +30,8 @@ export const StepOne: React.FC<StepProps> = ({
     return deployOptions.components
       .filter(
         (c) =>
-          !["llm", "reranker"].includes(c.type) &&
+          c.type !== COMPONENT_TYPES.LLM &&
+          c.type !== COMPONENT_TYPES.RERANKER &&
           !!componentModelsError[`${selectedServiceId}:${c.type}`],
       )
       .map((c) => c.name || c.type);
@@ -50,7 +52,8 @@ export const StepOne: React.FC<StepProps> = ({
         ?.filter(
           (c) =>
             serviceComponentTypes.includes(c.type) &&
-            !["llm", "reranker"].includes(c.type),
+            c.type !== COMPONENT_TYPES.LLM &&
+            c.type !== COMPONENT_TYPES.RERANKER,
         )
         .map((component) => {
           const selectedProviderId =
@@ -91,7 +94,7 @@ export const StepOne: React.FC<StepProps> = ({
     providerSchemas,
   ]);
 
-  // Set default model param for step 1 components (excludes llm/reranker — those are seeded in StepTwo).
+  // Set default model param for each component when its models arrive from the store.
   useEffect(() => {
     if (!selectedServiceId || !deployOptions.components) return;
 
@@ -101,26 +104,24 @@ export const StepOne: React.FC<StepProps> = ({
     const updates: Record<string, ComponentConfig> = {};
     let hasUpdates = false;
 
-    deployOptions.components
-      .filter((c) => !["llm", "reranker"].includes(c.type))
-      .forEach((component) => {
-        const componentConfig = serviceConfig.components[component.type];
-        if (!componentConfig || componentConfig.params?.model) return;
+    deployOptions.components.forEach((component) => {
+      const componentConfig = serviceConfig.components[component.type];
+      if (!componentConfig || componentConfig.params?.model) return;
 
-        const models =
-          componentModels[`${selectedServiceId}:${component.type}`] || [];
-        const matchingModel = models.find(
-          (m) => m.providerId === componentConfig.providerId,
-        );
+      const models =
+        componentModels[`${selectedServiceId}:${component.type}`] || [];
+      const matchingModel = models.find(
+        (m) => m.providerId === componentConfig.providerId,
+      );
 
-        if (matchingModel) {
-          updates[component.type] = {
-            ...componentConfig,
-            params: { ...componentConfig.params, model: matchingModel.id },
-          };
-          hasUpdates = true;
-        }
-      });
+      if (matchingModel) {
+        updates[component.type] = {
+          ...componentConfig,
+          params: { ...componentConfig.params, model: matchingModel.id },
+        };
+        hasUpdates = true;
+      }
+    });
 
     if (hasUpdates) {
       onChange({

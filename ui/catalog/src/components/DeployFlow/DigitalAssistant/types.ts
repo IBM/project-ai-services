@@ -1,16 +1,7 @@
 import type { DeployOptionsResponse, ProviderSchema } from "@/types/api.types";
 
 import { SHARED_ACTION_TYPES } from "../Shared/types";
-import type {
-  ServiceConfig as BaseServiceConfig,
-  BaseStepProps,
-  SharedDeployFlowAction,
-} from "../Shared/types";
-
-// DA-only extension of ServiceConfig — inferenceBackend removed in PR 9.
-export interface ServiceConfig extends BaseServiceConfig {
-  inferenceBackend?: string;
-}
+import type { BaseStepProps, SharedDeployFlowAction } from "../Shared/types";
 
 export const ACTION_TYPES = {
   ...SHARED_ACTION_TYPES,

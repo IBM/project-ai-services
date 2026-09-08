@@ -349,6 +349,18 @@ def validate_document_file(filename: str, content) -> None:
     if not filename:
         raise ValueError("File must have a filename.")
 
+    # Check content is bytes (not an exception from failed read) before any
+    # operation that calls methods on content (e.g. startswith).
+    if isinstance(content, Exception):
+        raise ValueError(f"Failed to read file: {filename}")
+
+    if not isinstance(content, bytes):
+        raise ValueError(f"Invalid file content for: {filename}")
+
+    # Check content is not empty
+    if len(content) == 0:
+        raise ValueError(f"File is empty: {filename}")
+
     # Validate extension and format
     allowed_extensions = {'.pdf', '.docx'}
     file_ext = Path(filename).suffix.lower()
@@ -368,17 +380,6 @@ def validate_document_file(filename: str, content) -> None:
         docx_signature = b'PK\x03\x04'
         if not content.startswith(docx_signature):
             raise ValueError(f"File has .docx extension but invalid DOCX format: {filename}")
-
-    # Check content is bytes (not an exception from failed read)
-    if isinstance(content, Exception):
-        raise ValueError(f"Failed to read file: {filename}")
-
-    if not isinstance(content, bytes):
-        raise ValueError(f"Invalid file content for: {filename}")
-
-    # Check content is not empty
-    if len(content) == 0:
-        raise ValueError(f"File is empty: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
     """Return the set of files from original_files that have not yet been processed."""

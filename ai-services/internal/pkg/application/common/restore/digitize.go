@@ -12,6 +12,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
+	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -267,6 +268,27 @@ func GetDigitizeData(backupFile string) (map[string]interface{}, error) {
 	}
 
 	return importPayload, nil
+}
+
+// GetDigitizeAPIURL extracts the digitize API URL from application details.
+// It searches the application's services for one with CatalogID == "digitize"
+// and returns the URL of the first endpoint with type == "api".
+func GetDigitizeAPIURL(appDetails *catalogTypes.Application) (string, error) {
+	for _, service := range appDetails.Services {
+		if service.CatalogID == "digitize" {
+			for _, endpoint := range service.Endpoints {
+				if endpointType, ok := endpoint["type"].(string); ok && endpointType == "api" {
+					if url, ok := endpoint["url"].(string); ok && url != "" {
+						return url, nil
+					}
+				}
+			}
+
+			return "", fmt.Errorf("digitize service found but no API endpoint available")
+		}
+	}
+
+	return "", fmt.Errorf("digitize service not found in application")
 }
 
 // Made with Bob

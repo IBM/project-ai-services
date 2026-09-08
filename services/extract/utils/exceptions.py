@@ -25,9 +25,9 @@ class ExtractException(Exception):
         message:     Human-readable description of the error.
     """
 
-    def __init__(self, status_code: int, code: str, message: str, details: Optional[dict] = None) -> None:
+    def __init__(self, status_code: int, code: str, message: str, details: Optional[dict | list] = None) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
-        self.details = details or {}
+        self.details = details if details is not None else {}
         super().__init__(message)

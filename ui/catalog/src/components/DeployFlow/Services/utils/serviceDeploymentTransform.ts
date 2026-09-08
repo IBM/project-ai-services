@@ -10,6 +10,8 @@ import type {
   DeploymentService,
 } from "@/types/api.types";
 import { fetchProviderSchema } from "@/api/applications.api";
+import { COMPONENT_TYPES } from "@/constants";
+import { splitServiceParams } from "@/components/DeployFlow/Shared/utils/paramFilter";
 
 /**
  * Extracts parameters with their defaults from a provider schema
@@ -67,38 +69,25 @@ function getProviderVersion(
   return "1.0.0";
 }
 
-function mergeParamsWithUserValues(
-  schemaParams: Record<string, unknown>,
-  userValues: Record<string, unknown>,
-): Record<string, unknown> {
-  const merged = { ...schemaParams };
-
-  // Override with user-provided values (non-empty strings, non-null values)
-  for (const [key, value] of Object.entries(userValues)) {
-    if (value !== undefined && value !== null && value !== "") {
-      merged[key] = value;
-    }
-  }
-
-  return merged;
-}
-
-/**
- * Builds a deployment component from ComponentConfig
- */
+// Builds a deployment component from ComponentConfig
 async function buildDeploymentComponent(
   componentType: string,
   componentConfig: ComponentConfig,
   deployOptions: ServiceDeployOptions,
   schemaPromise: Promise<Record<string, unknown>>,
+  extraParams?: Record<string, unknown>,
 ): Promise<DeploymentComponent> {
   const schemaParams = await schemaPromise;
 
-  // Merge schema defaults with user-provided params
-  const params = mergeParamsWithUserValues(
-    schemaParams,
-    componentConfig.params,
-  );
+  // Start from schema defaults, then apply user values and any extra params (e.g. credentials).
+  // Only non-empty user values are written so empty strings don't override a valid default.
+  const userValues = { ...componentConfig.params, ...(extraParams || {}) };
+  const params = { ...schemaParams };
+  for (const [key, value] of Object.entries(userValues)) {
+    if (value !== undefined && value !== null && value !== "") {
+      params[key] = value;
+    }
+  }
 
   // Build base component
   const component: DeploymentComponent = {
@@ -124,7 +113,7 @@ export async function transformToDeploymentPayload(
   formData: DeployFormData,
   deployOptions: ServiceDeployOptions,
   cachedSchemas?: Record<string, ProviderSchema>,
-  _serviceId?: string | null,
+  serviceId?: string | null,
 ): Promise<ServiceDeploymentPayload> {
   const services: DeploymentService[] = [];
 
@@ -154,17 +143,40 @@ export async function transformToDeploymentPayload(
     return schemaFetchPromises.get(key)!;
   };
 
-  // Process each enabled service
-  // Service IDs are now used directly as keys (e.g., "digitize", "summarize")
-  for (const [serviceId, serviceConfig] of Object.entries(formData.services)) {
+  for (const [currentServiceId, serviceConfig] of Object.entries(
+    formData.services,
+  )) {
     if (!serviceConfig.enabled) continue;
+
+    const inferenceComponentType =
+      COMPONENT_TYPES.LLM in serviceConfig.components
+        ? COMPONENT_TYPES.LLM
+        : COMPONENT_TYPES.RERANKER in serviceConfig.components
+          ? COMPONENT_TYPES.RERANKER
+          : null;
+
+    const inferenceProviderId = inferenceComponentType
+      ? serviceConfig.components[inferenceComponentType]?.providerId
+      : null;
+    const inferenceProviderSchema =
+      inferenceComponentType && inferenceProviderId && serviceId
+        ? (cachedSchemas?.[
+            `${serviceId}:${inferenceComponentType}:${inferenceProviderId}`
+          ] ?? null)
+        : null;
+
+    const { inferenceCredentialParams: credentialParams } = splitServiceParams(
+      serviceConfig.params || {},
+      null,
+      inferenceProviderSchema,
+    );
 
     const componentPromises: Promise<DeploymentComponent>[] = [];
 
-    // Process service-specific components dynamically
     for (const [componentType, componentConfig] of Object.entries(
       serviceConfig.components,
     )) {
+      const isInferenceComp = componentType === inferenceComponentType;
       componentPromises.push(
         buildDeploymentComponent(
           componentType,
@@ -173,8 +185,11 @@ export async function transformToDeploymentPayload(
           getSchemaPromise(
             componentType,
             componentConfig.providerId,
-            serviceId,
+            currentServiceId,
           ),
+          isInferenceComp && Object.keys(credentialParams).length > 0
+            ? credentialParams
+            : undefined,
         ),
       );
     }
@@ -183,7 +198,7 @@ export async function transformToDeploymentPayload(
     const components = await Promise.all(componentPromises);
 
     services.push({
-      catalog_id: serviceId, // Use service ID directly as catalog_id
+      catalog_id: currentServiceId,
       version: serviceConfig.version,
       components,
     });

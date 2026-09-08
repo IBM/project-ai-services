@@ -14,11 +14,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	defaultPort      = 3000
+	keyValueParts    = 2
+)
+
 var (
 	description     string
 	endpoint        string
 	authAPIKey      string
-	authCLI         bool
 	authToken       string
 	authPassthrough bool
 	queries         []string
@@ -42,8 +46,7 @@ This server loads OpenAPI specifications for AI Services and creates MCP tools t
 func init() {
 	rootCmd.Flags().StringVarP(&description, "description", "d", "", "The local OpenAPI description file path or remote URL to use (required)")
 	rootCmd.Flags().StringVarP(&endpoint, "endpoint", "e", "", "The service endpoint URL to use")
-	rootCmd.Flags().StringVarP(&authAPIKey, "auth-api-key", "k", "", "AI Services API key, environment variable ($VAR), or 1Password reference (op://...)")
-	rootCmd.Flags().BoolVarP(&authCLI, "auth-cli", "c", false, "Use the ibmcloud CLI to authenticate")
+	rootCmd.Flags().StringVarP(&authAPIKey, "auth-api-key", "k", "", "AI Services API key, environment variable ($VAR)")
 	rootCmd.Flags().StringVarP(&authToken, "auth-token", "a", "", "IAM token to use for authentication")
 	rootCmd.Flags().BoolVarP(&authPassthrough, "auth-passthrough", "P", false, "Use passthrough authentication mode")
 	rootCmd.Flags().StringSliceVarP(&queries, "query", "Q", nil, "Global query parameter in key=value format")
@@ -51,7 +54,7 @@ func init() {
 	rootCmd.Flags().StringSliceVarP(&tags, "tag", "T", nil, "Only expose tools for operations with specified tags")
 	rootCmd.Flags().BoolVarP(&configOutput, "config", "C", false, "Output MCP client-compatible configuration instead of starting server")
 	rootCmd.Flags().BoolVarP(&httpMode, "http", "S", false, "Use HTTP transport instead of stdio")
-	rootCmd.Flags().IntVarP(&port, "port", "p", 3000, "Port number for HTTP server (used with --http)")
+	rootCmd.Flags().IntVarP(&port, "port", "p", defaultPort, "Port number for HTTP server (used with --http)")
 	rootCmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification for the description fetch and API requests (insecure; for self-signed or internal-CA endpoints)")
 
 	if err := rootCmd.MarkFlagRequired("description"); err != nil {
@@ -167,9 +170,6 @@ func validateEndpoint(endpoint string) error {
 
 func createAuthenticator() (authenticator.Authenticator, error) {
 	authCount := 0
-	if authCLI {
-		authCount++
-	}
 	if authAPIKey != "" {
 		authCount++
 	}
@@ -191,7 +191,7 @@ func createAuthenticator() (authenticator.Authenticator, error) {
 	// delegated to the upstream API, which validates the caller's own token. A
 	// server-held credential would therefore be usable by anyone who can reach
 	// the port, so HTTP transport and passthrough authentication require each
-	// other. Stdio has no request headers to pass through.
+	// other. Stdio has no request headers to pass through
 	if httpMode && !authPassthrough {
 		return nil, errors.NewUsageError(
 			"Must use --auth-passthrough with --http. The HTTP server does not authenticate " +
@@ -204,14 +204,8 @@ func createAuthenticator() (authenticator.Authenticator, error) {
 				"to pass through")
 	}
 
-	if authCLI {
-		return authenticator.NewCLIAuthenticator(), nil
-	}
-
 	if authAPIKey != "" {
-		if strings.HasPrefix(authAPIKey, "op://") {
-			return authenticator.NewOPAuthenticator(authAPIKey), nil
-		} else if strings.HasPrefix(authAPIKey, "$") {
+		if strings.HasPrefix(authAPIKey, "$") {
 			return authenticator.NewEnvAuthenticator(authAPIKey[1:])
 		} else {
 			return authenticator.NewAPIKeyAuthenticator(authAPIKey), nil
@@ -233,8 +227,8 @@ func parseKeyValuePairs(pairs []string, pairType string) (map[string]string, err
 	result := make(map[string]string)
 
 	for _, pair := range pairs {
-		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
-		if len(parts) < 2 {
+		parts := strings.SplitN(strings.TrimSpace(pair), "=", keyValueParts)
+		if len(parts) < keyValueParts {
 			return nil, errors.NewUsageError("Must provide %s value in the form: <name>=<value>", pairType)
 		}
 
@@ -258,6 +252,7 @@ func outputConfig(serverName string) error {
 	}
 
 	fmt.Println(configStr)
+
 	return nil
 }
 
@@ -303,22 +298,15 @@ Flags:
   -e, --endpoint        <URL> The service endpoint to use.
   -k, --auth-api-key    <key> The AI Services API key with which to obtain
                               tokens to authenticate requests. Cannot be used
-                              with --auth-cli, --auth-token or --http.
+                              with --auth-token or --http.
                        $<VAR> As above, but read in the API key from an
                               environment variable. Note that this works
                               when a literal $-prefixed variable name is
                               passed in outside of a shell context. Cannot be
-                              used with --auth-cli, --auth-token or --http.
-                        <URL> The 1Password reference containing an AI Services
-                              API key with which to obtain tokens to
-                              authenticate requests. Cannot be used with
-                              --auth-cli, --auth-token or --http.
-  -c, --auth-cli              Use the ibmcloud CLI to authenticate. The CLI
-                              must have an active login. Cannot be used with
-                              --auth-api-key, --auth-token or --http.
+                              used with --auth-token or --http.
   -a, --auth-token     <token> The IAM token with which to authenticate
-                              requests. Cannot be used with --auth-cli,
-                              --auth-api-key or --http.
+                              requests. Cannot be used with --auth-api-key
+                              or --http.
   -P, --auth-passthrough      Use passthrough authentication mode where the
                               client provides the authorization header in each
                               request. Cannot be used with other auth options.
@@ -348,8 +336,8 @@ Flags:
 
 Transport Modes:
   Default: Stdio transport (for use with MCP clients like Claude Desktop).
-           Authenticates with a server-held credential: --auth-api-key,
-           --auth-cli or --auth-token.
+           Authenticates with a server-held credential: --auth-api-key
+           or --auth-token.
   --http:  HTTP transport (for direct HTTP clients or web interfaces).
            Requires --auth-passthrough: each caller supplies its own
            Authorization header, which is forwarded to the API for

@@ -6,8 +6,10 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
+	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // ResetCatalogCertificate resets the SSL certificates for the catalog service.
@@ -33,17 +35,8 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 	}
 
 	// Get existing catalog pod details
-	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
+	opts, err := prepareCatalogOpts(ctx, deployCtx, sslCertPath, sslKeyPath)
 	if err != nil {
-		return fmt.Errorf("failed to get catalog pod details: %w", err)
-	}
-
-	if opts.BaseDir == "" {
-		return fmt.Errorf("AI_SERVICES_BASE_DIR not found in catalog configuration")
-	}
-
-	// Validate that domain hasn't changed
-	if err := validateDomainUnchanged(opts, sslCertPath, sslKeyPath); err != nil {
 		return err
 	}
 
@@ -53,8 +46,19 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 		return fmt.Errorf("failed to get Caddy pod name: %w", err)
 	}
 
-	// Create Caddy context for certificate operations
-	caddyCtx := caddy.NewContext(caddyPodName, "")
+	// Delete the cert secret and Caddy pod to reset the custom certificate.
+	// For self-signed certs, the secret may not exist, but execution never reaches here
+	// because a domain change is rejected earlier.
+	if err := deleteSecretAndPod(ctx, deployCtx, caddyPodName, catalogConstant.CatalogCertSecretName); err != nil {
+		return err
+	}
+
+	opts.SSLCertPath = sslCertPath
+	opts.SSLKeyPath = sslKeyPath
+	caddyCtx, err := executeCatalogDeployment(ctx, deployCtx, *opts, "")
+	if err != nil {
+		return fmt.Errorf("failed to deploy catalog pod: %w", err)
+	}
 
 	// Load certificates with health check
 	if err := loadCertificatesToCaddy(ctx, caddyCtx, opts.BaseDir, sslCertPath, sslKeyPath); err != nil {
@@ -62,6 +66,40 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 	}
 
 	logger.InfolnCtx(ctx, "SSL certificates reset successfully")
+
+	return nil
+}
+
+// prepareCatalogOpts fetches the current catalog pod config, validates the base dir,
+// and ensures the domain has not changed relative to the new certificates.
+func prepareCatalogOpts(ctx context.Context, deployCtx *deploy.DeployContext, sslCertPath, sslKeyPath string) (*catalogUtils.PodmanConfigureOptions, error) {
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get catalog pod details: %w", err)
+	}
+
+	if opts.BaseDir == "" {
+		return nil, fmt.Errorf("AI_SERVICES_BASE_DIR not found in catalog configuration")
+	}
+
+	if err := validateDomainUnchanged(opts, sslCertPath, sslKeyPath); err != nil {
+		return nil, err
+	}
+
+	return opts, nil
+}
+
+// deleteSecretAndPod deletes the caddy cert secret and pod before redeployment.
+func deleteSecretAndPod(ctx context.Context, deployCtx *deploy.DeployContext, nameOrID, secretName string) error {
+	logger.InfofCtx(ctx, "Deleting existing secret %s", secretName)
+	if err := deployCtx.Runtime.DeleteSecret(ctx, secretName); err != nil {
+		return fmt.Errorf("failed to delete existing catalog secret: %w", err)
+	}
+
+	logger.InfofCtx(ctx, "Deleting existing pod %s", nameOrID)
+	if err := deployCtx.Runtime.DeletePod(ctx, nameOrID, utils.BoolPtr(true)); err != nil {
+		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
+	}
 
 	return nil
 }

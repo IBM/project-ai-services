@@ -15,8 +15,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
@@ -25,8 +34,9 @@ import (
 // CommandResult to send back on the stream. It never returns an error — all
 // failures are encoded as CommandResult{Success: false, Error: "..."} so the
 // control plane always gets a response and its blocking send() can unblock.
-func Dispatch(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) *workerpb.CommandResult {
-	data, err := handle(ctx, rt, cmd)
+// pr may be nil for runtimes that do not support proxy route management (e.g. OpenShift).
+func Dispatch(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) *workerpb.CommandResult {
+	data, err := handle(ctx, rt, pr, cmd)
 	if err != nil {
 		return failResult(cmd.GetCommandId(), err)
 	}
@@ -34,10 +44,13 @@ func Dispatch(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) *w
 	return okResult(cmd.GetCommandId(), data)
 }
 
+// defaultHelmTimeout is used when the caller does not supply a timeout.
+const defaultHelmTimeout = 10 * time.Minute
+
 // ─── router ───────────────────────────────────────────────────────────────────
 
 //nolint:gocognit,cyclop,funlen // large switch is unavoidable for a flat dispatch table
-func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]byte, error) {
+func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) ([]byte, error) {
 	p := cmd.GetPayload()
 
 	switch cmd.GetType() {
@@ -63,7 +76,8 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode list_pods payload: %w", err)
 		}
-		pods, err := rt.ListPods(ctx, req.Filters)
+		nrt := rtInNamespace(rt, req.Namespace)
+		pods, err := nrt.ListPods(ctx, req.Filters)
 
 		return marshalOr(pods, err)
 
@@ -89,23 +103,26 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode stop_pod payload: %w", err)
 		}
+		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, rt.StopPod(ctx, req.NameOrID)
+		return nil, nrt.StopPod(ctx, req.NameOrID)
 
 	case workerpb.CommandType_COMMAND_TYPE_START_POD:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode start_pod payload: %w", err)
 		}
+		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, rt.StartPod(ctx, req.NameOrID)
+		return nil, nrt.StartPod(ctx, req.NameOrID)
 
 	case workerpb.CommandType_COMMAND_TYPE_INSPECT_POD:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode inspect_pod payload: %w", err)
 		}
-		pod, err := rt.InspectPod(ctx, req.NameOrID)
+		nrt := rtInNamespace(rt, req.Namespace)
+		pod, err := nrt.InspectPod(ctx, req.NameOrID)
 
 		return marshalOr(pod, err)
 
@@ -114,7 +131,8 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode pod_exists payload: %w", err)
 		}
-		exists, err := rt.PodExists(ctx, req.NameOrID)
+		nrt := rtInNamespace(rt, req.Namespace)
+		exists, err := nrt.PodExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -123,15 +141,17 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode pod_logs payload: %w", err)
 		}
+		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, rt.PodLogs(ctx, req.NameOrID)
+		return nil, nrt.PodLogs(ctx, req.NameOrID)
 
 	case workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode get_pod_resources payload: %w", err)
 		}
-		pr, err := rt.GetPodResources(ctx, req.NameOrID)
+		nrt := rtInNamespace(rt, req.Namespace)
+		pr, err := nrt.GetPodResources(ctx, req.NameOrID)
 
 		return marshalOr(pr, err)
 
@@ -142,7 +162,8 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode list_secrets payload: %w", err)
 		}
-		names, err := rt.ListSecrets(ctx, req.Filters)
+		nrt := rtInNamespace(rt, req.Namespace)
+		names, err := nrt.ListSecrets(ctx, req.Filters)
 
 		return marshalOr(names, err)
 
@@ -151,15 +172,17 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode delete_secret payload: %w", err)
 		}
+		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, rt.DeleteSecret(ctx, req.Name)
+		return nil, nrt.DeleteSecret(ctx, req.Name)
 
 	case workerpb.CommandType_COMMAND_TYPE_SECRET_EXISTS:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode secret_exists payload: %w", err)
 		}
-		exists, err := rt.SecretExists(ctx, req.NameOrID)
+		nrt := rtInNamespace(rt, req.Namespace)
+		exists, err := nrt.SecretExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -170,15 +193,17 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode delete_volume payload: %w", err)
 		}
+		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, rt.DeleteVolume(ctx, req.Name)
+		return nil, nrt.DeleteVolume(ctx, req.Name)
 
 	case workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS:
 		var req payload.NameOrID
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode volume_exists payload: %w", err)
 		}
-		exists, err := rt.VolumeExists(ctx, req.NameOrID)
+		nrt := rtInNamespace(rt, req.Namespace)
+		exists, err := nrt.VolumeExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -189,7 +214,8 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode inspect_container payload: %w", err)
 		}
-		c, err := rt.InspectContainer(ctx, req.NameOrID)
+		nrt := rtInNamespace(rt, req.Namespace)
+		c, err := nrt.InspectContainer(ctx, req.NameOrID)
 
 		return marshalOr(c, err)
 
@@ -198,7 +224,8 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode container_exists payload: %w", err)
 		}
-		exists, err := rt.ContainerExists(ctx, req.NameOrID)
+		nrt := rtInNamespace(rt, req.Namespace)
+		exists, err := nrt.ContainerExists(ctx, req.NameOrID)
 
 		return marshalOr(exists, err)
 
@@ -207,17 +234,49 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode container_logs payload: %w", err)
 		}
+		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, rt.ContainerLogs(ctx, req.NameOrID)
+		return nil, nrt.ContainerLogs(ctx, req.NameOrID)
 
-	case workerpb.CommandType_COMMAND_TYPE_RUN_EPHEMERAL_CONTAINER:
+	case workerpb.CommandType_COMMAND_TYPE_EXEC_IN_CONTAINER:
 		var req payload.ExecInContainer
 		if err := json.Unmarshal(p, &req); err != nil {
-			return nil, fmt.Errorf("decode run_ephemeral_container payload: %w", err)
+			return nil, fmt.Errorf("decode exec_in_container payload: %w", err)
 		}
-		out, err := rt.ExecInContainerWithCmd(ctx, req.PodName, req.ContainerName, req.Command)
+		nrt := rtInNamespace(rt, req.Namespace)
+		out, err := nrt.ExecInContainerWithCmd(ctx, req.PodName, req.ContainerName, req.Command)
 
 		return marshalOr(out, err)
+
+	case workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL:
+		var req payload.DownloadModel
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode download_model payload: %w", err)
+		}
+
+		return nil, helpers.DownloadModelContainer(ctx, req.Model, utils.GetModelsPath())
+
+	// ── Caddy proxy management ────────────────────────────────────────────────
+
+	case workerpb.CommandType_COMMAND_TYPE_PROXY_ROUTE:
+		if pr == nil {
+			return nil, fmt.Errorf("proxy route management not supported")
+		}
+
+		var req payload.ProxyRoute
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode proxy_route payload: %w", err)
+		}
+
+		route, err := pr.ManageProxyRoute(ctx, req.Op, payload.Route{
+			ID:       req.ID,
+			Domain:   req.Domain,
+			Upstream: req.Upstream,
+			Terminal: req.Terminal,
+			Type:     req.Type,
+		})
+
+		return marshalOr(route, err)
 
 	// ── HTTP proxy tunnel ──────────────────────────────────────────────────────
 
@@ -240,7 +299,8 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode list_routes payload: %w", err)
 		}
-		routes, err := rt.ListRoutes(ctx, req.LabelSelector)
+		nrt := rtInNamespace(rt, req.Namespace)
+		routes, err := nrt.ListRoutes(ctx, req.LabelSelector)
 
 		return marshalOr(routes, err)
 
@@ -251,16 +311,129 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode delete_pvcs payload: %w", err)
 		}
+		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, rt.DeletePVCs(ctx, req.Name)
+		return nil, nrt.DeletePVCs(ctx, req.Name)
 
 	case workerpb.CommandType_COMMAND_TYPE_GET_SYSTEM_INFO:
 		info, err := rt.GetSystemInfo(ctx)
 
 		return marshalOr(info, err)
 
+	case workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS:
+		cards, err := helpers.FindFreeSpyreCards(ctx)
+
+		return marshalOr(cards, err)
+
+	case workerpb.CommandType_COMMAND_TYPE_GET_BASE_DIR:
+		return marshalOr(utils.GetBaseDir(), nil)
+
 	case workerpb.CommandType_COMMAND_TYPE_RUNTIME_TYPE:
 		return marshalOr(rt.Type().String(), nil)
+
+	// ── Helm ─────────────────────────────────────────────────────────────────
+
+	case workerpb.CommandType_COMMAND_TYPE_HELM_INSTALL:
+		var req payload.HelmInstall
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("helm install: decode payload: %w", err)
+		}
+
+		timeout := time.Duration(req.TimeoutSec) * time.Second
+		if req.TimeoutSec == 0 {
+			timeout = defaultHelmTimeout
+		}
+
+		chart, err := helmutil.UnmarshalChart(req.ChartFiles)
+		if err != nil {
+			return nil, fmt.Errorf("helm install: reconstruct chart for release %q: %w", req.Release, err)
+		}
+
+		return nil, helmutil.InstallOrUpgrade(ctx, req.Release, req.Namespace, chart, req.Values, req.TemplateID, timeout)
+
+	case workerpb.CommandType_COMMAND_TYPE_HELM_UNINSTALL:
+		var req payload.HelmRelease
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("helm uninstall: decode payload: %w", err)
+		}
+
+		return nil, helmutil.UninstallRelease(ctx, req.Release, req.Namespace)
+
+	case workerpb.CommandType_COMMAND_TYPE_HELM_GET_MANIFEST:
+		var req payload.HelmRelease
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("helm_get_manifest: decode payload: %w", err)
+		}
+
+		manifest, err := helmutil.GetReleaseManifest(req.Namespace, req.Release)
+		if err != nil {
+			return nil, err
+		}
+
+		return marshalOr(payload.HelmManifest{Manifest: manifest}, nil)
+
+	case workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE:
+		var req payload.WaitInferenceService
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("wait_inference_service: decode payload: %w", err)
+		}
+
+		oc, ok := rt.(*openshiftRuntime.OpenshiftClient)
+		if !ok {
+			return nil, fmt.Errorf("wait_inference_service: runtime is not OpenShift")
+		}
+
+		return nil, oc.WithNamespace(req.Namespace).WaitForInferenceServiceReady(ctx, req.Name)
+
+	case workerpb.CommandType_COMMAND_TYPE_LIST_CRD:
+		var req payload.ListCRD
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("list_crd: decode payload: %w", err)
+		}
+
+		scoped := rtInNamespace(rt, req.Namespace)
+
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   req.Group,
+			Version: req.Version,
+			Kind:    req.Kind,
+		})
+
+		filters := map[string][]string{}
+		if len(req.LabelKeys) > 0 {
+			filters["label"] = req.LabelKeys
+		}
+
+		resources, err := scoped.ListCRD(ctx, list, filters)
+		if err != nil {
+			return nil, err
+		}
+
+		wireItems := make([]payload.CRDResource, len(resources))
+		for i, r := range resources {
+			wireItems[i] = payload.CRDResource{Name: r.Name, Labels: r.Labels}
+		}
+
+		return marshalOr(wireItems, nil)
+
+	case workerpb.CommandType_COMMAND_TYPE_DELETE_NAMESPACE:
+		var req payload.DeleteNamespace
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("delete_namespace: decode payload: %w", err)
+		}
+
+		return nil, rt.DeleteNamespace(ctx, req.Name)
+
+	case workerpb.CommandType_COMMAND_TYPE_UPDATE_SECRET:
+		var req payload.UpdateSecret
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("update_secret: decode payload: %w", err)
+		}
+
+		nrt := rtInNamespace(rt, req.Namespace)
+
+		return nil, nrt.UpdateSecret(ctx, req.Name, req.DeploymentName, req.Data)
 
 	default:
 		return nil, fmt.Errorf("unsupported command type: %s", cmd.GetType())
@@ -268,6 +441,24 @@ func handle(ctx context.Context, rt runtime.Runtime, cmd *workerpb.Command) ([]b
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+
+// rtInNamespace returns the runtime scoped to ns.
+// For an OpenShift worker it returns a shallow copy of the existing client with
+// only Namespace swapped — no new k8s connections are made.
+// For Podman, namespace is not a concept; the runtime is returned unchanged.
+// An empty ns is treated as "no scoping needed" and returns rt unchanged.
+func rtInNamespace(rt runtime.Runtime, ns string) runtime.Runtime {
+	if ns == "" {
+		return rt
+	}
+
+	if oc, ok := rt.(*openshiftRuntime.OpenshiftClient); ok {
+		return oc.WithNamespace(ns)
+	}
+
+	// Podman and any other runtime: namespace is not applicable.
+	return rt
+}
 
 // marshalOr marshals v to JSON, or propagates err if non-nil.
 func marshalOr(v any, err error) ([]byte, error) {

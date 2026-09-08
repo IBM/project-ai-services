@@ -3,7 +3,6 @@ export interface ComponentConfig {
   params: Record<string, unknown>;
 }
 
-// `inferenceBackend` is a DigitalAssistant-only extension of this — removed in PR 9.
 export interface ServiceConfig {
   enabled: boolean;
   version: string;
@@ -26,6 +25,16 @@ export interface BaseStepProps {
   onResourceStatusChange?: (hasInsufficientResources: boolean) => void;
   showNameError?: boolean;
   onComponentError?: (hasError: boolean) => void;
+}
+
+export interface ServiceConfigField {
+  key: keyof ServiceConfig;
+  label: string;
+  options: Array<{ id: string; text: string }>;
+  readonly?: boolean;
+  globalValue?: string;
+  /** Options are model names; provider is resolved via llmModelsWithProviders. */
+  isModelFirst?: boolean;
 }
 
 export interface ResourceItem {

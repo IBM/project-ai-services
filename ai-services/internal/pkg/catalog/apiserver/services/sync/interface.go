@@ -24,12 +24,15 @@ type ResourceValidationInput struct {
 
 // RuntimeSync is the interface that every runtime-specific sync backend must implement.
 type RuntimeSync interface {
+	// WithRuntime returns a runtime-bound sync backend instance.
+	WithRuntime(rt runtime.Runtime) (RuntimeSync, error)
+
 	// FetchPodStatuses returns the status of all pods associated with the given template ID.
 	// The templateID is the service or component UUID used as the "ai-services.io/template" label value.
 	// Returns an error when no pods are found or when the runtime call fails.
-	FetchPodStatuses(ctx context.Context, rt runtime.Runtime, templateID string) ([]*PodStatus, error)
+	FetchPodStatuses(ctx context.Context, templateID string) ([]*PodStatus, error)
 
 	// ValidateResources validates the expected runtime-managed resources for the given service or
 	// component instance and returns an error message when a required resource is missing.
-	ValidateResources(ctx context.Context, input ResourceValidationInput, rt runtime.Runtime) string
+	ValidateResources(ctx context.Context, input ResourceValidationInput) string
 }

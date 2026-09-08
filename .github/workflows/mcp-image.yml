@@ -1,0 +1,32 @@
+name: MCP Sidecar Image
+
+on:
+  push:
+    paths:
+      - 'mcp/**'
+    branches:
+      - main
+      - 'release-*'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      service: 'ai-services-mcp'
+      working-directory: 'mcp'
+    secrets: inherit
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'mcp'
+      service: 'ai-services-mcp'
+      image: 'ai-services-mcp'
+    secrets:
+      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
+      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
