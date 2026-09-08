@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -11,18 +12,24 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
 
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
-	reg  *registry.Registry
-	repo repository.WorkerRepository
+	reg         *registry.Registry
+	repo        repository.WorkerRepository
+	runtimeType types.RuntimeType
+	gatewayPort int
 }
 
 // NewWorkerHandler creates a new WorkerHandler.
-func NewWorkerHandler(reg *registry.Registry, repo repository.WorkerRepository) *WorkerHandler {
-	return &WorkerHandler{reg: reg, repo: repo}
+func NewWorkerHandler(reg *registry.Registry, repo repository.WorkerRepository, runtimeType types.RuntimeType, gatewayPort int) *WorkerHandler {
+	return &WorkerHandler{reg: reg, repo: repo, runtimeType: runtimeType, gatewayPort: gatewayPort}
 }
 
 // createWorkerReq is the request body for registering a new worker.
@@ -32,8 +39,9 @@ type createWorkerReq struct {
 
 // createWorkerResp is the response body for a newly registered worker.
 type createWorkerResp struct {
-	WorkerName string `json:"worker_name"`
-	Token      string `json:"token"`
+	WorkerName     string `json:"worker_name"`
+	GatewayAddress string `json:"gateway_address"`
+	Token          string `json:"token"`
 }
 
 // CreateWorker godoc
@@ -69,6 +77,14 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	gatewayAddress, err := h.gatewayAddress(ctx)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to resolve gateway address: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve worker gateway address"})
+
+		return
+	}
+
 	token, err := h.reg.Preregister(ctx, req.WorkerName)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "worker handler: failed to register worker %q: %v", req.WorkerName, err)
@@ -78,9 +94,24 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, createWorkerResp{
-		WorkerName: req.WorkerName,
-		Token:      token,
+		WorkerName:     req.WorkerName,
+		GatewayAddress: gatewayAddress,
+		Token:          token,
 	})
+}
+
+func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
+	if h.runtimeType == types.RuntimeTypeOpenShift {
+		return gateway.GatewayRouteHost(ctx)
+	}
+
+	port := fmt.Sprintf("%d", h.gatewayPort)
+	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
+	if domainSuffix == "" {
+		return "", fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
+	}
+
+	return workerconstants.WorkerGatewayName + "." + domainSuffix + ":" + port, nil
 }
 
 // ListWorkers godoc

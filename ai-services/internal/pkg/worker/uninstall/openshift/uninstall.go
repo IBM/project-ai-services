@@ -2,17 +2,16 @@ package openshift
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
-	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
 // Uninstall removes all worker components deployed by `worker join`.
@@ -48,19 +47,18 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 	s := spinner.New("Uninstalling worker service...")
 	s.Start(ctx)
 
-	helmClient, err := helm.NewHelm(namespace)
-	if err != nil {
-		return fmt.Errorf("failed to create Helm client: %w", err)
+	if err := helm.UninstallRelease(ctx, release, namespace); err != nil {
+		return err
 	}
 
-	if err := helmClient.UninstallRelease(release); err != nil {
-		if errors.Is(err, driver.ErrReleaseNotFound) {
-			logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
+	if !opts.SkipCleanup {
+		logger.DebuglnCtx(ctx, "Delete worker PVCs...")
 
-			return nil
+		if err := rt.DeletePVCs(ctx, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, workerconstants.WorkerHelmReleaseName)); err != nil {
+			s.Fail("failed to delete worker pvc")
+
+			return fmt.Errorf("failed to delete PVCs: %w", err)
 		}
-
-		return err
 	}
 
 	s.Stop("Worker service uninstalled successfully")

@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"maps"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -17,16 +15,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/helm"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-)
-
-const (
-	defaultHelmTimeout    = 10 * time.Minute
-	predictorPollInterval = 15 * time.Second
-	predictorWaitTimeout  = 15 * time.Minute
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 )
 
 // Type aliases for deployment plan types.
@@ -39,13 +32,16 @@ type (
 // OpenShiftDeployer implements deployment execution for the OpenShift runtime using Helm.
 type OpenShiftDeployer struct {
 	runtime         runtime.Runtime
+	helm            helmutil.HelmManager
 	catalogProvider *catalog.CatalogProvider
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
 }
 
-// NewOpenShiftDeployer creates a new OpenShiftDeployer instance.
+// NewOpenShiftDeployer creates a deployer for the OpenShift runtime.
+// The HelmManager is resolved in ExecuteDeployment once the application
+// namespace is known from the plan.
 func NewOpenShiftDeployer(
 	rt runtime.Runtime,
 	catalogProvider *catalog.CatalogProvider,
@@ -73,6 +69,12 @@ func (d *OpenShiftDeployer) ExecuteDeployment(
 ) error {
 	ns := catalogutils.AppNamespace(plan.ApplicationID)
 
+	if rrt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		d.helm = helmutil.NewRemoteHelmManager(rrt.Sender, ns)
+	} else {
+		d.helm = helmutil.NewLocalHelmManager(ns)
+	}
+
 	logger.InfofCtx(ctx, "Starting OpenShift deployment for '%s' in namespace '%s'\n",
 		plan.ApplicationName, ns)
 
@@ -82,21 +84,21 @@ func (d *OpenShiftDeployer) ExecuteDeployment(
 	}
 
 	// Phase 0: Deploy prerequisites (ServingRuntimes etc.), idempotent, once per namespace
-	if err := d.deployPrerequisites(ctx, ns); err != nil {
+	if err := d.deployPrerequisites(ctx); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Prerequisites deployment failed", err)
 
 		return err
 	}
 
 	// Phase 1: Deploy components concurrently via Helm
-	if err := d.deployComponentsConcurrently(ctx, ns, plan); err != nil {
+	if err := d.deployComponentsConcurrently(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Component deployment failed", err)
 
 		return err
 	}
 
 	// Phase 2: Deploy services concurrently via Helm.
-	if err := d.deployServicesConcurrently(ctx, ns, plan); err != nil {
+	if err := d.deployServicesConcurrently(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Service deployment failed", err)
 
 		return err
@@ -115,7 +117,7 @@ func (d *OpenShiftDeployer) ExecuteDeployment(
 // deployPrerequisites installs all Helm charts found under prerequisites/openshift/ into the
 // application namespace. Each subdirectory is treated as an independent chart and installed
 // with its directory name as the release name.
-func (d *OpenShiftDeployer) deployPrerequisites(ctx context.Context, ns string) error {
+func (d *OpenShiftDeployer) deployPrerequisites(ctx context.Context) error {
 	prereqRoot := "prerequisites/openshift"
 
 	entries, err := assets.CatalogFS.ReadDir(prereqRoot)
@@ -134,7 +136,7 @@ func (d *OpenShiftDeployer) deployPrerequisites(ctx context.Context, ns string) 
 		chartPath := prereqRoot + "/" + entry.Name()
 		release := entry.Name() // e.g. "serving-runtime-cpu"
 
-		if err := helmInstallOrUpgrade(ctx, ns, release, chartPath, &assets.CatalogFS, map[string]any{}, ""); err != nil {
+		if err := d.helmInstallOrUpgrade(ctx, release, chartPath, &assets.CatalogFS, map[string]any{}, ""); err != nil {
 			return fmt.Errorf("failed to deploy prerequisite '%s': %w", release, err)
 		}
 	}
@@ -144,7 +146,7 @@ func (d *OpenShiftDeployer) deployPrerequisites(ctx context.Context, ns string) 
 
 // deployComponentsConcurrently installs all component Helm charts in parallel and waits for all
 // to become Ready before returning.
-func (d *OpenShiftDeployer) deployComponentsConcurrently(ctx context.Context, ns string, plan *DeploymentPlan) error {
+func (d *OpenShiftDeployer) deployComponentsConcurrently(ctx context.Context, plan *DeploymentPlan) error {
 	// Build hash → dbID index so RunConcurrently can track status per component.
 	items := make(map[string]uuid.UUID, len(plan.Components))
 	for hash, comp := range plan.Components {
@@ -155,7 +157,7 @@ func (d *OpenShiftDeployer) deployComponentsConcurrently(ctx context.Context, ns
 		ctx,
 		items,
 		func(ctx context.Context, hash string) error {
-			return d.deployComponent(ctx, ns, plan, plan.Components[hash])
+			return d.deployComponent(ctx, plan, plan.Components[hash])
 		},
 		func(ctx context.Context, dbID uuid.UUID, msg string) error {
 			return catalogutils.UpdateComponentStatus(ctx, d.componentRepo, dbID, models.ComponentStatusError, msg)
@@ -168,7 +170,7 @@ func (d *OpenShiftDeployer) deployComponentsConcurrently(ctx context.Context, ns
 
 // deployComponent installs or upgrades the Helm chart for a single component,
 // then registers the deterministic KServe predictor endpoint in the database.
-func (d *OpenShiftDeployer) deployComponent(ctx context.Context, ns string, plan *DeploymentPlan, comp *ComponentPlan) error {
+func (d *OpenShiftDeployer) deployComponent(ctx context.Context, plan *DeploymentPlan, comp *ComponentPlan) error {
 	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ProviderID)
 
 	fsys, err := d.catalogProvider.GetItemFS(componentKey)
@@ -176,27 +178,26 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, ns string, plan
 		return fmt.Errorf("failed to get filesystem for component %s: %w", componentKey, err)
 	}
 
-	if err := helmInstallOrUpgrade(ctx, ns, catalogutils.HelmReleaseName(plan.ApplicationID, strings.ReplaceAll(comp.ComponentType, "_", "-")), comp.CatalogPath, fsys, comp.Values, comp.DatabaseID.String()); err != nil {
+	if err := d.helmInstallOrUpgrade(ctx, catalogutils.HelmReleaseName(plan.ApplicationID, strings.ReplaceAll(comp.ComponentType, "_", "-")), comp.CatalogPath, fsys, comp.Values, comp.DatabaseID.String()); err != nil {
 		return err
 	}
 
 	// KServe marks an InferenceService "Ready=True" only once the predictor pod is fully up.
 	// Helm considers the InferenceService "Current" as soon as the CRD is accepted,
 	// so we must poll the InferenceService status directly.
-	if oc, ok := d.runtime.(*openshiftRuntime.OpenshiftClient); ok {
-		isvcName := comp.ComponentType
+	// Non-OpenShift runtimes return nil immediately (no-op).
+	isvcName := comp.ComponentType
 
-		logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
+	logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
 
-		waitCtx, cancel := context.WithTimeout(ctx, predictorWaitTimeout)
-		defer cancel()
+	waitCtx, cancel := context.WithTimeout(ctx, constants.PredictorWaitTimeout)
+	defer cancel()
 
-		if err := oc.WaitForInferenceServiceReady(waitCtx, isvcName, predictorPollInterval); err != nil {
-			return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
-		}
+	if err := d.runtime.WaitForInferenceServiceReady(waitCtx, isvcName); err != nil {
+		return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
 	}
 
-	if err := d.updateComponentEndpoint(ctx, ns, comp); err != nil {
+	if err := d.updateComponentEndpoint(ctx, plan, comp); err != nil {
 		// Non-fatal: log and continue — deployment itself succeeded.
 		logger.ErrorfCtx(ctx, "Failed to update component %s endpoint in DB: %v\n", comp.ComponentType, err)
 	}
@@ -206,7 +207,7 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, ns string, plan
 
 // deployServicesConcurrently installs all service Helm charts in parallel and waits for all pods
 // to become Ready.
-func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, ns string, plan *DeploymentPlan) error {
+func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, plan *DeploymentPlan) error {
 	// Build id → dbID index so RunConcurrently can track status per service.
 	items := make(map[string]uuid.UUID, len(plan.Services))
 	for id, svc := range plan.Services {
@@ -217,7 +218,7 @@ func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, ns s
 		ctx,
 		items,
 		func(ctx context.Context, id string) error {
-			return d.deployService(ctx, ns, plan, plan.Services[id])
+			return d.deployService(ctx, plan, plan.Services[id])
 		},
 		func(ctx context.Context, dbID uuid.UUID, msg string) error {
 			return catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, dbID, models.ServiceStatusError, msg)
@@ -230,7 +231,7 @@ func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, ns s
 
 // deployService installs or upgrades the Helm chart for a single service,
 // then reads the OpenShift Routes for the release and stores endpoints in the database.
-func (d *OpenShiftDeployer) deployService(ctx context.Context, ns string, plan *DeploymentPlan, svc *ServicePlan) error {
+func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentPlan, svc *ServicePlan) error {
 	releaseName := catalogutils.HelmReleaseName(plan.ApplicationID, svc.CatalogID)
 
 	fsys, err := d.catalogProvider.GetItemFS(svc.CatalogID)
@@ -238,11 +239,11 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, ns string, plan *
 		return fmt.Errorf("failed to get filesystem for service %s: %w", svc.CatalogID, err)
 	}
 
-	if err := helmInstallOrUpgrade(ctx, ns, releaseName, svc.CatalogPath, fsys, svc.Values, svc.DatabaseID.String()); err != nil {
+	if err := d.helmInstallOrUpgrade(ctx, releaseName, svc.CatalogPath, fsys, svc.Values, svc.DatabaseID.String()); err != nil {
 		return err
 	}
 
-	if err := d.registerServiceEndpoints(ctx, ns, releaseName, svc); err != nil {
+	if err := d.registerServiceEndpoints(ctx, releaseName, svc); err != nil {
 		// Non-fatal: log and continue — deployment itself succeeded.
 		logger.ErrorfCtx(ctx, "Failed to register service %s endpoints in DB: %v\n", svc.CatalogID, err)
 	}
@@ -253,7 +254,7 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, ns string, plan *
 // registerServiceEndpoints reads the OpenShift Routes created for the given Helm release
 // and writes them as HTTPS endpoints into the service database record.
 // Routes are identified by the label "ai-services.io/service: <releaseName>".
-func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, ns, releaseName string, svc *ServicePlan) error {
+func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, releaseName string, svc *ServicePlan) error {
 	labelSelector := fmt.Sprintf("ai-services.io/service=%s", releaseName)
 	routes, err := d.runtime.ListRoutes(ctx, labelSelector)
 	if err != nil {
@@ -294,7 +295,8 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, ns, re
 // updateComponentEndpoint writes the deterministic KServe predictor DNS endpoint
 // into the component database record.
 // KServe (RawDeployment) creates a Service named "<inferenceServiceName>-predictor" in the namespace.
-func (d *OpenShiftDeployer) updateComponentEndpoint(ctx context.Context, ns string, comp *ComponentPlan) error {
+func (d *OpenShiftDeployer) updateComponentEndpoint(ctx context.Context, plan *DeploymentPlan, comp *ComponentPlan) error {
+	ns := catalogutils.AppNamespace(plan.ApplicationID)
 	if comp.DatabaseID == uuid.Nil {
 		return nil
 	}
@@ -318,29 +320,18 @@ func (d *OpenShiftDeployer) updateComponentEndpoint(ctx context.Context, ns stri
 	return nil
 }
 
-// helmInstallOrUpgrade loads the chart at catalogPath from fsys and
-// performs helm install (if the release doesn't exist) or upgrade.
-// templateID is injected as a --set override (not part of values.yaml) so that
-// ai-services.io/template labels carry the DB UUID, matching the Podman convention.
-func helmInstallOrUpgrade(ctx context.Context, namespace, release, catalogPath string, fsys fs.FS, values map[string]any, templateID string) error {
+// helmInstallOrUpgrade loads the chart at catalogPath from fsys and delegates
+// to d.helm.InstallOrUpgrade — running locally or forwarding over gRPC to the
+// worker depending on which HelmManager is in use.
+// templateID is injected as a --set override so that ai-services.io/template
+// labels carry the DB UUID, matching the Podman convention.
+func (d *OpenShiftDeployer) helmInstallOrUpgrade(ctx context.Context, release, catalogPath string, fsys fs.FS, values map[string]any, templateID string) error {
 	chart, err := catalogutils.LoadChartFromFS(fsys, catalogPath)
 	if err != nil {
 		return fmt.Errorf("failed to load chart at %s: %w", catalogPath, err)
 	}
 
-	logger.InfofCtx(ctx, "Deploying release '%s' in namespace '%s'\n", release, namespace)
+	logger.InfofCtx(ctx, "Deploying release '%s'\n", release)
 
-	helmClient, err := helm.NewHelm(namespace)
-	if err != nil {
-		return fmt.Errorf("failed to create Helm client: %w", err)
-	}
-
-	// Merge templateID as a runtime override without mutating the caller's values map.
-	overrides := make(map[string]any, len(values)+1)
-	maps.Copy(overrides, values)
-	if templateID != "" {
-		overrides["templateID"] = templateID
-	}
-
-	return helmClient.InstallOrUpgrade(ctx, release, chart, overrides, defaultHelmTimeout)
+	return d.helm.InstallOrUpgrade(ctx, release, chart, values, templateID, constants.HelmTimeout)
 }

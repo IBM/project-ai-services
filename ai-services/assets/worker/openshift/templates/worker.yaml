@@ -44,3 +44,10 @@ spec:
             limits:
               memory: "{{ .Values.worker.resources.limits.memory }}"
               cpu: "{{ .Values.worker.resources.limits.cpu }}"
+          volumeMounts:
+            - name: worker-tls
+              mountPath: /var/lib/ai-services/worker-tls
+      volumes:
+        - name: worker-tls
+          persistentVolumeClaim:
+            claimName: worker-tls

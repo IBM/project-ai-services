@@ -112,6 +112,18 @@ definitions:
           Falls back to CatalogID when the catalog entry cannot be loaded.
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef:
+    properties:
+      id:
+        description: ID is the UUID from the connectors table.
+        type: string
+      type:
+        description: Type is the connector kind (e.g. "datasource").
+        type: string
+    required:
+    - id
+    - type
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
       catalog_id:
@@ -317,6 +329,15 @@ definitions:
       components:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
+        type: array
+      connectors:
+        description: |-
+          Connectors lists pre-registered connector records to attach to this service
+          after the application reaches Running status. Each entry is validated against
+          the service's catalog YAML (accepts_datasource) and the connectors table before
+          deployment begins. Omitting this field (or passing an empty list) is valid.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef'
         type: array
       params:
         additionalProperties: {}
@@ -976,6 +997,8 @@ definitions:
     type: object
   internal_pkg_catalog_apiserver_handlers.createWorkerResp:
     properties:
+      gateway_address:
+        type: string
       token:
         type: string
       worker_name:
@@ -2453,8 +2476,15 @@ paths:
       - Datasources
   /resources:
     get:
-      description: Retrieves system resource information including CPU, memory, and
-        accelerator availability
+      description: |-
+        Retrieves system resource information including CPU, memory, and accelerator availability.
+        When the optional `worker` query parameter is provided, the resources are fetched from
+        that remote worker node instead of the local runtime.
+      parameters:
+      - description: Worker name to query resources from
+        in: query
+        name: worker
+        type: string
       produces:
       - application/json
       responses:
@@ -2462,6 +2492,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse'
+        "400":
+          description: Worker not connected
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:

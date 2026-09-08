@@ -9,7 +9,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
@@ -89,7 +88,6 @@ func (e *DeletionExecutor) executeOpenShiftDeletion(
 ) error {
 	openshift.NewOpenshiftDeletion(
 		rt,
-		catalogutils.AppNamespace(appID),
 		e.appRepo,
 		e.serviceRepo,
 		e.componentRepo,

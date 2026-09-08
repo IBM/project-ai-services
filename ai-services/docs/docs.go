@@ -2174,7 +2174,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves system resource information including CPU, memory, and accelerator availability",
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability.\nWhen the optional ` + "`" + `worker` + "`" + ` query parameter is provided, the resources are fetched from\nthat remote worker node instead of the local runtime.",
                 "produces": [
                     "application/json"
                 ],
@@ -2182,11 +2182,25 @@ const docTemplate = `{
                     "Catalog"
                 ],
                 "summary": "Get system resources",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Worker name to query resources from",
+                        "name": "worker",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Worker not connected",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -2933,6 +2947,23 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef": {
+            "type": "object",
+            "required": [
+                "id",
+                "type"
+            ],
+            "properties": {
+                "id": {
+                    "description": "ID is the UUID from the connectors table.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the connector kind (e.g. \"datasource\").",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest": {
             "type": "object",
             "required": [
@@ -3212,6 +3243,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
+                    }
+                },
+                "connectors": {
+                    "description": "Connectors lists pre-registered connector records to attach to this service\nafter the application reaches Running status. Each entry is validated against\nthe service's catalog YAML (accepts_datasource) and the connectors table before\ndeployment begins. Omitting this field (or passing an empty list) is valid.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef"
                     }
                 },
                 "params": {
@@ -4169,6 +4207,9 @@ const docTemplate = `{
         "internal_pkg_catalog_apiserver_handlers.createWorkerResp": {
             "type": "object",
             "properties": {
+                "gateway_address": {
+                    "type": "string"
+                },
                 "token": {
                     "type": "string"
                 },

@@ -3,10 +3,10 @@ package openshift
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
@@ -14,10 +14,6 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 	"helm.sh/helm/v4/pkg/chart"
-)
-
-var (
-	defaultHelmTimeout = 10 * time.Minute
 )
 
 // DeployWorker orchestrates the full deployment of the worker gRPC stream pod on OpenShift.
@@ -85,7 +81,7 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, defaultHelmTimeout); err != nil {
+	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, constants.HelmTimeout); err != nil {
 		s.Fail("failed to deploy worker")
 
 		return fmt.Errorf("failed to deploy worker: %w", err)

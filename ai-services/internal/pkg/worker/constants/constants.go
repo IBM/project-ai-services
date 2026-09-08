@@ -42,6 +42,9 @@ const (
 	// MetaKeyBaseDir is the worker metadata key sent during Register and stored in worker.metadata JSON.
 	MetaKeyBaseDir = "baseDir"
 
+	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
+	WorkerGatewayPort = 9090
+
 	// ArgParamCaddyHTTPSPort, ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
 	// ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile are template
 	// value-override keys used when deploying worker pods.
@@ -51,7 +54,10 @@ const (
 	ArgParamWorkerPodmanURI   = "worker.podman.uri"
 	ArgParamWorkerAuthFile    = "worker.podman.authFileContent"
 
-	// GatewayServerName is the default DNS SAN embedded in the auto-generated
-	// gateway server certificate for the local/podman flow.
-	GatewayServerName = "gateway.ai-services.internal"
+	// WorkerGatewayName is the DNS name used by the catalog worker gateway route.
+	WorkerGatewayName = "catalog-worker-gateway"
+
+	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
+	// auto-generated gateway server certificate for internal cluster communication.
+	OpenShiftGatewayServiceEndpoint = "catalog-api.ai-services.svc.cluster.local"
 )
