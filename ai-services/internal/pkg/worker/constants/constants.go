@@ -99,4 +99,6 @@ const (
 const (
 	// WorkerJoinErr is the error log message emitted by the worker container when it fails to establish a gRPC stream connection to the gateway.
 	WorkerJoinErr = "failed to join the worker"
+	// WorkerJoinSuccess is the log message emitted by the worker container once the gRPC CommandStream is open.
+	WorkerJoinSuccess = "Opening CommandStream for worker"
 )

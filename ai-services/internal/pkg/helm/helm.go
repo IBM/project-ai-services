@@ -62,8 +62,9 @@ func (h *Helm) install(ctx context.Context, release string, chart chart.Charter,
 	installClient.ReleaseName = release
 	installClient.Namespace = h.namespace
 	installClient.CreateNamespace = true
-	if !opts.NoWait {
-		installClient.WaitStrategy = kube.StatusWatcherStrategy
+	installClient.WaitStrategy = kube.StatusWatcherStrategy
+	if opts.NoWait {
+		installClient.WaitStrategy = kube.HookOnlyStrategy
 	}
 	installClient.Timeout = opts.Timeout
 	installClient.SkipSchemaValidation = true
@@ -90,8 +91,9 @@ func (h *Helm) upgrade(ctx context.Context, release string, chart chart.Charter,
 	upgradeClient := action.NewUpgrade(h.actionConfig)
 	upgradeClient.Namespace = h.namespace
 	upgradeClient.ServerSideApply = "true"
-	if !opts.NoWait {
-		upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
+	upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
+	if opts.NoWait {
+		upgradeClient.WaitStrategy = kube.HookOnlyStrategy
 	}
 	upgradeClient.Timeout = opts.Timeout
 	upgradeClient.ForceConflicts = true

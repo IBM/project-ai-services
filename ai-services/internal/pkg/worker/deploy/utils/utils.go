@@ -44,11 +44,11 @@ func CheckWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
 				logger.WarningfCtx(ctx, "failed to fetch logs for pod %s: %v\n", pod.Name, err)
 			}
 
-			fmt.Println("Lines: ", lines)
-			fmt.Println("Pods: ", pod)
-			fmt.Println("Container: ", pod.Containers)
-
 			for _, line := range lines {
+				if strings.Contains(line, workerconstants.WorkerJoinSuccess) {
+					return nil
+				}
+
 				if strings.Contains(line, workerconstants.WorkerJoinErr) {
 					return errors.New(line)
 				}
