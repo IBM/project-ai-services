@@ -60,6 +60,9 @@ const (
 	// auto-generated gateway server certificate for internal cluster communication.
 	OpenShiftGatewayServiceEndpoint = "catalog-api.ai-services.svc.cluster.local"
 
+	// LocalWorkerEnvVar is the environment variable name that enables local-worker mode.
+	LocalWorkerEnvVar = "LOCAL_WORKER"
+
 	// LocalWorkerToken is the bootstrap token used for the local
 	// self-join. The catalog-backend gateway accepts this token without
 	// ValidateToken when LOCAL_WORKER=true.

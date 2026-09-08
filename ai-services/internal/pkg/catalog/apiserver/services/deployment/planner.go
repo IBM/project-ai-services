@@ -336,12 +336,12 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 // in-memory registry. Returns (uuid.Nil, false) when the worker is not
 // connected or the registry is nil (local-only server).
 func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
-	if isLocalWorkerName(workerName) {
+	if p.workerRegistry == nil {
 		return uuid.Nil, false
 	}
 
-	if p.workerRegistry == nil {
-		return uuid.Nil, false
+	if isLocalWorkerName(workerName) {
+		workerName = workerconstants.LocalWorkerName
 	}
 
 	return p.workerRegistry.WorkerID(workerName)

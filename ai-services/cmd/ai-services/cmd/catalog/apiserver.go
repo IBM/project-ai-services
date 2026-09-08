@@ -149,8 +149,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 	workerRepo := repository.NewWorkerRepository(pool)
-	localWorker := os.Getenv("LOCAL_WORKER") == "true"
-	workerReg := workerregistry.New(workerRepo, localWorker)
+	workerReg := workerregistry.New(workerRepo)
 
 	stopBackgroundServices, err := startBackgroundServices(ctx, appRepo, svcRepo, compRepo, svcDepRepo, connectorRepo, catalogProvider, workerReg, encryptionKey)
 	if err != nil {

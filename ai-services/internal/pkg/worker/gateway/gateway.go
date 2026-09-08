@@ -16,6 +16,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
@@ -141,7 +142,7 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 	// unconditionally: no token is required. The worker sends an empty token and
 	// the gateway assigns the reserved LocalWorkerName without any DB lookup.
 	var workerName string
-	if g.registry.IsLocalWorker() && req.GetPreSharedToken() == workerconstants.LocalWorkerToken {
+	if utils.GetEnv(workerconstants.LocalWorkerEnvVar, "") == "true" && req.GetPreSharedToken() == workerconstants.LocalWorkerToken {
 		workerName = workerconstants.LocalWorkerName
 		logger.InfofCtx(ctx, "WorkerGateway: local self-join for %q — skipping token validation", workerName)
 	} else {

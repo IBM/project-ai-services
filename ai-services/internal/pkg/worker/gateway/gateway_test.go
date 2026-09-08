@@ -185,7 +185,7 @@ func startTestGateway(t *testing.T, reg *registry.Registry) (workerpb.WorkerGate
 // ──────────────────────────────────────────────────────────────────────────────
 
 func TestGateway_Register_ValidToken(t *testing.T) {
-	reg := registry.New(newFakeWorkerRepo(), false)
+	reg := registry.New(newFakeWorkerRepo())
 	token := preregister(t, reg, "worker-1")
 
 	client, stop := startTestGateway(t, reg)
@@ -207,7 +207,7 @@ func TestGateway_Register_ValidToken(t *testing.T) {
 }
 
 func TestGateway_Register_InvalidToken(t *testing.T) {
-	reg := registry.New(newFakeWorkerRepo(), false)
+	reg := registry.New(newFakeWorkerRepo())
 
 	client, stop := startTestGateway(t, reg)
 	defer stop()
@@ -221,7 +221,7 @@ func TestGateway_Register_InvalidToken(t *testing.T) {
 }
 
 func TestGateway_Register_TokenSingleUse(t *testing.T) {
-	reg := registry.New(newFakeWorkerRepo(), false)
+	reg := registry.New(newFakeWorkerRepo())
 	token := preregister(t, reg, "worker-1")
 
 	client, stop := startTestGateway(t, reg)
@@ -254,7 +254,7 @@ func TestGateway_Register_TokenSingleUse(t *testing.T) {
 // The server may close the stream before the client's Send completes, so we
 // accept EOF on Send as equivalent to receiving an error on Recv.
 func TestGateway_CommandStream_UnregisteredWorker(t *testing.T) {
-	reg := registry.New(newFakeWorkerRepo(), false)
+	reg := registry.New(newFakeWorkerRepo())
 
 	client, stop := startTestGateway(t, reg)
 	defer stop()
@@ -277,7 +277,7 @@ func TestGateway_CommandStream_UnregisteredWorker(t *testing.T) {
 
 // Worker sends an empty worker_name — same Unauthenticated path as UnregisteredWorker.
 func TestGateway_CommandStream_MissingWorkerName(t *testing.T) {
-	reg := registry.New(newFakeWorkerRepo(), false)
+	reg := registry.New(newFakeWorkerRepo())
 
 	client, stop := startTestGateway(t, reg)
 	defer stop()
@@ -300,7 +300,7 @@ func TestGateway_CommandStream_MissingWorkerName(t *testing.T) {
 
 func TestGateway_CommandStream_CommandDelivered(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := registry.New(repo, false)
+	reg := registry.New(repo)
 	token := preregister(t, reg, "worker-2")
 
 	client, stop := startTestGateway(t, reg)
@@ -356,7 +356,7 @@ func TestGateway_CommandStream_CommandDelivered(t *testing.T) {
 
 func TestGateway_CommandStream_ResultRouted(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := registry.New(repo, false)
+	reg := registry.New(repo)
 	token := preregister(t, reg, "worker-3")
 
 	client, stop := startTestGateway(t, reg)
@@ -418,7 +418,7 @@ func TestGateway_CommandStream_ResultRouted(t *testing.T) {
 
 func TestGateway_CommandStream_Disconnect(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := registry.New(repo, false)
+	reg := registry.New(repo)
 	token := preregister(t, reg, "worker-4")
 
 	client, stop := startTestGateway(t, reg)

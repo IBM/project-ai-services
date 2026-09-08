@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -624,6 +625,29 @@ func GetAuthFilePath() (string, error) {
 	}
 
 	return fmt.Sprintf("/run/user/%d/containers/auth.json", os.Getuid()), nil
+}
+
+// ReadAuthFileBase64 reads the Podman auth file and returns its contents
+// base64-encoded. If the file does not exist, an encoded empty JSON object is
+// returned and a warning is logged.
+func ReadAuthFileBase64() (string, error) {
+	authFilePath, err := GetAuthFilePath()
+	if err != nil {
+		return "", fmt.Errorf("failed to get auth file path: %w", err)
+	}
+
+	content, err := os.ReadFile(authFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Warningln("Podman auth file not found. Image pulls may fail if the registry requires authentication.")
+			logger.Warningln("Run 'podman login' and retry if you encounter image pull errors.")
+			content = []byte("{}")
+		} else {
+			return "", fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString(content), nil
 }
 
 // ExtractTarGz extracts a tar.gz file to a destination directory.

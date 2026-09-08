@@ -103,7 +103,7 @@ var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
 // ──────────────────────────────────────────────────────────────────────────────
 
 func TestRegistry_Preregister_IssuesToken(t *testing.T) {
-	reg := New(newFakeWorkerRepo(), false)
+	reg := New(newFakeWorkerRepo())
 
 	token, err := reg.Preregister(context.Background(), "worker-a")
 	if err != nil {
@@ -116,7 +116,7 @@ func TestRegistry_Preregister_IssuesToken(t *testing.T) {
 
 func TestRegistry_Preregister_CreatesPendingRow(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	if _, err := reg.Preregister(context.Background(), "worker-a"); err != nil {
 		t.Fatalf("Preregister: %v", err)
@@ -132,7 +132,7 @@ func TestRegistry_Preregister_CreatesPendingRow(t *testing.T) {
 }
 
 func TestRegistry_Preregister_NoRepo(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	if _, err := reg.Preregister(context.Background(), "worker-a"); err == nil {
 		t.Fatal("expected error when no repository is configured")
@@ -140,7 +140,7 @@ func TestRegistry_Preregister_NoRepo(t *testing.T) {
 }
 
 func TestRegistry_Preregister_TokenIsValidatable(t *testing.T) {
-	reg := New(newFakeWorkerRepo(), false)
+	reg := New(newFakeWorkerRepo())
 
 	token, err := reg.Preregister(context.Background(), "worker-a")
 	if err != nil {
@@ -157,7 +157,7 @@ func TestRegistry_Preregister_TokenIsValidatable(t *testing.T) {
 }
 
 func TestRegistry_Preregister_TokenNotReusable(t *testing.T) {
-	reg := New(newFakeWorkerRepo(), false)
+	reg := New(newFakeWorkerRepo())
 
 	token, err := reg.Preregister(context.Background(), "worker-a")
 	if err != nil {
@@ -178,7 +178,7 @@ func TestRegistry_Preregister_TokenNotReusable(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 func TestRegistry_RegisterAddsEntry(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	entry, err := reg.Register(context.Background(), "worker-1", "podman", nil)
 	if err != nil {
@@ -196,7 +196,7 @@ func TestRegistry_RegisterAddsEntry(t *testing.T) {
 }
 
 func TestRegistry_Register_InvalidRuntimeType(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	_, err := reg.Register(context.Background(), "worker-1", "docker", nil)
 	if err == nil {
@@ -205,7 +205,7 @@ func TestRegistry_Register_InvalidRuntimeType(t *testing.T) {
 }
 
 func TestRegistry_RegisterIdempotent(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	e1, err := reg.Register(context.Background(), "worker-1", "podman", nil)
 	if err != nil {
@@ -229,7 +229,7 @@ func TestRegistry_RegisterIdempotent(t *testing.T) {
 }
 
 func TestRegistry_GetKnownWorker(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	entry, ok := reg.Get("worker-1")
@@ -242,7 +242,7 @@ func TestRegistry_GetKnownWorker(t *testing.T) {
 }
 
 func TestRegistry_GetUnknownWorker(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	_, ok := reg.Get("ghost")
 	if ok {
@@ -251,7 +251,7 @@ func TestRegistry_GetUnknownWorker(t *testing.T) {
 }
 
 func TestRegistry_Disconnect(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	reg.Disconnect(context.Background(), "worker-1")
@@ -263,13 +263,13 @@ func TestRegistry_Disconnect(t *testing.T) {
 }
 
 func TestRegistry_DisconnectUnknownIsNoop(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	// Must not panic.
 	reg.Disconnect(context.Background(), "never-registered")
 }
 
 func TestRegistry_DeregisterUnknown(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	deleted, err := reg.Deregister(context.Background(), uuid.New())
 	if err != nil {
@@ -281,7 +281,7 @@ func TestRegistry_DeregisterUnknown(t *testing.T) {
 }
 
 func TestRegistry_WaitForResult_WorkerNotConnected(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	_, err := reg.WaitForResult("ghost", "cmd-1")
 	if err == nil {
@@ -290,7 +290,7 @@ func TestRegistry_WaitForResult_WorkerNotConnected(t *testing.T) {
 }
 
 func TestRegistry_DeliverResult_Routing(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	ch, err := reg.WaitForResult("worker-1", "cmd-42")
@@ -316,7 +316,7 @@ func TestRegistry_DeliverResult_Routing(t *testing.T) {
 }
 
 func TestRegistry_DeliverResult_NoWaiter(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	// Delivering a result with no waiter must not block or panic.
@@ -327,7 +327,7 @@ func TestRegistry_DeliverResult_NoWaiter(t *testing.T) {
 }
 
 func TestRegistry_DeliverResult_UnknownWorker(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	// Delivering for a worker that has never registered must not panic.
 	reg.DeliverResult(&workerpb.CommandResult{
 		WorkerName: "ghost",
@@ -336,7 +336,7 @@ func TestRegistry_DeliverResult_UnknownWorker(t *testing.T) {
 }
 
 func TestRegistry_ValidateToken(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	token := reg.tokenStore.IssueToken("worker-x")
 
 	name, err := reg.ValidateToken(token)
@@ -349,7 +349,7 @@ func TestRegistry_ValidateToken(t *testing.T) {
 }
 
 func TestRegistry_ValidateToken_Invalid(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	if _, err := reg.ValidateToken("garbage"); err == nil {
 		t.Fatal("expected error for invalid token")
@@ -362,7 +362,7 @@ func TestRegistry_ValidateToken_Invalid(t *testing.T) {
 
 func TestRegistry_SweepStale_PendingNotSwept(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	// Pre-register creates a pending row with no heartbeat.
 	if _, err := reg.Preregister(context.Background(), "worker-pending"); err != nil {
@@ -383,7 +383,7 @@ func TestRegistry_SweepStale_PendingNotSwept(t *testing.T) {
 
 func TestRegistry_SweepStale_StaleReadyWorkerSwept(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	// Insert a ready worker whose heartbeat is already in the past.
 	past := time.Now().Add(-2 * time.Minute)
@@ -411,7 +411,7 @@ func TestRegistry_SweepStale_StaleReadyWorkerSwept(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 func TestRegistry_IsWorkerConnected_NotInCache(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	if reg.IsWorkerConnected(context.Background(), "ghost") {
 		t.Error("expected false for worker not in cache")
@@ -419,7 +419,7 @@ func TestRegistry_IsWorkerConnected_NotInCache(t *testing.T) {
 }
 
 func TestRegistry_IsWorkerConnected_CacheHitNoRepo(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	if !reg.IsWorkerConnected(context.Background(), "worker-1") {
@@ -429,7 +429,7 @@ func TestRegistry_IsWorkerConnected_CacheHitNoRepo(t *testing.T) {
 
 func TestRegistry_IsWorkerConnected_CacheHitDBReady(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	if _, err := reg.Preregister(context.Background(), "worker-1"); err != nil {
 		t.Fatalf("Preregister: %v", err)
@@ -447,7 +447,7 @@ func TestRegistry_IsWorkerConnected_CacheHitDBReady(t *testing.T) {
 
 func TestRegistry_IsWorkerConnected_CacheHitDBNotReady(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	if _, err := reg.Preregister(context.Background(), "worker-1"); err != nil {
 		t.Fatalf("Preregister: %v", err)
@@ -470,7 +470,7 @@ func TestRegistry_IsWorkerConnected_CacheHitDBNotReady(t *testing.T) {
 }
 
 func TestRegistry_IsWorkerConnected_DisconnectedRemovedFromCache(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 	reg.Disconnect(context.Background(), "worker-1")
 
@@ -484,7 +484,7 @@ func TestRegistry_IsWorkerConnected_DisconnectedRemovedFromCache(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 func TestRegistry_WorkerRuntimeType_Connected(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	rt, ok := reg.WorkerRuntimeType("worker-1")
@@ -497,7 +497,7 @@ func TestRegistry_WorkerRuntimeType_Connected(t *testing.T) {
 }
 
 func TestRegistry_WorkerRuntimeType_NotConnected(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	_, ok := reg.WorkerRuntimeType("ghost")
 	if ok {
@@ -506,7 +506,7 @@ func TestRegistry_WorkerRuntimeType_NotConnected(t *testing.T) {
 }
 
 func TestRegistry_WorkerMetadata_Connected(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	meta := map[string]string{"domainSuffix": "example.com", "httpsPort": "443"}
 	reg.Register(context.Background(), "worker-1", "podman", meta) //nolint:errcheck
 
@@ -523,7 +523,7 @@ func TestRegistry_WorkerMetadata_Connected(t *testing.T) {
 }
 
 func TestRegistry_WorkerMetadata_NotConnected(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	_, ok := reg.WorkerMetadata("ghost")
 	if ok {
@@ -532,7 +532,7 @@ func TestRegistry_WorkerMetadata_NotConnected(t *testing.T) {
 }
 
 func TestRegistry_WorkerCommandChannel_Connected(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
 
 	ch, ok := reg.WorkerCommandChannel("worker-1")
@@ -545,7 +545,7 @@ func TestRegistry_WorkerCommandChannel_Connected(t *testing.T) {
 }
 
 func TestRegistry_WorkerCommandChannel_NotConnected(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	ch, ok := reg.WorkerCommandChannel("ghost")
 	if ok {
@@ -565,7 +565,7 @@ func TestRegistry_WorkerCommandChannel_NotConnected(t *testing.T) {
 // in-memory registry is empty, and Restore should recreate the entry.
 func TestRegistry_Restore_AfterRestartReturnsEntry(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	id := uuid.New()
 	repo.workers["worker-r1"] = &models.Worker{
@@ -609,7 +609,7 @@ func TestRegistry_Restore_AfterRestartReturnsEntry(t *testing.T) {
 // after a clean disconnect: DB status is disconnected, registry is empty.
 func TestRegistry_Restore_DisconnectedWorkerReturnsEntry(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	id := uuid.New()
 	repo.workers["worker-dc"] = &models.Worker{
@@ -638,7 +638,7 @@ func TestRegistry_Restore_DisconnectedWorkerReturnsEntry(t *testing.T) {
 // cert alone — it must go through the full Register token flow.
 func TestRegistry_Restore_PendingWorkerReturnsNotFound(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	id := uuid.New()
 	repo.workers["worker-pending"] = &models.Worker{
@@ -661,7 +661,7 @@ func TestRegistry_Restore_PendingWorkerReturnsNotFound(t *testing.T) {
 // row at all is correctly rejected.
 func TestRegistry_Restore_UnknownWorkerReturnsNotFound(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	_, err := reg.Restore(context.Background(), "nobody")
 	if err == nil {
@@ -674,7 +674,7 @@ func TestRegistry_Restore_UnknownWorkerReturnsNotFound(t *testing.T) {
 
 // TestRegistry_Restore_NoRepoReturnsNotFound covers the nil-repo (test-only) case.
 func TestRegistry_Restore_NoRepoReturnsNotFound(t *testing.T) {
-	reg := New(nil, false)
+	reg := New(nil)
 
 	_, err := reg.Restore(context.Background(), "worker-x")
 	if err == nil {
@@ -689,7 +689,7 @@ func TestRegistry_Restore_NoRepoReturnsNotFound(t *testing.T) {
 // the same entry without creating a duplicate in-memory entry.
 func TestRegistry_Restore_Idempotent(t *testing.T) {
 	repo := newFakeWorkerRepo()
-	reg := New(repo, false)
+	reg := New(repo)
 
 	id := uuid.New()
 	repo.workers["worker-idem"] = &models.Worker{
