@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -265,25 +266,73 @@ func runStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRou
 	}
 }
 
-// recvLoop reads Commands from the gateway stream, dispatches each one to the
-// local runtime, and sends the result back on the stream.
+// recvLoop reads Commands from the gateway stream and dispatches each one in
+// its own goroutine so that long-running commands (e.g. HELM_INSTALL) do not
+// block reception of subsequent commands.  Results are funnelled through a
+// send channel so that stream.Send is always called from a single goroutine
+// (gRPC streams are not safe for concurrent sends).
 // The loop exits when the stream is closed or returns an error.
 func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
+	// sendCh serialises stream.Send calls. A dispatch goroutine blocks only if
+	// 32 results are already queued waiting to be sent, which is well above the
+	// expected burst (one result per in-flight command per worker connection).
+	const sendBufSize = 32
+	sendCh := make(chan *workerpb.CommandResult, sendBufSize)
+
+	// Dedicated sender goroutine — sole writer to the stream.
+	// senderErrCh carries the first send error (capacity 1, non-blocking write).
+	senderErrCh := make(chan error, 1)
+	senderDone := make(chan struct{})
+
+	go func() {
+		defer close(senderDone)
+
+		for result := range sendCh {
+			if err := stream.Send(result); err != nil {
+				senderErrCh <- fmt.Errorf("send command result id=%s: %w", result.GetCommandId(), err)
+
+				return
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+
 	for {
 		cmd, err := stream.Recv()
 		if err != nil {
+			// Stop accepting new commands; wait for all in-flight dispatches to
+			// finish so every result is flushed before we close sendCh.
+			wg.Wait()
+			close(sendCh)
+			<-senderDone
+
+			// Prefer a sender error (broken stream write) over the recv error.
+			select {
+			case sErr := <-senderErrCh:
+				return sErr
+			default:
+			}
+
 			return err
 		}
 
 		logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
 			workerName, cmd.GetCommandId(), cmd.GetType())
 
-		result := dispatch.Dispatch(ctx, rt, pr, cmd)
-		result.WorkerName = workerName
+		wg.Add(1)
 
-		if err := stream.Send(result); err != nil {
-			return fmt.Errorf("send command result id=%s: %w", cmd.GetCommandId(), err)
-		}
+		go func(c *workerpb.Command) {
+			defer wg.Done()
+
+			result := dispatch.Dispatch(ctx, rt, pr, c)
+			result.WorkerName = workerName
+
+			select {
+			case sendCh <- result:
+			case <-ctx.Done():
+			}
+		}(cmd)
 	}
 }
 
