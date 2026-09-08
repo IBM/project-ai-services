@@ -8,7 +8,7 @@ podTemplateExecutions:
 # Resource requirements
 resources:
   cpu: 8 # Adjusted based on observed max usage of ~7.5 cores with headroom
-  memory: 161061273600 # 150Gi in bytes
+  memory: 214748364800 # 200Gi in bytes
   storage: 53687091200 # 50Gi for model storage in bytes
   accelerators:
     ibm.com/spyre_pf: 4

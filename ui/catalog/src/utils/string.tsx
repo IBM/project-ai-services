@@ -60,3 +60,9 @@ export const parseMarkdownLinks = (text: string): ReactNode => {
 
   return parts.length > 0 ? parts : text;
 };
+
+// Formats a version string for display by prepending "v" if not already present
+export const formatVersion = (version: string | undefined | null): string => {
+  if (!version) return "";
+  return version.startsWith("v") ? version : `v${version}`;
+};

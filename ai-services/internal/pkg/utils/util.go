@@ -83,6 +83,21 @@ func CopyMap[K comparable, V any](src map[K]V) map[K]V {
 	return dst
 }
 
+// MergeMaps returns a new map that starts with all keys from base, then overlays overrides.
+// Neither input map is modified.
+func MergeMaps(base, overrides map[string]any) map[string]any {
+	merged := make(map[string]any, len(base)+len(overrides))
+	for k, v := range base {
+		merged[k] = v
+	}
+
+	for k, v := range overrides {
+		merged[k] = v
+	}
+
+	return merged
+}
+
 // JoinAndRemove joins the first `count` elements using `sep`,
 // returns the joined string, and removes those elements from the original slice.
 func JoinAndRemove(slice *[]string, count int, sep string) string {
@@ -793,4 +808,18 @@ func IndentString(s string, spaces int) string {
 	}
 
 	return prefix + strings.Join(lines, "\n")
+}
+
+// IsNotFoundError checks if an error indicates a resource was not found.
+// Returns true for "no such pod", "no such secret", "no such volume" errors.
+func IsNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+
+	return strings.Contains(errMsg, "no such pod") ||
+		strings.Contains(errMsg, "no pod with name or ID") ||
+		strings.Contains(errMsg, "no such secret") ||
+		strings.Contains(errMsg, "no such volume")
 }

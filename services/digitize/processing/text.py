@@ -10,7 +10,6 @@ import json
 import time
 
 from common.lang_utils import LanguageCodes
-from common.llm_utils import tqdm_wrapper
 from common.misc_utils import get_logger
 
 logger = get_logger("processing.text")
@@ -49,7 +48,7 @@ def process_text_docx(converted_doc, docx_path, out_path):
 
     structured_output = []
     last_header_level = 0
-    for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{docx_path}'"):
+    for text_obj in converted_doc.texts:
         label = text_obj.label
         if label in excluded_labels:
             continue
@@ -131,7 +130,7 @@ def process_text(converted_doc, doc_path, out_path):
 
     structured_output = []
     last_header_level = 0
-    for text_obj in tqdm_wrapper(converted_doc.texts, desc=f"Processing text content of '{doc_path}'"):
+    for text_obj in converted_doc.texts:
         label = text_obj.label
         if label in excluded_labels:
             continue

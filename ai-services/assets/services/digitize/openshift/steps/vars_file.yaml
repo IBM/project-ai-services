@@ -1,9 +1,11 @@
 containers:
   - name: "digitize-ui"
+    workload: "digitize-ui"
     format: ".Status"
     alias: UI_STATUS
 
   - name: "digitize-api"
+    workload: "digitize-api"
     format: ".Status"
     alias: API_STATUS
 

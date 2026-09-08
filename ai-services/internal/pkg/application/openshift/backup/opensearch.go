@@ -19,12 +19,13 @@ const (
 )
 
 // BackupOpenSearch performs OpenSearch backup for OpenShift using a sidecar pod.
-func BackupOpenSearch(ctx context.Context, applicationID, backupFile string) error {
-	logger.Infof("Backing up OpenSearch data for OpenShift application: %s\n", applicationID)
+// namespace is derived from the application UUID: "ai-services-<first 8 chars>".
+func BackupOpenSearch(ctx context.Context, templateID, namespace, backupFile string) error {
+	logger.Infof("Backing up OpenSearch data for OpenShift application in namespace: %s\n", namespace)
 	logger.Infoln("OpenSearch Backup (Sidecar Pod Approach)")
 
-	// Find OpenSearch pod
-	namespace, podName, err := common.FindOpenSearchPod(applicationID)
+	// Find OpenSearch pod using component templateID label
+	podName, err := common.FindOpenSearchPod(templateID, namespace)
 	if err != nil {
 		return err
 	}
@@ -33,7 +34,7 @@ func BackupOpenSearch(ctx context.Context, applicationID, backupFile string) err
 	logger.Infof("OpenSearch Pod: %s\n", podName)
 
 	// Get OpenSearch service name
-	serviceName, err := common.GetOpenSearchService(applicationID, namespace)
+	serviceName, err := common.GetOpenSearchService(templateID, namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenSearch service: %w", err)
 	}

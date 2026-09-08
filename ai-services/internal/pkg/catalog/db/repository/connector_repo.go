@@ -33,10 +33,12 @@ type ConnectorFilters struct {
 	Offset   int                    // Optional: number of records to skip
 }
 
-// ConnectorUpdateFields holds the credential metadata fields that may be changed after creation.
-// Only the metadata JSONB column is mutable; name, type, and provider are immutable.
+// ConnectorUpdateFields holds the fields that may be changed after creation.
+// Name, type, and provider are immutable; metadata, status, and message are mutable.
 type ConnectorUpdateFields struct {
 	Metadata map[string]any
+	Status   models.ConnectorStatus
+	Message  string
 }
 
 // ConnectorRepository defines the interface for connector data operations.
@@ -53,6 +55,10 @@ type ConnectorRepository interface {
 	// raw value to any API response.
 	// Returns ErrConnectorNotFound if the row does not exist.
 	GetByID(ctx context.Context, id uuid.UUID, includeCreds bool) (*models.Connector, error)
+	// GetByIDs fetches multiple connectors by their UUIDs in a single query and returns them
+	// as a map keyed by connector ID. Connectors not found in the DB are simply absent from
+	// the map. Sensitive metadata is never included.
+	GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]models.Connector, error)
 	// List returns a page of connectors matching the optional filters.
 	// Sensitive metadata is never included in the returned structs.
 	List(ctx context.Context, filters *ConnectorFilters) ([]models.Connector, error)
@@ -139,7 +145,6 @@ func scanConnectorWithCreds(rows pgx.Rows) (*models.Connector, error) {
 
 // Insert creates a new connector row, populating the ID, CreatedAt, and UpdatedAt fields on success.
 // Sensitive fields inside connector.Metadata are stored as-is for now.
-// TODO: encrypt sensitive fields inside connector.Metadata before write.
 func (r *connectorRepo) Insert(ctx context.Context, connector *models.Connector) error {
 	if connector.ID == uuid.Nil {
 		connector.ID = uuid.New()
@@ -202,7 +207,6 @@ func (r *connectorRepo) GetByName(ctx context.Context, name string) (*models.Con
 // Pass includeCreds=false for API responses (metadata omitted).
 // Pass includeCreds=true for internal paths that need credentials (sync job, Digitize propagation);
 // the caller must decrypt sensitive fields in-memory and must never forward the value to a response.
-// TODO: decrypt sensitive fields in Metadata when includeCreds is true.
 func (r *connectorRepo) GetByID(ctx context.Context, id uuid.UUID, includeCreds bool) (*models.Connector, error) {
 	var colList string
 	if includeCreds {
@@ -232,6 +236,40 @@ func (r *connectorRepo) GetByID(ctx context.Context, id uuid.UUID, includeCreds 
 	}
 
 	return scanConnector(rows)
+}
+
+// GetByIDs fetches all connectors whose IDs are in ids in a single query.
+// Returns a map keyed by connector ID; IDs absent from the DB are simply not present.
+// Sensitive metadata is never selected.
+func (r *connectorRepo) GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]models.Connector, error) {
+	if len(ids) == 0 {
+		return make(map[uuid.UUID]models.Connector), nil
+	}
+
+	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors WHERE id = ANY($1)`
+
+	rows, err := r.pool.Query(ctx, query, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connectors by IDs: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID]models.Connector, len(ids))
+
+	for rows.Next() {
+		c, err := scanConnector(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		result[c.ID] = *c
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating connectors by IDs: %w", err)
+	}
+
+	return result, nil
 }
 
 // buildWhereClause constructs the WHERE clause string and positional arguments from the
@@ -325,7 +363,6 @@ func (r *connectorRepo) List(ctx context.Context, filters *ConnectorFilters) ([]
 // Update replaces the metadata JSONB column for the given connector.
 // Name, type, and provider are immutable and are never touched here.
 // Sensitive fields inside fields.Metadata are stored as-is for now.
-// TODO: encrypt sensitive fields inside fields.Metadata before write.
 func (r *connectorRepo) Update(ctx context.Context, id uuid.UUID, fields ConnectorUpdateFields) (*models.Connector, error) {
 	metadataJSON, err := json.Marshal(fields.Metadata)
 	if err != nil {
@@ -334,11 +371,11 @@ func (r *connectorRepo) Update(ctx context.Context, id uuid.UUID, fields Connect
 
 	query := `
 		UPDATE connectors
-		SET metadata = $1, updated_at = NOW()
-		WHERE id = $2
+		SET metadata = $1, status = $2, message = $3, updated_at = NOW()
+		WHERE id = $4
 		RETURNING ` + nonSensitiveColumns
 
-	rows, err := r.pool.Query(ctx, query, metadataJSON, id)
+	rows, err := r.pool.Query(ctx, query, metadataJSON, fields.Status, sql.NullString{String: fields.Message, Valid: fields.Message != ""}, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update connector: %w", err)
 	}

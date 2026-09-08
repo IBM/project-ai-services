@@ -11,7 +11,7 @@ document status transitions for digitization jobs.
 import time
 from pathlib import Path
 
-from common.misc_utils import get_logger, get_utc_timestamp
+from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
 from digitize.db.manager import db_manager
 from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
@@ -117,6 +117,13 @@ def digitize(
     except _DeadlineExceeded as exc:
         _fail(str(exc))
         return
+
+    finally:
+        # Remove the staging directory once the full digitization pipeline has
+        # finished (success, failure, timeout, or cancellation).  _run_digitize
+        # also calls cleanup_staging_directory in its own finally — that call is
+        # idempotent and will be a no-op once the directory is already gone.
+        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
     if task is None or task.status == ConversionTaskStatus.FAILED:
         _fail((task.error or "Conversion failed") if task else "Task row missing")
