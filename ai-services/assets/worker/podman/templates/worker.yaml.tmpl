@@ -69,7 +69,7 @@ spec:
           mountPath: /etc/secret/worker-mtls-encryption-secret
           readOnly: true
         - name: worker-tls
-          mountPath: /var/lib/ai-services/worker-tls
+          mountPath: /data/worker-tls
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
       resources:

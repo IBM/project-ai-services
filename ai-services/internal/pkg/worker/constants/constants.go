@@ -25,13 +25,13 @@ const (
 	// credentials are stored. The host-side `worker join` command also writes
 	// to this path (outside a container). Single source of truth shared between
 	// the join, deploy, and uninstall packages.
-	WorkerTLSDir = "/var/lib/ai-services/worker-tls"
+	WorkerTLSDir = "/data/worker-tls"
 
 	// GatewayPKIDir is the mount path inside the catalog container where gateway
 	// PKI files (CA key/cert, server key/cert) are persisted. Backed by the
 	// gateway-pki podman PVC. Single source of truth shared between gateway and
 	// the catalog pod template.
-	GatewayPKIDir = "/var/lib/ai-services/gateway-pki"
+	GatewayPKIDir = "/data/gateway-pki"
 
 	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod.
 	WorkerCaddyPodName = "ai-services--caddy"

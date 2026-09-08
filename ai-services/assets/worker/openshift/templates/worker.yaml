@@ -61,7 +61,7 @@ spec:
               cpu: "{{ .Values.worker.resources.limits.cpu }}"
           volumeMounts:
             - name: worker-tls
-              mountPath: /var/lib/ai-services/worker-tls
+              mountPath: /data/worker-tls
       volumes:
         - name: worker-tls
           persistentVolumeClaim:
