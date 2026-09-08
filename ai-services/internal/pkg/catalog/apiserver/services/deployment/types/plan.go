@@ -21,6 +21,12 @@ type DeploymentPlan struct {
 	// workerconstants.LocalWorkerName for local deployments, or the actual
 	// worker name for remote ones.
 	WorkerName string
+	// RuntimeType is the resolved runtime for this deployment (e.g. "podman" or
+	// "openshift"). For worker deployments it is the worker's registered runtime;
+	// for local deployments it is the server's configured runtime. Set by
+	// PlanDeployment and used as the single source of truth by the executor and
+	// deployer, avoiding any implicit reads of vars.RuntimeFactory.
+	RuntimeType string
 }
 
 // ComponentPlan represents a single component deployment.

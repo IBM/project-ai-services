@@ -17,7 +17,7 @@ from pathlib import Path
 from rapidfuzz import fuzz
 
 from common.lang_utils import LanguageCodes, get_prompt_for_language
-from common.llm_utils import summarize_and_classify_tables, tqdm_wrapper
+from common.llm_utils import summarize_and_classify_tables
 from common.misc_utils import get_logger
 from digitize.settings import settings
 
@@ -283,14 +283,19 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     from digitize.parsing.docx import recover_table_caption_from_body_context
 
     table_dict = {}
-    for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content for '{doc_path}'")):
+    for table_ix, table in enumerate(converted_doc.tables):
         table_dict[table_ix] = {}
 
         # Use Markdown format for better LLM understanding
         raw_markdown = table.export_to_markdown(doc=converted_doc)
         caption = table.caption_text(doc=converted_doc)
 
-        if not caption:
+        # DOCX only: caption_text() returns empty for most Word tables because
+        # Docling rarely populates captions[]. The recovery function scans nearby
+        # body/parent refs for a matching "Table X-Y ..." paragraph.
+        # Skipped for PDFs: Docling stores PDF captions in captions[] (already
+        # handled above), and the section-header fallback would give false positives.
+        if not caption and is_docx:
             caption = recover_table_caption_from_body_context(converted_doc, table_ix)
 
         # Clean the markdown to fix parser glitches and recover hidden captions

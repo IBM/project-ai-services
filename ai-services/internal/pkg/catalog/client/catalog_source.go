@@ -38,22 +38,26 @@ type CatalogSource interface {
 	// LoadService returns the full details of a single service.
 	LoadService(ctx context.Context, id string) (*types.Service, error)
 	// GetServiceParams returns the JSON schema for a service's parameters.
-	GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error)
+	// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
+	GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error)
 	// GetComponentProviderParams returns the JSON schema for a component provider's parameters.
-	GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error)
+	// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
+	GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error)
 }
 
 // NewCatalogSource builds a CatalogSource that tries the catalog API first and
-// falls back to the provided embedded catalog when the user is not logged in.
+// falls back to the local embedded catalog when the user is not logged in.
 // Any other client-init error (bad config, etc.) is returned to the caller.
 //
 // If the API is reachable but returns a non-connectivity error (e.g. 4xx/5xx),
 // the error is propagated so the caller sees it rather than silently falling
 // back to stale embedded data.
-//
-// embedded must not be nil; it is consulted lazily — only when an API call
-// fails with a connectivity error, or when the user is not logged in.
-func NewCatalogSource(ctx context.Context, embedded EmbeddedCatalog) (CatalogSource, error) {
+func NewCatalogSource(ctx context.Context) (CatalogSource, error) {
+	embedded, err := newEmbeddedCatalog()
+	if err != nil {
+		return nil, err
+	}
+
 	apiClient, err := NewApplicationClient(ctx)
 	if err != nil {
 		if !errors.Is(err, config.ErrNotLoggedIn) {
@@ -70,6 +74,18 @@ func NewCatalogSource(ctx context.Context, embedded EmbeddedCatalog) (CatalogSou
 		api:      apiClient,
 		embedded: embedded,
 	}, nil
+}
+
+// newEmbeddedCatalog creates a local CatalogProvider with no bundle DB.
+// It is the embedded fallback used when the catalog API is unreachable or
+// the user is not logged in.
+func newEmbeddedCatalog() (EmbeddedCatalog, error) {
+	provider, err := catalog.NewCatalogProvider(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedded catalog provider: %w", err)
+	}
+
+	return provider, nil
 }
 
 // --------------------------------------------------------------------------
@@ -133,23 +149,33 @@ func (s *apiSource) LoadService(ctx context.Context, id string) (*types.Service,
 	return svc, err
 }
 
-func (s *apiSource) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
-	schema, err := s.api.GetServiceParams(ctx, serviceID)
+func (s *apiSource) GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error) {
+	schema, err := s.api.GetServiceParams(ctx, serviceID, runtimeType)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetServiceParams unreachable, falling back to embedded: %v", err)
 
-		return s.embedded.GetServiceParams(ctx, serviceID)
+		scopedCatalog, scopeErr := s.embedded.WithRuntime(runtimeType)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+
+		return scopedCatalog.GetServiceParams(ctx, serviceID)
 	}
 
 	return schema, err
 }
 
-func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
-	schema, err := s.api.GetComponentProviderParams(ctx, componentType, providerID)
+func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error) {
+	schema, err := s.api.GetComponentProviderParams(ctx, componentType, providerID, runtimeType)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API GetComponentProviderParams unreachable, falling back to embedded: %v", err)
 
-		return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
+		scopedCatalog, scopeErr := s.embedded.WithRuntime(runtimeType)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+
+		return scopedCatalog.GetComponentProviderParams(ctx, componentType, providerID)
 	}
 
 	return schema, err
@@ -168,8 +194,7 @@ type EmbeddedCatalog interface {
 	ListComponents() ([]types.Component, error)
 	LoadArchitecture(id string) (*types.Architecture, error)
 	LoadService(id string) (*types.Service, error)
-	GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error)
-	GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error)
+	WithRuntime(runtimeType string) (*catalog.CatalogProvider, error)
 }
 
 type embeddedOnlySource struct {
@@ -196,12 +221,22 @@ func (s *embeddedOnlySource) LoadService(_ context.Context, id string) (*types.S
 	return loadServiceFromEmbedded(s.embedded, id)
 }
 
-func (s *embeddedOnlySource) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
-	return s.embedded.GetServiceParams(ctx, serviceID)
+func (s *embeddedOnlySource) GetServiceParams(ctx context.Context, serviceID, runtimeType string) (map[string]any, error) {
+	scopedCatalog, err := s.embedded.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	return scopedCatalog.GetServiceParams(ctx, serviceID)
 }
 
-func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
-	return s.embedded.GetComponentProviderParams(ctx, componentType, providerID)
+func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error) {
+	scopedCatalog, err := s.embedded.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	return scopedCatalog.GetComponentProviderParams(ctx, componentType, providerID)
 }
 
 // --------------------------------------------------------------------------

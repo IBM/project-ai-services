@@ -31,8 +31,8 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	// Collect and hash password
-	// If secret exist passwordHash will be empty
+	// Collect and hash password.
+	// If secret exists passwordHash will be empty.
 	passwordHash, err := catalogUtils.CollectAndHashPassword(ctx, deployCtx.Runtime)
 	if err != nil {
 		return err
@@ -119,20 +119,14 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("failed to extract route infos: %w", err)
 	}
 
-	// Register routes with Caddy and get the registered route domains
-	routeDomains, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
+	// Register routes with Caddy and get the registered route URLs
+	routeURLs, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
-	// Get Caddy HTTPS port for next steps display
-	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, deployCtx.Runtime)
-	if err != nil {
-		return fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
-	}
-
 	// Print next steps with proxy route information
-	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeDomains, httpsPort); err != nil {
+	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeURLs); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}

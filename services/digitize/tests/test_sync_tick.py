@@ -30,6 +30,8 @@ _process_new_files
   - cancellation checkpoint fires between download and ingest
   - RuntimeError raised at end only when batch_failed=True
   - multiple batches all succeed
+  - increment_completed_files called with completed doc count after each batch
+  - increment_completed_files not called when all docs in batch fail
 
 _delete_orphans
   - removes checksum row and deletes doc when remaining == 0
@@ -219,12 +221,10 @@ class TestProcessNewFiles:
 
         stack.enter_context(patch(f"{DB_MODULE}.add_connector_checksum_entry"))
         stack.enter_context(
-            patch(f"{DB_MODULE}.initialize_job_state", return_value={"report.pdf": "doc-1"})
+            patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock,
+                  return_value={"report.pdf": "doc-1"})
         )
         stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid-1"))
-        stack.enter_context(
-            patch(f"{DB_MODULE}.ingest", side_effect=ingest_raises)
-        )
         # _wait_for_job polls with asyncio.sleep(_JOB_POLL_INTERVAL=10s) until the
         # job reaches a terminal state.  With get_job mocked to return None the
         # status never becomes terminal → infinite sleep → test hangs.
@@ -246,6 +246,7 @@ class TestProcessNewFiles:
         # validate_document_file reads staged bytes from disk; bypass it in unit tests
         # since the scanner is a MagicMock and no real files are written to disk.
         stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
+        stack.enter_context(patch(f"{DB_MODULE}.increment_completed_files"))
         return stack
 
     def test_happy_path_completes_without_error(self):
@@ -279,10 +280,10 @@ class TestProcessNewFiles:
             mock_settings.digitize.staging_dir.__truediv__ = MagicMock(return_value=MagicMock())
             stack.enter_context(patch(f"{DB_MODULE}.add_connector_checksum_entry"))
             stack.enter_context(
-                patch(f"{DB_MODULE}.initialize_job_state", return_value={"b.pdf": "doc-2"})
+                patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock,
+                      return_value={"b.pdf": "doc-2"})
             )
             stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid"))
-            stack.enter_context(patch(f"{DB_MODULE}.ingest"))
             stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
             stack.enter_context(
                 patch(
@@ -297,6 +298,7 @@ class TestProcessNewFiles:
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
             )
+            stack.enter_context(patch(f"{DB_MODULE}.increment_completed_files"))
             # Force batch_size=1 so the two files land in separate batches
             stack.enter_context(patch.object(_st_mod, "_BATCH_SIZE", 1))
 
@@ -366,10 +368,10 @@ class TestProcessNewFiles:
             mock_settings = stack.enter_context(patch(f"{DB_MODULE}.settings"))
             mock_settings.digitize.staging_dir.__truediv__ = MagicMock(return_value=MagicMock())
             stack.enter_context(
-                patch(f"{DB_MODULE}.initialize_job_state", return_value={"a.pdf": "doc-1", "b.pdf": "doc-2"})
+                patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock,
+                      return_value={"a.pdf": "doc-1", "b.pdf": "doc-2"})
             )
             stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid"))
-            stack.enter_context(patch(f"{DB_MODULE}.ingest"))
             stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_job_document_stats", return_value=partial_stats)
@@ -382,6 +384,7 @@ class TestProcessNewFiles:
                 patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
             )
             stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
+            stack.enter_context(patch(f"{DB_MODULE}.increment_completed_files"))
             with patch(f"{DB_MODULE}.add_connector_checksum_entry") as mock_add:
                 with pytest.raises(RuntimeError, match="One or more documents failed to sync"):
                     asyncio.run(_process_new_files(1, "conn-1", "conn-name", scanner, ingest_list))
@@ -497,13 +500,13 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=0), \
+                   new_callable=AsyncMock, return_value=[]), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             # must not raise despite close() failing
@@ -517,13 +520,13 @@ class TestRunTick:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=0), \
+                   new_callable=AsyncMock, return_value=[]), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=1))
@@ -609,7 +612,7 @@ class TestCheckInterruptCall:
             assert result == InterruptType.DELETE_CONNECTOR
 
     def test_returns_sync_cancel_when_cancel_pending_on_log(self):
-        """CANCEL_PENDING is read from connector_sync_logs, not from connectors.sync_status."""
+        """CANCEL_PENDING is read from connector_sync_logs, not from connectors.status."""
         with patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.CANCEL_PENDING):
             result = _check_interrupt_call("conn-1", sync_seq=5)
@@ -683,7 +686,10 @@ class TestRunTickCancellation:
         with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.DELETE_PENDING), \
-             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close:
+             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
+             patch("digitize.db.manager.db_manager") as mock_db_mgr, \
+             patch("digitize.api.v1.connectors._run_teardown", new_callable=AsyncMock):
+            mock_db_mgr.delete_conversion_tasks_for_connector.return_value = 0
             with pytest.raises(asyncio.CancelledError):
                 asyncio.run(run_tick("conn-1", sync_seq=10))
 
@@ -700,18 +706,43 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
              patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
              patch("digitize.connectors.sync_tick._process_new_files",
-                   new_callable=AsyncMock, return_value=0), \
+                   new_callable=AsyncMock, return_value=[]), \
              patch("digitize.connectors.sync_tick._delete_orphans",
                    new_callable=AsyncMock, return_value=0):
             asyncio.run(run_tick("conn-1", sync_seq=11))  # must not raise
 
         assert mock_close.call_args.kwargs["status"] == SyncLogStatus.COMPLETED
+
+    def test_invalid_files_fail_tick_with_formatted_message(self):
+        """When _process_new_files returns a non-empty list, run_tick must close
+        the sync log as FAILED with the message 'Invalid file(s) detected from source - ...'."""
+        connector = _connector()
+        mock_scanner = self._make_scanner()
+
+        with patch(f"{DB_MODULE}.get_connector_by_id", return_value=connector), \
+             patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
+             patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
+             patch(f"{DB_MODULE}.update_sync_log"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
+             patch(f"{DB_MODULE}.get_connector_sync_status", return_value=ConnectorStatus.SYNCING), \
+             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED), \
+             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
+             patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner), \
+             patch("digitize.connectors.sync_tick._process_new_files",
+                   new_callable=AsyncMock, return_value=["src/bad.pdf", "src/corrupt.docx"]), \
+             patch("digitize.connectors.sync_tick._delete_orphans",
+                   new_callable=AsyncMock, return_value=0):
+            asyncio.run(run_tick("conn-1", sync_seq=5))
+
+        args = mock_close.call_args.kwargs
+        assert args["status"] == SyncLogStatus.FAILED
+        assert args["error"] == "Invalid file(s) detected from source - src/bad.pdf, src/corrupt.docx"
 
     def test_cancelled_mid_process_closes_log(self):
         """_check_interrupt_call fires inside _process_new_files loop."""
@@ -731,7 +762,7 @@ class TestRunTickCancellation:
              patch(f"{DB_MODULE}.list_connector_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.list_all_checksums", return_value=[]), \
              patch(f"{DB_MODULE}.update_sync_log"), \
-             patch(f"{DB_MODULE}.update_connector_total_files"), \
+             patch(f"{DB_MODULE}.update_connector_total_files_and_message"), \
              patch(f"{DB_MODULE}._check_interrupt_call", side_effect=_maybe_cancel), \
              patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector") as mock_close, \
              patch("digitize.connectors.sync_tick.build_scanner", return_value=mock_scanner):
@@ -787,8 +818,10 @@ class TestHandleInterrupt:
 
     def test_delete_connector_calls_cancel_tick_and_teardown(self):
         with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
+             patch("digitize.db.manager.db_manager") as mock_db_mgr, \
              patch("digitize.api.v1.connectors._run_teardown",
                    new_callable=AsyncMock) as mock_teardown:
+            mock_db_mgr.delete_conversion_tasks_for_connector.return_value = 0
             asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
                                           interrupt_type=InterruptType.DELETE_CONNECTOR))
         mock_cancel.assert_called_once_with(3, "conn-B")
@@ -797,8 +830,10 @@ class TestHandleInterrupt:
     def test_delete_connector_does_not_call_sweep(self):
         """DELETE_CONNECTOR must not call _sweep_staging_dir."""
         with patch(f"{DB_MODULE}._cancel_tick"), \
+             patch("digitize.db.manager.db_manager") as mock_db_mgr, \
              patch("digitize.api.v1.connectors._run_teardown", new_callable=AsyncMock), \
              patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep:
+            mock_db_mgr.delete_conversion_tasks_for_connector.return_value = 0
             asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
                                           interrupt_type=InterruptType.DELETE_CONNECTOR))
         mock_sweep.assert_not_called()
@@ -836,10 +871,14 @@ class TestHandleInterrupt:
 # ---------------------------------------------------------------------------
 
 class TestWaitForJob:
-    def _patches(self, job_statuses: list, interrupt_returns=None):
+    _EMPTY_STATS = {"completed_docs": [], "failed_docs": [], "total_docs": 0,
+                    "failed_count": 0, "completed_count": 0}
+
+    def _patches(self, job_statuses: list, interrupt_returns=None, stats_returns=None):
         """
         Returns an ExitStack that patches asyncio.sleep (no-op), get_job to
-        return successive statuses, and _check_interrupt_call.
+        return successive statuses, _check_interrupt_call, get_job_document_stats,
+        and increment_completed_files.
         """
         from contextlib import ExitStack
 
@@ -858,6 +897,15 @@ class TestWaitForJob:
             patch(f"{DB_MODULE}._check_interrupt_call",
                   side_effect=lambda cid, seq: next(interrupt_iter))
         )
+
+        if stats_returns is None:
+            stats_returns = [self._EMPTY_STATS] * 20
+        stats_iter = iter(stats_returns + [self._EMPTY_STATS] * 20)
+        stack.enter_context(
+            patch(f"{DB_MODULE}.get_job_document_stats",
+                  side_effect=lambda jid: next(stats_iter))
+        )
+        stack.enter_context(patch(f"{DB_MODULE}.increment_completed_files"))
         return stack
 
     def test_exits_immediately_on_first_terminal_status(self):
@@ -902,8 +950,43 @@ class TestWaitForJob:
                 patch(f"{DB_MODULE}._check_interrupt_call",
                       side_effect=lambda cid, seq: next(interrupt_iter))
             )
+            stack.enter_context(
+                patch(f"{DB_MODULE}.get_job_document_stats", return_value=self._EMPTY_STATS)
+            )
+            stack.enter_context(patch(f"{DB_MODULE}.increment_completed_files"))
             with pytest.raises(asyncio.CancelledError):
                 asyncio.run(_wait_for_job("job-1", "conn-1", 5))
+
+    def test_increments_on_each_poll_as_docs_complete(self):
+        """increment_completed_files is called once per poll where new completions appear."""
+        # poll 1: doc-1 completes; poll 2: doc-2 completes + job done
+        stats_seq = [
+            {"completed_docs": [{"id": "doc-1"}], "failed_docs": [], "total_docs": 2,
+             "failed_count": 0, "completed_count": 1},
+            {"completed_docs": [{"id": "doc-1"}, {"id": "doc-2"}], "failed_docs": [],
+             "total_docs": 2, "failed_count": 0, "completed_count": 2},
+        ]
+        with self._patches(["in_progress", "completed"], stats_returns=stats_seq):
+            with patch(f"{DB_MODULE}.increment_completed_files") as mock_inc:
+                asyncio.run(_wait_for_job("job-1", "conn-1", 1))
+
+        assert mock_inc.call_count == 2
+        mock_inc.assert_any_call("conn-1", 1, count=1)  # poll 1: doc-1
+
+    def test_does_not_double_count_already_seen_completions(self):
+        """A doc that completed on poll N must not be counted again on poll N+1."""
+        # Both polls return the same completed doc (count stays at 1).
+        stats_seq = [
+            {"completed_docs": [{"id": "doc-1"}], "failed_docs": [], "total_docs": 1,
+             "failed_count": 0, "completed_count": 1},
+            {"completed_docs": [{"id": "doc-1"}], "failed_docs": [], "total_docs": 1,
+             "failed_count": 0, "completed_count": 1},
+        ]
+        with self._patches(["in_progress", "completed"], stats_returns=stats_seq):
+            with patch(f"{DB_MODULE}.increment_completed_files") as mock_inc:
+                asyncio.run(_wait_for_job("job-1", "conn-1", 1))
+
+        mock_inc.assert_called_once_with("conn-1", 1, count=1)
 
 
 # ---------------------------------------------------------------------------
@@ -923,10 +1006,10 @@ class TestProcessNewFilesExtra:
         mock_settings.digitize.staging_dir.__truediv__ = MagicMock(return_value=MagicMock())
         stack.enter_context(patch(f"{DB_MODULE}.add_connector_checksum_entry"))
         stack.enter_context(
-            patch(f"{DB_MODULE}.initialize_job_state", return_value={"report.pdf": "doc-1"})
+            patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock,
+                  return_value={"report.pdf": "doc-1"})
         )
         stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid-1"))
-        stack.enter_context(patch(f"{DB_MODULE}.ingest"))
         stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
         stack.enter_context(
             patch(f"{DB_MODULE}.get_job_document_stats", return_value=self._completed_stats())
@@ -939,6 +1022,7 @@ class TestProcessNewFilesExtra:
             patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
         )
         stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
+        stack.enter_context(patch(f"{DB_MODULE}.increment_completed_files"))
         return stack
 
     def test_empty_ingest_list_is_noop(self):
@@ -991,10 +1075,10 @@ class TestProcessNewFilesExtra:
             mock_settings.digitize.staging_dir.__truediv__ = MagicMock(return_value=MagicMock())
             stack.enter_context(patch(f"{DB_MODULE}.add_connector_checksum_entry"))
             stack.enter_context(
-                patch(f"{DB_MODULE}.initialize_job_state", return_value={"file.pdf": "doc-1"})
+                patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock,
+                      return_value={"file.pdf": "doc-1"})
             )
             stack.enter_context(patch(f"{DB_MODULE}.generate_uuid", return_value="job-uuid-1"))
-            stack.enter_context(patch(f"{DB_MODULE}.ingest"))
             stack.enter_context(patch(f"{DB_MODULE}._wait_for_job", new_callable=AsyncMock))
             stack.enter_context(
                 patch(f"{DB_MODULE}.get_job_document_stats", return_value=self._completed_stats("file.pdf", "doc-1"))
@@ -1007,6 +1091,7 @@ class TestProcessNewFilesExtra:
                 patch(f"{DB_MODULE}.get_sync_log_status", return_value=SyncLogStatus.STARTED)
             )
             stack.enter_context(patch(f"{DB_MODULE}.validate_document_file"))
+            stack.enter_context(patch(f"{DB_MODULE}.increment_completed_files"))
             stack.enter_context(
                 patch(f"{DB_MODULE}._check_interrupt_call", side_effect=_interrupt)
             )
@@ -1035,9 +1120,8 @@ class TestProcessNewFilesExtra:
 
         with self._base_patches():
             with patch.object(_st_mod, "_BATCH_SIZE", 1), \
-                 patch(f"{DB_MODULE}.initialize_job_state", side_effect=[
-                     {"a.pdf": "doc-1"}, {"b.pdf": "doc-2"}
-                 ]), \
+                 patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock,
+                       side_effect=[{"a.pdf": "doc-1"}, {"b.pdf": "doc-2"}]), \
                  patch(f"{DB_MODULE}.get_job_document_stats", side_effect=[
                      self._completed_stats("a.pdf", "doc-1"),
                      self._completed_stats("b.pdf", "doc-2"),
@@ -1053,13 +1137,11 @@ class TestProcessNewFilesExtra:
 
         with self._base_patches():
             with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")), \
-                 patch(f"{DB_MODULE}.initialize_job_state") as mock_init, \
-                 patch(f"{DB_MODULE}.ingest") as mock_ingest:
+                 patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock) as mock_init:
                 asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
                                                [("remote/fake.pdf", "ck1")]))
 
         mock_init.assert_not_called()
-        mock_ingest.assert_not_called()
 
     def test_all_files_invalid_does_not_set_batch_failed(self):
         """A batch where all files are skipped due to invalid format must not raise RuntimeError."""
@@ -1069,9 +1151,23 @@ class TestProcessNewFilesExtra:
 
         with self._base_patches():
             with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")):
-                # must not raise
-                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
-                                               [("remote/fake.pdf", "ck1")]))
+                # must not raise; returns the list of invalid remote paths
+                result = asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                                        [("remote/fake.pdf", "ck1")]))
+        assert result == ["remote/fake.pdf"]
+
+    def test_all_files_invalid_returns_remote_paths(self):
+        """_process_new_files returns the list of invalid remote paths, not a count."""
+        scanner = MagicMock()
+        scanner.download_to.return_value = "local_hash"
+        scanner.verify_integrity.return_value = True
+
+        with self._base_patches():
+            with patch(f"{DB_MODULE}.validate_document_file", side_effect=ValueError("bad")):
+                result = asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                                        [("a/one.pdf", "ck1"), ("b/two.pdf", "ck2")]))
+
+        assert result == ["a/one.pdf", "b/two.pdf"]
 
     def test_mixed_batch_only_valid_files_ingested(self):
         """In a mixed batch, only the valid file reaches ingest; the invalid one is deleted."""
@@ -1085,16 +1181,18 @@ class TestProcessNewFilesExtra:
 
         with self._base_patches():
             with patch(f"{DB_MODULE}.validate_document_file", side_effect=_validate), \
-                 patch(f"{DB_MODULE}.initialize_job_state",
+                 patch(f"{DB_MODULE}.initialize_and_launch", new_callable=AsyncMock,
                        return_value={"works.pdf": "doc-1"}) as mock_init:
-                asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
-                                               [("works.pdf", "ck1"), ("fake.pdf", "ck2")]))
+                result = asyncio.run(_process_new_files(1, "conn-1", "name", scanner,
+                                                        [("works.pdf", "ck1"), ("fake.pdf", "ck2")]))
 
-        # initialize_job_state must only see the valid file
+        # initialize_and_launch must only see the valid file
         mock_init.assert_called_once()
         call_args = mock_init.call_args
         assert call_args is not None
-        assert call_args.kwargs["documents_info"] == ["works.pdf"]
+        assert call_args.kwargs["filenames"] == ["works.pdf"]
+        # invalid file's remote path must be in the returned list
+        assert result == ["fake.pdf"]
 
 
 # ---------------------------------------------------------------------------

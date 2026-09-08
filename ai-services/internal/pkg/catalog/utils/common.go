@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/project-ai-services/ai-services/assets"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -17,6 +17,7 @@ import (
 	helmchart "helm.sh/helm/v4/pkg/chart"
 	"helm.sh/helm/v4/pkg/chart/loader/archive"
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
+	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
 const uninstallHelmTimeout = 5 * time.Minute
@@ -110,16 +111,16 @@ func SanitizeFilePath(path string) string {
 	return cleanPath
 }
 
-// LoadChartFromCatalogFS walks assets.CatalogFS at catalogPath and returns a Helm chart.
-func LoadChartFromCatalogFS(catalogPath string) (helmchart.Charter, error) {
+// LoadChartFromFS walks the given filesystem at catalogPath and returns a Helm chart.
+func LoadChartFromFS(fsys fs.FS, catalogPath string) (helmchart.Charter, error) {
 	var files []*archive.BufferedFile
 
-	err := fs.WalkDir(&assets.CatalogFS, catalogPath, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, catalogPath, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
 
-		data, err := assets.CatalogFS.ReadFile(p)
+		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
@@ -142,18 +143,17 @@ func HelmUninstall(ctx context.Context, namespace, release string) error {
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	exists, err := helmClient.IsReleaseExist(release)
-	if err != nil {
-		return fmt.Errorf("failed to check '%s' release existence: %w", release, err)
+	if err := helmClient.Uninstall(release, &helm.UninstallOpts{Timeout: uninstallHelmTimeout}); err != nil {
+		if errors.Is(err, driver.ErrReleaseNotFound) {
+			logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
+
+			return nil
+		}
+
+		return err
 	}
 
-	if !exists {
-		logger.InfofCtx(ctx, "Skipping uninstall of '%s': no release found.", release)
-
-		return nil
-	}
-
-	return helmClient.Uninstall(release, &helm.UninstallOpts{Timeout: uninstallHelmTimeout})
+	return nil
 }
 
 // Made with Bob

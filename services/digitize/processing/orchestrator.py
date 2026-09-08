@@ -16,10 +16,7 @@ import time
 from pathlib import Path
 
 from docling_core.types.doc.document import DoclingDocument
-from sentence_splitter import SentenceSplitter
-
-from common.lang_utils import LanguageCodes, to_sentence_splitter_lang
-from common.llm_utils import tqdm_wrapper
+from common.lang_utils import LanguageCodes, split_sentences, to_sentence_splitter_lang
 from common.misc_utils import (
     get_logger,
     get_utc_timestamp,
@@ -65,9 +62,7 @@ def split_text_into_token_chunks(text, emb_endpoint, max_tokens=512, overlap=50,
     Returns:
         List of text chunks
     """
-    logger.debug(f"Using language for chunking: {language}")
-
-    sentences = SentenceSplitter(language=language).split(text)
+    sentences = split_sentences(text, lang=language)
     chunks = []
     current_chunk = []
     current_token_count = 0
@@ -173,7 +168,7 @@ def chunk_text(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None, 
             current_subsection = None
             current_subsubsection = None
 
-            for idx, block in enumerate(tqdm_wrapper(data, desc=f"Chunking text from '{input_path}'")):
+            for idx, block in enumerate(data):
                 label = block.get("label")
                 text = block.get("text", "").strip()
                 page_no = block.get("page", 0)
@@ -265,7 +260,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
         if tab_data:
             tab_data_list = list(tab_data.values())
 
-            for block in tqdm_wrapper(tab_data_list, desc=f"Chunking tables of '{input_path}'"):
+            for block in tab_data_list:
                 caption = block.get('caption', '')
                 summary = block.get("summary", '')
                 page_number = block.get('page_number')
@@ -315,9 +310,9 @@ def chunk_single_file(input_path, table_json_path, out_path, emb_endpoint, max_t
     """
     t0 = time.time()
     try:
-        sentence_splitter_lang = to_sentence_splitter_lang(language)
-        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, sentence_splitter_lang)
-        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, sentence_splitter_lang)
+        splitter_lang = to_sentence_splitter_lang(language)
+        text_chunk_json, text_chunk_time = chunk_text(input_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
+        table_chunk_json, table_chunk_time = chunk_tables(table_json_path, out_path, emb_endpoint, max_tokens, doc_id, splitter_lang)
         total_time = time.time() - t0
         return text_chunk_json, table_chunk_json, total_time
     except Exception as e:

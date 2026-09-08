@@ -254,12 +254,12 @@ class TestLifespanRecoveryDeletePending:
         # Mock connectors list
         mock_conn_active = MagicMock()
         mock_conn_active.id = "conn-active"
-        mock_conn_active.sync_status = ConnectorStatus.UP_TO_DATE
+        mock_conn_active.status = ConnectorStatus.UP_TO_DATE
         mock_conn_active.sync_interval_seconds = 300
 
         mock_conn_delete = MagicMock()
         mock_conn_delete.id = "conn-delete"
-        mock_conn_delete.sync_status = ConnectorStatus.DELETE_PENDING
+        mock_conn_delete.status = ConnectorStatus.DELETE_PENDING
         mock_conn_delete.sync_interval_seconds = 300
 
         mock_connectors = [mock_conn_active, mock_conn_delete]

@@ -27,13 +27,21 @@ func (p *CatalogProvider) GetArchitectureImages(ctx context.Context, id string) 
 		return nil, fmt.Errorf("%w: architecture '%s'", ErrCatalogItemNotFound, id)
 	}
 
+	runtimeType, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+	scopedProvider, err := p.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, err
+	}
 	allImages := p.initBaseImages()
 
 	if err := p.addCatalogInfrastructureImages(ctx, allImages); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to collect catalog infrastructure images: %v", err)
 	}
 
-	if err := p.collectArchitectureImages(ctx, arch.Services, allImages); err != nil {
+	if err := scopedProvider.collectArchitectureImages(ctx, arch.Services, allImages); err != nil {
 		return nil, err
 	}
 
@@ -49,13 +57,21 @@ func (p *CatalogProvider) GetServiceImages(ctx context.Context, id string) ([]st
 		return nil, fmt.Errorf("%w: service '%s'", ErrCatalogItemNotFound, id)
 	}
 
+	runtimeType, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+	scopedProvider, err := p.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, err
+	}
 	allImages := p.initBaseImages()
 
 	if err := p.addCatalogInfrastructureImages(ctx, allImages); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to collect catalog infrastructure images: %v", err)
 	}
 
-	if err := p.collectServiceWithDependencies(ctx, id, service.Dependencies, allImages); err != nil {
+	if err := scopedProvider.collectServiceWithDependencies(ctx, id, service.Dependencies, allImages); err != nil {
 		return nil, err
 	}
 

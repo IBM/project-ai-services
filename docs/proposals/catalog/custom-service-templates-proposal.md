@@ -385,7 +385,7 @@ Five additional catalog-read endpoints are added under the authenticated `v1` ca
 | `GET` | `/api/v1/services/:id/images` | Return the complete list of container images required to deploy a service and all its component dependencies (both embedded and custom bundle services). The response includes catalog asset images (tool image and catalog infrastructure images). Returns `404` if `:id` is not a known service. |
 | `GET` | `/api/v1/architectures/:id/images` | Return the complete list of container images required to deploy an architecture and all its services and component dependencies (both embedded and custom bundle architectures). The response includes catalog asset images (tool image and catalog infrastructure images). Returns `404` if `:id` is not a known architecture. |
 | `GET` | `/api/v1/services/:id/models` | Return model metadata for a service. |
-| `GET` | `/api/v1/services/:id/md` | Return the service's Markdown description. |
+| `GET` | `/api/v1/services/:id/steps` | Return all files under the service's `steps/` directory for the requested runtime. Response is a JSON object keyed by filename (e.g. `info.md`, `next.md`, `vars_file.yaml`) with raw file content as string values. Accepts `?runtime=podman\|openshift` (default: `podman`). Returns `400` for an invalid runtime, `404` if `:id` is not a known service. |
 | `GET` | `/api/v1/architectures/:id/models` | Return model metadata for an architecture. |
 
 #### 6.2.1 Create Bundle — `POST /api/v1/catalog/bundles`
@@ -1235,6 +1235,23 @@ func (c *ApplicationClient) DeleteBundle(bundleID string) error
 // ValidationResult) on success, or a *ValidationError on 422.
 func (c *ApplicationClient) ValidateBundle(filePath string) (bundlesvc.ValidationResult, error)
 ```
+
+#### `ApplicationClient` steps method (client/application.go)
+
+CLIs retrieve steps files through [`internal/pkg/catalog/client/application.go`](ai-services/internal/pkg/catalog/client/application.go) instead of reading embedded assets directly. This allows custom bundle services to supply their own `steps/` files, which the server returns transparently alongside built-in ones.
+
+```go
+// GetServiceSteps calls GET /api/v1/services/:id/steps and returns all files under
+// the service's steps directory keyed by filename
+// (e.g. "info.md", "next.md", "vars_file.yaml").
+// runtime selects which runtime's steps to return ("podman" or "openshift");
+// when empty the server defaults to "podman".
+func (c *ApplicationClient) GetServiceSteps(ctx context.Context, serviceID, runtime string) (map[string]string, error)
+```
+
+The server-side implementation lives in `CatalogProvider.GetServiceSteps(serviceID string, runtime runtimeTypes.RuntimeType)`, which walks `<runtime>/steps/` in the item's own `fs.FS` — identical for embedded services (backed by `assets.CatalogFS`) and custom bundle services (backed by `os.DirFS`).
+
+The `application info` and `application create` CLI commands call `GetServiceSteps` with the runtime already known from the `--runtime` flag (e.g. `rt.String()`) and parse only `.md` files from the response into `text/template` instances via the shared `parseStepsTemplates` helper. `vars_file.yaml` is included in the response for future use but is currently consumed only by the legacy embed path.
 
 ---
 

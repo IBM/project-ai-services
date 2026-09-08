@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "catalog-worker-gateway"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    haproxy.router.openshift.io/timeout: 1d
+spec:
+  port:
+    targetPort: worker-gateway
+  to:
+    kind: Service
+    name: "catalog-api"
+  tls:
+    termination: passthrough
