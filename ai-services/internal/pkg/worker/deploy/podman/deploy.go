@@ -199,7 +199,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 
 	values, err := tp.LoadValues(workerconstants.WorkerAppTemplate, nil, argParams)
 	if err != nil {
-		return fmt.Errorf("failed to lod values: %w", err)
+		return fmt.Errorf("failed to load values: %w", err)
 	}
 
 	values["hostAliases"] = opts.Setup.HostAliases

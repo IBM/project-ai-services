@@ -365,18 +365,22 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 
 	var lines []string
 
+	// Install signal handling once for the entire streaming session so that
+	// Ctrl+C / SIGTERM stops the tail gracefully, regardless of how many
+	// containers are in the pod.
+	var sigCtx context.Context
+	var stopSignal context.CancelFunc
+	if stream {
+		sigCtx, stopSignal = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stopSignal()
+	}
+
 	for _, container := range podInspect.Containers {
 		if container.ID == podInspect.InfraContainerID {
 			continue
 		}
 
-		fmt.Println("container: ", container.ID)
-
 		if stream {
-			// Install signal handling so Ctrl+C / SIGTERM stops the tail gracefully.
-			sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-			defer stop()
-
 			logger.Infof("Streaming logs for container: %s", container.Name)
 
 			if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
@@ -387,8 +391,7 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 				return nil, nil
 			}
 		} else {
-			if err := pc.collectContainerLogs(ctx, container.ID, func(line string) {
-				fmt.Println("Line: ", line)
+			if err := pc.collectContainerLogs(ctx, container.ID, stream, func(line string) {
 				lines = append(lines, line)
 			}); err != nil {
 				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
@@ -403,9 +406,9 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 // onLine for every line received. follow=false snapshots and returns when the
 // stream closes naturally; follow=true tails until ctx is cancelled.
 // This is the shared core used by both PodLogs and streamContainerLogs.
-func (pc *PodmanClient) collectContainerLogs(ctx context.Context, containerID string, onLine func(string)) error {
+func (pc *PodmanClient) collectContainerLogs(ctx context.Context, containerID string, follow bool, onLine func(string)) error {
 	opts := &containers.LogOptions{
-		Follow: utils.BoolPtr(false),
+		Follow: utils.BoolPtr(follow),
 		Stderr: utils.BoolPtr(true),
 		Stdout: utils.BoolPtr(true),
 	}
