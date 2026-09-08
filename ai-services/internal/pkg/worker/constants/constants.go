@@ -56,6 +56,10 @@ const (
 	// WorkerGatewayName is the DNS name used by the catalog worker gateway route.
 	WorkerGatewayName = "catalog-worker-gateway"
 
+	// PodmanGatewayPodName is the Podman catalog pod DNS name embedded in the
+	// auto-generated gateway server certificate.
+	PodmanGatewayPodName = "ai-services--catalog"
+
 	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
 	// auto-generated gateway server certificate for internal cluster communication.
 	OpenShiftGatewayServiceEndpoint = "catalog-api.ai-services.svc.cluster.local"
