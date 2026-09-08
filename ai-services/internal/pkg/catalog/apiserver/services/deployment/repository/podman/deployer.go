@@ -54,24 +54,15 @@ type (
 	SpyreCardPool  = deploymenttypes.SpyreCardPool
 )
 
-// PodmanWorkerConfig holds configuration sourced from a remote worker's
-// registration metadata.
-type PodmanWorkerConfig struct {
-	DomainSuffix string
-	HTTPSPort    string
-	BaseDir      string
-}
-
 // PodmanDeployer implements deployment execution for Podman runtime.
 type PodmanDeployer struct {
 	runtime         runtime.Runtime
+	runtimeType     string
+	baseDir         string
 	catalogProvider *catalog.CatalogProvider
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
-	// workerConfig is non-nil for remote worker deployments. When set,
-	// getCaddyConfiguration uses its values instead of local env vars.
-	workerConfig *PodmanWorkerConfig
 }
 
 // NewPodmanDeployer creates a new PodmanDeployer instance.
@@ -84,18 +75,13 @@ func NewPodmanDeployer(
 ) *PodmanDeployer {
 	return &PodmanDeployer{
 		runtime:         rt,
+		runtimeType:     rt.Type().String(),
+		baseDir:         "",
 		catalogProvider: catalogProvider,
 		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
 	}
-}
-
-// SetPodmanWorkerConfig injects the Caddy configuration for a remote worker
-// deployment. When set, getCaddyConfiguration uses these values instead of
-// local env vars.
-func (d *PodmanDeployer) SetPodmanWorkerConfig(cfg PodmanWorkerConfig) {
-	d.workerConfig = &cfg
 }
 
 // ExecuteDeployment executes the deployment plan for an application or standalone service.
@@ -161,6 +147,12 @@ func (d *PodmanDeployer) ExecuteDeployment(
 // prepareDeployment pulls images, downloads models, and transitions the
 // application status to Deploying. It is a prerequisite for all deploy steps.
 func (d *PodmanDeployer) prepareDeployment(ctx context.Context, plan *DeploymentPlan) error {
+	baseDir, err := d.fetchBaseDir(ctx)
+	if err != nil {
+		return err
+	}
+	d.baseDir = baseDir
+
 	// Step 1a: Pull container images for all components and services
 	if err := d.pullImagesForDeployment(ctx, plan); err != nil {
 		catalogutils.HandleDeploymentStepError(ctx, d.appRepo, plan.ApplicationID, "Image pull failed", err)
@@ -238,17 +230,16 @@ func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet
 }
 
 // downloadModels downloads all models in the provided set.
-// For remote workers the command is sent over the gRPC stream so the download
-// runs on the worker node where the models directory lives; for local workers
-// helpers.DownloadModelContainer is called directly.
+// For remote workers the command is forwarded over the gRPC stream; the worker
+// resolves AI_SERVICES_BASE_DIR from its own environment to find the models
+// directory. For local deployments helpers.DownloadModelContainer is called
+// directly with the local models path.
 func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		modelsPath := d.workerConfig.BaseDir + "/models"
 		for modelName := range modelSet {
 			logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
 			_, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
-				Model:     modelName,
-				TargetDir: modelsPath,
+				Model: modelName,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to download model %s: %w", modelName, err)
@@ -321,14 +312,19 @@ func (d *PodmanDeployer) collectImagesFromPlan(ctx context.Context, plan *Deploy
 
 // extractImagesFromComponent extracts container images from a component's templates.
 func (d *PodmanDeployer) extractImagesFromComponent(ctx context.Context, comp *ComponentPlan, imageSet map[string]bool) error {
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	// Load component templates
-	templates, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	templates, err := scopedProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return fmt.Errorf("failed to load component templates for %s/%s: %w", comp.ComponentType, comp.ProviderID, err)
 	}
 
 	// Extract images from templates with custom values directly into imageSet
-	if err := d.catalogProvider.CollectImagesFromTemplates(ctx, templates, comp.Values, imageSet); err != nil {
+	if err := scopedProvider.CollectImagesFromTemplates(ctx, templates, comp.Values, imageSet); err != nil {
 		return fmt.Errorf("failed to extract images from component %s/%s: %w", comp.ComponentType, comp.ProviderID, err)
 	}
 
@@ -337,14 +333,19 @@ func (d *PodmanDeployer) extractImagesFromComponent(ctx context.Context, comp *C
 
 // extractImagesFromService extracts container images from a service's templates.
 func (d *PodmanDeployer) extractImagesFromService(ctx context.Context, svc *ServicePlan, imageSet map[string]bool) error {
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	// Load service templates
-	templates, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
+	templates, err := scopedProvider.LoadServiceTemplates(svc.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service templates for %s: %w", svc.CatalogID, err)
 	}
 
 	// Extract images from templates with custom values directly into imageSet
-	if err := d.catalogProvider.CollectImagesFromTemplates(ctx, templates, svc.Values, imageSet); err != nil {
+	if err := scopedProvider.CollectImagesFromTemplates(ctx, templates, svc.Values, imageSet); err != nil {
 		return fmt.Errorf("failed to extract images from service %s: %w", svc.CatalogID, err)
 	}
 
@@ -447,17 +448,22 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 
 // loadComponentResources loads all necessary resources for a component.
 func (d *PodmanDeployer) loadComponentResources(comp *ComponentPlan) (*types.Component, *templates.AppMetadata, map[string]*template.Template, error) {
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	component, err := d.catalogProvider.LoadComponent(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component from catalog: %w", err)
 	}
 
-	metadata, err := d.catalogProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID)
+	metadata, err := scopedProvider.LoadComponentRuntimeMetadata(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component runtime metadata: %w", err)
 	}
 
-	tmpls, err := d.catalogProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
+	tmpls, err := scopedProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to load component templates: %w", err)
 	}
@@ -563,7 +569,7 @@ func (d *PodmanDeployer) deployComponentPods(
 				initialParams := map[string]any{
 					"InstanceSlug": catalogutils.GenerateInstanceSlug(comp.DatabaseID.String()),
 					"TemplateID":   comp.DatabaseID,
-					"BaseDir":      utils.GetBaseDir(),
+					"BaseDir":      d.getBaseDir(),
 					"Values":       values,
 					"env":          map[string]map[string]string{},
 				}
@@ -582,7 +588,7 @@ func (d *PodmanDeployer) deployComponentPods(
 			initialParams := map[string]any{
 				"InstanceSlug": catalogutils.GenerateInstanceSlug(comp.DatabaseID.String()),
 				"TemplateID":   comp.DatabaseID,
-				"BaseDir":      utils.GetBaseDir(),
+				"BaseDir":      d.getBaseDir(),
 				"Values":       values,
 				"env":          map[string]map[string]string{},
 			}
@@ -645,14 +651,19 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	}
 	logger.InfofCtx(ctx, "Service %s loaded: %s\n", service.ID, service.Name)
 
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
+	}
+
 	// Load runtime-specific metadata (contains PodTemplateExecutions)
-	serviceAppMetadata, err := d.catalogProvider.LoadServiceRuntimeMetadata(svc.CatalogID)
+	serviceAppMetadata, err := scopedProvider.LoadServiceRuntimeMetadata(svc.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata: %w", err)
 	}
 
 	// Load service templates
-	tmpls, err := d.catalogProvider.LoadServiceTemplates(svc.CatalogID)
+	tmpls, err := scopedProvider.LoadServiceTemplates(svc.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service templates: %w", err)
 	}
@@ -765,7 +776,7 @@ func (d *PodmanDeployer) buildInitialParams(applicationID uuid.UUID, databaseID 
 	return map[string]any{
 		"InstanceSlug": catalogutils.GenerateInstanceSlug(applicationID.String()),
 		"TemplateID":   databaseID,
-		"BaseDir":      utils.GetBaseDir(),
+		"BaseDir":      d.getBaseDir(),
 		"Values":       values,
 		"env":          map[string]map[string]string{},
 	}
@@ -1059,6 +1070,11 @@ func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[strin
 	return spyreCards, spyreCardContainerMap, nil
 }
 
+// joinPCIAddresses joins a slice of PCI address strings with a space separator.
+func joinPCIAddresses(addrs []string) string {
+	return strings.Join(addrs, " ")
+}
+
 // getEnvParamsForComponent returns environment parameters for a component including Spyre card PCI addresses.
 func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *podmodels.PodSpec, plan *DeploymentPlan) (map[string]map[string]string, error) {
 	env := make(map[string]map[string]string)
@@ -1066,10 +1082,6 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 	// Get container names from pod spec
 	for _, container := range podSpec.Spec.Containers {
 		env[container.Name] = make(map[string]string)
-	}
-
-	if plan.SpyreCardPool == nil {
-		return env, nil
 	}
 
 	// Fetch Spyre card requirements from annotations
@@ -1082,39 +1094,102 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 		return env, nil
 	}
 
+	if plan.SpyreCardPool == nil {
+		pool, err := d.buildSpyreCardPoolForPlan(ctx, spyreCards)
+		if err != nil {
+			return env, err
+		}
+		plan.SpyreCardPool = pool
+	}
+
 	// Allocate PCI addresses to containers that need them
 	for containerName, spyreCount := range spyreCardContainerMap {
-		if spyreCount != 0 {
-			// Allocate addresses from the pool (thread-safe)
-			allocatedAddresses, err := plan.SpyreCardPool.Allocate(spyreCount)
-			if err != nil {
-				return env, fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
-			}
-
-			// Join addresses with space separator
-			pciAddressStr := ""
-			for i, addr := range allocatedAddresses {
-				if i > 0 {
-					pciAddressStr += " "
-				}
-				pciAddressStr += addr
-			}
-
-			env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
-
-			logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
-				spyreCount, containerName, podSpec.Name, pciAddressStr)
+		if spyreCount == 0 {
+			continue
 		}
+
+		// Allocate addresses from the pool (thread-safe)
+		allocatedAddresses, err := plan.SpyreCardPool.Allocate(spyreCount)
+		if err != nil {
+			return env, fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
+		}
+
+		pciAddressStr := joinPCIAddresses(allocatedAddresses)
+		env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
+
+		logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
+			spyreCount, containerName, podSpec.Name, pciAddressStr)
 	}
 
 	return env, nil
+}
+
+func (d *PodmanDeployer) getBaseDir() string {
+	if d.baseDir != "" {
+		return d.baseDir
+	}
+
+	return utils.GetBaseDir()
+}
+
+func (d *PodmanDeployer) buildSpyreCardPoolForPlan(ctx context.Context, required int) (*SpyreCardPool, error) {
+	addresses, err := d.fetchFreeSpyreCards(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sanitized := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		if trimmed := strings.TrimSpace(addr); trimmed != "" {
+			sanitized = append(sanitized, trimmed)
+		}
+	}
+	if len(sanitized) < required {
+		return nil, fmt.Errorf("insufficient Spyre cards: required %d, available %d", required, len(sanitized))
+	}
+
+	return &SpyreCardPool{Addresses: sanitized}, nil
+}
+
+func (d *PodmanDeployer) fetchFreeSpyreCards(ctx context.Context) ([]string, error) {
+	if remoteRT, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		addresses, err := remoteRT.FindFreeSpyreCards(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find free Spyre cards on worker %q: %w", remoteRT.WorkerName(), err)
+		}
+
+		return addresses, nil
+	}
+
+	addresses, err := helpers.FindFreeSpyreCards(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find free Spyre cards: %w", err)
+	}
+
+	return addresses, nil
+}
+
+func (d *PodmanDeployer) fetchBaseDir(ctx context.Context) (string, error) {
+	if remoteRT, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		baseDir, err := remoteRT.GetBaseDir(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve base directory on worker %q: %w", remoteRT.WorkerName(), err)
+		}
+		if strings.TrimSpace(baseDir) == "" {
+			return "", fmt.Errorf("worker %q returned empty base directory", remoteRT.WorkerName())
+		}
+
+		return baseDir, nil
+	}
+
+	return utils.GetBaseDir(), nil
 }
 
 // registerApplicationRoutes registers routes for all services with Caddy proxy and updates endpoints in database.
 func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Registering routes for application '%s'\n", plan.ApplicationName)
 
-	domainSuffix, httpsPort, proxyManager, err := d.getCaddyConfiguration()
+	proxyManager, err := d.getProxyManager()
 	if err != nil {
 		return err
 	}
@@ -1126,7 +1201,7 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 			continue
 		}
 
-		if err := d.registerServiceRoutes(ctx, svc, proxyManager, domainSuffix, httpsPort, &registrationErrors); err != nil {
+		if err := d.registerServiceRoutes(ctx, svc, proxyManager, &registrationErrors); err != nil {
 			registrationErrors = append(registrationErrors, err)
 		}
 	}
@@ -1140,40 +1215,24 @@ func (d *PodmanDeployer) registerApplicationRoutes(ctx context.Context, plan *De
 	return nil
 }
 
-// getCaddyConfiguration retrieves Caddy configuration and creates a ProxyManager.
-// For a remote runtime the domain/port come from the worker's registration
-// metadata (via workerConfig) and a RemoteProxyManager is returned.
-// For a local runtime both values are read from environment variables and a
-// local Caddy ProxyManager is returned.
-func (d *PodmanDeployer) getCaddyConfiguration() (string, string, proxy.ProxyManager, error) {
+// getProxyManager returns the appropriate ProxyManager for this deployment.
+// domainSuffix and httpsPort are intentionally not returned — RegisterRoute
+// on the ProxyManager reads both from its own environment (local or worker)
+// so the correct values are always used regardless of where Caddy is running.
+func (d *PodmanDeployer) getProxyManager() (proxy.ProxyManager, error) {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		pm := proxy.NewRemoteProxyManager(rt.Sender)
-
-		return d.workerConfig.DomainSuffix, d.workerConfig.HTTPSPort, pm, nil
+		return proxy.NewRemoteProxyManager(rt.Sender), nil
 	}
 
-	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
-	if domainSuffix == "" {
-		return "", "", nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set")
-	}
-
-	httpsPort := utils.GetEnv("CADDY_HTTPS_PORT", catalogconstants.DefaultHTTPSPort)
-
-	proxyManager, err := proxy.GetCaddyProxyManager()
-	if err != nil {
-		return "", "", nil, err
-	}
-
-	return domainSuffix, httpsPort, proxyManager, nil
+	return proxy.GetCaddyProxyManager()
 }
 
 // registerServiceRoutes registers routes for a single service and updates its endpoints in the database.
+// domainSuffix and httpsPort are resolved by RegisterRoute from the ProxyManager's own environment.
 func (d *PodmanDeployer) registerServiceRoutes(
 	ctx context.Context,
 	svc *ServicePlan,
 	proxyManager proxy.ProxyManager,
-	domainSuffix string,
-	httpsPort string,
 	registrationErrors *[]error,
 ) error {
 	var serviceEndpoints []map[string]any
@@ -1185,7 +1244,6 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			catalogconstants.CatalogAppName,
 			proxyManager,
 			routesAnnotation,
-			domainSuffix,
 			podName,
 		)
 		if err != nil {
@@ -1194,13 +1252,10 @@ func (d *PodmanDeployer) registerServiceRoutes(
 			continue
 		}
 
-		// Convert registered routes to endpoint format using route type
 		for _, route := range registeredRoutes {
-			url := catalogutils.BuildExternalURL(route.Domain, httpsPort)
-
 			endpoint := map[string]any{
 				"type": route.Type,
-				"url":  url,
+				"url":  route.ExternalURL,
 			}
 			serviceEndpoints = append(serviceEndpoints, endpoint)
 		}

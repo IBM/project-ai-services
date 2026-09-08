@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -113,17 +112,6 @@ func UpdateComponentStatus(ctx context.Context, componentRepo dbrepo.ComponentRe
 	return nil
 }
 
-// BuildExternalURL constructs an HTTPS URL from a domain and optional port.
-// If the port is not the default HTTPS port (443), it appends the port to the URL.
-func BuildExternalURL(domain string, httpsPort string) string {
-	url := fmt.Sprintf("https://%s", domain)
-	if httpsPort != constants.DefaultHTTPSPort {
-		url = url + ":" + httpsPort
-	}
-
-	return url
-}
-
 // GenerateInstanceSlug creates a short slug from an ID using SHA256 hash.
 // Returns the first 10 characters of the hex-encoded hash.
 // This is used to create consistent directory names for applications and components.
@@ -132,20 +120,6 @@ func GenerateInstanceSlug(id string) string {
 	hexHash := hex.EncodeToString(hash[:])
 
 	return hexHash[:10]
-}
-
-// IsNotFoundError checks if an error indicates a resource was not found.
-// Returns true for "no such pod", "no such secret", "no such volume" errors.
-func IsNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errMsg := err.Error()
-
-	return strings.Contains(errMsg, "no such pod") ||
-		strings.Contains(errMsg, "no pod with name or ID") ||
-		strings.Contains(errMsg, "no such secret") ||
-		strings.Contains(errMsg, "no such volume")
 }
 
 // CalculateComponentHash creates a unique hash for a component configuration.

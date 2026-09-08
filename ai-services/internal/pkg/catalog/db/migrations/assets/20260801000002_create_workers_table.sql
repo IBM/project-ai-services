@@ -24,6 +24,8 @@ CREATE TYPE worker_status AS ENUM (
 -- runtime_type:   execution environment the worker runs on.
 --                 'unknown' until the worker connects and declares its runtime.
 -- status:         lifecycle state of the worker (pending | ready | disconnected).
+-- message:        human-readable reason for the current status, set by the catalog
+--                 on status transitions.
 -- last_heartbeat: timestamp of the most recent heartbeat received from the worker;
 --                 NULL until the first heartbeat arrives.
 -- registered_at:  when the worker first registered with the system.
@@ -34,6 +36,7 @@ CREATE TABLE workers (
     name           TEXT                NOT NULL UNIQUE,
     runtime_type   worker_runtime_type NOT NULL DEFAULT 'unknown',
     status         worker_status       NOT NULL DEFAULT 'pending',
+    message        TEXT,
     last_heartbeat TIMESTAMPTZ,
     metadata       JSONB,
     registered_at  TIMESTAMPTZ         NOT NULL DEFAULT NOW(),

@@ -24,6 +24,7 @@ To join this node as a worker:
 
 	cmd.AddCommand(newJoinCmd())
 	cmd.AddCommand(newUninstallCmd())
+	cmd.AddCommand(newGrpcStreamCmd())
 
 	return cmd
 }

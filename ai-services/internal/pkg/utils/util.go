@@ -28,6 +28,9 @@ import (
 const (
 	maxKeyValueParts  = 2
 	maxHostnameLength = 63
+
+	CaddyFileIndent   = 10
+	CertContentIndent = 4
 )
 
 // IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
@@ -808,4 +811,18 @@ func IndentString(s string, spaces int) string {
 	}
 
 	return prefix + strings.Join(lines, "\n")
+}
+
+// IsNotFoundError checks if an error indicates a resource was not found.
+// Returns true for "no such pod", "no such secret", "no such volume" errors.
+func IsNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+
+	return strings.Contains(errMsg, "no such pod") ||
+		strings.Contains(errMsg, "no pod with name or ID") ||
+		strings.Contains(errMsg, "no such secret") ||
+		strings.Contains(errMsg, "no such volume")
 }

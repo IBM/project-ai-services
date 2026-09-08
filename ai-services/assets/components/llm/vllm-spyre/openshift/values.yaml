@@ -4,9 +4,9 @@ apiKey: ""
 resources:
   requests:
     cpu: "12"
-    memory: "150Gi"
+    memory: "200Gi"
     ibm.com/spyre_pf: "4"
   limits:
     cpu: "12"
-    memory: "150Gi"
+    memory: "200Gi"
     ibm.com/spyre_pf: "4"

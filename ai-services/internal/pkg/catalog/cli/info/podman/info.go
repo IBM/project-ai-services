@@ -52,7 +52,7 @@ func DisplayCatalogInfo(ctx context.Context) error {
 
 	// Step 3: Fetch route information
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
-	routeDomains, httpsPort, err := GetCatalogRouteInfo(ctx, runtime)
+	routeURLs, err := GetCatalogRouteInfo(ctx, runtime)
 	if err != nil {
 		logger.Errorf("failed to get route info: %v\n", err)
 		// Continue with basic info display
@@ -64,7 +64,7 @@ func DisplayCatalogInfo(ctx context.Context) error {
 	}
 
 	// Step 4: Read and print the info.md file with route information
-	if err := helpers.PrintInfoWithProxy(ctx, tp, runtime, constants.CatalogAppName, catalogTemplate, routeDomains, httpsPort); err != nil {
+	if err := helpers.PrintInfoWithProxy(ctx, tp, runtime, constants.CatalogAppName, catalogTemplate, routeURLs); err != nil {
 		// not failing overall info command if we cannot display Info
 		logger.Errorf("failed to display info: %v\n", err)
 
@@ -74,26 +74,26 @@ func DisplayCatalogInfo(ctx context.Context) error {
 	return nil
 }
 
-// GetCatalogRouteInfo retrieves route domains and HTTPS port for the catalog service.
+// GetCatalogRouteInfo retrieves route URLs for the catalog service.
 // This orchestrates: deployContext gets pod name and route info from templates,
-// caddy.Context queries Caddy for route domains and HTTPS port.
-func GetCatalogRouteInfo(ctx context.Context, rt *podman.PodmanClient) (map[string]string, string, error) {
+// caddy.Context queries Caddy for route URLs.
+func GetCatalogRouteInfo(ctx context.Context, rt *podman.PodmanClient) (map[string]string, error) {
 	// Create deployment context to access templates
 	deployCtx, err := deploy.NewDeployContext()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create deployment context: %w", err)
+		return nil, fmt.Errorf("failed to create deployment context: %w", err)
 	}
 
 	// Get Caddy pod name from templates
 	caddyPodName, err := deployCtx.GetCaddyPodName()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get Caddy pod name: %w", err)
+		return nil, fmt.Errorf("failed to get Caddy pod name: %w", err)
 	}
 
 	// Extract route infos from deployment context
 	routeInfos, err := deployCtx.ExtractRouteInfos()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to extract route infos: %w", err)
+		return nil, fmt.Errorf("failed to extract route infos: %w", err)
 	}
 
 	// Create Caddy context (domain suffix not needed for querying existing routes)

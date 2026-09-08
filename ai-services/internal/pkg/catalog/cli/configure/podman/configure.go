@@ -13,14 +13,10 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-)
-
-const (
-	caddyFileIndent   = 10
-	certContentIndent = 4
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
@@ -31,8 +27,8 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	// Collect and hash password
-	// If secret exist passwordHash will be empty
+	// Collect and hash password.
+	// If secret exists passwordHash will be empty.
 	passwordHash, err := catalogUtils.CollectAndHashPassword(ctx, deployCtx.Runtime)
 	if err != nil {
 		return err
@@ -119,20 +115,14 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("failed to extract route infos: %w", err)
 	}
 
-	// Register routes with Caddy and get the registered route domains
-	routeDomains, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
+	// Register routes with Caddy and get the registered route URLs
+	routeURLs, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
-	// Get Caddy HTTPS port for next steps display
-	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, deployCtx.Runtime)
-	if err != nil {
-		return fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
-	}
-
 	// Print next steps with proxy route information
-	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeDomains, httpsPort); err != nil {
+	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeURLs); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
@@ -222,11 +212,11 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 	argParams[configure.ArgParamPodmanAuthFileContent] = authFileBase64
 	argParams[configure.ArgParamPodmanURI] = podmanSocketPath
 	argParams[configure.ArgParamDBPassword] = dbPassword
-	argParams[configure.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
+	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
-	argParams[configure.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, caddyFileIndent)
-	argParams[configure.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, certContentIndent)
-	argParams[configure.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, certContentIndent)
+	argParams[constants.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, utils.CaddyFileIndent)
+	argParams[constants.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, utils.CertContentIndent)
+	argParams[constants.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, utils.CertContentIndent)
 
 	return argParams, nil
 }
