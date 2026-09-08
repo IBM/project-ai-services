@@ -13,4 +13,8 @@ from extract.settings import settings
 concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_size)
 
 # Async job admission semaphore (caps background workers).
-job_limiter = asyncio.BoundedSemaphore(settings.extract.max_concurrent_jobs)
+extract_limiter = asyncio.BoundedSemaphore(settings.extract.max_concurrent_requests)
+
+# Per-job file parallelism limiter: caps the total number of files being
+# processed concurrently within a single batch job.
+parallel_file_limiter = asyncio.BoundedSemaphore(settings.extract.parallel_files_per_job)

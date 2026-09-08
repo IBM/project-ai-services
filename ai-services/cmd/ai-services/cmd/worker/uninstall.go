@@ -1,19 +1,19 @@
 package worker
 
 import (
-	"context"
-
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
+	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
 
 // Flag variables for the worker uninstall command.
 var (
 	uninstallRuntimeType string
 	uninstallAutoYes     bool
+	skipCleanup          bool
 )
 
 func newUninstallCmd() *cobra.Command {
@@ -40,10 +40,11 @@ Application pods deployed on this worker by the catalog are not touched.`,
 
 			return cmdcommon.InitAndValidateRuntimeFlag(uninstallRuntimeType)
 		},
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return workeruninstall.Uninstall(context.Background(), workeruninstall.Options{
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return workeruninstall.Uninstall(cmd.Context(), workerutils.UninstallOptions{
 				RuntimeType: vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes:     uninstallAutoYes,
+				SkipCleanup: skipCleanup,
 			})
 		},
 	}
@@ -52,6 +53,9 @@ Application pods deployed on this worker by the catalog are not touched.`,
 
 	cmd.Flags().BoolVarP(&uninstallAutoYes, "yes", "y", false,
 		"Automatically accept all confirmation prompts.")
+
+	cmd.Flags().BoolVar(&skipCleanup, "skip-cleanup", false,
+		"Skip deleting worker voulme (default=false)")
 
 	return cmd
 }

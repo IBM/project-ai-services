@@ -16,7 +16,3 @@ postgres:
   # @generate:password
   password: ""
 
-llm:
-  model:
-    name: ""
-  apiKey: ""

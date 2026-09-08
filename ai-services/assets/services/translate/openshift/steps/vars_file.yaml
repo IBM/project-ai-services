@@ -1,0 +1,9 @@
+containers:
+  - name: "translate-api"
+    workload: "translate-api"
+    format: ".Status"
+    alias: API_STATUS
+
+hosts:
+  - fetch: API_URL
+    type: api

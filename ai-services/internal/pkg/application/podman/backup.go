@@ -8,9 +8,9 @@ import (
 	"time"
 
 	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
+	commonRestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/backup"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/common"
-	"github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
@@ -110,7 +110,7 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 		return err
 	}
 
-	digitizeURL, err := restore.GetDigitizeAPIURL(appDetails)
+	digitizeURL, err := commonRestore.GetDigitizeAPIURL(appDetails)
 	if err != nil {
 		return err
 	}

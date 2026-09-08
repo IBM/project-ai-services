@@ -42,29 +42,4 @@ type ConnectionTester interface {
 	TestConnection(ctx context.Context, params map[string]any) error
 }
 
-// sensitiveFieldsFromSchema inspects the top-level properties of a JSON Schema map and
-// returns the set of property names whose "format" is "password". This allows the set of
-// fields that require encryption to be driven by the connector's schema.json rather than
-// being hardcoded in each provider implementation.
-func sensitiveFieldsFromSchema(schema map[string]any) map[string]bool {
-	sensitive := make(map[string]bool)
-
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return sensitive
-	}
-
-	for name, raw := range properties {
-		prop, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if fmt, ok := prop["format"].(string); ok && fmt == "password" {
-			sensitive[name] = true
-		}
-	}
-
-	return sensitive
-}
-
 // Made with Bob

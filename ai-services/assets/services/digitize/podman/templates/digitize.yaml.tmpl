@@ -8,7 +8,7 @@ metadata:
     ai-services.io/secret-skip-cleanup: "true"
     ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }}"
   annotations:
-    ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api"
+    ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api,4002:digitize-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"  # Uncomment to expose ports directly (bypasses Caddy)
     io.podman.annotations.pids-limit/backend-server: "4096"
 spec:
@@ -148,6 +148,35 @@ spec:
           name: vllm-secret
           readOnly: true
         {{- end }}
+    - name: mcp-sidecar
+      image: "{{ .Values.mcp.image }}"
+      args:
+        - "--description"
+        - "http://localhost:4000/openapi.json"
+        - "--endpoint"
+        - "http://localhost:4000"
+        - "--tag"
+        - "mcp"
+        - "--port"
+        - "{{ .Values.mcp.port }}"
+        - "--auth-passthrough"
+        - "--http"
+      ports:
+        - containerPort: {{ .Values.mcp.port }}
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: {{ .Values.mcp.port }}
+        initialDelaySeconds: 60
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "128Mi"
+        limits:
+          memory: "128Mi"
   restartPolicy: Always
   volumes:
     - name: cache

@@ -1,5 +1,6 @@
 # Service identification
 id: digitize
+version: "1.0.0"
 name: "Digitize documents"
 description: "Converts physical and scanned documents into searchable, editable digital formats; enables efficient document management, data extraction, and workflow automation at scale."
 type: service
@@ -18,6 +19,7 @@ dependencies:
   - id: llm
 
 standalone: true
+accepts_datasource: true
 
 # About field containing detailed service information
 about:

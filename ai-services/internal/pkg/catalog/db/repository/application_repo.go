@@ -357,8 +357,8 @@ func (r *applicationRepo) GetByName(ctx context.Context, name string) (*models.A
 // Insert creates a new application in the database.
 func (r *applicationRepo) Insert(ctx context.Context, app *models.Application) error {
 	query := `
-		INSERT INTO applications (id, name, catalog_id, deployment_type, status, message, version, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO applications (id, name, catalog_id, deployment_type, status, message, version, created_by, worker_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING created_at, updated_at
 	`
 
@@ -378,6 +378,7 @@ func (r *applicationRepo) Insert(ctx context.Context, app *models.Application) e
 		sql.NullString{String: app.Message, Valid: app.Message != ""},
 		sql.NullString{String: app.Version, Valid: app.Version != ""},
 		app.CreatedBy,
+		app.WorkerID,
 	).Scan(&app.CreatedAt, &app.UpdatedAt)
 
 	if err != nil {
