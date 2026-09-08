@@ -16,7 +16,13 @@ const WorkerResources = () => {
     dispatch({ type: "SET_PHASE", payload: "loading" });
     try {
       const result = await registerWorker(state.workerName.trim());
-      dispatch({ type: "REGISTER_SUCCESS", payload: { token: result.token } });
+      dispatch({
+        type: "REGISTER_SUCCESS",
+        payload: {
+          token: result.token,
+          gatewayAddress: result.gateway_address,
+        },
+      });
     } catch (err) {
       dispatch({
         type: "REGISTER_ERROR",
@@ -49,6 +55,7 @@ const WorkerResources = () => {
         phase={state.phase}
         workerName={state.workerName}
         token={state.token}
+        gatewayAddress={state.gatewayAddress}
         onWorkerNameChange={(value) =>
           dispatch({ type: "SET_WORKER_NAME", payload: value })
         }

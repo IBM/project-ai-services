@@ -25,6 +25,7 @@ interface RegisterState {
   phase: RegisterPhase;
   workerName: string;
   token: string;
+  gatewayAddress: string;
 }
 
 type RegisterAction =
@@ -32,13 +33,14 @@ type RegisterAction =
   | { type: "CLOSE" }
   | { type: "SET_NAME"; payload: string }
   | { type: "SET_PHASE"; payload: RegisterPhase }
-  | { type: "SUCCESS"; payload: string };
+  | { type: "SUCCESS"; payload: { token: string; gatewayAddress: string } };
 
 const REGISTER_INITIAL: RegisterState = {
   isOpen: false,
   phase: "idle",
   workerName: "",
   token: "",
+  gatewayAddress: "",
 };
 
 function registerReducer(
@@ -59,7 +61,12 @@ function registerReducer(
     case "SET_PHASE":
       return { ...state, phase: action.payload };
     case "SUCCESS":
-      return { ...state, phase: "success", token: action.payload };
+      return {
+        ...state,
+        phase: "success",
+        token: action.payload.token,
+        gatewayAddress: action.payload.gatewayAddress,
+      };
     default:
       return state;
   }
@@ -176,7 +183,13 @@ export const SharedStepOne = ({
     dispatchRegister({ type: "SET_PHASE", payload: "loading" });
     try {
       const result = await registerWorker(registerState.workerName.trim());
-      dispatchRegister({ type: "SUCCESS", payload: result.token });
+      dispatchRegister({
+        type: "SUCCESS",
+        payload: {
+          token: result.token,
+          gatewayAddress: result.gateway_address,
+        },
+      });
     } catch {
       dispatchRegister({ type: "SET_PHASE", payload: "error" });
     }
@@ -410,6 +423,7 @@ export const SharedStepOne = ({
         phase={registerState.phase}
         workerName={registerState.workerName}
         token={registerState.token}
+        gatewayAddress={registerState.gatewayAddress}
         onWorkerNameChange={(value) =>
           dispatchRegister({ type: "SET_NAME", payload: value })
         }

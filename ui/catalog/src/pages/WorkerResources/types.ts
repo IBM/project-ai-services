@@ -6,6 +6,7 @@ export interface WorkerResourcesState {
   phase: RegisterPhase;
   workerName: string;
   token: string;
+  gatewayAddress: string;
   registerErrorMessage: string | null;
 }
 
@@ -14,7 +15,10 @@ export type WorkerResourcesAction =
   | { type: "CLOSE_MODAL" }
   | { type: "SET_WORKER_NAME"; payload: string }
   | { type: "SET_PHASE"; payload: RegisterPhase }
-  | { type: "REGISTER_SUCCESS"; payload: { token: string } }
+  | {
+      type: "REGISTER_SUCCESS";
+      payload: { token: string; gatewayAddress: string };
+    }
   | { type: "REGISTER_ERROR"; payload: string }
   | { type: "CLEAR_REGISTER_ERROR" };
 
@@ -24,6 +28,7 @@ export const initialState: WorkerResourcesState = {
   phase: "idle",
   workerName: "",
   token: "",
+  gatewayAddress: "",
   registerErrorMessage: null,
 };
 
@@ -39,6 +44,7 @@ export const workerResourcesReducer = (
         phase: "idle",
         workerName: state.registerErrorMessage ? state.workerName : "",
         token: "",
+        gatewayAddress: "",
         registerErrorMessage: null,
       };
     case "CLOSE_MODAL":
@@ -56,6 +62,7 @@ export const workerResourcesReducer = (
         ...state,
         phase: "success",
         token: action.payload.token,
+        gatewayAddress: action.payload.gatewayAddress,
         refreshTrigger: state.refreshTrigger + 1,
       };
     case "REGISTER_ERROR":
