@@ -161,8 +161,9 @@ func runConfigure(ctx context.Context) error {
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace: catalogConstants.CatalogAppName,
-			Timeout:   timeout,
+			Namespace:       catalogConstants.CatalogAppName,
+			Timeout:         timeout,
+			SkipLocalWorker: skipLocalWorkerFlag,
 		}
 
 		return catalogOpenShift.DeployCatalog(ctx, opts)
@@ -251,22 +252,18 @@ func initConfigureCommonFlags() {
 		false,
 		"Reset the password for the admin user",
 	)
-}
 
-func initConfigurePodmanFlags() {
-	initConfigurePodmanWorkerFlags()
-	initConfigurePodmanDeployFlags()
-	initConfigurePodmanResetFlags()
-}
-
-func initConfigurePodmanWorkerFlags() {
 	configureCmd.Flags().BoolVar(
 		&skipLocalWorkerFlag,
 		"skip-local-worker",
 		false,
-		"Skip automatically joining this machine as the local worker after catalog deployment.\n"+
-			"Note: Supported for podman runtime only.\n",
+		"Skip automatically joining this machine as the local worker after catalog deployment.",
 	)
+}
+
+func initConfigurePodmanFlags() {
+	initConfigurePodmanDeployFlags()
+	initConfigurePodmanResetFlags()
 }
 
 func initConfigurePodmanDeployFlags() {
@@ -357,7 +354,9 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 	builder := flagvalidator.NewFlagValidatorBuilder(rt)
 
 	// Common flags, valid for all runtimes.
-	builder.AddCommonFlag("reset-password", nil)
+	builder.
+		AddCommonFlag("reset-password", nil).
+		AddCommonFlag("skip-local-worker", nil)
 
 	// Podman-only flags.
 	builder.
@@ -368,8 +367,7 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 		AddPodmanFlag("ssl-cert", nil).
 		AddPodmanFlag("ssl-key", nil).
 		AddPodmanFlag("reset-podman-auth", nil).
-		AddPodmanFlag("reset-certificate", nil).
-		AddPodmanFlag("skip-local-worker", nil)
+		AddPodmanFlag("reset-certificate", nil)
 
 	// OpenShift-only flags.
 	builder.AddOpenShiftFlag("timeout", nil)

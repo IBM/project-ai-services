@@ -16,6 +16,8 @@ backend:
   dbEncryptionKey: ""
   # workerGatewayPort: port for the gRPC worker gateway. Always active; default is 9090.
   workerGatewayPort: "9090"
+  # localWorker: when "true", the catalog-backend auto-joins a co-located worker pod.
+  localWorker: "true"
   resources:
     requests:
       memory: "1Gi"

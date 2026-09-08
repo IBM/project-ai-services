@@ -54,7 +54,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	// Step 5: Prepare values with argument parameters
 	// Pass runtime so generateArgParams can skip re-generating the DB password
 	// when catalog-db-secret already exists (avoids mismatch with existing PVC data).
-	values, err := prepareValues(ctx, tp, runtime, passwordHash)
+	values, err := prepareValues(ctx, tp, runtime, passwordHash, opts.SkipLocalWorker)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,14 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 
 	logger.Infoln("-------")
 
-	// Step 7: Print next steps with route URLs
+	// Step 7: Join as local worker
+	if !opts.SkipLocalWorker {
+		if err := JoinAsLocalWorker(ctx); err != nil {
+			return fmt.Errorf("local worker join failed: %w", err)
+		}
+	}
+
+	// Step 8: Print next steps with route URLs
 	if err := helpers.PrintNextSteps(ctx, tp, runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate); err != nil {
 		logger.Infof("failed to display next steps: %v\n", err)
 
@@ -90,9 +97,9 @@ func getOperationTimeout(ctx context.Context, tp templates.Template, timeout tim
 	return timeout, nil
 }
 
-func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]any, error) {
+func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, passwordHash string, skipLocalWorker bool) (map[string]any, error) {
 	// Generate argument parameters
-	argParams, err := generateArgParams(ctx, rt, passwordHash)
+	argParams, err := generateArgParams(ctx, rt, passwordHash, skipLocalWorker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate arg params: %w", err)
 	}
@@ -106,9 +113,13 @@ func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpensh
 	return values, nil
 }
 
-func generateArgParams(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]string, error) {
+func generateArgParams(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, passwordHash string, skipLocalWorker bool) (map[string]string, error) {
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
+
+	if skipLocalWorker {
+		argParams[configure.ArgParamLocalWorker] = "false"
+	}
 
 	dbSecretExists, err := rt.SecretExists(ctx, catalogconstants.CatalogDBSecretName)
 	if err != nil {

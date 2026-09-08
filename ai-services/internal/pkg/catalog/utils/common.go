@@ -39,8 +39,9 @@ type PodmanConfigureOptions struct {
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
 type OpenShiftConfigureOptions struct {
-	Namespace string
-	Timeout   time.Duration
+	Namespace       string
+	Timeout         time.Duration
+	SkipLocalWorker bool // When true, deploy with localWorker=false
 }
 
 // GetCatalogPodConfig retrieves catalog pod configuration by inspecting the running pod and its containers.

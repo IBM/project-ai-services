@@ -112,6 +112,8 @@ spec:
               value: "{{ .Values.db.user }}"
             - name: WORKER_GATEWAY_PORT
               value: "{{ .Values.backend.workerGatewayPort }}"
+            - name: LOCAL_WORKER
+              value: "{{ .Values.backend.localWorker }}"
           ports:
             - containerPort: 8080
               protocol: TCP
