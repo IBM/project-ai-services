@@ -31,6 +31,7 @@ narrower — only fires when a real task is blocked on semaphore capacity.
 """
 
 import asyncio
+import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -159,7 +160,9 @@ async def dispatch_loop() -> None:
     global _op_turn, _connector_rr_index, _process_pool
 
     _process_pool = ProcessPoolExecutor(
-        max_workers=conversion_semaphore.capacity  # default 4
+        max_workers=conversion_semaphore.capacity,  # default 4
+        mp_context=multiprocessing.get_context("spawn"),
+        max_tasks_per_child=1,
     )
     logger.info(
         f"Conversion dispatcher started (pool workers={conversion_semaphore.capacity})"

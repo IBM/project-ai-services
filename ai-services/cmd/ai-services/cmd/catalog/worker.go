@@ -66,8 +66,10 @@ Pass the token to the worker node and run:
 			logger.Infoln("Worker registered successfully.")
 			logger.Infof("  Name:  %s\n", resp.WorkerName)
 			logger.Infof("  Token: %s\n", resp.Token)
-			logger.Infoln("\nPass this token to the worker daemon with --token.")
-			logger.Infoln("The token is single-use and expires after 24 hours.")
+			logger.Infoln("\nRun the following command on the worker node:")
+			logger.Infof("  ai-services worker join %s --token %s --runtime <runtime>\n",
+				resp.GatewayAddress, resp.Token)
+			logger.Infoln("\nThe token is single-use and expires after 24 hours.")
 
 			return nil
 		},

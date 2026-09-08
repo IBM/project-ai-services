@@ -463,3 +463,72 @@ func TestGateway_CommandStream_Disconnect(t *testing.T) {
 		t.Error("expected worker-4 to be removed from registry after disconnect")
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PKI / SAN tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+func TestGenerateServerCert_MultiSAN(t *testing.T) {
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("generateCA: %v", err)
+	}
+
+	sans := []string{"catalog-worker-gateway.example.com"}
+	_, certDER, err := generateServerCert(caCert, caKey, sans)
+	if err != nil {
+		t.Fatalf("generateServerCert: %v", err)
+	}
+
+	parsed, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	got := make(map[string]bool, len(parsed.DNSNames))
+	for _, n := range parsed.DNSNames {
+		got[n] = true
+	}
+	for _, want := range sans {
+		if !got[want] {
+			t.Errorf("expected SAN %q in cert, got DNSNames=%v", want, parsed.DNSNames)
+		}
+	}
+}
+
+func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
+
+	res, err := generateAndPersistPKI(t.Context(), dir, "podman")
+	if err != nil {
+		t.Fatalf("generateAndPersistPKI: %v", err)
+	}
+
+	leaf, err := x509.ParseCertificate(res.serverCert.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "catalog-worker-gateway.example.com" {
+		t.Errorf("expected SANs [catalog-worker-gateway.example.com]; got DNSNames=%v", leaf.DNSNames)
+	}
+}
+
+func TestGenerateAndPersistPKI_PodmanNoDomain(t *testing.T) {
+	t.Setenv("DOMAIN_SUFFIX", "")
+
+	_, err := generateAndPersistPKI(t.Context(), t.TempDir(), "podman")
+	if err == nil {
+		t.Fatal("expected error when DOMAIN_SUFFIX is unset, got nil")
+	}
+}
+
+func TestGenerateAndPersistPKI_UnknownRuntime(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := generateAndPersistPKI(t.Context(), dir, "unknown")
+	if err == nil {
+		t.Fatal("expected error for unsupported runtime type, got nil")
+	}
+}

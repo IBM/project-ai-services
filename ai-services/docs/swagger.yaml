@@ -997,6 +997,8 @@ definitions:
     type: object
   internal_pkg_catalog_apiserver_handlers.createWorkerResp:
     properties:
+      gateway_address:
+        type: string
       token:
         type: string
       worker_name:
