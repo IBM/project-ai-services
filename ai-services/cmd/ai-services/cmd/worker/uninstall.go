@@ -1,14 +1,10 @@
 package worker
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
@@ -46,10 +42,6 @@ Application pods deployed on this worker by the catalog are not touched.`,
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
-			if utils.GetEnv(workerconstants.LocalWorkerEnvVar, "") == "true" {
-				return fmt.Errorf("the worker is co-located with the control plane and cannot be uninstalled independently")
-			}
-
 			return workeruninstall.Uninstall(cmd.Context(), workerutils.UninstallOptions{
 				RuntimeType: vars.RuntimeFactory.GetRuntimeType(),
 				AutoYes:     uninstallAutoYes,

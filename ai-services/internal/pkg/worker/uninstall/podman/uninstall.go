@@ -22,6 +22,12 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return fmt.Errorf("worker uninstall: init runtime: %w", err)
 	}
 
+	if isLocalWorker, err := isCatalogLocalWorker(ctx, rt); err != nil {
+		logger.WarningfCtx(ctx, "worker uninstall: could not determine LOCAL_WORKER from catalog pod: %v\n", err)
+	} else if isLocalWorker {
+		return fmt.Errorf("the worker is co-located with the control plane and cannot be uninstalled independently")
+	}
+
 	pods, err := getWorkerPodList(ctx, rt)
 	if err != nil {
 		return fmt.Errorf("worker uninstall: list pods: %w", err)
@@ -136,6 +142,27 @@ func extractConfigFromEnv(env map[string]string, config *WorkerCaddyConfig) {
 	if value, ok := env[workerconstants.BaseDirEnvVar]; ok {
 		config.BaseDir = value
 	}
+}
+
+// isCatalogLocalWorker inspects the running catalog pod and returns true when
+// the LOCAL_WORKER environment variable is set to "true" inside it.
+func isCatalogLocalWorker(ctx context.Context, rt runtime.Runtime) (bool, error) {
+	pod, err := rt.InspectPod(ctx, workerconstants.PodmanGatewayPodName)
+	if err != nil {
+		return false, fmt.Errorf("inspect catalog pod: %w", err)
+	}
+
+	for _, container := range pod.Containers {
+		cInfo, err := rt.InspectContainer(ctx, container.ID)
+		if err != nil {
+			continue
+		}
+		if cInfo.Env[workerconstants.LocalWorkerEnvVar] == "true" {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func getWorkerPodList(ctx context.Context, rt runtime.Runtime) ([]types.Pod, error) {
