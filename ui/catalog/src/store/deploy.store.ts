@@ -47,29 +47,33 @@ interface DeployState {
   architectureDetailsError: string | null;
   architectureDetailsFetchedAt: number | null;
 
-  // Deploy options - persisted with 15-minute cache, keyed by architecture ID
+  // Deploy options - persisted with 15-minute cache, keyed by "architectureId:runtime"
   deployOptions: Record<string, DeployOptionsCache>;
   deployOptionsLoading: boolean;
   deployOptionsError: string | null;
 
-  // Provider params cache - persisted with 1-hour cache
+  // Provider params cache - persisted with 1-hour cache, keyed by "runtime:componentType:providerId"
   providerParams: Record<string, ProviderParamsCache>;
-  // Provider params error map - keyed "componentType:providerId", absent means loading or cached
+  // Provider params error map - keyed "runtime:componentType:providerId", absent means loading or cached
   providerParamsError: Record<string, string>;
 
-  // Service params cache - persisted with 1-hour cache
+  // Service params cache - persisted with 1-hour cache, keyed by "runtime:serviceId"
   serviceParams: Record<string, ServiceParamsCache>;
 
-  // Service params error map - keyed by serviceId, absent means loading or cached
+  // Service params error map - keyed by "runtime:serviceId", absent means loading or cached
   serviceParamsError: Record<string, string>;
 
-  // Model options for global components, keyed by componentType — not persisted
+  // Model options for global components, keyed by "runtime:componentType" — not persisted
   globalComponentModels: Record<string, LLMOption[]>;
   setGlobalComponentModels: (
     componentType: string,
+    runtime: string,
     models: LLMOption[],
   ) => void;
-  getGlobalComponentModels: (componentType: string) => LLMOption[];
+  getGlobalComponentModels: (
+    componentType: string,
+    runtime: string,
+  ) => LLMOption[];
 
   // Architecture actions
   setArchitectures: (data: ArchitectureSummary[]) => void;
@@ -94,9 +98,13 @@ interface DeployState {
   // Deploy options actions
   setDeployOptions: (
     architectureId: string,
+    runtime: string,
     data: DeployOptionsResponse,
   ) => void;
-  getDeployOptions: (architectureId: string) => DeployOptionsResponse | null;
+  getDeployOptions: (
+    architectureId: string,
+    runtime: string,
+  ) => DeployOptionsResponse | null;
   setDeployOptionsLoading: (loading: boolean) => void;
   setDeployOptionsError: (error: string | null) => void;
   clearDeployOptions: () => void;
@@ -105,34 +113,56 @@ interface DeployState {
   setProviderParams: (
     componentType: string,
     providerId: string,
+    runtime: string,
     data: ProviderSchema,
   ) => void;
   getProviderParams: (
     componentType: string,
     providerId: string,
+    runtime: string,
   ) => ProviderSchema | null;
   setProviderParamsError: (
     componentType: string,
     providerId: string,
+    runtime: string,
     error: string,
   ) => void;
-  clearProviderParamsError: (componentType: string, providerId: string) => void;
+  clearProviderParamsError: (
+    componentType: string,
+    providerId: string,
+    runtime: string,
+  ) => void;
   clearProviderParams: () => void;
 
   // Service params actions
-  setServiceParams: (serviceId: string, data: ProviderSchema) => void;
-  getServiceParams: (serviceId: string) => ProviderSchema | null;
-  setServiceParamsError: (serviceId: string, error: string) => void;
-  clearServiceParamsError: (serviceId: string) => void;
+  setServiceParams: (
+    serviceId: string,
+    runtime: string,
+    data: ProviderSchema,
+  ) => void;
+  getServiceParams: (
+    serviceId: string,
+    runtime: string,
+  ) => ProviderSchema | null;
+  setServiceParamsError: (
+    serviceId: string,
+    runtime: string,
+    error: string,
+  ) => void;
+  clearServiceParamsError: (serviceId: string, runtime: string) => void;
   clearServiceParams: () => void;
 
   // Check if cache is stale
   isArchitecturesStale: () => boolean;
   isServiceSummariesStale: () => boolean;
   isArchitectureDetailsStale: () => boolean;
-  isDeployOptionsStale: (architectureId: string) => boolean;
-  isProviderParamsStale: (componentType: string, providerId: string) => boolean;
-  isServiceParamsStale: (serviceId: string) => boolean;
+  isDeployOptionsStale: (architectureId: string, runtime: string) => boolean;
+  isProviderParamsStale: (
+    componentType: string,
+    providerId: string,
+    runtime: string,
+  ) => boolean;
+  isServiceParamsStale: (serviceId: string, runtime: string) => boolean;
 
   // Clear all deploy store data
   clearAll: () => void;
@@ -148,6 +178,7 @@ const CACHE_VERSION = "1.0.0";
 const CATALOG_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes for catalog metadata
 const DEPLOY_OPTIONS_CACHE_DURATION = 15 * 60 * 1000; // 15 minutes for deploy options
 const PARAMS_CACHE_DURATION = 60 * 60 * 1000; // 1 hour for provider/service params
+
 export const useDeployStore = create<DeployState>()(
   persist(
     (set, get) => ({
@@ -188,15 +219,15 @@ export const useDeployStore = create<DeployState>()(
 
       // Global component model options (not persisted)
       globalComponentModels: {},
-      setGlobalComponentModels: (componentType, models) =>
+      setGlobalComponentModels: (componentType, runtime, models) =>
         set((state) => ({
           globalComponentModels: {
             ...state.globalComponentModels,
-            [componentType]: models,
+            [`${runtime}:${componentType}`]: models,
           },
         })),
-      getGlobalComponentModels: (componentType) =>
-        get().globalComponentModels[componentType] || [],
+      getGlobalComponentModels: (componentType, runtime) =>
+        get().globalComponentModels[`${runtime}:${componentType}`] || [],
 
       // Architectures actions
       setArchitectures: (data) =>
@@ -275,22 +306,24 @@ export const useDeployStore = create<DeployState>()(
           architectureDetailsFetchedAt: null,
         }),
 
-      // Deploy options actions
-      setDeployOptions: (architectureId, data) =>
+      // Deploy options actions — keyed by "architectureId:runtime"
+      setDeployOptions: (architectureId, runtime, data) => {
+        const key = `${architectureId}:${runtime}`;
         set((state) => ({
           deployOptions: {
             ...state.deployOptions,
-            [architectureId]: {
+            [key]: {
               data,
               fetchedAt: Date.now(),
             },
           },
           deployOptionsError: null,
           deployOptionsLoading: false,
-        })),
+        }));
+      },
 
-      getDeployOptions: (architectureId) => {
-        const cached = get().deployOptions[architectureId];
+      getDeployOptions: (architectureId, runtime) => {
+        const cached = get().deployOptions[`${architectureId}:${runtime}`];
         return cached ? cached.data : null;
       },
 
@@ -306,9 +339,9 @@ export const useDeployStore = create<DeployState>()(
           deployOptionsError: null,
         }),
 
-      // Provider params actions
-      setProviderParams: (componentType, providerId, data) => {
-        const key = `${componentType}:${providerId}`;
+      // Provider params actions — keyed by "runtime:componentType:providerId"
+      setProviderParams: (componentType, providerId, runtime, data) => {
+        const key = `${runtime}:${componentType}:${providerId}`;
         set((state) => {
           const { [key]: _removed, ...remainingErrors } =
             state.providerParamsError;
@@ -322,21 +355,21 @@ export const useDeployStore = create<DeployState>()(
         });
       },
 
-      getProviderParams: (componentType, providerId) => {
-        const key = `${componentType}:${providerId}`;
+      getProviderParams: (componentType, providerId, runtime) => {
+        const key = `${runtime}:${componentType}:${providerId}`;
         const cached = get().providerParams[key];
         return cached ? cached.data : null;
       },
 
-      setProviderParamsError: (componentType, providerId, error) => {
-        const key = `${componentType}:${providerId}`;
+      setProviderParamsError: (componentType, providerId, runtime, error) => {
+        const key = `${runtime}:${componentType}:${providerId}`;
         set((state) => ({
           providerParamsError: { ...state.providerParamsError, [key]: error },
         }));
       },
 
-      clearProviderParamsError: (componentType, providerId) => {
-        const key = `${componentType}:${providerId}`;
+      clearProviderParamsError: (componentType, providerId, runtime) => {
+        const key = `${runtime}:${componentType}:${providerId}`;
         set((state) => {
           const { [key]: _removed, ...rest } = state.providerParamsError;
           return { providerParamsError: rest };
@@ -346,38 +379,41 @@ export const useDeployStore = create<DeployState>()(
       clearProviderParams: () =>
         set({ providerParams: {}, providerParamsError: {} }),
 
-      // Service params actions
-      setServiceParams: (serviceId, data) => {
+      // Service params actions — keyed by "runtime:serviceId"
+      setServiceParams: (serviceId, runtime, data) => {
+        const key = `${runtime}:${serviceId}`;
         set((state) => {
-          const { [serviceId]: _removed, ...remainingErrors } =
+          const { [key]: _removed, ...remainingErrors } =
             state.serviceParamsError;
           return {
             serviceParams: {
               ...state.serviceParams,
-              [serviceId]: { data, fetchedAt: Date.now() },
+              [key]: { data, fetchedAt: Date.now() },
             },
             serviceParamsError: remainingErrors,
           };
         });
       },
 
-      getServiceParams: (serviceId) => {
-        const cached = get().serviceParams[serviceId];
+      getServiceParams: (serviceId, runtime) => {
+        const cached = get().serviceParams[`${runtime}:${serviceId}`];
         return cached ? cached.data : null;
       },
 
-      setServiceParamsError: (serviceId, error) => {
+      setServiceParamsError: (serviceId, runtime, error) => {
+        const key = `${runtime}:${serviceId}`;
         set((state) => ({
           serviceParamsError: {
             ...state.serviceParamsError,
-            [serviceId]: error,
+            [key]: error,
           },
         }));
       },
 
-      clearServiceParamsError: (serviceId) => {
+      clearServiceParamsError: (serviceId, runtime) => {
+        const key = `${runtime}:${serviceId}`;
         set((state) => {
-          const { [serviceId]: _removed, ...rest } = state.serviceParamsError;
+          const { [key]: _removed, ...rest } = state.serviceParamsError;
           return { serviceParamsError: rest };
         });
       },
@@ -407,21 +443,21 @@ export const useDeployStore = create<DeployState>()(
         );
       },
 
-      isDeployOptionsStale: (architectureId) => {
-        const cached = get().deployOptions[architectureId];
+      isDeployOptionsStale: (architectureId, runtime) => {
+        const cached = get().deployOptions[`${architectureId}:${runtime}`];
         if (!cached || !cached.fetchedAt) return true;
         return Date.now() - cached.fetchedAt > DEPLOY_OPTIONS_CACHE_DURATION;
       },
 
-      isProviderParamsStale: (componentType, providerId) => {
-        const key = `${componentType}:${providerId}`;
+      isProviderParamsStale: (componentType, providerId, runtime) => {
+        const key = `${runtime}:${componentType}:${providerId}`;
         const cached = get().providerParams[key];
         if (!cached || !cached.fetchedAt) return true;
         return Date.now() - cached.fetchedAt > PARAMS_CACHE_DURATION;
       },
 
-      isServiceParamsStale: (serviceId) => {
-        const cached = get().serviceParams[serviceId];
+      isServiceParamsStale: (serviceId, runtime) => {
+        const cached = get().serviceParams[`${runtime}:${serviceId}`];
         if (!cached || !cached.fetchedAt) return true;
         return Date.now() - cached.fetchedAt > PARAMS_CACHE_DURATION;
       },

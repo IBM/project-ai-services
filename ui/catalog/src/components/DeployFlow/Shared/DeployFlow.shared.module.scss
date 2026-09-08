@@ -20,6 +20,162 @@
   margin-bottom: $spacing-06;
 }
 
+.deploymentSectionHeading {
+  @include type-style("heading-compact-01");
+  color: $text-primary;
+  margin: 0 0 $spacing-04 0;
+}
+
+.deploymentTypeGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: $spacing-05;
+
+  @include breakpoint("lg") {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.deploymentTypeTile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-block-size: 120px;
+  padding: $spacing-05;
+  border: 1px solid $border-subtle;
+  background-color: $layer-01;
+  transition: border-color $duration-moderate-01 motion(standard, productive);
+  text-decoration: none !important;
+
+  &,
+  &:hover,
+  &:focus,
+  &:active {
+    text-decoration: none !important;
+
+    * {
+      text-decoration: none !important;
+    }
+  }
+
+  &:hover:not(.deploymentTypeTileDisabled) {
+    border-color: $border-strong;
+  }
+}
+
+.deploymentTypeTileSelected {
+  border: 2px solid $border-interactive;
+  padding: calc(#{$spacing-05} - 1px);
+}
+
+.deploymentTypeTileDisabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.deploymentTypeTileCheck {
+  position: absolute;
+  top: $spacing-05;
+  right: $spacing-05;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  svg {
+    fill: $icon-primary;
+  }
+}
+
+.deploymentTypeTileContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.deploymentTileLabel {
+  @include type-style("body-compact-01");
+  margin: 0;
+  padding-right: $spacing-07;
+  color: $text-primary;
+  text-decoration: none;
+}
+
+.deploymentTileDescription {
+  @include type-style("body-compact-01");
+  margin: 0;
+  color: $text-primary;
+}
+
+.deploymentLocationField {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+  max-inline-size: 100%;
+
+  @include breakpoint("md") {
+    max-inline-size: 50%;
+  }
+
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-01 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+  }
+}
+
+.deploymentLocationLabel {
+  @include type-style("label-01");
+  color: $text-secondary;
+  display: flex;
+  align-items: center;
+  gap: $spacing-02;
+}
+
+.deploymentLocationRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+}
+
+.refreshButton {
+  border-radius: 24px;
+  flex-shrink: 0;
+}
+
+// Wrapper carries flex sizing for the dropdown.
+.workerDropdownWrapper {
+  flex: 1;
+  min-width: 0;
+
+  // Style the last list item (Register worker resource sentinel) as a sticky blue button.
+  :global {
+    .cds--list-box__menu-item:last-child {
+      position: sticky;
+      bottom: 0;
+      background-color: $interactive;
+      border-top: 1px solid $border-subtle;
+
+      &:hover {
+        background-color: $button-primary-hover;
+      }
+
+      .cds--list-box__menu-item__option {
+        color: $text-on-color;
+      }
+
+      // Hide the selected checkmark icon on the register item
+      .cds--list-box__menu-item__selected-icon {
+        display: none;
+      }
+    }
+  }
+}
+
 .sectionTitle {
   @include type-style("heading-compact-02");
   margin-bottom: $spacing-05;
@@ -369,6 +525,10 @@
 
 @include breakpoint-down(lg) {
   .formField {
+    max-width: 100%;
+  }
+
+  .deploymentLocationField {
     max-width: 100%;
   }
 

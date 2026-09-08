@@ -424,6 +424,8 @@ const WorkerResourcesTable = ({
               isOpen={state.isDeleteDialogOpen}
               isDeregistering={state.isDeleting}
               workerName={selectedRow?.name ?? ""}
+              workerStatus={selectedRow?.status ?? ""}
+              runtimeType={selectedRow?.runtime_type ?? ""}
               onConfirm={() => void handleDeregister()}
               onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
             />

@@ -9,18 +9,17 @@ import type {
 import type { ServiceDetailData } from "@/components";
 
 interface ServiceDeployState {
-  // Service deploy options cache - keyed by serviceId (static data - no refetch needed)
+  // Service deploy options cache - keyed by "serviceId:runtime"
   serviceDeployOptions: Record<string, ServiceDeployOptions>;
   serviceDeployOptionsLoading: Record<string, boolean>;
   serviceDeployOptionsError: Record<string, string | null>;
 
-  // Component models cache - keyed by "serviceId:componentType" (static data - no refetch needed)
-  // Stores model options for any component type (embedding, llm, reranker, etc.)
+  // Component models cache - keyed by "serviceId:componentType:runtime"
   componentModels: Record<string, LLMOption[]>;
   componentModelsLoading: Record<string, boolean>;
   componentModelsError: Record<string, string | null>;
 
-  // Provider schemas cache - keyed by "serviceId:componentType:providerId" (static data - no refetch needed)
+  // Provider schemas cache - keyed by "serviceId:componentType:providerId:runtime"
   providerSchemas: Record<string, ProviderSchema>;
 
   // Services cache (for StepZero) (static data - no refetch needed)
@@ -42,49 +41,69 @@ interface ServiceDeployState {
   // Actions for service deploy options
   setServiceDeployOptions: (
     serviceId: string,
+    runtime: string,
     data: ServiceDeployOptions,
   ) => void;
-  setServiceDeployOptionsLoading: (serviceId: string, loading: boolean) => void;
+  setServiceDeployOptionsLoading: (
+    serviceId: string,
+    runtime: string,
+    loading: boolean,
+  ) => void;
   setServiceDeployOptionsError: (
     serviceId: string,
+    runtime: string,
     error: string | null,
   ) => void;
-  getServiceDeployOptions: (serviceId: string) => ServiceDeployOptions | null;
-  clearServiceDeployOptions: (serviceId: string) => void;
+  getServiceDeployOptions: (
+    serviceId: string,
+    runtime: string,
+  ) => ServiceDeployOptions | null;
+  clearServiceDeployOptions: (serviceId: string, runtime: string) => void;
 
   // Actions for component models (generic)
   setComponentModels: (
     serviceId: string,
     componentType: string,
+    runtime: string,
     data: LLMOption[],
   ) => void;
   setComponentModelsLoading: (
     serviceId: string,
     componentType: string,
+    runtime: string,
     loading: boolean,
   ) => void;
   setComponentModelsError: (
     serviceId: string,
     componentType: string,
+    runtime: string,
     error: string | null,
   ) => void;
-  getComponentModels: (serviceId: string, componentType: string) => LLMOption[];
-  clearComponentModels: (serviceId: string, componentType: string) => void;
+  getComponentModels: (
+    serviceId: string,
+    componentType: string,
+    runtime: string,
+  ) => LLMOption[];
+  clearComponentModels: (
+    serviceId: string,
+    componentType: string,
+    runtime: string,
+  ) => void;
 
   // Actions for provider schemas
   setProviderSchema: (
     serviceId: string,
     componentType: string,
     providerId: string,
+    runtime: string,
     schema: ProviderSchema,
   ) => void;
   getProviderSchema: (
     serviceId: string,
     componentType: string,
     providerId: string,
+    runtime: string,
   ) => ProviderSchema | null;
-  clearProviderSchemas: (serviceId: string) => void;
-
   setServices: (data: Service[]) => void;
   setServicesLoading: (loading: boolean) => void;
   setServicesError: (error: string | null) => void;
@@ -111,7 +130,7 @@ interface ServiceDeployState {
 
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-// Helper function to generate composite keys
+// Builds a composite cache key from the provided parts
 const createKey = (...parts: string[]): string => parts.join(":");
 
 export const useServiceDeployStore = create<ServiceDeployState>()(
@@ -146,62 +165,72 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
       deployedServicesError: null,
       deployedServicesFetchedAt: null,
 
-      // Service deploy options actions
-      setServiceDeployOptions: (serviceId, data) =>
+      // Service deploy options actions — keyed by "serviceId:runtime"
+      setServiceDeployOptions: (serviceId, runtime, data) => {
+        const key = createKey(serviceId, runtime);
         set((state) => ({
           serviceDeployOptions: {
             ...state.serviceDeployOptions,
-            [serviceId]: data,
+            [key]: data,
           },
           serviceDeployOptionsLoading: {
             ...state.serviceDeployOptionsLoading,
-            [serviceId]: false,
+            [key]: false,
           },
-        })),
+        }));
+      },
 
-      setServiceDeployOptionsLoading: (serviceId, loading) =>
+      setServiceDeployOptionsLoading: (serviceId, runtime, loading) => {
+        const key = createKey(serviceId, runtime);
         set((state) => ({
           serviceDeployOptionsLoading: {
             ...state.serviceDeployOptionsLoading,
-            [serviceId]: loading,
+            [key]: loading,
           },
-        })),
+        }));
+      },
 
-      setServiceDeployOptionsError: (serviceId, error) =>
+      setServiceDeployOptionsError: (serviceId, runtime, error) => {
+        const key = createKey(serviceId, runtime);
         set((state) => ({
           serviceDeployOptionsError: {
             ...state.serviceDeployOptionsError,
-            [serviceId]: error,
+            [key]: error,
           },
           serviceDeployOptionsLoading: {
             ...state.serviceDeployOptionsLoading,
-            [serviceId]: false,
+            [key]: false,
           },
-        })),
-
-      getServiceDeployOptions: (serviceId) => {
-        const state = get();
-        return state.serviceDeployOptions[serviceId] || null;
+        }));
       },
 
-      clearServiceDeployOptions: (serviceId) =>
+      getServiceDeployOptions: (serviceId, runtime) => {
+        const state = get();
+        return (
+          state.serviceDeployOptions[createKey(serviceId, runtime)] || null
+        );
+      },
+
+      clearServiceDeployOptions: (serviceId, runtime) => {
+        const key = createKey(serviceId, runtime);
         set((state) => {
           const newOptions = { ...state.serviceDeployOptions };
           const newErrors = { ...state.serviceDeployOptionsError };
           const newLoading = { ...state.serviceDeployOptionsLoading };
-          delete newOptions[serviceId];
-          delete newErrors[serviceId];
-          delete newLoading[serviceId];
+          delete newOptions[key];
+          delete newErrors[key];
+          delete newLoading[key];
           return {
             serviceDeployOptions: newOptions,
             serviceDeployOptionsError: newErrors,
             serviceDeployOptionsLoading: newLoading,
           };
-        }),
+        });
+      },
 
-      // Component models actions (generic for any component type)
-      setComponentModels: (serviceId, componentType, data) => {
-        const key = createKey(serviceId, componentType);
+      // Component models actions — keyed by "serviceId:componentType:runtime"
+      setComponentModels: (serviceId, componentType, runtime, data) => {
+        const key = createKey(serviceId, componentType, runtime);
         set((state) => ({
           componentModels: {
             ...state.componentModels,
@@ -214,8 +243,13 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
         }));
       },
 
-      setComponentModelsLoading: (serviceId, componentType, loading) => {
-        const key = createKey(serviceId, componentType);
+      setComponentModelsLoading: (
+        serviceId,
+        componentType,
+        runtime,
+        loading,
+      ) => {
+        const key = createKey(serviceId, componentType, runtime);
         set((state) => ({
           componentModelsLoading: {
             ...state.componentModelsLoading,
@@ -224,8 +258,8 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
         }));
       },
 
-      setComponentModelsError: (serviceId, componentType, error) => {
-        const key = createKey(serviceId, componentType);
+      setComponentModelsError: (serviceId, componentType, runtime, error) => {
+        const key = createKey(serviceId, componentType, runtime);
         set((state) => ({
           componentModelsError: {
             ...state.componentModelsError,
@@ -238,14 +272,14 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
         }));
       },
 
-      getComponentModels: (serviceId, componentType) => {
+      getComponentModels: (serviceId, componentType, runtime) => {
         const state = get();
-        const key = createKey(serviceId, componentType);
+        const key = createKey(serviceId, componentType, runtime);
         return state.componentModels[key] || [];
       },
 
-      clearComponentModels: (serviceId, componentType) => {
-        const key = createKey(serviceId, componentType);
+      clearComponentModels: (serviceId, componentType, runtime) => {
+        const key = createKey(serviceId, componentType, runtime);
         set((state) => {
           const newModels = { ...state.componentModels };
           const newErrors = { ...state.componentModelsError };
@@ -261,9 +295,15 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
         });
       },
 
-      // Provider schemas actions
-      setProviderSchema: (serviceId, componentType, providerId, schema) => {
-        const key = createKey(serviceId, componentType, providerId);
+      // Provider schemas actions — keyed by "serviceId:componentType:providerId:runtime"
+      setProviderSchema: (
+        serviceId,
+        componentType,
+        providerId,
+        runtime,
+        schema,
+      ) => {
+        const key = createKey(serviceId, componentType, providerId, runtime);
         set((state) => ({
           providerSchemas: {
             ...state.providerSchemas,
@@ -272,27 +312,11 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
         }));
       },
 
-      getProviderSchema: (serviceId, componentType, providerId) => {
-        const key = createKey(serviceId, componentType, providerId);
+      getProviderSchema: (serviceId, componentType, providerId, runtime) => {
+        const key = createKey(serviceId, componentType, providerId, runtime);
         const state = get();
         return state.providerSchemas[key] || null;
       },
-
-      clearProviderSchemas: (serviceId) =>
-        set((state) => {
-          const newSchemas = { ...state.providerSchemas };
-
-          // Remove all schemas for this serviceId
-          Object.keys(newSchemas).forEach((key) => {
-            if (key.startsWith(`${serviceId}:`)) {
-              delete newSchemas[key];
-            }
-          });
-
-          return {
-            providerSchemas: newSchemas,
-          };
-        }),
 
       // Services actions
       setServices: (data) =>

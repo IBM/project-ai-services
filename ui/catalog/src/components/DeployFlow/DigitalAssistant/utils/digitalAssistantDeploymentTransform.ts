@@ -192,5 +192,6 @@ export function transformToDeploymentPayload(
     catalog_id: deployOptions.id,
     version: formData.version,
     services,
+    worker_name: formData.workerName,
   };
 }

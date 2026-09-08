@@ -3,6 +3,7 @@ import type { StepProps } from "../types";
 import type { ComponentConfig } from "../../Shared/types";
 import type { LLMOption } from "@/types/api.types";
 import { useDeployStore } from "@/store/deploy.store";
+import { DEFAULT_RUNTIME } from "@/constants";
 import {
   SharedStepOne,
   type StepOneComponentRow,
@@ -18,6 +19,10 @@ export const StepOne: React.FC<StepProps> = ({
   providerParamsByType,
   showNameError = false,
   onComponentError,
+  runtime = DEFAULT_RUNTIME,
+  workers,
+  isLoadingWorkers,
+  refetchWorkers,
 }) => {
   const providerParamsError = useDeployStore(
     (state) => state.providerParamsError,
@@ -35,25 +40,30 @@ export const StepOne: React.FC<StepProps> = ({
           component.providers.find((p) => p.default)?.id ||
           component.providers[0]?.id;
         if (!selectedProviderId) return false;
-        return !!providerParamsError[`${component.type}:${selectedProviderId}`];
+        return !!providerParamsError[
+          `${runtime}:${component.type}:${selectedProviderId}`
+        ];
       })
       .map((c) => c.name);
   }, [
     deployOptions.global_components,
     formData.globalComponents,
     providerParamsError,
+    runtime,
   ]);
 
   // providerId → display label for the provider-first fallback (hasModels: false).
   const modelNames = useMemo(() => {
     const result: Record<string, string> = {};
     deployOptions.global_components.forEach((component) => {
-      (globalComponentModels[component.type] ?? EMPTY).forEach((m) => {
-        if (!result[m.providerId]) result[m.providerId] = m.text;
-      });
+      (globalComponentModels[`${runtime}:${component.type}`] ?? EMPTY).forEach(
+        (m) => {
+          if (!result[m.providerId]) result[m.providerId] = m.text;
+        },
+      );
     });
     return result;
-  }, [deployOptions.global_components, globalComponentModels]);
+  }, [deployOptions.global_components, globalComponentModels, runtime]);
 
   // Set default model selection when model options arrive and nothing is selected yet.
   useEffect(() => {
@@ -64,7 +74,8 @@ export const StepOne: React.FC<StepProps> = ({
       const config = formData.globalComponents[component.type];
       if (!config || config.params?.model) return;
 
-      const models = globalComponentModels[component.type] ?? EMPTY;
+      const models =
+        globalComponentModels[`${runtime}:${component.type}`] ?? EMPTY;
       if (models.length === 0) return;
 
       // Prefer the default provider's first model, fall back to first overall.
@@ -91,12 +102,14 @@ export const StepOne: React.FC<StepProps> = ({
     formData.globalComponents,
     globalComponentModels,
     onChange,
+    runtime,
   ]);
 
   // Build component rows for SharedStepOne.
   const components = useMemo<StepOneComponentRow[]>(() => {
     return deployOptions.global_components.map((component) => {
-      const models = globalComponentModels[component.type] ?? EMPTY;
+      const models =
+        globalComponentModels[`${runtime}:${component.type}`] ?? EMPTY;
       const selectedModel =
         (formData.globalComponents[component.type]?.params?.model as string) ||
         "";
@@ -130,11 +143,13 @@ export const StepOne: React.FC<StepProps> = ({
     formData.globalComponents,
     globalComponentModels,
     modelNames,
+    runtime,
   ]);
 
   // Resolve provider from the selected model and update formData.
   const handleModelChange = (componentType: string, modelId: string) => {
-    const models = globalComponentModels[componentType] ?? EMPTY;
+    const models =
+      globalComponentModels[`${runtime}:${componentType}`] ?? EMPTY;
     const selected = models.find((m) => m.id === modelId);
     if (!selected) return;
 
@@ -182,6 +197,9 @@ export const StepOne: React.FC<StepProps> = ({
       showNameError={showNameError}
       failedComponentNames={failedComponentTypes}
       onComponentError={onComponentError}
+      workers={workers}
+      isLoadingWorkers={isLoadingWorkers}
+      refetchWorkers={refetchWorkers}
     />
   );
 };

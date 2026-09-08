@@ -10,11 +10,15 @@ export interface ServiceConfig {
   params: Record<string, unknown>; // Service-level params from schema
 }
 
+export type DeploymentRuntimeType = "podman" | "openshift";
+
 export interface DeployFormData {
   name: string;
   version: string;
   globalComponents: Record<string, ComponentConfig>; // e.g., { embedding: {...}, vector_store: {...} }
   services: Record<string, ServiceConfig>; // e.g., { digitize: {...}, chat: {...} }
+  deploymentType: DeploymentRuntimeType;
+  workerName: string;
 }
 
 export interface BaseStepProps {

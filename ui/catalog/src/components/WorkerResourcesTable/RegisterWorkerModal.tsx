@@ -36,12 +36,11 @@ const RegisterWorkerModal = ({
   const runCommand = useMemo(() => {
     if (!isSuccess) return "";
     return [
-      "ai-services worker join \\",
-      "  --server <host>:<port> \\",
-      `  --name "${workerName}" \\`,
+      "ai-services worker join <catalog-host>:9090 \\",
+      "  --runtime <podman|openshift> \\",
       `  --token "${token}"`,
     ].join("\n");
-  }, [isSuccess, workerName, token]);
+  }, [isSuccess, token]);
 
   return (
     <Modal

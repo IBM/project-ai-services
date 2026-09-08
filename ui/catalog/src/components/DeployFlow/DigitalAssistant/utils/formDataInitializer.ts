@@ -9,6 +9,7 @@ import type {
   ComponentConfig,
   ServiceConfig,
 } from "@/components/DeployFlow/Shared/types";
+import { DEFAULT_FORM_DATA } from "@/components/DeployFlow/Shared/utils/formData";
 
 // Initializes form data structure from deploy options with default values
 export function initializeFormData(
@@ -63,87 +64,6 @@ export function initializeFormData(
     version: deployOptions.version,
     globalComponents,
     services,
-  };
-}
-
-// Updates a specific component configuration within a service
-export function updateServiceComponent(
-  formData: DeployFormData,
-  serviceId: string,
-  componentType: string,
-  updates: Partial<ComponentConfig>,
-): DeployFormData {
-  return {
-    ...formData,
-    services: {
-      ...formData.services,
-      [serviceId]: {
-        ...formData.services[serviceId],
-        components: {
-          ...formData.services[serviceId].components,
-          [componentType]: {
-            ...formData.services[serviceId].components[componentType],
-            ...updates,
-          },
-        },
-      },
-    },
-  };
-}
-
-// Updates service-level parameters for a specific service
-export function updateServiceParams(
-  formData: DeployFormData,
-  serviceId: string,
-  params: Record<string, unknown>,
-): DeployFormData {
-  return {
-    ...formData,
-    services: {
-      ...formData.services,
-      [serviceId]: {
-        ...formData.services[serviceId],
-        params: {
-          ...formData.services[serviceId].params,
-          ...params,
-        },
-      },
-    },
-  };
-}
-
-// Updates a global component configuration shared across services
-export function updateGlobalComponent(
-  formData: DeployFormData,
-  componentType: string,
-  updates: Partial<ComponentConfig>,
-): DeployFormData {
-  return {
-    ...formData,
-    globalComponents: {
-      ...formData.globalComponents,
-      [componentType]: {
-        ...formData.globalComponents[componentType],
-        ...updates,
-      },
-    },
-  };
-}
-
-// Toggles the enabled/disabled state of a service
-export function toggleService(
-  formData: DeployFormData,
-  serviceId: string,
-  enabled: boolean,
-): DeployFormData {
-  return {
-    ...formData,
-    services: {
-      ...formData.services,
-      [serviceId]: {
-        ...formData.services[serviceId],
-        enabled,
-      },
-    },
+    ...DEFAULT_FORM_DATA,
   };
 }

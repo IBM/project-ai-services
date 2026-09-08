@@ -1,5 +1,6 @@
 import { useReducer, useEffect, useRef, useMemo, useState } from "react";
 import { COMPONENT_TYPES } from "@/constants";
+import { useWorkers } from "@/hooks/useWorkers";
 import type {
   ServicesDeployFlowProps,
   DeployFlowState,
@@ -20,7 +21,10 @@ import { StepZero } from "./steps/StepZero";
 import { useServiceDeployOptions } from "./hooks/useServiceDeployOptions";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
-import { BASE_INITIAL_STATE } from "../Shared/utils/formData";
+import {
+  BASE_INITIAL_STATE,
+  DEFAULT_FORM_DATA,
+} from "../Shared/utils/formData";
 
 const STEPS = [
   {
@@ -46,6 +50,7 @@ const getInitialState = (): DeployFlowState => ({
     version: "",
     globalComponents: {},
     services: {},
+    ...DEFAULT_FORM_DATA,
   },
   selectedServiceId: null,
   currentStep: 0,
@@ -72,6 +77,13 @@ export const ServicesDeployFlow = ({
   preSelectedServiceId,
 }: ServicesDeployFlowProps) => {
   const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
+
+  const {
+    workers,
+    isLoading: isLoadingWorkers,
+    refetch: refetchWorkers,
+  } = useWorkers();
+
   const [state, dispatch] = useReducer(servicesDeployFlowReducer, {
     ...getInitialState(),
     selectedServiceId: preSelectedServiceId ?? null,
@@ -81,6 +93,8 @@ export const ServicesDeployFlow = ({
   // Track if form data has been initialized for the current service to prevent re-initialization
   const hasInitializedFormData = useRef<string | null>(null);
 
+  const runtime = state.formData.deploymentType;
+
   // Only fetch deploy options when on step 1 or later (after user clicks Next)
   const shouldFetchDeployOptions =
     state.currentStep >= STEP_ONE && state.selectedServiceId;
@@ -88,6 +102,7 @@ export const ServicesDeployFlow = ({
     useServiceDeployOptions(
       shouldFetchDeployOptions ? state.selectedServiceId : null,
       open,
+      runtime,
     );
 
   // Get component models loading and error state from store
@@ -120,18 +135,23 @@ export const ServicesDeployFlow = ({
   const isStep1ComponentsLoading = useMemo(() => {
     if (!state.selectedServiceId || !step1Components.length) return false;
     return step1Components.some((component) => {
-      const key = `${state.selectedServiceId}:${component.type}`;
+      const key = `${state.selectedServiceId}:${component.type}:${runtime}`;
       return componentModelsLoading[key] === true;
     });
-  }, [state.selectedServiceId, step1Components, componentModelsLoading]);
+  }, [
+    state.selectedServiceId,
+    step1Components,
+    componentModelsLoading,
+    runtime,
+  ]);
 
   const hasStep1ComponentsError = useMemo(() => {
     if (!state.selectedServiceId || !step1Components.length) return false;
     return step1Components.some((component) => {
-      const key = `${state.selectedServiceId}:${component.type}`;
+      const key = `${state.selectedServiceId}:${component.type}:${runtime}`;
       return !!componentModelsError[key];
     });
-  }, [state.selectedServiceId, step1Components, componentModelsError]);
+  }, [state.selectedServiceId, step1Components, componentModelsError, runtime]);
 
   useEffect(() => {
     if (open && preSelectedServiceId) {
@@ -191,7 +211,7 @@ export const ServicesDeployFlow = ({
     }
 
     // Get the provider schema for the selected LLM provider
-    const schemaKey = `${state.selectedServiceId}:llm:${llmComponent.providerId}`;
+    const schemaKey = `${state.selectedServiceId}:llm:${llmComponent.providerId}:${runtime}`;
     const providerSchema = providerSchemas[schemaKey];
 
     if (!providerSchema || !providerSchema.required) {
@@ -212,7 +232,12 @@ export const ServicesDeployFlow = ({
         value !== undefined && value !== null && String(value).trim() !== ""
       );
     });
-  }, [state.selectedServiceId, state.formData.services, providerSchemas]);
+  }, [
+    state.selectedServiceId,
+    state.formData.services,
+    providerSchemas,
+    runtime,
+  ]);
 
   const {
     handleNext,
@@ -239,10 +264,19 @@ export const ServicesDeployFlow = ({
     await runDeployment({
       dispatch,
       deploy: async () => {
+        const runtimeSuffix = `:${runtime}`;
+        const resolvedSchemas = Object.fromEntries(
+          Object.entries(providerSchemas)
+            .filter(([key]) => key.endsWith(runtimeSuffix))
+            .map(([key, schema]) => [
+              key.slice(0, key.length - runtimeSuffix.length),
+              schema,
+            ]),
+        );
         const deploymentPayload = await transformToDeploymentPayload(
           state.formData,
           deployOptions,
-          providerSchemas,
+          resolvedSchemas,
           state.selectedServiceId,
         );
         await deployApplication(deploymentPayload);
@@ -320,6 +354,10 @@ export const ServicesDeployFlow = ({
           deployOptions={deployOptions}
           selectedServiceId={state.selectedServiceId}
           showNameError={state.showStepOneNameError}
+          runtime={runtime}
+          workers={workers}
+          isLoadingWorkers={isLoadingWorkers}
+          refetchWorkers={refetchWorkers}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -335,6 +373,7 @@ export const ServicesDeployFlow = ({
           serviceDescription={selectedService?.description}
           isLoadingLlmModels={!!isLoading}
           onComponentError={setHasStep2SchemaError}
+          runtime={runtime}
         />
       )}
     </DeployTearsheetShell>

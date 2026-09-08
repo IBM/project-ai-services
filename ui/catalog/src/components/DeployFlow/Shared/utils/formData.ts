@@ -1,4 +1,18 @@
-import type { BaseDeployFlowState, DeployFormData } from "../types";
+import type {
+  BaseDeployFlowState,
+  DeployFormData,
+  DeploymentRuntimeType,
+} from "../types";
+import { LOCAL_WORKER_NAME, DEFAULT_RUNTIME } from "@/constants";
+
+// Default form data values shared across both deploy flows.
+export const DEFAULT_FORM_DATA: Pick<
+  DeployFormData,
+  "deploymentType" | "workerName"
+> = {
+  deploymentType: DEFAULT_RUNTIME as DeploymentRuntimeType,
+  workerName: LOCAL_WORKER_NAME,
+};
 
 // Shared initial values — each flow spreads this and adds its own fields on top.
 export const BASE_INITIAL_STATE = {

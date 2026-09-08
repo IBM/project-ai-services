@@ -65,8 +65,11 @@ function getProviderVersion(
     return provider.version;
   }
 
-  // Final fallback
-  return "1.0.0";
+  // Version must come from API - throw error if not found
+  throw new Error(
+    `Provider version not found in API response for component type "${componentType}" and provider "${providerId}". ` +
+      `This indicates a configuration issue - all provider versions must be defined in the API response.`,
+  );
 }
 
 // Builds a deployment component from ComponentConfig
@@ -130,8 +133,7 @@ export async function transformToDeploymentPayload(
   ) => {
     const key = `${componentType}:${providerId}`;
     if (!schemaFetchPromises.has(key)) {
-      // Check if we have a cached schema for this component/provider
-      // Schemas are stored with key format: serviceId:componentType:providerId
+      // cachedSchemas keys are pre-resolved to "serviceId:componentType:providerId" by the caller
       const cacheKey = `${currentServiceId}:${componentType}:${providerId}`;
       const cachedSchema = cachedSchemas?.[cacheKey] || null;
 
@@ -210,5 +212,6 @@ export async function transformToDeploymentPayload(
     version: formData.version,
     deployment_type: "service",
     services,
+    worker_name: formData.workerName,
   };
 }

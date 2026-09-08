@@ -20,8 +20,12 @@ import { DAStepTwo as StepTwo } from "./steps/DAStepTwo";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
-import { BASE_INITIAL_STATE } from "../Shared/utils/formData";
+import {
+  BASE_INITIAL_STATE,
+  DEFAULT_FORM_DATA,
+} from "../Shared/utils/formData";
 import { dedupe } from "@/utils/requestManager";
+import { useWorkers } from "@/hooks/useWorkers";
 
 const STEPS = [
   {
@@ -52,6 +56,7 @@ const daDeployFlowReducer = (
         version: "",
         globalComponents: {},
         services: {},
+        ...DEFAULT_FORM_DATA,
       });
     default:
       return sharedDeployFlowReducer(state, action);
@@ -63,10 +68,14 @@ export const DeployFlow = ({
   onClose,
   onSubmit,
 }: BaseDeployFlowProps) => {
-  const { deployOptions, isLoading, isProviderParamsLoading, error } =
-    useDeployOptions(open);
   const [hasStep1SchemaError, setHasStep1SchemaError] = useState(false);
   const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
+
+  const {
+    workers,
+    isLoading: isLoadingWorkers,
+    refetch: refetchWorkers,
+  } = useWorkers();
 
   const {
     serviceSummaries,
@@ -79,6 +88,26 @@ export const DeployFlow = ({
     initialize,
   } = useDeployStore();
 
+  // useReducer must come before useDeployOptions so runtime can be derived from state
+  const initialState = useMemo(
+    () =>
+      getInitialState({
+        name: "Digital assistant (copy)",
+        version: "",
+        globalComponents: {},
+        services: {},
+        ...DEFAULT_FORM_DATA,
+      }),
+    [],
+  );
+  const [state, dispatch] = useReducer(daDeployFlowReducer, initialState);
+  const hasInitialized = useRef(false);
+
+  const runtime = state.formData.deploymentType;
+
+  const { deployOptions, isLoading, isProviderParamsLoading, error } =
+    useDeployOptions(open, runtime);
+
   // Build once here and pass down — both StepOne and StepTwo need the same map.
   const providerParamsByType = useMemo(() => {
     if (!deployOptions) return {};
@@ -90,12 +119,13 @@ export const DeployFlow = ({
     allComponents.forEach((component) => {
       if (!result[component.type]) result[component.type] = {};
       component.providers.forEach((provider) => {
-        const cached = providerParams[`${component.type}:${provider.id}`];
+        const cached =
+          providerParams[`${runtime}:${component.type}:${provider.id}`];
         if (cached) result[component.type][provider.id] = cached.data;
       });
     });
     return result;
-  }, [deployOptions, providerParams]);
+  }, [deployOptions, providerParams, runtime]);
 
   // Initialize store and validate cache version on mount
   useEffect(() => {
@@ -131,21 +161,6 @@ export const DeployFlow = ({
     setServiceSummariesError,
     isServiceSummariesStale,
   ]);
-
-  const initialState = useMemo(() => {
-    if (deployOptions) {
-      return getInitialState(initializeFormData(deployOptions));
-    }
-    return getInitialState({
-      name: "Digital assistant (copy)",
-      version: "",
-      globalComponents: {},
-      services: {},
-    });
-  }, [deployOptions]);
-
-  const [state, dispatch] = useReducer(daDeployFlowReducer, initialState);
-  const hasInitialized = useRef(false);
 
   useEffect(() => {
     if (!open) {
@@ -185,8 +200,15 @@ export const DeployFlow = ({
     await runDeployment({
       dispatch,
       deploy: async () => {
+        // Build service schemas for the active runtime only (keys are "runtime:serviceId")
+        const runtimePrefix = `${runtime}:`;
         const serviceSchemas = Object.fromEntries(
-          Object.entries(serviceParams).map(([id, cache]) => [id, cache.data]),
+          Object.entries(serviceParams)
+            .filter(([key]) => key.startsWith(runtimePrefix))
+            .map(([key, cache]) => [
+              key.slice(runtimePrefix.length),
+              cache.data,
+            ]),
         );
         const deploymentPayload = transformToDeploymentPayload(
           state.formData,
@@ -254,6 +276,10 @@ export const DeployFlow = ({
           providerParamsByType={providerParamsByType}
           showNameError={state.showStepOneNameError}
           onComponentError={setHasStep1SchemaError}
+          runtime={runtime}
+          workers={workers}
+          isLoadingWorkers={isLoadingWorkers}
+          refetchWorkers={refetchWorkers}
         />
       )}
       {state.currentStep === LAST_STEP && deployOptions && (
@@ -266,6 +292,7 @@ export const DeployFlow = ({
           onEditingChange={handleEditingChange}
           onResourceStatusChange={handleResourceStatusChange}
           onComponentError={setHasStep2SchemaError}
+          runtime={runtime}
         />
       )}
     </DeployTearsheetShell>
