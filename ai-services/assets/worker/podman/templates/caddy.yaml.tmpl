@@ -30,7 +30,7 @@ spec:
           EOF
       volumeMounts:
         - name: caddy-data
-          mountPath: /data:z
+          mountPath: /data
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
@@ -47,10 +47,10 @@ spec:
           value: "{{ .BaseDir }}"
       volumeMounts:
         - name: caddy-data
-          mountPath: /data:z
+          mountPath: /data
           subPath: data
         - name: caddy-data
-          mountPath: /config:z
+          mountPath: /config
           subPath: config
         {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
         - name: caddy-certs
