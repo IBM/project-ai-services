@@ -1,0 +1,33 @@
+name: Service Base Lite
+on:
+  push:
+    paths:
+      - 'images/service-base-lite/**'
+    branches:
+      - main
+      - 'release-*'
+  pull_request:
+    paths:
+      - 'images/service-base-lite/**'
+      - .github/workflows/service-base-lite.yml
+    branches:
+      - main
+      - 'release-*'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'images/service-base-lite'
+    secrets: inherit
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'images/service-base-lite'
+      image: 'service-base-lite'
