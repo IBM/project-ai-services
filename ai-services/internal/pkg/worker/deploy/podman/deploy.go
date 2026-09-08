@@ -275,6 +275,13 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 		return fmt.Errorf("worker setup: render %s: %w", tmplName, err)
 	}
 
+	// If the rendered template is empty, skip deploying it
+	if strings.TrimSpace(rendered.String()) == "" {
+		logger.Infof("%s: Skipping resource deploy as it rendered empty", tmplName)
+
+		return nil
+	}
+	
 	var podSpec podmodels.PodSpec
 	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
 		return fmt.Errorf("worker setup: parse pod spec %s: %w", tmplName, err)
