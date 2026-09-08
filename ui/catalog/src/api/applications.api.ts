@@ -496,3 +496,16 @@ export async function fetchAllApplicationDatasources(
 
   return allData.map(transformDatasourceToRow);
 }
+
+// Removes a single datasource from an application
+export async function removeApplicationDatasource(
+  applicationId: string,
+  datasourceId: string,
+): Promise<void> {
+  await api.delete(
+    APPLICATION_ENDPOINTS.REMOVE_APPLICATION_DATASOURCE(
+      applicationId,
+      datasourceId,
+    ),
+  );
+}

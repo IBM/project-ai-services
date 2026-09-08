@@ -27,13 +27,16 @@ export const LastSyncCell = ({ value }: Pick<CellRendererProps, "value">) => (
   <span>{String(value ?? "")}</span>
 );
 
-export const DeleteCell = () => (
+export const DeleteCell = ({ rowId, dispatch }: CellRendererProps) => (
   <Button
     hasIconOnly
     kind="ghost"
     size="sm"
     renderIcon={TrashCan}
-    iconDescription="Delete"
+    iconDescription="Remove"
+    onClick={() =>
+      dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
+    }
   />
 );
 
