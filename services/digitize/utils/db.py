@@ -1142,6 +1142,7 @@ class DatabaseStatusManager:
             JobStatus.FAILED,
             JobStatus.CANCELLED,
             JobStatus.CANCEL_PENDING,
+            JobStatus.COMPLETED_WITH_ERRORS,
         }
         current_db_status = JobStatus(job.status) if job.status in JobStatus._value2member_map_ else None
         if current_db_status in protected_statuses and job_status not in protected_statuses:

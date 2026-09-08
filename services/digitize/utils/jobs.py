@@ -287,6 +287,7 @@ _TERMINAL_DOC_STATUSES = (
 
 NON_CANCELLABLE_JOB_STATUSES = (
     models.JobStatus.COMPLETED.value,
+    models.JobStatus.COMPLETED_WITH_ERRORS.value,
     models.JobStatus.FAILED.value,
     models.JobStatus.CANCEL_PENDING.value,
     models.JobStatus.CANCELLED.value,
