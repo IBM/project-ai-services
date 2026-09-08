@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogservices "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/services"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -389,7 +390,8 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 
 	applications := make([]apimodels.ConnectedApplicationItem, 0, len(linkedRows))
 	for _, row := range linkedRows {
-		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
+		apiURL := extractAPIEndpointURL(row.EndpointsJSON)
+		baseURL := catalogservices.GetServiceURL(s.catalogProvider, row.ServiceCatalogID, apiURL, row.ApplicationID)
 		syncStatus, lastSyncAt, syncErr := fetchSyncState(ctx, connectorID, baseURL)
 
 		// Resolve the type name from catalog metadata; fall back to catalog_id.
@@ -551,8 +553,8 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 		}
 
 		endpointsJSON, _ := json.Marshal(svc.Endpoints)
-		url := extractAPIEndpointURL(endpointsJSON)
-		if url == "" {
+		apiURL := extractAPIEndpointURL(endpointsJSON)
+		if apiURL == "" {
 			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ID, svc.CatalogID)
 
 			continue
@@ -563,7 +565,7 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 			ServiceCatalogID: svc.CatalogID,
 			ApplicationID:    app.ID,
 			ApplicationName:  app.Name,
-			URL:              url,
+			URL:              catalogservices.GetServiceURL(s.catalogProvider, svc.CatalogID, apiURL, app.ID),
 		})
 	}
 
@@ -864,7 +866,8 @@ func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Con
 // error if appropriate. DB cleanup failures are logged but do not block the caller.
 func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) error {
 	for _, svc := range linkedServices {
-		url := extractAPIEndpointURL(svc.EndpointsJSON)
+		apiURL := extractAPIEndpointURL(svc.EndpointsJSON)
+		url := catalogservices.GetServiceURL(s.catalogProvider, svc.ServiceCatalogID, apiURL, svc.ApplicationID)
 		if url != "" {
 			if err := s.serviceClient.Disconnect(ctx, url, datasourceID.String()); err != nil {
 				// 404 means the connector is already gone on the downstream side —
@@ -900,7 +903,9 @@ func (s *DatasourceService) resolveLinkedEndpoint(ctx context.Context, applicati
 
 	for _, row := range allRows {
 		if row.ApplicationID == applicationID {
-			return extractAPIEndpointURL(row.EndpointsJSON), nil
+			apiURL := extractAPIEndpointURL(row.EndpointsJSON)
+
+			return catalogservices.GetServiceURL(s.catalogProvider, row.ServiceCatalogID, apiURL, applicationID), nil
 		}
 	}
 
@@ -993,8 +998,8 @@ func (s *DatasourceService) propagateCredentials(
 	var propErrors []apimodels.PropagationError
 
 	for _, svc := range serviceEndpoints {
-		baseURL := extractAPIEndpointURL(svc.EndpointsJSON)
-		if baseURL == "" {
+		apiURL := extractAPIEndpointURL(svc.EndpointsJSON)
+		if apiURL == "" {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ID:    svc.ApplicationID.String(),
 				Name:  svc.ApplicationName,
@@ -1004,6 +1009,7 @@ func (s *DatasourceService) propagateCredentials(
 			continue
 		}
 
+		baseURL := catalogservices.GetServiceURL(s.catalogProvider, svc.ServiceCatalogID, apiURL, svc.ApplicationID)
 		if err := catalogclient.NewServiceClient(baseURL).UpdateConnector(ctx, datasourceID.String(), credPayload); err != nil {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ID:    svc.ApplicationID.String(),

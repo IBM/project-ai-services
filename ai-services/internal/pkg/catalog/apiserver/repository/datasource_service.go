@@ -38,5 +38,3 @@ func NewDatasourceService(
 		encryptionKey,
 	), nil
 }
-
-// Made with Bob
