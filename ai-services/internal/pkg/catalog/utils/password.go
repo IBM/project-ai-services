@@ -36,7 +36,7 @@ func HashPasswordPBKDF2(password string, iteration int) (string, error) {
 	return encoded, nil
 }
 
-// CollectAndHashPassword collects the password from user and returns the hashed password.
+// CollectAndHashPassword collects the password from the user and returns the hashed password.
 // Returns empty string if the secret already exists (no password needed).
 func CollectAndHashPassword(ctx context.Context, rt runtime.Runtime) (string, error) {
 	secretExists, err := rt.SecretExists(ctx, catalogConstants.CatalogSecretName)

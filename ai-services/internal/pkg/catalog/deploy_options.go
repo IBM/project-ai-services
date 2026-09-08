@@ -8,7 +8,6 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // GetArchitectureDeployOptions returns deploy options for all services in an architecture.
@@ -71,6 +70,10 @@ func (p *CatalogProvider) buildArchitectureServices(ctx context.Context, svcRefs
 
 // buildSingleService builds deploy options for a single service.
 func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID string) (*types.DeployOptionsService, error) {
+	if _, err := p.resolveRuntimeType(""); err != nil {
+		return nil, err
+	}
+
 	service, err := p.LoadService(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load service '%s': %w", serviceID, err)
@@ -104,6 +107,9 @@ func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID stri
 		Version:    serviceVersion,
 		Components: components,
 		Resources:  resources,
+		// Copy accepts_datasource from the catalog YAML so the UI knows whether to
+		// render a connector picker for this service.
+		AcceptsDatasource: service.AcceptsDatasource,
 	}
 
 	// Only add schema if the service has non-empty schema properties
@@ -128,6 +134,10 @@ func (p *CatalogProvider) buildServiceComponents(ctx context.Context, serviceID 
 
 // getServiceVersion retrieves the version for a service, returning empty string if not found.
 func (p *CatalogProvider) getServiceVersion(serviceID string) string {
+	if _, err := p.resolveRuntimeType(""); err != nil {
+		return ""
+	}
+
 	if runtimeMetadata, err := p.LoadServiceRuntimeMetadata(serviceID); err == nil {
 		return runtimeMetadata.Version
 	}
@@ -136,14 +146,29 @@ func (p *CatalogProvider) getServiceVersion(serviceID string) string {
 }
 
 // addServiceSchemaIfPresent adds schema URL to service if it has non-empty properties.
+// The URL includes ?runtime= so the UI fetches the correct runtime-specific schema.
 func (p *CatalogProvider) addServiceSchemaIfPresent(ctx context.Context, deployOptionsService *types.DeployOptionsService, serviceID string) {
-	if schema, err := p.GetServiceParams(ctx, serviceID); err == nil && hasNonEmptyProperties(schema) {
-		deployOptionsService.Schema = fmt.Sprintf("/api/v1/services/%s/params", serviceID)
+	runtimeType, err := p.resolveRuntimeType("")
+	if err != nil {
+		return
+	}
+
+	scopedProvider, err := p.WithRuntime(runtimeType)
+	if err != nil {
+		return
+	}
+	if schema, err := scopedProvider.GetServiceParams(ctx, serviceID); err == nil && hasNonEmptyProperties(schema) {
+		deployOptionsService.Schema = fmt.Sprintf("/api/v1/services/%s/params?runtime=%s", serviceID, runtimeType)
 	}
 }
 
 // GetServiceDeployOptions returns deploy options for a specific service.
 func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID string) (*types.DeployOptionsService, error) {
+	resolvedRuntimeType, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Load service metadata
 	service, err := p.LoadService(serviceID)
 	if err != nil {
@@ -189,9 +214,10 @@ func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID
 		Resources:  resources,
 	}
 
-	// Only add schema if the service has non-empty schema properties
+	// Only add schema if the service has non-empty schema properties.
+	// Include ?runtime= so the UI fetches the correct runtime-specific schema.
 	if schema, err := p.GetServiceParams(ctx, serviceID); err == nil && hasNonEmptyProperties(schema) {
-		deployOptions.Schema = fmt.Sprintf("/api/v1/services/%s/params", serviceID)
+		deployOptions.Schema = fmt.Sprintf("/api/v1/services/%s/params?runtime=%s", serviceID, resolvedRuntimeType)
 	}
 
 	return deployOptions, nil
@@ -239,6 +265,16 @@ func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, compo
 
 // buildProvider builds a DeployOptionsProvider from a component, including version, resources and schema if applicable.
 func (p *CatalogProvider) buildProvider(ctx context.Context, comp types.Component, componentType string, includeResources bool) types.DeployOptionsProvider {
+	runtimeType, err := p.resolveRuntimeType("")
+	if err != nil {
+		return types.DeployOptionsProvider{
+			ID:          comp.ID,
+			Name:        comp.Name,
+			Description: comp.Description,
+			Default:     comp.Default,
+		}
+	}
+
 	// Load component runtime metadata
 	providerVersion := ""
 	var resources *types.Resources
@@ -266,9 +302,10 @@ func (p *CatalogProvider) buildProvider(ctx context.Context, comp types.Componen
 		Resources:   resources,
 	}
 
-	// Only add schema if the schema file has non-empty properties
+	// Only add schema if the schema file has non-empty properties.
+	// Include ?runtime= so the UI fetches the correct runtime-specific schema.
 	if schema, err := p.GetComponentProviderParams(ctx, componentType, comp.ID); err == nil && hasNonEmptyProperties(schema) {
-		provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params", componentType, comp.ID)
+		provider.Schema = fmt.Sprintf("/api/v1/components/%s/providers/%s/params?runtime=%s", componentType, comp.ID, runtimeType)
 	}
 
 	return provider
@@ -286,8 +323,13 @@ func hasNonEmptyProperties(schema map[string]any) bool {
 // GetComponentProviderParams returns the JSON schema for a specific provider's configuration.
 // If the schema file is not present, returns an empty schema instead of failing.
 func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, componentType, providerID string) (map[string]any, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Verify component exists and get its path
-	_, err := p.LoadComponent(componentType, providerID)
+	_, err = p.LoadComponent(componentType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("component provider not found: %w", err)
 	}
@@ -298,13 +340,12 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 		return nil, fmt.Errorf("failed to get component path: %w", err)
 	}
 
-	itemFS, err := p.getItemFS(componentKey)
+	itemFS, err := p.GetItemFS(componentKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get component filesystem: %w", err)
 	}
 
-	runtimeStr := string(vars.RuntimeFactory.GetRuntimeType())
-	schemaPath := filepath.Join(componentPath, runtimeStr, "values.schema.json")
+	schemaPath := filepath.Join(componentPath, runtimePath, "values.schema.json")
 	schemaData, err := itemFS.Open(schemaPath)
 	if err != nil {
 		// Schema file is optional — return an empty schema rather than failing.
@@ -341,7 +382,7 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 		return nil, fmt.Errorf("failed to get connector path: %w", err)
 	}
 
-	itemFS, err := p.getItemFS(connectorKey)
+	itemFS, err := p.GetItemFS(connectorKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connector filesystem: %w", err)
 	}
@@ -371,8 +412,13 @@ func (p *CatalogProvider) GetConnectorProviderParams(ctx context.Context, connec
 // GetServiceParams returns the JSON schema for a specific service's configuration.
 // If the schema file is not present, returns an empty schema instead of failing.
 func (p *CatalogProvider) GetServiceParams(ctx context.Context, serviceID string) (map[string]any, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
 	// Verify service exists and get its path
-	_, err := p.LoadService(serviceID)
+	_, err = p.LoadService(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("service not found: %w", err)
 	}
@@ -382,13 +428,12 @@ func (p *CatalogProvider) GetServiceParams(ctx context.Context, serviceID string
 		return nil, fmt.Errorf("failed to get service path: %w", err)
 	}
 
-	itemFS, err := p.getItemFS(serviceID)
+	itemFS, err := p.GetItemFS(serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service filesystem: %w", err)
 	}
 
-	runtimeStr := string(vars.RuntimeFactory.GetRuntimeType())
-	schemaPath := filepath.Join(servicePath, runtimeStr, "values.schema.json")
+	schemaPath := filepath.Join(servicePath, runtimePath, "values.schema.json")
 	schemaFile, err := itemFS.Open(schemaPath)
 	if err != nil {
 		// Schema file is optional — return an empty schema rather than failing.

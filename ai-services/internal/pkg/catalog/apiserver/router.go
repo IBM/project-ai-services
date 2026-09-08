@@ -12,13 +12,16 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, datasourceSvc repository.DatasourceServiceInterface, bundleService bundlesvc.BundleServiceInterface, catalogProvider *catalog.CatalogProvider) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, workerRepo dbrepo.WorkerRepository, workerGatewayPort int, datasourceSvc repository.DatasourceServiceInterface, bundleService bundlesvc.BundleServiceInterface, catalogProvider *catalog.CatalogProvider) *gin.Engine {
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
@@ -37,9 +40,13 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 
 	auth := middleware.AuthMiddleware(tokenMgr, blacklist)
 	datasourceH := handlers.NewDatasourceHandler(datasourceSvc)
-	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(), auth)
+	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(workerReg), auth)
 	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), datasourceH, auth)
-	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg), auth)
+	runtimeType := types.RuntimeTypePodman
+	if vars.RuntimeFactory != nil {
+		runtimeType = vars.RuntimeFactory.GetRuntimeType()
+	}
+	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg, workerRepo, runtimeType, workerGatewayPort), auth)
 	registerDatasourceRoutes(v1, datasourceH, auth)
 	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
 
@@ -63,10 +70,15 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/architectures", catalog.ListArchitectures)
 		g.GET("/architectures/:id", catalog.GetArchitectureDetails)
 		g.GET("/architectures/:id/deploy-options", catalog.GetArchitectureDeployOptions)
+		g.GET("/architectures/:id/images", catalog.GetArchitectureImages)
+		g.GET("/architectures/:id/models", catalog.GetArchitectureModels)
 		g.GET("/services", catalog.ListServices)
 		g.GET("/services/:id", catalog.GetServiceDetails)
 		g.GET("/services/:id/deploy-options", catalog.GetServiceDeployOptions)
 		g.GET("/services/:id/params", catalog.GetServiceParams)
+		g.GET("/services/:id/images", catalog.GetServiceImages)
+		g.GET("/services/:id/models", catalog.GetServiceModels)
+		g.GET("/services/:id/steps", catalog.GetServiceSteps)
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)
 		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)
@@ -103,8 +115,14 @@ func registerApplicationRoutes(v1 *gin.RouterGroup, h *handlers.ApplicationHandl
 		g.PUT("/:id", h.UpdateApplication)
 		g.DELETE("/:id", h.DeleteApplication)
 		g.GET("/:id/ps", h.ApplicationPS)
+		// GET /api/v1/applications/:id/datasources — list datasources linked to this application
+		g.GET("/:id/datasources", datasourceH.ListApplicationDatasources)
 		// PUT /api/v1/applications/:id/datasources — connect one or more datasources to application
 		g.PUT("/:id/datasources", datasourceH.ConnectDatasourcesToApplication)
+		// GET /api/v1/applications/:id/datasources/:datasource_id — get datasource status for application
+		g.GET("/:id/datasources/:datasource_id", datasourceH.GetApplicationDatasource)
+		// DELETE /api/v1/applications/:id/datasources/:datasource_id — disconnect a single datasource from application
+		g.DELETE("/:id/datasources/:datasource_id", datasourceH.DisconnectDatasourcesFromApplication)
 	}
 }
 
@@ -114,6 +132,7 @@ func registerWorkerRoutes(v1 *gin.RouterGroup, h *handlers.WorkerHandler, authMw
 	{
 		g.POST("", h.CreateWorker)
 		g.GET("", h.ListWorkers)
+		g.GET("/:id", h.GetWorker)
 		g.DELETE("/:id", h.DeleteWorker)
 	}
 }
@@ -125,6 +144,7 @@ func registerDatasourceRoutes(v1 *gin.RouterGroup, h *handlers.DatasourceHandler
 		g.POST("", h.CreateDatasource)
 		g.GET("", h.ListDatasources)
 		g.GET("/:id", h.GetDatasource)
+		g.GET("/:id/applications", h.GetDatasourceApplications)
 		g.PUT("/:id", h.UpdateDatasource)
 		g.DELETE("/:id", h.DeleteDatasource)
 	}

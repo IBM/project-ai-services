@@ -24,9 +24,11 @@ func NewRemoteProxyManager(sender *stream.Sender) *RemoteProxyManager {
 	return &RemoteProxyManager{sender: sender}
 }
 
-// RegisterRoute implements ProxyManager.
-func (r *RemoteProxyManager) RegisterRoute(ctx context.Context, route Route) error {
-	_, err := r.send(ctx, payload.ProxyRoute{
+// RegisterRoute implements ProxyManager. It forwards the registration to the
+// remote worker and reads the ExternalURL back from the CommandResult — the
+// worker builds it from its own DOMAIN_SUFFIX/CADDY_HTTPS_PORT env vars.
+func (r *RemoteProxyManager) RegisterRoute(ctx context.Context, route Route) (string, error) {
+	res, err := r.send(ctx, payload.ProxyRoute{
 		Op:       payload.ProxyRouteOpRegister,
 		ID:       route.ID,
 		Domain:   route.Domain,
@@ -34,8 +36,21 @@ func (r *RemoteProxyManager) RegisterRoute(ctx context.Context, route Route) err
 		Terminal: route.Terminal,
 		Type:     route.Type,
 	})
+	if err != nil {
+		return "", err
+	}
 
-	return err
+	// Worker serialises the registered payload.Route (with ExternalURL) into Data.
+	if len(res.GetData()) == 0 {
+		return "", nil
+	}
+
+	var registered payload.Route
+	if err := json.Unmarshal(res.GetData(), &registered); err != nil {
+		return "", fmt.Errorf("remote proxy manager: unmarshal registered route: %w", err)
+	}
+
+	return registered.ExternalURL, nil
 }
 
 // UnregisterRoute implements ProxyManager.

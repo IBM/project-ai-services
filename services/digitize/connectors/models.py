@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 # ---------------------------------------------------------------------------
 
 class ConnectorStatus(str, Enum):
-    """String enum for the Connector.sync_status column.
+    """String enum for the Connector.status column.
 
     Inherits from str so values can be passed directly to SQLAlchemy and
     compared with raw DB strings without calling .value.
@@ -80,7 +80,7 @@ class ConnectorError(str, Enum):
     """Written by run_tick when scanner.connect() raises a ConnectionError.
 
     Cleared automatically when a subsequent sync tick connects successfully
-    (finalize_sync_log_and_update_connector with COMPLETED status sets error=None).
+    (finalize_sync_log_and_update_connector with COMPLETED status sets message=None).
     """
 
 # ---------------------------------------------------------------------------
@@ -223,9 +223,9 @@ class ConnectorListItem(BaseModel):
     type: str
     attached_at: Optional[str]
     last_sync_at: Optional[str]
-    sync_status: str
-    error: Optional[str]
+    status: str
     total_files: int
+    message: Optional[str]
 
     model_config = {
         "json_schema_extra": {
@@ -235,9 +235,9 @@ class ConnectorListItem(BaseModel):
                 "type": "file_system",
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
-                "sync_status": "up to date",
-                "error": None,
+                "status": "up to date",
                 "total_files": 15,
+                "message": None,
             }
         }
     }
@@ -253,10 +253,10 @@ class ConnectorDetailResponse(BaseModel):
     sync_interval_seconds: int
     attached_at: Optional[str]
     last_sync_at: Optional[str]
-    sync_status: str
-    error: Optional[str]
+    status: str
     connection_details: Dict[str, Any]
     total_files: int
+    message: Optional[str]
 
     model_config = {
         "json_schema_extra": {
@@ -268,8 +268,7 @@ class ConnectorDetailResponse(BaseModel):
                 "sync_interval_seconds": 60,
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
-                "sync_status": "up to date",
-                "error": None,
+                "status": "up to date",
                 "connection_details": {
                     "host": "sftp.example.com",
                     "port": 22,
@@ -277,6 +276,7 @@ class ConnectorDetailResponse(BaseModel):
                     "remote_path": "/exports",
                 },
                 "total_files": 15,
+                "message": None,
             }
         }
     }
@@ -290,6 +290,7 @@ class SyncLogItem(BaseModel):
     finished_at: Optional[str]
     total_files: int
     new_files: int
+    completed_files: int
     removed_files: int
     status: str
     error: str
@@ -302,9 +303,41 @@ class SyncLogItem(BaseModel):
                 "finished_at": "2025-01-15T10:30:15Z",
                 "total_files": 15,
                 "new_files": 3,
+                "completed_files": 3,
                 "removed_files": 0,
                 "status": "completed",
                 "error": "",
+            }
+        }
+    }
+
+
+class ConnectorListResponse(BaseModel):
+    """Paginated response for GET /v1/connectors."""
+
+    total: int
+    limit: int
+    offset: int
+    items: List[ConnectorListItem]
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "total": 1,
+                "limit": 50,
+                "offset": 0,
+                "items": [
+                    {
+                        "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
+                        "name": "prod-sftp-reports",
+                        "type": "file_system",
+                        "attached_at": "2025-01-15T10:00:00Z",
+                        "last_sync_at": "2025-01-15T10:30:00Z",
+                        "status": "up to date",
+                        "total_files": 15,
+                        "message": None,
+                    }
+                ],
             }
         }
     }
@@ -331,39 +364,12 @@ class SyncLogResponse(BaseModel):
                         "finished_at": "2025-01-15T10:30:15Z",
                         "total_files": 15,
                         "new_files": 3,
+                        "completed_files": 3,
                         "removed_files": 0,
                         "status": "completed",
                         "error": "",
                     }
                 ],
-            }
-        }
-    }
-
-
-class SyncLogDetailResponse(BaseModel):
-    """Single sync-log item returned by GET /v1/connectors/{connector_id}/syncs/{sync_seq}."""
-
-    seq: int
-    started_at: str
-    finished_at: Optional[str]
-    total_files: int
-    new_files: int
-    removed_files: int
-    status: str
-    error: str
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "seq": 1,
-                "started_at": "2025-01-15T10:30:00Z",
-                "finished_at": "2025-01-15T10:30:15Z",
-                "total_files": 15,
-                "new_files": 3,
-                "removed_files": 0,
-                "status": "completed",
-                "error": "",
             }
         }
     }
