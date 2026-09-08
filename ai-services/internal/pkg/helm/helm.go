@@ -51,6 +51,9 @@ func NewHelm(namespace string) (*Helm, error) {
 type InstallOpts struct {
 	Values  map[string]any
 	Timeout time.Duration
+	// NoWait skips Helm's built-in pod readiness watch (--wait).
+	// Use when the caller performs its own post-deploy health check.
+	NoWait bool
 }
 
 func (h *Helm) install(ctx context.Context, release string, chart chart.Charter, opts *InstallOpts) error {
@@ -59,7 +62,9 @@ func (h *Helm) install(ctx context.Context, release string, chart chart.Charter,
 	installClient.ReleaseName = release
 	installClient.Namespace = h.namespace
 	installClient.CreateNamespace = true
-	installClient.WaitStrategy = kube.StatusWatcherStrategy
+	if !opts.NoWait {
+		installClient.WaitStrategy = kube.StatusWatcherStrategy
+	}
 	installClient.Timeout = opts.Timeout
 	installClient.SkipSchemaValidation = true
 
@@ -75,6 +80,9 @@ func (h *Helm) install(ctx context.Context, release string, chart chart.Charter,
 type UpgradeOpts struct {
 	Values  map[string]any
 	Timeout time.Duration
+	// NoWait skips Helm's built-in pod readiness watch (--wait).
+	// Use when the caller performs its own post-deploy health check.
+	NoWait bool
 }
 
 func (h *Helm) upgrade(ctx context.Context, release string, chart chart.Charter, opts *UpgradeOpts) error {
@@ -82,7 +90,9 @@ func (h *Helm) upgrade(ctx context.Context, release string, chart chart.Charter,
 	upgradeClient := action.NewUpgrade(h.actionConfig)
 	upgradeClient.Namespace = h.namespace
 	upgradeClient.ServerSideApply = "true"
-	upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
+	if !opts.NoWait {
+		upgradeClient.WaitStrategy = kube.StatusWatcherStrategy
+	}
 	upgradeClient.Timeout = opts.Timeout
 	upgradeClient.ForceConflicts = true
 	upgradeClient.RollbackOnFailure = true
@@ -98,17 +108,21 @@ func (h *Helm) upgrade(ctx context.Context, release string, chart chart.Charter,
 }
 
 // InstallOrUpgrade installs a release if it does not exist, or upgrades it if it does.
-func (h *Helm) InstallOrUpgrade(ctx context.Context, release string, chart chart.Charter, values map[string]any, timeout time.Duration) error {
+// Pass noWait=true to skip Helm's built-in pod readiness wait when the caller
+// performs its own post-deploy health check.
+func (h *Helm) InstallOrUpgrade(ctx context.Context, release string, chart chart.Charter, values map[string]any, timeout time.Duration, noWait ...bool) error {
+	skipWait := len(noWait) > 0 && noWait[0]
+
 	exists, err := h.IsReleaseExist(release)
 	if err != nil {
 		return fmt.Errorf("failed to check release existence: %w", err)
 	}
 
 	if !exists {
-		return h.install(ctx, release, chart, &InstallOpts{Values: values, Timeout: timeout})
+		return h.install(ctx, release, chart, &InstallOpts{Values: values, Timeout: timeout, NoWait: skipWait})
 	}
 
-	return h.upgrade(ctx, release, chart, &UpgradeOpts{Values: values, Timeout: timeout})
+	return h.upgrade(ctx, release, chart, &UpgradeOpts{Values: values, Timeout: timeout, NoWait: skipWait})
 }
 
 func (h *Helm) IsReleaseExist(release string) (bool, error) {

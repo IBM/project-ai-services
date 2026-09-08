@@ -32,7 +32,6 @@ import (
 )
 
 const (
-	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
 	caddyfileSubDir = "worker/caddy"
 	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
 

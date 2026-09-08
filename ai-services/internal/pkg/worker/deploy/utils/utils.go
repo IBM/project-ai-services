@@ -18,7 +18,7 @@ const (
 	logPollInterval = 3 * time.Second
 	// logPollTimeout is the maximum time we wait for the worker container to
 	// emit a join-error log before declaring it healthy.
-	logPollTimeout = 30 * time.Second
+	logPollTimeout = 120 * time.Second
 )
 
 // CheckWorkerContainerLogs polls worker pod logs until the worker container
@@ -43,6 +43,10 @@ func CheckWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
 			if err != nil {
 				logger.WarningfCtx(ctx, "failed to fetch logs for pod %s: %v\n", pod.Name, err)
 			}
+
+			fmt.Println("Lines: ", lines)
+			fmt.Println("Pods: ", pod)
+			fmt.Println("Container: ", pod.Containers)
 
 			for _, line := range lines {
 				if strings.Contains(line, workerconstants.WorkerJoinErr) {
