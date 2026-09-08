@@ -9,3 +9,9 @@ export const COMPONENT_TYPES = {
 
 export type ComponentType =
   (typeof COMPONENT_TYPES)[keyof typeof COMPONENT_TYPES];
+
+// runtime mapping
+export const RUNTIME_TYPE_LABELS: Record<string, string> = {
+  podman: "RHAIIS",
+  openshift: "RHOAI",
+};
