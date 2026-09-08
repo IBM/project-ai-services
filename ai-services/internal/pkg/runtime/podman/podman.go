@@ -370,6 +370,8 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 			continue
 		}
 
+		fmt.Println("container: ", container.ID)
+
 		if stream {
 			// Install signal handling so Ctrl+C / SIGTERM stops the tail gracefully.
 			sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -386,6 +388,7 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 			}
 		} else {
 			if err := pc.collectContainerLogs(ctx, container.ID, func(line string) {
+				fmt.Println("Line: ", line)
 				lines = append(lines, line)
 			}); err != nil {
 				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)

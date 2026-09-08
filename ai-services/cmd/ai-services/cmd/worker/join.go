@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -345,6 +346,7 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 
 	err := join.StartGrpcStream(ctx, rt, pr, opts)
 	if err != nil {
+		logger.ErrorfCtx(ctx, "%s: %v\n", workerconstants.WorkerJoinErr, err)
 		return fmt.Errorf("%s: %w", workerconstants.WorkerJoinErr, err)
 	}
 
