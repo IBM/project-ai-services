@@ -21,6 +21,7 @@ spec:
         - "sh"
         - "-c"
         - |
+          mkdir -p /data/caddy /config
           cat << 'EOF' > /data/caddy/Caddyfile
           {{- if .Values.caddy.caddyFileContent }}
 {{ .Values.caddy.caddyFileContent }}
@@ -31,6 +32,10 @@ spec:
       volumeMounts:
         - name: caddy-data
           mountPath: /data
+          subPath: data
+        - name: caddy-data
+          mountPath: /config
+          subPath: config
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
