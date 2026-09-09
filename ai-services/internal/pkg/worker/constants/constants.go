@@ -22,9 +22,10 @@ const (
 	WorkerAppTemplate     = "worker"
 	WorkerHelmReleaseName = "ai-services-worker"
 	// WorkerTLSDir is the mount path inside the worker container where mTLS
-	// credentials are stored. The host-side `worker join` command also writes
-	// to this path (outside a container). Single source of truth shared between
-	// the join, deploy, and uninstall packages.
+	// credentials are stored. Backed by the worker-tls Podman PVC; the path is
+	// container-internal and must not overlap with the ai-services-data hostPath
+	// bind mount. Single source of truth shared between the join, deploy, and
+	// uninstall packages.
 	WorkerTLSDir = "/data/worker-tls"
 
 	// GatewayPKIDir is the mount path inside the catalog container where gateway
