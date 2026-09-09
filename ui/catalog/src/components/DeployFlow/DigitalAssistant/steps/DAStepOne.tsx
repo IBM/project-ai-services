@@ -18,6 +18,8 @@ export const StepOne: React.FC<StepProps> = ({
   deployOptions,
   providerParamsByType,
   showNameError = false,
+  showWorkerError = false,
+  onWorkerErrorReset,
   onComponentError,
   runtime = DEFAULT_RUNTIME,
   workers,
@@ -195,6 +197,8 @@ export const StepOne: React.FC<StepProps> = ({
       onComponentChange={handleProviderChange}
       onModelChange={handleModelChange}
       showNameError={showNameError}
+      showWorkerError={showWorkerError}
+      onWorkerErrorReset={onWorkerErrorReset}
       failedComponentNames={failedComponentTypes}
       onComponentError={onComponentError}
       workers={workers}

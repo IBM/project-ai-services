@@ -258,7 +258,7 @@ export const DeployFlow = ({
         (isLastStep && (hasStep2SchemaError || state.isEditing))
       }
       onBack={handleBack}
-      onNext={() => handleNext(state.formData.name)}
+      onNext={() => handleNext(state.formData.name, state.formData.workerName)}
       onSubmit={handleSubmit}
       deployError={state.deployError}
       deployToastOpen={state.deployToastOpen}
@@ -275,6 +275,13 @@ export const DeployFlow = ({
           deployOptions={deployOptions}
           providerParamsByType={providerParamsByType}
           showNameError={state.showStepOneNameError}
+          showWorkerError={state.showStepOneWorkerError}
+          onWorkerErrorReset={() =>
+            dispatch({
+              type: ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
+              payload: false,
+            })
+          }
           onComponentError={setHasStep1SchemaError}
           runtime={runtime}
           workers={workers}

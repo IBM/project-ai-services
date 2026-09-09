@@ -23,6 +23,7 @@ export const BASE_INITIAL_STATE = {
   deployError: null,
   deployToastOpen: false,
   showStepOneNameError: false,
+  showStepOneWorkerError: false,
 } as const;
 
 // Shared reducer logic for UPDATE_FORM_DATA — identical across both flows.

@@ -11,7 +11,7 @@ export type ComponentType =
   (typeof COMPONENT_TYPES)[keyof typeof COMPONENT_TYPES];
 
 // The worker name used by the local (same-node) deployment target.
-export const LOCAL_WORKER_NAME = "local";
+export const LOCAL_WORKER_NAME = "Local";
 
 // All supported deployment runtime types.
 export const RUNTIMES = ["podman", "openshift"] as const;

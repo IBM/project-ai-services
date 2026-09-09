@@ -329,7 +329,7 @@ export const ServicesDeployFlow = ({
       isDeploying={state.isDeploying}
       isPrimaryDisabled={isPrimaryDisabled}
       onBack={handleBack}
-      onNext={() => handleNext(state.formData.name)}
+      onNext={() => handleNext(state.formData.name, state.formData.workerName)}
       onSubmit={handleSubmit}
       deployError={state.deployError}
       deployToastOpen={state.deployToastOpen}
@@ -354,6 +354,13 @@ export const ServicesDeployFlow = ({
           deployOptions={deployOptions}
           selectedServiceId={state.selectedServiceId}
           showNameError={state.showStepOneNameError}
+          showWorkerError={state.showStepOneWorkerError}
+          onWorkerErrorReset={() =>
+            dispatch({
+              type: ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
+              payload: false,
+            })
+          }
           runtime={runtime}
           workers={workers}
           isLoadingWorkers={isLoadingWorkers}

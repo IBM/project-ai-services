@@ -94,6 +94,8 @@ export interface SharedStepOneProps {
   onComponentChange: (componentType: string, providerId: string) => void;
   onModelChange?: (componentType: string, model: string) => void;
   showNameError?: boolean;
+  showWorkerError?: boolean;
+  onWorkerErrorReset?: () => void;
   failedComponentNames?: string[]; // Non-empty → renders an error banner listing the failed component names.
   onComponentError?: (hasError: boolean) => void;
   workers: WorkerApiResponse[];
@@ -111,6 +113,8 @@ export const SharedStepOne = ({
   onComponentChange,
   onModelChange,
   showNameError = false,
+  showWorkerError = false,
+  onWorkerErrorReset,
   failedComponentNames = [],
   onComponentError,
   workers,
@@ -125,42 +129,41 @@ export const SharedStepOne = ({
     REGISTER_INITIAL,
   );
 
-  // Remote workers ready for the selected runtime — local excluded here since it is pinned separately.
+  // Workers matching the selected runtime — Local is included when its runtime_type matches.
+  // Only ready workers are shown; absent on --skip-local-worker installs.
   const filteredWorkers = useMemo(
     () =>
       workers.filter(
         (w) =>
-          w.name !== LOCAL_WORKER_NAME &&
-          w.runtime_type === formData.deploymentType &&
-          w.status === "ready",
+          w.runtime_type === formData.deploymentType && w.status === "ready",
       ),
     [workers, formData.deploymentType],
   );
 
-  // Local worker first (valid for all runtimes), then runtime-scoped remotes, then register sentinel.
+  // Local pinned first, then remaining remotes, then register sentinel.
   const workerOptions = useMemo(() => {
-    const local = workers.find((w) => w.name === LOCAL_WORKER_NAME);
-    const remoteOptions = filteredWorkers.map((w) => ({
-      id: w.name,
-      text: w.name,
-    }));
-    const localOption = local
-      ? [{ id: local.name, text: local.name }]
-      : [{ id: LOCAL_WORKER_NAME, text: LOCAL_WORKER_NAME }];
+    const local = filteredWorkers.find((w) => w.name === LOCAL_WORKER_NAME);
+    const remotes = filteredWorkers
+      .filter((w) => w.name !== LOCAL_WORKER_NAME)
+      .map((w) => ({ id: w.name, text: w.name }));
+    const localOption = local ? [{ id: local.name, text: local.name }] : [];
     return [
       ...localOption,
-      ...remoteOptions,
+      ...remotes,
       { id: "__register__", text: "Register worker resource" },
     ];
-  }, [workers, filteredWorkers]);
+  }, [filteredWorkers]);
 
-  // When the deployment type tile changes, reset workerName to the local worker.
+  // When the deployment type tile changes, reset workerName and clear any worker error.
   const handleDeploymentTypeChange = (value: string | number) => {
-    const localWorker = workers.find((w) => w.name === LOCAL_WORKER_NAME);
+    const firstWorker = workers.find(
+      (w) => w.runtime_type === value && w.status === "ready",
+    );
     onChange({
       deploymentType: value as DeploymentRuntimeType,
-      workerName: localWorker?.name ?? LOCAL_WORKER_NAME,
+      workerName: firstWorker?.name ?? "",
     });
+    onWorkerErrorReset?.();
   };
 
   const handleWorkerDropdownChange = ({
@@ -209,14 +212,23 @@ export const SharedStepOne = ({
 
   // When the worker list refreshes, sync formData if the selected worker is no longer present.
   // Guarded by isLoadingWorkers so we don't reset mid-fetch while workers is still [].
+  // Also clears the worker error when a valid worker is auto-selected.
   useEffect(() => {
     if (isLoadingWorkers) return;
-    const validOptions = workerOptions.filter((w) => w.id !== "__register__");
-    const exists = validOptions.some((w) => w.id === formData.workerName);
+    const realOptions = workerOptions.filter((w) => w.id !== "__register__");
+    const exists = realOptions.some((w) => w.id === formData.workerName);
     if (!exists) {
-      onChange({ workerName: validOptions[0]?.id ?? LOCAL_WORKER_NAME });
+      const next = realOptions[0]?.id ?? "";
+      onChange({ workerName: next });
+      if (next) onWorkerErrorReset?.();
     }
-  }, [workerOptions, formData.workerName, onChange, isLoadingWorkers]);
+  }, [
+    workerOptions,
+    formData.workerName,
+    onChange,
+    isLoadingWorkers,
+    onWorkerErrorReset,
+  ]);
 
   return (
     <>
@@ -234,7 +246,7 @@ export const SharedStepOne = ({
         />
       )}
 
-      <div className={styles.formSection}>
+      <div className={`${styles.formSection} ${styles.formSectionStepOne}`}>
         <Grid narrow className={styles.formGrid}>
           <Column sm={4} md={8} lg={16}>
             <div className={styles.formField}>
@@ -396,9 +408,10 @@ export const SharedStepOne = ({
                     items={workerOptions}
                     itemToString={(item) => (item ? item.text : "")}
                     disabled={isLoadingWorkers}
+                    invalid={showWorkerError && !formData.workerName}
+                    invalidText="Worker resource is required"
                     selectedItem={
                       workerOptions.find((w) => w.id === formData.workerName) ||
-                      workerOptions[0] ||
                       null
                     }
                     onChange={handleWorkerDropdownChange}

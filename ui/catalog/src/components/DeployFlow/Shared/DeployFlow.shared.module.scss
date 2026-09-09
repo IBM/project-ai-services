@@ -209,6 +209,10 @@
   margin-bottom: $spacing-07;
 }
 
+.formSectionStepOne {
+  padding-bottom: $spacing-10;
+}
+
 .stepTitle {
   @include type-style("heading-03");
   margin: 0 0 $spacing-06 0;
