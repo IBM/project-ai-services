@@ -103,7 +103,6 @@ const WorkerResourcesTable = ({
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
   const registerRetryRef = useRef<(() => void) | null>(null);
-  const isRegisterError = useRef(false);
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
 
@@ -140,7 +139,12 @@ const WorkerResourcesTable = ({
     [],
   );
 
+  const selectedRowSnapshot = useRef<WorkerResourceRow | undefined>(undefined);
   const selectedRow = state.rowsData.find((r) => r.id === state.selectedRowId);
+  if (selectedRow) selectedRowSnapshot.current = selectedRow;
+  const modalRow = state.isDeleteDialogOpen
+    ? (selectedRow ?? selectedRowSnapshot.current)
+    : selectedRowSnapshot.current;
 
   const handleDeregister = useCallback(async () => {
     const id = state.selectedRowId;
@@ -211,7 +215,6 @@ const WorkerResourcesTable = ({
   useEffect(() => {
     if (!registerError) return;
     registerRetryRef.current = registerError.onRetry;
-    isRegisterError.current = true;
     dispatch({
       type: ACTION_TYPES.SHOW_REGISTER_ERROR,
       payload: registerError.message,
@@ -219,7 +222,6 @@ const WorkerResourcesTable = ({
   }, [registerError]);
 
   const handleRegisterErrorClose = useCallback(() => {
-    isRegisterError.current = false;
     dispatch({ type: ACTION_TYPES.HIDE_REGISTER_ERROR });
     onRegisterErrorDismiss?.();
   }, [onRegisterErrorDismiss]);
@@ -237,7 +239,6 @@ const WorkerResourcesTable = ({
           className={sharedStyles.customToast}
           onCloseButtonClick={handleRegisterErrorClose}
           onActionButtonClick={() => {
-            isRegisterError.current = false;
             dispatch({ type: ACTION_TYPES.HIDE_REGISTER_ERROR });
             registerRetryRef.current?.();
           }}
@@ -423,7 +424,9 @@ const WorkerResourcesTable = ({
             <DeregisterWorkerModal
               isOpen={state.isDeleteDialogOpen}
               isDeregistering={state.isDeleting}
-              workerName={selectedRow?.name ?? ""}
+              workerName={modalRow?.name ?? ""}
+              workerStatus={modalRow?.status ?? ""}
+              runtimeType={modalRow?.runtime_type ?? ""}
               onConfirm={() => void handleDeregister()}
               onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
             />
