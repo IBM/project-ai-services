@@ -7,9 +7,7 @@ package deploy
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -215,7 +213,7 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 		return nil, fmt.Errorf("worker setup: resolve podman URI: %w", err)
 	}
 
-	authFileBase64, err := readAuthFileBase64()
+	authFileBase64, err := utils.ReadAuthFileBase64()
 	if err != nil {
 		return nil, err
 	}
@@ -235,30 +233,6 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 		workerconstants.ArgParamWorkerPodmanURI:   strings.TrimPrefix(podmanURI, "unix://"),
 		workerconstants.ArgParamWorkerAuthFile:    authFileBase64,
 	}, nil
-}
-
-// readAuthFileBase64 reads the podman auth file and returns its contents
-// base64-encoded. If the file does not exist, it returns an encoded empty
-// JSON object and logs a warning.
-func readAuthFileBase64() (string, error) {
-	authFilePath, err := utils.GetAuthFilePath()
-	if err != nil {
-		return "", fmt.Errorf("worker setup: resolve auth file path: %w", err)
-	}
-
-	content, err := os.ReadFile(authFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Warningln("Podman auth file not found. Image pulls may fail if the registry requires authentication.")
-			// TODO: worker join- > worker --reset-podman-auth when implemented
-			logger.Warningln("Run 'podman login' then re-run 'worker join' to update credentials.")
-			content = []byte("{}")
-		} else {
-			return "", fmt.Errorf("worker setup: read auth file %s: %w", authFilePath, err)
-		}
-	}
-
-	return base64.StdEncoding.EncodeToString(content), nil
 }
 
 // renderAndDeploy renders a single pod template and deploys it.

@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
@@ -91,6 +93,20 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		if err := validateAddHost(h); err != nil {
 			return err
 		}
+	}
+
+	ctx := context.Background()
+	rtType := vars.RuntimeFactory.GetRuntimeType()
+	rt, err := runtime.CreateRuntime(rtType, "")
+	if err != nil {
+		return fmt.Errorf("worker join: init runtime: %w", err)
+	}
+	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
+	}
+	if isLocalWorker {
+		return fmt.Errorf("the worker is already co-located with the control plane and cannot be joined independently")
 	}
 
 	return nil

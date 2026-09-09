@@ -37,6 +37,11 @@ spec:
               value: "info"
             - name: AI_SERVICES_LOG_FORMAT
               value: "service"
+            - name: MTLS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: worker-mtls-encryption-secret
+                  key: mtls-encryption-key
           resources:
             requests:
               memory: "{{ .Values.worker.resources.requests.memory }}"

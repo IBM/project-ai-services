@@ -44,6 +44,8 @@ var (
 	resetPodmanAuthFlag bool
 	// Reset certificate flag for catalog configure command.
 	resetCertificateFlag bool
+	// Skip joining this machine as the Local worker.
+	skipLocalWorkerFlag bool
 
 	// openShift flags.
 	timeout time.Duration
@@ -152,14 +154,16 @@ func runConfigure(ctx context.Context) error {
 			SSLKeyPath:        catalogUtils.SanitizeFilePath(sslKeyPath),
 			HttpsPort:         httpsPort,
 			WorkerGatewayPort: workerGatewayPort,
+			SkipLocalWorker:   skipLocalWorkerFlag,
 		}
 
 		return catalogPodman.DeployCatalog(ctx, opts)
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace: catalogConstants.CatalogAppName,
-			Timeout:   timeout,
+			Namespace:       catalogConstants.CatalogAppName,
+			Timeout:         timeout,
+			SkipLocalWorker: skipLocalWorkerFlag,
 		}
 
 		return catalogOpenShift.DeployCatalog(ctx, opts)
@@ -247,6 +251,13 @@ func initConfigureCommonFlags() {
 		"reset-password",
 		false,
 		"Reset the password for the admin user",
+	)
+
+	configureCmd.Flags().BoolVar(
+		&skipLocalWorkerFlag,
+		"skip-local-worker",
+		false,
+		"Skip automatically joining this machine as the local worker after catalog deployment.",
 	)
 }
 
@@ -343,7 +354,9 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 	builder := flagvalidator.NewFlagValidatorBuilder(rt)
 
 	// Common flags, valid for all runtimes.
-	builder.AddCommonFlag("reset-password", nil)
+	builder.
+		AddCommonFlag("reset-password", nil).
+		AddCommonFlag("skip-local-worker", nil)
 
 	// Podman-only flags.
 	builder.

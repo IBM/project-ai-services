@@ -39,6 +39,10 @@ const (
 	// BaseDirEnvVar is injected into the Caddy container at deploy time; read back by uninstall.
 	BaseDirEnvVar = "AI_SERVICES_BASE_DIR"
 
+	// WorkerMTLSSecretName is the name of the Podman secret that holds the
+	// AES-256 mTLS encryption key for the worker node.
+	WorkerMTLSSecretName = "worker-mtls-encryption-secret"
+
 	// MetaKeyBaseDir is the worker metadata key sent during Register and stored in worker.metadata JSON.
 	MetaKeyBaseDir = "baseDir"
 
@@ -56,7 +60,23 @@ const (
 	// WorkerGatewayName is the DNS name used by the catalog worker gateway route.
 	WorkerGatewayName = "catalog-worker-gateway"
 
+	// PodmanGatewayPodName is the Podman catalog pod DNS name embedded in the
+	// auto-generated gateway server certificate.
+	PodmanGatewayPodName = "ai-services--catalog"
+
 	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
 	// auto-generated gateway server certificate for internal cluster communication.
 	OpenShiftGatewayServiceEndpoint = "catalog-api.ai-services.svc.cluster.local"
+
+	// LocalWorkerEnvVar is the environment variable name that enables local-worker mode.
+	LocalWorkerEnvVar = "LOCAL_WORKER"
+
+	// LocalWorkerToken is the bootstrap token used for the local
+	// self-join. The catalog-backend gateway accepts this token without
+	// ValidateToken when LOCAL_WORKER=true.
+	LocalWorkerToken = "local-worker"
+	// MTLSEncryptionKeyEnv is the environment variable that holds the AES-256 key used to
+	// encrypt mTLS private key files at rest (gateway CA key, server key, worker client key).
+	// Sourced from the catalog-mtls-encryption-secret Podman/OpenShift secret at runtime.
+	MTLSEncryptionKeyEnv = "MTLS_ENCRYPTION_KEY"
 )
