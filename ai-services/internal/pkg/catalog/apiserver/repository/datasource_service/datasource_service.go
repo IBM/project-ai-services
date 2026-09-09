@@ -389,7 +389,7 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 
 	applications := make([]apimodels.ConnectedApplicationItem, 0, len(linkedRows))
 	for _, row := range linkedRows {
-		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
+		baseURL := extractInternalEndpointURL(row.EndpointsJSON)
 		syncStatus, lastSyncAt, syncErr := fetchSyncState(ctx, connectorID, baseURL)
 
 		// Resolve the type name from catalog metadata; fall back to catalog_id.
@@ -551,9 +551,9 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 		}
 
 		endpointsJSON, _ := json.Marshal(svc.Endpoints)
-		url := extractAPIEndpointURL(endpointsJSON)
+		url := extractInternalEndpointURL(endpointsJSON)
 		if url == "" {
-			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ID, svc.CatalogID)
+			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no internal endpoint — skipping", svc.ID, svc.CatalogID)
 
 			continue
 		}
@@ -864,7 +864,7 @@ func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Con
 // error if appropriate. DB cleanup failures are logged but do not block the caller.
 func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) error {
 	for _, svc := range linkedServices {
-		url := extractAPIEndpointURL(svc.EndpointsJSON)
+		url := extractInternalEndpointURL(svc.EndpointsJSON)
 		if url != "" {
 			if err := s.serviceClient.Disconnect(ctx, url, datasourceID.String()); err != nil {
 				// 404 means the connector is already gone on the downstream side —
@@ -900,7 +900,7 @@ func (s *DatasourceService) resolveLinkedEndpoint(ctx context.Context, applicati
 
 	for _, row := range allRows {
 		if row.ApplicationID == applicationID {
-			return extractAPIEndpointURL(row.EndpointsJSON), nil
+			return extractInternalEndpointURL(row.EndpointsJSON), nil
 		}
 	}
 
@@ -993,7 +993,7 @@ func (s *DatasourceService) propagateCredentials(
 	var propErrors []apimodels.PropagationError
 
 	for _, svc := range serviceEndpoints {
-		baseURL := extractAPIEndpointURL(svc.EndpointsJSON)
+		baseURL := extractInternalEndpointURL(svc.EndpointsJSON)
 		if baseURL == "" {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ID:    svc.ApplicationID.String(),
@@ -1096,11 +1096,11 @@ func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL
 	}
 }
 
-// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
-// and returns the URL of the first entry whose "type" is "api".
-// Both Podman and OpenShift deployers register the service backend URL with type "api".
-// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
-func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
+// extractInternalEndpointURL parses a JSONB endpoints array and returns the URL of the
+// first entry whose "type" is "internal". The internal endpoint is the plain-HTTP pod-to-pod
+// URL (http://podname:port) stored at deploy time — no TLS needed.
+// Returns an empty string when the array is empty, malformed, or contains no "internal" entry.
+func extractInternalEndpointURL(endpointsJSON json.RawMessage) string {
 	if len(endpointsJSON) == 0 {
 		return ""
 	}
@@ -1111,7 +1111,7 @@ func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
 	}
 
 	for _, ep := range endpoints {
-		if t, ok := ep["type"].(string); ok && t == "api" {
+		if t, ok := ep["type"].(string); ok && t == "internal" {
 			if u, ok := ep["url"].(string); ok {
 				return u
 			}
@@ -1187,7 +1187,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 }
 
 // fetchServiceConnectors resolves the service base URL from the first connector ID in the
-// list (via the existing GetLinkedServiceEndpoints + extractAPIEndpointURL path), then calls
+// list (via the existing GetLinkedServiceEndpoints + extractInternalEndpointURL path), then calls
 // GET /v1/connectors once with the given limit/offset. Returns an empty-page result when no
 // endpoint is found or the call fails.
 func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
@@ -1206,7 +1206,7 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connecto
 
 	baseURL := ""
 	for _, row := range linkedRows {
-		if u := extractAPIEndpointURL(row.EndpointsJSON); u != "" {
+		if u := extractInternalEndpointURL(row.EndpointsJSON); u != "" {
 			baseURL = u
 
 			break
