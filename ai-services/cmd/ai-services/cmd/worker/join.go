@@ -95,13 +95,22 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	ctx := context.Background()
+	return checkNotLocalWorker(context.Background())
+}
+
+// checkNotLocalWorker returns an error when this node is co-located with the
+// catalog control plane, which means it cannot be managed as a standalone worker.
+func checkNotLocalWorker(ctx context.Context) error {
 	rtType := vars.RuntimeFactory.GetRuntimeType()
 	rt, err := runtime.CreateRuntime(rtType, "")
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
-	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+	podName := workerconstants.PodmanGatewayPodName
+	if rtType == types.RuntimeTypeOpenShift {
+		podName = workerconstants.OpenShiftCatalogPodName
+	}
+	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt, podName)
 	if err != nil {
 		return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
 	}

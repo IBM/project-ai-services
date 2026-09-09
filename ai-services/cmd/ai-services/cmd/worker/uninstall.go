@@ -8,7 +8,9 @@ import (
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
@@ -52,7 +54,11 @@ Application pods deployed on this worker by the catalog are not touched.`,
 			if err != nil {
 				return fmt.Errorf("worker uninstall: init runtime: %w", err)
 			}
-			isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+			podName := workerconstants.PodmanGatewayPodName
+			if runtimeType == types.RuntimeTypeOpenShift {
+				podName = workerconstants.OpenShiftCatalogPodName
+			}
+			isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt, podName)
 			if err != nil {
 				return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
 			}

@@ -53,11 +53,17 @@ func validateRuntimeType(runtimeType types.RuntimeType) error {
 	}
 }
 
-// IsCatalogLocalWorker inspects the running catalog pod and returns true when
+// IsCatalogLocalWorker inspects the named catalog pod and returns true when
 // the LOCAL_WORKER environment variable is set to "true" inside it.
-func IsCatalogLocalWorker(ctx context.Context, rt runtime.Runtime) (bool, error) {
-	pod, err := rt.InspectPod(ctx, workerconstants.PodmanGatewayPodName)
+// If the catalog pod does not exist on this node, it returns false, nil —
+// which is the expected state on a standalone remote worker.
+func IsCatalogLocalWorker(ctx context.Context, rt runtime.Runtime, podName string) (bool, error) {
+	pod, err := rt.InspectPod(ctx, podName)
 	if err != nil {
+		if utils.IsNotFoundError(err) {
+			return false, nil
+		}
+
 		return false, fmt.Errorf("inspect catalog pod: %w", err)
 	}
 
