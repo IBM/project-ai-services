@@ -13,16 +13,15 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	apiModels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
@@ -97,7 +96,7 @@ Arguments:
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		// When legacyCreate is true, use the older/stable code path
 		if legacyCreate {
-			if err := doBootstrapValidate(ctx); err != nil {
+			if err := cmdcommon.DoBootstrapValidate(ctx, skipChecks); err != nil {
 				return err
 			}
 
@@ -127,21 +126,6 @@ Arguments:
 	},
 }
 
-func doBootstrapValidate(ctx context.Context) error {
-	skip := helpers.ParseSkipChecks(skipChecks)
-	if len(skip) > 0 {
-		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
-	}
-
-	// Create bootstrap instance based on runtime
-	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
-
-	if err := factory.Validate(ctx, skip); err != nil {
-		return fmt.Errorf("bootstrap validation failed: %w", err)
-	}
-
-	return nil
-}
 
 func createExample() string {
 	return `  For Podman:
@@ -279,7 +263,7 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 
 	// Register common flags with their validation functions
 	builder.
-		AddCommonFlag(appFlags.Create.SkipValidation, validateSkipChecksFlag).
+		AddCommonFlag(appFlags.Create.SkipValidation, cmdcommon.ValidateSkipChecksFlag).
 		AddCommonFlag(appFlags.Create.Template, validateTemplateFlag).
 		AddCommonFlag(appFlags.Create.Params, validateParamsFlag).
 		AddCommonFlag(appFlags.Create.Values, validateValuesFlag).
@@ -367,28 +351,6 @@ func validateImagePullPolicyFlag(cmd *cobra.Command) error {
 			"invalid value %q: must be one of %q, %q, %q",
 			image.ImagePullPolicy(rawArgImagePullPolicy), image.PullAlways, image.PullNever, image.PullIfNotPresent,
 		)
-	}
-
-	return nil
-}
-
-// validateSkipChecksFlag validates the skipChecks flag for the current runtime.
-func validateSkipChecksFlag(cmd *cobra.Command) error {
-	if len(skipChecks) == 0 {
-		return nil
-	}
-
-	// Build valid checks dynamically from runtime
-	validChecks := make(map[string]bool, len(bootstrap.GetRulesForRuntime()))
-	for _, r := range bootstrap.GetRulesForRuntime() {
-		validChecks[r.Name()] = true
-	}
-
-	// Validate each skip check
-	for _, s := range skipChecks {
-		if !validChecks[s] {
-			return fmt.Errorf("invalid skip-validation value '%s' for runtime '%s'", s, vars.RuntimeFactory.GetRuntimeType())
-		}
 	}
 
 	return nil

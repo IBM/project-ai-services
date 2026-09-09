@@ -11,9 +11,7 @@ import (
 
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
-	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -95,7 +93,7 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if err := validateSkipChecksFlag(cmd); err != nil {
+	if err := cmdcommon.ValidateSkipChecksFlag(cmd); err != nil {
 		return err
 	}
 
@@ -183,41 +181,6 @@ func parseAddHosts(raw []string) []workertypes.HostAlias {
 	return aliases
 }
 
-func validateSkipChecksFlag(cmd *cobra.Command) error {
-	if len(skipChecks) == 0 {
-		return nil
-	}
-
-	validChecks := make(map[string]bool, len(bootstrap.GetRulesForRuntime()))
-	for _, r := range bootstrap.GetRulesForRuntime() {
-		validChecks[r.Name()] = true
-	}
-
-	for _, s := range skipChecks {
-		if !validChecks[s] {
-			return fmt.Errorf("invalid skip-validation value '%s' for runtime '%s'", s, vars.RuntimeFactory.GetRuntimeType())
-		}
-	}
-
-	return nil
-}
-
-func doBootstrapValidate(ctx context.Context) error {
-	skip := helpers.ParseSkipChecks(skipChecks)
-	if len(skip) > 0 {
-		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
-	}
-
-	// Create bootstrap instance based on runtime
-	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
-
-	if err := factory.Validate(ctx, skip); err != nil {
-		return fmt.Errorf("bootstrap validation failed: %w", err)
-	}
-
-	return nil
-}
-
 // joinRunE provisions the worker node for the given runtime type and returns once
 // the deployment is complete.
 //
@@ -227,7 +190,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	gatewayAddr := args[0]
 
-	if err := doBootstrapValidate(ctx); err != nil {
+	if err := cmdcommon.DoBootstrapValidate(ctx, skipChecks); err != nil {
 		return err
 	}
 
