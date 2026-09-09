@@ -11,15 +11,6 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
-// joinResult is returned by scanLogLines to indicate what was found in the logs.
-type joinResult int
-
-const (
-	joinResultPending joinResult = iota // no conclusive line yet
-	joinResultSuccess                   // worker joined successfully
-	joinResultError                     // worker reported a join error
-)
-
 const (
 	// logPollInterval is how often we re-read container logs while waiting for
 	// the worker to either connect successfully or emit an error.
@@ -63,13 +54,14 @@ func pollPodLogs(ctx context.Context, rt runtime.Runtime, podName string, deadli
 			return fmt.Errorf("failed to fetch logs for pod %s: %v", podName, err)
 		}
 
-		result, joinErr := scanLogLines(lines)
-		if result == joinResultSuccess {
-			return nil
-		}
+		for _, line := range lines {
+			if strings.Contains(line, workerconstants.WorkerJoinSuccess) {
+				return nil
+			}
 
-		if result == joinResultError {
-			return joinErr
+			if strings.Contains(line, workerconstants.WorkerJoinErr) {
+				return errors.New(line)
+			}
 		}
 
 		if time.Now().After(deadline) {
@@ -82,20 +74,4 @@ func pollPodLogs(ctx context.Context, rt runtime.Runtime, podName string, deadli
 		case <-time.After(logPollInterval):
 		}
 	}
-}
-
-// scanLogLines inspects a snapshot of log lines for a worker join outcome.
-// It returns joinResultPending when no conclusive line is found (keep polling).
-func scanLogLines(lines []string) (joinResult, error) {
-	for _, line := range lines {
-		if strings.Contains(line, workerconstants.WorkerJoinSuccess) {
-			return joinResultSuccess, nil
-		}
-
-		if strings.Contains(line, workerconstants.WorkerJoinErr) {
-			return joinResultError, errors.New(line)
-		}
-	}
-
-	return joinResultPending, nil
 }
