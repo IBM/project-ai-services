@@ -96,14 +96,14 @@ func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *r
 		return fmt.Errorf("admin password verification failed: %w", err)
 	}
 
-	// Step 8 (was Step 7): Join as local worker
+	// Step 8: Join as local worker
 	if !opts.SkipLocalWorker {
 		if err := JoinAsLocalWorker(ctx, runtime, catalogClient); err != nil {
 			return fmt.Errorf("local worker join failed: %w", err)
 		}
 	}
 
-	// Step 9 (was Step 8): Print next steps with route URLs
+	// Step 9: Print next steps with route URLs
 	if err := helpers.PrintNextSteps(ctx, tp, runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate); err != nil {
 		logger.Infof("failed to display next steps: %v\n", err)
 

@@ -5,13 +5,9 @@ import (
 	"fmt"
 
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-)
-
-const (
-	// CatalogAdminUser is the default admin username created during catalog configure.
-	CatalogAdminUser = "admin"
 )
 
 // LoginToCatalog logs in to the catalog API and returns the authenticated client.
@@ -20,7 +16,7 @@ const (
 func LoginToCatalog(ctx context.Context, catalogAPIURL, adminPassword string) (*catalogclient.Client, error) {
 	logger.InfolnCtx(ctx, "Logging in to catalog API...")
 
-	c, err := catalogclient.NewWithLogin(ctx, catalogAPIURL, CatalogAdminUser, adminPassword, true)
+	c, err := catalogclient.NewWithLogin(ctx, catalogAPIURL, catalogconstants.CatalogAdminUser, adminPassword, true)
 	if err != nil {
 		return nil, fmt.Errorf("login to catalog API at %s: %w", catalogAPIURL, err)
 	}

@@ -128,7 +128,7 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 
 	// Login to the catalog API — this both verifies the admin password and gives
 	// us a client to reuse for local worker registration without a second login.
-	catalogAPIURL := routeURLs["CATALOG_API_ROUTE"]
+	catalogAPIURL := routeURLs[catalogconstants.CatalogAPIRouteKey]
 	catalogClient, err := configure.LoginToCatalog(ctx, catalogAPIURL, adminPassword)
 	if err != nil {
 		return fmt.Errorf("admin password verification failed: %w", err)
