@@ -18,7 +18,7 @@ interface CellRendererProps {
   value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction | SharedTableAction>;
-  rowData?: { status?: string; name?: string };
+  rowData?: { status?: string; name?: string; services?: number | null };
 }
 
 export const NameCell = ({ value, rowId }: CellRendererProps) => (
@@ -30,27 +30,42 @@ export const ServicesCell = ({ value }: Pick<CellRendererProps, "value">) => {
   return <span>{count === null || count === 0 ? "-" : String(count)}</span>;
 };
 
-export const ActionCell = () => (
-  <OverflowMenu size="lg" flipped aria-label="Actions">
-    <OverflowMenuItem
-      itemText={
-        <div className={styles.actionMenuItem}>
-          <span>Update key</span>
-          <Edit size={16} />
-        </div>
-      }
-    />
-    <OverflowMenuItem
-      itemText={
-        <div className={sharedStyles.deleteMenuItem}>
-          <span>Delete</span>
-          <Delete size={16} />
-        </div>
-      }
-      isDelete
-    />
-  </OverflowMenu>
-);
+export const ActionCell = ({ rowId, rowData, dispatch }: CellRendererProps) => {
+  // Disable Remove when the connector still has connected services
+  const hasConnectedServices =
+    typeof rowData?.services === "number" && rowData.services > 0;
+
+  return (
+    <OverflowMenu size="lg" flipped aria-label="Actions">
+      <OverflowMenuItem
+        itemText={
+          <div className={styles.actionMenuItem}>
+            <span>Update key</span>
+            <Edit size={16} />
+          </div>
+        }
+      />
+      <OverflowMenuItem
+        itemText={
+          <div className={sharedStyles.deleteMenuItem}>
+            <span>Remove</span>
+            <Delete size={16} />
+          </div>
+        }
+        isDelete
+        disabled={hasConnectedServices}
+        title={
+          hasConnectedServices
+            ? "Disconnect all services before removing"
+            : undefined
+        }
+        onClick={() =>
+          dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
+        }
+      />
+    </OverflowMenu>
+  );
+};
 
 type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 

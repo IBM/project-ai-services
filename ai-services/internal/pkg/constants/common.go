@@ -124,3 +124,10 @@ const (
 	// SecretSkipLabel represents if secret associated with pod should be skipped while deletion.
 	SecretSkipLabel = "ai-services.io/secret-skip-cleanup"
 )
+
+const (
+	ArgParamCaddyHTTPSPort     = "caddy.httpsPort"
+	ArgParamCaddyFileContent   = "caddy.caddyFileContent"
+	ArgParamSSLCertFileContent = "caddy.sslCertContent"
+	ArgParamSSLKeyFileContent  = "caddy.sslKeyContent"
+)

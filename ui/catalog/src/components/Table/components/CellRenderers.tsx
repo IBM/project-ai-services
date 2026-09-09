@@ -46,12 +46,12 @@ export const STATUS_CONFIG = {
     className: sharedStyles.statusTagError,
   },
   // ── Data source connector statuses ──────────────────────────────────────────
-  Connected: {
+  connected: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: sharedStyles.statusTagSuccess,
   },
-  Offline: {
+  offline: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,

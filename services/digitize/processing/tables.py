@@ -11,6 +11,7 @@ Responsibilities:
 """
 
 import json
+import threading
 import time
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ from rapidfuzz import fuzz
 from common.lang_utils import LanguageCodes, get_prompt_for_language
 from common.llm_utils import summarize_and_classify_tables
 from common.misc_utils import get_logger
+from digitize.exceptions import JobCancelledError
 from digitize.settings import settings
 
 logger = get_logger("processing.tables")
@@ -259,8 +261,7 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-
-def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH):
+def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None):
     """Extract, process, and summarize tables found in a document.
 
     Saves the extracted tables and their LLM-generated summaries to a JSON file.
@@ -316,6 +317,9 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         else:
             table_dict[table_ix]["page_number"] = None
 
+    if stop_event and stop_event.is_set():
+        raise JobCancelledError(f"Job cancelled before merging tables for document: {doc_path}")
+
     logger.debug(f"Merging cross-page tables for '{doc_path}'")
     merged_table_dict = merge_consecutive_tables(table_dict)
 
@@ -350,11 +354,15 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         f"for table summarization"
     )
 
+    if stop_event and stop_event.is_set():
+        raise JobCancelledError(f"Job cancelled before summarizing tables for document: {doc_path}")
+
     # Summarize and classify tables - use markdown directly
     table_summaries, decisions, failures = summarize_and_classify_tables(
         table_markdowns, gen_model, gen_endpoint, doc_path,
         prompt_template=selected_prompt,
         max_tokens=selected_max_tokens,
+        stop_event=stop_event,
     )
 
     filtered_table_dicts = {
