@@ -49,6 +49,11 @@ const (
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
 	WorkerGatewayPort = 9090
 
+	// OpenShiftRoutePort is the port used by OpenShift passthrough routes.
+	// All OpenShift routes (including the worker-gateway passthrough route) are
+	// always reachable on port 443 via the cluster ingress router.
+	OpenShiftRoutePort = 443
+
 	// ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
 	// ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile are template
 	// value-override keys used when deploying worker pods.
