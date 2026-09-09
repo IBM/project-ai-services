@@ -5,11 +5,13 @@ job initialisation, file staging, active-job guards, document content
 retrieval, and bulk deletion helpers.
 """
 import asyncio
+from datetime import datetime, timezone
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from common.misc_utils import get_logger
-from digitize.db.models import ConversionTaskStatus
+from digitize.db.models import ConversionTaskStatus, JobSource
 from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
@@ -18,6 +20,7 @@ from digitize.models import (
 )
 from digitize.parsing.pdf import get_document_page_count
 from digitize.settings import settings
+from digitize.db.manager import db_manager
 from digitize.utils.db import (
     create_job,
     create_document,
@@ -28,6 +31,8 @@ from digitize.utils.db import (
 )
 
 from common.misc_utils import get_utc_timestamp, cleanup_staging_directory
+from digitize import models
+from digitize.exceptions import JobCancelledError
 
 
 logger = get_logger("digitize_utils")
@@ -42,10 +47,12 @@ def get_job_document_stats(job_id: str) -> dict:
     Returns:
         Dictionary containing:
         - failed_docs: List of failed document objects with id, name, status
-        - completed_docs: List of completed document objects with id, name, status
+        - completed_docs: List of completed document objects with id, name, status (includes already_exists, excludes completed_with_errors)
+        - completed_with_errors_docs: List of docs with status completed_with_errors
         - total_docs: Total number of documents
         - failed_count: Number of failed documents
-        - completed_count: Number of completed documents
+        - completed_count: Number of completed documents (includes already_exists, excludes completed_with_errors)
+        - completed_with_errors_count: Number of completed_with_errors documents
     """
     from digitize.models import DocStatus
 
@@ -59,17 +66,24 @@ def get_job_document_stats(job_id: str) -> dict:
 
         documents = job_data.get("documents", [])
         failed_docs = [doc for doc in documents if doc.get("status") == DocStatus.FAILED.value]
-        completed_docs = [
+        _terminal_ok = (
+            DocStatus.COMPLETED.value,
+            DocStatus.ALREADY_EXISTS.value,
+        )
+        completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]
+        completed_with_errors_docs = [
             doc for doc in documents
-            if doc.get("status") in (DocStatus.COMPLETED.value, DocStatus.ALREADY_EXISTS.value)
+            if doc.get("status") == DocStatus.COMPLETED_WITH_ERRORS.value
         ]
 
         return {
             "failed_docs": failed_docs,
             "completed_docs": completed_docs,
+            "completed_with_errors_docs": completed_with_errors_docs,
             "total_docs": len(documents),
             "failed_count": len(failed_docs),
-            "completed_count": len(completed_docs)
+            "completed_count": len(completed_docs),
+            "completed_with_errors_count": len(completed_with_errors_docs),
         }
     except Exception as e:
         logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)
@@ -98,6 +112,7 @@ def initialize_job_state(
     output_format: OutputFormat,
     documents_info: list[str],
     job_name: Optional[str] = None,
+    source: JobSource = JobSource.USER,
     already_exists_files: Optional[list] = None,   # list[AlreadyExistsFile]
 ) -> dict[str, str]:
     """
@@ -112,6 +127,7 @@ def initialize_job_state(
         output_format: Output format for documents
         documents_info: List of filenames to be processed
         job_name: Optional human-readable name for the job
+        source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
         already_exists_files: Optional list of AlreadyExistsFile entries that were
                               stripped from the batch before staging.
 
@@ -134,7 +150,8 @@ def initialize_job_state(
         operation=operation,
         submitted_at=submitted_at,
         documents_info=all_filenames,
-        job_name=job_name
+        job_name=job_name,
+        source=source,
     )
 
     # Now create document metadata in both database and file system
@@ -146,7 +163,8 @@ def initialize_job_state(
             job_id=job_id,
             output_format=output_format,
             operation=operation,
-            submitted_at=submitted_at
+            submitted_at=submitted_at,
+            source=source.value,
         )
     logger.info(f"Created job {job_id} with {len(documents_info)} document(s) in database")
 
@@ -171,6 +189,7 @@ def initialize_job_state(
                 submitted_at=submitted_at,
                 initial_status=DocStatus.ALREADY_EXISTS,
                 completed_at=submitted_at,
+                source=source.value,
                 extra_metadata={
                     "existing_doc_id": skipped.existing_doc_id,
                     "existing_doc_name": skipped.existing_doc_name,
@@ -190,6 +209,7 @@ async def enqueue_conversion_tasks(
     output_format: OutputFormat,
     quota: int,
     queued_for_op: int,
+    connector_id: Optional[str] = None,
 ) -> None:
     """
     Insert conversion_tasks rows for every file in the job in a single
@@ -203,8 +223,13 @@ async def enqueue_conversion_tasks(
     The batch insert is atomic: if any row fails the entire set is rolled
     back, leaving no partial state for the caller to reason about.
 
-    Slots up to the free quota are inserted as ``queued``; the rest as
-    ``pending`` (the dispatcher will promote them as capacity frees up).
+    For user jobs (connector_id=None): slots up to the free quota are
+    inserted as ``queued``; the rest as ``pending`` (promoted by the
+    dispatcher as capacity frees up).
+
+    For connector jobs (connector_id set): all tasks are inserted directly
+    as ``queued`` — connector tasks have no pending phase. The _BATCH_SIZE
+    cap in sync_tick controls how many tasks are enqueued per batch.
 
     Args:
         job_id:        Job identifier.
@@ -213,10 +238,10 @@ async def enqueue_conversion_tasks(
         doc_id_dict:   Mapping of filename → document ID.
         staging_dir:   Path to the job's staging directory.
         output_format: Requested output format.
-        quota:         Per-operation queue quota from settings.
-        queued_for_op: Number of tasks already queued for this operation.
+        quota:         Per-operation queue quota from settings (user jobs only).
+        queued_for_op: Number of tasks already queued for this operation (user jobs only).
+        connector_id:  Owning connector UUID; None for user-submitted jobs.
     """
-    from digitize.db.manager import db_manager
 
     slots_free = max(0, quota - queued_for_op)
     tasks = []
@@ -227,11 +252,18 @@ async def enqueue_conversion_tasks(
         file_path = staging_dir / filename
         page_count = await asyncio.to_thread(get_document_page_count, str(file_path))
         is_large = page_count >= settings.digitize.heavy_doc_page_threshold
-        task_status = ConversionTaskStatus.QUEUED if idx < slots_free else ConversionTaskStatus.PENDING
+        # Connector tasks are always queued directly — no pending phase.
+        # User tasks respect the quota: slots_free queued, remainder pending.
+        task_status = (
+            ConversionTaskStatus.QUEUED
+            if (connector_id is not None or idx < slots_free)
+            else ConversionTaskStatus.PENDING
+        )
         tasks.append({
             "task_id":       task_id,
             "job_id":        job_id,
             "doc_id":        doc_id,
+            "connector_id":  connector_id,
             "operation":     op_key,
             "cached_file":   str(file_path),
             "output_format": output_format.value,
@@ -241,10 +273,301 @@ async def enqueue_conversion_tasks(
         })
         logger.debug(
             f"Prepared task {task_id} for {filename} "
-            f"(op={op_key}, status={task_status}, large={is_large})"
+            f"(op={op_key}, status={task_status}, large={is_large}, connector={connector_id})"
         )
 
     db_manager.create_conversion_tasks_batch(tasks)
+
+_TERMINAL_DOC_STATUSES = (
+    models.DocStatus.COMPLETED.value,
+    models.DocStatus.FAILED.value,
+    models.DocStatus.CANCELLED.value,
+    models.DocStatus.ALREADY_EXISTS.value,
+)
+
+NON_CANCELLABLE_JOB_STATUSES = (
+    models.JobStatus.COMPLETED.value,
+    models.JobStatus.COMPLETED_WITH_ERRORS.value,
+    models.JobStatus.FAILED.value,
+    models.JobStatus.CANCEL_PENDING.value,
+    models.JobStatus.CANCELLED.value,
+)
+
+def _cancel_job_docs(job_id: str, status_mgr, *, force: bool = False) -> None:
+    """Mark documents for *job_id* as CANCELLED, then set the job to CANCELLED.
+
+    When *force* is ``False`` (default) terminal documents (COMPLETED, FAILED,
+    CANCELLED, ALREADY_EXISTS) are left untouched.  Pass ``force=True`` after a
+    VDB cleanup so that COMPLETED docs — whose vector chunks have just been
+    removed — are also marked CANCELLED.
+    """
+    docs = db_manager.get_documents_by_job_id(job_id)
+    for doc in docs:
+        if force or doc.status not in _TERMINAL_DOC_STATUSES:
+            status_mgr.update_doc_metadata(
+                doc.doc_id,
+                {"status": models.DocStatus.CANCELLED, "completed_at": datetime.now(timezone.utc).isoformat()},
+            )
+    status_mgr.update_job_progress("", models.DocStatus.CANCELLED, models.JobStatus.CANCELLED)
+
+
+def request_job_cancellation(job_id: str, *, clean_files: bool = False) -> None:
+    """Mark *job_id* as CANCEL_PENDING and persist the *clean_files* flag in stats.
+
+    Sets the job to CANCEL_PENDING so the background pipeline stops at its
+    next checkpoint.
+
+    Parameters
+    ----------
+    job_id:
+        The job to cancel.
+    clean_files:
+        When ``True`` the background task should also remove staged/output
+        files when it handles the cancellation.
+    """
+    job_row = db_manager.get_job_by_id(job_id)
+    current_stats = (job_row.stats if job_row and job_row.stats else {})
+    updated_stats = {**current_stats, "clean_files": clean_files}
+
+    db_manager.update_job(job_id, status=models.JobStatus.CANCEL_PENDING, stats=updated_stats)
+    logger.info(f"Job '{job_id}' marked as CANCEL_PENDING (clean_files={clean_files})")
+
+
+async def initialize_and_launch(
+    job_id: str,
+    operation,                          # models.OperationType or str
+    output_format: OutputFormat,
+    filenames: list[str],
+    staging_dir: Path,
+    quota: int,
+    queued_for_op: int,
+    job_name: Optional[str] = None,
+    source: Optional[JobSource] = None,
+    already_exists_files: Optional[list] = None,
+    file_checksum_dict: Optional[dict] = None,
+    connector_id: Optional[str] = None,
+) -> dict[str, str]:
+    """
+    Steps 7–9 of the job-creation flow, shared by the user API and the
+    connector sync path.
+
+      7. ``initialize_job_state``       — create jobs + documents DB rows.
+      8. ``enqueue_conversion_tasks``   — insert conversion_tasks rows.
+      9. ``launch_ingest_pipeline``     — fire-and-forget ingestion task.
+         ``launch_digitize_pipeline``   — fire-and-forget digitization task.
+
+    If step 7 or 8 raises, staged files under *staging_dir* are cleaned up
+    immediately and the exception is re-raised.
+
+    Parameters
+    ----------
+    job_id:
+        Pre-generated job UUID.
+    operation:
+        ``OperationType.INGESTION`` / ``OperationType.DIGITIZATION`` or the
+        equivalent string value.
+    output_format:
+        Requested output format.
+    filenames:
+        Novel filenames to process (already-exists files excluded).
+    staging_dir:
+        Directory holding the staged files. Cleaned up here on error;
+        cleaned up by the pipeline on success.
+    quota:
+        Per-operation queue quota. Pass ``0`` for connector jobs.
+    queued_for_op:
+        Tasks already queued at submission time. Pass ``0`` for connector jobs.
+    job_name:
+        Optional human-readable job name.
+    source:
+        ``JobSource.USER`` (default) or ``JobSource.CONNECTOR``.
+    already_exists_files:
+        Files stripped by hash-dedup (user jobs only).
+    file_checksum_dict:
+        ``filename → md5-hex`` for novel files (user jobs only). Connector
+        jobs omit this — checksums are registered via
+        ``add_connector_checksum_entry`` after the job completes.
+    connector_id:
+        Owning connector UUID; ``None`` for user-submitted jobs.
+
+    Returns
+    -------
+    dict[str, str]
+        The ``filename → doc_id`` mapping produced by ``initialize_job_state``.
+    """
+    from digitize.db.models import JobSource as _JobSource
+    from digitize.models import OperationType
+
+    op_key = operation.value if hasattr(operation, "value") else operation
+    resolved_source = source if source is not None else _JobSource.USER
+
+    try:
+        doc_id_dict = initialize_job_state(
+            job_id=job_id,
+            operation=operation,
+            output_format=output_format,
+            documents_info=filenames,
+            job_name=job_name,
+            source=resolved_source,
+            already_exists_files=already_exists_files,
+        )
+
+        await enqueue_conversion_tasks(
+            job_id=job_id,
+            op_key=op_key,
+            filenames=filenames,
+            doc_id_dict=doc_id_dict,
+            staging_dir=staging_dir,
+            output_format=output_format,
+            quota=quota,
+            queued_for_op=queued_for_op,
+            connector_id=connector_id,
+        )
+    except Exception:
+        logger.error(
+            f"Job {job_id}: DB initialisation or enqueue failed — "
+            f"removing {len(filenames)} staged file(s)",
+        )
+        cleanup_staging_directory(staging_dir.name, staging_dir.parent)
+        raise
+
+    # Step 9: fire-and-forget pipeline task.
+    if op_key == OperationType.INGESTION.value:
+        asyncio.create_task(
+            launch_ingest_pipeline(
+                job_id=job_id,
+                doc_id_dict=doc_id_dict,
+                file_checksum_dict=file_checksum_dict,
+                staging_dir=staging_dir,
+            )
+        )
+    elif op_key == OperationType.DIGITIZATION.value:
+        asyncio.create_task(launch_digitize_pipeline(job_id, doc_id_dict))
+
+    return doc_id_dict
+
+
+async def launch_digitize_pipeline(
+    job_id: str,
+    doc_id_dict: dict,
+) -> None:
+    """
+    Fire-and-forget coroutine that drives the digitization pipeline for *job_id*.
+
+    Runs the blocking ``digitize()`` call in a thread so the asyncio event loop
+    stays free.  Cleans up the staging directory when done regardless of outcome.
+    """
+    from digitize.models import DocStatus, JobStatus
+    from digitize.utils.db import get_status_manager
+
+    status_mgr = get_status_manager(job_id)
+    try:
+        logger.info(f"🚀 Digitization pipeline started for job: {job_id}")
+        from digitize.pipeline.digitize import digitize
+        await asyncio.to_thread(digitize, job_id, doc_id_dict)
+        logger.info(f"Digitization pipeline for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Digitization job {job_id} was cancelled")
+        _cancel_job_docs(job_id, status_mgr)
+    except Exception as exc:
+        logger.error(f"Error in digitization pipeline for job {job_id}: {exc}", exc_info=True)
+        status_mgr.update_job_progress(
+            "",
+            DocStatus.FAILED,
+            JobStatus.FAILED,
+            error=f"Error occurred while processing digitization pipeline: {exc}",
+        )
+    finally:
+        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
+
+
+async def launch_ingest_pipeline(
+    job_id: str,
+    doc_id_dict: dict,
+    file_checksum_dict: Optional[dict] = None,
+    staging_dir: Optional[Path] = None,
+) -> None:
+    """
+    Fire-and-forget coroutine that drives the ingestion pipeline for *job_id*.
+
+    Runs the blocking ``ingest()`` call in a thread so the asyncio event loop
+    stays free.  Cleans up the staging directory when done regardless of outcome.
+
+    This is the single shared implementation used by both:
+    - ``api/v1/jobs.py`` — for user-submitted ingestion jobs, and
+    - ``connectors/sync_tick.py`` — for connector-sourced ingestion batches.
+
+    Parameters
+    ----------
+    job_id:
+        The job whose conversion_tasks rows the pipeline should poll and
+        process.
+    doc_id_dict:
+        Mapping of ``filename → doc_id`` as returned by
+        ``initialize_job_state()``.
+    file_checksum_dict:
+        Optional ``filename → md5-hex`` map used to store ``file_hash`` on
+        each document upon completion.  Only meaningful for user-submitted
+        jobs — used by ``find_completed_document_by_hash`` for dedup on
+        subsequent uploads.  Connector jobs omit this; connectors manage
+        their own dedup via ``add_connector_checksum_entry``.
+    staging_dir:
+        The staging directory to clean up after the pipeline finishes.
+        Defaults to ``settings.digitize.staging_dir / job_id`` (the path
+        used for user jobs).  Pass ``batch_dir`` when calling from
+        ``sync_tick.py`` (connector batches live under a different subtree).
+    """
+    from digitize.models import DocStatus, JobStatus
+    from digitize.utils.db import get_status_manager
+
+    resolved: Path = staging_dir if staging_dir is not None else settings.digitize.staging_dir / job_id
+    status_mgr = get_status_manager(job_id)
+    try:
+        logger.info(f"🚀 Ingestion pipeline started for job: {job_id}")
+        from digitize.pipeline.ingest import ingest
+        await asyncio.to_thread(ingest, resolved, job_id, doc_id_dict, file_checksum_dict)
+        logger.info(f"Ingestion pipeline for job {job_id} completed successfully")
+    except JobCancelledError:
+        logger.info(f"Ingestion job {job_id} was cancelled")
+
+        # Clean vector DB before marking docs CANCELLED so the filter on
+        # CHUNKED/COMPLETED statuses still reflects pre-cancellation state.
+        vdb_cleaned = False
+        try:
+            job_row = db_manager.get_job_by_id(job_id)
+            if job_row and job_row.stats.get("clean_files"):
+                import common.db_utils as db_utils
+                indexed_statuses = {
+                    models.DocStatus.CHUNKED.value,
+                    models.DocStatus.COMPLETED.value,
+                }
+                all_docs = db_manager.get_documents_by_job_id(job_id)
+                doc_ids_to_clean = [
+                    d.doc_id for d in all_docs
+                    if d.status in indexed_statuses
+                ]
+                if doc_ids_to_clean:
+                    vector_store = db_utils.get_vector_store()
+                    deleted = vector_store.remove_docs_from_index(doc_ids_to_clean)
+                    logger.info(f"Cancelled job {job_id}: removed {deleted} vector chunks (clean_files=true)")
+                    vdb_cleaned = True
+        except Exception as vdb_exc:
+            logger.warning(f"Vector DB cleanup failed for cancelled job {job_id}: {vdb_exc}")
+
+        # If VDB cleanup ran, force-cancel all docs (including COMPLETED ones
+        # whose vectors were just removed).  Otherwise respect terminal statuses.
+        _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
+    except Exception as exc:
+        logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
+        status_mgr = get_status_manager(job_id)
+        status_mgr.update_job_progress(
+            "",
+            DocStatus.FAILED,
+            JobStatus.FAILED,
+            error=f"Error occurred while processing ingestion pipeline: {exc}",
+        )
+    finally:
+        cleanup_staging_directory(resolved.name, resolved.parent)
 
 
 async def stage_upload_files(

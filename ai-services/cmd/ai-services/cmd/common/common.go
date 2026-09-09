@@ -3,6 +3,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // InitAndValidateRuntimeFlag validates the runtime flag value, initialises
@@ -49,4 +51,25 @@ func validateRuntimeType(runtimeType types.RuntimeType) error {
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
 	}
+}
+
+// IsCatalogLocalWorker inspects the running catalog pod and returns true when
+// the LOCAL_WORKER environment variable is set to "true" inside it.
+func IsCatalogLocalWorker(ctx context.Context, rt runtime.Runtime) (bool, error) {
+	pod, err := rt.InspectPod(ctx, workerconstants.PodmanGatewayPodName)
+	if err != nil {
+		return false, fmt.Errorf("inspect catalog pod: %w", err)
+	}
+
+	for _, container := range pod.Containers {
+		cInfo, err := rt.InspectContainer(ctx, container.ID)
+		if err != nil {
+			return false, fmt.Errorf("inspect container %s failed: %w", container.ID, err)
+		}
+		if cInfo.Env[workerconstants.LocalWorkerEnvVar] == "true" {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
