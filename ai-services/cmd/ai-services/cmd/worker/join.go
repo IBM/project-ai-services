@@ -17,6 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
@@ -102,19 +103,24 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 // catalog control plane, which means it cannot be managed as a standalone worker.
 func checkNotLocalWorker(ctx context.Context) error {
 	rtType := vars.RuntimeFactory.GetRuntimeType()
-	rt, err := runtime.CreateRuntime(rtType, "")
+	rt, err := runtime.CreateRuntime(rtType, workerconstants.WorkerAppName)
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
-	podName := workerconstants.PodmanGatewayPodName
-	if rtType == types.RuntimeTypeOpenShift {
-		podName = workerconstants.OpenShiftCatalogPodName
+
+	var localWorker bool
+
+	switch rtType {
+	case types.RuntimeTypeOpenShift:
+		localWorker, err = workercommon.IsOpenShiftLocalWorker(ctx, rt)
+	default:
+		localWorker, err = workercommon.IsPodmanLocalWorker(ctx, rt)
 	}
-	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt, podName)
+
 	if err != nil {
 		return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
 	}
-	if isLocalWorker {
+	if localWorker {
 		return fmt.Errorf("the worker is already co-located with the control plane and cannot be joined independently")
 	}
 

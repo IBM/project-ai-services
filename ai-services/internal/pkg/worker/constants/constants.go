@@ -13,6 +13,11 @@ const (
 	// WorkerPodLabel is the pod label set to identify worker pod deployed or not.
 	WorkerPodLabel = "ai-services.io/component=worker"
 
+	// CatalogBackendPodLabel is the label key used to identify the catalog-backend pod on OpenShift.
+	CatalogBackendPodLabel = "ai-services.io/component"
+	// CatalogBackendPodLabelValue is the label value for the catalog-backend pod.
+	CatalogBackendPodLabelValue = "catalog-backend"
+
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
 
