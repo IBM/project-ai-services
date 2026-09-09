@@ -472,3 +472,32 @@ export interface CreateDatasourceRequest {
 export interface CreateDatasourceResponse {
   id: string;
 }
+
+/** GET /datasources/:id — application entry inside a connector */
+export interface ConnectorApplication {
+  id: string;
+  name: string;
+  catalog_id: string;
+  type: string;
+  sync_status?: string | null;
+  last_sync_at?: string | null;
+}
+
+/** GET /datasources/:id — full detail response */
+export interface DataSourceDetailResponse {
+  id: string;
+  name: string;
+  type: string;
+  provider: ConnectorProvider;
+  status: ConnectorStatus;
+  message?: string;
+  metadata: Record<string, unknown>;
+  applications: ConnectorApplication[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** PATCH /datasources/:id — update authentication key request */
+export interface UpdateDataSourceAuthRequest {
+  params: Record<string, string | string[]>;
+}

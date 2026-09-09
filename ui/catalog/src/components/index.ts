@@ -14,6 +14,8 @@ export type { SolutionCardProps } from "./SolutionCard";
 export { default as DeployedServicesTable } from "./DeployedServicesTable";
 export { default as DataSourceConnectorsTable } from "./DataSourceConnectorsTable";
 export type { DataSourceConnectorsTableProps } from "./DataSourceConnectorsTable";
+export { default as ConnectorDetailsPanel } from "./ConnectorDetailsPanel";
+export type { ConnectorDetailsPanelProps } from "./ConnectorDetailsPanel";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
   DeployFormData,
