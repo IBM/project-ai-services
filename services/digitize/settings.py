@@ -442,6 +442,7 @@ class TableSummaryConfig(BaseSettings):
                 Decision: <yes または no>
 
                 JSON、追加のコメント、またはその他のテキストを出力しないでください。
+                重要：出力ラベル（「Summary:」と「Decision:」）は必ず英語のままにしてください。翻訳しないでください。
 
                 例：
 
