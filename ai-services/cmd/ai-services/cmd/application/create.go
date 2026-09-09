@@ -22,7 +22,6 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
@@ -140,22 +139,6 @@ func createExample() string {
   For Openshift:
   # Deploy with default mode (5 Spyre cards)
   ai-services application create rag --template rag --runtime openshift`
-}
-
-func doBootstrapValidate(ctx context.Context) error {
-	skip := helpers.ParseSkipChecks(skipChecks)
-	if len(skip) > 0 {
-		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
-	}
-
-	// Create bootstrap instance based on runtime
-	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
-
-	if err := factory.Validate(ctx, skip); err != nil {
-		return fmt.Errorf("bootstrap validation failed: %w", err)
-	}
-
-	return nil
 }
 
 func init() {
