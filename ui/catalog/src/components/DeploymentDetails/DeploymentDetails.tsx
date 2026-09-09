@@ -14,6 +14,7 @@ import {
   SkeletonPlaceholder,
   ToastNotification,
 } from "@carbon/react";
+import ApplicationDatasourcesTable from "./components/ApplicationDatasourcesTable";
 import { PageHeader, ProductiveCard } from "@carbon/ibm-products";
 import {
   ArrowLeft,
@@ -461,6 +462,14 @@ const DeploymentDetails = ({
               >
                 Integration endpoints
               </SideNavLink>
+              {deployment.type === "Digital Assistants" && (
+                <SideNavLink
+                  isActive={activeSection === "datasources"}
+                  onClick={() => setActiveSection("datasources")}
+                >
+                  Data sources
+                </SideNavLink>
+              )}
             </SideNavItems>
           </SideNav>
         </Column>
@@ -752,6 +761,11 @@ const DeploymentDetails = ({
               ))}
             </Grid>
           )}
+
+          {activeSection === "datasources" &&
+            deployment.type === "Digital Assistants" && (
+              <ApplicationDatasourcesTable applicationId={deployment.id} />
+            )}
 
           {activeSection === "integration" && (
             <Grid className={styles.servicesGrid}>
