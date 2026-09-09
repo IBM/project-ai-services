@@ -126,7 +126,6 @@ Arguments:
 	},
 }
 
-
 func createExample() string {
 	return `  For Podman:
   # Deploy with default mode (5 Spyre cards)
