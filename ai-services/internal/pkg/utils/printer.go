@@ -57,21 +57,27 @@ func (p *Printer) AppendRow(cells ...string) {
 	p.model.SetRows(append(p.model.Rows(), table.Row(cells)))
 }
 
-func collapseFirstColumn(rows []table.Row) []table.Row {
+func collapseLeadingColumns(rows []table.Row, n int) []table.Row {
 	if len(rows) == 0 {
 		return rows
 	}
 
-	last := ""
+	last := make([]string, n)
 	for i, r := range rows {
 		if len(r) == 0 {
 			continue
 		}
 
-		if r[0] == last {
-			r[0] = "" // blank repeated values
-		} else {
-			last = r[0]
+		for col := 0; col < n && col < len(r); col++ {
+			if r[col] == last[col] {
+				r[col] = "" // blank repeated values
+			} else {
+				last[col] = r[col]
+				// reset all subsequent tracked columns when a parent changes
+				for j := col + 1; j < n; j++ {
+					last[j] = ""
+				}
+			}
 		}
 
 		rows[i] = r
@@ -82,7 +88,7 @@ func collapseFirstColumn(rows []table.Row) []table.Row {
 
 func (p *Printer) CloseTableWriter() {
 	cols := p.model.Columns()
-	rows := collapseFirstColumn(p.model.Rows())
+	rows := collapseLeadingColumns(p.model.Rows(), 2)
 
 	// Width of rows is computed here before rendering
 	for colIdx := range cols {
