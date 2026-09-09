@@ -51,7 +51,7 @@ func pollPodLogs(ctx context.Context, rt runtime.Runtime, podName string, deadli
 
 		lines, err := rt.PodLogs(ctx, podName, false)
 		if err != nil {
-			return fmt.Errorf("failed to fetch logs for pod %w: %v", podName, err)
+			return fmt.Errorf("failed to fetch logs for pod %s: %w", podName, err)
 		}
 
 		for _, line := range lines {
