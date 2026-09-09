@@ -94,10 +94,6 @@ Arguments:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		if err := doBootstrapValidate(ctx); err != nil {
-			return err
-		}
-
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		// When legacyCreate is true, use the older/stable code path
 		if legacyCreate {
