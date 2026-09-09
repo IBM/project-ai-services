@@ -291,18 +291,33 @@ func (kc *OpenshiftClient) StartPod(_ context.Context, id string) error {
 }
 
 // PodLogs retrieves logs from a pod.
-func (kc *OpenshiftClient) PodLogs(ctx context.Context, podNameOrID string) error {
+// When stream is true it follows logs until interrupted (prints to logger).
+// When stream is false it snapshots current logs and returns all lines.
+func (kc *OpenshiftClient) PodLogs(ctx context.Context, podNameOrID string, stream bool) ([]string, error) {
 	podName, err := getPodNameWithPrefix(ctx, kc, podNameOrID)
 	if err != nil {
-		return fmt.Errorf("failed to get the pod: %w", err)
+		return nil, fmt.Errorf("failed to get the pod: %w", err)
 	}
 
-	// Defaults to only container if there is one container in the pod.
-	opts := &corev1.PodLogOptions{
-		Follow: true,
+	opts := &corev1.PodLogOptions{Follow: stream}
+
+	if stream {
+		// Install signal handling so Ctrl+C / SIGTERM stops the tail gracefully.
+		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
+		return nil, streamPodLogs(ctx, kc, podName, opts, func(line string) {
+			logger.Infoln(line)
+		})
 	}
 
-	return followLogs(ctx, kc, podName, opts)
+	var lines []string
+
+	err = streamPodLogs(ctx, kc, podName, opts, func(line string) {
+		lines = append(lines, line)
+	})
+
+	return lines, err
 }
 
 // InspectContainer inspects a container.
@@ -365,7 +380,12 @@ func (kc *OpenshiftClient) ContainerLogs(ctx context.Context, containerNameOrID 
 					Follow:    true,
 				}
 
-				return followLogs(ctx, kc, pod.Name, opts)
+				ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+				defer stop()
+
+				return streamPodLogs(ctx, kc, pod.Name, opts, func(line string) {
+					logger.Infoln(line)
+				})
 			}
 		}
 	}
@@ -455,16 +475,15 @@ func getPodNameWithPrefix(ctx context.Context, kc *OpenshiftClient, nameOrID str
 	return "", fmt.Errorf("cannot find pod: %s", nameOrID)
 }
 
-func followLogs(ctx context.Context, kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions) error {
-	// Create interrupt-aware context (Ctrl+C), child of the caller's context.
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+// streamPodLogs opens the log stream for podName and calls onLine for every line
+// scanned. It is the shared core used by both the follow and snapshot paths in
+// PodLogs, and by ContainerLogs.
+func streamPodLogs(ctx context.Context, kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions, onLine func(string)) error {
 	req := kc.KubeClient.CoreV1().Pods(kc.Namespace).GetLogs(podName, opts)
 
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to stream logs: %w", err)
+		return fmt.Errorf("failed to open log stream for pod %s: %w", podName, err)
 	}
 
 	defer func() {
@@ -476,7 +495,7 @@ func followLogs(ctx context.Context, kc *OpenshiftClient, podName string, opts *
 	scanner := bufio.NewScanner(stream)
 
 	for scanner.Scan() {
-		logger.Infoln(scanner.Text())
+		onLine(scanner.Text())
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -485,7 +504,7 @@ func followLogs(ctx context.Context, kc *OpenshiftClient, podName string, opts *
 			return nil
 		}
 
-		return fmt.Errorf("error reading log stream: %w", err)
+		return fmt.Errorf("error reading log stream for pod %s: %w", podName, err)
 	}
 
 	return nil

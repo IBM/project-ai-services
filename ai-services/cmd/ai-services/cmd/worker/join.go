@@ -12,11 +12,13 @@ import (
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
@@ -95,17 +97,31 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	ctx := context.Background()
+	return checkNotLocalWorker(cmd.Context())
+}
+
+// checkNotLocalWorker returns an error when this node is co-located with the
+// catalog control plane, which means it cannot be managed as a standalone worker.
+func checkNotLocalWorker(ctx context.Context) error {
 	rtType := vars.RuntimeFactory.GetRuntimeType()
-	rt, err := runtime.CreateRuntime(rtType, "")
+	rt, err := runtime.CreateRuntime(rtType, workerconstants.WorkerAppName)
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
-	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+
+	var localWorker bool
+
+	switch rtType {
+	case types.RuntimeTypeOpenShift:
+		localWorker, err = workercommon.IsOpenShiftLocalWorker(ctx, rt)
+	default:
+		localWorker, err = workercommon.IsPodmanLocalWorker(ctx, rt)
+	}
+
 	if err != nil {
 		return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
 	}
-	if isLocalWorker {
+	if localWorker {
 		return fmt.Errorf("the worker is already co-located with the control plane and cannot be joined independently")
 	}
 
@@ -190,7 +206,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 
 		// Setup worker node
 		if err := workerpodman.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("worker join: setup: %w", err)
+			return fmt.Errorf("failed to deploy worker: %w", err)
 		}
 	case types.RuntimeTypeOpenShift:
 		opts := workertypes.OpenshiftWorkerOptions{
@@ -203,7 +219,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 			},
 		}
 		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("worker join: failed to install worker helm chart: %w", err)
+			return fmt.Errorf("failed to deploy worker: %w", err)
 		}
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
@@ -328,7 +344,14 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	return join.StartGrpcStream(ctx, rt, pr, opts)
+	err := join.StartGrpcStream(ctx, rt, pr, opts)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "%s: %v\n", workerconstants.WorkerJoinErr, err)
+
+		return fmt.Errorf("%s: %w", workerconstants.WorkerJoinErr, err)
+	}
+
+	return nil
 }
 
 func newGrpcStreamCmd() *cobra.Command {

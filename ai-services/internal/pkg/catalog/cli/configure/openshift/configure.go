@@ -3,6 +3,7 @@ package openshift
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"helm.sh/helm/v4/pkg/chart"
@@ -117,9 +118,7 @@ func generateArgParams(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
 
-	if skipLocalWorker {
-		argParams[configure.ArgParamLocalWorker] = "false"
-	}
+	argParams[configure.ArgParamLocalWorker] = strconv.FormatBool(!skipLocalWorker)
 
 	dbSecretExists, err := rt.SecretExists(ctx, catalogconstants.CatalogDBSecretName)
 	if err != nil {

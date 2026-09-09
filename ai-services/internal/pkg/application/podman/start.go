@@ -155,7 +155,7 @@ func (p *PodmanApplication) startPods(ctx context.Context, podsToStart []types.P
 func (p *PodmanApplication) printPodLogs(ctx context.Context, podsToStart []types.Pod) error {
 	logger.Infof("\n--- Following logs for pod: %s ---\n", podsToStart[0].Name)
 
-	if err := p.runtime.PodLogs(ctx, podsToStart[0].Name); err != nil {
+	if _, err := p.runtime.PodLogs(ctx, podsToStart[0].Name, true); err != nil {
 		if strings.Contains(err.Error(), "signal: interrupt") || strings.Contains(err.Error(), "context canceled") {
 			logger.Infoln("Log following stopped.")
 

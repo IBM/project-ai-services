@@ -337,6 +337,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         LanguageCodes.GERMAN: settings.table_summary.german.prompt,
         LanguageCodes.ITALIAN: settings.table_summary.italian.prompt,
         LanguageCodes.FRENCH: settings.table_summary.french.prompt,
+        LanguageCodes.JAPANESE: settings.table_summary.japanese.prompt,
     }
     selected_prompt = get_prompt_for_language(document_language, prompt_templates)
 
@@ -346,6 +347,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         LanguageCodes.GERMAN: settings.table_summary.german.max_tokens,
         LanguageCodes.ITALIAN: settings.table_summary.italian.max_tokens,
         LanguageCodes.FRENCH: settings.table_summary.french.max_tokens,
+        LanguageCodes.JAPANESE: settings.table_summary.japanese.max_tokens,
     }
     selected_max_tokens = max_tokens_config.get(document_language, settings.table_summary.english.max_tokens)
 

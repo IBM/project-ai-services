@@ -143,7 +143,9 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		}
 		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, nrt.PodLogs(ctx, req.NameOrID)
+		logsLines, err := nrt.PodLogs(ctx, req.NameOrID, false)
+
+		return marshalOr(logsLines, err)
 
 	case workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES:
 		var req payload.NameOrID
