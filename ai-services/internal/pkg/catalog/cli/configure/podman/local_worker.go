@@ -7,7 +7,6 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmanruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
@@ -22,12 +21,7 @@ import (
 func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts catalogUtils.PodmanConfigureOptions) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	hostIP, err := utils.GetHostIP()
-	if err != nil || hostIP == "" {
-		return fmt.Errorf("local worker join: resolve host IP: %w", err)
-	}
-
-	gatewayAddr := fmt.Sprintf("%s:%d", hostIP, opts.WorkerGatewayPort)
+	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.PodmanGatewayPodName, opts.WorkerGatewayPort)
 
 	workerOpts := workertypes.PodmanWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
