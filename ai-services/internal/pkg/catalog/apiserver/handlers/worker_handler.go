@@ -106,6 +106,7 @@ func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
+
 		return fmt.Sprintf("%s:%d", host, workerconstants.OpenShiftRoutePort), nil
 	}
 
