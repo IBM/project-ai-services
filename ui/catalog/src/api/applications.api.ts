@@ -467,7 +467,7 @@ export async function fetchApplicationDatasources(
   pagination: PaginationMetadata;
 }> {
   const response = await api.get<ApplicationDatasourcesListResponse>(
-    APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+    APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
     { params: { page, page_size: pageSize } },
   );
   return {
@@ -486,7 +486,7 @@ export async function fetchAllApplicationDatasources(
 
   while (hasNext) {
     const response = await api.get<ApplicationDatasourcesListResponse>(
-      APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+      APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
       { params: { page: currentPage, page_size: 100 } },
     );
     allData.push(...response.data.data);
@@ -495,4 +495,14 @@ export async function fetchAllApplicationDatasources(
   }
 
   return allData.map(transformDatasourceToRow);
+}
+
+// Connects one or more data source connectors to an application
+export async function connectApplicationDatasources(
+  applicationId: string,
+  datasourceIds: string[],
+): Promise<void> {
+  await api.put(APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId), {
+    datasource_ids: datasourceIds,
+  });
 }

@@ -1,4 +1,4 @@
-import { useReducer, useCallback, useRef } from "react";
+import { useReducer, useCallback, useRef, useState } from "react";
 import {
   DataTable,
   Table,
@@ -25,6 +25,7 @@ import {
   appReducer,
 } from "./types";
 import { CELL_RENDERERS } from "./CellRenderers";
+import ConnectDatasourceModal from "./ConnectDatasourceModal";
 import type { SharedTableAction } from "@/components/Table/types";
 import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
 import ExportModal from "@/components/Table/components/ExportModal";
@@ -88,6 +89,7 @@ const ApplicationDatasourcesTable = ({
   applicationId,
 }: ApplicationDatasourcesTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+  const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
 
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
@@ -245,7 +247,12 @@ const ApplicationDatasourcesTable = ({
                           })
                         }
                       >
-                        <Button kind="primary" size="lg" renderIcon={Add}>
+                        <Button
+                          kind="primary"
+                          size="lg"
+                          renderIcon={Add}
+                          onClick={() => setIsConnectModalOpen(true)}
+                        >
                           Connect
                         </Button>
                       </TableToolbarActions>
@@ -338,6 +345,18 @@ const ApplicationDatasourcesTable = ({
                 )}
               </DataTable>
             )}
+
+            {/* Connect datasource modal */}
+            <ConnectDatasourceModal
+              open={isConnectModalOpen}
+              applicationId={applicationId}
+              connectedIds={new Set(state.rowsData.map((r) => r.id))}
+              onClose={() => setIsConnectModalOpen(false)}
+              onConnected={() => {
+                setIsConnectModalOpen(false);
+                void loadDatasources();
+              }}
+            />
 
             {/* Export modal */}
             <ExportModal
