@@ -69,6 +69,19 @@ class TestDetectDocumentLanguage:
 
         assert result == "IT"
 
+    def test_detect_language_with_valid_japanese_data(self):
+        """Test language detection with valid Japanese text blocks."""
+        data = [
+            {"text": "これは人工知能に関する日本語の文章です。"},
+            {"text": "機械学習はAIのサブセットです。"},
+        ]
+
+        with patch("digitize.processing.language.detect_language") as mock_detect:
+            mock_detect.return_value = "JA"
+            result = detect_document_language(data)
+
+        assert result == "JA"
+
     def test_detect_language_with_unsupported_language_falls_back_to_english(self):
         """Test that unsupported languages fall back to English."""
         data = [
@@ -606,3 +619,66 @@ class TestProcessTableLanguageSelection:
 
 
 # Made with Bob
+
+
+@pytest.mark.unit
+class TestSplitJapaneseSentences:
+    """Tests for _split_japanese_sentences Japanese sentence splitter."""
+
+    def test_splits_on_kuten(self):
+        """Splits on 。 and retains the punctuation."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("これはテストです。次の文章です。")
+        assert result == ["これはテストです。", "次の文章です。"]
+
+    def test_splits_on_exclamation(self):
+        """Splits on ！ and retains the punctuation."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("素晴らしい！本当にそうです。")
+        assert result == ["素晴らしい！", "本当にそうです。"]
+
+    def test_splits_on_question_mark(self):
+        """Splits on ？ and retains the punctuation."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("何ですか？はい、そうです。")
+        assert result == ["何ですか？", "はい、そうです。"]
+
+    def test_mixed_punctuation(self):
+        """Splits on mixed Japanese and ASCII sentence-ending punctuation."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("テストです。確認しました！問題ありません。")
+        assert len(result) == 3
+        assert result[0] == "テストです。"
+        assert result[1] == "確認しました！"
+        assert result[2] == "問題ありません。"
+
+    def test_filters_empty_strings(self):
+        """Empty strings from consecutive delimiters are filtered out."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("文章です。。次です。")
+        assert all(s for s in result)
+
+    def test_single_sentence_no_delimiter(self):
+        """Text with no sentence-ending punctuation returns as single item."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("区切りなしのテキスト")
+        assert result == ["区切りなしのテキスト"]
+
+    def test_empty_string(self):
+        """Empty input returns empty list."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("")
+        assert result == []
+
+    def test_english_text_passthrough(self):
+        """English text without Japanese punctuation returns as single sentence."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("Power10 processor with 16 cores.")
+        assert result == ["Power10 processor with 16 cores."]
+
+    def test_mixed_japanese_english(self):
+        """Splits on Japanese delimiters even when English words are present."""
+        from digitize.processing.orchestrator import _split_japanese_sentences
+        result = _split_japanese_sentences("Power10はIBMのプロセッサです。16コアを搭載しています。")
+        assert result == ["Power10はIBMのプロセッサです。", "16コアを搭載しています。"]
+
