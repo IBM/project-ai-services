@@ -66,7 +66,7 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	// Uninstall the co-located local worker.
 	if err := workeruninstall.Uninstall(ctx, workerutils.UninstallOptions{
 		RuntimeType: types.RuntimeTypeOpenShift,
-		AutoYes:     opts.AutoYes,
+		AutoYes:     true,
 		SkipCleanup: opts.SkipCleanup,
 	}); err != nil {
 		return fmt.Errorf("worker uninstalled failed: %w", err)

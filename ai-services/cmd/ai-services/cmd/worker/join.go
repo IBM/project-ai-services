@@ -95,7 +95,7 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	return checkNotLocalWorker(context.Background())
+	return checkNotLocalWorker(cmd.Context())
 }
 
 // checkNotLocalWorker returns an error when this node is co-located with the

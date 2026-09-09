@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -48,7 +47,6 @@ Application pods deployed on this worker by the catalog are not touched.`,
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
-			ctx := context.Background()
 			runtimeType := vars.RuntimeFactory.GetRuntimeType()
 			rt, err := runtime.CreateRuntime(runtimeType, "")
 			if err != nil {
@@ -58,7 +56,7 @@ Application pods deployed on this worker by the catalog are not touched.`,
 			if runtimeType == types.RuntimeTypeOpenShift {
 				podName = workerconstants.OpenShiftCatalogPodName
 			}
-			isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt, podName)
+			isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(cmd.Context(), rt, podName)
 			if err != nil {
 				return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
 			}

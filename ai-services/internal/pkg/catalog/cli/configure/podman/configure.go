@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
@@ -189,9 +190,7 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
-	if skipLocalWorker {
-		argParams[configure.ArgParamLocalWorker] = "false"
-	}
+	argParams[configure.ArgParamLocalWorker] = strconv.FormatBool(!skipLocalWorker)
 	argParams[constants.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, utils.CaddyFileIndent)
 	argParams[constants.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, utils.CertContentIndent)
 	argParams[constants.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, utils.CertContentIndent)
