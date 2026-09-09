@@ -85,6 +85,16 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 		return
 	}
 
+	// "Local" is reserved for the catalog-machine worker registered by the
+	// configure flow. It is only allowed when LOCAL_WORKER=true, meaning this
+	// catalog instance is configured to host a co-located worker.
+	if strings.EqualFold(req.WorkerName, workerconstants.LocalWorkerName) &&
+		utils.GetEnv(workerconstants.LocalWorkerEnvVar, "") != "true" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("worker name %q is reserved", req.WorkerName)})
+
+		return
+	}
+
 	token, err := h.reg.Preregister(ctx, req.WorkerName)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "worker handler: failed to register worker %q: %v", req.WorkerName, err)
