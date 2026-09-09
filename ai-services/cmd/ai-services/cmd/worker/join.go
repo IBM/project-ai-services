@@ -258,7 +258,7 @@ func configureFlags(c *cobra.Command) {
 		"Add an extra entry to the worker pod's /etc/hosts (repeatable).\n"+
 			"Format: DOMAIN:IP\n"+
 			"Note: Supported for podman runtime only.\n"+
-			"Example: --add-host catalog.example.com:10.20.188.75\n")
+			"Example: --add-host catalog-worker-gateway.example.com:10.20.188.75\n")
 }
 
 func newJoinCmd() *cobra.Command {
