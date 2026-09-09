@@ -3,10 +3,10 @@ package openshift
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -17,6 +17,10 @@ import (
 	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 	"helm.sh/helm/v4/pkg/chart"
+)
+
+const (
+	workerHelmTimeout = 2 * time.Minute
 )
 
 // DeployWorker orchestrates the full deployment of the worker gRPC stream pod on OpenShift.
@@ -41,26 +45,7 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 		return err
 	}
 
-	// Step 3: Deploy the worker using Helm
-	if err := deployWorkerHelm(ctx, chartData, values, namespace); err != nil {
-		return err
-	}
-
-	rt, err := runtime.CreateRuntime(runtimetypes.RuntimeTypeOpenShift, namespace)
-	if err != nil {
-		return fmt.Errorf("failed to init runtime: %w", err)
-	}
-
-	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
-		uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
-		if uninstallErr != nil {
-			logger.ErrorfCtx(ctx, "failed to delete '%s' release: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
-		}
-
-		return err
-	}
-
-	return nil
+	return deployWorkerHelm(ctx, chartData, values, namespace)
 }
 
 // prepareValues builds the Helm values map for the worker chart.
@@ -100,8 +85,24 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, constants.HelmTimeout, true); err != nil {
+	rt, err := runtime.CreateRuntime(runtimetypes.RuntimeTypeOpenShift, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to init runtime: %w", err)
+	}
+
+
+	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, workerHelmTimeout); err != nil {
 		s.Fail("failed to deploy worker")
+		
+		// Verifying worker pod logs for the error message from 'grpcstream' cmd
+		if workerErr := deployutils.CheckWorkerContainerLogs(ctx, rt); workerErr != nil {
+			uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
+			if uninstallErr != nil {
+				logger.ErrorfCtx(ctx, "failed to delete '%s' release: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
+			}
+
+			return workerErr
+		}
 
 		return fmt.Errorf("failed to deploy worker: %w", err)
 	}
