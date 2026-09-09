@@ -290,7 +290,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         content={
             "data": {
                 "extraction": parsed_output,
-                "schema_id": body.schema_id,
+                "schema_id": schema_row.schema_id,
                 "source": {
                     "input_type": "text",
                     "input_tokens": input_tokens,
@@ -464,6 +464,7 @@ async def create_extract_job(
             row = db_repo.create_job(
                 job_id=job_id,
                 schema_id=schema_id,
+                schema_name=schema_name,
                 job_name=job_name,
                 submitted_at=datetime.now(timezone.utc),
                 file_count=len(files),

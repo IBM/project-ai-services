@@ -306,6 +306,26 @@ class TestCreateExtractJob:
         assert resp.status_code == 202
         assert "job_id" in resp.json()
 
+    def test_202_accepted_via_schema_name_passes_name_to_db(self, extract_test_client):
+        """schema_name is forwarded to create_job so it is persisted on the job row."""
+        mock_create_job = Mock(return_value=_mock_job_row(status="accepted"))
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_name", return_value=_mock_schema_row()), \
+             patch("extract.api.v1.jobs.validate_file_extension", return_value=(True, ".txt")), \
+             patch("extract.api.v1.jobs.stage_multiple_files"), \
+             patch("extract.api.v1.jobs.db_repo.create_job", mock_create_job), \
+             patch("extract.api.v1.jobs.db_repo.create_documents", return_value=True), \
+             patch("extract.api.v1.jobs.validate_file_content", new=AsyncMock()), \
+             patch("extract.api.v1.jobs.process_batch_job", new=AsyncMock()), \
+             _patch_extract_limiter_free():
+            extract_test_client.post(
+                "/v1/extract/jobs",
+                data={"schema_name": "my-schema"},
+                files=[("files", ("doc.txt", b"invoice text content", "text/plain"))],
+            )
+
+        _, kwargs = mock_create_job.call_args
+        assert kwargs.get("schema_name") == "my-schema"
+
     def test_400_missing_schema_id_and_name(self, extract_test_client):
         """Neither schema_id nor schema_name → 400 INVALID_REQUEST."""
         with _patch_extract_limiter_free():

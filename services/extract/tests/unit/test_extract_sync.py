@@ -436,6 +436,24 @@ class TestExtractSyncEndpoint:
         assert resp.status_code == 200
         assert resp.json()["data"]["extraction"] == VALID_EXTRACTION
 
+    def test_200_resolve_by_schema_name_returns_resolved_schema_id(self, extract_test_client, monkeypatch):
+        """Response schema_id comes from the resolved row, not the (absent) request field."""
+        schema_row = _mock_schema_row(schema_id="schema-001")
+        good_json = json.dumps(VALID_EXTRACTION)
+        _setup_happy_path(monkeypatch, schema_row, input_tokens=100, raw_output=good_json)
+        monkeypatch.setattr(
+            "extract.api.v1.jobs.db_repo.get_schema_by_name",
+            Mock(return_value=schema_row),
+        )
+
+        resp = extract_test_client.post(
+            "/v1/extract",
+            json={"text": "some invoice text", "schema_name": "my-schema"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["schema_id"] == "schema-001"
+
     def test_schema_id_takes_priority_over_schema_name(self, extract_test_client, monkeypatch):
         """When both schema_id and schema_name are given, schema_id is used."""
         schema_row = _mock_schema_row()
