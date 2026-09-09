@@ -22,16 +22,17 @@ const (
 	WorkerAppTemplate     = "worker"
 	WorkerHelmReleaseName = "ai-services-worker"
 	// WorkerTLSDir is the mount path inside the worker container where mTLS
-	// credentials are stored. The host-side `worker join` command also writes
-	// to this path (outside a container). Single source of truth shared between
-	// the join, deploy, and uninstall packages.
-	WorkerTLSDir = "/var/lib/ai-services/worker-tls"
+	// credentials are stored. Backed by the worker-tls Podman PVC; the path is
+	// container-internal and must not overlap with the ai-services-data hostPath
+	// bind mount. Single source of truth shared between the join, deploy, and
+	// uninstall packages.
+	WorkerTLSDir = "/data/worker-tls"
 
 	// GatewayPKIDir is the mount path inside the catalog container where gateway
 	// PKI files (CA key/cert, server key/cert) are persisted. Backed by the
 	// gateway-pki podman PVC. Single source of truth shared between gateway and
 	// the catalog pod template.
-	GatewayPKIDir = "/var/lib/ai-services/gateway-pki"
+	GatewayPKIDir = "/data/gateway-pki"
 
 	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod.
 	WorkerCaddyPodName = "ai-services--caddy"
@@ -48,6 +49,11 @@ const (
 
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
 	WorkerGatewayPort = 9090
+
+	// OpenShiftRoutePort is the port used by OpenShift passthrough routes.
+	// All OpenShift routes (including the worker-gateway passthrough route) are
+	// always reachable on port 443 via the cluster ingress router.
+	OpenShiftRoutePort = 443
 
 	// ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
 	// ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile are template

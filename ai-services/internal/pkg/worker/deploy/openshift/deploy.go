@@ -62,6 +62,8 @@ func prepareValues(tp templates.Template, opts workertypes.OpenshiftWorkerOption
 		return nil, fmt.Errorf("failed to prepare values: %w", err)
 	}
 
+	values["hostAliases"] = opts.HostAliases
+
 	return values, nil
 }
 

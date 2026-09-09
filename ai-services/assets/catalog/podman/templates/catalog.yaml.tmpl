@@ -157,7 +157,7 @@ spec:
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
         - name: gateway-pki
-          mountPath: /var/lib/ai-services/gateway-pki
+          mountPath: /data/gateway-pki
         - name: catalog-secret
           mountPath: /etc/secret/catalog-secret
           readOnly: true
