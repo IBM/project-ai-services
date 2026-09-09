@@ -45,7 +45,12 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 		return err
 	}
 
-	return deployWorkerHelm(ctx, chartData, values, namespace)
+	rt, err := runtime.CreateRuntime(runtimetypes.RuntimeTypeOpenShift, namespace)
+	if err != nil {
+		return fmt.Errorf("failed to init runtime: %w", err)
+	}
+
+	return deployWorkerHelm(ctx, chartData, values, namespace, rt)
 }
 
 // prepareValues builds the Helm values map for the worker chart.
@@ -72,7 +77,7 @@ func prepareValues(tp templates.Template, opts workertypes.OpenshiftWorkerOption
 // deployWorkerHelm installs or upgrades the worker Helm release in the given namespace.
 // It creates a namespaced Helm client, performs an install-or-upgrade operation with the
 // provided chart and values, and enforces a timeout of helmTimeout.
-func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[string]any, namespace string) error {
+func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[string]any, namespace string, rt runtime.Runtime) error {
 	s := spinner.New("Deploying worker to OpenShift...")
 
 	s.Start(ctx)
@@ -85,28 +90,41 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		return fmt.Errorf("failed to create Helm client: %w", err)
 	}
 
-	rt, err := runtime.CreateRuntime(runtimetypes.RuntimeTypeOpenShift, namespace)
-	if err != nil {
-		return fmt.Errorf("failed to init runtime: %w", err)
-	}
-
 	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, workerHelmTimeout); err != nil {
 		s.Fail("failed to deploy worker")
 
 		// Verifying worker pod logs for the error message from 'grpcstream' cmd
-		if workerErr := deployutils.CheckWorkerContainerLogs(ctx, rt); workerErr != nil {
-			uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
-			if uninstallErr != nil {
-				logger.ErrorfCtx(ctx, "failed to delete '%s' release: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
-			}
-
+		if workerErr := checkAndUninstallOnWorkerErr(ctx, rt, namespace); workerErr != nil {
 			return workerErr
 		}
 
 		return fmt.Errorf("failed to deploy worker: %w", err)
 	}
 
+	// Verifying worker pod logs for the error message from 'grpcstream' cmd
+	if workerErr := checkAndUninstallOnWorkerErr(ctx, rt, namespace); workerErr != nil {
+		s.Fail("worker failed to join")
+
+		return workerErr
+	}
+
 	s.Stop("Worker deployed successfully")
+
+	return nil
+}
+
+// checkAndUninstallOnWorkerErr checks the worker container logs for a gRPC join
+// error. If a join error is found, it uninstalls the Helm release before
+// returning the error so the namespace is left clean for a retry.
+func checkAndUninstallOnWorkerErr(ctx context.Context, rt runtime.Runtime, namespace string) error {
+	if workerErr := deployutils.CheckWorkerContainerLogs(ctx, rt); workerErr != nil {
+		uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
+		if uninstallErr != nil {
+			logger.ErrorfCtx(ctx, "failed to delete '%s' release: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
+		}
+
+		return workerErr
+	}
 
 	return nil
 }
