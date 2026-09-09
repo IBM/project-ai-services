@@ -137,8 +137,6 @@ spec:
           value: "/models/{{ .Values.reranker.model.name }}"
         - name: AIU_WORLD_SIZE
           value: "1"
-        - name: SENDNN_INFERENCE_USE_CHUNKED_PREFILL
-          value: "0"
         - name: SENDNN_INFERENCE_WARMUP_BATCH_SIZES
           value: "4"
         - name: SENDNN_INFERENCE_WARMUP_PROMPT_LENS
