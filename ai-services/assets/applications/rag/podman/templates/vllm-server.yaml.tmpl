@@ -55,7 +55,7 @@ spec:
           value: "/models/{{ .Values.instruct.model.name }}"
         - name: AIU_WORLD_SIZE
           value: "4"
-        - name: SENDNN_INFERENCE_USE_CB
+        - name: VLLM_SPYRE_USE_CB
           value: "1"
         - name: MAX_MODEL_LEN
           value: "{{ .Values.instruct.model.maxModelLen }}"
