@@ -12,6 +12,7 @@ import {
   IconButton,
 } from "@carbon/react";
 import { RadioButtonChecked, Information, Reset } from "@carbon/icons-react";
+import { formatVersion } from "@/utils/string";
 import styles from "../DeployFlow.shared.module.scss";
 import type { DeployFormData, DeploymentRuntimeType } from "../types";
 import type { WorkerApiResponse } from "@/types/api.types";
@@ -117,7 +118,7 @@ export const SharedStepOne = ({
   refetchWorkers,
 }: SharedStepOneProps) => {
   const isNameValid = !!formData.name.trim();
-  const versionOptions = [{ id: version, text: version }];
+  const versionOptions = [{ id: version, text: formatVersion(version) }];
 
   const [registerState, dispatchRegister] = useReducer(
     registerReducer,

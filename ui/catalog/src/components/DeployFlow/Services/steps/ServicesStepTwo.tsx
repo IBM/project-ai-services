@@ -1,4 +1,5 @@
 import { useMemo, useEffect } from "react";
+import { formatVersion } from "@/utils/string";
 import { InlineLoading, InlineNotification } from "@carbon/react";
 import { sumProviderResources } from "../../Shared/utils/resources";
 import { COMPONENT_TYPES, DEFAULT_RUNTIME } from "@/constants";
@@ -185,7 +186,9 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   );
 
   const serviceVersionOptions = useMemo(
-    () => [{ id: deployOptions.version, text: deployOptions.version }],
+    () => [
+      { id: deployOptions.version, text: formatVersion(deployOptions.version) },
+    ],
     [deployOptions.version],
   );
 

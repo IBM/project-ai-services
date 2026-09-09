@@ -3,7 +3,6 @@ package deployment
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -15,7 +14,6 @@ import (
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -75,10 +73,8 @@ func (e *DeploymentExecutor) executeDeployment(
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
 ) error {
-	// ── Remote worker deployment ──────────────────────────────────────────────
-	// TODO Remove the check when remote deployment is by default
-	// and the remaining code will be dead
-	if plan.WorkerName != "" && !strings.EqualFold(plan.WorkerName, workerconstants.LocalWorkerName) {
+	// Route through worker when a worker name is set (includes "Local").
+	if plan.WorkerName != "" {
 		return e.executeWorkerDeployment(ctx, plan, req)
 	}
 

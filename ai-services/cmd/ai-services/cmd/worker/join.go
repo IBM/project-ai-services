@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
@@ -93,6 +95,20 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	ctx := context.Background()
+	rtType := vars.RuntimeFactory.GetRuntimeType()
+	rt, err := runtime.CreateRuntime(rtType, "")
+	if err != nil {
+		return fmt.Errorf("worker join: init runtime: %w", err)
+	}
+	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
+	}
+	if isLocalWorker {
+		return fmt.Errorf("the worker is already co-located with the control plane and cannot be joined independently")
+	}
+
 	return nil
 }
 
@@ -161,12 +177,14 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 				Token:       token,
 			},
 			Setup: workertypes.Options{
+				CommonWorkerOptions: workertypes.CommonWorkerOptions{
+					HostAliases: parseAddHosts(addHosts),
+				},
 				BaseDir:     aiServicesDir,
 				HTTPSPort:   httpsPort,
 				DomainName:  domainName,
 				SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
 				SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
-				HostAliases: parseAddHosts(addHosts),
 			},
 		}
 
@@ -179,6 +197,9 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 			WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
 				GatewayAddr: gatewayAddr,
 				Token:       token,
+			},
+			CommonWorkerOptions: workertypes.CommonWorkerOptions{
+				HostAliases: parseAddHosts(addHosts),
 			},
 		}
 		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
@@ -237,7 +258,7 @@ func configureFlags(c *cobra.Command) {
 		"Add an extra entry to the worker pod's /etc/hosts (repeatable).\n"+
 			"Format: DOMAIN:IP\n"+
 			"Note: Supported for podman runtime only.\n"+
-			"Example: --add-host catalog.example.com:10.20.188.75\n")
+			"Example: --add-host catalog-worker-gateway.example.com:10.20.188.75\n")
 }
 
 func newJoinCmd() *cobra.Command {

@@ -1,3 +1,5 @@
+export { default as DeleteConfirmNameModal } from "./DeleteConfirmNameModal";
+export type { DeleteConfirmNameModalProps } from "./DeleteConfirmNameModal";
 export { default as Navbar } from "./Navbar";
 export { default as AuthRoute } from "./AuthRoute";
 export { default as ServiceCard } from "./ServiceCard";

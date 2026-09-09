@@ -75,7 +75,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 		return err
 	}
 
-	secretsToDelete := []string{constants.PodmanAuthSecret}
+	secretsToDelete := []string{constants.PodmanAuthSecret, workerconstants.WorkerMTLSSecretName}
 	if err := podmanutils.DeleteSecrets(ctx, rt, secretsToDelete); err != nil {
 		return err
 	}

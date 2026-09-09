@@ -7,18 +7,17 @@ package deploy
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	ttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -32,11 +31,7 @@ import (
 )
 
 const (
-	caddyfileSubDir = "worker/caddy"
-	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
-
-	dirPerm  = 0o750
-	filePerm = 0o644
+	caddyfilePath = "worker/podman/Caddyfile.tmpl"
 )
 
 // Options carries the parameters needed to set up the worker node.
@@ -89,11 +84,22 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return nil
 	}
 
-	if err := writeCaddyfile(opts.Setup.BaseDir); err != nil {
-		return fmt.Errorf("worker setup: write Caddyfile: %w", err)
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
+		return fmt.Errorf("worker join: compute domain suffix: %w", err)
 	}
 
-	if err := deployAll(ctx, rt, tp, opts, existingResource); err != nil {
+	if err := deployAll(ctx, rt, tp, opts, existingResource, domainSuffix); err != nil {
+		return err
+	}
+
+	logger.DebugfCtx(ctx, "Using domain suffix: %s\n", domainSuffix)
+
+	// Create Caddy context with pod name and domain suffix (NO template dependencies)
+	caddyCtx := caddy.NewContext(workerconstants.WorkerCaddyPodName, domainSuffix)
+
+	// Load SSL certificates if provided
+	if err := caddyCtx.LoadSSLCertificates(ctx, opts.Setup.BaseDir, opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath); err != nil {
 		return err
 	}
 
@@ -132,33 +138,28 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 
 // ─── internal ────────────────────────────────────────────────────────────────
 
-// writeCaddyfile writes the static worker Caddyfile to
-// <baseDir>/worker/caddy/Caddyfile. The Caddyfile has no template variables —
-// it is written verbatim. Caddy must find it at container start.
-func writeCaddyfile(baseDir string) error {
+func readCaddyConfig(sslCertPath, sslKeyPath string) (string, string, string, error) {
 	raw, err := assets.WorkerFS.ReadFile(caddyfilePath)
 	if err != nil {
-		return fmt.Errorf("read Caddyfile: %w", err)
+		return "", "", "", fmt.Errorf("read Caddyfile: %w", err)
 	}
 
-	dir := filepath.Join(baseDir, caddyfileSubDir)
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return fmt.Errorf("create dir %s: %w", dir, err)
+	var sslCertContent, sslKeyContent string
+	if sslCertPath != "" && sslKeyPath != "" {
+		certbyte, keyBytes, _, err := utils.ReadAndParseCertificates(sslCertPath, sslKeyPath)
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to load ssl certs: %w", err)
+		}
+		sslCertContent = string(certbyte)
+		sslKeyContent = string(keyBytes)
 	}
 
-	dst := filepath.Join(dir, "Caddyfile")
-	if err := os.WriteFile(dst, raw, filePerm); err != nil {
-		return fmt.Errorf("write Caddyfile to %s: %w", dst, err)
-	}
-
-	logger.Infof("worker setup: Caddyfile written to %s\n", dst)
-
-	return nil
+	return string(raw), sslCertContent, sslKeyContent, nil
 }
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string) error {
+func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string, domainSuffix string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerconstants.WorkerAppTemplate, true, &appMetadata); err != nil {
 		return fmt.Errorf("worker setup: load metadata: %w", err)
@@ -167,11 +168,6 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
 		return fmt.Errorf("worker setup: load templates: %w", err)
-	}
-
-	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-	if err != nil {
-		return fmt.Errorf("worker setup: compute domain suffix: %w", err)
 	}
 
 	argParams, err := buildArgParams(opts)
@@ -217,42 +213,26 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 		return nil, fmt.Errorf("worker setup: resolve podman URI: %w", err)
 	}
 
-	authFileBase64, err := readAuthFileBase64()
+	authFileBase64, err := utils.ReadAuthFileBase64()
 	if err != nil {
 		return nil, err
 	}
 
+	caddyFileContent, sslCertContent, sslKeyContent, err := readCaddyConfig(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("worker setup: read Caddyfile: %w", err)
+	}
+
 	return map[string]string{
-		workerconstants.ArgParamCaddyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
+		constants.ArgParamCaddyHTTPSPort:          strconv.Itoa(opts.Setup.HTTPSPort),
+		constants.ArgParamCaddyFileContent:        utils.IndentString(caddyFileContent, utils.CaddyFileIndent),
+		constants.ArgParamSSLCertFileContent:      utils.IndentString(sslCertContent, utils.CertContentIndent),
+		constants.ArgParamSSLKeyFileContent:       utils.IndentString(sslKeyContent, utils.CertContentIndent),
 		workerconstants.ArgParamWorkerToken:       opts.Token,
 		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
 		workerconstants.ArgParamWorkerPodmanURI:   strings.TrimPrefix(podmanURI, "unix://"),
 		workerconstants.ArgParamWorkerAuthFile:    authFileBase64,
 	}, nil
-}
-
-// readAuthFileBase64 reads the podman auth file and returns its contents
-// base64-encoded. If the file does not exist, it returns an encoded empty
-// JSON object and logs a warning.
-func readAuthFileBase64() (string, error) {
-	authFilePath, err := utils.GetAuthFilePath()
-	if err != nil {
-		return "", fmt.Errorf("worker setup: resolve auth file path: %w", err)
-	}
-
-	content, err := os.ReadFile(authFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Warningln("Podman auth file not found. Image pulls may fail if the registry requires authentication.")
-			// TODO: worker join- > worker --reset-podman-auth when implemented
-			logger.Warningln("Run 'podman login' then re-run 'worker join' to update credentials.")
-			content = []byte("{}")
-		} else {
-			return "", fmt.Errorf("worker setup: read auth file %s: %w", authFilePath, err)
-		}
-	}
-
-	return base64.StdEncoding.EncodeToString(content), nil
 }
 
 // renderAndDeploy renders a single pod template and deploys it.
@@ -267,6 +247,13 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, params); err != nil {
 		return fmt.Errorf("worker setup: render %s: %w", tmplName, err)
+	}
+
+	// If the rendered template is empty, skip deploying it
+	if strings.TrimSpace(rendered.String()) == "" {
+		logger.Infof("%s: Skipping resource deploy as it rendered empty", tmplName)
+
+		return nil
 	}
 
 	var podSpec podmodels.PodSpec
