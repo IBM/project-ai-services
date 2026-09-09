@@ -25,7 +25,7 @@ spec:
     env:
     - name: HF_HOME
       value: /tmp/hf_home
-    image: icr.io/ppc64le-oss/vllm-ppc64le:0.19.1
+    image: icr.io/ppc64le-oss/vllm-ppc64le:0.28.0
     name: kserve-container
     ports:
     - containerPort: 8080
