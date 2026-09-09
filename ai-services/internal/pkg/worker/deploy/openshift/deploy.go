@@ -20,6 +20,9 @@ import (
 )
 
 const (
+	// workerHelmTimeout is intentionally short: we want the install process to
+	// exit early so we can inspect the container logs for a gRPC join error
+	// message rather than waiting for a full Helm timeout.
 	workerHelmTimeout = 2 * time.Minute
 )
 

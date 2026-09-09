@@ -169,7 +169,7 @@ func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string, _ bool) ([
 		return nil, err
 	}
 
-	return podLogsLines, err
+	return podLogsLines, nil
 }
 
 func (r *RemoteRuntime) GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error) {
