@@ -38,12 +38,12 @@ func FetchApplications(ctx context.Context, appClient *catalogClient.Application
 }
 
 // BuildPodRowFromAPI builds a table row from API response data.
-func BuildPodRowFromAPI(appName string, pod catalogTypes.Pod, wideOutput bool) []string {
+func BuildPodRowFromAPI(appName, workerName, namespace string, pod catalogTypes.Pod, wideOutput bool) []string {
 	status := getPodStatusFromAPI(pod)
 
-	// If wide option flag is not set, return appName, podName and status only
+	// If wide option flag is not set, return appName, workerName, namespace, podName and status only
 	if !wideOutput {
-		return []string{appName, pod.PodName, status}
+		return []string{appName, workerName, namespace, pod.PodName, status}
 	}
 
 	containerNames := getContainerNamesFromAPI(pod)
@@ -63,6 +63,8 @@ func BuildPodRowFromAPI(appName string, pod catalogTypes.Pod, wideOutput bool) [
 
 	return []string{
 		appName,
+		workerName,
+		namespace,
 		pod.PodID[:12],
 		pod.PodName,
 		status,

@@ -177,13 +177,13 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 
 		// Process services pods
 		for _, pod := range psResp.Services {
-			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, pod, opts.OutputWide)
+			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, psResp.WorkerName, psResp.Namespace, pod, opts.OutputWide)
 			printer.AppendRow(rows...)
 		}
 
 		// Process components pods
 		for _, pod := range psResp.Components {
-			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, pod, opts.OutputWide)
+			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, psResp.WorkerName, psResp.Namespace, pod, opts.OutputWide)
 			printer.AppendRow(rows...)
 		}
 	}
@@ -194,8 +194,8 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 // setApplicationPSTableHeaders sets the table headers based on output format.
 func setApplicationPSTableHeaders(printer *utils.Printer, outputWide bool) {
 	if outputWide {
-		printer.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "CREATED", "CONTAINERS")
+		printer.SetHeaders("APPLICATION NAME", "WORKER", "NAMESPACE", "POD ID", "POD NAME", "STATUS", "CREATED", "CONTAINERS")
 	} else {
-		printer.SetHeaders("APPLICATION NAME", "POD NAME", "STATUS")
+		printer.SetHeaders("APPLICATION NAME", "WORKER", "NAMESPACE", "POD NAME", "STATUS")
 	}
 }

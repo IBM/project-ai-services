@@ -92,6 +92,8 @@ type ApplicationMemInfo struct {
 type ApplicationPSResponse struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
+	WorkerName string `json:"worker_name,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
 	Services   []Pod  `json:"services"`
 	Components []Pod  `json:"components"`
 }
