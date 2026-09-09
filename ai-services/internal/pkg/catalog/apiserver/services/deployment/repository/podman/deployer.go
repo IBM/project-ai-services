@@ -734,13 +734,16 @@ func (d *PodmanDeployer) deployPodTemplateLayer(
 	for _, podTemplateName := range layer {
 		initialParams := d.buildInitialParams(applicationID, svc.DatabaseID, values)
 
-		_, podName, routes, err := d.deployPodTemplate(ctx, podTemplateName, tmpls, initialParams)
+		podEndpoints, podName, routes, err := d.deployPodTemplate(ctx, podTemplateName, tmpls, initialParams)
 		if err != nil {
 			return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
 		}
 
 		if routes != "" {
 			svc.Routes[podName] = routes
+			if svc.InternalEndpoint == "" {
+				svc.InternalEndpoint = buildInternalEndpointURL(podEndpoints)
+			}
 		}
 	}
 
@@ -758,13 +761,16 @@ func (d *PodmanDeployer) deployAllPodTemplates(
 	for templateName := range tmpls {
 		initialParams := d.buildInitialParams(applicationID, svc.DatabaseID, values)
 
-		_, podName, routes, err := d.deployPodTemplate(ctx, templateName, tmpls, initialParams)
+		podEndpoints, podName, routes, err := d.deployPodTemplate(ctx, templateName, tmpls, initialParams)
 		if err != nil {
 			return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
 		}
 
 		if routes != "" {
 			svc.Routes[podName] = routes
+			if svc.InternalEndpoint == "" {
+				svc.InternalEndpoint = buildInternalEndpointURL(podEndpoints)
+			}
 		}
 	}
 
@@ -1261,6 +1267,15 @@ func (d *PodmanDeployer) registerServiceRoutes(
 		}
 	}
 
+	// Also store the internal pod-to-pod endpoint so connector calls can use it
+	// without requiring TLS (plain HTTP, no InsecureSkipVerify needed).
+	if svc.InternalEndpoint != "" {
+		serviceEndpoints = append(serviceEndpoints, map[string]any{
+			"type": "internal",
+			"url":  svc.InternalEndpoint,
+		})
+	}
+
 	// Update service endpoints in database
 	if len(serviceEndpoints) > 0 {
 		if err := d.serviceRepo.UpdateEndpoints(ctx, svc.DatabaseID, serviceEndpoints); err != nil {
@@ -1270,6 +1285,22 @@ func (d *PodmanDeployer) registerServiceRoutes(
 	}
 
 	return nil
+}
+
+// buildInternalEndpointURL constructs http://host:port from the map returned by extractPodEndpoints.
+// Returns an empty string when host is missing.
+func buildInternalEndpointURL(endpoints map[string]string) string {
+	host := endpoints["host"]
+	if host == "" {
+		return ""
+	}
+
+	port := endpoints["port"]
+	if port == "" {
+		return fmt.Sprintf("http://%s", host)
+	}
+
+	return fmt.Sprintf("http://%s:%s", host, port)
 }
 
 // updateComponentEndpointsInDB updates component endpoints in the database.

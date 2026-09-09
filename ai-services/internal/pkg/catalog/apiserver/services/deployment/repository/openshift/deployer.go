@@ -243,7 +243,7 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 		return err
 	}
 
-	if err := d.registerServiceEndpoints(ctx, releaseName, svc); err != nil {
+	if err := d.registerServiceEndpoints(ctx, plan, releaseName, svc); err != nil {
 		// Non-fatal: log and continue — deployment itself succeeded.
 		logger.ErrorfCtx(ctx, "Failed to register service %s endpoints in DB: %v\n", svc.CatalogID, err)
 	}
@@ -251,10 +251,11 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 	return nil
 }
 
-// registerServiceEndpoints reads the OpenShift Routes created for the given Helm release
-// and writes them as HTTPS endpoints into the service database record.
+// registerServiceEndpoints reads the OpenShift Routes created for the given Helm release,
+// writes them as HTTPS endpoints into the service database record, and also stores the
+// internal cluster-DNS endpoint (type: "internal") for connector downstream calls.
 // Routes are identified by the label "ai-services.io/service: <releaseName>".
-func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, releaseName string, svc *ServicePlan) error {
+func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, plan *DeploymentPlan, releaseName string, svc *ServicePlan) error {
 	labelSelector := fmt.Sprintf("ai-services.io/service=%s", releaseName)
 	routes, err := d.runtime.ListRoutes(ctx, labelSelector)
 	if err != nil {
@@ -267,7 +268,9 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, releas
 		return nil
 	}
 
-	endpoints := make([]map[string]any, 0, len(routes))
+	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	endpoints := make([]map[string]any, 0, len(routes)+1)
+
 	for _, route := range routes {
 		if route.HostPort == "" {
 			continue
@@ -277,6 +280,16 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, releas
 			"type": route.Labels["ai-services.io/endpoint-type"],
 			"url":  fmt.Sprintf("https://%s", route.HostPort),
 		})
+
+		// For the api-type route, also derive the internal cluster-DNS endpoint so
+		// connector calls can reach the service over plain HTTP without TLS.
+		if route.Labels["ai-services.io/endpoint-type"] == "api" && route.TargetPort != "" {
+			internalURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%s", releaseName, ns, route.TargetPort)
+			endpoints = append(endpoints, map[string]any{
+				"type": "internal",
+				"url":  internalURL,
+			})
+		}
 	}
 
 	if len(endpoints) == 0 {
