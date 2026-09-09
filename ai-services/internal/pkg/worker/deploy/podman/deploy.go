@@ -237,7 +237,7 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 
 	caddyFileContent, sslCertContent, sslKeyContent, err := readCaddyConfig(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath)
 	if err != nil {
-		return nil, fmt.Errorf("worker setup: read Caddyfile: %w", err)
+		return nil, fmt.Errorf("failed to read Caddyfile: %w", err)
 	}
 
 	return map[string]string{
@@ -286,7 +286,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	deployOpts := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(podSpec))
 
-	logger.InfofCtx(ctx, "worker setup: deploying %s\n", podSpec.Name)
+	logger.InfofCtx(ctx, "Deploying %s\n", podSpec.Name)
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)
