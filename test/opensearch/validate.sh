@@ -44,12 +44,13 @@ HOST_PORT="9299"
 STARTUP_TIMEOUT=180
 KEEP_CONTAINER=false
 
-# Credentials that match the production secret pattern
-# (security plugin is ON — same as the statefulset)
-# Note: OpenSearch 3.x rejects passwords that contain the username ("admin"),
-# so the password must not include that substring.
+# Generate a throwaway password for this validation run.
+# OpenSearch 3.x enforces complexity (upper+lower+digit+special) and rejects
+# passwords that contain the username ("admin"), so we build the password from
+# two random hex segments joined by a fixed separator that provides the required
+# character classes without embedding a known secret in source.
 OS_USER="admin"
-OS_PASS="S3cur3#Srvc2024"   # strong: upper+lower+digit+special, no username substring
+OS_PASS="Vld-$(openssl rand -hex 8)-$(openssl rand -hex 4)X1!"
 
 # ---------------------------------------------------------------------------
 # Argument parsing

@@ -8,11 +8,6 @@ pipeline {
             choices: ['3.8.0', '3.7.0','3.5.0'],
             description: 'OpenSearch version to build'
         )
-        string(
-            name: 'BUILD_SCRIPTS_BRANCH',
-            defaultValue: 'opensearch-3.8.0',
-            description: 'Branch or tag of the ppc64le/build-scripts repository to checkout. Must exactly match an existing branch or tag name in that repo.'
-        )
         booleanParam(
             name: 'PUSH_RELEASE_TAG',
             defaultValue: false,
@@ -39,7 +34,7 @@ pipeline {
 
         // Git repositories
         OPENSEARCH_BUILD_REPO = "https://github.com/opensearch-project/opensearch-build.git"
-        BUILD_SCRIPTS_REPO    = "https://github.com/irapandey/build-scripts.git" // TODO - change after validate and PR merge
+        BUILD_SCRIPTS_REPO    = "https://github.com/ppc64le/build-scripts.git"
 
         // Workspace
         BUILD_DIR   = "${WORKSPACE}/opensearch-build"
@@ -64,7 +59,7 @@ pipeline {
                     def ver = params.OPENSEARCH_VERSION
 
                     env.OPENSEARCH_BUILD_BRANCH = ver
-                    env.BUILD_SCRIPTS_BRANCH    = params.BUILD_SCRIPTS_BRANCH
+                    env.BUILD_SCRIPTS_BRANCH    = 'master'
                     env.DOCKERFILE_DIR          = "o/opensearch-project-opensearch-build/Dockerfiles/${ver}_ubi9.7"
                     env.PATCH_FILE              = "${env.DOCKERFILE_DIR}/ppc64le-${ver}-ai-services.patch"
                     env.BUILD_ENV_IMAGE         = "opensearch-build-env:${ver}-ppc64le"
@@ -372,8 +367,8 @@ pipeline {
 
                     sh """
                         set -euo pipefail
-                        chmod +x hack/cicd/opensearch/validate.sh
-                        hack/cicd/opensearch/validate.sh \
+                        chmod +x test/opensearch/validate.sh
+                        test/opensearch/validate.sh \
                             --image  ${IMAGE_NAME}:${IMAGE_TAG} \
                             --version ${OPENSEARCH_VERSION} \
                             --port    9202 \
