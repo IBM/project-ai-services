@@ -11,7 +11,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
@@ -21,14 +20,6 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, "")
 	if err != nil {
 		return fmt.Errorf("worker uninstall: init runtime: %w", err)
-	}
-
-	localWorker, err := workercommon.IsPodmanLocalWorker(ctx, rt)
-	if err != nil {
-		return fmt.Errorf("worker uninstall failed: %w", err)
-	}
-	if localWorker {
-		return fmt.Errorf("the worker is co-located with the control plane and cannot be uninstalled independently")
 	}
 
 	pods, err := getWorkerPodList(ctx, rt)
