@@ -48,7 +48,6 @@ from extract.utils.job import (
     check_job_admission,
     process_batch_job,
     process_file,
-    resolve_schema,
     validate_and_resolve_file,
     validate_file_content,
     delete_all_job_files,
@@ -152,7 +151,6 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         msg = "text field is empty"
         logger.error(msg)
         raise ExtractException(400, "INVALID_REQUEST", msg)
-
 
     # ------------------------------------------------------------------
     # 2. Semaphore check (non-blocking — reject immediately if saturated)
@@ -335,10 +333,12 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         "against a registered schema.  Returns immediately with a `job_id`.\n\n"
         "**Form parameters:**\n"
         "- `files` (required): One or more `.txt` or `.md` files (no duplicates)\n"
-        "- `schema_id` (optional): ID of a registered extraction schema\n"
-        "- `schema_name` (optional): Name of a registered extraction schema\n"
+        "- `schema_id` (optional): ID of a registered schema\n"
+        "- `schema_name` (optional): Name of a registered schema\n"
+        "- `json_schema` (optional): Ephemeral JSON Schema\n"
+        "- `json_example` (optional): Ephemeral JSON example\n"
         "- `job_name` (optional): Human-readable label for the job\n"
-        "\nEither `schema_id` or `schema_name` must be provided.\n"
+        "\nEither `schema_id` or `schema_name` or `json_schema` or `json_example` must be provided.\n"
     ),
     tags=["jobs"],
 )
@@ -346,17 +346,12 @@ async def create_extract_job(
     files: List[UploadFile] = File(...),
     schema_id: Optional[str] = Form(None),
     schema_name: Optional[str] = Form(None),
+    json_schema: Optional[str] = Form(None),
+    json_example: Optional[str] = Form(None),
     job_name: Optional[str] = Form(None),
 ) -> JobCreatedResponse:
     """Validate, stage, record, and enqueue an async extraction job (single or batch)."""
     check_job_admission()
-
-    if not schema_id and not schema_name:
-        raise ExtractException(
-            400,
-            "INVALID_REQUEST",
-            "Either schema_id or schema_name must be provided.",
-        )
 
     # ------------------------------------------------------------------
     # 1. File count validation
@@ -439,15 +434,60 @@ async def create_extract_job(
     # ------------------------------------------------------------------
     # 3. Schema lookup
     # ------------------------------------------------------------------
-    if schema_id:
-        schema_row = _resolve_schema_id(schema_id)
-        if schema_name and schema_row.name != schema_name:
+    json_schema_dict: Optional[dict] = None
+    if json_schema is not None:
+        try:
+            json_schema_dict = json.loads(json_schema)
+        except json.JSONDecodeError as exc:
             raise ExtractException(
-                400,
-                "INVALID_REQUEST",
-                "Schema name and id are not for the same record")
-    else:
-        schema_row = _resolve_schema_name(schema_name)
+                400, "INVALID_REQUEST", f"json_schema is not valid JSON: {exc}"
+            )
+
+    json_example_dict: Optional[dict] = None
+    if json_example is not None:
+        try:
+            json_example_dict = json.loads(json_example)
+        except json.JSONDecodeError as exc:
+            raise ExtractException(
+                400, "INVALID_REQUEST", f"json_example is not valid JSON: {exc}"
+            )
+
+    llm_model_dict = get_llm_endpoint()
+    llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
+
+    try:
+        schema_row = resolve_schema_input(
+            schema_id=schema_id,
+            schema_name=schema_name,
+            json_schema=json_schema_dict,
+            json_example=json_example_dict,
+            llm_endpoint=llm_endpoint,
+        )
+    except SchemaValidationError as exc:
+        raise ExtractException(exc.status, exc.code, exc.message)
+
+    if schema_row.schema_id is None:
+        # Ephemeral schema, register it to satisfy DB foreign key constraint
+        ephemeral_id = f"ephemeral-{uuid.uuid4()}"
+        ephemeral_name = f"ephemeral-{ephemeral_id}"
+        db_row = db_repo.create_schema(
+            schema_id=ephemeral_id,
+            name=ephemeral_name,
+            json_schema=schema_row.json_schema,
+            schema_tokens=schema_row.schema_tokens,
+            examples_tokens=schema_row.examples_tokens,
+            custom_prompt_tokens=schema_row.custom_prompt_tokens,
+            examples=schema_row.examples,
+            custom_prompt=schema_row.custom_prompt,
+            is_schema_inferred=True if json_example_dict is not None else False,
+        )
+        if db_row is None:
+            raise ExtractException(500, "DATABASE_ERROR", "Failed to register ephemeral schema for batch job.")
+        schema_row = db_row
+
+    resolved_schema_id = schema_row.schema_id
+    if resolved_schema_id is None:
+        raise ExtractException(500, "DATABASE_ERROR", "Resolved schema ID is missing.")
 
     # ------------------------------------------------------------------
     # 4. Stage all files, create job + document rows
@@ -464,7 +504,7 @@ async def create_extract_job(
         try:
             row = db_repo.create_job(
                 job_id=job_id,
-                schema_id=schema_id,
+                schema_id=resolved_schema_id,
                 schema_name=schema_name,
                 job_name=job_name,
                 submitted_at=datetime.now(timezone.utc),
@@ -496,7 +536,7 @@ async def create_extract_job(
         _success = True
         asyncio.create_task(process_batch_job(job_id))
         logger.info(
-            f"Accepted extraction job {job_id} (schema={schema_id}, "
+            f"Accepted extraction job {job_id} (schema={schema_row.schema_id}, "
             f"files={len(files)}, job_name={job_name!r})"
         )
         return JobCreatedResponse(job_id=job_id, file_count=len(files))
