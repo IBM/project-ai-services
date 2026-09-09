@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
@@ -71,7 +70,7 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 		secretsToDelete = append(secretsToDelete, catalogConstants.CatalogCertSecretName)
 	}
 
-	volumesToDelete, volumesToSkip := fetchVolumesToDelete(pods)
+	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 
 	// Delete catalog pods
 	if err := podmanutils.DeletePods(ctx, rt, pods); err != nil {
@@ -95,30 +94,13 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	}
 
 	// Delete skip-cleanup resources (secrets and volumes preserved when --skip-cleanup is set)
-	if err := cleanupSkippedResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
+	if err := podmanutils.CleanupSkippedResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
 		return err
 	}
 
 	logger.Infoln("Catalog service removed successfully")
 
 	return nil
-}
-
-// cleanupSkippedResources deletes secrets and volumes that are preserved when --skip-cleanup is set.
-func cleanupSkippedResources(ctx context.Context, rt *podman.PodmanClient, secretsToSkip []string, volumesToSkip []string, skipCleanup bool) error {
-	if skipCleanup {
-		logger.Infoln("Skipping cleanup of preserved resources (--skip-cleanup flag set)")
-
-		return nil
-	}
-
-	// Delete catalog secrets
-	if err := podmanutils.DeleteSecrets(ctx, rt, secretsToSkip); err != nil {
-		return err
-	}
-
-	// Delete volumes with skip-cleanup label (only when --skip-cleanup is not set)
-	return podmanutils.DeleteVolumes(ctx, rt, volumesToSkip)
 }
 
 // We are currently associating secret names with pods via pod labels and relying on those labels for secret cleanup.
@@ -139,47 +121,6 @@ func fetchSecretsToDelete(pods []types.Pod) ([]string, []string) {
 	}
 
 	return secretsToDelete, secretsToSkip
-}
-
-// fetchVolumesToDelete extracts volume names from pod labels and separates them based on skip-cleanup label.
-// Returns two lists: volumes to delete immediately, and volumes to skip (only deleted when --skip-cleanup is not set).
-func fetchVolumesToDelete(pods []types.Pod) ([]string, []string) {
-	volumeMapToDelete := make(map[string]bool) // Use map to avoid duplicates
-	volumeMapToSkip := make(map[string]bool)
-
-	for _, pod := range pods {
-		// fetch volume names from pod labels
-		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
-			// Check if this pod has skip-cleanup label for volumes
-			_, hasSkipLabel := pod.Labels[catalogConstants.CatalogVolumeSkipLabel]
-
-			// Split comma-separated volume names (in case a pod has multiple volumes)
-			volumes := strings.Split(volumeNames, ",")
-			for _, volumeName := range volumes {
-				volumeName = strings.TrimSpace(volumeName)
-				if volumeName != "" {
-					if hasSkipLabel {
-						volumeMapToSkip[volumeName] = true
-					} else {
-						volumeMapToDelete[volumeName] = true
-					}
-				}
-			}
-		}
-	}
-
-	// Convert maps to slices
-	volumesToDelete := make([]string, 0, len(volumeMapToDelete))
-	for volumeName := range volumeMapToDelete {
-		volumesToDelete = append(volumesToDelete, volumeName)
-	}
-
-	volumesToSkip := make([]string, 0, len(volumeMapToSkip))
-	for volumeName := range volumeMapToSkip {
-		volumesToSkip = append(volumesToSkip, volumeName)
-	}
-
-	return volumesToDelete, volumesToSkip
 }
 
 // Made with Bob

@@ -117,4 +117,17 @@ const (
 	PodmanAuthSecret = "podman-auth-secret"
 	// VolumeLabel represents the volume name associated with Pod.
 	VolumeLabel = "ai-services.io/volume"
+	// VolumeSkipLabel represents volumes associated with pod should be skipped while deletion.
+	VolumeSkipLabel = "ai-services.io/volume-skip-cleanup"
+	// SecretLabel represents the secret name associated with Pod.
+	SecretLabel = "ai-services.io/secret"
+	// SecretSkipLabel represents if secret associated with pod should be skipped while deletion.
+	SecretSkipLabel = "ai-services.io/secret-skip-cleanup"
+)
+
+const (
+	ArgParamCaddyHTTPSPort     = "caddy.httpsPort"
+	ArgParamCaddyFileContent   = "caddy.caddyFileContent"
+	ArgParamSSLCertFileContent = "caddy.sslCertContent"
+	ArgParamSSLKeyFileContent  = "caddy.sslKeyContent"
 )

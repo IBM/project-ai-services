@@ -17,6 +17,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
@@ -93,8 +94,9 @@ func generateCA() (*ecdsa.PrivateKey, *x509.Certificate, []byte, error) {
 }
 
 // generateServerCert creates a new ECDSA P-256 server key and signs it with the CA.
-// serverNames are the hostnames embedded as DNS SANs (must match what workers dial).
-func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, serverNames []string) (*ecdsa.PrivateKey, []byte, error) {
+// dnsNames is the list of DNS SANs embedded in the cert — must exactly match the
+// hostname(s) workers will use to dial the gateway.
+func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNames []string) (*ecdsa.PrivateKey, []byte, error) {
 	srvKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate server key: %w", err)
@@ -103,7 +105,7 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, serve
 	srvTemplate := &x509.Certificate{
 		SerialNumber: srvSerial,
 		Subject:      pkix.Name{CommonName: "Catalog"},
-		DNSNames:     serverNames,
+		DNSNames:     dnsNames,
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(serverCertTTL),
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
@@ -121,22 +123,38 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, serve
 // certificate, then writes all four PEM files to pkiDir.
 //
 // For OpenShift the server cert's DNS SANs include both the live passthrough
-// route host and the internal service endpoint. For Podman they include the
-// catalog pod name and the static internal name.
-func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
-	empty := pkiResult{}
-
-	serverNames := []string{}
+// route host and the internal service endpoint. For Podman the SAN includes the
+// domain-derived gateway name.
+func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]string, error) {
 	switch runtimeType {
 	case types.RuntimeTypeOpenShift:
 		route, err := GatewayRouteHost(ctx)
 		if err != nil {
-			return empty, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
+			return nil, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
 		}
-		serverNames = []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}
+
+		return []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}, nil
 	case types.RuntimeTypePodman:
-		serverNames = []string{workerconstants.PodmanGatewayServerName, workerconstants.PodmanGatewayPodName}
+		domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
+		if domainSuffix == "" {
+			return nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set — cannot generate gateway server cert")
+		}
+
+		return []string{workerconstants.WorkerGatewayName + "." + domainSuffix}, nil
+	default:
+		return nil, fmt.Errorf("unsupported runtime type %q for gateway PKI generation", runtimeType)
 	}
+}
+
+func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
+	empty := pkiResult{}
+
+	dnsNames, err := serverCertDNSNames(ctx, runtimeType)
+	if err != nil {
+		return empty, err
+	}
+
+	logger.InfofCtx(ctx, "worker gateway: generating server cert with SANs: %v", dnsNames)
 
 	if err := os.MkdirAll(pkiDir, dirPerm); err != nil {
 		return empty, fmt.Errorf("mkdir %s: %w", pkiDir, err)
@@ -147,7 +165,7 @@ func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types
 		return empty, err
 	}
 
-	srvKey, srvCertDER, err := generateServerCert(caCert, caKey, serverNames)
+	srvKey, srvCertDER, err := generateServerCert(caCert, caKey, dnsNames)
 	if err != nil {
 		return empty, err
 	}

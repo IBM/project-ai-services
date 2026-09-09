@@ -134,7 +134,7 @@ func (a *APIserver) Start(ctx context.Context) error {
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.workerRepository, a.datasourceService, a.bundleService, a.catalogProvider)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.workerRepository, a.workerGatewayPort, a.datasourceService, a.bundleService, a.catalogProvider)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err

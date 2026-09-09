@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -137,4 +138,62 @@ func DeleteSecrets(ctx context.Context, rt runtime.Runtime, secrets []string) er
 	}
 
 	return nil
+}
+
+// FetchVolumesToDelete extracts volume names from pod labels and separates them based on skip-cleanup label.
+// Returns two lists: volumes to delete immediately, and volumes to skip (only deleted when --skip-cleanup is not set).
+func FetchVolumesToDelete(pods []types.Pod) ([]string, []string) {
+	volumeMapToDelete := make(map[string]bool) // Use map to avoid duplicates
+	volumeMapToSkip := make(map[string]bool)
+
+	for _, pod := range pods {
+		// fetch volume names from pod labels
+		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
+			// Check if this pod has skip-cleanup label for volumes
+			_, hasSkipLabel := pod.Labels[constants.VolumeSkipLabel]
+
+			// Split comma-separated volume names (in case a pod has multiple volumes)
+			volumes := strings.Split(volumeNames, ",")
+			for _, volumeName := range volumes {
+				volumeName = strings.TrimSpace(volumeName)
+				if volumeName != "" {
+					if hasSkipLabel {
+						volumeMapToSkip[volumeName] = true
+					} else {
+						volumeMapToDelete[volumeName] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Convert maps to slices
+	volumesToDelete := make([]string, 0, len(volumeMapToDelete))
+	for volumeName := range volumeMapToDelete {
+		volumesToDelete = append(volumesToDelete, volumeName)
+	}
+
+	volumesToSkip := make([]string, 0, len(volumeMapToSkip))
+	for volumeName := range volumeMapToSkip {
+		volumesToSkip = append(volumesToSkip, volumeName)
+	}
+
+	return volumesToDelete, volumesToSkip
+}
+
+// CleanupSkippedResources deletes secrets and volumes that are preserved when --skip-cleanup is set.
+func CleanupSkippedResources(ctx context.Context, rt runtime.Runtime, secretsToSkip []string, volumesToSkip []string, skipCleanup bool) error {
+	if skipCleanup {
+		logger.Infoln("Skipping cleanup of preserved resources (--skip-cleanup flag set)")
+
+		return nil
+	}
+
+	// Delete catalog secrets
+	if err := DeleteSecrets(ctx, rt, secretsToSkip); err != nil {
+		return err
+	}
+
+	// Delete volumes with skip-cleanup label (only when --skip-cleanup is not set)
+	return DeleteVolumes(ctx, rt, volumesToSkip)
 }

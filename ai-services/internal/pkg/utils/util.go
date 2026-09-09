@@ -28,6 +28,9 @@ import (
 const (
 	maxKeyValueParts  = 2
 	maxHostnameLength = 63
+
+	CaddyFileIndent   = 10
+	CertContentIndent = 4
 )
 
 // IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
