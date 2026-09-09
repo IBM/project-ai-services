@@ -10,7 +10,7 @@ const (
 	OperatorPollTimeout  = 3 * time.Minute
 
 	// HelmTimeout is the default timeout for a Helm install/upgrade operation.
-	HelmTimeout = 10 * time.Minute
+	HelmTimeout = 20 * time.Minute
 	// HelmUninstallTimeout is the default timeout for a Helm uninstall operation.
 	HelmUninstallTimeout = 5 * time.Minute
 	// PredictorWaitTimeout is the maximum time to wait for a KServe InferenceService
