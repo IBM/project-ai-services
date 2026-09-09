@@ -172,7 +172,10 @@ func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]s
 			return nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set — cannot generate gateway server cert")
 		}
 
-		return []string{workerconstants.WorkerGatewayName + "." + domainSuffix}, nil
+		return []string{
+			workerconstants.WorkerGatewayName + "." + domainSuffix,
+			workerconstants.PodmanGatewayPodName,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime type %q for gateway PKI generation", runtimeType)
 	}
