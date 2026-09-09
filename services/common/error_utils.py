@@ -20,6 +20,7 @@ class ErrorCode(str, Enum):
     INVALID_PARAMETER = "INVALID_PARAMETER"
     AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
     RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND"
+    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
     RESOURCE_LOCKED = "RESOURCE_LOCKED"
     UNSUPPORTED_MEDIA_TYPE = "UNSUPPORTED_MEDIA_TYPE"
     UNSUPPORTED_FILE_TYPE = "UNSUPPORTED_FILE_TYPE"
@@ -94,6 +95,23 @@ class NotFoundErrorResponse(BaseModel):
                     "code": "RESOURCE_NOT_FOUND",
                     "message": "The requested resource was not found",
                     "status": 404
+                }
+            }
+        }
+    }
+
+
+class MethodNotAllowedErrorResponse(BaseModel):
+    """405 Method Not Allowed error response."""
+    error: ErrorDetail
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "error": {
+                    "code": "METHOD_NOT_ALLOWED",
+                    "message": "This operation is not allowed for this resource",
+                    "status": 405
                 }
             }
         }
@@ -207,6 +225,7 @@ http_error_responses: Dict[int | str, Dict[str, Any]] = {
     400: {"description": "Bad Request - Invalid input or validation error", "model": BadRequestErrorResponse},
     401: {"description": "Unauthorized - Authentication failed", "model": UnauthorizedErrorResponse},
     404: {"description": "Not Found - Resource does not exist", "model": NotFoundErrorResponse},
+    405: {"description": "Method Not Allowed - Operation not permitted for this resource", "model": MethodNotAllowedErrorResponse},
     409: {"description": "Conflict - Resource is locked or in use", "model": ConflictErrorResponse},
     413: {"description": "Payload Too Large - Input exceeds size limits", "model": PayloadTooLargeErrorResponse},
     415: {"description": "Unsupported Media Type - Invalid file format", "model": UnsupportedMediaTypeErrorResponse},
@@ -232,6 +251,7 @@ class APIError:
         ErrorCode.INVALID_PARAMETER: (400, "Invalid parameter value"),
         ErrorCode.AUTHENTICATION_FAILED: (401, "Authentication failed"),
         ErrorCode.RESOURCE_NOT_FOUND: (404, "The requested resource was not found"),
+        ErrorCode.METHOD_NOT_ALLOWED: (405, "This operation is not allowed for this resource"),
         ErrorCode.RESOURCE_LOCKED: (409, "Resource is locked by an active operation"),
         ErrorCode.UNSUPPORTED_MEDIA_TYPE: (415, "File format not supported"),
         ErrorCode.UNSUPPORTED_FILE_TYPE: (415, "File type not supported"),

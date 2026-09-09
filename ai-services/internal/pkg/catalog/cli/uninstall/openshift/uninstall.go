@@ -8,11 +8,15 @@ import (
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	internalutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
+	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
 
 // UninstallCatalog removes the catalog helm release and optionally cleans up PVCs and catalog namespace.
@@ -59,20 +63,25 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 
 	s.Stop("Catalog service uninstalled successfully")
 
+	// Uninstall the co-located local worker.
+	if err := workeruninstall.Uninstall(ctx, workerutils.UninstallOptions{
+		RuntimeType: types.RuntimeTypeOpenShift,
+		AutoYes:     opts.AutoYes,
+		SkipCleanup: opts.SkipCleanup,
+	}); err != nil {
+		return fmt.Errorf("worker uninstalled failed: %w", err)
+	}
+
 	return nil
 }
 
 func confirmDeletion(ctx context.Context, rt runtime.Runtime, autoYes bool) (bool, error) {
-	if autoYes {
-		return true, nil
-	}
-
 	pods, err := clicommon.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return false, err
 	}
 
-	return utils.ConfirmDeletion(ctx, pods)
+	return internalutils.ConfirmUninstall(ctx, pods, autoYes)
 }
 
 // Made with Bob

@@ -119,7 +119,8 @@ def swagger_root():
     "/v1/similarity-search",
     response_model=SimilaritySearchResponse,
     responses={400: http_error_responses[400], 500: http_error_responses[500], 503: http_error_responses[503]},
-    tags=["similarity"],
+    tags=["similarity", "MCP"],
+    operation_id="similarity_search",
     summary="Vector similarity search",
     description=(
         "Performs vector similarity search against the vector store.\n\n"

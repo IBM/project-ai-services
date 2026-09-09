@@ -12,29 +12,26 @@ import (
 )
 
 // FindOpenSearchPod finds the OpenSearch pod in OpenShift.
-func FindOpenSearchPod(appID string) (string, string, error) {
-	// Use app name as namespace (convention)
-	namespace := appID
-
-	// Find pod with vectordb component label
+// namespace is derived from the application UUID: "ai-services-<first 8 chars>".
+func FindOpenSearchPod(templateID, namespace string) (string, error) {
 	cmd := exec.Command("oc", "get", "pods", "-n", namespace,
-		"-l", fmt.Sprintf("ai-services.io/application=%s,ai-services.io/component=vectordb", appID),
+		"-l", fmt.Sprintf("ai-services.io/template=%s", templateID),
 		"-o", "jsonpath={.items[0].metadata.name}")
 
 	output, err := cmd.Output()
 	if err != nil || len(output) == 0 {
-		return "", "", fmt.Errorf("OpenSearch pod not found for app: %s in namespace: %s", appID, namespace)
+		return "", fmt.Errorf("OpenSearch pod not found for template ID: %s in namespace: %s", templateID, namespace)
 	}
 
 	podName := strings.TrimSpace(string(output))
 
-	return namespace, podName, nil
+	return podName, nil
 }
 
 // GetOpenSearchService gets the OpenSearch service name.
-func GetOpenSearchService(appID, namespace string) (string, error) {
+func GetOpenSearchService(templateID, namespace string) (string, error) {
 	cmd := exec.Command("oc", "get", "svc", "-n", namespace,
-		"-l", fmt.Sprintf("ai-services.io/application=%s,ai-services.io/component=vectordb", appID),
+		"-l", fmt.Sprintf("ai-services.io/template=%s", templateID),
 		"-o", "jsonpath={.items[0].metadata.name}")
 
 	output, err := cmd.Output()

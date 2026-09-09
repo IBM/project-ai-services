@@ -2,9 +2,7 @@ package podman
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
@@ -13,6 +11,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -26,8 +25,8 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	// Collect and hash password
-	// If secret exist passwordHash will be empty
+	// Collect and hash password.
+	// If secret exists passwordHash will be empty.
 	passwordHash, err := catalogUtils.CollectAndHashPassword(ctx, deployCtx.Runtime)
 	if err != nil {
 		return err
@@ -43,7 +42,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx)
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts)
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
@@ -74,8 +73,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 	if !isDeployed {
 		// Prepare deployment with domain suffix computation and create Caddy context
-		err = loadCatalogParamValues(deployCtx, passwordHash, opts.HttpsPort, opts.WorkerGatewayPort)
-		if err != nil {
+		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
 			s.Fail("failed to load param values")
 
 			return nil, err
@@ -94,7 +92,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		s.Stop("Catalog service already deployed")
 		logger.Infof("Existing resources: %v\n", existingResources)
 		// Validate domain, HTTPS port, base directory, and certificates haven't changed
-		if err := validateReconfigureParameters(ctx, deployCtx.Runtime, &opts, caddyCtx.GetDomainSuffix()); err != nil {
+		if err := validateReconfigureParameters(ctx, deployCtx.Runtime, &opts, caddyCtx); err != nil {
 			s.Fail("validation failed during reconfigure")
 
 			return nil, fmt.Errorf("reconfigure validation failed: %w", err)
@@ -105,7 +103,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 }
 
 // handlePostDeployment handles route registration and next steps display after catalog deployment.
-func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext) error {
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -114,20 +112,20 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("failed to extract route infos: %w", err)
 	}
 
-	// Register routes with Caddy and get the registered route domains
-	routeDomains, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
+	// Register routes with Caddy and get the registered route URLs
+	routeURLs, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
-	// Get Caddy HTTPS port for next steps display
-	httpsPort, err := caddyCtx.GetHTTPSPort(ctx, deployCtx.Runtime)
-	if err != nil {
-		return fmt.Errorf("failed to get Caddy HTTPS port: %w", err)
+	if !opts.SkipLocalWorker {
+		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts); err != nil {
+			return fmt.Errorf("local worker join failed: %v", err)
+		}
 	}
 
 	// Print next steps with proxy route information
-	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeDomains, httpsPort); err != nil {
+	if err := helpers.PrintNextStepsWithProxy(ctx, deployCtx.TemplateProvider, deployCtx.Runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate, routeURLs); err != nil {
 		// do not want to fail the overall configure if we cannot print next steps
 		logger.Infof("failed to display next steps: %v\n", err)
 	}
@@ -135,19 +133,18 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	return nil
 }
 
-// loadCatalogParamValues prepares all necessary data for deployment including domain suffix computation.
-func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string, httpsPort, workerGatewayPort int) error {
+// loadCatalogParamValues prepares all necessary data for deployment.
+func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) error {
 	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
-	argParams, err := generateArgParams(passwordHash, httpsPort, workerGatewayPort)
+	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, httpsPort, workerGatewayPort, skipLocalWorker)
 	if err != nil {
 		return fmt.Errorf("failed to generate arg params: %w", err)
 	}
 
 	// Prepare values with configure-specific configuration
-	err = deployCtx.PrepareValues(argParams)
-	if err != nil {
+	if err := deployCtx.PrepareValues(argParams); err != nil {
 		return fmt.Errorf("failed to load values: %w", err)
 	}
 
@@ -155,35 +152,16 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash string
 }
 
 // generateArgParams generates the argument parameters for template rendering.
-func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (map[string]string, error) {
-	// Generate database password
+func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate database password: %w", err)
 	}
 
-	// Determine auth file path
-	// Read and encode auth file content for secret
-	// If auth file doesn't exist, use empty content
-	authFilePath, err := utils.GetAuthFilePath()
+	authFileBase64, err := utils.ReadAuthFileBase64()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get auth file path: %w", err)
+		return nil, err
 	}
-
-	authFileContent, err := os.ReadFile(authFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Auth file doesn't exist - user hasn't logged into podman
-			logger.Warningln("Podman auth file not found. Deployment may fail since deployment may require pulling images.")
-			logger.Warningln("If you need to update registry credentials later, you can use the '--reset-podman-auth' flag after running 'podman login'.")
-			authFileContent = []byte("{}")
-		} else {
-			return nil, fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
-		}
-	}
-
-	// Base64 encode the auth file content for Kubernetes secret
-	authFileBase64 := base64.StdEncoding.EncodeToString(authFileContent)
 
 	// Determine the podman URI
 	// Strip unix:// prefix from podmanURI for hostPath volume mount
@@ -192,27 +170,55 @@ func generateArgParams(passwordHash string, httpsPort, workerGatewayPort int) (m
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate podman uri: %w", err)
 	}
-	podmanSocketPath := strings.TrimPrefix(podmanURI, "unix://")
 
-	// Set configure-specific values
+	caddyFileContent, err := caddy.GetCaddyFileContent()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate caddy file: %w", err)
+	}
+
+	sslCertContent, sslKeyContent, err := readSSLContents(sslCertPath, sslKeyPath)
+	if err != nil {
+		return nil, err
+	}
+
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
 	argParams[configure.ArgParamRuntime] = "podman"
 	argParams[configure.ArgParamPodmanAuthFileContent] = authFileBase64
-	argParams[configure.ArgParamPodmanURI] = podmanSocketPath
+	argParams[configure.ArgParamPodmanURI] = strings.TrimPrefix(podmanURI, "unix://")
 	argParams[configure.ArgParamDBPassword] = dbPassword
-	argParams[configure.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
+	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
+	if skipLocalWorker {
+		argParams[configure.ArgParamLocalWorker] = "false"
+	}
+	argParams[constants.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, utils.CaddyFileIndent)
+	argParams[constants.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, utils.CertContentIndent)
+	argParams[constants.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, utils.CertContentIndent)
 
 	return argParams, nil
+}
+
+// readSSLContents reads and returns the PEM contents of the cert and key files.
+// Returns empty strings when either path is empty.
+func readSSLContents(certPath, keyPath string) (string, string, error) {
+	if certPath == "" || keyPath == "" {
+		return "", "", nil
+	}
+
+	certBytes, keyBytes, _, err := utils.ReadAndParseCertificates(certPath, keyPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to load ssl certs: %w", err)
+	}
+
+	return string(certBytes), string(keyBytes), nil
 }
 
 // setupCaddyContext sets up the Caddy context with domain configuration and Caddyfile generation.
 // This function:
 // 1. Gets the Caddy pod name from deployment context templates
 // 2. Computes domain configuration (cert domain extraction + domain suffix resolution)
-// 3. Creates Caddy context with pod name and domain suffix
-// 4. Generates and writes Caddyfile.
+// 3. Creates Caddy context with pod name and domain suffix.
 func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, s *spinner.Spinner) (*caddy.Context, error) {
 	// Get Caddy pod name from deployment context (templates)
 	caddyPodName, err := deployCtx.GetCaddyPodName()
@@ -234,13 +240,6 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.Podman
 
 	// Create Caddy context with pod name and domain suffix (NO template dependencies)
 	caddyCtx := caddy.NewContext(caddyPodName, domainSuffix)
-
-	// Generate and write Caddyfile before deploying
-	if err := caddy.GenerateCaddyfile(opts.BaseDir); err != nil {
-		s.Fail("failed to generate Caddyfile")
-
-		return nil, fmt.Errorf("failed to generate Caddyfile: %w", err)
-	}
 
 	return caddyCtx, nil
 }

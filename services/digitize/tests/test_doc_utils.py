@@ -376,7 +376,7 @@ class TestProcessTableLanguageSelection:
                 "page_number": 1,
             }
         }
-        mock_summarize_and_classify.return_value = (["Riassunto"], [True])
+        mock_summarize_and_classify.return_value = (["Riassunto"], [True], {})
 
         mock_table = Mock()
         mock_prov = Mock()
@@ -389,7 +389,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            process_table(
+            table_count, process_time, failures = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -401,6 +401,7 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "Italian prompt template"
         assert kwargs["max_tokens"] == 1339
+        assert failures == {}
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.merge_consecutive_tables")
@@ -442,7 +443,7 @@ class TestProcessTableLanguageSelection:
                 "page_number": 1,
             }
         }
-        mock_summarize_and_classify.return_value = (["Summary"], [True])
+        mock_summarize_and_classify.return_value = (["Summary"], [True], {})
 
         mock_table = Mock()
         mock_prov = Mock()
@@ -455,7 +456,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            process_table(
+            table_count, process_time, failures = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -467,6 +468,7 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "English prompt template"
         assert kwargs["max_tokens"] == 1024
+        assert failures == {}
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.merge_consecutive_tables")
@@ -508,7 +510,7 @@ class TestProcessTableLanguageSelection:
                 "page_number": 1,
             }
         }
-        mock_summarize_and_classify.return_value = (["Zusammenfassung"], [True])
+        mock_summarize_and_classify.return_value = (["Zusammenfassung"], [True], {})
 
         mock_table = Mock()
         mock_prov = Mock()
@@ -521,7 +523,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            process_table(
+            table_count, process_time, failures = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -533,6 +535,7 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "German prompt template"
         assert kwargs["max_tokens"] == 1536
+        assert failures == {}
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.merge_consecutive_tables")
@@ -574,7 +577,7 @@ class TestProcessTableLanguageSelection:
                 "page_number": 1,
             }
         }
-        mock_summarize_and_classify.return_value = (["Résumé"], [True])
+        mock_summarize_and_classify.return_value = (["Résumé"], [True], {})
 
         mock_table = Mock()
         mock_prov = Mock()
@@ -587,7 +590,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            process_table(
+            table_count, process_time, failures = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -599,6 +602,7 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "French prompt template"
         assert kwargs["max_tokens"] == 1260
+        assert failures == {}
 
 
 # Made with Bob

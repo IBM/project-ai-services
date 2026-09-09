@@ -151,7 +151,7 @@ class TestEncryptSecrets:
     def test_encrypts_ssh_private_key(self, monkeypatch):
         _set_key(monkeypatch)
         details = {"host": "example.com", "username": "user", "private_key": "MY_PRIVATE_KEY"}
-        encrypted = encrypt_secrets("ssh", details)
+        encrypted = encrypt_secrets("file_system", details)
         # The private_key field must be base64-encoded ciphertext, not plain
         assert encrypted["private_key"] != "MY_PRIVATE_KEY"
         assert encrypted["host"] == "example.com"
@@ -160,7 +160,7 @@ class TestEncryptSecrets:
     def test_encrypts_s3_secret_access_key(self, monkeypatch):
         _set_key(monkeypatch)
         details = {"bucket": "my-bucket", "access_key_id": "AKID", "secret_access_key": "MY_SECRET"}
-        encrypted = encrypt_secrets("s3", details)
+        encrypted = encrypt_secrets("object_storage", details)
         assert encrypted["secret_access_key"] != "MY_SECRET"
         assert encrypted["bucket"] == "my-bucket"
         assert encrypted["access_key_id"] == "AKID"
@@ -174,14 +174,14 @@ class TestEncryptSecrets:
     def test_skips_none_valued_secret_fields(self, monkeypatch):
         _set_key(monkeypatch)
         details = {"private_key": None, "username": "admin"}
-        result = encrypt_secrets("ssh", details)
+        result = encrypt_secrets("file_system", details)
         assert result["private_key"] is None
         assert result["username"] == "admin"
 
     def test_does_not_mutate_original_dict(self, monkeypatch):
         _set_key(monkeypatch)
         original = {"private_key": "secret", "host": "ssh.example.com"}
-        _ = encrypt_secrets("ssh", original)
+        _ = encrypt_secrets("file_system", original)
         assert original["private_key"] == "secret"
 
 
@@ -193,15 +193,15 @@ class TestDecryptSecrets:
     def test_decrypts_value_encrypted_by_encrypt_secrets(self, monkeypatch):
         _set_key(monkeypatch)
         details = {"private_key": "-----BEGIN RSA PRIVATE KEY-----\nFAKE\n-----END RSA PRIVATE KEY-----"}
-        encrypted = encrypt_secrets("ssh", details)
-        decrypted = decrypt_secrets("ssh", encrypted)
+        encrypted = encrypt_secrets("file_system", details)
+        decrypted = decrypt_secrets("file_system", encrypted)
         assert decrypted["private_key"] == details["private_key"]
 
     def test_leaves_non_secret_fields_untouched(self, monkeypatch):
         _set_key(monkeypatch)
         details = {"host": "sftp.example.com", "private_key": "KEY_DATA", "port": 22}
-        encrypted = encrypt_secrets("ssh", details)
-        decrypted = decrypt_secrets("ssh", encrypted)
+        encrypted = encrypt_secrets("file_system", details)
+        decrypted = decrypt_secrets("file_system", encrypted)
         assert decrypted["host"] == "sftp.example.com"
         assert decrypted["port"] == 22
 
@@ -209,12 +209,12 @@ class TestDecryptSecrets:
         _set_key(monkeypatch)
         bad_details = {"private_key": "not_valid_base64_ciphertext=="}
         with pytest.raises(Exception):
-            decrypt_secrets("ssh", bad_details)
+            decrypt_secrets("file_system", bad_details)
 
     def test_skips_none_valued_secret_fields(self, monkeypatch):
         _set_key(monkeypatch)
         details = {"private_key": None, "host": "host.example.com"}
-        result = decrypt_secrets("ssh", details)
+        result = decrypt_secrets("file_system", details)
         assert result["private_key"] is None
 
     def test_s3_full_roundtrip(self, monkeypatch):
@@ -224,8 +224,8 @@ class TestDecryptSecrets:
             "access_key_id": "AKID123",
             "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         }
-        encrypted = encrypt_secrets("s3", details)
-        decrypted = decrypt_secrets("s3", encrypted)
+        encrypted = encrypt_secrets("object_storage", details)
+        decrypted = decrypt_secrets("object_storage", encrypted)
         assert decrypted == details
 
 
@@ -236,14 +236,14 @@ class TestDecryptSecrets:
 class TestStripSecrets:
     def test_removes_private_key_from_ssh_details(self):
         details = {"host": "sftp.example.com", "username": "user", "private_key": "SENSITIVE"}
-        result = strip_secrets("ssh", details)
+        result = strip_secrets("file_system", details)
         assert "private_key" not in result
         assert result["host"] == "sftp.example.com"
         assert result["username"] == "user"
 
     def test_removes_secret_access_key_from_s3_details(self):
         details = {"bucket": "b", "access_key_id": "AK", "secret_access_key": "SK"}
-        result = strip_secrets("s3", details)
+        result = strip_secrets("object_storage", details)
         assert "secret_access_key" not in result
         assert result["bucket"] == "b"
         assert result["access_key_id"] == "AK"
@@ -255,13 +255,13 @@ class TestStripSecrets:
 
     def test_does_not_mutate_original_dict(self):
         original = {"private_key": "KEY", "host": "h"}
-        _ = strip_secrets("ssh", original)
+        _ = strip_secrets("file_system", original)
         assert "private_key" in original
 
     def test_field_absent_in_details_is_no_op(self):
         """strip_secrets must not raise if a secret field is simply absent."""
         details = {"host": "sftp.example.com", "username": "bob"}
-        result = strip_secrets("ssh", details)
+        result = strip_secrets("file_system", details)
         assert result == details
 
 
@@ -274,7 +274,7 @@ class TestMergeAndEncryptPartial:
         _set_key(monkeypatch)
         existing = {"private_key": "ENCRYPTED_BLOB", "host": "old.example.com", "port": 22}
         partial = {"host": "new.example.com"}
-        result = merge_and_encrypt_partial("ssh", existing, partial)
+        result = merge_and_encrypt_partial("file_system", existing, partial)
         assert result["host"] == "new.example.com"
         assert result["port"] == 22
 
@@ -282,7 +282,7 @@ class TestMergeAndEncryptPartial:
         _set_key(monkeypatch)
         existing = {"private_key": "OLD_ENCRYPTED", "host": "sftp.example.com"}
         partial = {"private_key": "NEW_PLAINTEXT_KEY"}
-        result = merge_and_encrypt_partial("ssh", existing, partial)
+        result = merge_and_encrypt_partial("file_system", existing, partial)
         # The updated private_key must be a new ciphertext, not plaintext
         assert result["private_key"] != "NEW_PLAINTEXT_KEY"
         assert result["private_key"] != "OLD_ENCRYPTED"
@@ -291,7 +291,7 @@ class TestMergeAndEncryptPartial:
         _set_key(monkeypatch)
         existing = {"private_key": "EXISTING_CIPHERTEXT", "host": "sftp.example.com"}
         partial = {"host": "new-sftp.example.com"}
-        result = merge_and_encrypt_partial("ssh", existing, partial)
+        result = merge_and_encrypt_partial("file_system", existing, partial)
         # Private key blob unchanged — it was not in partial_update
         assert result["private_key"] == "EXISTING_CIPHERTEXT"
 
@@ -299,21 +299,21 @@ class TestMergeAndEncryptPartial:
         _set_key(monkeypatch)
         existing = {"private_key": "CIPHERTEXT", "host": "old.example.com"}
         original_existing = dict(existing)
-        merge_and_encrypt_partial("ssh", existing, {"host": "new.example.com"})
+        merge_and_encrypt_partial("file_system", existing, {"host": "new.example.com"})
         assert existing == original_existing
 
     def test_partial_none_value_for_secret_field_is_passed_through(self, monkeypatch):
         """A None update for a secret field must not be encrypted — passed as None."""
         _set_key(monkeypatch)
         existing = {"private_key": "CIPHERTEXT", "host": "sftp.example.com"}
-        result = merge_and_encrypt_partial("ssh", existing, {"private_key": None})
+        result = merge_and_encrypt_partial("file_system", existing, {"private_key": None})
         assert result["private_key"] is None
 
     def test_s3_partial_update_encrypts_secret_access_key(self, monkeypatch):
         _set_key(monkeypatch)
         existing = {"bucket": "b", "access_key_id": "OLD_AK", "secret_access_key": "OLD_CIPHERTEXT"}
         partial = {"secret_access_key": "NEW_PLAINTEXT_SECRET"}
-        result = merge_and_encrypt_partial("s3", existing, partial)
+        result = merge_and_encrypt_partial("object_storage", existing, partial)
         assert result["secret_access_key"] != "NEW_PLAINTEXT_SECRET"
         assert result["bucket"] == "b"
 

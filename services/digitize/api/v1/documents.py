@@ -6,8 +6,9 @@ Extracted from the monolithic app.py following the digitize-api-sample pattern.
 
 Connector visibility rules:
   - GET  /v1/documents        — user-submitted only (connector-sourced excluded)
-  - GET  /v1/documents/{id}   — 404 for connector-sourced docs
-  - DELETE /v1/documents/{id} — 404 for connector-sourced docs
+  - GET  /v1/documents/{id}   — 405 for connector-sourced docs
+  - DELETE /v1/documents/{id} — 405 for connector-sourced docs
+  - DELETE /v1/documents      — user-submitted only (connector-sourced skipped)
 """
 
 import json
@@ -141,7 +142,7 @@ async def list_documents(
 @router.get(
     "/{doc_id}",
     response_model=models.DocumentDetailResponse,
-    responses={404: http_error_responses[404], 500: http_error_responses[500]},
+    responses={404: http_error_responses[404], 405: http_error_responses[405], 500: http_error_responses[500]},
     summary="Get document metadata",
     description=(
         "Retrieve detailed metadata for a specific document by its ID. "
@@ -158,15 +159,21 @@ async def get_document_metadata(
     Allows optionally including deeper page/table/timing processing metrics.
     """
     try:
-        from digitize.utils.db import get_document, is_connector_sourced_document
+        from digitize.utils.db import (
+            get_document,
+            get_shadow_documents_for,
+            is_connector_sourced_document,
+        )
 
         if is_connector_sourced_document(doc_id):
             APIError.raise_error(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                f"Document with ID '{doc_id}' not found",
+                ErrorCode.METHOD_NOT_ALLOWED,
+                f"Document with ID '{doc_id}' is connector-sourced and cannot be accessed via this endpoint",
             )
 
-        return get_document(doc_id, include_details=details)
+        doc = get_document(doc_id, include_details=details)
+        doc.duplicate_names = get_shadow_documents_for(doc_id)
+        return doc
     except FileNotFoundError as exc:
         logger.warning(f"Document '{doc_id}' not found: {exc}")
         APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
@@ -224,6 +231,7 @@ async def get_document_content(doc_id: str):
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         404: http_error_responses[404],
+        405: http_error_responses[405],
         409: http_error_responses[409],
         500: http_error_responses[500],
     },
@@ -237,7 +245,7 @@ async def get_document_content(doc_id: str):
 )
 async def delete_document(doc_id: str):
     """Delete a single document — follows the 'Always-Clean-VDB' strategy.
-    1. Connector guard  — 404 for connector-sourced docs
+    1. Connector guard  — 405 for connector-sourced docs
     2. Fetch metadata
     3. Active-job guard
     4. VDB cleanup (high priority)
@@ -250,8 +258,8 @@ async def delete_document(doc_id: str):
 
         if is_connector_sourced_document(doc_id):
             APIError.raise_error(
-                ErrorCode.RESOURCE_NOT_FOUND,
-                f"Document with ID '{doc_id}' not found",
+                ErrorCode.METHOD_NOT_ALLOWED,
+                f"Document with ID '{doc_id}' is connector-sourced and cannot be deleted via this endpoint",
             )
 
         # 2. Fetch metadata (best-effort).
