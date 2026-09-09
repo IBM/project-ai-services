@@ -402,8 +402,7 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 	return lines, nil
 }
 
-// collectContainerLogs opens a log stream for a single container and calls
-// This is the shared core used by both PodLogs and streamContainerLogs.
+// collectContainerLogs opens a log stream for a single container and invokes onLine for each received log line.
 func (pc *PodmanClient) collectContainerLogs(ctx context.Context, containerID string, follow bool, onLine func(string)) error {
 	opts := &containers.LogOptions{
 		Follow: utils.BoolPtr(follow),

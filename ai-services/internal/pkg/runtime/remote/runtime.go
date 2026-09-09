@@ -160,6 +160,9 @@ func (r *RemoteRuntime) PodExists(ctx context.Context, nameOrID string) (bool, e
 
 func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string, _ bool) ([]string, error) {
 	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
+	if err != nil {
+		return nil, err
+	}
 
 	var podLogsLines []string
 	if err := unmarshalData(res, &podLogsLines); err != nil {

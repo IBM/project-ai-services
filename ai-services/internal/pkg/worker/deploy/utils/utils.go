@@ -41,7 +41,7 @@ func CheckWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
 
 			lines, err := rt.PodLogs(ctx, pod.Name, false)
 			if err != nil {
-				logger.WarningfCtx(ctx, "failed to fetch logs for pod %s: %v\n", pod.Name, err)
+				return fmt.Errorf("failed to fetch logs for pod %s: %v\n", pod.Name, err)
 			}
 
 			for _, line := range lines {
