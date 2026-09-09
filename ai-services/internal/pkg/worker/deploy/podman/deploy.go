@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
+	caddyfilePath = "worker/podman/Caddyfile.tmpl"
 )
 
 // Options carries the parameters needed to set up the worker node.

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
