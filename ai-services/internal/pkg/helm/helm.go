@@ -98,7 +98,6 @@ func (h *Helm) upgrade(ctx context.Context, release string, chart chart.Charter,
 }
 
 // InstallOrUpgrade installs a release if it does not exist, or upgrades it if it does.
-// performs its own post-deploy health check.
 func (h *Helm) InstallOrUpgrade(ctx context.Context, release string, chart chart.Charter, values map[string]any, timeout time.Duration) error {
 	exists, err := h.IsReleaseExist(release)
 	if err != nil {

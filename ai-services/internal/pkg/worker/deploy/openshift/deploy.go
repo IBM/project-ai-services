@@ -90,10 +90,9 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
-
 	if err := helmClient.InstallOrUpgrade(ctx, workerconstants.WorkerHelmReleaseName, chartData, values, workerHelmTimeout); err != nil {
 		s.Fail("failed to deploy worker")
-		
+
 		// Verifying worker pod logs for the error message from 'grpcstream' cmd
 		if workerErr := deployutils.CheckWorkerContainerLogs(ctx, rt); workerErr != nil {
 			uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)

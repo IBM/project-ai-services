@@ -363,39 +363,55 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream 
 		return nil, errors.New("no containers found in pod")
 	}
 
-	var lines []string
+	if stream {
+		return nil, pc.streamPodLogs(ctx, podInspect)
+	}
 
+	return pc.collectPodLogs(ctx, podInspect)
+}
+
+// streamPodLogs streams logs for all non-infra containers in the pod until
+// interrupted (Ctrl+C / SIGTERM).
+func (pc *PodmanClient) streamPodLogs(ctx context.Context, podInspect *types.Pod) error {
 	// Install signal handling once for the entire streaming session so that
 	// Ctrl+C / SIGTERM stops the tail gracefully, regardless of how many
 	// containers are in the pod.
-	var sigCtx context.Context
-	var stopSignal context.CancelFunc
-	if stream {
-		sigCtx, stopSignal = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-		defer stopSignal()
-	}
+	sigCtx, stopSignal := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignal()
 
 	for _, container := range podInspect.Containers {
 		if container.ID == podInspect.InfraContainerID {
 			continue
 		}
 
-		if stream {
-			logger.Infof("Streaming logs for container: %s", container.Name)
+		logger.Infof("Streaming logs for container: %s", container.Name)
 
-			if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
-				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
-			}
+		if err := pc.streamContainerLogs(sigCtx, container.ID); err != nil {
+			return fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
+		}
 
-			if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
-				return nil, nil
-			}
-		} else {
-			if err := pc.collectContainerLogs(ctx, container.ID, stream, func(line string) {
-				lines = append(lines, line)
-			}); err != nil {
-				return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
-			}
+		if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// collectPodLogs snapshots the current logs for all non-infra containers and
+// returns all lines.
+func (pc *PodmanClient) collectPodLogs(ctx context.Context, podInspect *types.Pod) ([]string, error) {
+	var lines []string
+
+	for _, container := range podInspect.Containers {
+		if container.ID == podInspect.InfraContainerID {
+			continue
+		}
+
+		if err := pc.collectContainerLogs(ctx, container.ID, false, func(line string) {
+			lines = append(lines, line)
+		}); err != nil {
+			return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
 		}
 	}
 

@@ -11,6 +11,15 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
+// joinResult is returned by scanLogLines to indicate what was found in the logs.
+type joinResult int
+
+const (
+	joinResultPending joinResult = iota // no conclusive line yet
+	joinResultSuccess                   // worker joined successfully
+	joinResultError                     // worker reported a join error
+)
+
 const (
 	// logPollInterval is how often we re-read container logs while waiting for
 	// the worker to either connect successfully or emit an error.
@@ -33,37 +42,60 @@ func CheckWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
 	deadline := time.Now().Add(logPollTimeout)
 
 	for _, pod := range pods {
-		for {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			lines, err := rt.PodLogs(ctx, pod.Name, false)
-			if err != nil {
-				return fmt.Errorf("failed to fetch logs for pod %s: %v\n", pod.Name, err)
-			}
-
-			for _, line := range lines {
-				if strings.Contains(line, workerconstants.WorkerJoinSuccess) {
-					return nil
-				}
-
-				if strings.Contains(line, workerconstants.WorkerJoinErr) {
-					return errors.New(line)
-				}
-			}
-
-			if time.Now().After(deadline) {
-				break
-			}
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(logPollInterval):
-			}
+		if err := pollPodLogs(ctx, rt, pod.Name, deadline); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// pollPodLogs repeatedly fetches logs for a single pod until a join-success or
+// join-error line is found, the deadline is reached, or the context is cancelled.
+func pollPodLogs(ctx context.Context, rt runtime.Runtime, podName string, deadline time.Time) error {
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		lines, err := rt.PodLogs(ctx, podName, false)
+		if err != nil {
+			return fmt.Errorf("failed to fetch logs for pod %s: %v", podName, err)
+		}
+
+		result, joinErr := scanLogLines(lines)
+		if result == joinResultSuccess {
+			return nil
+		}
+
+		if result == joinResultError {
+			return joinErr
+		}
+
+		if time.Now().After(deadline) {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(logPollInterval):
+		}
+	}
+}
+
+// scanLogLines inspects a snapshot of log lines for a worker join outcome.
+// It returns joinResultPending when no conclusive line is found (keep polling).
+func scanLogLines(lines []string) (joinResult, error) {
+	for _, line := range lines {
+		if strings.Contains(line, workerconstants.WorkerJoinSuccess) {
+			return joinResultSuccess, nil
+		}
+
+		if strings.Contains(line, workerconstants.WorkerJoinErr) {
+			return joinResultError, errors.New(line)
+		}
+	}
+
+	return joinResultPending, nil
 }
