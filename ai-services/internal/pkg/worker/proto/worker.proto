@@ -140,4 +140,7 @@ enum CommandType {
   // The worker cancels the context it created for that command and sends back a
   // CommandResult immediately. No-op if the command has already finished.
   COMMAND_TYPE_CANCEL                    = 37;
+
+  // Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
+  COMMAND_TYPE_DELETE_SECRETS            = 38;
 }

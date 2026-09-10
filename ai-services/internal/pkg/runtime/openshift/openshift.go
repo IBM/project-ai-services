@@ -516,8 +516,34 @@ func (kc *OpenshiftClient) ListSecrets(_ context.Context, filters map[string][]s
 	return nil, nil
 }
 
-func (kc *OpenshiftClient) DeleteSecret(_ context.Context, name string) error {
-	logger.Warningln("Not implemented")
+func (kc *OpenshiftClient) DeleteSecret(ctx context.Context, name string) error {
+	if err := kc.KubeClient.CoreV1().Secrets(kc.Namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil
+		}
+
+		return fmt.Errorf("failed to delete secret '%s': %w", name, err)
+	}
+
+	logger.Debugf("Deleted secret '%s'\n", name)
+
+	return nil
+}
+
+// DeleteSecrets deletes all Secrets matching the given label selector.
+func (kc *OpenshiftClient) DeleteSecrets(ctx context.Context, labelSelector string) error {
+	secretList, err := kc.KubeClient.CoreV1().Secrets(kc.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list secrets for cleanup: %w", err)
+	}
+
+	for _, secret := range secretList.Items {
+		if err := kc.DeleteSecret(ctx, secret.Name); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

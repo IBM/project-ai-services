@@ -82,6 +82,8 @@ const (
 	// The worker cancels the context it created for that command and sends back a
 	// CommandResult immediately. No-op if the command has already finished.
 	CommandType_COMMAND_TYPE_CANCEL CommandType = 37
+	// Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
+	CommandType_COMMAND_TYPE_DELETE_SECRETS CommandType = 38
 )
 
 // Enum value maps for CommandType.
@@ -125,6 +127,7 @@ var (
 		35: "COMMAND_TYPE_DELETE_NAMESPACE",
 		36: "COMMAND_TYPE_UPDATE_SECRET",
 		37: "COMMAND_TYPE_CANCEL",
+		38: "COMMAND_TYPE_DELETE_SECRETS",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":            0,
@@ -165,6 +168,7 @@ var (
 		"COMMAND_TYPE_DELETE_NAMESPACE":       35,
 		"COMMAND_TYPE_UPDATE_SECRET":          36,
 		"COMMAND_TYPE_CANCEL":                 37,
+		"COMMAND_TYPE_DELETE_SECRETS":         38,
 	}
 )
 

@@ -142,6 +142,49 @@ func DeleteSecrets(ctx context.Context, rt runtime.Runtime, secrets []string) er
 	return nil
 }
 
+// FetchSecretsToDelete extracts secret names from pod labels and separates them
+// based on the skip-cleanup label.
+// Returns two lists: secrets to delete immediately, and secrets to skip (only
+// deleted when --skip-cleanup is not set).
+func FetchSecretsToDelete(pods []types.Pod) ([]string, []string) {
+	secretMapToDelete := make(map[string]bool)
+	secretMapToSkip := make(map[string]bool)
+
+	for _, pod := range pods {
+		secretNames, ok := pod.Labels[constants.SecretLabel]
+		if !ok || secretNames == "" {
+			continue
+		}
+
+		_, hasSkipLabel := pod.Labels[constants.SecretSkipLabel]
+
+		for _, secretName := range strings.Split(secretNames, ",") {
+			secretName = strings.TrimSpace(secretName)
+			if secretName == "" {
+				continue
+			}
+
+			if hasSkipLabel {
+				secretMapToSkip[secretName] = true
+			} else {
+				secretMapToDelete[secretName] = true
+			}
+		}
+	}
+
+	secretsToDelete := make([]string, 0, len(secretMapToDelete))
+	for secretName := range secretMapToDelete {
+		secretsToDelete = append(secretsToDelete, secretName)
+	}
+
+	secretsToSkip := make([]string, 0, len(secretMapToSkip))
+	for secretName := range secretMapToSkip {
+		secretsToSkip = append(secretsToSkip, secretName)
+	}
+
+	return secretsToDelete, secretsToSkip
+}
+
 // FetchVolumesToDelete extracts volume names from pod labels and separates them based on skip-cleanup label.
 // Returns two lists: volumes to delete immediately, and volumes to skip (only deleted when --skip-cleanup is not set).
 func FetchVolumesToDelete(pods []types.Pod) ([]string, []string) {

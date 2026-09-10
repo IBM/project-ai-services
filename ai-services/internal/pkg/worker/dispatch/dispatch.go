@@ -396,6 +396,15 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		return nil, nrt.DeletePVCs(ctx, req.Name)
 
+	case workerpb.CommandType_COMMAND_TYPE_DELETE_SECRETS:
+		var req payload.Name
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode delete_secrets payload: %w", err)
+		}
+		nrt := rtInNamespace(rt, req.Namespace)
+
+		return nil, nrt.DeleteSecrets(ctx, req.Name)
+
 	case workerpb.CommandType_COMMAND_TYPE_GET_SYSTEM_INFO:
 		info, err := rt.GetSystemInfo(ctx)
 
