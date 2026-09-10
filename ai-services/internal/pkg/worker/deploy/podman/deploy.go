@@ -193,8 +193,6 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 		workerResourceCount--
 	}
 
-	
-
 	return len(existingResources) == workerResourceCount, existingResources, nil
 }
 
