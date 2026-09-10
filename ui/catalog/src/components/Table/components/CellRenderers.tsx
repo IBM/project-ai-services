@@ -142,12 +142,13 @@ export interface MessageCellProps extends SharedCellRendererProps {
   /**
    * Statuses that indicate a clean/healthy state — message is suppressed when
    * the row's status is in this list (or when the message is empty).
-   * Defaults to ["Running"] to preserve existing behaviour for the deployments table.
+   * Defaults to ["Running", "connected", "up to date"] — covers the deployments table
+   * (Running) and the connectors table (connected) and the application datasources table (up to date).
    */
   hideStatuses?: string[];
   /**
    * Statuses that warrant the error icon instead of the in-progress icon.
-   * Defaults to ["Error", "Offline"] to preserve existing behaviour for the deployments table.
+   * Defaults to ["Error", "offline"] to preserve existing behaviour for the deployments table.
    */
   errorStatuses?: string[];
 }
@@ -155,7 +156,7 @@ export interface MessageCellProps extends SharedCellRendererProps {
 export const MessageCell = ({
   value,
   rowData,
-  hideStatuses = ["Running", "up to date"],
+  hideStatuses = ["Running", "connected", "up to date"],
   errorStatuses = ["Error", "offline", "out of sync"],
 }: MessageCellProps) => {
   const message = String(value || "");
