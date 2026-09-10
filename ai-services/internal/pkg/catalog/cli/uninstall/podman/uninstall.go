@@ -64,15 +64,7 @@ func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error
 func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.Pod, skipCleanup bool) error {
 	logger.Infoln("Proceeding with deletion...")
 
-	// Retrieve the BaseDir from the catalog pod configuration
-	var baseDir string
-	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
-	if err != nil {
-		logger.Warningf("Failed to retrieve BaseDir from catalog pod: %v. Using default BaseDir.\n", err)
-		baseDir = utils.GetBaseDir()
-	} else {
-		baseDir = config.BaseDir
-	}
+	baseDir := resolveBaseDir(ctx, rt)
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
 	// Check before catalog pods are deleted whether a local worker is co-located.
@@ -81,20 +73,13 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 		return fmt.Errorf("failed to check local worker: %w", err)
 	}
 
-	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
-	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName, catalogConstants.CatalogMTLSSecretName)
-
-	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
-	// If secret is created adding it to 'secretsToDelete' list
-	exists, err := rt.SecretExists(ctx, catalogConstants.CatalogCertSecretName)
+	secretsToDelete, err := buildSecretsToDelete(ctx, rt, pods)
 	if err != nil {
 		return err
 	}
-	if exists {
-		secretsToDelete = append(secretsToDelete, catalogConstants.CatalogCertSecretName)
-	}
 
 	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
+	_, secretsToSkip := fetchSecretsToDelete(pods)
 
 	// Delete catalog pods
 	if err := podmanutils.DeletePods(ctx, rt, pods); err != nil {
@@ -122,19 +107,53 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 		return err
 	}
 
-	// Only uninstall the co-located worker if LOCAL_WORKER is true
 	if isLocalWorker {
-		if err := workeruninstall.Uninstall(ctx, workerutils.UninstallOptions{
-			RuntimeType: types.RuntimeTypePodman,
-			AutoYes:     true,
-			SkipCleanup: skipCleanup,
-		}); err != nil {
-			return fmt.Errorf("worker uninstall failed: %w", err)
+		if err := uninstallLocalWorker(ctx, skipCleanup); err != nil {
+			return err
 		}
 	}
 
 	logger.Infoln("Catalog service removed successfully")
 
+	return nil
+}
+
+// resolveBaseDir returns the base directory from the catalog pod config, falling back to the default.
+func resolveBaseDir(ctx context.Context, rt *podman.PodmanClient) string {
+	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
+	if err != nil {
+		logger.Warningf("Failed to retrieve BaseDir from catalog pod: %v. Using default BaseDir.\n", err)
+		return utils.GetBaseDir()
+	}
+	return config.BaseDir
+}
+
+// buildSecretsToDelete assembles the full list of secrets that must be deleted unconditionally.
+func buildSecretsToDelete(ctx context.Context, rt *podman.PodmanClient, pods []types.Pod) ([]string, error) {
+	secretsToDelete, _ := fetchSecretsToDelete(pods)
+	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName, catalogConstants.CatalogMTLSSecretName)
+
+	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
+	// If secret is created adding it to 'secretsToDelete' list
+	exists, err := rt.SecretExists(ctx, catalogConstants.CatalogCertSecretName)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		secretsToDelete = append(secretsToDelete, catalogConstants.CatalogCertSecretName)
+	}
+	return secretsToDelete, nil
+}
+
+// uninstallLocalWorker removes the co-located local worker.
+func uninstallLocalWorker(ctx context.Context, skipCleanup bool) error {
+	if err := workeruninstall.Uninstall(ctx, workerutils.UninstallOptions{
+		RuntimeType: types.RuntimeTypePodman,
+		AutoYes:     true,
+		SkipCleanup: skipCleanup,
+	}); err != nil {
+		return fmt.Errorf("worker uninstall failed: %w", err)
+	}
 	return nil
 }
 
