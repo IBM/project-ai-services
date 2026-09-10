@@ -12,7 +12,7 @@ spec:
     - name: dshm
       emptyDir:
         medium: Memory
-        sizeLimit: 512Mi
+        sizeLimit: 2Gi
     - name: models
       hostPath:
         path: "{{ .BaseDir }}/models"
@@ -26,6 +26,8 @@ spec:
       - --served-model-name
       - {{ .Values.model }}
       - --port=8002
+      - --gpu-memory-utilization=0.5
+      - --enforce-eager
       livenessProbe:
         httpGet:
           path: /health
@@ -39,9 +41,9 @@ spec:
           value: "8"
       resources:
         requests:
-          memory: "5Gi"
+          memory: "8Gi"
         limits:
-          memory: "5Gi"
+          memory: "8Gi"
       ports:
         - containerPort: 8002
       volumeMounts:
