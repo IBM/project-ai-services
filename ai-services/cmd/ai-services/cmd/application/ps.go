@@ -193,9 +193,9 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 
 // PS table column indices (shared across normal and wide output).
 const (
-	psColAppName  = 0
-	psColWorker   = 1
-	psColRuntime  = 2
+	psColAppName   = 0
+	psColWorker    = 1
+	psColRuntime   = 2
 	psColNamespace = 3
 )
 
