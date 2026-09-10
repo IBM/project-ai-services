@@ -71,9 +71,6 @@ var (
 	// subsequent specs (pods existence, logs) can reuse it without a second CLI call.
 	appPsWideOutput string
 	backupAppName   string
-	// workerName is the name of the remote worker to target in mid-deploy-delete tests.
-	// Set via --worker-name flag; tests that require it skip when empty.
-	workerName string
 )
 
 func init() {
@@ -84,9 +81,6 @@ func init() {
 	flag.BoolVar(&runFailureTests, "run-failure-tests", false,
 		"Opt in to running failure test suites (bootstrap, catalog, similarity). "+
 			"Failure tests are skipped by default to prevent accidental execution during a normal suite run.")
-	flag.StringVar(&workerName, "worker-name", "",
-		"Name of the connected remote worker to target for mid-deployment delete tests. "+
-			"When empty, mid-deploy-delete tests are skipped.")
 }
 
 func TestE2E(t *testing.T) {
