@@ -27,6 +27,7 @@ import {
   INITIAL_PANEL_STATE,
   PANEL_ACTION_TYPES,
   deriveConnectionField,
+  parseMessageCheckType,
 } from "./types";
 import type { DetailsPanelMode } from "./types";
 import {
@@ -301,6 +302,10 @@ const ConnectorDetailsPanel = ({
 
   // ── Section renderers ──────────────────────────────────────────────────────
 
+  // ── Parse the backend message prefix once — shared by all section renderers ─
+  const { checkType: errorCheckType, strippedMessage: errorMessage } =
+    parseMessageCheckType(state.detail?.message);
+
   const renderConnectionSection = () => {
     if (!state.detail) return null;
     const connectionField = deriveConnectionField(
@@ -318,6 +323,17 @@ const ConnectorDetailsPanel = ({
     return (
       <Section level={3} className={styles.section}>
         <Heading className={styles.sectionTitle}>Connection</Heading>
+        {/* Network error — e.g. endpoint unreachable */}
+        {errorCheckType === "network" && (
+          <InlineNotification
+            kind="error"
+            title="Endpoint unreachable"
+            subtitle={errorMessage}
+            lowContrast
+            hideCloseButton
+            className={styles.inlineNotification}
+          />
+        )}
         {connectionField &&
           renderReadOnlyField(connectionField.label, connectionField.value)}
         <Tag
@@ -336,19 +352,25 @@ const ConnectorDetailsPanel = ({
     if (!state.detail) return null;
     const { authSectionState } = state;
 
-    const hasInvalidCredentials =
-      state.detail.status !== "connected" && !!state.detail.message;
+    // Show the auth error notification only when the backend reported an auth failure,
+    // OR when there is an unclassified message (no prefix) — preserves previous behaviour
+    // for any connector type that does not yet emit a structured prefix.
+    const hasAuthError =
+      authSectionState.kind === "button" &&
+      state.detail.status !== "connected" &&
+      !!state.detail.message &&
+      (errorCheckType === "auth" || errorCheckType === null);
 
     return (
       <Section level={3} className={styles.section}>
         <Heading className={styles.sectionTitle}>Authentication</Heading>
 
         {/* Invalid credentials notification — view mode only */}
-        {authSectionState.kind === "button" && hasInvalidCredentials && (
+        {hasAuthError && (
           <InlineNotification
             kind="error"
             title="Invalid key credentials"
-            subtitle={state.detail.message}
+            subtitle={errorMessage}
             lowContrast
             hideCloseButton
             className={styles.inlineNotification}
@@ -369,9 +391,14 @@ const ConnectorDetailsPanel = ({
           />
         )}
 
-        {/* View mode — "Update key" button */}
+        {/* View mode — "Update key" button; disabled when connector is offline */}
         {authSectionState.kind === "button" && (
-          <Button kind="tertiary" size="sm" onClick={handleShowAuthForm}>
+          <Button
+            kind="tertiary"
+            size="sm"
+            disabled={state.detail?.status === "offline"}
+            onClick={handleShowAuthForm}
+          >
             Update key
           </Button>
         )}
@@ -432,11 +459,22 @@ const ConnectorDetailsPanel = ({
         field.key !== connectionKey && v !== undefined && v !== null && v !== ""
       );
     });
-    if (visibleFields.length === 0) return null;
+    if (visibleFields.length === 0 && errorCheckType !== "access") return null;
 
     return (
       <Section level={3} className={styles.section}>
         <Heading className={styles.sectionTitle}>Location</Heading>
+        {/* Access error — e.g. bucket not found */}
+        {errorCheckType === "access" && (
+          <InlineNotification
+            kind="error"
+            title="Resource not accessible"
+            subtitle={errorMessage}
+            lowContrast
+            hideCloseButton
+            className={styles.inlineNotification}
+          />
+        )}
         {visibleFields.map((field) =>
           renderReadOnlyField(
             field.label,

@@ -196,3 +196,24 @@ export function deriveConnectionField(
 
   return { key: fieldKey, label, value: String(value) };
 }
+
+/**
+ * Parses the structured prefix written by ConnectionCheckError.Error() on the backend.
+ * The backend serialises errors as "[NETWORK] ...", "[AUTH] ...", or "[ACCESS] ...".
+ *
+ * Returns the check type and the message with the prefix stripped, so each section
+ * can decide whether to show the notification and what subtitle to display.
+ */
+export function parseMessageCheckType(message: string | undefined): {
+  checkType: "network" | "auth" | "access" | null;
+  strippedMessage: string;
+} {
+  if (!message) return { checkType: null, strippedMessage: "" };
+
+  const match = message.match(/^\[(NETWORK|AUTH|ACCESS)\]\s*/i);
+  if (!match) return { checkType: null, strippedMessage: message };
+
+  const checkType = match[1].toLowerCase() as "network" | "auth" | "access";
+  const strippedMessage = message.slice(match[0].length);
+  return { checkType, strippedMessage };
+}
