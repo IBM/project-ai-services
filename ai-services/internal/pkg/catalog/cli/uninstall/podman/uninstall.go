@@ -12,7 +12,6 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -59,17 +58,6 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
-	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret)
-
-	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
-	// If secret is created adding it to 'secretsToDelete' list
-	exists, err := rt.SecretExists(ctx, catalogConstants.CatalogCertSecretName)
-	if err != nil {
-		return err
-	}
-	if exists {
-		secretsToDelete = append(secretsToDelete, catalogConstants.CatalogCertSecretName)
-	}
 
 	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 
