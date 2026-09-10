@@ -11,6 +11,7 @@ import (
 type DeploymentPlan struct {
 	ApplicationID   uuid.UUID                 // Generated application ID
 	ApplicationName string                    // Application name
+	Namespace       string                    // Namespace derived from ApplicationID
 	CatalogID       string                    // Architecture or service catalog ID
 	Version         string                    // Application version from request
 	IsArchitecture  bool                      // true for architecture, false for standalone service
