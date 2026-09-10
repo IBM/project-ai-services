@@ -20,6 +20,8 @@ from digitize.models import (
     JobStats,
     ExportJobRecord,
     ExportDocumentRecord,
+    ExportConnectorRecord,
+    ExportSyncLogRecord,
     ImportRequest,
     ImportResponse,
     ImportSummary,
@@ -704,11 +706,18 @@ def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
     return timestamp.isoformat().replace("+00:00", "Z")
 
 
-def _build_import_summary(total_jobs: int, total_documents: int) -> ImportSummary:
+def _build_import_summary(
+    total_jobs: int,
+    total_documents: int,
+    total_connectors: int = 0,
+    total_sync_logs: int = 0,
+) -> ImportSummary:
     """Create an initialized import summary object."""
     return ImportSummary(
         jobs=ImportEntitySummary(total_received=total_jobs),
         documents=ImportEntitySummary(total_received=total_documents),
+        connectors=ImportEntitySummary(total_received=total_connectors),
+        sync_logs=ImportEntitySummary(total_received=total_sync_logs),
     )
 
 
@@ -788,6 +797,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             job_id=job.job_id,
             operation=job.operation,
             status=job.status,
+            source=job.source or JobSource.USER.value,
             job_name=job.job_name,
             submitted_at=_serialize_datetime(job.submitted_at) or "",
             completed_at=_serialize_datetime(job.completed_at),
@@ -804,6 +814,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             name=doc.name,
             type=doc.type,
             status=doc.status,
+            source=doc.source or DocumentSource.USER.value,
             output_format=doc.output_format,
             submitted_at=_serialize_datetime(doc.submitted_at) or "",
             completed_at=_serialize_datetime(doc.completed_at),
@@ -813,13 +824,54 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
         for doc in documents
     ]
 
+    # Export connectors (credentials excluded — connection_details stripped)
+    all_connectors = db_manager.get_all_connectors()
+    exported_connectors = [
+        ExportConnectorRecord(
+            id=c.id,
+            name=c.name,
+            type=c.type,
+            allowed_extensions=list(c.allowed_extensions or []),
+            sync_interval_seconds=c.sync_interval_seconds,
+            attached_at=_serialize_datetime(c.attached_at) or "",
+            last_sync_at=_serialize_datetime(c.last_sync_at),
+            status=c.status,
+            total_files=c.total_files,
+            message=c.message,
+        )
+        for c in all_connectors
+    ]
+
+    # Export all sync logs across all connectors
+    all_sync_logs = db_manager.get_all_sync_logs()
+    exported_sync_logs = [
+        ExportSyncLogRecord(
+            connector_id=row.connector_id,
+            seq=row.seq,
+            started_at=_serialize_datetime(row.started_at) or "",
+            finished_at=_serialize_datetime(row.finished_at),
+            total_files=row.total_files,
+            new_files=row.new_files,
+            completed_files=row.completed_files,
+            removed_files=row.removed_files,
+            status=row.status,
+            error=row.error or "",
+        )
+        for row in all_sync_logs
+    ]
+
     returned_records = len(exported_jobs) + len(exported_documents)
     total_records = total_jobs + total_documents
     effective_limit = returned_records if limit == -1 else limit
 
     return ExportResponse(
         status="completed",
-        data=ImportExportData(jobs=exported_jobs, documents=exported_documents),
+        data=ImportExportData(
+            jobs=exported_jobs,
+            documents=exported_documents,
+            connectors=exported_connectors,
+            sync_logs=exported_sync_logs,
+        ),
         summary=ExportSummary(
             jobs=ExportEntitySummary(
                 total_exported=len(exported_jobs),
@@ -836,6 +888,14 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                     if doc.status in (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
                 ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
+            ),
+            connectors=ExportEntitySummary(
+                total_exported=len(exported_connectors),
+            ),
+            sync_logs=ExportEntitySummary(
+                total_exported=len(exported_sync_logs),
+                completed=sum(1 for s in exported_sync_logs if s.status == "completed"),
+                failed=sum(1 for s in exported_sync_logs if s.status == "failed"),
             ),
         ),
         export_timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -864,21 +924,28 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
         raise RuntimeError("Database not available. Cannot import metadata without database connection.")
 
     started_at = perf_counter()
-    summary = _build_import_summary(len(payload.data.jobs), len(payload.data.documents))
+    summary = _build_import_summary(
+        len(payload.data.jobs),
+        len(payload.data.documents),
+        len(payload.data.connectors),
+        len(payload.data.sync_logs),
+    )
     warnings: list[ImportRecordIssue] = []
     errors: list[ImportRecordIssue] = []
 
     existing_job_ids = set(get_all_job_ids())
     existing_document_ids = set(get_all_document_ids())
+    existing_connector_ids = {c.id for c in db_manager.get_all_connectors()}
 
     importable_job_ids = set(existing_job_ids)
+    importable_connector_ids = set(existing_connector_ids)
 
+    # ── Jobs ─────────────────────────────────────────────────────────────────
     for job_record in payload.data.jobs:
         if job_record.job_id in existing_job_ids:
             summary.jobs.skipped += 1
             continue
 
-        # Parse and validate timestamps once, then reuse
         try:
             submitted_at = _parse_iso_datetime(job_record.submitted_at)
             completed_at = _parse_iso_datetime(job_record.completed_at)
@@ -899,11 +966,13 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             importable_job_ids.add(job_record.job_id)
             continue
 
+        source = JobSource.CONNECTOR if job_record.source == JobSource.CONNECTOR.value else JobSource.USER
         created_job = db_manager.create_job(
             job_id=job_record.job_id,
             operation=job_record.operation,
             status=JobStatus(job_record.status),
             job_name=job_record.job_name,
+            source=source,
             submitted_at=submitted_at,
             completed_at=completed_at,
             error=job_record.error,
@@ -925,6 +994,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
         summary.jobs.imported += 1
         importable_job_ids.add(job_record.job_id)
 
+    # ── Documents ─────────────────────────────────────────────────────────────
     for document_record in payload.data.documents:
         if document_record.id in existing_document_ids:
             summary.documents.skipped += 1
@@ -942,7 +1012,6 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
-        # Parse and validate timestamps once, then reuse
         try:
             submitted_at = _parse_iso_datetime(document_record.submitted_at)
             completed_at = _parse_iso_datetime(document_record.completed_at)
@@ -962,6 +1031,11 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             summary.documents.imported += 1
             continue
 
+        doc_source = (
+            DocumentSource.CONNECTOR
+            if document_record.source == DocumentSource.CONNECTOR.value
+            else DocumentSource.USER
+        )
         created_document = db_manager.create_document(
             doc_id=document_record.id,
             name=document_record.name,
@@ -972,6 +1046,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             completed_at=completed_at,
             error=document_record.error,
             job_id=document_record.job_id,
+            source=doc_source,
             metadata=document_record.metadata,
         )
 
@@ -988,6 +1063,131 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             continue
 
         summary.documents.imported += 1
+
+    # ── Connectors ────────────────────────────────────────────────────────────
+    for connector_record in payload.data.connectors:
+        if connector_record.id in existing_connector_ids:
+            summary.connectors.skipped += 1
+            continue
+
+        try:
+            attached_at = _parse_iso_datetime(connector_record.attached_at)
+            if attached_at is None:
+                raise ValueError("attached_at is required")
+            last_sync_at = _parse_iso_datetime(connector_record.last_sync_at)
+        except ValueError as exc:
+            summary.connectors.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="connector",
+                    record_id=connector_record.id,
+                    type="validation_error",
+                    message=f"Invalid timestamp: {exc}",
+                )
+            )
+            continue
+
+        if payload.validate_only:
+            summary.connectors.imported += 1
+            importable_connector_ids.add(connector_record.id)
+            continue
+
+        try:
+            inserted = db_manager.import_connector(
+                connector_id=connector_record.id,
+                name=connector_record.name,
+                connector_type=connector_record.type,
+                allowed_extensions=connector_record.allowed_extensions,
+                sync_interval_seconds=connector_record.sync_interval_seconds,
+                attached_at=attached_at,
+                last_sync_at=last_sync_at,
+                status=connector_record.status,
+                total_files=connector_record.total_files,
+                message=connector_record.message,
+            )
+            if inserted:
+                summary.connectors.imported += 1
+                importable_connector_ids.add(connector_record.id)
+            else:
+                summary.connectors.skipped += 1
+        except Exception as exc:
+            summary.connectors.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="connector",
+                    record_id=connector_record.id,
+                    type="database_error",
+                    message=f"Failed to create connector record: {exc}",
+                )
+            )
+
+    # ── Sync logs ─────────────────────────────────────────────────────────────
+    for sync_log_record in payload.data.sync_logs:
+        record_id = f"{sync_log_record.connector_id}:{sync_log_record.seq}"
+
+        if sync_log_record.connector_id not in importable_connector_ids:
+            summary.sync_logs.failed += 1
+            warnings.append(
+                ImportRecordIssue(
+                    record_type="sync_log",
+                    record_id=record_id,
+                    type="orphaned_sync_log",
+                    message=(
+                        f"sync_log references non-existent connector_id: "
+                        f"{sync_log_record.connector_id}"
+                    ),
+                )
+            )
+            continue
+
+        try:
+            started_at = _parse_iso_datetime(sync_log_record.started_at)
+            if started_at is None:
+                raise ValueError("started_at is required")
+            finished_at = _parse_iso_datetime(sync_log_record.finished_at)
+        except ValueError as exc:
+            summary.sync_logs.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="sync_log",
+                    record_id=record_id,
+                    type="validation_error",
+                    message=f"Invalid timestamp: {exc}",
+                )
+            )
+            continue
+
+        if payload.validate_only:
+            summary.sync_logs.imported += 1
+            continue
+
+        try:
+            inserted = db_manager.import_sync_log(
+                connector_id=sync_log_record.connector_id,
+                seq=sync_log_record.seq,
+                started_at=started_at,
+                finished_at=finished_at,
+                total_files=sync_log_record.total_files,
+                new_files=sync_log_record.new_files,
+                completed_files=sync_log_record.completed_files,
+                removed_files=sync_log_record.removed_files,
+                status=sync_log_record.status,
+                error=sync_log_record.error,
+            )
+            if inserted:
+                summary.sync_logs.imported += 1
+            else:
+                summary.sync_logs.skipped += 1
+        except Exception as exc:
+            summary.sync_logs.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="sync_log",
+                    record_id=record_id,
+                    type="database_error",
+                    message=f"Failed to create sync_log record: {exc}",
+                )
+            )
 
     return ImportResponse(
         status="completed",

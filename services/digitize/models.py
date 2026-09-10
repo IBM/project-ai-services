@@ -199,6 +199,8 @@ class ImportExportData(BaseModel):
     """Shared payload structure for import/export APIs."""
     jobs: List["ExportJobRecord"] = Field(default_factory=list)
     documents: List["ExportDocumentRecord"] = Field(default_factory=list)
+    connectors: List["ExportConnectorRecord"] = Field(default_factory=list)
+    sync_logs: List["ExportSyncLogRecord"] = Field(default_factory=list)
 
 
 class ExportJobRecord(BaseModel):
@@ -206,6 +208,7 @@ class ExportJobRecord(BaseModel):
     job_id: str
     operation: str
     status: str
+    source: str = "user"
     job_name: Optional[str] = None
     submitted_at: str
     completed_at: Optional[str] = None
@@ -220,11 +223,47 @@ class ExportDocumentRecord(BaseModel):
     name: str
     type: str
     status: str
+    source: str = "user"
     output_format: str
     submitted_at: str
     completed_at: Optional[str] = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExportConnectorRecord(BaseModel):
+    """Serializable connector record for export/import APIs.
+
+    connection_details is intentionally excluded — encrypted credentials
+    cannot be round-tripped; connectors must be re-registered with fresh
+    credentials after restore. The record carries all other config fields
+    so the connector shell (id, name, type, extensions, interval, state)
+    is preserved.
+    """
+    id: str
+    name: str
+    type: str
+    allowed_extensions: List[str] = Field(default_factory=list)
+    sync_interval_seconds: int = 300
+    attached_at: str
+    last_sync_at: Optional[str] = None
+    status: str = "up to date"
+    total_files: int = 0
+    message: Optional[str] = None
+
+
+class ExportSyncLogRecord(BaseModel):
+    """Serializable connector sync-log record for export/import APIs."""
+    connector_id: str
+    seq: int
+    started_at: str
+    finished_at: Optional[str] = None
+    total_files: int = 0
+    new_files: int = 0
+    completed_files: int = 0
+    removed_files: int = 0
+    status: str
+    error: str = ""
 
 
 class ImportRequest(BaseModel):
@@ -234,8 +273,15 @@ class ImportRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_non_empty_payload(self):
-        if not self.data.jobs and not self.data.documents:
-            raise ValueError("At least one job or document record must be provided")
+        if (
+            not self.data.jobs
+            and not self.data.documents
+            and not self.data.connectors
+            and not self.data.sync_logs
+        ):
+            raise ValueError(
+                "At least one job, document, connector, or sync_log record must be provided"
+            )
         return self
 
 
@@ -256,9 +302,11 @@ class ImportEntitySummary(BaseModel):
 
 
 class ImportSummary(BaseModel):
-    """Import summary grouped by jobs and documents."""
+    """Import summary grouped by entity type."""
     jobs: ImportEntitySummary
     documents: ImportEntitySummary
+    connectors: ImportEntitySummary = Field(default_factory=ImportEntitySummary)
+    sync_logs: ImportEntitySummary = Field(default_factory=ImportEntitySummary)
 
 
 class ImportResponse(BaseModel):
@@ -278,9 +326,11 @@ class ExportEntitySummary(BaseModel):
 
 
 class ExportSummary(BaseModel):
-    """Export summary grouped by jobs and documents."""
+    """Export summary grouped by entity type."""
     jobs: ExportEntitySummary
     documents: ExportEntitySummary
+    connectors: ExportEntitySummary = Field(default_factory=ExportEntitySummary)
+    sync_logs: ExportEntitySummary = Field(default_factory=ExportEntitySummary)
 
 
 class ExportPagination(BaseModel):
