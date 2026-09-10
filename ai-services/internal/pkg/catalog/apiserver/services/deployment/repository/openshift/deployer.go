@@ -268,7 +268,7 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, plan *
 		return nil
 	}
 
-	ns := plan.Namespace
+	ns := catalogutils.AppNamespace(plan.ApplicationID)
 	endpoints := make([]map[string]any, 0, len(routes)+1)
 
 	for _, route := range routes {

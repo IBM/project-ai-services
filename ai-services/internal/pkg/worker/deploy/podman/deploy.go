@@ -25,6 +25,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 
 	k8syaml "sigs.k8s.io/yaml"
@@ -68,7 +69,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 
 	rt, err := runtime.CreateRuntime(types.RuntimeTypePodman, "")
 	if err != nil {
-		return fmt.Errorf("worker join: init runtime: %w", err)
+		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
@@ -103,9 +104,32 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return err
 	}
 
+	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
+		cleanupFailedWorkerPods(ctx, rt)
+
+		return err
+	}
+
 	logger.InfolnCtx(ctx, "Worker node setup complete.")
 
 	return nil
+}
+
+// cleanupFailedWorkerPods deletes all worker pods after a failed join attempt.
+func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
+	pods, listErr := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
+	if listErr != nil {
+		logger.ErrorfCtx(ctx, "failed to list worker pods for cleanup: %v\n", listErr)
+
+		return
+	}
+
+	for _, pod := range pods {
+		logger.InfofCtx(ctx, "Deleting '%s' pod, as worker failed to join", pod.Name)
+		if delErr := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); delErr != nil {
+			logger.ErrorfCtx(ctx, "failed to delete worker pod %s: %v\n", pod.Name, delErr)
+		}
+	}
 }
 
 // CheckStatus checks whether the worker node is already deployed by listing
@@ -118,7 +142,7 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 	for _, label := range labels {
 		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
 		if err != nil {
-			return false, nil, fmt.Errorf("worker setup: list pods: %w", err)
+			return false, nil, fmt.Errorf("failed to list pod: %w", err)
 		}
 
 		for _, p := range pods {
@@ -130,7 +154,7 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 
 	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
-		return false, nil, fmt.Errorf("worker setup: load templates: %w", err)
+		return false, nil, fmt.Errorf("failed to load templates: %w", err)
 	}
 
 	return len(existingResources) == len(tmpls), existingResources, nil
@@ -162,12 +186,12 @@ func readCaddyConfig(sslCertPath, sslKeyPath string) (string, string, string, er
 func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string, domainSuffix string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerconstants.WorkerAppTemplate, true, &appMetadata); err != nil {
-		return fmt.Errorf("worker setup: load metadata: %w", err)
+		return fmt.Errorf("failed to load metadata: %w", err)
 	}
 
 	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
-		return fmt.Errorf("worker setup: load templates: %w", err)
+		return fmt.Errorf("failed to load templates: %w", err)
 	}
 
 	argParams, err := buildArgParams(opts)
@@ -177,7 +201,7 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 
 	values, err := tp.LoadValues(workerconstants.WorkerAppTemplate, nil, argParams)
 	if err != nil {
-		return fmt.Errorf("worker setup: load values: %w", err)
+		return fmt.Errorf("failed to load values: %w", err)
 	}
 
 	values["hostAliases"] = opts.Setup.HostAliases
@@ -210,7 +234,7 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 	// worker container gets the correct CONTAINER_HOST and volume mount.
 	podmanURI, err := utils.ResolvePodmanURI()
 	if err != nil {
-		return nil, fmt.Errorf("worker setup: resolve podman URI: %w", err)
+		return nil, fmt.Errorf("failed to resolve podman URI: %w", err)
 	}
 
 	authFileBase64, err := utils.ReadAuthFileBase64()
@@ -220,7 +244,7 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 
 	caddyFileContent, sslCertContent, sslKeyContent, err := readCaddyConfig(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath)
 	if err != nil {
-		return nil, fmt.Errorf("worker setup: read Caddyfile: %w", err)
+		return nil, fmt.Errorf("failed to read Caddyfile: %w", err)
 	}
 
 	return map[string]string{
@@ -241,12 +265,12 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*ttemplate.Template, tmplName string, params map[string]any, existingResources []string) error {
 	tmpl, ok := tmpls[tmplName]
 	if !ok {
-		return fmt.Errorf("worker setup: template %q not found", tmplName)
+		return fmt.Errorf("template %q not found", tmplName)
 	}
 
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, params); err != nil {
-		return fmt.Errorf("worker setup: render %s: %w", tmplName, err)
+		return fmt.Errorf("failed to render template %s: %w", tmplName, err)
 	}
 
 	// If the rendered template is empty, skip deploying it
@@ -258,7 +282,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	var podSpec podmodels.PodSpec
 	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-		return fmt.Errorf("worker setup: parse pod spec %s: %w", tmplName, err)
+		return fmt.Errorf("failed to parse pod spec %s: %w", tmplName, err)
 	}
 	// Skipping deployment of existing resources
 	if slices.Contains(existingResources, podSpec.Name) {
@@ -269,7 +293,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	deployOpts := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(podSpec))
 
-	logger.InfofCtx(ctx, "worker setup: deploying %s\n", podSpec.Name)
+	logger.InfofCtx(ctx, "Deploying %s\n", podSpec.Name)
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)

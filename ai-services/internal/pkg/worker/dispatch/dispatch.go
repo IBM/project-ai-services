@@ -1,9 +1,15 @@
 // Package dispatch implements the worker-side command dispatcher.
 //
 // When the gRPC CommandStream delivers a Command from the control plane, the
-// worker calls Dispatch: the payload is decoded, the appropriate local
-// runtime.Runtime method is called, and a CommandResult is returned to be
-// sent back on the stream.
+// worker calls Dispatcher.Dispatch: the payload is decoded, the appropriate
+// local runtime.Runtime method is called, and a CommandResult is returned to
+// be sent back on the stream.
+//
+// Each command runs with its own cancellable context derived from the stream
+// context. When the control plane sends COMMAND_TYPE_CANCEL carrying the ID
+// of an in-flight command, the Dispatcher cancels that command's context so
+// the worker stops the work immediately (Helm install aborts, model download
+// container is stopped, etc.).
 //
 // The dispatcher is intentionally runtime-agnostic — the same Command envelope
 // is used for podman and openshift; the runtime implementation handles the
@@ -15,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -30,12 +37,80 @@ import (
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
+// Dispatcher routes commands to the local runtime and tracks in-flight
+// commands so they can be cancelled by COMMAND_TYPE_CANCEL.
+type Dispatcher struct {
+	mu       sync.Mutex
+	inflight map[string]context.CancelFunc // commandID → cancel
+}
+
+// New returns a ready-to-use Dispatcher.
+func New() *Dispatcher {
+	return &Dispatcher{inflight: make(map[string]context.CancelFunc)}
+}
+
+// register creates a per-command context derived from parent, stores its cancel
+// func keyed by commandID, and returns the derived context.
+func (d *Dispatcher) register(parent context.Context, commandID string) context.Context {
+	ctx, cancel := context.WithCancel(parent)
+	d.mu.Lock()
+	d.inflight[commandID] = cancel
+	d.mu.Unlock()
+
+	return ctx
+}
+
+// deregister removes the command from the inflight map and calls cancel() to
+// release the context node from the parent tree (avoids a context leak).
+func (d *Dispatcher) deregister(commandID string) {
+	d.mu.Lock()
+	cancel, ok := d.inflight[commandID]
+	delete(d.inflight, commandID)
+	d.mu.Unlock()
+
+	if ok {
+		cancel()
+	}
+}
+
+// cancelCommand signals the in-flight command to stop. No-op if already done.
+func (d *Dispatcher) cancelCommand(commandID string) {
+	d.mu.Lock()
+	cancel, ok := d.inflight[commandID]
+	if ok {
+		delete(d.inflight, commandID)
+	}
+	d.mu.Unlock()
+
+	if ok {
+		cancel()
+	}
+}
+
 // Dispatch routes cmd to the appropriate local runtime method and returns the
 // CommandResult to send back on the stream. It never returns an error — all
 // failures are encoded as CommandResult{Success: false, Error: "..."} so the
 // control plane always gets a response and its blocking send() can unblock.
 // pr may be nil for runtimes that do not support proxy route management (e.g. OpenShift).
-func Dispatch(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) *workerpb.CommandResult {
+func (d *Dispatcher) Dispatch(streamCtx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) *workerpb.CommandResult {
+	// CANCEL is handled inline — it signals another command's context and
+	// returns immediately without creating its own per-command context.
+	if cmd.GetType() == workerpb.CommandType_COMMAND_TYPE_CANCEL {
+		var req payload.CancelCommand
+		if err := json.Unmarshal(cmd.GetPayload(), &req); err != nil {
+			return failResult(cmd.GetCommandId(), fmt.Errorf("cancel: decode payload: %w", err))
+		}
+
+		d.cancelCommand(req.CommandID)
+
+		return okResult(cmd.GetCommandId(), nil)
+	}
+
+	// All other commands get their own cancellable context so COMMAND_TYPE_CANCEL
+	// can abort them mid-flight without touching the stream context.
+	ctx := d.register(streamCtx, cmd.GetCommandId())
+	defer d.deregister(cmd.GetCommandId())
+
 	data, err := handle(ctx, rt, pr, cmd)
 	if err != nil {
 		return failResult(cmd.GetCommandId(), err)
@@ -49,6 +124,10 @@ const defaultHelmTimeout = 20 * time.Minute
 
 // ─── router ───────────────────────────────────────────────────────────────────
 
+// handle routes cmd to the appropriate runtime method and returns the result.
+// NOTE: ctx is cancelled by deregister() on return — handlers must not spawn
+// background goroutines that inherit ctx and expect to outlive this call.
+//
 //nolint:gocognit,cyclop,funlen // large switch is unavoidable for a flat dispatch table
 func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) ([]byte, error) {
 	p := cmd.GetPayload()
@@ -143,7 +222,9 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		}
 		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, nrt.PodLogs(ctx, req.NameOrID)
+		logsLines, err := nrt.PodLogs(ctx, req.NameOrID, false)
+
+		return marshalOr(logsLines, err)
 
 	case workerpb.CommandType_COMMAND_TYPE_GET_POD_RESOURCES:
 		var req payload.NameOrID

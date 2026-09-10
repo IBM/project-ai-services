@@ -23,6 +23,8 @@ func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, con
 	var err error
 
 	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(inspectPollInterval)
+	defer timer.Stop()
 
 	for {
 		// fetch the container status
@@ -46,14 +48,21 @@ func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, con
 			return fmt.Errorf("operation timed out waiting for container readiness")
 		}
 
-		// every 10 seconds inspect the container
-		time.Sleep(inspectPollInterval)
+		// wait for next poll interval, but respect context cancellation
+		timer.Reset(inspectPollInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 
 // WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
 func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(inspectPollInterval)
+	defer timer.Stop()
 
 	for {
 		// fetch the pod info
@@ -73,8 +82,13 @@ func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, pod
 			return fmt.Errorf("operation timed out waiting for container creation")
 		}
 
-		// every 10 seconds inspect the pod
-		time.Sleep(inspectPollInterval)
+		// wait for next poll interval, but respect context cancellation
+		timer.Reset(inspectPollInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogOpenShift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
@@ -26,6 +27,7 @@ var (
 	// common flags.
 	// Runtime type flag for catalog configure command.
 	runtimeType string
+	skipChecks  []string
 	// Reset password flag for catalog configure command.
 	resetPasswordFlag bool
 
@@ -112,6 +114,10 @@ Note: --workergateway-port is supported for podman runtime only (default 9090).`
 			return runResetPodmanAuth(ctx)
 		} else if resetCertificateFlag {
 			return runResetCertificate(ctx)
+		}
+
+		if err := common.DoBootstrapValidate(ctx, skipChecks); err != nil {
+			return err
 		}
 
 		return runConfigure(ctx)
@@ -246,6 +252,9 @@ func runResetCertificate(ctx context.Context) error {
 func initConfigureCommonFlags() {
 	common.ConfigureRuntimeFlag(configureCmd, &runtimeType)
 
+	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
+	configureCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+
 	configureCmd.Flags().BoolVar(
 		&resetPasswordFlag,
 		"reset-password",
@@ -356,7 +365,8 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 	// Common flags, valid for all runtimes.
 	builder.
 		AddCommonFlag("reset-password", nil).
-		AddCommonFlag("skip-local-worker", nil)
+		AddCommonFlag("skip-local-worker", nil).
+		AddCommonFlag("skip-validation", common.ValidateSkipChecksFlag)
 
 	// Podman-only flags.
 	builder.
