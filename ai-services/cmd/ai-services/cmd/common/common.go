@@ -57,7 +57,10 @@ func validateRuntimeType(runtimeType types.RuntimeType) error {
 // ValidateSkipChecksFlag validates the skip-validation flag for the current runtime.
 func ValidateSkipChecksFlag(cmd *cobra.Command) error {
 	skipChecks, err := cmd.Flags().GetStringSlice("skip-validation")
-	if err != nil || len(skipChecks) == 0 {
+	if err != nil {
+		return err
+	}
+	if len(skipChecks) == 0 {
 		return nil
 	}
 
