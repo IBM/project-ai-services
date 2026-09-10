@@ -14,7 +14,6 @@ import (
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -59,38 +58,34 @@ func (e *DeploymentExecutor) ExecuteWithPlan(
 	ctx context.Context,
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
-	runtimeType types.RuntimeType,
 ) error {
-	if err := e.executeDeployment(ctx, plan, req, runtimeType); err != nil {
+	if err := e.executeDeployment(ctx, plan, req); err != nil {
 		return fmt.Errorf("failed to execute deployment: %w", err)
 	}
 
 	return nil
 }
 
-// executeDeployment routes to the correct deployer based on plan.WorkerName.
-// WorkerName is always set by PlanDeployment.
+// executeDeployment routes to the correct deployer based on plan.WorkerName and
+// plan.RuntimeType, which are both set by PlanDeployment.
 func (e *DeploymentExecutor) executeDeployment(
 	ctx context.Context,
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
-	runtimeType types.RuntimeType,
 ) error {
-	// ── Remote worker deployment ──────────────────────────────────────────────
-	// TODO Remove the check when remote deployment is by default
-	// and the remaining code will be dead
+	// Route through worker when a worker name is set (includes "Local").
 	if plan.WorkerName != "" {
 		return e.executeWorkerDeployment(ctx, plan, req)
 	}
 
 	// ── Local deployment ──────────────────────────────────────────────────────
-	switch runtimeType {
+	switch types.RuntimeType(plan.RuntimeType) {
 	case types.RuntimeTypePodman:
 		return e.executePodmanDeployment(ctx, plan, req)
 	case types.RuntimeTypeOpenShift:
 		return e.executeOpenShiftDeployment(ctx, plan, req)
 	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
+		return fmt.Errorf("unsupported runtime type: %s", plan.RuntimeType)
 	}
 }
 
@@ -104,12 +99,18 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 	req apimodels.CreateApplicationRequest,
 ) error {
 	// Connectivity was already confirmed by ValidateWorker; just read the type.
-	rtStr, _ := e.workerRegistry.WorkerRuntimeType(plan.WorkerName)
+	rtStr, ok := e.workerRegistry.WorkerRuntimeType(plan.WorkerName)
+	if !ok || rtStr == "" {
+		return fmt.Errorf("worker %q runtime type not available", plan.WorkerName)
+	}
 	workerType := types.RuntimeType(rtStr)
+	if !workerType.Valid() {
+		return fmt.Errorf("worker %q has unsupported runtime type %q", plan.WorkerName, workerType)
+	}
 
 	// RemoteRuntime forwards every call over the gRPC CommandStream — the
 	// deployer does not need to know it is talking to a remote machine.
-	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry)
+	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry, catalogutils.AppNamespace(plan.ApplicationID))
 	if err != nil {
 		return fmt.Errorf("create remote runtime for worker %q: %w", plan.WorkerName, err)
 	}
@@ -124,10 +125,7 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 	}
 }
 
-// runPodmanDeployer creates a PodmanDeployer backed by the RemoteRuntime and
-// injects the worker's registration metadata (domain suffix, HTTPS port, base
-// dir) via SetPodmanWorkerConfig so the deployer uses the correct values
-// instead of local environment variables.
+// runPodmanDeployer creates a PodmanDeployer backed by the RemoteRuntime.
 func (e *DeploymentExecutor) runPodmanDeployer(
 	ctx context.Context,
 	plan *DeploymentPlan,
@@ -136,19 +134,11 @@ func (e *DeploymentExecutor) runPodmanDeployer(
 ) error {
 	deployer := podman.NewPodmanDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo)
 
-	meta, _ := e.workerRegistry.WorkerMetadata(plan.WorkerName)
-	deployer.SetPodmanWorkerConfig(podman.PodmanWorkerConfig{
-		DomainSuffix: meta[workerconstants.MetaKeyDomainSuffix],
-		HTTPSPort:    meta[workerconstants.MetaKeyHTTPSPort],
-		BaseDir:      meta[workerconstants.MetaKeyBaseDir],
-	})
-
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }
 
-// runOpenShiftDeployer creates an OpenShiftDeployer backed by the RemoteRuntime
-// and runs the deployment. OpenShift workers manage routes natively via the
-// Kubernetes API so no config is needed.
+// runOpenShiftDeployer creates an OpenShiftDeployer backed by the given runtime.
+// HelmManager is resolved inside NewOpenShiftDeployer based on the runtime type.
 func (e *DeploymentExecutor) runOpenShiftDeployer(
 	ctx context.Context,
 	plan *DeploymentPlan,

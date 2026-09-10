@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,9 @@ import (
 const (
 	maxKeyValueParts  = 2
 	maxHostnameLength = 63
+
+	CaddyFileIndent   = 10
+	CertContentIndent = 4
 )
 
 // IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
@@ -613,14 +617,37 @@ func getPodmanURIAsRoot() (string, error) {
 	), nil
 }
 
-// GetAuthFilePath determines the auth.json file path based on the current user.
+// getAuthFilePath determines the auth.json file path based on the current user.
 // Returns the path to the Podman auth.json file for container registry authentication.
-func GetAuthFilePath() (string, error) {
+func getAuthFilePath() (string, error) {
 	if os.Geteuid() == 0 {
 		return "/run/user/0/containers/auth.json", nil
 	}
 
 	return fmt.Sprintf("/run/user/%d/containers/auth.json", os.Getuid()), nil
+}
+
+// ReadAuthFileBase64 reads the Podman auth file and returns its contents
+// base64-encoded. If the file does not exist, an encoded empty JSON object is
+// returned and a warning is logged.
+func ReadAuthFileBase64() (string, error) {
+	authFilePath, err := getAuthFilePath()
+	if err != nil {
+		return "", fmt.Errorf("failed to get auth file path: %w", err)
+	}
+
+	content, err := os.ReadFile(authFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logger.Warningln("Podman auth file not found. Image pulls may fail if the registry requires authentication.")
+			logger.Warningln("Run 'podman login' and retry if you encounter image pull errors.")
+			content = []byte("{}")
+		} else {
+			return "", fmt.Errorf("failed to read auth file from %s: %w", authFilePath, err)
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString(content), nil
 }
 
 // ExtractTarGz extracts a tar.gz file to a destination directory.
@@ -808,4 +835,18 @@ func IndentString(s string, spaces int) string {
 	}
 
 	return prefix + strings.Join(lines, "\n")
+}
+
+// IsNotFoundError checks if an error indicates a resource was not found.
+// Returns true for "no such pod", "no such secret", "no such volume" errors.
+func IsNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+
+	return strings.Contains(errMsg, "no such pod") ||
+		strings.Contains(errMsg, "no pod with name or ID") ||
+		strings.Contains(errMsg, "no such secret") ||
+		strings.Contains(errMsg, "no such volume")
 }

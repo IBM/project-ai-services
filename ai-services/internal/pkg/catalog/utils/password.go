@@ -1,16 +1,13 @@
 package utils
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"syscall"
 
-	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/term"
 )
@@ -36,39 +33,49 @@ func HashPasswordPBKDF2(password string, iteration int) (string, error) {
 	return encoded, nil
 }
 
-// CollectAndHashPassword collects the password from user and returns the hashed password.
-// Returns empty string if the secret already exists (no password needed).
-func CollectAndHashPassword(ctx context.Context, rt runtime.Runtime) (string, error) {
-	secretExists, err := rt.SecretExists(ctx, catalogConstants.CatalogSecretName)
+// PromptNewAdminPassword prompts for a new password (with confirmation) and
+// returns both the PBKDF2 hash and the plaintext.
+// Used during fresh catalog configure when no secret exists yet.
+func PromptNewAdminPassword() (passwordHash, plaintext string, err error) {
+	plaintext, err = promptForNewPassword()
 	if err != nil {
-		return "", fmt.Errorf("failed to check existing secrets: %w", err)
+		return "", "", fmt.Errorf("failed to read admin password: %w", err)
 	}
 
-	if secretExists {
-		return "", nil
+	passwordHash, err = HashPasswordPBKDF2(plaintext, defaultPasswordIterations)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	return PromptAndHashPassword()
+	return passwordHash, plaintext, nil
+}
+
+// PromptExistingAdminPassword prompts for the current admin password (no
+// confirmation, no hashing) and returns the plaintext.
+// Used when the catalog secret already exists and we just need to authenticate.
+func PromptExistingAdminPassword() (string, error) {
+	password, err := readPasswordFromTerminal("Enter admin password for authentication: ")
+	if err != nil {
+		return "", fmt.Errorf("failed to read admin password: %w", err)
+	}
+
+	if password == "" {
+		return "", fmt.Errorf("password cannot be empty")
+	}
+
+	return password, nil
 }
 
 // PromptAndHashPassword prompts for a new password and returns its hash.
 // Used for resets where the secret already exists.
 func PromptAndHashPassword() (string, error) {
-	adminPassword, err := promptForPassword()
-	if err != nil {
-		return "", fmt.Errorf("failed to read admin password: %w", err)
-	}
+	hash, _, err := PromptNewAdminPassword()
 
-	passwordHash, err := HashPasswordPBKDF2(adminPassword, defaultPasswordIterations)
-	if err != nil {
-		return "", fmt.Errorf("failed to hash password: %w", err)
-	}
-
-	return passwordHash, nil
+	return hash, err
 }
 
-// promptForPassword prompts the user to enter a password securely with confirmation.
-func promptForPassword() (string, error) {
+// promptForNewPassword prompts the user to enter a password securely with confirmation.
+func promptForNewPassword() (string, error) {
 	password, err := readPasswordFromTerminal("Enter admin password: ")
 	if err != nil {
 		return "", err
@@ -95,6 +102,7 @@ func readPasswordFromTerminal(prompt string) (string, error) {
 	fmt.Print(prompt)
 	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
 	fmt.Println()
+
 	if err != nil {
 		return "", err
 	}

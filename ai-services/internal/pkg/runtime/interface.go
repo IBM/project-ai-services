@@ -22,7 +22,7 @@ type Runtime interface {
 	StartPod(ctx context.Context, id string) error
 	InspectPod(ctx context.Context, nameOrId string) (*types.Pod, error)
 	PodExists(ctx context.Context, nameOrID string) (bool, error)
-	PodLogs(ctx context.Context, nameOrID string) error
+	PodLogs(ctx context.Context, nameOrID string, stream bool) ([]string, error)
 	GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error)
 	GetNamespace(ctx context.Context) (string, error)
 
@@ -66,6 +66,11 @@ type Runtime interface {
 	// and body is the request body (may be nil). Returns the HTTP status code,
 	// response headers, and body.
 	HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error)
+
+	// WaitForInferenceServiceReady polls a KServe InferenceService until its
+	// Ready condition is True or the context deadline is exceeded.
+	// Non-OpenShift runtimes return nil immediately (no-op).
+	WaitForInferenceServiceReady(ctx context.Context, isvcName string) error
 
 	// Runtime type identification
 	Type() types.RuntimeType

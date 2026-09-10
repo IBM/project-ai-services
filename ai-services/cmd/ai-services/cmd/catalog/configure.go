@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogOpenShift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
@@ -26,6 +27,7 @@ var (
 	// common flags.
 	// Runtime type flag for catalog configure command.
 	runtimeType string
+	skipChecks  []string
 	// Reset password flag for catalog configure command.
 	resetPasswordFlag bool
 
@@ -44,6 +46,8 @@ var (
 	resetPodmanAuthFlag bool
 	// Reset certificate flag for catalog configure command.
 	resetCertificateFlag bool
+	// Skip joining this machine as the Local worker.
+	skipLocalWorkerFlag bool
 
 	// openShift flags.
 	timeout time.Duration
@@ -60,19 +64,20 @@ var configureCmd = &cobra.Command{
 	Long: `Configure and deploy the AI Services catalog service with the specified runtime.
 
 This command performs the following operations:
-  - Deploys the catalog services
-  - Creates an admin user (if not already present)
-  - Initializes directory structure for applications and models
-
-Use --workergateway-port to set the gRPC port that workers connect to (default 9090).
-The worker gateway is always started; only the port number is configurable.
+	 - Deploys the catalog services
+	 - Creates an admin user (if not already present)
+	 - Initializes directory structure for applications and models
 
 Additional configuration options include base directory customization, domain name setup,
-SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
-	Example: `  # Configure catalog service for podman (worker gateway on default port 9090)
+SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
+Note: --workergateway-port is supported for podman runtime only (default 9090).`,
+	Example: `  # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
 
-	 # Configure with a custom worker gateway port
+	 # Configure catalog service for OpenShift
+	 ai-services catalog configure --runtime openshift
+
+	 # Configure with a custom worker gateway port (podman only)
 	 ai-services catalog configure --runtime podman --workergateway-port 9191
 
 	 # Configure with custom HTTPS port
@@ -109,6 +114,10 @@ SSL/TLS certificate management, HTTPS port configuration, and credential/certifi
 			return runResetPodmanAuth(ctx)
 		} else if resetCertificateFlag {
 			return runResetCertificate(ctx)
+		}
+
+		if err := common.DoBootstrapValidate(ctx, skipChecks); err != nil {
+			return err
 		}
 
 		return runConfigure(ctx)
@@ -151,14 +160,16 @@ func runConfigure(ctx context.Context) error {
 			SSLKeyPath:        catalogUtils.SanitizeFilePath(sslKeyPath),
 			HttpsPort:         httpsPort,
 			WorkerGatewayPort: workerGatewayPort,
+			SkipLocalWorker:   skipLocalWorkerFlag,
 		}
 
 		return catalogPodman.DeployCatalog(ctx, opts)
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace: catalogConstants.CatalogAppName,
-			Timeout:   timeout,
+			Namespace:       catalogConstants.CatalogAppName,
+			Timeout:         timeout,
+			SkipLocalWorker: skipLocalWorkerFlag,
 		}
 
 		return catalogOpenShift.DeployCatalog(ctx, opts)
@@ -186,8 +197,12 @@ func validateResetFlag(cmd *cobra.Command, flagName string) error {
 
 // validateConfigureFlags validates the configure command flags.
 func validateConfigureFlags() error {
-	// Validate SSL flags
+	// Podman-only validations
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
+			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
+		}
+
 		if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
 			return err
 		}
@@ -195,11 +210,6 @@ func validateConfigureFlags() error {
 		// Validate HTTPS port range
 		if httpsPort < 1 || httpsPort > 65535 {
 			return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
-		}
-
-		// Validate workergateway-port is a valid port number
-		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
-			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
 		}
 	}
 
@@ -242,11 +252,21 @@ func runResetCertificate(ctx context.Context) error {
 func initConfigureCommonFlags() {
 	common.ConfigureRuntimeFlag(configureCmd, &runtimeType)
 
+	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
+	configureCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+
 	configureCmd.Flags().BoolVar(
 		&resetPasswordFlag,
 		"reset-password",
 		false,
 		"Reset the password for the admin user",
+	)
+
+	configureCmd.Flags().BoolVar(
+		&skipLocalWorkerFlag,
+		"skip-local-worker",
+		false,
+		"Skip automatically joining this machine as the local worker after catalog deployment.",
 	)
 }
 
@@ -278,7 +298,7 @@ func initConfigurePodmanDeployFlags() {
 		&workerGatewayPort,
 		"workergateway-port",
 		defaultWorkerGatewayPort,
-		"Port for the gRPC worker gateway that workers connect to (always active).\n"+
+		"Port for the gRPC worker gateway that workers connect to.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --workergateway-port 9090\n",
 	)
@@ -342,14 +362,17 @@ func buildFlagValidator() *flagvalidator.FlagValidator {
 	rt := vars.RuntimeFactory.GetRuntimeType()
 	builder := flagvalidator.NewFlagValidatorBuilder(rt)
 
-	// Common flags, valid for every runtime.
-	builder.AddCommonFlag("reset-password", nil)
+	// Common flags, valid for all runtimes.
+	builder.
+		AddCommonFlag("reset-password", nil).
+		AddCommonFlag("skip-local-worker", nil).
+		AddCommonFlag("skip-validation", common.ValidateSkipChecksFlag)
 
 	// Podman-only flags.
 	builder.
+		AddPodmanFlag("workergateway-port", nil).
 		AddPodmanFlag("basedir", nil).
 		AddPodmanFlag("https-port", nil).
-		AddPodmanFlag("workergateway-port", nil).
 		AddPodmanFlag("domain-name", nil).
 		AddPodmanFlag("ssl-cert", nil).
 		AddPodmanFlag("ssl-key", nil).

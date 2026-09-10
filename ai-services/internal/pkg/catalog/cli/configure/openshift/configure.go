@@ -3,12 +3,14 @@ package openshift
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
+	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -18,6 +20,7 @@ import (
 	runtimeOpenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 )
 
 // DeployCatalog deploys the catalog service to OpenShift using the Helm chart.
@@ -27,13 +30,13 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	tp := templates.NewEmbedTemplateProvider(&assets.CatalogFS, "")
 
 	// Step 1: Fetch the operation timeout from metadata (or use the user-supplied timeout)
-	timeout, err := getOperationTimeout(ctx, tp, opts.Timeout)
+	timeout, err := getOperationTimeout(tp, opts.Timeout)
 	if err != nil {
 		return err
 	}
 
 	// Step 2: Load the Chart from assets/catalog/openshift
-	chartData, err := loadChart(ctx, tp)
+	chartData, err := helmutils.LoadChart(ctx, tp, catalogconstants.CatalogAppTemplate)
 	if err != nil {
 		return err
 	}
@@ -44,8 +47,17 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 		return fmt.Errorf("failed to create OpenShift client: %w", err)
 	}
 
-	// Step 4: Collect and hash password (if secret doesn't exist)
-	passwordHash, err := catalogutils.CollectAndHashPassword(ctx, runtime)
+	// Step 4: Collect the admin password.
+	//
+	// Fresh install (secret absent): prompt with confirmation → hash stored in the
+	//   new secret, plaintext used to login after deploy.
+	// Reconfigure (secret present): prompt without confirmation → verify by login.
+	secretExists, err := runtime.SecretExists(ctx, catalogconstants.CatalogSecretName)
+	if err != nil {
+		return fmt.Errorf("failed to check catalog secret: %w", err)
+	}
+
+	passwordHash, adminPassword, err := configureutils.CollectAdminPassword(secretExists)
 	if err != nil {
 		return err
 	}
@@ -53,7 +65,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	// Step 5: Prepare values with argument parameters
 	// Pass runtime so generateArgParams can skip re-generating the DB password
 	// when catalog-db-secret already exists (avoids mismatch with existing PVC data).
-	values, err := prepareValues(ctx, tp, runtime, passwordHash)
+	values, err := prepareValues(ctx, tp, runtime, passwordHash, opts.SkipLocalWorker)
 	if err != nil {
 		return err
 	}
@@ -65,7 +77,33 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 
 	logger.Infoln("-------")
 
-	// Step 7: Print next steps with route URLs
+	// Step 7: Login to catalog API, join as local worker, print next steps
+	return handlePostDeployment(ctx, tp, runtime, opts, adminPassword)
+}
+
+// handlePostDeployment logs in to the catalog API (verifying the admin password),
+// optionally joins the local worker, and prints next steps.
+func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *runtimeOpenshift.OpenshiftClient, opts catalogutils.OpenShiftConfigureOptions, adminPassword string) error {
+	// Login to the catalog API — this both verifies the admin password and gives
+	// us a client to reuse for local worker registration without a second login.
+	catalogAPIURL, err := getCatalogAPIURL(ctx, runtime)
+	if err != nil {
+		return fmt.Errorf("failed to resolve catalog API URL: %w", err)
+	}
+
+	catalogClient, err := configure.LoginToCatalog(ctx, catalogAPIURL, adminPassword)
+	if err != nil {
+		return fmt.Errorf("admin password verification failed: %w", err)
+	}
+
+	// Step 8: Join as local worker
+	if !opts.SkipLocalWorker {
+		if err := JoinAsLocalWorker(ctx, runtime, catalogClient); err != nil {
+			return fmt.Errorf("local worker join failed: %w", err)
+		}
+	}
+
+	// Step 9: Print next steps with route URLs
 	if err := helpers.PrintNextSteps(ctx, tp, runtime, catalogconstants.CatalogAppName, catalogconstants.CatalogAppTemplate); err != nil {
 		logger.Infof("failed to display next steps: %v\n", err)
 
@@ -75,7 +113,7 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	return nil
 }
 
-func getOperationTimeout(ctx context.Context, tp templates.Template, timeout time.Duration) (time.Duration, error) {
+func getOperationTimeout(tp templates.Template, timeout time.Duration) (time.Duration, error) {
 	// populate the operation timeout if it's either not set or set negatively
 	if timeout <= 0 {
 		var appMetadata templates.AppMetadata
@@ -89,24 +127,9 @@ func getOperationTimeout(ctx context.Context, tp templates.Template, timeout tim
 	return timeout, nil
 }
 
-func loadChart(ctx context.Context, tp templates.Template) (chart.Charter, error) {
-	s := spinner.New("Loading the Helm chart for catalog...")
-
-	s.Start(ctx)
-	chart, err := tp.LoadChart(catalogconstants.CatalogAppTemplate)
-	if err != nil {
-		s.Fail("failed to load the Helm chart")
-
-		return nil, fmt.Errorf("failed to load the chart: %w", err)
-	}
-	s.Stop("Loaded the Helm chart successfully")
-
-	return chart, nil
-}
-
-func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]any, error) {
+func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpenshift.OpenshiftClient, passwordHash string, skipLocalWorker bool) (map[string]any, error) {
 	// Generate argument parameters
-	argParams, err := generateArgParams(ctx, rt, passwordHash)
+	argParams, err := generateArgParams(ctx, rt, passwordHash, skipLocalWorker)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate arg params: %w", err)
 	}
@@ -120,9 +143,11 @@ func prepareValues(ctx context.Context, tp templates.Template, rt *runtimeOpensh
 	return values, nil
 }
 
-func generateArgParams(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, passwordHash string) (map[string]string, error) {
+func generateArgParams(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, passwordHash string, skipLocalWorker bool) (map[string]string, error) {
 	argParams := make(map[string]string)
 	argParams[configure.ArgParamAdminPasswordHash] = passwordHash
+
+	argParams[configure.ArgParamLocalWorker] = strconv.FormatBool(!skipLocalWorker)
 
 	dbSecretExists, err := rt.SecretExists(ctx, catalogconstants.CatalogDBSecretName)
 	if err != nil {

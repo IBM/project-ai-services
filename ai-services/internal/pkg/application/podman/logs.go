@@ -14,7 +14,7 @@ func (p *PodmanApplication) Logs(ctx context.Context, opts types.LogsOptions) er
 	logger.Infof("Fetching logs for application pod: %s", opts.PodName)
 
 	if opts.ContainerNameOrID == "" {
-		if err := p.runtime.PodLogs(ctx, opts.PodName); err != nil {
+		if _, err := p.runtime.PodLogs(ctx, opts.PodName, true); err != nil {
 			return fmt.Errorf("failed to fetch pod: %s logs; err: %w", opts.PodName, err)
 		}
 

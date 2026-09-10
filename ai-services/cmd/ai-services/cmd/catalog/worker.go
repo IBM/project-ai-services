@@ -53,7 +53,7 @@ Pass the token to the worker node and run:
 
 			ctx := cmd.Context()
 
-			c, err := client.New(ctx)
+			c, err := client.NewWorkerClient(ctx)
 			if err != nil {
 				return err
 			}
@@ -66,8 +66,10 @@ Pass the token to the worker node and run:
 			logger.Infoln("Worker registered successfully.")
 			logger.Infof("  Name:  %s\n", resp.WorkerName)
 			logger.Infof("  Token: %s\n", resp.Token)
-			logger.Infoln("\nPass this token to the worker daemon with --token.")
-			logger.Infoln("The token is single-use and expires after 24 hours.")
+			logger.Infoln("\nRun the following command on the worker node:")
+			logger.Infof("  ai-services worker join %s --token %s --runtime <runtime>\n",
+				resp.GatewayAddress, resp.Token)
+			logger.Infoln("\nThe token is single-use and expires after 24 hours.")
 
 			return nil
 		},
@@ -89,7 +91,7 @@ func newWorkerListCmd() *cobra.Command {
 
 			ctx := cmd.Context()
 
-			c, err := client.New(ctx)
+			c, err := client.NewWorkerClient(ctx)
 			if err != nil {
 				return err
 			}
@@ -122,7 +124,7 @@ If the worker is currently connected its gRPC stream is also cleaned up.`,
 
 			ctx := cmd.Context()
 
-			c, err := client.New(ctx)
+			c, err := client.NewWorkerClient(ctx)
 			if err != nil {
 				return err
 			}
@@ -153,7 +155,7 @@ func printWorkerTable(workers []catalogtypes.Worker) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, workerTablePadding, ' ', 0)
-	if _, err := fmt.Fprintln(w, "ID\tNAME\tRUNTIME\tSTATUS\tLAST HEARTBEAT"); err != nil {
+	if _, err := fmt.Fprintln(w, "ID\tNAME\tRUNTIME\tSTATUS\tMESSAGE\tLAST HEARTBEAT\tAPPS"); err != nil {
 		return err
 	}
 
@@ -163,8 +165,13 @@ func printWorkerTable(workers []catalogtypes.Worker) error {
 			hb = worker.LastHeartbeat.UTC().Format(time.RFC3339)
 		}
 
-		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			worker.ID, worker.Name, worker.RuntimeType, worker.Status, hb); err != nil {
+		msg := worker.Message
+		if msg == "" {
+			msg = "-"
+		}
+
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			worker.ID, worker.Name, worker.RuntimeType, worker.Status, msg, hb, len(worker.ApplicationIDs)); err != nil {
 			return err
 		}
 	}

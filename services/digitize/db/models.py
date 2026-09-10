@@ -31,6 +31,22 @@ class Base(DeclarativeBase):
     pass
 
 
+class JobSource(str, enum.Enum):
+    """Origin of a job: submitted by a human user or created by a connector sync."""
+    USER      = "user"
+    CONNECTOR = "connector"
+
+
+class DocumentSource(str, enum.Enum):
+    """Origin of a document: submitted by a human user or created by a connector sync.
+
+    Denormalised copy of the parent job's source so that document-only queries
+    (list, delete, existence checks) can filter without joining to the jobs table.
+    """
+    USER      = "user"
+    CONNECTOR = "connector"
+
+
 class Job(Base):
     """
     Job model representing a processing job.
@@ -46,6 +62,9 @@ class Job(Base):
     job_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     operation: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=JobSource.USER.value
+    )
 
     # Timestamps
     submitted_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -78,12 +97,16 @@ class Job(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint(
-            "status IN ('accepted', 'in_progress', 'completed', 'failed')",
+            "status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed', 'cancel_pending', 'cancelled')",
             name="chk_job_status"
         ),
         CheckConstraint(
             "operation IN ('ingestion', 'digitization')",
             name="chk_job_operation"
+        ),
+        CheckConstraint(
+            "source IN ('user', 'connector')",
+            name="chk_job_source"
         ),
         Index("idx_jobs_submitted_at_status", "submitted_at", "status"),
     )
@@ -114,6 +137,9 @@ class Document(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=DocumentSource.USER.value
+    )
     output_format: Mapped[str] = mapped_column(String(10), nullable=False)
 
     # Timestamps
@@ -140,12 +166,16 @@ class Document(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('accepted', 'in_progress', 'digitized', 'processed',"
-            " 'chunked', 'completed', 'failed', 'already_exists')",
+            " 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists', 'cancelled')",
             name="chk_doc_status"
         ),
         CheckConstraint(
             "type IN ('ingestion', 'digitization')",
             name="chk_doc_type"
+        ),
+        CheckConstraint(
+            "source IN ('user', 'connector')",
+            name="chk_doc_source"
         ),
         CheckConstraint(
             "output_format IN ('txt', 'md', 'json')",
@@ -204,9 +234,9 @@ class Connector(Base):
         default=lambda: datetime.now(timezone.utc),
     )
     last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    sync_status: Mapped[str] = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default=ConnectorStatus.UP_TO_DATE)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     sync_logs: Mapped[List["ConnectorSyncLog"]] = relationship(
@@ -221,7 +251,7 @@ class Connector(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Connector(id='{self.id}', name='{self.name}', type='{self.type}', status='{self.sync_status}')>"
+        return f"<Connector(id='{self.id}', name='{self.name}', type='{self.type}', status='{self.status}')>"
 
 
 class ConnectorDocumentChecksum(Base):
@@ -268,6 +298,7 @@ class ConnectorSyncLog(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     total_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     new_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     removed_files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default=SyncLogStatus.STARTED)
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -287,11 +318,13 @@ class ConnectorSyncLog(Base):
 
 class ConversionTaskStatus(str, enum.Enum):
     """Lifecycle statuses for a ConversionTask row."""
-    PENDING   = "pending"    # over-quota; waiting for queue headroom
-    QUEUED    = "queued"     # admitted to queue; waiting for semaphore slot
-    RUNNING   = "running"    # semaphore slot acquired
-    COMPLETED = "completed"  # conversion finished successfully
-    FAILED    = "failed"     # conversion failed or timed out
+    PENDING        = "pending"         # over-quota; waiting for queue headroom
+    QUEUED         = "queued"          # admitted to queue; waiting for semaphore slot
+    RUNNING        = "running"         # semaphore slot acquired
+    COMPLETED      = "completed"       # conversion finished successfully
+    FAILED         = "failed"          # conversion failed or timed out
+    CANCEL_PENDING = "cancel_pending"  # cancellation requested; dispatcher will stop before or after current chunk
+    CANCELLED      = "cancelled"       # dispatcher acknowledged cancellation and halted
 
 
 class ConversionTask(Base):
@@ -315,6 +348,9 @@ class ConversionTask(Base):
 
     # Digitize document id; informational only
     doc_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Owning connector UUID — NULL for user-submitted jobs
+    connector_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Operation type — 'ingestion' | 'digitization'
     operation: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -360,13 +396,15 @@ class ConversionTask(Base):
             name="chk_ct_output_format",
         ),
         CheckConstraint(
-            "status IN ('pending', 'queued', 'running', 'completed', 'failed')",
+            "status IN ('pending', 'queued', 'running', 'completed', 'failed', 'cancel_pending', 'cancelled')",
             name="chk_ct_status",
         ),
         # Supports dispatcher's pick query (ORDER BY queued_at per status+operation)
         Index("idx_ct_status_op_queued", "status", "operation", "queued_at"),
         # Supports get_conversion_task_by_job_id — called by pipeline pollers
         Index("idx_ct_job_id", "job_id"),
+        # Supports dispatcher connector round-robin pick (turn 2: queued tasks per connector)
+        Index("idx_ct_connector_queued", "connector_id", "status", "queued_at"),
     )
 
     def __repr__(self) -> str:

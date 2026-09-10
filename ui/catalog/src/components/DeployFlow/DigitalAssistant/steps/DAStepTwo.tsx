@@ -1,4 +1,5 @@
 import { useMemo, useEffect } from "react";
+import { formatVersion } from "@/utils/string";
 import { InlineNotification } from "@carbon/react";
 import styles from "../../Shared/DeployFlow.shared.module.scss";
 import type { StepProps } from "../types";
@@ -247,7 +248,9 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
   );
 
   const serviceVersionOptions = useMemo(
-    () => [{ id: deployOptions.version, text: deployOptions.version }],
+    () => [
+      { id: deployOptions.version, text: formatVersion(deployOptions.version) },
+    ],
     [deployOptions.version],
   );
 

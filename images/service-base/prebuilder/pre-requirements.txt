@@ -1,1 +1,2 @@
+sudachipy==0.6.11
 ujson==5.13.0

@@ -14,7 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from common.misc_utils import get_logger
 from digitize.db.models import (
-    Job, Document, DocumentChecksum,
+    Job, JobSource, Document, DocumentSource, DocumentChecksum,
     Connector, ConnectorDocumentChecksum, ConnectorSyncLog,
     ConversionTask, ConversionTaskStatus,
 )
@@ -37,6 +37,7 @@ class DatabaseManager:
         operation: str,
         status: JobStatus = JobStatus.ACCEPTED,
         job_name: Optional[str] = None,
+        source: JobSource = JobSource.USER,
         submitted_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
         error: Optional[str] = None,
@@ -50,6 +51,7 @@ class DatabaseManager:
             operation: Type of operation (ingestion/digitization)
             status: Initial job status
             job_name: Optional human-readable name
+            source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
             submitted_at: Submission timestamp (defaults to now)
             completed_at: Completion timestamp (optional, for import)
             error: Error message (optional, for import)
@@ -65,6 +67,7 @@ class DatabaseManager:
                     job_name=job_name,
                     operation=operation,
                     status=status.value,
+                    source=source.value,
                     submitted_at=submitted_at or datetime.now(timezone.utc),
                     completed_at=completed_at,
                     error=error,
@@ -119,6 +122,39 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Unexpected error retrieving job {job_id}: {e}", exc_info=True)
             return None
+
+
+    @staticmethod
+    def is_job_cancelled(job_id: str) -> bool:
+        """
+        Check whether a job has been marked for cancellation.
+
+        Returns True for both 'cancel_pending' (set by the API endpoint) and
+        'cancelled' (set by the pipeline after it finishes draining), so that
+        pipeline checkpoints stop as soon as the cancellation request arrives.
+
+        Performs a lightweight single-column SELECT so it is cheap to call
+        at pipeline checkpoints without loading the full job row.
+
+        Args:
+            job_id: Unique identifier for the job
+
+        Returns:
+            True if the job status is 'cancel_pending' or 'cancelled', False
+            otherwise (including when the job is not found or a DB error occurs).
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(Job.status).where(Job.job_id == job_id)
+                job_status = session.scalar(stmt)
+                return job_status in ("cancel_pending", "cancelled")
+        except SQLAlchemyError as e:
+            logger.error(f"Database error checking cancellation for job {job_id}: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error checking cancellation for job {job_id}: {e}", exc_info=True)
+            return False
+
 
     @staticmethod
     def get_all_jobs(
@@ -264,6 +300,7 @@ class DatabaseManager:
         completed_at: Optional[datetime] = None,
         error: Optional[str] = None,
         job_id: Optional[str] = None,
+        source: DocumentSource = DocumentSource.USER,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[Document]:
         """
@@ -279,6 +316,7 @@ class DatabaseManager:
             completed_at: Completion timestamp (optional, for import)
             error: Error message (optional, for import)
             job_id: Associated job ID
+            source: Document origin — DocumentSource.USER (default) or DocumentSource.CONNECTOR
             metadata: Additional metadata dictionary
 
         Returns:
@@ -292,6 +330,7 @@ class DatabaseManager:
                     name=name,
                     type=doc_type,
                     status=status.value,
+                    source=source.value,
                     output_format=output_format,
                     submitted_at=submitted_at or datetime.now(timezone.utc),
                     completed_at=completed_at,
@@ -329,9 +368,9 @@ class DatabaseManager:
                 if document:
                     # Eagerly access all attributes to load them before session closes
                     _ = (document.doc_id, document.job_id, document.name, document.type,
-                         document.status, document.output_format, document.submitted_at,
-                         document.completed_at, document.error, document.doc_metadata,
-                         document.updated_at)
+                         document.status, document.source, document.output_format,
+                         document.submitted_at, document.completed_at, document.error,
+                         document.doc_metadata, document.updated_at)
                     # Expunge the object from session to prevent DetachedInstanceError
                     session.expunge(document)
                     logger.debug(f"Retrieved document from database: {doc_id}")
@@ -415,8 +454,8 @@ class DatabaseManager:
                     # DetachedInstanceError in the caller.
                     _ = (
                         doc.doc_id, doc.job_id, doc.name, doc.type,
-                        doc.status, doc.output_format, doc.submitted_at,
-                        doc.completed_at, doc.error, doc.doc_metadata,
+                        doc.status, doc.source, doc.output_format,
+                        doc.submitted_at, doc.completed_at, doc.error, doc.doc_metadata,
                     )
                     session.expunge(doc)
                     logger.debug(
@@ -447,8 +486,8 @@ class DatabaseManager:
             name: Filter by document name (partial match)
             limit: Maximum number of documents to return
             offset: Number of documents to skip
-            exclude_connector_sourced: When True, omit docs that appear in
-                connector_document_checksum (connector-sourced documents).
+            exclude_connector_sourced: When True, omit connector-sourced documents
+                by filtering on Document.source directly — no join to jobs required.
 
         Returns:
             Tuple of (list of Document objects, total count)
@@ -468,12 +507,7 @@ class DatabaseManager:
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 if exclude_connector_sourced:
-                    # Exclude connector-sourced documents via NOT EXISTS subquery.
-                    filters.append(
-                        ~select(ConnectorDocumentChecksum.doc_id)
-                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
-                        .exists()
-                    )
+                    filters.append(Document.source == DocumentSource.USER.value)
 
                 if filters:
                     stmt = stmt.where(and_(*filters))
@@ -490,7 +524,7 @@ class DatabaseManager:
                 for doc in documents:
                     # Access all attributes to load them before session closes
                     _ = (doc.doc_id, doc.job_id, doc.name, doc.type, doc.status,
-                         doc.output_format, doc.submitted_at, doc.completed_at,
+                         doc.source, doc.output_format, doc.submitted_at, doc.completed_at,
                          doc.error, doc.doc_metadata, doc.updated_at)
                     session.expunge(doc)
                 logger.debug(f"Retrieved {len(documents)} documents from database (total: {total})")
@@ -521,7 +555,7 @@ class DatabaseManager:
                 for doc in documents:
                     # Access all attributes to load them before session closes
                     _ = (doc.doc_id, doc.job_id, doc.name, doc.type, doc.status,
-                         doc.output_format, doc.submitted_at, doc.completed_at,
+                         doc.source, doc.output_format, doc.submitted_at, doc.completed_at,
                          doc.error, doc.doc_metadata, doc.updated_at)
                     session.expunge(doc)
                 return documents
@@ -671,7 +705,7 @@ class DatabaseManager:
     @staticmethod
     def delete_user_documents() -> Dict[str, Any]:
         """
-        Delete only user-submitted documents (those NOT in connector_document_checksum).
+        Delete only user-submitted documents — those whose source is 'user'.
 
         Connector-sourced documents and their checksum rows are left untouched.
 
@@ -686,11 +720,7 @@ class DatabaseManager:
                 # Collect user-submitted doc IDs first (excludes connector-sourced).
                 user_doc_ids_stmt = (
                     select(Document.doc_id)
-                    .where(
-                        ~select(ConnectorDocumentChecksum.doc_id)
-                        .where(ConnectorDocumentChecksum.doc_id == Document.doc_id)
-                        .exists()
-                    )
+                    .where(Document.source == DocumentSource.USER.value)
                 )
                 doc_ids = list(session.scalars(user_doc_ids_stmt).all())
 
@@ -727,8 +757,7 @@ class DatabaseManager:
     @staticmethod
     def delete_user_jobs() -> Dict[str, Any]:
         """
-        Delete only user-submitted jobs — those whose job_name does NOT start
-        with the connector-job prefix ``"Connector-"``.
+        Delete only user-submitted jobs — those whose source is 'user'.
 
         Returns:
             Dictionary with:
@@ -738,7 +767,7 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 stmt = delete(Job).where(
-                    ~Job.job_name.like("Connector-%")
+                    Job.source == JobSource.USER.value
                 )
                 result = cast(CursorResult, session.execute(stmt))
                 deleted_count = result.rowcount
@@ -782,7 +811,7 @@ class DatabaseManager:
                         allowed_extensions=allowed_extensions,
                         sync_interval_seconds=sync_interval_seconds,
                         attached_at=datetime.now(timezone.utc),
-                        sync_status=ConnectorStatus.UP_TO_DATE,
+                        status=ConnectorStatus.UP_TO_DATE,
                         total_files=0,
                     )
                     .on_conflict_do_nothing(index_elements=["id"])
@@ -808,14 +837,14 @@ class DatabaseManager:
         connection_details: Optional[dict] = None,
         allowed_extensions: Optional[list] = None,
         total_files: Optional[int] = None,
-        error: "Optional[str]" = _UNSET,  # type: ignore[assignment]
+        message: "Optional[str]" = _UNSET,  # type: ignore[assignment]
     ) -> None:
         """
         Partial update of an existing connector.
 
         Only non-``_UNSET`` kwargs are written; connection_details is merged at
         the key level using the PostgreSQL ``||`` JSONB concatenation operator.
-        Pass ``error=None`` explicitly to clear a previously set error to NULL.
+        Pass ``message=None`` explicitly to clear a previously set message to NULL.
 
         Raises FileNotFoundError if no connector with the given id exists.
         """
@@ -828,8 +857,8 @@ class DatabaseManager:
                     values["allowed_extensions"] = allowed_extensions
                 if total_files is not None:
                     values["total_files"] = total_files
-                if error is not _UNSET:
-                    values["error"] = error
+                if message is not _UNSET:
+                    values["message"] = message
                 if connection_details is not None:
                     stmt = (
                         update(Connector)
@@ -874,8 +903,8 @@ class DatabaseManager:
                     connector.id, connector.name, connector.type,
                     connector.connection_details, connector.allowed_extensions,
                     connector.sync_interval_seconds, connector.attached_at,
-                    connector.last_sync_at, connector.sync_status,
-                    connector.error, connector.total_files,
+                    connector.last_sync_at, connector.status,
+                    connector.total_files, connector.message,
                 )
                 session.expunge(connector)
                 return connector
@@ -900,7 +929,7 @@ class DatabaseManager:
                     connector.id, connector.name, connector.type,
                     connector.connection_details, connector.allowed_extensions,
                     connector.sync_interval_seconds, connector.attached_at,
-                    connector.last_sync_at, connector.sync_status,
+                    connector.last_sync_at, connector.status,
                     connector.error, connector.total_files,
                 )
                 session.expunge(connector)
@@ -912,15 +941,15 @@ class DatabaseManager:
     @staticmethod
     def get_connector_sync_status(connector_id: str) -> Optional[str]:
         """
-        Return the current sync_status string for a connector.
+        Return the current status string for a connector.
 
-        Does a minimal SELECT sync_status query — does not load the full row.
+        Does a minimal SELECT status query — does not load the full row.
         Returns None if the connector does not exist.
         """
         try:
             with get_db_session() as session:
                 stmt = (
-                    select(Connector.sync_status)
+                    select(Connector.status)
                     .where(Connector.id == connector_id)
                 )
                 row = session.execute(stmt).one_or_none()
@@ -947,8 +976,8 @@ class DatabaseManager:
                     _ = (
                         c.id, c.name, c.type, c.connection_details,
                         c.allowed_extensions, c.sync_interval_seconds,
-                        c.attached_at, c.last_sync_at, c.sync_status,
-                        c.error, c.total_files,
+                        c.attached_at, c.last_sync_at, c.status,
+                        c.total_files, c.message,
                     )
                     session.expunge(c)
                 logger.debug(f"Listed {len(connectors)} connector(s)")
@@ -956,6 +985,47 @@ class DatabaseManager:
         except SQLAlchemyError as e:
             logger.error(f"DB error listing connectors: {e}", exc_info=True)
             return []
+
+    @staticmethod
+    def get_all_connectors_paginated(
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[List[Connector], int]:
+        """
+        Return paginated connectors ordered by attached_at descending.
+
+        Returns (items, total_count).
+        Each object is eagerly loaded and expunged from the session.
+        """
+        try:
+            with get_db_session() as session:
+                base = select(Connector)
+                total = session.execute(
+                    select(func.count()).select_from(base.subquery())
+                ).scalar() or 0
+                stmt = (
+                    select(Connector)
+                    .order_by(Connector.attached_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                connectors = list(session.scalars(stmt).all())
+                for c in connectors:
+                    _ = (
+                        c.id, c.name, c.type, c.connection_details,
+                        c.allowed_extensions, c.sync_interval_seconds,
+                        c.attached_at, c.last_sync_at, c.status,
+                        c.total_files, c.message,
+                    )
+                    session.expunge(c)
+                logger.debug(
+                    f"Listed {len(connectors)} connector(s) "
+                    f"(limit={limit}, offset={offset}, total={total})"
+                )
+                return connectors, total
+        except SQLAlchemyError as e:
+            logger.error(f"DB error listing connectors (paginated): {e}", exc_info=True)
+            return [], 0
 
     @staticmethod
     def delete_connector(connector_id: str) -> bool:
@@ -1133,7 +1203,7 @@ class DatabaseManager:
     @staticmethod
     def try_acquire_sync_lock(connector_id: str) -> bool:
         """
-        Atomically set sync_status='syncing' if it is not already 'syncing'.
+        Atomically set status='syncing' if it is not already 'syncing'.
 
         Returns True if the lock was acquired, False if another tick already
         holds it (or the connector row does not exist).
@@ -1144,9 +1214,9 @@ class DatabaseManager:
                     update(Connector)
                     .where(
                         Connector.id == connector_id,
-                        Connector.sync_status != ConnectorStatus.SYNCING,
+                        Connector.status != ConnectorStatus.SYNCING,
                     )
-                    .values(sync_status=ConnectorStatus.SYNCING)
+                    .values(status=ConnectorStatus.SYNCING)
                     .returning(Connector.id)
                 ).one_or_none()
                 return result is not None
@@ -1180,7 +1250,7 @@ class DatabaseManager:
     @staticmethod
     def mark_connector_delete_pending(connector_id: str) -> bool:
         """
-        Set sync_status='delete pending' for the given connector regardless of
+        Set status='delete pending' for the given connector regardless of
         current status.
 
         Returns True if the connector was found and updated, False if it does
@@ -1193,7 +1263,7 @@ class DatabaseManager:
                     .where(
                         Connector.id == connector_id
                     )
-                    .values(sync_status=ConnectorStatus.DELETE_PENDING)
+                    .values(status=ConnectorStatus.DELETE_PENDING)
                     .returning(Connector.id)
                 ).one_or_none()
                 return result is not None
@@ -1239,13 +1309,13 @@ class DatabaseManager:
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
-        """Set sync_status=SYNCING on the connector row."""
+        """Set status=SYNCING and clear message on the connector row."""
         try:
             with get_db_session() as session:
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
-                    .values(sync_status=ConnectorStatus.SYNCING)
+                    .values(status=ConnectorStatus.SYNCING, message=None)
                 )
         except SQLAlchemyError as e:
             logger.error(f"DB error in set_connector_sync_status_syncing({connector_id}): {e}", exc_info=True)
@@ -1310,32 +1380,29 @@ class DatabaseManager:
         connector_id: str,
         status: str,
         last_sync_at: Optional[datetime] = None,
-        error: Optional[str] = None,
+        message: Optional[str] = None,
     ) -> None:
         """
-        Update last_sync_at, sync_status, and error on the connector row after a sync run.
+        Update last_sync_at, status, and message on the connector row after a sync run.
 
         CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can retry;
         any other status (e.g. COMPLETED) is written through verbatim.
 
-        ``error`` is written when provided (failure/cancel paths); it is cleared
-        to NULL on a successful completion so a past error does not persist.
+        ``message`` carries error detail on failure/cancel paths and is
+        cleared to NULL on a successful completion.
         """
         try:
             with get_db_session() as session:
                 connector_sync_status = (
-                    ConnectorStatus.OUT_OF_SYNC
-                    if status in (SyncLogStatus.CANCELLED, SyncLogStatus.FAILED)
-                    else status
+                    ConnectorStatus.UP_TO_DATE
+                    if status == SyncLogStatus.COMPLETED
+                    else ConnectorStatus.OUT_OF_SYNC
                 )
                 values: Dict[str, Any] = {
                     "last_sync_at": last_sync_at or datetime.now(timezone.utc),
-                    "sync_status": connector_sync_status,
+                    "status": connector_sync_status,
+                    "message": message if status != SyncLogStatus.COMPLETED else None,
                 }
-                if status == SyncLogStatus.COMPLETED:
-                    values["error"] = None
-                elif error is not None:
-                    values["error"] = error
                 session.execute(
                     update(Connector)
                     .where(Connector.id == connector_id)
@@ -1396,6 +1463,53 @@ class DatabaseManager:
             return False
 
     @staticmethod
+    def increment_completed_files(connector_id: str, seq: int, count: int = 1) -> bool:
+        """
+        Atomically increment completed_files by *count* on the identified sync-log row,
+        then write a "Processing x/y files" message on the connector row.
+
+        Uses a SQL expression (completed_files + count) so concurrent calls do
+        not race against each other.  Returns True if the row was found and
+        updated, False otherwise.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    update(ConnectorSyncLog)
+                    .where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq == seq,
+                    )
+                    .values(
+                        completed_files=ConnectorSyncLog.completed_files + count
+                    )
+                    .returning(
+                        ConnectorSyncLog.completed_files,
+                        ConnectorSyncLog.new_files,
+                    )
+                )
+                row = session.execute(stmt).one_or_none()
+                if row is None:
+                    logger.warning(
+                        f"Sync log connector={connector_id!r} seq={seq} not found for completed_files increment"
+                    )
+                    return False
+                completed, new_files = row
+                message = f"Processing {completed}/{new_files} files"
+                session.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(message=message)
+                )
+                return True
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in increment_completed_files(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            return False
+
+    @staticmethod
     def get_sync_log_status(connector_id: str, seq: int) -> Optional[str]:
         """
         Return the status of a specific sync-log row identified by (connector_id, seq).
@@ -1451,7 +1565,6 @@ class DatabaseManager:
                 exc_info=True,
             )
             return None
-
     @staticmethod
     def count_sync_logs(connector_id: str) -> int:
         """Return the total number of sync-log rows for the given connector."""
@@ -1549,6 +1662,7 @@ class DatabaseManager:
         page_count: int,
         is_large: bool,
         status: ConversionTaskStatus = ConversionTaskStatus.QUEUED,
+        connector_id: Optional[str] = None,
     ) -> Optional[ConversionTask]:
         """
         Insert a single conversion_tasks row.
@@ -1563,6 +1677,7 @@ class DatabaseManager:
             page_count:    Document page count (0 for DOCX).
             is_large:      True when page_count >= heavy_doc_page_threshold.
             status:        Initial status — QUEUED or PENDING.
+            connector_id:  Owning connector UUID; None for user-submitted jobs.
 
         Returns:
             The created ConversionTask or None on failure.
@@ -1573,6 +1688,7 @@ class DatabaseManager:
                     task_id=task_id,
                     job_id=job_id,
                     doc_id=doc_id,
+                    connector_id=connector_id,
                     operation=operation,
                     cached_file=cached_file,
                     output_format=output_format,
@@ -1624,6 +1740,7 @@ class DatabaseManager:
                     task_id=t["task_id"],
                     job_id=t["job_id"],
                     doc_id=t["doc_id"],
+                    connector_id=t.get("connector_id"),
                     operation=t["operation"],
                     cached_file=t["cached_file"],
                     output_format=t["output_format"],
@@ -1650,8 +1767,8 @@ class DatabaseManager:
         then removes the object from the identity map so callers can use it
         freely after the ``with get_db_session()`` block exits.
         """
-        _ = (task.task_id, task.job_id, task.doc_id, task.operation,
-             task.cached_file, task.output_format, task.page_count,
+        _ = (task.task_id, task.job_id, task.doc_id, task.connector_id,
+             task.operation, task.cached_file, task.output_format, task.page_count,
              task.is_large, task.status, task.result_path, task.error,
              task.queued_at, task.started_at, task.completed_at)
         session.expunge(task)
@@ -1855,7 +1972,11 @@ class DatabaseManager:
                 }
                 if status == ConversionTaskStatus.RUNNING:
                     updates["started_at"] = now
-                if status in (ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED):
+                if status in (
+                    ConversionTaskStatus.COMPLETED,
+                    ConversionTaskStatus.FAILED,
+                    ConversionTaskStatus.CANCELLED,
+                ):
                     updates["completed_at"] = now
                 if result_path is not None:
                     updates["result_path"] = result_path
@@ -1874,25 +1995,95 @@ class DatabaseManager:
             return False
 
     @staticmethod
-    def peek_head(operation: str) -> Optional[ConversionTask]:
+    def cancel_tasks_for_job(job_id: str) -> int:
+        """
+        Cancel all non-terminal ConversionTask rows for ``job_id``.
+
+        Tasks that have never been dispatched (pending, queued) are moved
+        directly to ``cancelled`` — the dispatcher will never pick them up
+        again so there is no checkpoint to wait for.
+
+        Tasks that are actively running are moved to ``cancel_pending`` so
+        the dispatcher can observe the flag at its next safe checkpoint
+        (between 100-page chunks or after the process-pool future returns)
+        and write the final ``cancelled`` status itself.
+
+        Tasks already in completed, failed, cancel_pending, or cancelled are
+        left unchanged.
+
+        Returns:
+            Total number of rows updated.
+        """
+        try:
+            with get_db_session() as session:
+                # PENDING / QUEUED → CANCELLED directly: never dispatched, no
+                # checkpoint needed.
+                not_started = (
+                    update(ConversionTask)
+                    .where(
+                        ConversionTask.job_id == job_id,
+                        ConversionTask.status.in_([
+                            ConversionTaskStatus.PENDING,
+                            ConversionTaskStatus.QUEUED,
+                        ]),
+                    )
+                    .values(status=ConversionTaskStatus.CANCELLED)
+                )
+                not_started_result = cast(CursorResult, session.execute(not_started))
+
+                # RUNNING → CANCEL_PENDING: dispatcher must observe the flag
+                # at its next checkpoint before writing the final CANCELLED.
+                running = (
+                    update(ConversionTask)
+                    .where(
+                        ConversionTask.job_id == job_id,
+                        ConversionTask.status == ConversionTaskStatus.RUNNING,
+                    )
+                    .values(status=ConversionTaskStatus.CANCEL_PENDING)
+                )
+                running_result = cast(CursorResult, session.execute(running))
+
+                updated = not_started_result.rowcount + running_result.rowcount
+                if updated:
+                    logger.info(
+                        f"cancel_tasks_for_job: cancelled {not_started_result.rowcount} "
+                        f"queued/pending and signalled {running_result.rowcount} "
+                        f"running task(s) for job {job_id}"
+                    )
+                return updated
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in cancel_tasks_for_job({job_id}): {e}", exc_info=True
+            )
+            return 0
+
+
+    @staticmethod
+    def peek_head(operation: str, connector_id: Optional[str] = None) -> Optional[ConversionTask]:
         """
         Return the oldest 'queued' task for ``operation`` without locking.
+
+        Pass ``connector_id`` to scope the peek to a specific connector's queue
+        (dispatcher turn 2).  Pass None (default) for user task queues.
 
         Used by the dispatcher to inspect the head weight before attempting
         an atomic claim.
         """
         try:
             with get_db_session() as session:
-                stmt = (
+                filters = [
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
+                    ConversionTask.operation == operation,
+                    ConversionTask.connector_id == connector_id
+                    if connector_id is not None
+                    else ConversionTask.connector_id.is_(None),
+                ]
+                task = session.scalar(
                     select(ConversionTask)
-                    .where(
-                        ConversionTask.status == ConversionTaskStatus.QUEUED,
-                        ConversionTask.operation == operation,
-                    )
+                    .where(*filters)
                     .order_by(ConversionTask.queued_at)
                     .limit(1)
                 )
-                task = session.scalar(stmt)
                 if task:
                     DatabaseManager._load_and_expunge_task(task, session)
                 return task
@@ -1901,9 +2092,12 @@ class DatabaseManager:
             return None
 
     @staticmethod
-    def claim_head(operation: str) -> Optional[ConversionTask]:
+    def claim_head(operation: str, connector_id: Optional[str] = None) -> Optional[ConversionTask]:
         """
         Atomically promote the oldest 'queued' task for ``operation`` to 'running'.
+
+        Pass ``connector_id`` to scope the claim to a specific connector's queue
+        (dispatcher turn 2).  Pass None (default) for user task queues.
 
         Uses SELECT … FOR UPDATE SKIP LOCKED so concurrent callers never
         claim the same task.
@@ -1914,33 +2108,33 @@ class DatabaseManager:
         """
         try:
             with get_db_session() as session:
-                # Subquery: find the head task_id under a row-level lock
+                filters = [
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
+                    ConversionTask.operation == operation,
+                    ConversionTask.connector_id == connector_id
+                    if connector_id is not None
+                    else ConversionTask.connector_id.is_(None),
+                ]
                 subq = (
                     select(ConversionTask.task_id)
-                    .where(
-                        ConversionTask.status == ConversionTaskStatus.QUEUED,
-                        ConversionTask.operation == operation,
-                    )
+                    .where(*filters)
                     .order_by(ConversionTask.queued_at)
                     .limit(1)
                     .with_for_update(skip_locked=True)
                     .scalar_subquery()
                 )
-                now = datetime.now(timezone.utc)
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id == subq)
                     .values(
                         status=ConversionTaskStatus.RUNNING,
-                        started_at=now,
+                        started_at=datetime.now(timezone.utc),
                     )
                     .returning(ConversionTask)
                 )
-                result = session.execute(stmt)
-                row = result.fetchone()
+                row = session.execute(stmt).fetchone()
                 if row is None:
                     return None
-                # row[0] is the ORM object returned by RETURNING *
                 task = row[0]
                 DatabaseManager._load_and_expunge_task(task, session)
                 return task
@@ -1951,10 +2145,14 @@ class DatabaseManager:
     @staticmethod
     def promote_pending(operation: str, quota: int) -> int:
         """
-        Promote as many 'pending' tasks as will fit under ``quota`` for ``operation``.
+        Promote as many 'pending' user tasks as will fit under ``quota`` for
+        ``operation``.
 
-        This keeps the 'queued' count ≤ quota while draining the pending backlog
-        in first-submitted-first-promoted order.
+        Only promotes tasks where ``connector_id IS NULL`` — connector tasks are
+        always inserted as 'queued' and never enter the pending backlog.
+
+        This keeps the user 'queued' count ≤ quota while draining the pending
+        backlog in first-submitted-first-promoted order.
 
         All three statements (count queued, select candidates, update status) run
         inside a single transaction under the same session-level advisory lock used
@@ -1981,11 +2179,12 @@ class DatabaseManager:
                 # sequence so no concurrent caller can interleave.
                 session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
 
-                # Count currently queued tasks for this operation.
+                # Count currently queued user tasks for this operation.
                 queued_count = session.scalar(
                     select(func.count()).where(
                         ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == operation,
+                        ConversionTask.connector_id.is_(None),
                     )
                 ) or 0
 
@@ -1993,12 +2192,13 @@ class DatabaseManager:
                 if headroom == 0:
                     return 0
 
-                # Fetch the oldest pending tasks that fit under the quota.
+                # Fetch the oldest pending user tasks that fit under the quota.
                 candidates = session.execute(
                     select(ConversionTask.task_id, ConversionTask.cached_file)
                     .where(
                         ConversionTask.status == ConversionTaskStatus.PENDING,
                         ConversionTask.operation == operation,
+                        ConversionTask.connector_id.is_(None),
                     )
                     .order_by(ConversionTask.queued_at)
                     .limit(headroom)
@@ -2008,14 +2208,12 @@ class DatabaseManager:
                     return 0
 
                 candidate_ids = [row.task_id for row in candidates]
-                now = datetime.now(timezone.utc)
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id.in_(candidate_ids))
-                    .values(status=ConversionTaskStatus.QUEUED, queued_at=now)
+                    .values(status=ConversionTaskStatus.QUEUED, queued_at=datetime.now(timezone.utc))
                 )
-                result = cast(CursorResult, session.execute(stmt))
-                promoted = result.rowcount
+                promoted = cast(CursorResult, session.execute(stmt)).rowcount
                 if promoted:
                     logger.debug(f"Promoted {promoted} pending → queued for {operation}")
                     for row in candidates:
@@ -2025,6 +2223,67 @@ class DatabaseManager:
                 return promoted
         except SQLAlchemyError as e:
             logger.error(f"DB error promoting pending tasks for {operation}: {e}", exc_info=True)
+            return 0
+
+    @staticmethod
+    def get_connector_ids_with_queued_tasks() -> List[str]:
+        """
+        Return connector IDs that have at least one 'queued' ingestion task,
+        ordered by their oldest queued_at (FIFO — longest-waiting connector first).
+
+        Called each tick by the dispatcher's connector turn (turn 2) to build
+        the round-robin list.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask.connector_id)
+                    .where(
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        ConversionTask.operation == "ingestion",
+                        ConversionTask.connector_id.is_not(None),
+                    )
+                    .group_by(ConversionTask.connector_id)
+                    .order_by(func.min(ConversionTask.queued_at))
+                )
+                return [row[0] for row in session.execute(stmt).all()]
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_connector_ids_with_queued_tasks: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def delete_conversion_tasks_for_connector(connector_id: str) -> int:
+        """
+        Delete all queued conversion_tasks rows owned by ``connector_id``.
+
+        Called as the first step of connector teardown, before checksum rows
+        and document rows are removed, to ensure the dispatcher never picks up
+        tasks that belong to a connector being deleted.
+
+        Returns:
+            Number of rows deleted.
+        """
+        try:
+            with get_db_session() as session:
+                result = cast(
+                    CursorResult,
+                    session.execute(
+                        delete(ConversionTask).where(
+                            ConversionTask.connector_id == connector_id,
+                            ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        )
+                    ),
+                )
+                deleted = result.rowcount
+                if deleted:
+                    logger.info(
+                        f"Deleted {deleted} queued task(s) for connector {connector_id!r}"
+                    )
+                return deleted
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error deleting tasks for connector {connector_id!r}: {e}", exc_info=True
+            )
             return 0
 
 
@@ -2045,10 +2304,10 @@ class DatabaseManager:
             with get_db_session() as session:
                 result = session.execute(
                     update(Connector)
-                    .where(Connector.sync_status == ConnectorStatus.SYNCING)
+                    .where(Connector.status == ConnectorStatus.SYNCING)
                     .values(
-                        sync_status=ConnectorStatus.OUT_OF_SYNC,
-                        error=error,
+                        status=ConnectorStatus.OUT_OF_SYNC,
+                        message=error,
                     )
                     .returning(Connector.id)
                 )
@@ -2089,6 +2348,12 @@ class DatabaseManager:
                     )
                     .returning(ConnectorSyncLog.seq)
                 ).one_or_none()
+                if result is not None:
+                    session.execute(
+                        update(Connector)
+                        .where(Connector.id == connector_id)
+                        .values(message=None)
+                    )
                 return result is not None
         except SQLAlchemyError as e:
             logger.error(
