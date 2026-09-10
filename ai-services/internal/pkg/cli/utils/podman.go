@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -239,4 +241,109 @@ func CleanupSkippedResources(ctx context.Context, rt runtime.Runtime, secretsToS
 
 	// Delete volumes with skip-cleanup label (only when --skip-cleanup is not set)
 	return DeleteVolumes(ctx, rt, volumesToSkip)
+}
+
+// DeleteSecretAndPod deletes the named secret and then force-deletes the named pod.
+// It is used during certificate reset operations to remove the existing secret and
+// pod before redeployment with new credentials.
+func DeleteSecretAndPod(ctx context.Context, rt runtime.Runtime, secretName, podName string) error {
+	logger.InfofCtx(ctx, "Deleting existing secret %s", secretName)
+	if err := rt.DeleteSecret(ctx, secretName); err != nil {
+		return fmt.Errorf("failed to delete existing secret %s: %w", secretName, err)
+	}
+
+	logger.InfofCtx(ctx, "Deleting existing pod %s", podName)
+	if err := rt.DeletePod(ctx, podName, utils.BoolPtr(true)); err != nil {
+		return fmt.Errorf("failed to delete existing pod %s: %w", podName, err)
+	}
+
+	return nil
+}
+
+// LoadCertificatesToCaddy checks Caddy health and loads SSL certificates.
+func LoadCertificatesToCaddy(ctx context.Context, caddyCtx *caddy.Context, sslCertPath, sslKeyPath string) error {
+	// Check Caddy health before attempting to load certificates
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create proxy manager: %w", err)
+	}
+
+	if err := proxyManager.HealthCheck(ctx); err != nil {
+		return fmt.Errorf("caddy health check failed - admin API is not accessible: %w", err)
+	}
+
+	// Load new SSL certificates to Caddy
+	if err := caddyCtx.LoadSSLCertificates(ctx, sslCertPath, sslKeyPath); err != nil {
+		return fmt.Errorf("failed to load certificates: %w", err)
+	}
+
+	return nil
+}
+
+// PodmanOptions carries the env needed to restart pod.
+type PodmanOptions struct {
+	BaseDir           string
+	HTTPSPort         int
+	DomainName        string
+	GatewayAddr       string
+	WorkerGatewayPort int
+}
+
+// ExtractPodConfigFromEnv populates PodmanOptions from the container environment variables.
+func ExtractPodConfigFromEnv(env map[string]string, opts *PodmanOptions) {
+	if value, ok := env["AI_SERVICES_BASE_DIR"]; ok {
+		opts.BaseDir = value
+	}
+
+	if value, ok := env["DOMAIN_SUFFIX"]; ok {
+		opts.DomainName = value
+	}
+
+	if value, ok := env["CADDY_HTTPS_PORT"]; ok {
+		opts.HTTPSPort, _ = strconv.Atoi(value)
+	}
+
+	if value, ok := env["GATEWAY_ADDR"]; ok {
+		opts.GatewayAddr = value
+	}
+
+	if value, ok := env["WORKER_GATEWAY_PORT"]; ok {
+		opts.WorkerGatewayPort, _ = strconv.Atoi(value)
+	}
+}
+
+// ErrPodNotFound is returned by GetPodConfig when no pod matches the given label.
+var ErrPodNotFound = fmt.Errorf("no pod found")
+
+// GetPodConfig finds the first pod matching podLabel, inspects all its containers,
+// and returns the populated PodmanOptions together with the pod ID.
+func GetPodConfig(ctx context.Context, rt runtime.Runtime, podLabel string) (*PodmanOptions, string, error) {
+	pods, err := rt.ListPods(ctx, map[string][]string{"label": {podLabel}})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	if len(pods) == 0 {
+		return nil, "", ErrPodNotFound
+	}
+
+	pod := pods[0]
+
+	pInfo, err := rt.InspectPod(ctx, pod.ID)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to inspect pod %s: %w", pod.Name, err)
+	}
+
+	opts := &PodmanOptions{}
+
+	for _, container := range pInfo.Containers {
+		cInfo, err := rt.InspectContainer(ctx, container.ID)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
+		}
+
+		ExtractPodConfigFromEnv(cInfo.Env, opts)
+	}
+
+	return opts, pod.ID, nil
 }

@@ -135,6 +135,12 @@ enum CommandType {
   // Update a Kubernetes secret and restart the associated deployment on an OpenShift worker.
   COMMAND_TYPE_UPDATE_SECRET             = 36;
 
+  // Cancel a previously-dispatched command that is still running on the worker.
+  // The payload is a JSON-encoded CancelCommand{command_id: "<id-to-cancel>"}.
+  // The worker cancels the context it created for that command and sends back a
+  // CommandResult immediately. No-op if the command has already finished.
+  COMMAND_TYPE_CANCEL                    = 37;
+
   // Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
-  COMMAND_TYPE_DELETE_SECRETS            = 37;
+  COMMAND_TYPE_DELETE_SECRETS            = 38;
 }

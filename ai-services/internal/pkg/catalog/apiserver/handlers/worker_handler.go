@@ -75,6 +75,20 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 		return
 	}
 
+	// "Local" is reserved for the catalog-machine worker registered by the
+	// configure flow. It is only allowed when LOCAL_WORKER=true, meaning this
+	// catalog instance is configured to host a co-located worker.
+	// Preserve the canonical casing so the DB row matches LocalWorkerName exactly.
+	if strings.EqualFold(req.WorkerName, workerconstants.LocalWorkerName) {
+		if utils.GetEnv(workerconstants.LocalWorkerEnvVar, "") != "true" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("worker name %q is reserved", req.WorkerName)})
+
+			return
+		}
+
+		req.WorkerName = workerconstants.LocalWorkerName
+	}
+
 	ctx := c.Request.Context()
 
 	gatewayAddress, err := h.gatewayAddress(ctx)
@@ -214,6 +228,7 @@ func (h *WorkerHandler) GetWorker(c *gin.Context) {
 //	@Param			id	path	string	true	"Worker ID (UUID)"
 //	@Success		204	"Worker deleted"
 //	@Failure		400	{object}	map[string]interface{}	"Invalid worker ID"
+//	@Failure		403	{object}	map[string]interface{}	"Local worker cannot be deleted"
 //	@Failure		404	{object}	map[string]interface{}	"Worker not found"
 //	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
@@ -227,6 +242,27 @@ func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	// Resolve the worker name before deletion so we can block the Local worker.
+	w, err := h.repo.GetByID(ctx, workerID)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to fetch worker %s: %v", workerID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete worker"})
+
+		return
+	}
+
+	if w == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "worker not found"})
+
+		return
+	}
+
+	if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "the Local worker cannot be deleted"})
+
+		return
+	}
 
 	deleted, err := h.reg.Deregister(ctx, workerID)
 	if err != nil {

@@ -118,10 +118,11 @@ func toOpenShiftRouteList(routes []routev1.Route) []types.Route {
 	routeList := make([]types.Route, 0, len(routes))
 	for _, route := range routes {
 		routeList = append(routeList, types.Route{
-			Name:       route.Name,
-			HostPort:   route.Spec.Host,
-			TargetPort: route.Spec.Port.TargetPort.String(),
-			Labels:     route.Labels,
+			Name:        route.Name,
+			HostPort:    route.Spec.Host,
+			TargetPort:  route.Spec.Port.TargetPort.String(),
+			ServiceName: route.Spec.To.Name,
+			Labels:      route.Labels,
 		})
 	}
 

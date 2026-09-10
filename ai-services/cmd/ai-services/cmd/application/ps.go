@@ -164,7 +164,7 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 	printer := utils.NewTableWriter()
 	defer printer.CloseTableWriter()
 
-	// Set table headers based on output format
+	// Set table headers and collapse indices based on output format
 	setApplicationPSTableHeaders(printer, opts.OutputWide)
 
 	// Process each application ID
@@ -177,13 +177,13 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 
 		// Process services pods
 		for _, pod := range psResp.Services {
-			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, pod, opts.OutputWide)
+			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, psResp.WorkerName, psResp.Namespace, psResp.RuntimeType, pod, opts.OutputWide)
 			printer.AppendRow(rows...)
 		}
 
 		// Process components pods
 		for _, pod := range psResp.Components {
-			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, pod, opts.OutputWide)
+			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, psResp.WorkerName, psResp.Namespace, psResp.RuntimeType, pod, opts.OutputWide)
 			printer.AppendRow(rows...)
 		}
 	}
@@ -191,11 +191,21 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 	return nil
 }
 
-// setApplicationPSTableHeaders sets the table headers based on output format.
+// PS table column indices (shared across normal and wide output).
+const (
+	psColAppName   = 0
+	psColWorker    = 1
+	psColRuntime   = 2
+	psColNamespace = 3
+)
+
+// setApplicationPSTableHeaders sets the table headers and collapse indices based on output format.
 func setApplicationPSTableHeaders(printer *utils.Printer, outputWide bool) {
 	if outputWide {
-		printer.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "CREATED", "CONTAINERS")
+		printer.SetHeaders("APPLICATION NAME", "WORKER", "RUNTIME", "NAMESPACE", "POD ID", "POD NAME", "STATUS", "CREATED", "CONTAINERS")
+		printer.SetCollapseIndices(psColAppName, psColWorker, psColRuntime)
 	} else {
-		printer.SetHeaders("APPLICATION NAME", "POD NAME", "STATUS")
+		printer.SetHeaders("APPLICATION NAME", "WORKER", "RUNTIME", "NAMESPACE", "POD NAME", "STATUS")
+		printer.SetCollapseIndices(psColAppName, psColWorker, psColRuntime)
 	}
 }

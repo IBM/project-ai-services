@@ -58,6 +58,11 @@ const (
 	CatalogMTLSSecretName = "catalog-mtls-encryption-secret"
 	// CatalogDeploymentName represent the catalog deployment name.
 	CatalogDeploymentName = "catalog-backend"
+	// CatalogAdminUser is the default admin username created during catalog configure.
+	CatalogAdminUser = "admin"
+	// CatalogAPIRouteKey is the routeURLs map key for the catalog backend API URL,
+	// populated by caddy.RegisterCatalogRoutes during podman configure.
+	CatalogAPIRouteKey = "CATALOG_API_ROUTE"
 )
 
 // Pagination constants.
