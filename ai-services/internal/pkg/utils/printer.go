@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	columnPadding = 2
+	columnPadding             = 2
+	collapseLeadingColumnsNum = 2
 )
 
 type Printer struct {
@@ -88,7 +89,7 @@ func collapseLeadingColumns(rows []table.Row, n int) []table.Row {
 
 func (p *Printer) CloseTableWriter() {
 	cols := p.model.Columns()
-	rows := collapseLeadingColumns(p.model.Rows(), 2)
+	rows := collapseLeadingColumns(p.model.Rows(), collapseLeadingColumnsNum)
 
 	// Width of rows is computed here before rendering
 	for colIdx := range cols {
