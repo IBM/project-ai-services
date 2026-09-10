@@ -1267,7 +1267,8 @@ func (d *PodmanDeployer) registerServiceRoutes(
 		}
 	}
 
-	// Also store the internal pod-to-pod endpoint
+	// Also store the internal pod-to-pod endpoint so connector calls can use it
+	// without requiring TLS (plain HTTP, no InsecureSkipVerify needed).
 	if svc.InternalEndpoint != "" {
 		serviceEndpoints = append(serviceEndpoints, map[string]any{
 			"type": "internal",

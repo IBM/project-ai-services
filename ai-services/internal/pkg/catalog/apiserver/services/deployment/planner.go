@@ -132,11 +132,9 @@ func (p *DeploymentPlanner) PlanDeployment(
 	}
 
 	// Create deployment plan
-	appID := uuid.New()
 	plan := &DeploymentPlan{
-		ApplicationID:   appID,
+		ApplicationID:   uuid.New(),
 		ApplicationName: req.Name,
-		Namespace:       utils.AppNamespace(appID),
 		CatalogID:       req.CatalogID,
 		Version:         req.Version,
 		IsArchitecture:  isArchitecture,
