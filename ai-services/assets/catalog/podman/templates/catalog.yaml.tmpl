@@ -6,7 +6,8 @@ metadata:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
-    ai-services.io/secret: "catalog-secret"
+    ai-services.io/secret: "catalog-secret,catalog-db-encryption-secret,catalog-mtls-encryption-secret"
+    ai-services.io/secret-skip-cleanup: "true"
     ai-services.io/volume: "podman-auth-secret,catalog-secret,catalog-db-encryption-secret,catalog-mtls-encryption-secret,catalog-bundles,catalog-caddy-cert-secret,gateway-pki"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
