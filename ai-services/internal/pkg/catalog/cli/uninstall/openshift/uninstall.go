@@ -72,12 +72,22 @@ func uninstallCatalogResources(ctx context.Context, rt runtime.Runtime, catalog,
 	}
 
 	if !skipCleanup {
+		appLabel := fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)
+
 		logger.DebuglnCtx(ctx, "Delete catalog PVCs...")
 
-		if err := rt.DeletePVCs(ctx, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)); err != nil {
+		if err := rt.DeletePVCs(ctx, appLabel); err != nil {
 			s.Fail("failed to delete catalog pvc")
 
 			return fmt.Errorf("failed to delete PVCs: %w", err)
+		}
+
+		logger.DebuglnCtx(ctx, "Delete catalog secrets...")
+
+		if err := rt.DeleteSecrets(ctx, appLabel); err != nil {
+			s.Fail("failed to delete catalog secrets")
+
+			return fmt.Errorf("failed to delete secrets: %w", err)
 		}
 
 		if err := rt.DeleteNamespace(ctx, namespace); err != nil {

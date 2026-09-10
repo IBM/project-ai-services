@@ -77,6 +77,8 @@ const (
 	CommandType_COMMAND_TYPE_DELETE_NAMESPACE CommandType = 35
 	// Update a Kubernetes secret and restart the associated deployment on an OpenShift worker.
 	CommandType_COMMAND_TYPE_UPDATE_SECRET CommandType = 36
+	// Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
+	CommandType_COMMAND_TYPE_DELETE_SECRETS CommandType = 37
 )
 
 // Enum value maps for CommandType.
@@ -119,6 +121,7 @@ var (
 		34: "COMMAND_TYPE_LIST_CRD",
 		35: "COMMAND_TYPE_DELETE_NAMESPACE",
 		36: "COMMAND_TYPE_UPDATE_SECRET",
+		37: "COMMAND_TYPE_DELETE_SECRETS",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":            0,
@@ -158,6 +161,7 @@ var (
 		"COMMAND_TYPE_LIST_CRD":               34,
 		"COMMAND_TYPE_DELETE_NAMESPACE":       35,
 		"COMMAND_TYPE_UPDATE_SECRET":          36,
+		"COMMAND_TYPE_DELETE_SECRETS":         37,
 	}
 )
 

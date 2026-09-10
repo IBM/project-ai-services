@@ -134,4 +134,7 @@ enum CommandType {
 
   // Update a Kubernetes secret and restart the associated deployment on an OpenShift worker.
   COMMAND_TYPE_UPDATE_SECRET             = 36;
+
+  // Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
+  COMMAND_TYPE_DELETE_SECRETS            = 37;
 }

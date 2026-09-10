@@ -414,6 +414,12 @@ func (r *RemoteRuntime) DeletePVCs(ctx context.Context, appLabel string) error {
 	return err
 }
 
+func (r *RemoteRuntime) DeleteSecrets(ctx context.Context, labelSelector string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_SECRETS, payload.Name{Namespace: r.namespace, Name: labelSelector})
+
+	return err
+}
+
 func (r *RemoteRuntime) GetSystemInfo(ctx context.Context) (*models.SystemInfo, error) {
 	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_SYSTEM_INFO, nil)
 	if err != nil {
