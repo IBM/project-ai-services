@@ -5,29 +5,22 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // NewWhoamiCmd returns the cobra command that prints the currently authenticated user.
 func NewWhoamiCmd() *cobra.Command {
-	var (
-		runtimeType string
-	)
 	cmd := &cobra.Command{
 		Use:   "whoami",
 		Short: "Show the currently authenticated user",
 		Long: `Retrieve and display information about the user that is currently
 logged in to the catalog API server.`,
-		Example: `  # Show currently authenticated user for podman runtime
-  ai-services catalog whoami --runtime podman
+		Example: `  # Show currently authenticated user
+  ai-services catalog whoami
 
 Note:
   - Requires prior authentication via 'ai-services catalog login'`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return common.InitAndValidateRuntimeFlag(runtimeType)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Once precheck passes, silence usage for any *later* internal errors.
 			cmd.SilenceUsage = true
@@ -52,8 +45,6 @@ Note:
 			return nil
 		},
 	}
-
-	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	return cmd
 }

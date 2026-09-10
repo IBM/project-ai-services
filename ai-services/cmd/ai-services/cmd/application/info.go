@@ -33,13 +33,21 @@ var infoCmd = &cobra.Command{
 Arguments:
   [name] : Application name (required)
 	`,
-	Example: `  # Display application information from podman runtime
-  ai-services application info rag --runtime podman
-  
-  # Display application information from openshift runtime
-  ai-services application info rag --runtime openshift
+	Example: `  # Display application information
+  ai-services application info rag
+
+  # Display application information using the legacy path (requires --runtime)
+  ai-services application info rag --legacy --runtime podman
   `,
 	Args: cobra.ExactArgs(1),
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// --runtime is only required for legacy info; the catalog path derives it from the Worker record.
+		if legacyInfo && runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set (required with --legacy)")
+		}
+
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// fetch application name
 		applicationName := args[0]
@@ -48,10 +56,10 @@ Arguments:
 		cmd.SilenceUsage = true
 
 		ctx := cmd.Context()
-		rt := vars.RuntimeFactory.GetRuntimeType()
 
 		// When legacyInfo is true, use the older/stable code path
 		if legacyInfo {
+			rt := vars.RuntimeFactory.GetRuntimeType()
 			// Create application instance using factory
 			factory := application.NewFactory(rt)
 			app, err := factory.Create(applicationName)
@@ -67,7 +75,7 @@ Arguments:
 		}
 
 		// Default: use new implementation using catalog
-		return renderApplicationInfo(ctx, applicationName, rt)
+		return renderApplicationInfo(ctx, applicationName)
 	},
 }
 
@@ -75,7 +83,7 @@ func init() {
 	infoCmd.Flags().BoolVar(&legacyInfo, "legacy", false, "Use legacy application info implementation")
 }
 
-func renderApplicationInfo(ctx context.Context, appName string, rt types.RuntimeType) error {
+func renderApplicationInfo(ctx context.Context, appName string) error {
 	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create application client: %w", err)
@@ -97,13 +105,11 @@ func renderApplicationInfo(ctx context.Context, appName string, rt types.Runtime
 		return fmt.Errorf("failed to get application: %w", err)
 	}
 
-	// When the application is deployed on a remote worker, use the worker's
-	// runtime type to select the correct service steps (vars_file.yaml, info.md).
-	// The CLI's own --runtime flag reflects the local machine, not the worker.
-	// TODO: worker will always exist so we do not need to read from cmd
-	if application.Worker != nil && application.Worker.RuntimeType != "" {
-		rt = types.RuntimeType(application.Worker.RuntimeType)
+	if application.Worker == nil || application.Worker.RuntimeType == "" {
+		return fmt.Errorf("application %q has no worker runtime type", appName)
 	}
+
+	rt := types.RuntimeType(application.Worker.RuntimeType)
 
 	appPS, err := appClient.GetApplicationPS(ctx, app.ID)
 	if err != nil {

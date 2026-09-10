@@ -23,7 +23,7 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 
 	token, gatewayAddr, err := configure.RegisterLocalWorker(ctx, c)
 	if err != nil {
-		return fmt.Errorf("local worker join: %w", err)
+		return fmt.Errorf("worker join: %w", err)
 	}
 
 	workerOpts := workertypes.PodmanWorkerOptions{
@@ -41,10 +41,10 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 	}
 
 	if err := workerpodman.DeployWorker(ctx, workerOpts); err != nil {
-		return fmt.Errorf("local worker join: deploy worker pod: %w", err)
+		return fmt.Errorf("worker join: deploy worker pod: %w", err)
 	}
 
-	logger.InfolnCtx(ctx, "Local worker joined successfully.")
+	logger.InfolnCtx(ctx, "worker joined successfully.")
 
 	return nil
 }

@@ -24,7 +24,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
@@ -101,13 +100,6 @@ type ApplicationServiceBase struct {
 	DeletionExecutor      *deletion.DeletionExecutor
 	Validator             *validators.ApplicationValidator
 
-	// RuntimeType is the runtime this service instance targets (Podman or OpenShift).
-	// Set once at construction; used by CreateApplication to plan and execute deployments.
-	// TODO: Remove once the existing/legacy flow is retired — in the new flow every
-	// application has a WorkerID and CreateApplication will derive the runtime from the
-	// worker's registered runtime type instead of this field.
-	RuntimeType runtimeTypes.RuntimeType
-
 	// DeploymentRegistry tracks in-flight deployments so they can be cancelled
 	// by a concurrent delete request. Nil means no cancellation (e.g. OpenShift stub).
 	DeploymentRegistry *DeploymentRegistry
@@ -123,52 +115,50 @@ type ApplicationServiceBase struct {
 }
 
 // createRuntime returns the runtime.Runtime appropriate for app.
-// When WorkerID is set (new flow) it resolves the worker name and builds a RemoteRuntime
-// over the gRPC CommandStream — this covers both the "Local" worker and actual remote workers.
-// When WorkerID is nil (existing/legacy flow, pre-worker feature) it falls back to
-// vars.RuntimeFactory directly, deriving the namespace from app.ID when needed (OpenShift).
+// Every application has a WorkerID (NOT NULL column, migration 20260801000003). It
+// resolves the worker name and builds a RemoteRuntime over the gRPC CommandStream —
+// this covers both the "Local" worker and actual remote workers.
 func (s *ApplicationServiceBase) createRuntime(app *models.Application) (runtime.Runtime, error) {
-	if app.WorkerID != nil {
-		if s.WorkerRegistry == nil {
-			return nil, fmt.Errorf("worker deployment not configured on this server")
-		}
-
-		workerName, ok := s.WorkerRegistry.WorkerNameByID(*app.WorkerID)
-		if !ok {
-			return nil, fmt.Errorf("worker %s for application %s is not connected", app.WorkerID, app.ID)
-		}
-
-		rtStr, _ := s.WorkerRegistry.WorkerRuntimeType(workerName)
-		rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.WorkerRegistry, catalogutils.AppNamespace(app.ID))
-		if err != nil {
-			return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
-		}
-
-		return rt, nil
+	if app.WorkerID == nil {
+		return nil, fmt.Errorf("application %s has no worker_id: every application must be deployed through a worker", app.ID)
 	}
 
-	return vars.RuntimeFactory.Create(catalogutils.AppNamespace(app.ID))
+	if s.WorkerRegistry == nil {
+		return nil, fmt.Errorf("worker deployment not configured on this server")
+	}
+
+	workerName, ok := s.WorkerRegistry.WorkerNameByID(*app.WorkerID)
+	if !ok {
+		return nil, fmt.Errorf("worker %s for application %s is not connected", app.WorkerID, app.ID)
+	}
+
+	rtStr, _ := s.WorkerRegistry.WorkerRuntimeType(workerName)
+	rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.WorkerRegistry, catalogutils.AppNamespace(app.ID))
+	if err != nil {
+		return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
+	}
+
+	return rt, nil
 }
 
 // buildWorkerInfo resolves the worker name and runtime type from the registry and returns
-// an ApplicationWorker for embedding in the application response. The ID is always set;
-// name and runtime_type are set only when the worker is currently connected.
-func (s *ApplicationServiceBase) buildWorkerInfo(workerID uuid.UUID) *types.ApplicationWorker {
-	w := &types.ApplicationWorker{ID: workerID.String()}
+// an ApplicationWorker for embedding in the application response.
+func (s *ApplicationServiceBase) buildWorkerInfo(workerID uuid.UUID) (*types.ApplicationWorker, error) {
 	if s.WorkerRegistry == nil {
-		return w
-	}
-	name, ok := s.WorkerRegistry.WorkerNameByID(workerID)
-	if !ok {
-		return w
+		return nil, fmt.Errorf("worker registry not configured")
 	}
 
-	w.Name = name
+	name, ok := s.WorkerRegistry.WorkerNameByID(workerID)
+	if !ok {
+		return nil, fmt.Errorf("worker %s is not connected", workerID)
+	}
+
+	w := &types.ApplicationWorker{ID: workerID.String(), Name: name}
 	if rtStr, ok := s.WorkerRegistry.WorkerRuntimeType(name); ok {
 		w.RuntimeType = rtStr
 	}
 
-	return w
+	return w, nil
 }
 
 // buildApplication creates an Application from a models.Application.
@@ -192,9 +182,16 @@ func (s *ApplicationServiceBase) buildApplication(app models.Application) (types
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
 
-	if app.WorkerID != nil {
-		appData.Worker = s.buildWorkerInfo(*app.WorkerID)
+	if app.WorkerID == nil {
+		return types.Application{}, fmt.Errorf("application %s has no worker_id", app.ID)
 	}
+
+	worker, err := s.buildWorkerInfo(*app.WorkerID)
+	if err != nil {
+		return types.Application{}, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
+	}
+
+	appData.Worker = worker
 
 	// Add services array only for architectures (not for individual services)
 	if app.DeploymentType == models.DeploymentTypeArchitectures && len(app.Services) > 0 {
@@ -338,9 +335,16 @@ func (s *ApplicationServiceBase) buildGetApplicationResponse(ctx context.Context
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
 
-	if app.WorkerID != nil {
-		appresponse.Worker = s.buildWorkerInfo(*app.WorkerID)
+	if app.WorkerID == nil {
+		return nil, fmt.Errorf("application %s has no worker_id", app.ID)
 	}
+
+	worker, err := s.buildWorkerInfo(*app.WorkerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
+	}
+
+	appresponse.Worker = worker
 
 	// Load services with their components if present
 	if len(app.Services) > 0 {
@@ -547,15 +551,19 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 		CreatedBy:      createdBy,
 	}
 
-	// Attach the worker FK. In the new flow WorkerName is always set by PlanDeployment
-	// (including "Local" for same-machine deployments). The nil check handles the
-	// existing flow where WorkerName is empty and there is no worker row to look up.
-	// TODO: Remove the empty-string guard once the existing flow is retired.
-	if plan.WorkerName != "" {
-		if dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName); ok {
-			app.WorkerID = &dbID
-		}
+	// Attach the worker FK. Every deployment goes through a worker (the local worker
+	// is used for local deployments). WorkerName is always set by the CLI since the
+	// --worker flag defaults to workerconstants.LocalWorkerName.
+	if plan.WorkerName == "" {
+		return fmt.Errorf("worker name is required for application deployment; use --worker to specify a worker (default: %q)", workerconstants.LocalWorkerName)
 	}
+
+	dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName)
+	if !ok {
+		return fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", plan.WorkerName)
+	}
+
+	app.WorkerID = &dbID
 
 	if err := s.AppRepo.Insert(ctx, app); err != nil {
 		return fmt.Errorf("failed to insert application: %w", err)
@@ -1170,25 +1178,27 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		return nil, fmt.Errorf("failed to collect component pods: %w", err)
 	}
 
+	if app.WorkerID == nil {
+		return nil, fmt.Errorf("application %s has no worker_id", app.ID)
+	}
+
+	workerInfo, err := s.buildWorkerInfo(*app.WorkerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
+	}
+
 	psResp := &types.ApplicationPSResponse{
 		ID:          app.ID.String(),
 		Name:        app.Name,
-		RuntimeType: s.RuntimeType.String(),
+		RuntimeType: workerInfo.RuntimeType,
+		WorkerName:  workerInfo.Name,
 		Services:    servicePods,
 		Components:  componentPods,
 	}
 
-	if app.WorkerID != nil {
-		workerInfo := s.buildWorkerInfo(*app.WorkerID)
-		psResp.WorkerName = workerInfo.Name
-		// Namespace is only meaningful for OpenShift workers
-		if runtimeTypes.RuntimeType(workerInfo.RuntimeType) == runtimeTypes.RuntimeTypeOpenShift {
-			psResp.Namespace = catalogutils.AppNamespace(app.ID)
-		}
-		// Override runtime type with the worker's actual runtime when available
-		if workerInfo.RuntimeType != "" {
-			psResp.RuntimeType = workerInfo.RuntimeType
-		}
+	// Namespace is only meaningful for OpenShift workers
+	if runtimeTypes.RuntimeType(workerInfo.RuntimeType) == runtimeTypes.RuntimeTypeOpenShift {
+		psResp.Namespace = catalogutils.AppNamespace(app.ID)
 	}
 
 	return psResp, nil

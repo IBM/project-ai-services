@@ -111,14 +111,8 @@ func (p *DeploymentPlanner) PlanDeployment(
 	ctx context.Context,
 	req apimodels.CreateApplicationRequest,
 ) (*DeploymentPlan, error) {
-	runtimeType := p.runtimeType
-	if runtimeType == "" {
-		// TODO: Remove this fallback once all callers provide a runtime-scoped planner.
-		var err error
-		runtimeType, err = p.ResolveRuntimeType(ctx, req.WorkerName)
-		if err != nil {
-			return nil, err
-		}
+	if p.runtimeType == "" {
+		return nil, fmt.Errorf("planner has no runtime type: call WithRuntime before PlanDeployment")
 	}
 
 	workerName := req.WorkerName
@@ -143,7 +137,7 @@ func (p *DeploymentPlanner) PlanDeployment(
 		Components:      make(map[string]*ComponentPlan),
 		Services:        make(map[string]*ServicePlan),
 		WorkerName:      workerName,
-		RuntimeType:     runtimeType,
+		RuntimeType:     p.runtimeType,
 	}
 
 	// Process each service from request
@@ -155,7 +149,7 @@ func (p *DeploymentPlanner) PlanDeployment(
 
 	// Calculate and allocate Spyre cards only for local Podman deployments.
 	// Remote-worker deployments must not probe local /dev/vfio on the API server.
-	if runtimeType == runtimeTypes.RuntimeTypePodman.String() && isLocalWorkerName(workerName) {
+	if p.runtimeType == runtimeTypes.RuntimeTypePodman.String() && isLocalWorkerName(workerName) {
 		if err := p.calculateAndAllocateSpyreCards(ctx, plan); err != nil {
 			return nil, fmt.Errorf("failed to allocate Spyre cards: %w", err)
 		}
@@ -354,11 +348,6 @@ func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName strin
 
 	if p.workerRegistry == nil {
 		return fmt.Errorf("worker deployment is not configured on this server")
-	}
-
-	// TODO: Remove this when remote deployment is by default
-	if workerName == "" {
-		return nil
 	}
 
 	if !p.workerRegistry.IsWorkerConnected(ctx, workerName) {

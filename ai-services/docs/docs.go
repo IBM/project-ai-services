@@ -2174,7 +2174,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves system resource information including CPU, memory, and accelerator availability.\nWhen the optional ` + "`" + `worker` + "`" + ` query parameter is provided, the resources are fetched from\nthat remote worker node instead of the local runtime.",
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability.\nDefaults to the local worker when the ` + "`" + `worker` + "`" + ` query parameter is omitted.",
                 "produces": [
                     "application/json"
                 ],
@@ -2185,7 +2185,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Worker name to query resources from",
+                        "description": "Worker name to query resources from (default: Local)",
                         "name": "worker",
                         "in": "query"
                     }
