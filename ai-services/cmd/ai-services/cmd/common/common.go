@@ -129,7 +129,8 @@ func ValidateResetFlag(cmd *cobra.Command, flagName string, skipFlags ...string)
 // defaultHTTPSPort is used as the default value for --https-port.
 func ConfigurePodmanDeployFlags(cmd *cobra.Command, baseDir *string, httpsPort *int, defaultHTTPSPort int, sslCertPath, sslKeyPath, domainName *string) {
 	cmd.Flags().StringVar(baseDir, BaseDirFlag, "",
-		"Base directory for AI services data (models, caddy).\n"+
+		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
+			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /var/lib/ai-services\n")
 

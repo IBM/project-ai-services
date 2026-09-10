@@ -92,12 +92,10 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-<<<<<<< HEAD
 	if err := cmdcommon.ValidateSkipChecksFlag(cmd); err != nil {
 		return err
 	}
 
-=======
 	// Reject runtime-scoped flags early.
 	if err := buildWorkerFlagValidator().Validate(cmd); err != nil {
 		return err
@@ -120,7 +118,6 @@ func validateWorkerJoinFlags(ctx context.Context) error {
 		return fmt.Errorf("required flag(s) %q not set", cmdcommon.TokenFlag)
 	}
 
->>>>>>> 5cc23ee6 (Supporting reset flags)
 	if httpsPort < 1 || httpsPort > 65535 {
 		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 	}
@@ -216,58 +213,16 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 	sslKeyPath := catalogUtils.SanitizeFilePath(sslKeyPath)
 
 	gatewayAddr := args[0]
-
-<<<<<<< HEAD
 	if err := cmdcommon.DoBootstrapValidate(ctx, skipChecks); err != nil {
 		return err
 	}
 
-	switch types.RuntimeType(runtimeType) {
-	case types.RuntimeTypePodman:
-		aiServicesDir, err := utils.ValidateBaseDir(baseDir)
-		if err != nil {
-			return fmt.Errorf("invalid base directory %q: %w", baseDir, err)
-		}
-
-		if err := utils.CreateDir(filepath.Join(aiServicesDir, "models")); err != nil {
-			return fmt.Errorf("failed to create model directory: %w", err)
-		}
-
-		opts := workertypes.PodmanWorkerOptions{
-			WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
-				GatewayAddr: gatewayAddr,
-				Token:       token,
-			},
-			Setup: workertypes.Options{
-				CommonWorkerOptions: workertypes.CommonWorkerOptions{
-					HostAliases: parseAddHosts(addHosts),
-				},
-				BaseDir:     aiServicesDir,
-				HTTPSPort:   httpsPort,
-				DomainName:  domainName,
-				SSLCertPath: catalogUtils.SanitizeFilePath(sslCertPath),
-				SSLKeyPath:  catalogUtils.SanitizeFilePath(sslKeyPath),
-			},
-		}
-
-		// Setup worker node
-		if err := workerpodman.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("failed to deploy worker: %w", err)
-		}
-	case types.RuntimeTypeOpenShift:
-		opts := workertypes.OpenshiftWorkerOptions{
-			WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
-				GatewayAddr: gatewayAddr,
-				Token:       token,
-			},
-=======
 	return workerdeploy.DeployWorker(ctx, workertypes.DeployOpts{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
 			Token:       token,
 			GatewayAddr: gatewayAddr,
 		},
 		Options: workertypes.Options{
->>>>>>> 5cc23ee6 (Supporting reset flags)
 			CommonWorkerOptions: workertypes.CommonWorkerOptions{
 				HostAliases: parseAddHosts(addHosts),
 			},
@@ -297,14 +252,10 @@ func configureFlags(c *cobra.Command, requireToken bool) {
 
 	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
 	c.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+	initJoinPodmanFlags(c)
 }
 
 func initJoinPodmanFlags(c *cobra.Command) {
-	c.Flags().StringVar(&baseDir, "basedir", "",
-		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
-			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --basedir /var/lib/ai-services\n")
 	cmdcommon.ConfigurePodmanDeployFlags(c, &baseDir, &httpsPort, defaultJoinHTTPSPort, &sslCertPath, &sslKeyPath, &domainName)
 
 	c.Flags().StringArrayVar(&addHosts, cmdcommon.AddHostFlag, nil,
