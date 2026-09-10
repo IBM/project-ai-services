@@ -541,7 +541,7 @@ func (kc *OpenshiftClient) DeleteSecrets(ctx context.Context, labelSelector stri
 
 	for _, secret := range secretList.Items {
 		if err := kc.DeleteSecret(ctx, secret.Name); err != nil {
-			logger.Warningf("Failed to delete secret '%s': %v\n", secret.Name, err)
+			return err
 		}
 	}
 
