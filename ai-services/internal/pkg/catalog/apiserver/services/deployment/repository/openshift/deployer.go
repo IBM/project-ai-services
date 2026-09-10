@@ -253,7 +253,7 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 
 // registerServiceEndpoints reads the OpenShift Routes created for the given Helm release,
 // writes them as HTTPS endpoints into the service database record, and also stores the
-// internal cluster-DNS endpoint (type: "internal") for connector downstream calls.
+// internal cluster-DNS endpoint (type: "internal").
 // Routes are identified by the label "ai-services.io/service: <releaseName>".
 func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, plan *DeploymentPlan, releaseName string, svc *ServicePlan) error {
 	labelSelector := fmt.Sprintf("ai-services.io/service=%s", releaseName)
@@ -277,15 +277,14 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, plan *
 		}
 
 		endpoints = append(endpoints, map[string]any{
-			"type": route.Labels["ai-services.io/endpoint-type"],
+			"type": route.Labels[constants.EndpointTypeLabelKey],
 			"url":  fmt.Sprintf("https://%s", route.HostPort),
 		})
 
-		// For the api-type route, also derive the internal cluster-DNS endpoint so
-		// connector calls can reach the service over plain HTTP without TLS.
+		// For the api-type route, also derive the internal cluster-DNS endpoint
 		// Use route.ServiceName (the K8s Service the route points to) as the hostname —
 		// not releaseName, which is the Helm release name and has no corresponding Service.
-		if route.Labels["ai-services.io/endpoint-type"] == "api" && route.TargetPort != "" && route.ServiceName != "" {
+		if route.Labels[constants.EndpointTypeLabelKey] == "api" && route.TargetPort != "" && route.ServiceName != "" {
 			internalURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%s", route.ServiceName, ns, route.TargetPort)
 			endpoints = append(endpoints, map[string]any{
 				"type": "internal",
