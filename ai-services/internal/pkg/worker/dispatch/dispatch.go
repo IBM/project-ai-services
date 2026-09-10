@@ -197,7 +197,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		}
 		nrt := rtInNamespace(rt, req.Namespace)
 
-		return nil, nrt.DeleteVolume(ctx, req.Name)
+		return nil, nrt.DeleteVolume(ctx, req.Name, nil)
 
 	case workerpb.CommandType_COMMAND_TYPE_VOLUME_EXISTS:
 		var req payload.NameOrID

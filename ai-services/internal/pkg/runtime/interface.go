@@ -33,7 +33,7 @@ type Runtime interface {
 	UpdateSecret(ctx context.Context, name, deploymentName string, data map[string][]byte) error
 
 	// Volume operations
-	DeleteVolume(ctx context.Context, name string) error
+	DeleteVolume(ctx context.Context, name string, force *bool) error
 	VolumeExists(ctx context.Context, nameOrID string) (bool, error)
 
 	// Container operations

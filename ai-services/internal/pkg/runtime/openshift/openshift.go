@@ -576,7 +576,7 @@ func (kc *OpenshiftClient) UpdateSecret(ctx context.Context, name, deploymentNam
 	return fmt.Errorf("timed out waiting for deployment %q to become ready after secret update", deploymentName)
 }
 
-func (kc *OpenshiftClient) DeleteVolume(_ context.Context, name string) error {
+func (kc *OpenshiftClient) DeleteVolume(_ context.Context, name string, force *bool) error {
 	logger.Warningln("Not implemented")
 
 	return nil

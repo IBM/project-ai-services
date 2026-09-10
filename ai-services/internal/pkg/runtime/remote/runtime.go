@@ -242,7 +242,7 @@ func (r *RemoteRuntime) UpdateSecret(ctx context.Context, name, deploymentName s
 
 // ─── Volume operations ────────────────────────────────────────────────────────
 
-func (r *RemoteRuntime) DeleteVolume(ctx context.Context, name string) error {
+func (r *RemoteRuntime) DeleteVolume(ctx context.Context, name string, _ *bool) error {
 	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_VOLUME, payload.Name{Namespace: r.namespace, Name: name})
 
 	return err

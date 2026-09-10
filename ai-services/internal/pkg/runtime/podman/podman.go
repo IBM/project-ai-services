@@ -567,11 +567,11 @@ func (pc *PodmanClient) DeleteSecret(ctx context.Context, name string) error {
 	return nil
 }
 
-func (pc *PodmanClient) DeleteVolume(ctx context.Context, name string) error {
+func (pc *PodmanClient) DeleteVolume(ctx context.Context, name string, force *bool) error {
 	podCtx, cancel := pc.podmanCtx(ctx)
 	defer cancel()
 
-	err := volumes.Remove(podCtx, name, nil)
+	err := volumes.Remove(podCtx, name, &volumes.RemoveOptions{Force: force})
 	if err != nil {
 		return fmt.Errorf("failed to remove volume: %w", err)
 	}

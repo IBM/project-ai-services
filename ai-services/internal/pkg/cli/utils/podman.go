@@ -53,7 +53,7 @@ func DeleteVolumes(ctx context.Context, rt runtime.Runtime, volumeNames []string
 	for _, volumeName := range volumeNames {
 		logger.Infof("Deleting volume: %s\n", volumeName)
 
-		if err := rt.DeleteVolume(ctx, volumeName); err != nil {
+		if err := rt.DeleteVolume(ctx, volumeName, utils.BoolPtr(true)); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if utils.IsNotFoundError(err) {
 				logger.Infof("Volume %s already deleted or does not exist\n", volumeName)

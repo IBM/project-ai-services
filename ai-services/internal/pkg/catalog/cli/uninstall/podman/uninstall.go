@@ -4,18 +4,22 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
+	workerConstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
+	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
 
 // UninstallCatalog removes the catalog service and all associated resources.
@@ -29,6 +33,20 @@ func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error
 	pods, err := clicommon.GetCatalogPods(ctx, rt)
 	if err != nil || len(pods) == 0 {
 		return err
+	}
+
+	// Filter out any worker pod (ai-services.io/component=worker) — those are
+	// managed by the worker uninstall path and must not be touched here.
+	workerComponentValue := strings.TrimPrefix(workerConstants.WorkerPodLabel, workerConstants.CatalogBackendPodLabel+"=")
+	filtered := pods[:0]
+	for _, pod := range pods {
+		if pod.Labels[workerConstants.CatalogBackendPodLabel] != workerComponentValue {
+			filtered = append(filtered, pod)
+		}
+	}
+	pods = filtered
+	if len(pods) == 0 {
+		return nil
 	}
 
 	// Warn about potential application staleness
@@ -56,6 +74,12 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 		baseDir = config.BaseDir
 	}
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
+
+	// Check before catalog pods are deleted whether a local worker is co-located.
+	isLocalWorker, err := workercommon.IsPodmanLocalWorker(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("failed to check local worker: %w", err)
+	}
 
 	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
 	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName, catalogConstants.CatalogMTLSSecretName)
@@ -96,6 +120,17 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	// Delete skip-cleanup resources (secrets and volumes preserved when --skip-cleanup is set)
 	if err := podmanutils.CleanupSkippedResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
 		return err
+	}
+
+	// Only uninstall the co-located worker if LOCAL_WORKER is true
+	if isLocalWorker {
+		if err := workeruninstall.Uninstall(ctx, workerutils.UninstallOptions{
+			RuntimeType: types.RuntimeTypePodman,
+			AutoYes:     true,
+			SkipCleanup: skipCleanup,
+		}); err != nil {
+			return fmt.Errorf("worker uninstall failed: %w", err)
+		}
 	}
 
 	logger.Infoln("Catalog service removed successfully")

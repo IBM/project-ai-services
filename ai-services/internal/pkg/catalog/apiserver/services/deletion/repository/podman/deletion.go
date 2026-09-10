@@ -292,7 +292,7 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 
 	// Delete each unique volume using the runtime client
 	for volumeName := range volumesToDelete {
-		if err := s.rt.DeleteVolume(ctx, volumeName); err != nil {
+		if err := s.rt.DeleteVolume(ctx, volumeName, utils.BoolPtr(true)); err != nil {
 			// Ignore "not found" errors - volume already deleted or never existed
 			if utils.IsNotFoundError(err) {
 				logger.InfofCtx(ctx, "Volume %s already deleted or does not exist", volumeName)
