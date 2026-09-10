@@ -540,13 +540,9 @@ func (kc *OpenshiftClient) DeleteSecrets(ctx context.Context, labelSelector stri
 	}
 
 	for _, secret := range secretList.Items {
-		if err := kc.KubeClient.CoreV1().Secrets(kc.Namespace).Delete(ctx, secret.Name, metav1.DeleteOptions{}); err != nil {
+		if err := kc.DeleteSecret(ctx, secret.Name); err != nil {
 			logger.Warningf("Failed to delete secret '%s': %v\n", secret.Name, err)
-
-			continue
 		}
-
-		logger.Debugf("Deleted secret '%s'\n", secret.Name)
 	}
 
 	return nil
