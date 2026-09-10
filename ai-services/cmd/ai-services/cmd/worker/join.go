@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -33,8 +34,12 @@ const (
 
 // Flag variables for the worker join command.
 var (
+	// common flags.
 	token       string
 	runtimeType string
+	skipChecks  []string
+
+	// podman flags.
 	baseDir     string
 	httpsPort   int
 	domainName  string
@@ -70,7 +75,12 @@ Obtain a token first by running on the catalog node:
   ai-services worker join catalog.example.com:9090 \
       --token    <bootstrap-token> \
       --ssl-cert /path/to/cert.pem \
-      --ssl-key  /path/to/key.pem`,
+      --ssl-key  /path/to/key.pem
+
+  # Skip specific bootstrap validation checks
+  ai-services worker join catalog.example.com:9090 \
+      --token           <bootstrap-token> \
+      --skip-validation rhn,power`,
 	Args:    cobra.ExactArgs(1),
 	PreRunE: joinPreRunE,
 	RunE:    joinRunE,
@@ -80,6 +90,10 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 	cmd.SilenceUsage = true
 
 	if err := cmdcommon.InitAndValidateRuntimeFlag(runtimeType); err != nil {
+		return err
+	}
+
+	if err := cmdcommon.ValidateSkipChecksFlag(cmd); err != nil {
 		return err
 	}
 
@@ -176,6 +190,10 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	gatewayAddr := args[0]
 
+	if err := cmdcommon.DoBootstrapValidate(ctx, skipChecks); err != nil {
+		return err
+	}
+
 	switch types.RuntimeType(runtimeType) {
 	case types.RuntimeTypePodman:
 		aiServicesDir, err := utils.ValidateBaseDir(baseDir)
@@ -228,10 +246,13 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// configureFlags registers the flags shared by the join and grpcstream
-// commands: --token (required), --runtime, --basedir, --https-port,
-// --ssl-cert, and --ssl-key.
+// configureFlags registers the flags shared by the join and grpcstream commands.
 func configureFlags(c *cobra.Command) {
+	initJoinCommonFlags(c)
+	initJoinPodmanFlags(c)
+}
+
+func initJoinCommonFlags(c *cobra.Command) {
 	c.Flags().StringVar(&token, "token", "",
 		"Single-use bootstrap token issued by 'catalog worker register' (required).\n"+
 			"Example: --token <uuid>\n")
@@ -239,6 +260,11 @@ func configureFlags(c *cobra.Command) {
 
 	cmdcommon.ConfigureRuntimeFlag(c, &runtimeType)
 
+	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
+	c.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+}
+
+func initJoinPodmanFlags(c *cobra.Command) {
 	c.Flags().StringVar(&baseDir, "basedir", "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+

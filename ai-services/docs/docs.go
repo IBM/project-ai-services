@@ -2790,6 +2790,13 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     },
+                    "403": {
+                        "description": "Local worker cannot be deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "404": {
                         "description": "Worker not found",
                         "schema": {

@@ -41,6 +41,12 @@ func NewWorkerClient(ctx context.Context) (*WorkerClient, error) {
 	return &WorkerClient{client: c}, nil
 }
 
+// NewWorkerClientFromClient creates a WorkerClient from an already-authenticated Client.
+// Use this when you have obtained a Client via NewWithLogin (e.g. during catalog configure).
+func NewWorkerClientFromClient(c *Client) *WorkerClient {
+	return &WorkerClient{client: c}
+}
+
 // ServerURL returns the catalog API server URL this client is connected to.
 func (c *WorkerClient) ServerURL() string {
 	return c.client.ServerURL()
