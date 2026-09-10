@@ -1171,10 +1171,11 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 	}
 
 	psResp := &types.ApplicationPSResponse{
-		ID:         app.ID.String(),
-		Name:       app.Name,
-		Services:   servicePods,
-		Components: componentPods,
+		ID:          app.ID.String(),
+		Name:        app.Name,
+		RuntimeType: s.RuntimeType.String(),
+		Services:    servicePods,
+		Components:  componentPods,
 	}
 
 	if app.WorkerID != nil {
@@ -1183,6 +1184,10 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		// Namespace is only meaningful for OpenShift workers
 		if runtimeTypes.RuntimeType(workerInfo.RuntimeType) == runtimeTypes.RuntimeTypeOpenShift {
 			psResp.Namespace = catalogutils.AppNamespace(app.ID)
+		}
+		// Override runtime type with the worker's actual runtime when available
+		if workerInfo.RuntimeType != "" {
+			psResp.RuntimeType = workerInfo.RuntimeType
 		}
 	}
 

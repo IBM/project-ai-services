@@ -9,12 +9,15 @@ import (
 )
 
 const (
-	columnPadding             = 2
-	collapseLeadingColumnsNum = 2
+	columnPadding = 2
 )
 
+// defaultCollapseIndices are the column indices collapsed by default (APPLICATION NAME, WORKER).
+var defaultCollapseIndices = []int{0, 1}
+
 type Printer struct {
-	model table.Model
+	model           table.Model
+	collapseIndices []int
 }
 
 func NewTableWriter() *Printer {
@@ -39,7 +42,12 @@ func NewTableWriter() *Printer {
 
 	t.SetStyles(styles)
 
-	return &Printer{model: t}
+	return &Printer{model: t, collapseIndices: defaultCollapseIndices}
+}
+
+// SetCollapseIndices overrides which column indices are collapsed when rendering.
+func (p *Printer) SetCollapseIndices(indices ...int) {
+	p.collapseIndices = indices
 }
 
 func (p *Printer) SetHeaders(headers ...string) {
@@ -58,26 +66,32 @@ func (p *Printer) AppendRow(cells ...string) {
 	p.model.SetRows(append(p.model.Rows(), table.Row(cells)))
 }
 
-func collapseLeadingColumns(rows []table.Row, n int) []table.Row {
-	if len(rows) == 0 {
+// collapseColumns blanks repeated values in the given column indices across rows.
+// The first index is the anchor column (APPLICATION NAME): when it changes, all
+// tracked columns re-print; when it stays the same, they are all blanked.
+func collapseColumns(rows []table.Row, indices []int) []table.Row {
+	if len(rows) == 0 || len(indices) == 0 {
 		return rows
 	}
 
-	last := make([]string, n)
+	anchor := indices[0]
+	last := make(map[int]string, len(indices))
 	for i, r := range rows {
 		if len(r) == 0 {
 			continue
 		}
 
-		for col := 0; col < n && col < len(r); col++ {
-			if r[col] == last[col] {
-				r[col] = "" // blank repeated values
+		// Only the anchor column drives whether all tracked columns print or collapse.
+		anchorChanged := anchor < len(r) && r[anchor] != last[anchor]
+
+		for _, col := range indices {
+			if col >= len(r) {
+				continue
+			}
+			if anchorChanged {
+				last[col] = r[col] // re-print and update baseline
 			} else {
-				last[col] = r[col]
-				// reset all subsequent tracked columns when a parent changes
-				for j := col + 1; j < n; j++ {
-					last[j] = ""
-				}
+				r[col] = "" // blank repeated value
 			}
 		}
 
@@ -89,7 +103,7 @@ func collapseLeadingColumns(rows []table.Row, n int) []table.Row {
 
 func (p *Printer) CloseTableWriter() {
 	cols := p.model.Columns()
-	rows := collapseLeadingColumns(p.model.Rows(), collapseLeadingColumnsNum)
+	rows := collapseColumns(p.model.Rows(), p.collapseIndices)
 
 	// Width of rows is computed here before rendering
 	for colIdx := range cols {
