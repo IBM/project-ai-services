@@ -3,11 +3,13 @@ package podman
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
+	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -27,7 +29,12 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 
 	// Collect and hash password.
 	// If secret exists passwordHash will be empty.
-	passwordHash, err := catalogUtils.CollectAndHashPassword(ctx, deployCtx.Runtime)
+	secretExists, err := deployCtx.Runtime.SecretExists(ctx, catalogconstants.CatalogSecretName)
+	if err != nil {
+		return fmt.Errorf("failed to check catalog secret: %w", err)
+	}
+
+	passwordHash, adminPassword, err := configureutils.CollectAdminPassword(secretExists)
 	if err != nil {
 		return err
 	}
@@ -42,7 +49,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts)
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword)
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
@@ -102,8 +109,9 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	return caddyCtx, nil
 }
 
-// handlePostDeployment handles route registration and next steps display after catalog deployment.
-func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions) error {
+// handlePostDeployment handles route registration, login verification,
+// local worker join, and next steps display after catalog deployment.
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, adminPassword string) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -118,8 +126,16 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
+	// Login to the catalog API — this both verifies the admin password and gives
+	// us a client to reuse for local worker registration without a second login.
+	catalogAPIURL := routeURLs[catalogconstants.CatalogAPIRouteKey]
+	catalogClient, err := configure.LoginToCatalog(ctx, catalogAPIURL, adminPassword)
+	if err != nil {
+		return fmt.Errorf("admin password verification failed: %w", err)
+	}
+
 	if !opts.SkipLocalWorker {
-		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts); err != nil {
+		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts, catalogClient); err != nil {
 			return fmt.Errorf("local worker join failed: %v", err)
 		}
 	}
@@ -189,9 +205,7 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
-	if skipLocalWorker {
-		argParams[configure.ArgParamLocalWorker] = "false"
-	}
+	argParams[configure.ArgParamLocalWorker] = strconv.FormatBool(!skipLocalWorker)
 	argParams[constants.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, utils.CaddyFileIndent)
 	argParams[constants.ArgParamSSLCertFileContent] = utils.IndentString(sslCertContent, utils.CertContentIndent)
 	argParams[constants.ArgParamSSLKeyFileContent] = utils.IndentString(sslKeyContent, utils.CertContentIndent)

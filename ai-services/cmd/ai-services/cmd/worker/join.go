@@ -9,14 +9,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
@@ -31,8 +34,12 @@ const (
 
 // Flag variables for the worker join command.
 var (
+	// common flags.
 	token       string
 	runtimeType string
+	skipChecks  []string
+
+	// podman flags.
 	baseDir     string
 	httpsPort   int
 	domainName  string
@@ -68,7 +75,12 @@ Obtain a token first by running on the catalog node:
   ai-services worker join catalog.example.com:9090 \
       --token    <bootstrap-token> \
       --ssl-cert /path/to/cert.pem \
-      --ssl-key  /path/to/key.pem`,
+      --ssl-key  /path/to/key.pem
+
+  # Skip specific bootstrap validation checks
+  ai-services worker join catalog.example.com:9090 \
+      --token           <bootstrap-token> \
+      --skip-validation rhn,power`,
 	Args:    cobra.ExactArgs(1),
 	PreRunE: joinPreRunE,
 	RunE:    joinRunE,
@@ -78,6 +90,10 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 	cmd.SilenceUsage = true
 
 	if err := cmdcommon.InitAndValidateRuntimeFlag(runtimeType); err != nil {
+		return err
+	}
+
+	if err := cmdcommon.ValidateSkipChecksFlag(cmd); err != nil {
 		return err
 	}
 
@@ -95,17 +111,31 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	ctx := context.Background()
+	return checkNotLocalWorker(cmd.Context())
+}
+
+// checkNotLocalWorker returns an error when this node is co-located with the
+// catalog control plane, which means it cannot be managed as a standalone worker.
+func checkNotLocalWorker(ctx context.Context) error {
 	rtType := vars.RuntimeFactory.GetRuntimeType()
-	rt, err := runtime.CreateRuntime(rtType, "")
+	rt, err := runtime.CreateRuntime(rtType, workerconstants.WorkerAppName)
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
-	isLocalWorker, err := cmdcommon.IsCatalogLocalWorker(ctx, rt)
+
+	var localWorker bool
+
+	switch rtType {
+	case types.RuntimeTypeOpenShift:
+		localWorker, err = workercommon.IsOpenShiftLocalWorker(ctx, rt)
+	default:
+		localWorker, err = workercommon.IsPodmanLocalWorker(ctx, rt)
+	}
+
 	if err != nil {
 		return fmt.Errorf("could not determine LOCAL_WORKER from catalog pod: %w", err)
 	}
-	if isLocalWorker {
+	if localWorker {
 		return fmt.Errorf("the worker is already co-located with the control plane and cannot be joined independently")
 	}
 
@@ -160,6 +190,10 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	gatewayAddr := args[0]
 
+	if err := cmdcommon.DoBootstrapValidate(ctx, skipChecks); err != nil {
+		return err
+	}
+
 	switch types.RuntimeType(runtimeType) {
 	case types.RuntimeTypePodman:
 		aiServicesDir, err := utils.ValidateBaseDir(baseDir)
@@ -190,7 +224,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 
 		// Setup worker node
 		if err := workerpodman.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("worker join: setup: %w", err)
+			return fmt.Errorf("failed to deploy worker: %w", err)
 		}
 	case types.RuntimeTypeOpenShift:
 		opts := workertypes.OpenshiftWorkerOptions{
@@ -203,7 +237,7 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 			},
 		}
 		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("worker join: failed to install worker helm chart: %w", err)
+			return fmt.Errorf("failed to deploy worker: %w", err)
 		}
 	default:
 		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
@@ -212,10 +246,13 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// configureFlags registers the flags shared by the join and grpcstream
-// commands: --token (required), --runtime, --basedir, --https-port,
-// --ssl-cert, and --ssl-key.
+// configureFlags registers the flags shared by the join and grpcstream commands.
 func configureFlags(c *cobra.Command) {
+	initJoinCommonFlags(c)
+	initJoinPodmanFlags(c)
+}
+
+func initJoinCommonFlags(c *cobra.Command) {
 	c.Flags().StringVar(&token, "token", "",
 		"Single-use bootstrap token issued by 'catalog worker register' (required).\n"+
 			"Example: --token <uuid>\n")
@@ -223,6 +260,11 @@ func configureFlags(c *cobra.Command) {
 
 	cmdcommon.ConfigureRuntimeFlag(c, &runtimeType)
 
+	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
+	c.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+}
+
+func initJoinPodmanFlags(c *cobra.Command) {
 	c.Flags().StringVar(&baseDir, "basedir", "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
@@ -328,7 +370,14 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	return join.StartGrpcStream(ctx, rt, pr, opts)
+	err := join.StartGrpcStream(ctx, rt, pr, opts)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "%s: %v\n", workerconstants.WorkerJoinErr, err)
+
+		return fmt.Errorf("%s: %w", workerconstants.WorkerJoinErr, err)
+	}
+
+	return nil
 }
 
 func newGrpcStreamCmd() *cobra.Command {

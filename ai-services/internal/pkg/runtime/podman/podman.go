@@ -346,26 +346,40 @@ func (pc *PodmanClient) printLogsFromChannels(parentCtx, logsCtx context.Context
 	}
 }
 
-func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string) error {
+// PodLogs retrieves logs for all non-infra containers in a pod.
+// When stream is true it follows logs until interrupted (prints to logger).
+// When stream is false it snapshots current logs and returns all lines.
+func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string, stream bool) ([]string, error) {
 	if podNameOrID == "" {
-		return errors.New("pod name or ID cannot be empty")
+		return nil, errors.New("pod name or ID cannot be empty")
 	}
 
 	podInspect, err := pc.InspectPod(ctx, podNameOrID)
 	if err != nil {
-		return fmt.Errorf("failed to inspect pod: %w", err)
+		return nil, fmt.Errorf("failed to inspect pod: %w", err)
 	}
 
 	if len(podInspect.Containers) == 0 {
-		return errors.New("no containers found in pod")
+		return nil, errors.New("no containers found in pod")
 	}
 
-	// creating context here that listens for Ctrl+C
-	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	if stream {
+		return nil, pc.streamPodLogs(ctx, podInspect)
+	}
+
+	return pc.collectPodLogs(ctx, podInspect)
+}
+
+// streamPodLogs streams logs for all non-infra containers in the pod until
+// interrupted (Ctrl+C / SIGTERM).
+func (pc *PodmanClient) streamPodLogs(ctx context.Context, podInspect *types.Pod) error {
+	// Install signal handling once for the entire streaming session so that
+	// Ctrl+C / SIGTERM stops the tail gracefully, regardless of how many
+	// containers are in the pod.
+	sigCtx, stopSignal := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignal()
 
 	for _, container := range podInspect.Containers {
-		// Skip infra container
 		if container.ID == podInspect.InfraContainerID {
 			continue
 		}
@@ -376,9 +390,72 @@ func (pc *PodmanClient) PodLogs(ctx context.Context, podNameOrID string) error {
 			return fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
 		}
 
-		// Check if context was cancelled
 		if sigCtx.Err() == context.Canceled || sigCtx.Err() == context.DeadlineExceeded {
 			return nil
+		}
+	}
+
+	return nil
+}
+
+// collectPodLogs snapshots the current logs for all non-infra containers and
+// returns all lines.
+func (pc *PodmanClient) collectPodLogs(ctx context.Context, podInspect *types.Pod) ([]string, error) {
+	var lines []string
+
+	for _, container := range podInspect.Containers {
+		if container.ID == podInspect.InfraContainerID {
+			continue
+		}
+
+		if err := pc.collectContainerLogs(ctx, container.ID, false, func(line string) {
+			lines = append(lines, line)
+		}); err != nil {
+			return nil, fmt.Errorf("error reading logs for container %s: %w", container.Name, err)
+		}
+	}
+
+	return lines, nil
+}
+
+// collectContainerLogs opens a log stream for a single container and invokes onLine for each received log line.
+func (pc *PodmanClient) collectContainerLogs(ctx context.Context, containerID string, follow bool, onLine func(string)) error {
+	opts := &containers.LogOptions{
+		Follow: utils.BoolPtr(follow),
+		Stderr: utils.BoolPtr(true),
+		Stdout: utils.BoolPtr(true),
+	}
+
+	stdoutChan := make(chan string, logChannelBufferSize)
+	stderrChan := make(chan string, logChannelBufferSize)
+
+	podCtx, cancel := pc.podmanCtx(ctx)
+
+	go func() {
+		defer cancel()
+		defer close(stdoutChan)
+		defer close(stderrChan)
+		_ = containers.Logs(podCtx, containerID, opts, stdoutChan, stderrChan)
+	}()
+
+	for stdoutChan != nil || stderrChan != nil {
+		select {
+		case <-ctx.Done():
+			return nil
+		case line, ok := <-stdoutChan:
+			if !ok {
+				stdoutChan = nil
+
+				continue
+			}
+			onLine(line)
+		case line, ok := <-stderrChan:
+			if !ok {
+				stderrChan = nil
+
+				continue
+			}
+			onLine(line)
 		}
 	}
 

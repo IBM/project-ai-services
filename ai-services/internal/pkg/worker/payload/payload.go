@@ -193,3 +193,9 @@ type WaitInferenceService struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
 }
+
+// CancelCommand is the wire payload for COMMAND_TYPE_CANCEL.
+// CommandID is the ID of the previously-dispatched command to abort.
+type CancelCommand struct {
+	CommandID string `json:"command_id"`
+}
