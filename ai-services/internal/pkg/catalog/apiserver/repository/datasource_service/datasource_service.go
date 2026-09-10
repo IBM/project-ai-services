@@ -1098,7 +1098,7 @@ func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL
 
 // extractInternalEndpointURL parses a JSONB endpoints array and returns the URL of the
 // first entry whose "type" is "internal". The internal endpoint is the plain-HTTP pod-to-pod
-// URL (http://podname:port) stored at deploy time — no TLS needed.
+// URL (http://podname:port) stored at deploy time.
 // Returns an empty string when the array is empty, malformed, or contains no "internal" entry.
 func extractInternalEndpointURL(endpointsJSON json.RawMessage) string {
 	if len(endpointsJSON) == 0 {
