@@ -923,7 +923,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     if engine is None:
         raise RuntimeError("Database not available. Cannot import metadata without database connection.")
 
-    started_at = perf_counter()
+    _perf_start = perf_counter()
     summary = _build_import_summary(
         len(payload.data.jobs),
         len(payload.data.documents),
@@ -1192,7 +1192,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     return ImportResponse(
         status="completed",
         summary=summary,
-        duration_seconds=round(perf_counter() - started_at, 4),
+        duration_seconds=round(perf_counter() - _perf_start, 4),
         errors=errors,
         warnings=warnings,
     )
