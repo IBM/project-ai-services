@@ -433,6 +433,9 @@ func buildCatalogPayload(ctx context.Context, appClient *catalogClient.Applicati
 }
 
 // pollApplicationStatus polls the application status until it's ready or fails.
+// If ctx is cancelled (e.g. Ctrl+C) the in-flight deployment is deleted so the
+// server-side cancellation chain fires (DeploymentRegistry.Cancel →
+// Sender.sendCancel → COMMAND_TYPE_CANCEL on the worker).
 func pollApplicationStatus(ctx context.Context, appClient *catalogClient.ApplicationClient, appName, id string) error {
 	logger.Infof("Waiting for application '%s' to be ready...\n", appName)
 
@@ -443,6 +446,15 @@ func pollApplicationStatus(ctx context.Context, appClient *catalogClient.Applica
 
 	for {
 		select {
+		case <-ctx.Done():
+			logger.Infof("Interrupted — deleting application '%s' to stop the in-flight deployment...\n", appName)
+			deleteCtx := context.Background()
+			if err := appClient.DeleteApplication(deleteCtx, id, &catalogClient.DeleteApplicationParams{}); err != nil {
+				logger.Warningf("Failed to delete application '%s' after interruption: %v\n", appName, err)
+			}
+
+			return ctx.Err()
+
 		case <-timeout:
 			return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
 
