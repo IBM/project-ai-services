@@ -308,6 +308,37 @@ func (s *bundleService) insertActivateAndFetch(ctx context.Context, catalogType,
 	return s.GetBundleByID(ctx, row.ID.String())
 }
 
+// checkReplaceIdentity enforces the two pre-validation checks for ReplaceBundle:
+//  1. catalog_id and catalog_type are immutable — archive values must match the existing record.
+//  2. name must not collide with any other catalog entry (skipped when the name is unchanged).
+func (s *bundleService) checkReplaceIdentity(meta any, existing *BundleResponse, catalogType, catalogID, name string) error {
+	if catalogID != existing.CatalogID {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("catalog_id mismatch: archive contains %q but existing bundle has %q", catalogID, existing.CatalogID),
+		}
+	}
+	if catalogType != existing.CatalogType {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("catalog_type mismatch: archive contains %q but existing bundle has %q", catalogType, existing.CatalogType),
+		}
+	}
+
+	if s.catalog == nil || strings.EqualFold(name, existing.Name) {
+		return nil
+	}
+
+	switch m := meta.(type) {
+	case *bundlemetadata.ServiceMetadataYAML:
+		return checkNameCollisionServices(s.catalog, name)
+	case *bundlemetadata.ComponentMetadataYAML:
+		return checkNameCollisionComponents(s.catalog, m.ComponentType, name)
+	}
+
+	return nil
+}
+
 // ReplaceBundle is the synchronous PUT update path.
 //
 //  1. peekMetadata: read minimal identity fields from the archive.
@@ -332,39 +363,9 @@ func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleRespo
 
 	catalogType, catalogID, version, name := metaFields(meta)
 
-	// Step 2: immutability check — catalog_id and catalog_type must not change.
-	if catalogID != existing.CatalogID {
-		return nil, &validators.ValidationError{
-			Code: http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf(
-				"catalog_id mismatch: archive contains %q but existing bundle has %q",
-				catalogID, existing.CatalogID,
-			),
-		}
-	}
-	if catalogType != existing.CatalogType {
-		return nil, &validators.ValidationError{
-			Code: http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf(
-				"catalog_type mismatch: archive contains %q but existing bundle has %q",
-				catalogType, existing.CatalogType,
-			),
-		}
-	}
-
-	// Step 2b: name collision check — reject if the new name matches another catalog entry.
-	// Skip when the name is unchanged (the bundle keeps its own existing name).
-	if s.catalog != nil && !strings.EqualFold(name, existing.Name) {
-		switch m := meta.(type) {
-		case *bundlemetadata.ServiceMetadataYAML:
-			if err := checkNameCollisionServices(s.catalog, name); err != nil {
-				return nil, err
-			}
-		case *bundlemetadata.ComponentMetadataYAML:
-			if err := checkNameCollisionComponents(s.catalog, m.ComponentType, name); err != nil {
-				return nil, err
-			}
-		}
+	// Steps 2–2b: immutability + name collision checks.
+	if err := s.checkReplaceIdentity(meta, existing, catalogType, catalogID, name); err != nil {
+		return nil, err
 	}
 
 	// Step 3: full validation — same rules as POST /validate, no re-read needed.
