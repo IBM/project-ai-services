@@ -3531,6 +3531,9 @@ const docTemplate = `{
                 "namespace": {
                     "type": "string"
                 },
+                "runtime_type": {
+                    "type": "string"
+                },
                 "services": {
                     "type": "array",
                     "items": {

@@ -191,17 +191,27 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 	return nil
 }
 
+// PS table column indices (normal output).
+const (
+	psColAppName = 0
+	psColWorker  = 1
+	psColRuntime = 5
+)
+
+// PS table column indices (wide output).
+const (
+	psWideColAppName = 0
+	psWideColWorker  = 1
+	psWideColRuntime = 6
+)
+
 // setApplicationPSTableHeaders sets the table headers and collapse indices based on output format.
-//
-// Column indices for collapsing:
-//   - normal: APPLICATION NAME(0), WORKER(1), RUNTIME(5)
-//   - wide:   APPLICATION NAME(0), WORKER(1), RUNTIME(6)
 func setApplicationPSTableHeaders(printer *utils.Printer, outputWide bool) {
 	if outputWide {
 		printer.SetHeaders("APPLICATION NAME", "WORKER", "NAMESPACE", "POD ID", "POD NAME", "STATUS", "RUNTIME", "CREATED", "CONTAINERS")
-		printer.SetCollapseIndices(0, 1, 6)
+		printer.SetCollapseIndices(psWideColAppName, psWideColWorker, psWideColRuntime)
 	} else {
 		printer.SetHeaders("APPLICATION NAME", "WORKER", "NAMESPACE", "POD NAME", "STATUS", "RUNTIME")
-		printer.SetCollapseIndices(0, 1, 5)
+		printer.SetCollapseIndices(psColAppName, psColWorker, psColRuntime)
 	}
 }
