@@ -26,6 +26,7 @@ spec:
       - --served-model-name
       - {{ .Values.model }}
       - --port=8001
+      - --gpu-memory-utilization=0.5
       livenessProbe:
         httpGet:
           path: /health
@@ -39,9 +40,9 @@ spec:
           value: "16"
       resources:
         requests:
-          memory: "4Gi"
+          memory: "8Gi"
         limits:
-          memory: "4Gi"
+          memory: "8Gi"
       ports:
         - containerPort: 8001
       volumeMounts:
