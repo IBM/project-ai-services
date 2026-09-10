@@ -22,6 +22,7 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/join"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
@@ -107,15 +108,15 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 // buildWorkerFlagValidator registers every worker join flag with its runtime scope.
 func buildWorkerFlagValidator() *flagvalidator.FlagValidator {
 	return cmdcommon.BuildFlagValidator(
-		[]string{cmdcommon.TokenFlag},
-		[]string{cmdcommon.BaseDirFlag, cmdcommon.HTTPSPortFlag, cmdcommon.DomainNameFlag, cmdcommon.SSLCertFlag, cmdcommon.SSLKeyFlag},
+		[]string{constants.TokenFlag},
+		[]string{constants.BaseDirFlag, constants.HTTPSPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag},
 		nil,
 	)
 }
 
 func validateWorkerJoinFlags(ctx context.Context) error {
 	if token == "" {
-		return fmt.Errorf("required flag(s) %q not set", cmdcommon.TokenFlag)
+		return fmt.Errorf("required flag(s) %q not set", constants.TokenFlag)
 	}
 
 	if httpsPort < 1 || httpsPort > 65535 {
@@ -241,11 +242,11 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 // --ssl-cert, and --ssl-key.
 // requireToken controls whether --token is marked as a required flag.
 func configureFlags(c *cobra.Command, requireToken bool) {
-	c.Flags().StringVar(&token, cmdcommon.TokenFlag, "",
+	c.Flags().StringVar(&token, constants.TokenFlag, "",
 		"Single-use bootstrap token issued by 'catalog worker register' (required).\n"+
 			"Example: --token <uuid>\n")
 	if requireToken {
-		_ = c.MarkFlagRequired(cmdcommon.TokenFlag)
+		_ = c.MarkFlagRequired(constants.TokenFlag)
 	}
 
 	cmdcommon.ConfigureRuntimeFlag(c, &runtimeType)
@@ -258,7 +259,7 @@ func configureFlags(c *cobra.Command, requireToken bool) {
 func initJoinPodmanFlags(c *cobra.Command) {
 	cmdcommon.ConfigurePodmanDeployFlags(c, &baseDir, &httpsPort, defaultJoinHTTPSPort, &sslCertPath, &sslKeyPath, &domainName)
 
-	c.Flags().StringArrayVar(&addHosts, cmdcommon.AddHostFlag, nil,
+	c.Flags().StringArrayVar(&addHosts, constants.AddHostFlag, nil,
 		"Add an extra entry to the worker pod's /etc/hosts (repeatable).\n"+
 			"Format: DOMAIN:IP\n"+
 			"Note: Supported for podman runtime only.\n"+

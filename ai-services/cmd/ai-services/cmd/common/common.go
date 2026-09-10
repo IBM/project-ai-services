@@ -20,12 +20,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-const (
-	ResetPasswordFlag   = "reset-password"
-	ResetPodmanAuthFlag = "reset-podman-auth"
-	ResetSSLCertFlag    = "reset-certificate"
-)
-
 // InitAndValidateRuntimeFlag validates the runtime flag value, initialises
 // vars.RuntimeFactory, and checks platform support. It must be called in
 // PreRunE before any code that reads vars.RuntimeFactory.
@@ -128,18 +122,18 @@ func ValidateResetFlag(cmd *cobra.Command, flagName string, skipFlags ...string)
 // a podman-backed service (e.g. "worker join" and "catalog configure").
 // defaultHTTPSPort is used as the default value for --https-port.
 func ConfigurePodmanDeployFlags(cmd *cobra.Command, baseDir *string, httpsPort *int, defaultHTTPSPort int, sslCertPath, sslKeyPath, domainName *string) {
-	cmd.Flags().StringVar(baseDir, BaseDirFlag, "",
+	cmd.Flags().StringVar(baseDir, constants.BaseDirFlag, "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /var/lib/ai-services\n")
 
-	cmd.Flags().IntVar(httpsPort, HTTPSPortFlag, defaultHTTPSPort,
+	cmd.Flags().IntVar(httpsPort, constants.HTTPSPortFlag, defaultHTTPSPort,
 		"Custom HTTPS port to expose the service endpoints externally.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --https-port 8443\n")
 
-	cmd.Flags().StringVar(domainName, DomainNameFlag, "",
+	cmd.Flags().StringVar(domainName, constants.DomainNameFlag, "",
 		"Custom domain name for self-signed certificates.\n"+
 			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
 			"If a custom SSL certificate/key pair is provided, the domain is extracted from the certificate and this flag is ignored.\n"+
@@ -150,14 +144,14 @@ func ConfigurePodmanDeployFlags(cmd *cobra.Command, baseDir *string, httpsPort *
 }
 
 func ConfigureSSLFlags(cmd *cobra.Command, sslCertPath, sslKeyPath *string) {
-	cmd.Flags().StringVar(sslCertPath, SSLCertFlag, "",
+	cmd.Flags().StringVar(sslCertPath, constants.SSLCertFlag, "",
 		"Path to user-provided SSL certificate (optional).\n"+
 			"Must be used together with --ssl-key.\n"+
 			"Certificate must contain wildcard SAN entry (e.g., *.example.com).\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --ssl-cert /path/to/cert.pem\n")
 
-	cmd.Flags().StringVar(sslKeyPath, SSLKeyFlag, "",
+	cmd.Flags().StringVar(sslKeyPath, constants.SSLKeyFlag, "",
 		"Path to user-provided SSL private key (optional).\n"+
 			"Must be used together with --ssl-cert.\n"+
 			"Note: Supported for podman runtime only.\n"+
@@ -170,7 +164,7 @@ func ConfigureSSLFlags(cmd *cobra.Command, sslCertPath, sslKeyPath *string) {
 func ConfigurePodmanResetFlags(cmd *cobra.Command, resetPodmanAuth, resetCertificate *bool) {
 	cmd.Flags().BoolVar(
 		resetPodmanAuth,
-		ResetPodmanAuthFlag,
+		constants.ResetPodmanAuthFlag,
 		false,
 		"Reset podman authentication using the system's current auth.json.\n"+
 			"Note: Supported for podman runtime only.\n",
@@ -178,7 +172,7 @@ func ConfigurePodmanResetFlags(cmd *cobra.Command, resetPodmanAuth, resetCertifi
 
 	cmd.Flags().BoolVar(
 		resetCertificate,
-		ResetSSLCertFlag,
+		constants.ResetSSLCertFlag,
 		false,
 		"Reset the Caddy SSL certificates by loading new custom certificates.\n"+
 			"Requires --ssl-cert and --ssl-key flags to specify the new certificate files.\n"+

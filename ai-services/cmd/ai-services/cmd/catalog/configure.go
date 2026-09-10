@@ -15,6 +15,7 @@ import (
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -94,11 +95,11 @@ Note: --workergateway-port is supported for podman runtime only (default 9090).`
 		}
 
 		if resetPasswordFlag {
-			return common.ValidateResetFlag(cmd, common.ResetPasswordFlag)
+			return common.ValidateResetFlag(cmd, constants.ResetPasswordFlag)
 		} else if resetPodmanAuthFlag {
-			return common.ValidateResetFlag(cmd, common.ResetPodmanAuthFlag)
+			return common.ValidateResetFlag(cmd, constants.ResetPodmanAuthFlag)
 		} else if resetCertificateFlag {
-			return common.ValidateResetCertificateFlags(cmd, common.ResetSSLCertFlag, sslCertPath, sslKeyPath, domainName)
+			return common.ValidateResetCertificateFlags(cmd, constants.ResetSSLCertFlag, sslCertPath, sslKeyPath, domainName)
 		}
 
 		return validateConfigureFlags()
@@ -136,9 +137,9 @@ func init() {
 // buildCatalogFlagValidator registers every catalog configure flag with its runtime scope.
 func buildCatalogFlagValidator() *flagvalidator.FlagValidator {
 	return common.BuildFlagValidator(
-		[]string{common.ResetPasswordFlag, common.SkipLocalWorkerFlag},
-		[]string{common.WorkerGatewayPortFlag, common.BaseDirFlag, common.HTTPSPortFlag, common.DomainNameFlag, common.SSLCertFlag, common.SSLKeyFlag, common.ResetPodmanAuthFlag, common.ResetSSLCertFlag},
-		[]string{common.TimeoutFlag},
+		[]string{constants.ResetPasswordFlag, constants.SkipLocalWorkerFlag},
+		[]string{constants.WorkerGatewayPortFlag, constants.BaseDirFlag, constants.HTTPSPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag, constants.ResetPodmanAuthFlag, constants.ResetSSLCertFlag},
+		[]string{constants.TimeoutFlag},
 	)
 }
 
@@ -219,14 +220,14 @@ func initConfigureCommonFlags() {
 
 	configureCmd.Flags().BoolVar(
 		&resetPasswordFlag,
-		common.ResetPasswordFlag,
+		constants.ResetPasswordFlag,
 		false,
 		"Reset the password for the admin user",
 	)
 
 	configureCmd.Flags().BoolVar(
 		&skipLocalWorkerFlag,
-		common.SkipLocalWorkerFlag,
+		constants.SkipLocalWorkerFlag,
 		false,
 		"Skip automatically joining this machine as the local worker after catalog deployment.",
 	)
@@ -238,7 +239,7 @@ func initConfigurePodmanFlags() {
 
 	configureCmd.Flags().IntVar(
 		&workerGatewayPort,
-		common.WorkerGatewayPortFlag,
+		constants.WorkerGatewayPortFlag,
 		defaultWorkerGatewayPort,
 		"Port for the gRPC worker gateway that workers connect to.\n"+
 			"Note: Supported for podman runtime only.\n"+
@@ -267,7 +268,7 @@ func runResetPodmanAuth(ctx context.Context) error {
 func initConfigureOpenShiftFlags() {
 	configureCmd.Flags().DurationVar(
 		&timeout,
-		common.TimeoutFlag,
+		constants.TimeoutFlag,
 		0,
 		"Timeout for the operation (e.g. 10s, 2m, 1h).\n"+
 			"Note: Supported for openshift runtime only.\n"+

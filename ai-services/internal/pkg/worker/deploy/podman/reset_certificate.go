@@ -38,7 +38,7 @@ func ResetWorkerCertificate(ctx context.Context, sslCertPath, sslKeyPath string)
 	}
 
 	// Delete certificate secret and worker pod before redeployment.
-	if err := podmanutils.DeleteSecretAndPod(ctx, rt, workerconstants.CadyCertSecretName, workerconstants.WorkerCaddyPodName); err != nil {
+	if err := podmanutils.DeleteSecretAndPod(ctx, rt, workerconstants.CaddyCertSecretName, workerconstants.WorkerCaddyPodName); err != nil {
 		return err
 	}
 

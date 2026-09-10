@@ -15,7 +15,7 @@ import (
 func ResetPodmanAuth(ctx context.Context) error {
 	rt, err := runtime.CreateRuntime(types.RuntimeTypePodman, "")
 	if err != nil {
-		return fmt.Errorf("worker join: init runtime: %w", err)
+		return fmt.Errorf("worker reset: init runtime: %w", err)
 	}
 
 	opts := workertypes.PodmanWorkerOptions{}

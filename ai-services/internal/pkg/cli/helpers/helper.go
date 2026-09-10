@@ -132,7 +132,7 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 // CheckExistingResourcesForApplication checks if there are resources already existing for the given application name.
 func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.Runtime, appName string, secretNames []string) ([]string, error) {
 	// check existing pods for the application
-	podsToSkip, err := existingRunningPods(ctx, runtime, fmt.Sprintf("ai-services.io/application=%s", appName))
+	podsToSkip, err := existingRunningPods(ctx, runtime, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, appName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing pods: %w", err)
 	}

@@ -135,3 +135,20 @@ const (
 const (
 	CaddyAdminInternalPort = "2019/"
 )
+
+const (
+	TokenFlag             = "token"
+	BaseDirFlag           = "basedir"
+	HTTPSPortFlag         = "https-port"
+	DomainNameFlag        = "domain-name"
+	SSLCertFlag           = "ssl-cert"
+	SSLKeyFlag            = "ssl-key"
+	AddHostFlag           = "add-host"
+	SkipLocalWorkerFlag   = "skip-local-worker"
+	WorkerGatewayPortFlag = "workergateway-port"
+	TimeoutFlag           = "timeout"
+
+	ResetPasswordFlag   = "reset-password"
+	ResetPodmanAuthFlag = "reset-podman-auth"
+	ResetSSLCertFlag    = "reset-certificate"
+)

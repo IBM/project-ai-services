@@ -155,12 +155,12 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 	workerResourceCount := len(tmpls)
 
 	// Checking if 'caddy-cert-secret' optional secret is present or not
-	exists, err := rt.SecretExists(ctx, workerconstants.CadyCertSecretName)
+	exists, err := rt.SecretExists(ctx, workerconstants.CaddyCertSecretName)
 	if err != nil {
 		return false, nil, err
 	}
 	if exists {
-		existingResources = append(existingResources, workerconstants.CadyCertSecretName)
+		existingResources = append(existingResources, workerconstants.CaddyCertSecretName)
 	} else {
 		// When 'caddy-cert-secret' secret not created, decrement workerResourceCount by one,
 		// as resource is created based on optional flag (--ssl-cert and --ssl-key)
@@ -179,7 +179,7 @@ func collectWorkerSecretNames(tmpls map[string]*ttemplate.Template) ([]string, e
 		var rendered bytes.Buffer
 		if err := tmpl.Execute(&rendered, nil); err != nil {
 			// Skip templates that require params — they are not secrets.
-			continue
+			return nil, err
 		}
 
 		if strings.TrimSpace(rendered.String()) == "" {

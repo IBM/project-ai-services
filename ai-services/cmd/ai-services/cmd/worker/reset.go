@@ -8,6 +8,7 @@ import (
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
 )
 
@@ -47,9 +48,9 @@ Note: Supported for podman runtime only.`,
 		}
 
 		if resetPodmanAuthFlag {
-			return cmdcommon.ValidateResetFlag(cmd, cmdcommon.ResetPodmanAuthFlag)
+			return cmdcommon.ValidateResetFlag(cmd, constants.ResetPodmanAuthFlag)
 		} else if resetCertificateFlag {
-			return cmdcommon.ValidateResetCertificateFlags(cmd, cmdcommon.ResetSSLCertFlag, sslCertPath, sslKeyPath, "")
+			return cmdcommon.ValidateResetCertificateFlags(cmd, constants.ResetSSLCertFlag, sslCertPath, sslKeyPath, "")
 		}
 
 		return fmt.Errorf("at least one of --reset-podman-auth or --reset-certificate must be specified")
@@ -74,7 +75,7 @@ Note: Supported for podman runtime only.`,
 func buildWorkerResetFlagValidator() *flagvalidator.FlagValidator {
 	return cmdcommon.BuildFlagValidator(
 		nil,
-		[]string{cmdcommon.ResetPodmanAuthFlag, cmdcommon.ResetSSLCertFlag, cmdcommon.SSLCertFlag, cmdcommon.SSLKeyFlag},
+		[]string{constants.ResetPodmanAuthFlag, constants.ResetSSLCertFlag, constants.SSLCertFlag, constants.SSLKeyFlag},
 		nil,
 	)
 }
