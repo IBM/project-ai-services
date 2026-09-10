@@ -45,7 +45,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 	}
 
 	// Load SSL certificates if provided
-	if err := caddyCtx.LoadSSLCertificates(ctx, opts.BaseDir, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+	if err := caddyCtx.LoadSSLCertificates(ctx, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
 		return err
 	}
 
