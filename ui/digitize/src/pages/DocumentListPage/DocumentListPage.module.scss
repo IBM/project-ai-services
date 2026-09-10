@@ -179,6 +179,10 @@
   fill: var(--cds-support-warning);
 }
 
+.statusIconCancelled {
+  fill: var(--cds-icon-primary);
+}
+
 .errorInfoButton {
   display: inline-flex;
   align-items: center;

@@ -3,6 +3,7 @@ export const JOB_STATUS = {
   ACCEPTED: 'accepted',
   IN_PROGRESS: 'in_progress',
   COMPLETED: 'completed',
+  COMPLETED_WITH_ERRORS: 'completed_with_errors',
   FAILED: 'failed',
   CANCEL_PENDING: 'cancel_pending',
   CANCELLED: 'cancelled',
@@ -10,15 +11,16 @@ export const JOB_STATUS = {
 
 // Display status constants
 export const DISPLAY_STATUS = {
-  ACCEPTED: 'Accepted',
-  INGESTED: 'Ingested',
-  DIGITIZED: 'Digitized',
-  INGESTION_ERROR: 'Ingestion error',
-  DIGITIZATION_ERROR: 'Digitization error',
-  INGESTING: 'Ingesting...',
-  DIGITIZING: 'Digitizing...',
-  CANCEL_PENDING: 'Cancelling...',
-  CANCELLED: 'Cancelled',
+  ACCEPTED: 'accepted',
+  INGESTED: 'ingested',
+  DIGITIZED: 'digitized',
+  COMPLETED_WITH_ERRORS: 'completed_with_errors',
+  INGESTION_ERROR: 'ingestion error',
+  DIGITIZATION_ERROR: 'digitization error',
+  INGESTING: 'ingesting...',
+  DIGITIZING: 'digitizing...',
+  CANCEL_PENDING: 'cancelling...',
+  CANCELLED: 'cancelled',
 } as const;
 
 // Document status constants (matching backend DocStatus enum values)

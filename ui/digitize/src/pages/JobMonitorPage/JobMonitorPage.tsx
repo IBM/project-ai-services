@@ -304,6 +304,9 @@ const getStatusIcon = (status: string) => {
     case DISPLAY_STATUS.INGESTED:
     case DISPLAY_STATUS.DIGITIZED:
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
+    case JOB_STATUS.COMPLETED_WITH_ERRORS:
+    case DISPLAY_STATUS.COMPLETED_WITH_ERRORS:
+      return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case JOB_STATUS.FAILED:
     case DISPLAY_STATUS.INGESTION_ERROR:
     case DISPLAY_STATUS.DIGITIZATION_ERROR:
@@ -320,7 +323,7 @@ const getStatusIcon = (status: string) => {
     case JOB_STATUS.CANCELLED:
     case DISPLAY_STATUS.CANCELLED:
     case DOC_STATUS.CANCELLED:
-      return <Close size={16} className={styles.statusIconCancelled} />;
+      return <ErrorFilled size={16} className={styles.errorInfoIcon} />;
     case DOC_STATUS.ALREADY_EXISTS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     default:
@@ -598,6 +601,8 @@ const JobMonitorPage = () => {
   const getJobStatus = (job: Job) => {
     if (job.status === JOB_STATUS.COMPLETED) {
       return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTED : DISPLAY_STATUS.DIGITIZED;
+    } else if (job.status === JOB_STATUS.COMPLETED_WITH_ERRORS) {
+      return DISPLAY_STATUS.COMPLETED_WITH_ERRORS;
     } else if (job.status === JOB_STATUS.FAILED) {
       return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTION_ERROR : DISPLAY_STATUS.DIGITIZATION_ERROR;
     } else if (job.status === JOB_STATUS.IN_PROGRESS) {
