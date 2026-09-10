@@ -72,6 +72,10 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
+	if err := checkAndCleanExistingWorkerPods(ctx, rt); err != nil {
+		return fmt.Errorf("failed to verify existing worker pods: %w", err)
+	}
+
 	deployed, existingResource, err := CheckStatus(ctx, rt, tp)
 	if err != nil {
 		return err
@@ -109,6 +113,28 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	}
 
 	logger.InfolnCtx(ctx, "Worker node setup complete.")
+
+	return nil
+}
+
+// checkAndCleanExistingWorkerPods checks if any worker pods are present and inspects
+// their container logs. If an error is detected or logs indicate failure, it cleans up
+// the failed pods so setup can proceed cleanly.
+func checkAndCleanExistingWorkerPods(ctx context.Context, rt runtime.Runtime) error {
+	pods, err := rt.ListPods(ctx, map[string][]string{
+		"label": {workerconstants.WorkerPodLabel},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	if len(pods) > 0 {
+		logger.InfolnCtx(ctx, "Existing worker pods found, verifying container logs...")
+		if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
+			logger.WarningfCtx(ctx, "Existing worker pod is in a failed state (%v); deleting pod and proceeding with setup", err)
+			cleanupFailedWorkerPods(ctx, rt)
+		}
+	}
 
 	return nil
 }
@@ -166,6 +192,8 @@ func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template)
 		// as resource is created based on optional flag (--ssl-cert and --ssl-key)
 		workerResourceCount--
 	}
+
+	
 
 	return len(existingResources) == workerResourceCount, existingResources, nil
 }

@@ -53,6 +53,10 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
+	if err := checkAndCleanExistingWorkerPods(ctx, rt, namespace); err != nil {
+		return fmt.Errorf("failed to verify existing worker pods: %w", err)
+	}
+
 	return deployWorkerHelm(ctx, chartData, values, namespace, rt)
 }
 
@@ -97,21 +101,42 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		s.Fail("failed to deploy worker")
 
 		// Verifying worker pod logs for the error message from 'grpcstream' cmd
-		if workerErr := checkAndUninstallOnWorkerErr(ctx, rt, namespace); workerErr != nil {
-			return workerErr
+		if err := checkAndUninstallOnWorkerErr(ctx, rt, namespace); err != nil {
+			return err
 		}
 
 		return fmt.Errorf("failed to deploy worker: %w", err)
 	}
 
 	// Verifying worker pod logs for the error message from 'grpcstream' cmd
-	if workerErr := checkAndUninstallOnWorkerErr(ctx, rt, namespace); workerErr != nil {
+	if err := checkAndUninstallOnWorkerErr(ctx, rt, namespace); err != nil {
 		s.Fail("worker failed to join")
 
-		return workerErr
+		return err
 	}
 
 	s.Stop("Worker deployed successfully")
+
+	return nil
+}
+
+// checkAndCleanExistingWorkerPods checks if any worker pods are present and inspects
+// their container logs. If an error is detected or logs indicate failure, it uninstalls
+// the Helm release so setup can proceed cleanly.
+func checkAndCleanExistingWorkerPods(ctx context.Context, rt runtime.Runtime, namespace string) error {
+	pods, err := rt.ListPods(ctx, map[string][]string{
+		"label": {workerconstants.WorkerPodLabel},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
+	if len(pods) > 0 {
+		logger.InfolnCtx(ctx, "Existing worker pods found, verifying container logs...")
+		if err := checkAndUninstallOnWorkerErr(ctx, rt, namespace); err != nil {
+			logger.WarningfCtx(ctx, "Existing worker pod was in a failed state (%v); uninstalled release and proceeding with setup", err)
+		}
+	}
 
 	return nil
 }
