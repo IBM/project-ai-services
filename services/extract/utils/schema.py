@@ -760,6 +760,14 @@ def resolve_schema_input(
             raise ExtractException(
                 404, "SCHEMA_NOT_FOUND", f"No schema with id {schema_id!r}."
             )
+        if schema_name is not None and row.name != schema_name:
+            logger.error(
+                "Schema name mismatch: schema_id=%r resolved to name %r, but request specified schema_name=%r",
+                schema_id, row.name, schema_name
+            )
+            raise ExtractException(
+                400, "INVALID_REQUEST", "Schema name and id are not for the same record"
+            )
         return row
 
     # ── Priority 2: schema_name ───────────────────────────────────────────

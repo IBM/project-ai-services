@@ -236,24 +236,6 @@ class ExtractionRequest(BaseModel):
         ),
     )
 
-    @field_validator("json_schema", "json_example", "schema_name", "schema_id", mode="before")
-    @classmethod
-    def _at_least_one_schema_source(cls, v: Any, info: Any) -> Any:  # noqa: N805
-        # Individual field validators cannot see sibling fields; mutual-exclusivity
-        # is enforced in the model-level validator below.
-        return v
-
-    def model_post_init(self, __context: Any) -> None:  # noqa: D401
-        """Ensure exactly one schema source is present."""
-        provided = [
-            f
-            for f in ("schema_id", "schema_name", "json_schema", "json_example")
-            if getattr(self, f) is not None
-        ]
-        if not provided:
-            raise ValueError(
-                "One of schema_id, schema_name, json_schema, or json_example must be provided."
-            )
 
 
 class ExtractionSourceInfo(BaseModel):
