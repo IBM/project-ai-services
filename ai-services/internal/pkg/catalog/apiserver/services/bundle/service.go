@@ -26,6 +26,8 @@ type CatalogProvider interface {
 	Reload(ctx context.Context) error
 	ServiceExists(id string) bool
 	ComponentExists(componentType, id string) bool
+	ListServices() ([]catalogtypes.Service, error)
+	ListComponents() ([]catalogtypes.Component, error)
 }
 
 // bundleService implements BundleServiceInterface.
@@ -111,7 +113,7 @@ func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, 
 }
 
 // checkCatalogCollision returns a ValidationError when the metadata conflicts with a
-// registered catalog entry. Returns nil when catalog is nil (CLI/test paths).
+// registered catalog entry (by id or by name). Returns nil when catalog is nil (CLI/test paths).
 func (s *bundleService) checkCatalogCollision(meta any) error {
 	if s.catalog == nil {
 		return nil
@@ -125,11 +127,59 @@ func (s *bundleService) checkCatalogCollision(meta any) error {
 				Message: fmt.Sprintf("metadata.yaml: service id %q conflicts with an existing catalog service; choose a unique id", m.ID),
 			}
 		}
+		if err := checkNameCollisionServices(s.catalog, m.Name); err != nil {
+			return err
+		}
 	case *bundlemetadata.ComponentMetadataYAML:
 		if s.catalog.ComponentExists(m.ComponentType, m.ID) {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("metadata.yaml: component %q (type: %s) conflicts with an existing catalog component; choose a unique id", m.ID, m.ComponentType),
+			}
+		}
+		if err := checkNameCollisionComponents(s.catalog, m.ComponentType, m.Name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkNameCollisionServices returns a ValidationError when the given name
+// (case-insensitive) matches any existing service's name.
+func checkNameCollisionServices(catalog CatalogProvider, name string) error {
+	services, err := catalog.ListServices()
+	if err != nil {
+		return fmt.Errorf("name collision check failed: %w", err)
+	}
+
+	lower := strings.ToLower(name)
+	for _, svc := range services {
+		if strings.ToLower(svc.Name) == lower {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("metadata.yaml: service name %q conflicts with an existing catalog service name; choose a unique name", name),
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkNameCollisionComponents returns a ValidationError when the given name
+// (case-insensitive) matches any existing component's name within the same component_type.
+func checkNameCollisionComponents(catalog CatalogProvider, componentType, name string) error {
+	components, err := catalog.ListComponents()
+	if err != nil {
+		return fmt.Errorf("name collision check failed: %w", err)
+	}
+
+	lower := strings.ToLower(name)
+	for _, comp := range components {
+		if comp.ComponentType == componentType && strings.ToLower(comp.Name) == lower {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("metadata.yaml: component name %q conflicts with an existing %s component name; choose a unique name", name, componentType),
 			}
 		}
 	}
@@ -299,6 +349,21 @@ func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleRespo
 				"catalog_type mismatch: archive contains %q but existing bundle has %q",
 				catalogType, existing.CatalogType,
 			),
+		}
+	}
+
+	// Step 2b: name collision check — reject if the new name matches another catalog entry.
+	// Skip when the name is unchanged (the bundle keeps its own existing name).
+	if s.catalog != nil && !strings.EqualFold(name, existing.Name) {
+		switch m := meta.(type) {
+		case *bundlemetadata.ServiceMetadataYAML:
+			if err := checkNameCollisionServices(s.catalog, name); err != nil {
+				return nil, err
+			}
+		case *bundlemetadata.ComponentMetadataYAML:
+			if err := checkNameCollisionComponents(s.catalog, m.ComponentType, name); err != nil {
+				return nil, err
+			}
 		}
 	}
 
