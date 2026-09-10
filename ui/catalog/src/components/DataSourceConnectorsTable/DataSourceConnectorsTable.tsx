@@ -1,4 +1,5 @@
-import { useReducer, useCallback, useRef } from "react";
+import { useReducer, useCallback, useRef, useEffect } from "react";
+import { isAxiosError } from "axios";
 import {
   DataTable,
   Table,
@@ -28,6 +29,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import type { SharedTableAction } from "@/components/Table/types";
 import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
 import ExportModal from "@/components/Table/components/ExportModal";
+import DeleteConfirmNameModal from "@/components/DeleteConfirmNameModal";
 import TableToasts from "@/components/Table/components/TableToasts";
 import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
@@ -41,7 +43,11 @@ import {
   fetchDataSourceConnectors,
   fetchAllDataSourceConnectors,
   transformConnectorToRow,
+  fetchConnectorTypes,
+  fetchConnectorParams,
+  deleteDataSourceConnector,
 } from "@/api/connectors.api";
+import { useConnectorsStore } from "@/store/connectors.store";
 import styles from "./DataSourceConnectorsTable.module.scss";
 
 interface RenderCellProps {
@@ -92,6 +98,18 @@ const DataSourceConnectorsTable = ({
 }: DataSourceConnectorsTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
+  // Connector catalog prefetch — read store actions once, stable references
+  const {
+    isConnectorTypesStale,
+    setConnectorTypes,
+    setConnectorTypesLoading,
+    setConnectorTypesError,
+    isParamsStale,
+    setParams,
+    setParamsLoading,
+    setParamsError,
+  } = useConnectorsStore();
+
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
   pageRef.current = state.page;
@@ -109,8 +127,8 @@ const DataSourceConnectorsTable = ({
         // Guard: if the deleted item was the last one on a non-first page,
         // the API returns an empty page. Correct back to the last valid page
         // and re-fetch — same pattern used in DigitalAssistants.
-        const totalPages = Math.max(1, Math.ceil(response.total / pageSize));
-        if (page > totalPages) {
+        const totalPages = response.pagination?.total_pages ?? 1;
+        if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
           void loadConnectors(totalPages, pageSize);
@@ -119,7 +137,7 @@ const DataSourceConnectorsTable = ({
 
         dispatch({
           type: ACTION_TYPES.FETCH_CONNECTORS_SUCCESS,
-          payload: { rows, total: response.total },
+          payload: { rows, pagination: response.pagination },
         });
       } catch (error) {
         const errorMessage =
@@ -132,6 +150,60 @@ const DataSourceConnectorsTable = ({
     },
     [],
   );
+
+  // Background prefetch — fires once after the connector list loads successfully.
+  useEffect(() => {
+    // Skip if cache is still fresh
+    if (!isConnectorTypesStale()) return;
+
+    setConnectorTypesLoading(true);
+
+    fetchConnectorTypes()
+      .then((types) => {
+        setConnectorTypes(types);
+
+        // Prefetch params for each provider in parallel — skip any still fresh
+        types.forEach((type) => {
+          if (!isParamsStale(type.provider.id)) return;
+          setParamsLoading(type.provider.id, true);
+          fetchConnectorParams(type.provider.id)
+            .then((schema) => setParams(type.provider.id, schema))
+            .catch(() =>
+              setParamsError(type.provider.id, "Failed to load params"),
+            );
+        });
+      })
+      .catch(() => setConnectorTypesError("Failed to load connector types"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleDelete = async () => {
+    if (!state.selectedRowId) {
+      dispatch({
+        type: "SHARED_SHOW_ERROR",
+        payload: { message: "No data source selected for removal" },
+      });
+      return;
+    }
+
+    dispatch({ type: "SHARED_SET_DELETING", payload: true });
+    dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: "" });
+
+    try {
+      await deleteDataSourceConnector(state.selectedRowId);
+      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+      dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+      await loadConnectors();
+    } catch (err) {
+      const msg =
+        isAxiosError(err) && err.response?.data?.error
+          ? err.response.data.error
+          : "Failed to remove data source";
+      dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: msg });
+    } finally {
+      dispatch({ type: "SHARED_SET_DELETING", payload: false });
+    }
+  };
 
   // Mount fetch + optional 2-minute auto-refresh (paused during delete flow)
   useAutoRefresh({
@@ -187,8 +259,8 @@ const DataSourceConnectorsTable = ({
         deleteErrorRowName={state.deleteErrorRowName}
         deleteErrorMessage={state.deleteErrorMessage}
         entityLabel="data source connector"
-        onDeleteErrorClose={() => {}}
-        onDeleteErrorRetry={async () => {}}
+        onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
+        onDeleteErrorRetry={handleDelete}
         exportToastOpen={state.exportToastOpen}
         exportToastKind={state.exportToastKind}
         exportToastMessage={state.exportToastMessage}
@@ -320,7 +392,7 @@ const DataSourceConnectorsTable = ({
                         <Pagination
                           page={state.page}
                           pageSize={state.pageSize}
-                          pageSizes={[10, 20, 30, 50]}
+                          pageSizes={[20, 30, 50]}
                           totalItems={state.totalItems}
                           onChange={({ page, pageSize }) => {
                             pageRef.current = page;
@@ -341,6 +413,34 @@ const DataSourceConnectorsTable = ({
                 )}
               </DataTable>
             )}
+
+            {/* Remove data source modal */}
+            <DeleteConfirmNameModal
+              isOpen={state.isDeleteDialogOpen}
+              isDeleting={state.isDeleting}
+              itemName={
+                state.rowsData.find((r) => r.id === state.selectedRowId)
+                  ?.name ?? ""
+              }
+              warningText="Removing this data source will stop future syncing and ingestion, permanently delete indexed data from each connected vector store."
+              confirmValue={state.confirmTextValue}
+              onConfirmValueChange={(value) =>
+                dispatch({
+                  type: ACTION_TYPES.SET_CONFIRM_TEXT,
+                  payload: value,
+                })
+              }
+              errorMessage={state.modalDeleteError}
+              onConfirm={() => void handleDelete()}
+              onClose={() => {
+                dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+                dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+                dispatch({
+                  type: ACTION_TYPES.SET_MODAL_DELETE_ERROR,
+                  payload: "",
+                });
+              }}
+            />
 
             {/* Export modal */}
             <ExportModal

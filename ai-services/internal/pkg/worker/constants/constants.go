@@ -45,10 +45,9 @@ const (
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
 	WorkerGatewayPort = 9090
 
-	// ArgParamCaddyHTTPSPort, ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
+	// ArgParamWorkerToken, ArgParamWorkerGatewayAddr,
 	// ArgParamWorkerPodmanURI, and ArgParamWorkerAuthFile are template
 	// value-override keys used when deploying worker pods.
-	ArgParamCaddyHTTPSPort    = "caddy.httpsPort"
 	ArgParamWorkerToken       = "worker.token"
 	ArgParamWorkerGatewayAddr = "worker.gatewayAddr"
 	ArgParamWorkerPodmanURI   = "worker.podman.uri"
