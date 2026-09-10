@@ -1,8 +1,4 @@
-// Package deploy provides worker-node setup and pod deployment helpers.
-// It writes prerequisite config files (e.g. Caddyfile), checks whether worker
-// components are already running, and deploys pods from the assets/worker
-// template tree via EmbedTemplateProvider.
-package deploy
+package podman
 
 import (
 	"bytes"
@@ -15,6 +11,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -33,6 +30,7 @@ import (
 
 const (
 	caddyfilePath = "worker/podman/Caddyfile.tmpl"
+	kindSecret    = "Secret"
 )
 
 // Options carries the parameters needed to set up the worker node.
@@ -100,7 +98,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	caddyCtx := caddy.NewContext(workerconstants.WorkerCaddyPodName, domainSuffix)
 
 	// Load SSL certificates if provided
-	if err := caddyCtx.LoadSSLCertificates(ctx, opts.Setup.BaseDir, opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath); err != nil {
+	if err := caddyCtx.LoadSSLCertificates(ctx, opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath); err != nil {
 		return err
 	}
 
@@ -137,27 +135,68 @@ func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
 // Returns (true, existingResources, nil) when all worker pods are already running.
 func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template) (bool, []string, error) {
 	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
-
-	var existingResources []string
-	for _, label := range labels {
-		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
-		if err != nil {
-			return false, nil, fmt.Errorf("failed to list pod: %w", err)
-		}
-
-		for _, p := range pods {
-			existingResources = append(existingResources, p.Name)
-		}
-	}
-
-	logger.InfofCtx(ctx, "List of existing resources: %v", existingResources)
-
 	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
 		return false, nil, fmt.Errorf("failed to load templates: %w", err)
 	}
 
-	return len(existingResources) == len(tmpls), existingResources, nil
+	secretNames, err := collectWorkerSecretNames(tmpls)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to collect secret names: %w", err)
+	}
+
+	existingResources, err := helpers.CheckExistingResourcesForWorker(ctx, rt, labels, secretNames)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to check existing resources: %w", err)
+	}
+
+	logger.InfofCtx(ctx, "List of existing resources: %v", existingResources)
+
+	workerResourceCount := len(tmpls)
+
+	// Checking if 'caddy-cert-secret' optional secret is present or not
+	exists, err := rt.SecretExists(ctx, workerconstants.CadyCertSecretName)
+	if err != nil {
+		return false, nil, err
+	}
+	if exists {
+		existingResources = append(existingResources, workerconstants.CadyCertSecretName)
+	} else {
+		// When 'caddy-cert-secret' secret not created, decrement workerResourceCount by one,
+		// as resource is created based on optional flag (--ssl-cert and --ssl-key)
+		workerResourceCount--
+	}
+
+	return len(existingResources) == workerResourceCount, existingResources, nil
+}
+
+// collectWorkerSecretNames renders each worker template with empty params and
+// returns the names of all resources whose Kind is "Secret".
+func collectWorkerSecretNames(tmpls map[string]*ttemplate.Template) ([]string, error) {
+	var secretNames []string
+
+	for tmplName, tmpl := range tmpls {
+		var rendered bytes.Buffer
+		if err := tmpl.Execute(&rendered, nil); err != nil {
+			// Skip templates that require params — they are not secrets.
+			continue
+		}
+
+		if strings.TrimSpace(rendered.String()) == "" {
+			continue
+		}
+
+		var podSpec podmodels.PodSpec
+		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
+			return nil, fmt.Errorf("failed to parse template %q: %w", tmplName, err)
+		}
+
+		if podSpec.Kind == kindSecret {
+			secretNames = append(secretNames, podSpec.Name)
+		}
+	}
+
+	return secretNames, nil
 }
 
 // ─── internal ────────────────────────────────────────────────────────────────

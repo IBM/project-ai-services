@@ -55,6 +55,8 @@ spec:
           value: "{{ .Values.caddy.httpsPort }}"
         - name: DOMAIN_SUFFIX
           value: "{{ .DomainSuffix }}"
+        - name: GATEWAY_ADDR
+          value: "{{ .Values.worker.gatewayAddr }}"
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.worker.podman.uri }}

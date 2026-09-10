@@ -131,3 +131,7 @@ const (
 	ArgParamSSLCertFileContent = "caddy.sslCertContent"
 	ArgParamSSLKeyFileContent  = "caddy.sslKeyContent"
 )
+
+const (
+	CaddyAdminInternalPort = "2019/"
+)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,7 +11,7 @@ import (
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -21,8 +20,8 @@ import (
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
-	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
+	workerdeploy "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/join"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
@@ -93,10 +92,35 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+<<<<<<< HEAD
 	if err := cmdcommon.ValidateSkipChecksFlag(cmd); err != nil {
 		return err
 	}
 
+=======
+	// Reject runtime-scoped flags early.
+	if err := buildWorkerFlagValidator().Validate(cmd); err != nil {
+		return err
+	}
+
+	return validateWorkerJoinFlags(cmd.Context())
+}
+
+// buildWorkerFlagValidator registers every worker join flag with its runtime scope.
+func buildWorkerFlagValidator() *flagvalidator.FlagValidator {
+	return cmdcommon.BuildFlagValidator(
+		[]string{cmdcommon.TokenFlag},
+		[]string{cmdcommon.BaseDirFlag, cmdcommon.HTTPSPortFlag, cmdcommon.DomainNameFlag, cmdcommon.SSLCertFlag, cmdcommon.SSLKeyFlag},
+		nil,
+	)
+}
+
+func validateWorkerJoinFlags(ctx context.Context) error {
+	if token == "" {
+		return fmt.Errorf("required flag(s) %q not set", cmdcommon.TokenFlag)
+	}
+
+>>>>>>> 5cc23ee6 (Supporting reset flags)
 	if httpsPort < 1 || httpsPort > 65535 {
 		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 	}
@@ -111,7 +135,7 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	return checkNotLocalWorker(cmd.Context())
+	return checkNotLocalWorker(ctx)
 }
 
 // checkNotLocalWorker returns an error when this node is co-located with the
@@ -188,8 +212,12 @@ func parseAddHosts(raw []string) []workertypes.HostAlias {
 // the long-lived CommandStream to the catalog control plane.
 func joinRunE(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+	sslCertPath := catalogUtils.SanitizeFilePath(sslCertPath)
+	sslKeyPath := catalogUtils.SanitizeFilePath(sslKeyPath)
+
 	gatewayAddr := args[0]
 
+<<<<<<< HEAD
 	if err := cmdcommon.DoBootstrapValidate(ctx, skipChecks); err != nil {
 		return err
 	}
@@ -232,31 +260,38 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 				GatewayAddr: gatewayAddr,
 				Token:       token,
 			},
+=======
+	return workerdeploy.DeployWorker(ctx, workertypes.DeployOpts{
+		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
+			Token:       token,
+			GatewayAddr: gatewayAddr,
+		},
+		Options: workertypes.Options{
+>>>>>>> 5cc23ee6 (Supporting reset flags)
 			CommonWorkerOptions: workertypes.CommonWorkerOptions{
 				HostAliases: parseAddHosts(addHosts),
 			},
-		}
-		if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
-			return fmt.Errorf("failed to deploy worker: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
-	}
-
-	return nil
+			BaseDir:     baseDir,
+			HTTPSPort:   httpsPort,
+			DomainName:  domainName,
+			SSLCertPath: sslCertPath,
+			SSLKeyPath:  sslKeyPath,
+		},
+		RuntimeType: runtimeType,
+	})
 }
 
-// configureFlags registers the flags shared by the join and grpcstream commands.
-func configureFlags(c *cobra.Command) {
-	initJoinCommonFlags(c)
-	initJoinPodmanFlags(c)
-}
-
-func initJoinCommonFlags(c *cobra.Command) {
-	c.Flags().StringVar(&token, "token", "",
+// configureFlags registers the flags shared by the join and grpcstream
+// commands: --token, --runtime, --basedir, --https-port,
+// --ssl-cert, and --ssl-key.
+// requireToken controls whether --token is marked as a required flag.
+func configureFlags(c *cobra.Command, requireToken bool) {
+	c.Flags().StringVar(&token, cmdcommon.TokenFlag, "",
 		"Single-use bootstrap token issued by 'catalog worker register' (required).\n"+
 			"Example: --token <uuid>\n")
-	_ = c.MarkFlagRequired("token")
+	if requireToken {
+		_ = c.MarkFlagRequired(cmdcommon.TokenFlag)
+	}
 
 	cmdcommon.ConfigureRuntimeFlag(c, &runtimeType)
 
@@ -270,33 +305,9 @@ func initJoinPodmanFlags(c *cobra.Command) {
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --basedir /var/lib/ai-services\n")
+	cmdcommon.ConfigurePodmanDeployFlags(c, &baseDir, &httpsPort, defaultJoinHTTPSPort, &sslCertPath, &sslKeyPath, &domainName)
 
-	c.Flags().IntVar(&httpsPort, "https-port", defaultJoinHTTPSPort,
-		"Custom HTTPS port to expose the service endpoints externally.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --https-port 8443\n")
-
-	c.Flags().StringVar(&domainName, "domain-name", "",
-		"Custom domain name for self-signed certificates.\n"+
-			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
-			"If a custom SSL certificate/key pair is provided, the domain is extracted from the certificate and this flag is ignored.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --domain-name example.com\n")
-
-	c.Flags().StringVar(&sslCertPath, "ssl-cert", "",
-		"Path to user-provided SSL certificate (optional).\n"+
-			"Must be used together with --ssl-key.\n"+
-			"Certificate must contain wildcard SAN entry (e.g., *.example.com).\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --ssl-cert /path/to/cert.pem\n")
-
-	c.Flags().StringVar(&sslKeyPath, "ssl-key", "",
-		"Path to user-provided SSL private key (optional).\n"+
-			"Must be used together with --ssl-cert.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --ssl-key /path/to/key.pem\n")
-
-	c.Flags().StringArrayVar(&addHosts, "add-host", nil,
+	c.Flags().StringArrayVar(&addHosts, cmdcommon.AddHostFlag, nil,
 		"Add an extra entry to the worker pod's /etc/hosts (repeatable).\n"+
 			"Format: DOMAIN:IP\n"+
 			"Note: Supported for podman runtime only.\n"+
@@ -304,7 +315,7 @@ func initJoinPodmanFlags(c *cobra.Command) {
 }
 
 func newJoinCmd() *cobra.Command {
-	configureFlags(cmd)
+	configureFlags(cmd, true)
 
 	return cmd
 }
@@ -381,7 +392,7 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 }
 
 func newGrpcStreamCmd() *cobra.Command {
-	configureFlags(grpcStreamCmd)
+	configureFlags(grpcStreamCmd, false)
 
 	return grpcStreamCmd
 }

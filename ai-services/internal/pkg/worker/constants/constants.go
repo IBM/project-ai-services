@@ -78,6 +78,7 @@ const (
 	// OpenShiftCatalogPodName is the pod name prefix used by the catalog-backend
 	// Deployment on OpenShift.
 	OpenShiftCatalogPodName = "catalog-backend"
+	CadyCertSecretName      = "caddy-cert-secret"
 
 	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
 	// auto-generated gateway server certificate for internal cluster communication.

@@ -132,7 +132,7 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 // CheckExistingResourcesForApplication checks if there are resources already existing for the given application name.
 func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.Runtime, appName string, secretNames []string) ([]string, error) {
 	// check existing pods for the application
-	podsToSkip, err := existingRunningPods(ctx, runtime, appName)
+	podsToSkip, err := existingRunningPods(ctx, runtime, fmt.Sprintf("ai-services.io/application=%s", appName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing pods: %w", err)
 	}
@@ -148,14 +148,39 @@ func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.R
 	return resourcesToSkip, nil
 }
 
-// existingRunningPods lists pods for the given application. Any pod that is not in
+// CheckExistingResourcesForWorker checks if there are resources already existing for the worker,
+// querying pods by each of the provided labels and secrets by name.
+func CheckExistingResourcesForWorker(ctx context.Context, runtime runtime.Runtime, labels []string, secretNames []string) ([]string, error) {
+	var podsToSkip []string
+
+	for _, label := range labels {
+		pods, err := existingRunningPods(ctx, runtime, label)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check existing pods: %w", err)
+		}
+
+		podsToSkip = append(podsToSkip, pods...)
+	}
+
+	// check existing secrets for the worker
+	secretsToSkip, err := existingSecrets(ctx, runtime, secretNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing secrets: %w", err)
+	}
+
+	resourcesToSkip := append(podsToSkip, secretsToSkip...)
+
+	return resourcesToSkip, nil
+}
+
+// existingRunningPods lists pods matching the given label selector. Any pod that is not in
 // Running state is deleted so that the deployment layer can recreate it cleanly.
 // Only Running pod names are returned for the skip list.
-func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName string) ([]string, error) {
+func existingRunningPods(ctx context.Context, runtime runtime.Runtime, label string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
 	pods, err := runtime.ListPods(ctx, map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
+		"label": {label},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
