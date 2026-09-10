@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
-	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
@@ -57,7 +55,7 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	}
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
-	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
+	secretsToDelete, secretsToSkip := podmanutils.FetchSecretsToDelete(pods)
 
 	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 
@@ -91,45 +89,3 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 
 	return nil
 }
-
-// We are currently associating secret names with pods via pod labels and relying on those labels for secret cleanup.
-// Since this is not an ideal approach for managing secret deletion, we should design a more robust and reliable mechanism in the future.
-// fetchSecretsToDelete fetches the secrets to delete and secrets which are to be deleted when --skip-cleanup is not set.
-func fetchSecretsToDelete(pods []types.Pod) ([]string, []string) {
-	secretMapToDelete := make(map[string]bool)
-	secretMapToSkip := make(map[string]bool)
-
-	for _, pod := range pods {
-		// fetch secret name from pod labels
-		if secretNames, ok := pod.Labels[catalogConstants.CatalogSecretLabel]; ok && secretNames != "" {
-			// check if it has skip-cleanup label
-			_, hasSkipLabel := pod.Labels[catalogConstants.CatalogSecretSkipLabel]
-
-			secrets := strings.Split(secretNames, ",")
-			for _, secretName := range secrets {
-				secretName = strings.TrimSpace(secretName)
-				if secretName != "" {
-					if hasSkipLabel {
-						secretMapToSkip[secretName] = true
-					} else {
-						secretMapToDelete[secretName] = true
-					}
-				}
-			}
-		}
-	}
-
-	secretsToDelete := make([]string, 0, len(secretMapToDelete))
-	for secretName := range secretMapToDelete {
-		secretsToDelete = append(secretsToDelete, secretName)
-	}
-
-	secretsToSkip := make([]string, 0, len(secretMapToSkip))
-	for secretName := range secretMapToSkip {
-		secretsToSkip = append(secretsToSkip, secretName)
-	}
-
-	return secretsToDelete, secretsToSkip
-}
-
-// Made with Bob
