@@ -124,6 +124,10 @@ const defaultHelmTimeout = 20 * time.Minute
 
 // ─── router ───────────────────────────────────────────────────────────────────
 
+// handle routes cmd to the appropriate runtime method and returns the result.
+// NOTE: ctx is cancelled by deregister() on return — handlers must not spawn
+// background goroutines that inherit ctx and expect to outlive this call.
+//
 //nolint:gocognit,cyclop,funlen // large switch is unavoidable for a flat dispatch table
 func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) ([]byte, error) {
 	p := cmd.GetPayload()
