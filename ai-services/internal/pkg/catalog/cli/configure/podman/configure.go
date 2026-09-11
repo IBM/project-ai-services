@@ -282,7 +282,7 @@ func validateSkipLocalWorker(ctx context.Context, c *catalogclient.Client) error
 	}
 
 	if len(workers) > 0 {
-		return fmt.Errorf("--skip-local-worker cannot be set when workers are already registered; found %d worker(s)", len(workers))
+		return fmt.Errorf("--skip-local-worker flag changed; to change this setting, uninstall and re-run catalog configure")
 	}
 
 	return nil

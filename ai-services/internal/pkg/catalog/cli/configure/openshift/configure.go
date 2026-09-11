@@ -9,9 +9,9 @@ import (
 	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/assets"
-	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -210,7 +210,7 @@ func validateSkipLocalWorker(ctx context.Context, c *catalogclient.Client) error
 	}
 
 	if len(workers) > 0 {
-		return fmt.Errorf("--skip-local-worker cannot be set when workers are already registered; found %d worker(s)", len(workers))
+		return fmt.Errorf("--skip-local-worker flag changed; to change this setting, uninstall and re-run catalog configure")
 	}
 
 	return nil
