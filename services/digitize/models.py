@@ -199,8 +199,6 @@ class ImportExportData(BaseModel):
     """Shared payload structure for import/export APIs."""
     jobs: List["ExportJobRecord"] = Field(default_factory=list)
     documents: List["ExportDocumentRecord"] = Field(default_factory=list)
-    connectors: List["ExportConnectorRecord"] = Field(default_factory=list)
-    sync_logs: List["ExportSyncLogRecord"] = Field(default_factory=list)
 
 
 class ExportJobRecord(BaseModel):
@@ -273,14 +271,9 @@ class ImportRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_non_empty_payload(self):
-        if (
-            not self.data.jobs
-            and not self.data.documents
-            and not self.data.connectors
-            and not self.data.sync_logs
-        ):
+        if not self.data.jobs and not self.data.documents:
             raise ValueError(
-                "At least one job, document, connector, or sync_log record must be provided"
+                "At least one job or document record must be provided"
             )
         return self
 
@@ -305,8 +298,6 @@ class ImportSummary(BaseModel):
     """Import summary grouped by entity type."""
     jobs: ImportEntitySummary
     documents: ImportEntitySummary
-    connectors: ImportEntitySummary = Field(default_factory=ImportEntitySummary)
-    sync_logs: ImportEntitySummary = Field(default_factory=ImportEntitySummary)
 
 
 class ImportResponse(BaseModel):
@@ -329,8 +320,6 @@ class ExportSummary(BaseModel):
     """Export summary grouped by entity type."""
     jobs: ExportEntitySummary
     documents: ExportEntitySummary
-    connectors: ExportEntitySummary = Field(default_factory=ExportEntitySummary)
-    sync_logs: ExportEntitySummary = Field(default_factory=ExportEntitySummary)
 
 
 class ExportPagination(BaseModel):
