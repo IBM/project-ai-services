@@ -48,7 +48,7 @@ func CheckWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
 // to clean up all worker components before returning the combined error.
 func CheckLogsAndUninstall(ctx context.Context, rt runtime.Runtime) error {
 	if err := CheckWorkerContainerLogs(ctx, rt); err != nil {
-		logger.WarningfCtx(ctx, "Worker container logs indicate a failure (%v); uninstalling worker components...\n", err)
+		logger.WarningfCtx(ctx, "Worker container logs indicate a failure uninstalling worker components...\n")
 
 		if uninstallErr := workeruninstall.Uninstall(ctx, workeruninstallutils.UninstallOptions{
 			RuntimeType: rt.Type(),
