@@ -96,6 +96,7 @@ func displayArchitectureParameters(ctx context.Context, source catalogClient.Cat
 		deployOpts, err := source.GetServiceDeployOptions(ctx, svcRef.ID, runtimeType())
 		if err != nil {
 			logger.Warningf("skipping parameters for service '%s': %v", svcRef.ID, err)
+
 			continue
 		}
 		displayDeployOptionsParameters(ctx, source, deployOpts, displayedComponents)
