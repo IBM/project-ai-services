@@ -28,22 +28,22 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
 	// If the worker's mTLS secret is already present (preserved by --skip-cleanup),
-	// the worker has valid on-disk TLS credentials and will reconnect to the new
-	// control plane on its own — skip registration and re-deploy entirely.
+	// the worker has valid on-disk TLS credentials and can reconnect using them —
+	// skip registration (no new token needed) but still redeploy the pod.
+	var token, gatewayAddr string
+
 	workerSecretsExist, err := rt.SecretExists(ctx, workerconstants.WorkerMTLSSecretName)
 	if err != nil {
 		return fmt.Errorf("local worker join: check worker secrets: %w", err)
 	}
 
-	if workerSecretsExist {
+	if !workerSecretsExist {
+		token, gatewayAddr, err = configure.RegisterLocalWorker(ctx, c)
+		if err != nil {
+			return fmt.Errorf("local worker join: %w", err)
+		}
+	} else {
 		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
-
-		return nil
-	}
-
-	token, gatewayAddr, err := configure.RegisterLocalWorker(ctx, c)
-	if err != nil {
-		return fmt.Errorf("local worker join: %w", err)
 	}
 
 	workerOpts := workertypes.PodmanWorkerOptions{
