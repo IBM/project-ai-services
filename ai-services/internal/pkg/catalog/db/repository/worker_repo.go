@@ -234,11 +234,13 @@ func (r *workerRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Worker,
 }
 
 // GetByName returns the worker with the given name, or (nil, nil) if not found.
+// The match is case-insensitive so "Worker-A" and "worker-a" resolve to the
+// same row regardless of how the name was stored.
 func (r *workerRepo) GetByName(ctx context.Context, name string) (*models.Worker, error) {
 	query := `
 		SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at
 		FROM workers
-		WHERE name = $1
+		WHERE LOWER(name) = LOWER($1)
 	`
 
 	var (

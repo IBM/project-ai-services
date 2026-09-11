@@ -625,7 +625,7 @@ func resolveDeployRuntimeType(ctx context.Context) (runtimeTypes.RuntimeType, er
 	}
 
 	for _, w := range workers {
-		if w.Name == workerName {
+		if strings.EqualFold(w.Name, workerName) {
 			if w.RuntimeType == "" {
 				return "", fmt.Errorf("worker %q has no runtime type", workerName)
 			}
