@@ -1,5 +1,6 @@
 import { api } from "@/api/axios";
 import { WORKERS_ENDPOINTS } from "@/constants/api-endpoints.constants";
+import { WORKER_RUNTIME_LABELS } from "@/constants/app.constants";
 import type {
   WorkerApiResponse,
   WorkerListResponse,
@@ -14,7 +15,8 @@ export function transformWorkerToRow(
     id: worker.id,
     name: worker.name,
     status: worker.status,
-    runtime_type: worker.runtime_type,
+    runtime_type:
+      WORKER_RUNTIME_LABELS[worker.runtime_type]?.short ?? worker.runtime_type,
     messages: "",
     actions: "actions",
   };

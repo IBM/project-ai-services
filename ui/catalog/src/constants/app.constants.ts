@@ -1,8 +1,3 @@
-// runtime mapping
-export const RUNTIME_TYPE_LABELS: Record<string, string> = {
-  podman: "RHAIIS",
-  openshift: "RHOAI",
-};
 export const APP_NAME = "IBM Power AI Launchpad";
 
 export const COMPONENT_TYPES = {
@@ -18,19 +13,22 @@ export type ComponentType =
 // description and disabled will be used by the other worker PRs
 export const WORKER_RUNTIME_LABELS: Record<
   string,
-  { label: string; description: string; disabled?: boolean }
+  { short: string; label: string; description: string; disabled?: boolean }
 > = {
   podman: {
+    short: "RHAIIS",
     label: "Red Hat Enterprise Linux (RHAIIS)",
     description:
       "This mode deploys all services across multiple worker resources with standard or common resource allocation; and runs on the premises of the client, rather than at a remote facility.",
   },
   openshift: {
+    short: "RHOAI",
     label: "Red Hat OpenShift (RHOAI)",
     description:
       "This mode deploys all services into a single worker resource, with additional resource requirements; and runs on the premises of the client, rather than at a remote facility.",
   },
   powervs: {
+    short: "PowerVS",
     label: "IBM Power Virtual Server (PowerVS)",
     description: "Deploy on public cloud infrastructure with managed services.",
     disabled: true,

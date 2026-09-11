@@ -8,7 +8,6 @@ import {
   StatusCell,
   MessageCell,
 } from "@/components/Table/components/CellRenderers";
-import { RUNTIME_TYPE_LABELS } from "@/constants/app.constants";
 
 export { StatusCell, MessageCell };
 
@@ -83,8 +82,7 @@ type CellRendererComponent = (
 export const WorkerTypeCell = ({
   value,
 }: CellRendererProps): React.ReactElement => {
-  const raw = String(value ?? "");
-  return <span>{RUNTIME_TYPE_LABELS[raw] ?? raw}</span>;
+  return <span>{String(value ?? "")}</span>;
 };
 
 export const CELL_RENDERERS: Record<string, CellRendererComponent> = {
