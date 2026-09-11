@@ -7,11 +7,9 @@ import (
 
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
-	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -57,18 +55,7 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 	}
 	logger.Infof("Using base directory for cleanup: %s\n", baseDir)
 
-	secretsToDelete, secretsToSkip := fetchSecretsToDelete(pods)
-	secretsToDelete = append(secretsToDelete, constants.PodmanAuthSecret, catalogConstants.CatalogConnectorSecretName, catalogConstants.CatalogMTLSSecretName)
-
-	// Checking if 'catalog-caddy-cert-secret' is created as part of catalog configure
-	// If secret is created adding it to 'secretsToDelete' list
-	exists, err := rt.SecretExists(ctx, catalogConstants.CatalogCertSecretName)
-	if err != nil {
-		return err
-	}
-	if exists {
-		secretsToDelete = append(secretsToDelete, catalogConstants.CatalogCertSecretName)
-	}
+	secretsToDelete, secretsToSkip := podmanutils.FetchSecretsToDelete(pods)
 
 	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 
@@ -102,25 +89,3 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 
 	return nil
 }
-
-// We are currently associating secret names with pods via pod labels and relying on those labels for secret cleanup.
-// Since this is not an ideal approach for managing secret deletion, we should design a more robust and reliable mechanism in the future.
-// fetchSecretsToDelete fetches the secrets to delete and secrets which are to be deleted when --skip-cleanup is not set.
-func fetchSecretsToDelete(pods []types.Pod) ([]string, []string) {
-	var secretsToDelete, secretsToSkip []string
-	for _, pod := range pods {
-		// fetch secret name from pod labels
-		if secretName, ok := pod.Labels[catalogConstants.CatalogSecretLabel]; ok {
-			// check if it has skip-cleanup label
-			if _, ok := pod.Labels[catalogConstants.CatalogSecretSkipLabel]; ok {
-				secretsToSkip = append(secretsToSkip, secretName)
-			} else {
-				secretsToDelete = append(secretsToDelete, secretName)
-			}
-		}
-	}
-
-	return secretsToDelete, secretsToSkip
-}
-
-// Made with Bob

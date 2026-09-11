@@ -87,6 +87,7 @@ export interface DeployOptionsService {
     storage?: number;
     accelerators?: Record<string, number>;
   };
+  accepts_datasource?: boolean;
 }
 
 export interface DeployOptionsResponse {
@@ -312,6 +313,7 @@ export interface ServiceDeployOptions {
     storage?: number;
     accelerators?: Record<string, number>;
   };
+  accepts_datasource?: boolean;
 }
 
 export interface SchemaProperty {
@@ -367,6 +369,11 @@ export interface DeploymentComponent {
   params?: Record<string, unknown>;
 }
 
+export interface ConnectorRef {
+  id: string;
+  type: string;
+}
+
 export interface DeploymentService {
   catalog_id: string;
   version: string;
@@ -374,6 +381,7 @@ export interface DeploymentService {
   params?: {
     backend?: Record<string, unknown>;
   };
+  connectors?: ConnectorRef[];
 }
 
 export interface ArchitectureDeploymentPayload {

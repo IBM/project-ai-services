@@ -96,7 +96,7 @@ func (g *podmanGatherer) resolveBaseDir(ctx context.Context, rt *podmanRuntime.P
 
 	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
 	if err != nil {
-		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
+		if errors.Is(err, cliUtils.ErrPodNotFound) {
 			logger.WarninglnCtx(ctx, "Catalog backend pod is stopped — base directory resolved to default.")
 		} else {
 			logger.WarningfCtx(ctx, "Could not read base dir from catalog pod: %v; using default.\n", err)

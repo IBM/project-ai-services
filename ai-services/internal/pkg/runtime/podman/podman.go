@@ -555,6 +555,12 @@ func (pc *PodmanClient) DeletePVCs(_ context.Context, _ string) error {
 	return fmt.Errorf("unsupported method")
 }
 
+func (pc *PodmanClient) DeleteSecrets(_ context.Context, _ string) error {
+	logger.Errorf("unsupported method called!")
+
+	return fmt.Errorf("unsupported method")
+}
+
 func (pc *PodmanClient) DeleteSecret(ctx context.Context, name string) error {
 	podCtx, cancel := pc.podmanCtx(ctx)
 	defer cancel()
