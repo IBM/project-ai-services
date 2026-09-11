@@ -51,6 +51,10 @@ const (
 
 	// retryBackoffFactor is the exponential multiplier applied to the backoff duration.
 	retryBackoffFactor = 2
+
+	// retryMaxAttempts is the maximum number of reconnect attempts before
+	// giving up, even for transient errors.
+	retryMaxAttempts = 10
 )
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
@@ -188,6 +192,7 @@ func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.P
 // reconnecting.
 func runStreamLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, workerName string) error {
 	backoff := retryBase
+	attempts := 0
 
 	for {
 		if ctx.Err() != nil {
@@ -217,7 +222,12 @@ func runStreamLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Prox
 			return fmt.Errorf("worker join: permanent stream error, not retrying: %w", err)
 		}
 
-		logger.WarningfCtx(ctx, "CommandStream disconnected (%v) — retrying in %s...\n", err, backoff)
+		attempts++
+		if attempts >= retryMaxAttempts {
+			return fmt.Errorf("CommandStream failed to connect after %d attempts, giving up: %w", attempts, err)
+		}
+
+		logger.WarningfCtx(ctx, "CommandStream disconnected (%v) — retrying in %s (attempt %d/%d)...\n", err, backoff, attempts, retryMaxAttempts)
 
 		select {
 		case <-ctx.Done():
