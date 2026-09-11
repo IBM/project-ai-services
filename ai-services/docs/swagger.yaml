@@ -1,5 +1,51 @@
 basePath: /api/v1
 definitions:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceItem:
+    properties:
+      err_msg:
+        description: |-
+          ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or
+          no endpoint registered). Empty on success.
+        type: string
+      files:
+        description: Files is the total number of files tracked by the connector (total_files
+          from the service).
+        type: integer
+      id:
+        description: ID is the UUID of the datasource connector.
+        type: string
+      last_sync:
+        description: LastSync is the ISO-8601 timestamp of the last completed sync,
+          or null when unavailable.
+        type: string
+      message:
+        description: |-
+          Message is sourced directly from the connector's message field on the service pod.
+          It covers all phases: "x new files found", "Processing x/y files", and error details.
+          Empty when no sync has run yet or the service pod is unreachable.
+        type: string
+      name:
+        description: Name is the human-readable label of the datasource.
+        type: string
+      provider:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo'
+        description: Provider contains the provider ID and its resolved display name.
+      status:
+        description: |-
+          Status is the connector's sync_status sourced live from the service pod.
+          Set to "unknown" when the service pod is unreachable.
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceItem'
+        type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component:
     properties:
       component_type:
@@ -65,6 +111,18 @@ definitions:
           Type is the resolved catalog type name of the owning application (e.g. "Digital Assistants").
           Falls back to CatalogID when the catalog entry cannot be loaded.
         type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef:
+    properties:
+      id:
+        description: ID is the UUID from the connectors table.
+        type: string
+      type:
+        description: Type is the connector kind (e.g. "datasource").
+        type: string
+    required:
+    - id
+    - type
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateApplicationRequest:
     properties:
@@ -272,6 +330,15 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component'
         type: array
+      connectors:
+        description: |-
+          Connectors lists pre-registered connector records to attach to this service
+          after the application reaches Running status. Each entry is validated against
+          the service's catalog YAML (accepts_datasource) and the connectors table before
+          deployment begins. Omitting this field (or passing an empty list) is valid.
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef'
+        type: array
       params:
         additionalProperties: {}
         description: Service-level parameters
@@ -294,9 +361,11 @@ definitions:
         description: LastSyncAt is the ISO-8601 timestamp of the last completed sync,
           or null when unavailable.
         type: string
-      last_sync_error:
-        description: LastSyncError is the error string from the last failed sync,
-          or null on success.
+      message:
+        description: |-
+          Message contains the current status and phase description from the connector
+          (e.g. "x new files found", "Processing x/y files", or error details).
+          Omitted when empty.
         type: string
       sync_status:
         description: SyncStatus is the current sync state from the service. Set to
@@ -469,10 +538,16 @@ definitions:
         type: string
       name:
         type: string
+      namespace:
+        type: string
+      runtime_type:
+        type: string
       services:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod'
         type: array
+      worker_name:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse:
     properties:
@@ -847,9 +922,15 @@ definitions:
     - Dead
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker:
     properties:
+      application_ids:
+        items:
+          type: string
+        type: array
       id:
         type: string
       last_heartbeat:
+        type: string
+      message:
         type: string
       metadata:
         additionalProperties: {}
@@ -914,14 +995,14 @@ definitions:
   internal_pkg_catalog_apiserver_handlers.createWorkerReq:
     properties:
       worker_name:
-        maxLength: 100
-        minLength: 1
         type: string
     required:
     - worker_name
     type: object
   internal_pkg_catalog_apiserver_handlers.createWorkerResp:
     properties:
+      gateway_address:
+        type: string
       token:
         type: string
       worker_name:
@@ -1182,6 +1263,54 @@ paths:
       tags:
       - Applications
   /applications/{id}/datasources:
+    get:
+      description: Returns a paginated list of datasource connectors linked to the
+        given application, enriched with live sync state (status, files, last_sync,
+        message) from each connector's Digitize pod.
+      parameters:
+      - description: Application ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceListResponse'
+        "400":
+          description: Invalid path parameter or query params
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Application not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List application datasources
+      tags:
+      - Applications
     put:
       consumes:
       - application/json
@@ -2351,8 +2480,14 @@ paths:
       - Datasources
   /resources:
     get:
-      description: Retrieves system resource information including CPU, memory, and
-        accelerator availability
+      description: |-
+        Retrieves system resource information including CPU, memory, and accelerator availability.
+        Defaults to the local worker when the `worker` query parameter is omitted.
+      parameters:
+      - description: 'Worker name to query resources from (default: Local)'
+        in: query
+        name: worker
+        type: string
       produces:
       - application/json
       responses:
@@ -2360,6 +2495,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse'
+        "400":
+          description: Worker not connected
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:
@@ -2646,8 +2785,8 @@ paths:
       - Catalog
   /workers:
     get:
-      description: Returns all registered workers and their current status from the
-        database.
+      description: Returns all registered workers, their current status, human-readable
+        message, and connected application IDs.
       produces:
       - application/json
       responses:
@@ -2723,6 +2862,11 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "403":
+          description: Local worker cannot be deleted
+          schema:
+            additionalProperties: true
+            type: object
         "404":
           description: Worker not found
           schema:
@@ -2736,6 +2880,42 @@ paths:
       security:
       - BearerAuth: []
       summary: Deregister a worker
+      tags:
+      - Workers
+    get:
+      description: Returns the worker with the given ID, including its status message
+        and connected application IDs.
+      parameters:
+      - description: Worker ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Worker details
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker'
+        "400":
+          description: Invalid worker ID
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Worker not found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a single worker
       tags:
       - Workers
 securityDefinitions:

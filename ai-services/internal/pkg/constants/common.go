@@ -8,12 +8,22 @@ const (
 	PodStartOff          = "off"
 	OperatorPollInterval = 5 * time.Second
 	OperatorPollTimeout  = 3 * time.Minute
-	VersionV2            = "v2"
-	DSCKind              = "DataScienceCluster"
-	DSCIKind             = "DSCInitialization"
-	SMTLevel             = 2
-	ErrSecretNotFound    = "no secret with name or id"
-	CaddyServerName      = "ai_services" // Caddy server name used for route registration
+
+	// HelmTimeout is the default timeout for a Helm install/upgrade operation.
+	HelmTimeout = 20 * time.Minute
+	// HelmUninstallTimeout is the default timeout for a Helm uninstall operation.
+	HelmUninstallTimeout = 5 * time.Minute
+	// PredictorWaitTimeout is the maximum time to wait for a KServe InferenceService
+	// to reach Ready=True after a Helm install.
+	PredictorWaitTimeout = 15 * time.Minute
+	// IsvcPollInterval is the interval between KServe InferenceService readiness polls.
+	IsvcPollInterval  = 15 * time.Second
+	VersionV2         = "v2"
+	DSCKind           = "DataScienceCluster"
+	DSCIKind          = "DSCInitialization"
+	SMTLevel          = 2
+	ErrSecretNotFound = "no secret with name or id"
+	CaddyServerName   = "ai_services" // Caddy server name used for route registration
 )
 
 const (
@@ -107,4 +117,38 @@ const (
 	PodmanAuthSecret = "podman-auth-secret"
 	// VolumeLabel represents the volume name associated with Pod.
 	VolumeLabel = "ai-services.io/volume"
+	// VolumeSkipLabel represents volumes associated with pod should be skipped while deletion.
+	VolumeSkipLabel = "ai-services.io/volume-skip-cleanup"
+	// SecretLabel represents the secret name associated with Pod.
+	SecretLabel = "ai-services.io/secret"
+	// SecretSkipLabel represents if secret associated with pod should be skipped while deletion.
+	SecretSkipLabel = "ai-services.io/secret-skip-cleanup"
+)
+
+const (
+	ArgParamCaddyHTTPSPort     = "caddy.httpsPort"
+	ArgParamCaddyFileContent   = "caddy.caddyFileContent"
+	ArgParamSSLCertFileContent = "caddy.sslCertContent"
+	ArgParamSSLKeyFileContent  = "caddy.sslKeyContent"
+)
+
+const (
+	CaddyAdminInternalPort = "2019/"
+)
+
+const (
+	TokenFlag             = "token"
+	BaseDirFlag           = "basedir"
+	HTTPSPortFlag         = "https-port"
+	DomainNameFlag        = "domain-name"
+	SSLCertFlag           = "ssl-cert"
+	SSLKeyFlag            = "ssl-key"
+	AddHostFlag           = "add-host"
+	SkipLocalWorkerFlag   = "skip-local-worker"
+	WorkerGatewayPortFlag = "workergateway-port"
+	TimeoutFlag           = "timeout"
+
+	ResetPasswordFlag   = "reset-password"
+	ResetPodmanAuthFlag = "reset-podman-auth"
+	ResetSSLCertFlag    = "reset-certificate"
 )

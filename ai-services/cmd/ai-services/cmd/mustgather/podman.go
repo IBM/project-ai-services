@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -94,9 +96,10 @@ func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string
 func (g *podmanGatherer) resolveBaseDir(ctx context.Context, rt *podmanRuntime.PodmanClient) {
 	g.baseDir = pkgutils.GetBaseDir() // safe fallback
 
-	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstants.CatalogComponentValue
+	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt, catalogPodLabel)
 	if err != nil {
-		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
+		if errors.Is(err, cliUtils.ErrPodNotFound) {
 			logger.WarninglnCtx(ctx, "Catalog backend pod is stopped — base directory resolved to default.")
 		} else {
 			logger.WarningfCtx(ctx, "Could not read base dir from catalog pod: %v; using default.\n", err)

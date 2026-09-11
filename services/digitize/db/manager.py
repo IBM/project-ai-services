@@ -123,6 +123,39 @@ class DatabaseManager:
             logger.error(f"Unexpected error retrieving job {job_id}: {e}", exc_info=True)
             return None
 
+
+    @staticmethod
+    def is_job_cancelled(job_id: str) -> bool:
+        """
+        Check whether a job has been marked for cancellation.
+
+        Returns True for both 'cancel_pending' (set by the API endpoint) and
+        'cancelled' (set by the pipeline after it finishes draining), so that
+        pipeline checkpoints stop as soon as the cancellation request arrives.
+
+        Performs a lightweight single-column SELECT so it is cheap to call
+        at pipeline checkpoints without loading the full job row.
+
+        Args:
+            job_id: Unique identifier for the job
+
+        Returns:
+            True if the job status is 'cancel_pending' or 'cancelled', False
+            otherwise (including when the job is not found or a DB error occurs).
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(Job.status).where(Job.job_id == job_id)
+                job_status = session.scalar(stmt)
+                return job_status in ("cancel_pending", "cancelled")
+        except SQLAlchemyError as e:
+            logger.error(f"Database error checking cancellation for job {job_id}: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error checking cancellation for job {job_id}: {e}", exc_info=True)
+            return False
+
+
     @staticmethod
     def get_all_jobs(
         status: Optional[JobStatus] = None,
@@ -1582,6 +1615,136 @@ class DatabaseManager:
             logger.error(f"DB error in get_sync_logs({connector_id}): {e}", exc_info=True)
             return []
 
+    @staticmethod
+    def get_all_sync_logs() -> List[ConnectorSyncLog]:
+        """Return every sync-log row across all connectors, ordered by connector_id, seq asc.
+
+        Used exclusively by export_metadata to snapshot full history.
+        Each object is eagerly loaded and expunged from the session.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(ConnectorSyncLog).order_by(
+                    ConnectorSyncLog.connector_id,
+                    ConnectorSyncLog.seq,
+                )
+                rows = list(session.scalars(stmt).all())
+                for row in rows:
+                    _ = (
+                        row.connector_id, row.seq,
+                        row.started_at, row.finished_at,
+                        row.total_files, row.new_files, row.completed_files,
+                        row.removed_files, row.status, row.error,
+                    )
+                    session.expunge(row)
+                logger.debug(f"get_all_sync_logs: returned {len(rows)} row(s)")
+                return rows
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_all_sync_logs: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def import_connector(
+        connector_id: str,
+        name: str,
+        connector_type: str,
+        allowed_extensions: list,
+        sync_interval_seconds: int,
+        attached_at: datetime,
+        last_sync_at: Optional[datetime],
+        status: str,
+        total_files: int,
+        message: Optional[str],
+    ) -> bool:
+        """Insert a connector row during import (no credentials — shell only).
+
+        Uses ON CONFLICT DO NOTHING so re-importing the same snapshot is safe.
+        Returns True if the row was inserted, False if it already existed.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    pg_insert(Connector)
+                    .values(
+                        id=connector_id,
+                        name=name,
+                        type=connector_type,
+                        connection_details={},
+                        allowed_extensions=allowed_extensions,
+                        sync_interval_seconds=sync_interval_seconds,
+                        attached_at=attached_at,
+                        last_sync_at=last_sync_at,
+                        status=status,
+                        total_files=total_files,
+                        message=message,
+                    )
+                    .on_conflict_do_nothing(index_elements=["id"])
+                )
+                result = session.execute(stmt)
+                inserted = result.rowcount == 1
+                if inserted:
+                    logger.info(f"import_connector: inserted connector {connector_id!r} ({name!r})")
+                else:
+                    logger.debug(f"import_connector: connector {connector_id!r} already exists — skipped")
+                return inserted
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in import_connector({connector_id!r}): {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def import_sync_log(
+        connector_id: str,
+        seq: int,
+        started_at: datetime,
+        finished_at: Optional[datetime],
+        total_files: int,
+        new_files: int,
+        completed_files: int,
+        removed_files: int,
+        status: str,
+        error: str,
+    ) -> bool:
+        """Insert a sync-log row during import.
+
+        Uses ON CONFLICT DO NOTHING so re-importing the same snapshot is safe.
+        Returns True if the row was inserted, False if it already existed.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    pg_insert(ConnectorSyncLog)
+                    .values(
+                        connector_id=connector_id,
+                        seq=seq,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        total_files=total_files,
+                        new_files=new_files,
+                        completed_files=completed_files,
+                        removed_files=removed_files,
+                        status=status,
+                        error=error,
+                    )
+                    .on_conflict_do_nothing(index_elements=["connector_id", "seq"])
+                )
+                result = session.execute(stmt)
+                inserted = result.rowcount == 1
+                if inserted:
+                    logger.debug(
+                        f"import_sync_log: inserted connector={connector_id!r} seq={seq}"
+                    )
+                else:
+                    logger.debug(
+                        f"import_sync_log: connector={connector_id!r} seq={seq} already exists — skipped"
+                    )
+                return inserted
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in import_sync_log(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            raise
+
     # ========================================================================
     # Document metadata helper
     # ========================================================================
@@ -1629,6 +1792,7 @@ class DatabaseManager:
         page_count: int,
         is_large: bool,
         status: ConversionTaskStatus = ConversionTaskStatus.QUEUED,
+        connector_id: Optional[str] = None,
     ) -> Optional[ConversionTask]:
         """
         Insert a single conversion_tasks row.
@@ -1643,6 +1807,7 @@ class DatabaseManager:
             page_count:    Document page count (0 for DOCX).
             is_large:      True when page_count >= heavy_doc_page_threshold.
             status:        Initial status — QUEUED or PENDING.
+            connector_id:  Owning connector UUID; None for user-submitted jobs.
 
         Returns:
             The created ConversionTask or None on failure.
@@ -1653,6 +1818,7 @@ class DatabaseManager:
                     task_id=task_id,
                     job_id=job_id,
                     doc_id=doc_id,
+                    connector_id=connector_id,
                     operation=operation,
                     cached_file=cached_file,
                     output_format=output_format,
@@ -1704,6 +1870,7 @@ class DatabaseManager:
                     task_id=t["task_id"],
                     job_id=t["job_id"],
                     doc_id=t["doc_id"],
+                    connector_id=t.get("connector_id"),
                     operation=t["operation"],
                     cached_file=t["cached_file"],
                     output_format=t["output_format"],
@@ -1730,8 +1897,8 @@ class DatabaseManager:
         then removes the object from the identity map so callers can use it
         freely after the ``with get_db_session()`` block exits.
         """
-        _ = (task.task_id, task.job_id, task.doc_id, task.operation,
-             task.cached_file, task.output_format, task.page_count,
+        _ = (task.task_id, task.job_id, task.doc_id, task.connector_id,
+             task.operation, task.cached_file, task.output_format, task.page_count,
              task.is_large, task.status, task.result_path, task.error,
              task.queued_at, task.started_at, task.completed_at)
         session.expunge(task)
@@ -1935,7 +2102,11 @@ class DatabaseManager:
                 }
                 if status == ConversionTaskStatus.RUNNING:
                     updates["started_at"] = now
-                if status in (ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED):
+                if status in (
+                    ConversionTaskStatus.COMPLETED,
+                    ConversionTaskStatus.FAILED,
+                    ConversionTaskStatus.CANCELLED,
+                ):
                     updates["completed_at"] = now
                 if result_path is not None:
                     updates["result_path"] = result_path
@@ -1954,25 +2125,95 @@ class DatabaseManager:
             return False
 
     @staticmethod
-    def peek_head(operation: str) -> Optional[ConversionTask]:
+    def cancel_tasks_for_job(job_id: str) -> int:
+        """
+        Cancel all non-terminal ConversionTask rows for ``job_id``.
+
+        Tasks that have never been dispatched (pending, queued) are moved
+        directly to ``cancelled`` — the dispatcher will never pick them up
+        again so there is no checkpoint to wait for.
+
+        Tasks that are actively running are moved to ``cancel_pending`` so
+        the dispatcher can observe the flag at its next safe checkpoint
+        (between 100-page chunks or after the process-pool future returns)
+        and write the final ``cancelled`` status itself.
+
+        Tasks already in completed, failed, cancel_pending, or cancelled are
+        left unchanged.
+
+        Returns:
+            Total number of rows updated.
+        """
+        try:
+            with get_db_session() as session:
+                # PENDING / QUEUED → CANCELLED directly: never dispatched, no
+                # checkpoint needed.
+                not_started = (
+                    update(ConversionTask)
+                    .where(
+                        ConversionTask.job_id == job_id,
+                        ConversionTask.status.in_([
+                            ConversionTaskStatus.PENDING,
+                            ConversionTaskStatus.QUEUED,
+                        ]),
+                    )
+                    .values(status=ConversionTaskStatus.CANCELLED)
+                )
+                not_started_result = cast(CursorResult, session.execute(not_started))
+
+                # RUNNING → CANCEL_PENDING: dispatcher must observe the flag
+                # at its next checkpoint before writing the final CANCELLED.
+                running = (
+                    update(ConversionTask)
+                    .where(
+                        ConversionTask.job_id == job_id,
+                        ConversionTask.status == ConversionTaskStatus.RUNNING,
+                    )
+                    .values(status=ConversionTaskStatus.CANCEL_PENDING)
+                )
+                running_result = cast(CursorResult, session.execute(running))
+
+                updated = not_started_result.rowcount + running_result.rowcount
+                if updated:
+                    logger.info(
+                        f"cancel_tasks_for_job: cancelled {not_started_result.rowcount} "
+                        f"queued/pending and signalled {running_result.rowcount} "
+                        f"running task(s) for job {job_id}"
+                    )
+                return updated
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in cancel_tasks_for_job({job_id}): {e}", exc_info=True
+            )
+            return 0
+
+
+    @staticmethod
+    def peek_head(operation: str, connector_id: Optional[str] = None) -> Optional[ConversionTask]:
         """
         Return the oldest 'queued' task for ``operation`` without locking.
+
+        Pass ``connector_id`` to scope the peek to a specific connector's queue
+        (dispatcher turn 2).  Pass None (default) for user task queues.
 
         Used by the dispatcher to inspect the head weight before attempting
         an atomic claim.
         """
         try:
             with get_db_session() as session:
-                stmt = (
+                filters = [
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
+                    ConversionTask.operation == operation,
+                    ConversionTask.connector_id == connector_id
+                    if connector_id is not None
+                    else ConversionTask.connector_id.is_(None),
+                ]
+                task = session.scalar(
                     select(ConversionTask)
-                    .where(
-                        ConversionTask.status == ConversionTaskStatus.QUEUED,
-                        ConversionTask.operation == operation,
-                    )
+                    .where(*filters)
                     .order_by(ConversionTask.queued_at)
                     .limit(1)
                 )
-                task = session.scalar(stmt)
                 if task:
                     DatabaseManager._load_and_expunge_task(task, session)
                 return task
@@ -1981,9 +2222,12 @@ class DatabaseManager:
             return None
 
     @staticmethod
-    def claim_head(operation: str) -> Optional[ConversionTask]:
+    def claim_head(operation: str, connector_id: Optional[str] = None) -> Optional[ConversionTask]:
         """
         Atomically promote the oldest 'queued' task for ``operation`` to 'running'.
+
+        Pass ``connector_id`` to scope the claim to a specific connector's queue
+        (dispatcher turn 2).  Pass None (default) for user task queues.
 
         Uses SELECT … FOR UPDATE SKIP LOCKED so concurrent callers never
         claim the same task.
@@ -1994,33 +2238,33 @@ class DatabaseManager:
         """
         try:
             with get_db_session() as session:
-                # Subquery: find the head task_id under a row-level lock
+                filters = [
+                    ConversionTask.status == ConversionTaskStatus.QUEUED,
+                    ConversionTask.operation == operation,
+                    ConversionTask.connector_id == connector_id
+                    if connector_id is not None
+                    else ConversionTask.connector_id.is_(None),
+                ]
                 subq = (
                     select(ConversionTask.task_id)
-                    .where(
-                        ConversionTask.status == ConversionTaskStatus.QUEUED,
-                        ConversionTask.operation == operation,
-                    )
+                    .where(*filters)
                     .order_by(ConversionTask.queued_at)
                     .limit(1)
                     .with_for_update(skip_locked=True)
                     .scalar_subquery()
                 )
-                now = datetime.now(timezone.utc)
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id == subq)
                     .values(
                         status=ConversionTaskStatus.RUNNING,
-                        started_at=now,
+                        started_at=datetime.now(timezone.utc),
                     )
                     .returning(ConversionTask)
                 )
-                result = session.execute(stmt)
-                row = result.fetchone()
+                row = session.execute(stmt).fetchone()
                 if row is None:
                     return None
-                # row[0] is the ORM object returned by RETURNING *
                 task = row[0]
                 DatabaseManager._load_and_expunge_task(task, session)
                 return task
@@ -2031,10 +2275,14 @@ class DatabaseManager:
     @staticmethod
     def promote_pending(operation: str, quota: int) -> int:
         """
-        Promote as many 'pending' tasks as will fit under ``quota`` for ``operation``.
+        Promote as many 'pending' user tasks as will fit under ``quota`` for
+        ``operation``.
 
-        This keeps the 'queued' count ≤ quota while draining the pending backlog
-        in first-submitted-first-promoted order.
+        Only promotes tasks where ``connector_id IS NULL`` — connector tasks are
+        always inserted as 'queued' and never enter the pending backlog.
+
+        This keeps the user 'queued' count ≤ quota while draining the pending
+        backlog in first-submitted-first-promoted order.
 
         All three statements (count queued, select candidates, update status) run
         inside a single transaction under the same session-level advisory lock used
@@ -2061,11 +2309,12 @@ class DatabaseManager:
                 # sequence so no concurrent caller can interleave.
                 session.execute(text(f"SELECT pg_advisory_xact_lock({lock_key})"))
 
-                # Count currently queued tasks for this operation.
+                # Count currently queued user tasks for this operation.
                 queued_count = session.scalar(
                     select(func.count()).where(
                         ConversionTask.status == ConversionTaskStatus.QUEUED,
                         ConversionTask.operation == operation,
+                        ConversionTask.connector_id.is_(None),
                     )
                 ) or 0
 
@@ -2073,12 +2322,13 @@ class DatabaseManager:
                 if headroom == 0:
                     return 0
 
-                # Fetch the oldest pending tasks that fit under the quota.
+                # Fetch the oldest pending user tasks that fit under the quota.
                 candidates = session.execute(
                     select(ConversionTask.task_id, ConversionTask.cached_file)
                     .where(
                         ConversionTask.status == ConversionTaskStatus.PENDING,
                         ConversionTask.operation == operation,
+                        ConversionTask.connector_id.is_(None),
                     )
                     .order_by(ConversionTask.queued_at)
                     .limit(headroom)
@@ -2088,14 +2338,12 @@ class DatabaseManager:
                     return 0
 
                 candidate_ids = [row.task_id for row in candidates]
-                now = datetime.now(timezone.utc)
                 stmt = (
                     update(ConversionTask)
                     .where(ConversionTask.task_id.in_(candidate_ids))
-                    .values(status=ConversionTaskStatus.QUEUED, queued_at=now)
+                    .values(status=ConversionTaskStatus.QUEUED, queued_at=datetime.now(timezone.utc))
                 )
-                result = cast(CursorResult, session.execute(stmt))
-                promoted = result.rowcount
+                promoted = cast(CursorResult, session.execute(stmt)).rowcount
                 if promoted:
                     logger.debug(f"Promoted {promoted} pending → queued for {operation}")
                     for row in candidates:
@@ -2105,6 +2353,67 @@ class DatabaseManager:
                 return promoted
         except SQLAlchemyError as e:
             logger.error(f"DB error promoting pending tasks for {operation}: {e}", exc_info=True)
+            return 0
+
+    @staticmethod
+    def get_connector_ids_with_queued_tasks() -> List[str]:
+        """
+        Return connector IDs that have at least one 'queued' ingestion task,
+        ordered by their oldest queued_at (FIFO — longest-waiting connector first).
+
+        Called each tick by the dispatcher's connector turn (turn 2) to build
+        the round-robin list.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask.connector_id)
+                    .where(
+                        ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        ConversionTask.operation == "ingestion",
+                        ConversionTask.connector_id.is_not(None),
+                    )
+                    .group_by(ConversionTask.connector_id)
+                    .order_by(func.min(ConversionTask.queued_at))
+                )
+                return [row[0] for row in session.execute(stmt).all()]
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_connector_ids_with_queued_tasks: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def delete_conversion_tasks_for_connector(connector_id: str) -> int:
+        """
+        Delete all queued conversion_tasks rows owned by ``connector_id``.
+
+        Called as the first step of connector teardown, before checksum rows
+        and document rows are removed, to ensure the dispatcher never picks up
+        tasks that belong to a connector being deleted.
+
+        Returns:
+            Number of rows deleted.
+        """
+        try:
+            with get_db_session() as session:
+                result = cast(
+                    CursorResult,
+                    session.execute(
+                        delete(ConversionTask).where(
+                            ConversionTask.connector_id == connector_id,
+                            ConversionTask.status == ConversionTaskStatus.QUEUED,
+                        )
+                    ),
+                )
+                deleted = result.rowcount
+                if deleted:
+                    logger.info(
+                        f"Deleted {deleted} queued task(s) for connector {connector_id!r}"
+                    )
+                return deleted
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error deleting tasks for connector {connector_id!r}: {e}", exc_info=True
+            )
             return 0
 
 

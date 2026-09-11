@@ -2,6 +2,7 @@ package openshift
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,30 +11,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
 // Delete removes an application and its associated resources.
 func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOptions) error {
 	app := opts.Name
 	namespace := app
-
-	// Create a new Helm client
-	helmClient, err := helm.NewHelm(namespace)
-	if err != nil {
-		return fmt.Errorf("failed to create helm client: %w", err)
-	}
-
-	// Check if the app exists
-	isAppExist, err := helmClient.IsReleaseExist(app)
-	if err != nil {
-		return fmt.Errorf("failed to check if application exists: %w", err)
-	}
-
-	if !isAppExist {
-		logger.Infof("Application '%s' does not exist in namespace '%s'\n", app, namespace)
-
-		return nil
-	}
 
 	if err := o.confirmDeletion(opts); err != nil {
 		return err
@@ -47,13 +31,23 @@ func (o *OpenshiftApplication) Delete(ctx context.Context, opts types.DeleteOpti
 		timeout = defaultDeleteTimeout
 	}
 
+	helmClient, err := helm.NewHelm(namespace)
+	if err != nil {
+		return fmt.Errorf("failed to create helm client: %w", err)
+	}
+
 	s := spinner.New("Deleting application '" + app + "'...")
 
 	s.Start(ctx)
 
-	// Perform helm uninstall
 	err = helmClient.Uninstall(app, &helm.UninstallOpts{Timeout: timeout})
 	if err != nil {
+		if errors.Is(err, driver.ErrReleaseNotFound) {
+			s.Stop("Application '" + app + "' does not exist — nothing to delete")
+
+			return nil
+		}
+
 		s.Fail("failed to delete application")
 
 		return fmt.Errorf("failed to perform app deletion: %w", err)

@@ -1,5 +1,5 @@
 ui:
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.66
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.75
   resources:
     requests:
       memory: "512Mi"
@@ -9,11 +9,17 @@ ui:
       cpu: "500m"
 
 backend:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.319
+  image: icr.io/ai-services-cicd/ai-services:v0.0.360
   runtime: "openshift"
   adminPasswordHash: ""
   # @generate:password length=32, special=false
   dbEncryptionKey: ""
+  # workerGatewayPort: port for the gRPC worker gateway. Always active; default is 9090.
+  workerGatewayPort: "9090"
+  # localWorker: when "true", the catalog-backend auto-joins a co-located worker pod.
+  localWorker: "true"
+  # @generate:password length=32, special=false
+  mtlsEncryptionKey: ""
   resources:
     requests:
       memory: "1Gi"

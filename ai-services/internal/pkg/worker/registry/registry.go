@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,10 @@ import (
 // ErrWorkerAlreadyActive is returned by Register when the named worker already
 // has an active in-memory entry (i.e. a live CommandStream is open).
 var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
+
+// ErrWorkerNotFound is returned by Restore when the named worker has no DB row,
+// or its status is pending (never completed bootstrap).
+var ErrWorkerNotFound = fmt.Errorf("worker not found")
 
 // ErrUnsupportedRuntimeType is returned by Register when runtimeType is not a
 // recognised value (podman or openshift).
@@ -116,8 +121,9 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedRuntimeType, runtimeType)
 	}
 
+	k := workerKey(workerName)
 	r.mu.Lock()
-	if _, exists := r.workers[workerName]; exists {
+	if _, exists := r.workers[k]; exists {
 		r.mu.Unlock()
 
 		return nil, fmt.Errorf("%w: %s", ErrWorkerAlreadyActive, workerName)
@@ -130,7 +136,7 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 		CommandCh:   make(chan *workerpb.Command, commandChannelSize),
 		results:     make(map[string]chan *workerpb.CommandResult),
 	}
-	r.workers[workerName] = entry
+	r.workers[k] = entry
 	r.mu.Unlock()
 
 	if r.repo != nil {
@@ -152,15 +158,87 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 	return entry, nil
 }
 
+// Restore re-creates the in-memory entry for a previously-registered worker whose
+// record exists in the DB but whose in-memory entry is absent (e.g. after a
+// control-plane restart, or after a worker reconnects following a clean disconnect).
+// The caller must have already verified the worker's identity via mTLS — this
+// method does not consult the token store.
+//
+// Returns ErrWorkerNotFound if the worker has no DB row or its status is pending
+// (it was pre-registered but never completed the bootstrap flow; a cert alone is
+// not sufficient proof of identity in that state).
+//
+// If the worker is already in the in-memory map (concurrent reconnect), the
+// existing entry is returned unchanged — Restore is idempotent.
+//
+// On success the DB status is updated to ready and the new entry is returned.
+func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry, error) {
+	k := workerKey(workerName)
+	// Fast path: already in memory (e.g. concurrent reconnect races).
+	r.mu.RLock()
+	if entry, ok := r.workers[k]; ok {
+		r.mu.RUnlock()
+
+		return entry, nil
+	}
+	r.mu.RUnlock()
+
+	if r.repo == nil {
+		return nil, ErrWorkerNotFound
+	}
+
+	w, err := r.repo.GetByName(ctx, workerName)
+	if err != nil {
+		return nil, fmt.Errorf("worker registry: DB lookup for %s: %w", workerName, err)
+	}
+	// Pending means the worker was pre-registered but never completed the initial
+	// bootstrap (Register RPC + token exchange). Require the full flow.
+	if w == nil || w.Status == models.WorkerStatusPending {
+		return nil, ErrWorkerNotFound
+	}
+
+	entry := &WorkerEntry{
+		DBID:        w.ID,
+		WorkerName:  w.Name, // use the DB-stored casing, not the caller-supplied name
+		RuntimeType: string(w.RuntimeType),
+		Metadata:    metadataToString(w.Metadata),
+		CommandCh:   make(chan *workerpb.Command, commandChannelSize),
+		results:     make(map[string]chan *workerpb.CommandResult),
+	}
+
+	r.mu.Lock()
+	// Re-check under write lock to guard against a concurrent Restore.
+	if existing, ok := r.workers[k]; ok {
+		r.mu.Unlock()
+
+		return existing, nil
+	}
+	r.workers[k] = entry
+	r.mu.Unlock()
+
+	if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusReady), Message: utils.Ptr("")}); err != nil {
+		logger.WarningfCtx(ctx, "worker registry: DB status update failed on restore for %s: %v", workerName, err)
+	}
+
+	return entry, nil
+}
+
 // Preregister creates a pending DB row for a named worker and returns a single-use
 // bootstrap token the operator passes to the worker daemon at startup.
 // If a row already exists (re-registration), it is reset to pending and a new token
-// supersedes the old one. The registry's in-memory map is not touched — the worker
-// is not "connected" until it calls Register via gRPC.
+// supersedes the old one.
+//
+// If the worker is currently active in the in-memory map (i.e. its stream is still
+// open), it is evicted first so that the stale connection can no longer update the
+// heartbeat on the now-pending row.
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
 	}
+
+	// Evict any live in-memory entry so UpdateHeartbeat stops updating the row
+	// we are about to reset to pending. Disconnect normalises the key itself.
+	r.Disconnect(ctx, workerName)
 
 	w := &models.Worker{
 		Name:        workerName,
@@ -187,7 +265,7 @@ func (r *Registry) List(ctx context.Context) ([]models.Worker, error) {
 func (r *Registry) Get(workerName string) (*WorkerEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	e, ok := r.workers[workerName]
+	e, ok := r.workers[workerKey(workerName)]
 
 	return e, ok
 }
@@ -195,15 +273,20 @@ func (r *Registry) Get(workerName string) (*WorkerEntry, bool) {
 // Disconnect removes the worker from the in-memory map and marks it disconnected in the DB.
 // The DB row is kept so the worker can reconnect and its history is preserved.
 func (r *Registry) Disconnect(ctx context.Context, workerName string) {
+	k := workerKey(workerName)
 	r.mu.Lock()
-	entry, ok := r.workers[workerName]
+	entry, ok := r.workers[k]
 	if ok {
-		delete(r.workers, workerName)
+		delete(r.workers, k)
 	}
 	r.mu.Unlock()
 
 	if ok && r.repo != nil && entry.DBID != uuid.Nil {
-		if err := r.repo.Update(ctx, entry.DBID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
+		msg := MsgDisconnected
+		if err := r.repo.Update(ctx, entry.DBID, repository.WorkerUpdate{
+			Status:  utils.Ptr(models.WorkerStatusDisconnected),
+			Message: &msg,
+		}); err != nil {
 			logger.WarningfCtx(ctx, "worker registry: DB disconnect update failed for %s: %v", workerName, err)
 		}
 	}
@@ -233,7 +316,11 @@ func (r *Registry) SweepStale(ctx context.Context, timeout time.Duration) {
 		}
 		if w.LastHeartbeat == nil || now.Sub(*w.LastHeartbeat) > timeout {
 			logger.WarningfCtx(ctx, "worker registry: worker %s heartbeat timed out — marking disconnected", w.Name)
-			if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{Status: utils.Ptr(models.WorkerStatusDisconnected)}); err != nil {
+			msg := MsgLostHeartbeat
+			if err := r.repo.Update(ctx, w.ID, repository.WorkerUpdate{
+				Status:  utils.Ptr(models.WorkerStatusDisconnected),
+				Message: &msg,
+			}); err != nil {
 				logger.WarningfCtx(ctx, "worker registry: failed to update stale worker %s: %v", w.Name, err)
 			}
 		}
@@ -248,7 +335,7 @@ func (r *Registry) UpdateHeartbeat(ctx context.Context, workerName string) {
 	}
 
 	r.mu.RLock()
-	entry, ok := r.workers[workerName]
+	entry, ok := r.workers[workerKey(workerName)]
 	r.mu.RUnlock()
 
 	if !ok || entry.DBID == uuid.Nil {
@@ -290,7 +377,7 @@ func (r *Registry) Deregister(ctx context.Context, id uuid.UUID) (bool, error) {
 // DeliverResult routes an incoming CommandResult to the waiting RemoteRuntime call.
 func (r *Registry) DeliverResult(res *workerpb.CommandResult) {
 	r.mu.RLock()
-	entry, ok := r.workers[res.GetWorkerName()]
+	entry, ok := r.workers[workerKey(res.GetWorkerName())]
 	r.mu.RUnlock()
 	if ok {
 		entry.deliverResult(res)
@@ -300,7 +387,7 @@ func (r *Registry) DeliverResult(res *workerpb.CommandResult) {
 // WaitForResult returns a channel that will receive the result for commandID on workerName.
 func (r *Registry) WaitForResult(workerName, commandID string) (chan *workerpb.CommandResult, error) {
 	r.mu.RLock()
-	entry, ok := r.workers[workerName]
+	entry, ok := r.workers[workerKey(workerName)]
 	r.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("worker %s not connected", workerName)
@@ -313,7 +400,7 @@ func (r *Registry) WaitForResult(workerName, commandID string) (chan *workerpb.C
 // It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) WorkerCommandChannel(workerName string) (chan *workerpb.Command, bool) {
 	r.mu.RLock()
-	entry, ok := r.workers[workerName]
+	entry, ok := r.workers[workerKey(workerName)]
 	r.mu.RUnlock()
 	if !ok {
 		return nil, false
@@ -326,7 +413,7 @@ func (r *Registry) WorkerCommandChannel(workerName string) (chan *workerpb.Comma
 // It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) WorkerRuntimeType(workerName string) (string, bool) {
 	r.mu.RLock()
-	entry, ok := r.workers[workerName]
+	entry, ok := r.workers[workerKey(workerName)]
 	r.mu.RUnlock()
 	if !ok {
 		return "", false
@@ -339,7 +426,7 @@ func (r *Registry) WorkerRuntimeType(workerName string) (string, bool) {
 // It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) WorkerMetadata(workerName string) (map[string]string, bool) {
 	r.mu.RLock()
-	entry, ok := r.workers[workerName]
+	entry, ok := r.workers[workerKey(workerName)]
 	r.mu.RUnlock()
 	if !ok {
 		return nil, false
@@ -352,7 +439,7 @@ func (r *Registry) WorkerMetadata(workerName string) (map[string]string, bool) {
 // time. Returns (uuid.Nil, false) if the worker is not currently connected.
 func (r *Registry) WorkerID(workerName string) (uuid.UUID, bool) {
 	r.mu.RLock()
-	entry, ok := r.workers[workerName]
+	entry, ok := r.workers[workerKey(workerName)]
 	r.mu.RUnlock()
 	if !ok {
 		return uuid.Nil, false
@@ -368,9 +455,9 @@ func (r *Registry) WorkerNameByID(id uuid.UUID) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for name, entry := range r.workers {
+	for _, entry := range r.workers {
 		if entry.DBID == id {
-			return name, true
+			return entry.WorkerName, true
 		}
 	}
 
@@ -385,7 +472,7 @@ func (r *Registry) WorkerNameByID(id uuid.UUID) (string, bool) {
 // It satisfies the stream.WorkerRegistry interface.
 func (r *Registry) IsWorkerConnected(ctx context.Context, workerName string) bool {
 	r.mu.RLock()
-	_, inCache := r.workers[workerName]
+	_, inCache := r.workers[workerKey(workerName)]
 	r.mu.RUnlock()
 
 	if !inCache {
@@ -408,6 +495,12 @@ func (r *Registry) IsWorkerConnected(ctx context.Context, workerName string) boo
 // Internal helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
+// workerKey returns the canonical map key for a worker name: lowercase of name.
+// The WorkerEntry.WorkerName field always stores the original casing.
+func workerKey(name string) string {
+	return strings.ToLower(name)
+}
+
 // metadataToAny converts a map[string]string (from proto) to map[string]any (for the DB model).
 func metadataToAny(m map[string]string) map[string]any {
 	if len(m) == 0 {
@@ -416,6 +509,24 @@ func metadataToAny(m map[string]string) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
 		out[k] = v
+	}
+
+	return out
+}
+
+// metadataToString converts a map[string]any (from the DB model) back to map[string]string
+// for use in a WorkerEntry. Non-string values are converted via fmt.Sprintf.
+func metadataToString(m map[string]any) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		} else {
+			out[k] = fmt.Sprintf("%v", v)
+		}
 	}
 
 	return out

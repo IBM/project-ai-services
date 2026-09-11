@@ -363,6 +363,76 @@ const docTemplate = `{
             }
         },
         "/applications/{id}/datasources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a paginated list of datasource connectors linked to the given application, enriched with live sync state (status, files, last_sync, message) from each connector's Digitize pod.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Applications"
+                ],
+                "summary": "List application datasources",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (1-indexed)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Number of items per page (max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid path parameter or query params",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Application not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "put": {
                 "security": [
                     {
@@ -2104,7 +2174,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves system resource information including CPU, memory, and accelerator availability",
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability.\nDefaults to the local worker when the ` + "`" + `worker` + "`" + ` query parameter is omitted.",
                 "produces": [
                     "application/json"
                 ],
@@ -2112,11 +2182,25 @@ const docTemplate = `{
                     "Catalog"
                 ],
                 "summary": "Get system resources",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Worker name to query resources from (default: Local)",
+                        "name": "worker",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ResourcesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Worker not connected",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -2539,7 +2623,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns all registered workers and their current status from the database.",
+                "description": "Returns all registered workers, their current status, human-readable message, and connected application IDs.",
                 "produces": [
                     "application/json"
                 ],
@@ -2619,6 +2703,59 @@ const docTemplate = `{
             }
         },
         "/workers/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the worker with the given ID, including its status message and connected application IDs.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Workers"
+                ],
+                "summary": "Get a single worker",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Worker ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Worker details",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid worker ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Worker not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -2653,6 +2790,13 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     },
+                    "403": {
+                        "description": "Local worker cannot be deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "404": {
                         "description": "Worker not found",
                         "schema": {
@@ -2672,6 +2816,61 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceItem": {
+            "type": "object",
+            "properties": {
+                "err_msg": {
+                    "description": "ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or\nno endpoint registered). Empty on success.",
+                    "type": "string"
+                },
+                "files": {
+                    "description": "Files is the total number of files tracked by the connector (total_files from the service).",
+                    "type": "integer"
+                },
+                "id": {
+                    "description": "ID is the UUID of the datasource connector.",
+                    "type": "string"
+                },
+                "last_sync": {
+                    "description": "LastSync is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "Message is sourced directly from the connector's message field on the service pod.\nIt covers all phases: \"x new files found\", \"Processing x/y files\", and error details.\nEmpty when no sync has run yet or the service pod is unreachable.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the human-readable label of the datasource.",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider contains the provider ID and its resolved display name.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceProviderInfo"
+                        }
+                    ]
+                },
+                "status": {
+                    "description": "Status is the connector's sync_status sourced live from the service pod.\nSet to \"unknown\" when the service pod is unreachable.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ApplicationDatasourceItem"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component": {
             "type": "object",
             "required": [
@@ -2751,6 +2950,23 @@ const docTemplate = `{
                 },
                 "type": {
                     "description": "Type is the resolved catalog type name of the owning application (e.g. \"Digital Assistants\").\nFalls back to CatalogID when the catalog entry cannot be loaded.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef": {
+            "type": "object",
+            "required": [
+                "id",
+                "type"
+            ],
+            "properties": {
+                "id": {
+                    "description": "ID is the UUID from the connectors table.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type is the connector kind (e.g. \"datasource\").",
                     "type": "string"
                 }
             }
@@ -3036,6 +3252,13 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component"
                     }
                 },
+                "connectors": {
+                    "description": "Connectors lists pre-registered connector records to attach to this service\nafter the application reaches Running status. Each entry is validated against\nthe service's catalog YAML (accepts_datasource) and the connectors table before\ndeployment begins. Omitting this field (or passing an empty list) is valid.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef"
+                    }
+                },
                 "params": {
                     "description": "Service-level parameters",
                     "type": "object",
@@ -3057,8 +3280,8 @@ const docTemplate = `{
                     "description": "LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.",
                     "type": "string"
                 },
-                "last_sync_error": {
-                    "description": "LastSyncError is the error string from the last failed sync, or null on success.",
+                "message": {
+                    "description": "Message contains the current status and phase description from the connector\n(e.g. \"x new files found\", \"Processing x/y files\", or error details).\nOmitted when empty.",
                     "type": "string"
                 },
                 "sync_status": {
@@ -3305,11 +3528,20 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "namespace": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
                 "services": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod"
                     }
+                },
+                "worker_name": {
+                    "type": "string"
                 }
             }
         },
@@ -3868,10 +4100,19 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker": {
             "type": "object",
             "properties": {
+                "application_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "id": {
                     "type": "string"
                 },
                 "last_heartbeat": {
+                    "type": "string"
+                },
+                "message": {
                     "type": "string"
                 },
                 "metadata": {
@@ -3973,15 +4214,16 @@ const docTemplate = `{
             ],
             "properties": {
                 "worker_name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
+                    "type": "string"
                 }
             }
         },
         "internal_pkg_catalog_apiserver_handlers.createWorkerResp": {
             "type": "object",
             "properties": {
+                "gateway_address": {
+                    "type": "string"
+                },
                 "token": {
                     "type": "string"
                 },

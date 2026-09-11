@@ -16,6 +16,7 @@ class JobStatus(str):
     ACCEPTED = "accepted"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
 
 
@@ -26,8 +27,28 @@ class JobStatus(str):
 class ExampleItem(BaseModel):
     """A single few-shot example stored with a schema."""
 
-    text: str = Field(..., description="Source text for this example")
-    output: Dict[str, Any] = Field(..., description="Expected extraction output")
+    text: Optional[str] = Field(None, description="Source text for this example", json_schema_extra={
+        "example":"First line\nSecond line"})
+    output: Dict[str, Any] = Field(..., description="Expected extraction output", json_schema_extra={
+            "examples": [{
+                "example_argument1": "example value",
+                "another_argument": 123
+        }]
+    })
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples":
+            [
+                {
+                    "text": "First line\nSecond line",
+                    "output": {
+                        "example_argument1": "example value"
+                    }
+                }
+            ]
+        }
+    )
 
 
 class SchemaRegisterRequest(BaseModel):
@@ -122,14 +143,17 @@ class SchemaDetailResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class JobCreatedResponse(BaseModel):
-    """Response body for POST /v1/extract/jobs (202 Accepted)."""
+    """Response body for POST /v1/extract/jobs (202 Accepted) — single or batch."""
     job_id: str
+    file_count: int = 1
 
 
-class DocumentInfo(BaseModel):
-    """Inline document info embedded in job detail responses."""
-    name: str
-    source_type: str
+class BatchDocumentItem(BaseModel):
+    """Per-document summary item in batch job detail responses."""
+    doc_id: str
+    filename: str
+    status: str
+    error: str = ""
 
 
 class JobDetailResponse(BaseModel):
@@ -141,7 +165,14 @@ class JobDetailResponse(BaseModel):
     job_name: Optional[str] = None
     schema_id: str
     status: str
-    document: DocumentInfo
+    # Single-file jobs: document is None. Batch jobs populate `documents`.
+    document: None = None
+    documents: Optional[List[BatchDocumentItem]] = None
+    # Batch progress counters (None for single-file jobs)
+    file_count: Optional[int] = None
+    files_completed: Optional[int] = None
+    files_failed: Optional[int] = None
+    files_pending: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
     submitted_at: str
     completed_at: Optional[str] = None
@@ -155,7 +186,7 @@ class JobListItem(BaseModel):
     job_name: Optional[str] = None
     schema_id: str
     status: str
-    document_name: str
+    file_count: int = 1
     submitted_at: str
     completed_at: Optional[str] = None
 
@@ -180,7 +211,8 @@ class ExtractionRequest(BaseModel):
     """Request body for POST /v1/extract."""
 
     text: str = Field(..., min_length=1, description="Raw text to extract from")
-    schema_id: str = Field(..., min_length=1, description="ID of a registered schema")
+    schema_id: Optional[str] = Field(default=None, min_length=1, description="ID of a registered schema")
+    schema_name: Optional[str] = Field(default=None, min_length=1, description="Registered schema name")
 
 
 class ExtractionSourceInfo(BaseModel):

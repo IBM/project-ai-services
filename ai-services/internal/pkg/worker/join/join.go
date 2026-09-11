@@ -20,17 +20,20 @@ package join
 import (
 	"context"
 	"fmt"
+	"net"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
@@ -53,19 +56,32 @@ const (
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
 func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
-	// ── Step 1: Dial the gateway ─────────────────────────────────────────────
-	logger.InfofCtx(ctx, "Connecting to catalog gateway at %s...\n", opts.GatewayAddr)
-
-	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fmt.Errorf("worker grpcstream: create client for %s: %w", opts.GatewayAddr, err)
+	if opts.GatewayAddr == "" {
+		return fmt.Errorf("worker join: gateway address is required (e.g. gateway.10.0.0.1.nip.io:9090)")
 	}
-	defer func() { _ = conn.Close() }()
+	if _, _, err := net.SplitHostPort(opts.GatewayAddr); err != nil {
+		return fmt.Errorf("worker join: invalid gateway address %q — must be host:port (e.g. gateway.10.0.0.1.nip.io:9090)", opts.GatewayAddr)
+	}
 
-	client := workerpb.NewWorkerGatewayClient(conn)
+	tlsDir := workerconstants.WorkerTLSDir
+	// ── Step 1: Check for existing valid mTLS credentials & stream loop ────────────────────
+	if hasValidTLSCredentials(ctx, tlsDir) {
+		logger.InfofCtx(ctx, "worker join: valid mTLS credentials found in %s, skipping registration", tlsDir)
+
+		workerName, err := workerNameFromCert(tlsDir)
+		if err != nil {
+			return fmt.Errorf("worker join: recover worker name from cert: %w", err)
+		}
+
+		return connectAndStream(ctx, rt, pr, opts.GatewayAddr, workerName)
+	}
+
+	if opts.Token == "" {
+		return fmt.Errorf("worker join: no valid mTLS credentials found in %s and no --token provided", tlsDir)
+	}
 
 	// ── Step 2: Register + stream loop ───────────────────────────────────────
-	return runRegistrationLoop(ctx, rt, pr, client, opts.Token)
+	return runRegistrationLoop(ctx, rt, pr, opts)
 }
 
 // ─── registration loop ────────────────────────────────────────────────────────
@@ -73,36 +89,98 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 // runRegistrationLoop calls Register and then enters the CommandStream retry
 // loop.  If the stream comes back with codes.Unauthenticated it re-registers
 // before reconnecting.
-func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, token string) error {
-	workerName, err := register(ctx, client, token, rt.Type())
+func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
+	workerName, err := register(ctx, opts, rt.Type())
 	if err != nil {
 		return fmt.Errorf("worker join: register: %w", err)
 	}
 
 	logger.InfofCtx(ctx, "Worker %q registered with control plane.\n", workerName)
 
-	return runStreamLoop(ctx, rt, pr, client, workerName)
+	return connectAndStream(ctx, rt, pr, opts.GatewayAddr, workerName)
 }
 
 // register calls the Register RPC once and returns the worker name bound by
 // the control plane.
-func register(ctx context.Context, client workerpb.WorkerGatewayClient, token string, rt types.RuntimeType) (string, error) {
+func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.RuntimeType) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker with catalog control plane...")
 
-	resp, err := client.Register(ctx, &workerpb.RegisterRequest{
-		PreSharedToken: token,
-		RuntimeType:    rt.String(),
-	})
-	// TODO: When registrations fails due to "token already used" error
-	// attempt registretion without token.
+	tlsDir := workerconstants.WorkerTLSDir
+	// 1. Generate local ECDSA P-256 key + CSR — private key never transmitted.
+	keyPEM, csrPEM, err := generateKeyAndCSR()
 	if err != nil {
-		return "", fmt.Errorf("register RPC: %w", err)
+		return "", err
 	}
 
-	return resp.GetWorkerName(), nil
+	// 2. Dial the gateway for bootstrap. ca.crt may not exist yet on first run,
+	//    so buildTLSConfig falls back to InsecureSkipVerify (TOFU) if absent.
+	tlsCfg, err := buildTLSConfig(opts.GatewayAddr, tlsDir, nil)
+	if err != nil {
+		return "", err
+	}
+	if tlsCfg.InsecureSkipVerify {
+		logger.WarningfCtx(ctx, "worker join: ca.crt not present, bootstrap connection will use InsecureSkipVerify")
+	}
+
+	conn, err := grpc.NewClient(opts.GatewayAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	if err != nil {
+		return "", fmt.Errorf("dial %s: %w", opts.GatewayAddr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// 3. Call Register with token + CSR.
+	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
+	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
+		PreSharedToken: opts.Token,
+		RuntimeType:    rt.String(),
+		CsrPem:         csrPEM,
+	})
+	if err != nil {
+		return "", fmt.Errorf("worker join: register RPC: %w", err)
+	}
+
+	// 4. Write TLS material to disk (see tls.go: writeTLSMaterial).
+	if len(resp.GetTlsCertPem()) == 0 {
+		return "", fmt.Errorf("gateway returned empty certificate — registration failed")
+	}
+	if err := writeTLSMaterial(tlsDir, resp.GetTlsCertPem(), keyPEM, resp.GetCaCertPem()); err != nil {
+		return "", err
+	}
+	logger.InfofCtx(ctx, "worker join: mTLS credentials written to %s", tlsDir)
+
+	// Recover the worker name from the signed cert — the gateway embeds the
+	// token-bound worker name as the cert CN, so no separate response field is needed.
+	return workerNameFromCert(tlsDir)
 }
 
 // ─── command-stream loop ──────────────────────────────────────────────────────
+
+// connectAndStream loads mTLS credentials from tlsDir, dials the gateway with
+// mTLS, and runs the CommandStream retry loop.
+// workerName is sent in the first stream message so the gateway can identify
+// this worker; it is empty on reconnect (the gateway will read it from the message).
+func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, gatewayAddr, workerName string) error {
+	tlsDir := workerconstants.WorkerTLSDir
+	cert, err := loadClientCert(tlsDir)
+	if err != nil {
+		return fmt.Errorf("worker join: %w", err)
+	}
+
+	tlsCfg, err := buildTLSConfig(gatewayAddr, tlsDir, &cert)
+	if err != nil {
+		return fmt.Errorf("worker join: build TLS config for stream: %w", err)
+	}
+
+	conn, err := grpc.NewClient(gatewayAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	if err != nil {
+		return fmt.Errorf("worker join: dial %s: %w", gatewayAddr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	logger.InfofCtx(ctx, "worker join: connecting as %q to %s", workerName, gatewayAddr)
+
+	return runStreamLoop(ctx, rt, pr, workerpb.NewWorkerGatewayClient(conn), workerName)
+}
 
 // runStreamLoop opens the CommandStream and retries on transient failures.
 // An Unauthenticated status from the gateway means the control plane restarted
@@ -154,60 +232,150 @@ func runStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRou
 	}
 
 	// Send the first message so the gateway can identify which worker this is.
+	// This is the only direct stream.Send call — after this, all writes go
+	// through recvLoop's single sender goroutine to avoid concurrent sends.
 	if err := sendHeartbeat(stream, workerName); err != nil {
 		return fmt.Errorf("initial heartbeat: %w", err)
 	}
 
 	logger.InfofCtx(ctx, "CommandStream open for worker %q \n", workerName)
 
-	// Two concurrent activities:
-	//   • recv goroutine: read Commands from the gateway and handle them.
-	//   • heartbeat ticker: periodically send keep-alives.
-	recvErrCh := make(chan error, 1)
+	// recvLoop owns all subsequent stream.Send calls (results + heartbeats).
+	return recvLoop(ctx, rt, pr, stream, workerName)
+}
 
-	go func() {
-		recvErrCh <- recvLoop(ctx, rt, pr, stream, workerName)
-	}()
+// recvLoop reads Commands from the gateway stream and dispatches each one in
+// its own goroutine so that long-running commands (e.g. HELM_INSTALL) do not
+// block reception of subsequent commands.  Results and heartbeats are
+// funnelled through a single send channel so that stream.Send is always
+// called from one goroutine (gRPC streams are not safe for concurrent sends).
+// The loop exits when the stream is closed or returns an error.
+//
+//nolint:cyclop // complexity comes from select branches, not logic depth
+func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
+	// sendCh serialises all stream.Send calls — both command results and
+	// heartbeats. Buffer of 32 prevents dispatch goroutines from blocking
+	// on a momentarily busy sender.
+	const sendBufSize = 32
+	sendCh := make(chan *workerpb.CommandResult, sendBufSize)
+	senderErrCh, senderDone := startSender(stream, sendCh)
 
+	var wg sync.WaitGroup
+	drain := makeDrainer(&wg, sendCh, senderDone, senderErrCh)
+
+	// Heartbeat ticker — keep-alives go through sendCh so they share the
+	// same stream.Send goroutine as command results.
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
+
+	heartbeat := &workerpb.CommandResult{WorkerName: workerName, IsHeartbeat: true}
+
+	// recvCh carries commands (and the terminal error) from a background
+	// stream.Recv goroutine so we can select on it with the ticker and ctx.
+	recvCh := startRecvGoroutine(stream)
+
+	// One Dispatcher per stream lifetime — it tracks all in-flight command
+	// contexts so COMMAND_TYPE_CANCEL can abort a specific command.
+	d := dispatch.New()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-
-		case err := <-recvErrCh:
-			return err
+			return drain(ctx.Err())
 
 		case <-ticker.C:
-			if err := sendHeartbeat(stream, workerName); err != nil {
-				return fmt.Errorf("heartbeat: %w", err)
+			select {
+			case sendCh <- heartbeat:
+			default: // drop heartbeat if sender is backed up; not critical
 			}
+
+		case msg := <-recvCh:
+			if msg.err != nil {
+				return drain(msg.err)
+			}
+
+			logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
+				workerName, msg.cmd.GetCommandId(), msg.cmd.GetType())
+
+			wg.Add(1)
+
+			go func(c *workerpb.Command) {
+				defer wg.Done()
+
+				result := d.Dispatch(ctx, rt, pr, c)
+				result.WorkerName = workerName
+
+				select {
+				case sendCh <- result:
+				case <-ctx.Done():
+				}
+			}(msg.cmd)
 		}
 	}
 }
 
-// recvLoop reads Commands from the gateway stream, dispatches each one to the
-// local runtime, and sends the result back on the stream.
-// The loop exits when the stream is closed or returns an error.
-func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
-	for {
-		cmd, err := stream.Recv()
-		if err != nil {
-			return err
-		}
+// makeDrainer returns a function that waits for all in-flight dispatch
+// goroutines to finish, closes sendCh, waits for the sender goroutine to
+// exit, and returns any sender error in preference to the recv error.
+func makeDrainer(wg *sync.WaitGroup, sendCh chan *workerpb.CommandResult, senderDone <-chan struct{}, senderErrCh <-chan error) func(error) error {
+	return func(recvErr error) error {
+		wg.Wait()
+		close(sendCh)
+		<-senderDone
 
-		logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
-			workerName, cmd.GetCommandId(), cmd.GetType())
-
-		result := dispatch.Dispatch(ctx, rt, pr, cmd)
-		result.WorkerName = workerName
-
-		if err := stream.Send(result); err != nil {
-			return fmt.Errorf("send command result id=%s: %w", cmd.GetCommandId(), err)
+		select {
+		case sErr := <-senderErrCh:
+			return sErr
+		default:
+			return recvErr
 		}
 	}
+}
+
+// startSender starts the dedicated stream.Send goroutine and returns its error
+// channel and done channel.
+func startSender(stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], sendCh <-chan *workerpb.CommandResult) (chan error, chan struct{}) {
+	senderErrCh := make(chan error, 1)
+	senderDone := make(chan struct{})
+
+	go func() {
+		defer close(senderDone)
+
+		for result := range sendCh {
+			if err := stream.Send(result); err != nil {
+				senderErrCh <- fmt.Errorf("send result/heartbeat id=%s: %w", result.GetCommandId(), err)
+
+				return
+			}
+		}
+	}()
+
+	return senderErrCh, senderDone
+}
+
+// streamRecvMsg is a command received from the stream, or an error.
+type streamRecvMsg struct {
+	cmd *workerpb.Command
+	err error
+}
+
+// startRecvGoroutine starts a goroutine that reads from stream.Recv and
+// forwards each message (or error) to the returned channel.
+func startRecvGoroutine(stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command]) chan streamRecvMsg {
+	recvCh := make(chan streamRecvMsg, 1)
+
+	go func() {
+		for {
+			cmd, err := stream.Recv()
+			recvCh <- streamRecvMsg{cmd, err}
+
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	return recvCh
 }
 
 // sendHeartbeat sends a heartbeat CommandResult on the stream.

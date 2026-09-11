@@ -319,6 +319,67 @@ func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// ListApplicationDatasources godoc
+//
+//	@Summary		List application datasources
+//	@Description	Returns a paginated list of datasource connectors linked to the given application, enriched with live sync state (status, files, last_sync, message) from each connector's Digitize pod.
+//	@Tags			Applications
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id			path		string	true	"Application ID (UUID)"
+//	@Param			page		query		int		false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
+//	@Success		200			{object}	models.ApplicationDatasourceListResponse
+//	@Failure		400			{object}	ErrorResponse	"Invalid path parameter or query params"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized"
+//	@Failure		404			{object}	ErrorResponse	"Application not found"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/applications/{id}/datasources [get]
+func (h *DatasourceHandler) ListApplicationDatasources(c *gin.Context) {
+	appID := c.Param("id")
+	if _, err := uuid.Parse(appID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("Invalid application ID format: %v", err),
+		})
+
+		return
+	}
+
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+
+	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	req := models.ListApplicationDatasourcesRequest{
+		ApplicationID: appID,
+		Page:          page,
+		PageSize:      pageSize,
+	}
+
+	resp, err := h.datasourceSvc.ListApplicationDatasources(c.Request.Context(), req)
+	if err != nil {
+		if valErr, ok := err.(*repository.ValidationError); ok {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(c.Request.Context(), "failed to list application datasources: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "Failed to list application datasources",
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // ConnectDatasourcesToApplication godoc
 //
 //	@Summary		Connect datasources to application

@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 							"[FAILURE-TEST][Catalog] Invoking catalog login without --server flag",
 						)
 
-						output, err := cli.CatalogLoginMissingServer(ctx, cfg, appRuntime)
+						output, err := cli.CatalogLoginMissingServer(ctx, cfg)
 
 						// ── Assertions ─────────────────────────────────────
 						// 1. The command MUST fail.
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 							badURL,
 						)
 
-						output, err := cli.CatalogLoginInvalidURL(ctx, cfg, badURL, appRuntime)
+						output, err := cli.CatalogLoginInvalidURL(ctx, cfg, badURL)
 
 						// ── Assertions ─────────────────────────────────────
 						gomega.Expect(err).To(
@@ -231,7 +231,7 @@ var _ = ginkgo.Describe("Catalog Failure Scenarios",
 							emptyHome,
 						)
 
-						output, cmdErr := cli.CatalogWhoamiWithoutLogin(ctx, cfg, emptyHome, appRuntime)
+						output, cmdErr := cli.CatalogWhoamiWithoutLogin(ctx, cfg, emptyHome)
 
 						// ── Assertions ─────────────────────────────────────
 						gomega.Expect(cmdErr).To(

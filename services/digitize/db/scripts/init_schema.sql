@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed')),
+    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed', 'cancel_pending', 'cancelled')),
     CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization')),
     CONSTRAINT chk_job_source CHECK (source IN ('user', 'connector'))
 );
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS documents (
     error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists')),
+    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists', 'cancelled')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
     CONSTRAINT chk_doc_source CHECK (source IN ('user', 'connector')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS conversion_tasks (
     -- link back to the digitize job that owns this task
     job_id          VARCHAR(255)    REFERENCES jobs(job_id) ON DELETE SET NULL,
     doc_id          VARCHAR(255),                           -- informational; no FK
+    connector_id    VARCHAR(255),                           -- NULL for user jobs; connector UUID for connector jobs
     operation       VARCHAR(50)     NOT NULL,
     -- input
     cached_file     TEXT            NOT NULL,               -- absolute path at enqueue time
@@ -125,7 +126,7 @@ CREATE TABLE IF NOT EXISTS conversion_tasks (
     completed_at    TIMESTAMPTZ,
     CONSTRAINT chk_ct_operation    CHECK (operation IN ('ingestion', 'digitization')),
     CONSTRAINT chk_ct_output_format CHECK (output_format IN ('json', 'md', 'txt')),
-    CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed'))
+    CONSTRAINT chk_ct_status       CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed', 'cancel_pending', 'cancelled'))
 );
 
 -- Supports dispatcher pick query (ORDER BY queued_at per status + operation)
@@ -135,6 +136,10 @@ CREATE INDEX IF NOT EXISTS idx_ct_status_op_queued
 -- Supports get_conversion_task_by_job_id — avoids full-table scans on poll
 CREATE INDEX IF NOT EXISTS idx_ct_job_id
     ON conversion_tasks (job_id);
+
+-- Supports dispatcher connector round-robin pick (turn 2: queued tasks per connector)
+CREATE INDEX IF NOT EXISTS idx_ct_connector_queued
+    ON conversion_tasks (connector_id, status, queued_at);
 
 -- Create indexes with IF NOT EXISTS
 CREATE INDEX IF NOT EXISTS idx_jobs_submitted_at_status ON jobs(submitted_at DESC, status);

@@ -1,5 +1,6 @@
 # Service identification
 id: summarize
+version: "1.0.0"
 name: "Summarize"
 description: "Condenses long-form content into concise, accurate summaries while preserving key information; enables efficient document analysis and information extraction at scale."
 type: service

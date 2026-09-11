@@ -474,6 +474,47 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
         raise
 
 
+def get_shadow_documents_for(doc_id: str) -> List[str]:
+    """
+    Return the names of all 'already_exists' shadow document rows whose
+    ``existing_doc_id`` metadata key references *doc_id*.
+
+    These placeholder rows are created whenever a duplicate file is submitted
+    (the original was already ingested).  They will be automatically removed
+    by :meth:`~digitize.db.manager.DatabaseManager.delete_document` when the
+    original document is deleted, so callers should surface this list to the
+    user before confirming deletion.
+
+    Returns an empty list when there are no duplicates or the DB is unavailable.
+    """
+    if engine is None:
+        return []
+    try:
+        from digitize.db.connection import get_db_session
+        from sqlalchemy import select as _select
+
+        with get_db_session() as session:
+            stmt = (
+                _select(Document.name)
+                .where(
+                    Document.status == DocStatus.ALREADY_EXISTS.value,
+                    Document.doc_metadata["existing_doc_id"].as_string() == doc_id,
+                )
+                .order_by(Document.submitted_at)
+            )
+            names: List[str] = list(session.scalars(stmt).all())
+            logger.debug(
+                f"Found {len(names)} shadow duplicate(s) for doc_id={doc_id!r}"
+            )
+            return names
+    except Exception as exc:
+        logger.error(
+            f"DB error in get_shadow_documents_for({doc_id!r}): {exc}",
+            exc_info=True,
+        )
+        return []
+
+
 def is_connector_sourced_document(doc_id: str) -> bool:
     """
     Return True if *doc_id* has source='connector' in the documents table.
@@ -663,7 +704,10 @@ def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
     return timestamp.isoformat().replace("+00:00", "Z")
 
 
-def _build_import_summary(total_jobs: int, total_documents: int) -> ImportSummary:
+def _build_import_summary(
+    total_jobs: int,
+    total_documents: int,
+) -> ImportSummary:
     """Create an initialized import summary object."""
     return ImportSummary(
         jobs=ImportEntitySummary(total_received=total_jobs),
@@ -747,6 +791,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             job_id=job.job_id,
             operation=job.operation,
             status=job.status,
+            source=job.source or JobSource.USER.value,
             job_name=job.job_name,
             submitted_at=_serialize_datetime(job.submitted_at) or "",
             completed_at=_serialize_datetime(job.completed_at),
@@ -763,6 +808,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             name=doc.name,
             type=doc.type,
             status=doc.status,
+            source=doc.source or DocumentSource.USER.value,
             output_format=doc.output_format,
             submitted_at=_serialize_datetime(doc.submitted_at) or "",
             completed_at=_serialize_datetime(doc.completed_at),
@@ -778,7 +824,10 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
     return ExportResponse(
         status="completed",
-        data=ImportExportData(jobs=exported_jobs, documents=exported_documents),
+        data=ImportExportData(
+            jobs=exported_jobs,
+            documents=exported_documents,
+        ),
         summary=ExportSummary(
             jobs=ExportEntitySummary(
                 total_exported=len(exported_jobs),
@@ -822,8 +871,11 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     if engine is None:
         raise RuntimeError("Database not available. Cannot import metadata without database connection.")
 
-    started_at = perf_counter()
-    summary = _build_import_summary(len(payload.data.jobs), len(payload.data.documents))
+    _perf_start = perf_counter()
+    summary = _build_import_summary(
+        len(payload.data.jobs),
+        len(payload.data.documents),
+    )
     warnings: list[ImportRecordIssue] = []
     errors: list[ImportRecordIssue] = []
 
@@ -832,12 +884,12 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
 
     importable_job_ids = set(existing_job_ids)
 
+    # ── Jobs ─────────────────────────────────────────────────────────────────
     for job_record in payload.data.jobs:
         if job_record.job_id in existing_job_ids:
             summary.jobs.skipped += 1
             continue
 
-        # Parse and validate timestamps once, then reuse
         try:
             submitted_at = _parse_iso_datetime(job_record.submitted_at)
             completed_at = _parse_iso_datetime(job_record.completed_at)
@@ -858,11 +910,13 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             importable_job_ids.add(job_record.job_id)
             continue
 
+        source = JobSource.CONNECTOR if job_record.source == JobSource.CONNECTOR.value else JobSource.USER
         created_job = db_manager.create_job(
             job_id=job_record.job_id,
             operation=job_record.operation,
             status=JobStatus(job_record.status),
             job_name=job_record.job_name,
+            source=source,
             submitted_at=submitted_at,
             completed_at=completed_at,
             error=job_record.error,
@@ -884,6 +938,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
         summary.jobs.imported += 1
         importable_job_ids.add(job_record.job_id)
 
+    # ── Documents ─────────────────────────────────────────────────────────────
     for document_record in payload.data.documents:
         if document_record.id in existing_document_ids:
             summary.documents.skipped += 1
@@ -901,7 +956,6 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
-        # Parse and validate timestamps once, then reuse
         try:
             submitted_at = _parse_iso_datetime(document_record.submitted_at)
             completed_at = _parse_iso_datetime(document_record.completed_at)
@@ -921,6 +975,11 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             summary.documents.imported += 1
             continue
 
+        doc_source = (
+            DocumentSource.CONNECTOR
+            if document_record.source == DocumentSource.CONNECTOR.value
+            else DocumentSource.USER
+        )
         created_document = db_manager.create_document(
             doc_id=document_record.id,
             name=document_record.name,
@@ -931,6 +990,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             completed_at=completed_at,
             error=document_record.error,
             job_id=document_record.job_id,
+            source=doc_source,
             metadata=document_record.metadata,
         )
 
@@ -951,7 +1011,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     return ImportResponse(
         status="completed",
         summary=summary,
-        duration_seconds=round(perf_counter() - started_at, 4),
+        duration_seconds=round(perf_counter() - _perf_start, 4),
         errors=errors,
         warnings=warnings,
     )
@@ -1131,6 +1191,28 @@ class DatabaseStatusManager:
             logger.warning(f"Job {self.job_id} not found in database")
             return
 
+        # Do not overwrite a terminal status already written by the pipeline
+        # (e.g. CANCELLED written by _run_ingest/_run_digitize) with a
+        # superseding status coming from a late update_job_progress call.
+        # CANCEL_PENDING is also protected: the job has been requested for
+        # cancellation and must not be flipped back to IN_PROGRESS by any
+        # in-flight pipeline step that hasn't yet observed the cancellation flag.
+        protected_statuses = {
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+            JobStatus.CANCEL_PENDING,
+            JobStatus.COMPLETED_WITH_ERRORS,
+        }
+        current_db_status = JobStatus(job.status) if job.status in JobStatus._value2member_map_ else None
+        if current_db_status in protected_statuses and job_status not in protected_statuses:
+            assert current_db_status is not None  # narrowing: None is never in protected_statuses
+            logger.debug(
+                f"Job {self.job_id} already in protected state '{current_db_status.value}'; "
+                f"ignoring status update to '{job_status.value}'"
+            )
+            return
+
         # Get all documents for this job to recalculate stats
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
@@ -1157,21 +1239,21 @@ class DatabaseStatusManager:
             ),
         }
 
+        # Preserve any extra keys already in job stats (e.g. clean_files flag)
+        existing_stats = job.stats or {}
+        for key, value in existing_stats.items():
+            if key not in stats:
+                stats[key] = value
+
         # Prepare job update parameters
         update_params: Dict[str, Any] = {
             "status": job_status,
             "stats": stats,
         }
 
-        # Set completed_at for all terminal job states
-        _terminal_job = (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED)
-        if job_status in _terminal_job:
-            total_docs = stats["total_documents"]
-            completed_docs = stats["completed"]
-            failed_docs = stats["failed"]
-
-            if total_docs > 0 and (completed_docs + failed_docs) == total_docs:
-                update_params["completed_at"] = datetime.now(timezone.utc)
+        # Set completed_at if job is finished
+        if job_status in [JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED, JobStatus.CANCELLED]:
+            update_params["completed_at"] = datetime.now(timezone.utc)
 
         # Set error for hard failures and completed_with_errors (when an error message is provided)
         if error and job_status in (JobStatus.FAILED, JobStatus.COMPLETED_WITH_ERRORS):

@@ -41,7 +41,6 @@ from pydantic import ValidationError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, validate_document_file
 from digitize.connectors.scanners.scanner_factory import build_scanner
-from digitize.pipeline.ingest import ingest
 from digitize.settings import settings
 from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
 from digitize.models import JobStatus, OutputFormat, OperationType
@@ -60,7 +59,8 @@ from digitize.utils.db import (
     update_sync_log,
 )
 from digitize.db.models import JobSource
-from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_job_state
+
+from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_and_launch, request_job_cancellation, NON_CANCELLABLE_JOB_STATUSES
 
 logger = get_logger("sync_tick")
 
@@ -283,18 +283,33 @@ async def _wait_for_job(
     Raises ``asyncio.CancelledError`` if the connector is marked for deletion
     or a stop-sync request is issued during the wait.
     """
-    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value}
+    _TERMINAL = {
+        JobStatus.COMPLETED.value,
+        JobStatus.COMPLETED_WITH_ERRORS.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    }
     prev_completed_count = 0
     while True:
         await asyncio.sleep(_JOB_POLL_INTERVAL)
-        interrupt = _check_interrupt_call(connector_id, sync_seq)
-        if interrupt:
-            raise asyncio.CancelledError(
-                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
-            )
         job_data = get_job(job_id)
         status = (job_data or {}).get("status", "")
         logger.debug(f"Polling job {job_id!r} for connector {connector_id!r}: status={status!r}")
+
+        interrupt = _check_interrupt_call(connector_id, sync_seq)
+        if interrupt:
+            # Only cancel if the job hasn't already reached a terminal state
+            # (e.g. it finished naturally just before the interrupt arrived).
+            if status not in NON_CANCELLABLE_JOB_STATUSES:
+                # DELETE_CONNECTOR: connector is being removed — clean up any
+                # already-indexed vector chunks (clean_files=True).
+                # SYNC_CANCEL: just stop the current sync — leave indexed
+                # data intact (clean_files=False).
+                clean_files = interrupt == InterruptType.DELETE_CONNECTOR
+                request_job_cancellation(job_id, clean_files=clean_files)
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+            )
 
         # Count any docs that newly reached 'completed' since the last poll.
         job_stats = get_job_document_stats(job_id)
@@ -391,23 +406,31 @@ async def _process_new_files(
 
             filenames = list(filename_to_checksum.keys())
             job_name = f"Connector-{connector_name}-{sync_seq}-{batch_number}"
-            doc_id_dict = initialize_job_state(
+
+            # Steps 7, 8 & 9: create DB rows, enqueue tasks, launch pipeline.
+            # quota=0 / queued_for_op=0: connector tasks bypass user quota.
+            # file_checksum_dict omitted: connectors register checksums via
+            # add_connector_checksum_entry after the job completes.
+            doc_id_dict = await initialize_and_launch(
                 job_id=job_id,
                 operation=OperationType.INGESTION,
                 output_format=OutputFormat.JSON,
-                documents_info=filenames,
+                filenames=filenames,
+                staging_dir=batch_dir,
+                quota=0,
+                queued_for_op=0,
                 job_name=job_name,
                 source=JobSource.CONNECTOR,
+                connector_id=connector_id,
             )
 
-            # doc_id → checksum: built from doc_id_dict (filename→doc_id) + filename_to_checksum
+            # doc_id → checksum: used after job completes to register
+            # connector checksum entries via add_connector_checksum_entry.
             doc_id_to_checksum: dict[str, str] = {
                 doc_id: filename_to_checksum[filename]
                 for filename, doc_id in doc_id_dict.items()
                 if filename in filename_to_checksum
             }
-
-            await asyncio.to_thread(ingest, batch_dir, job_id, doc_id_dict)
 
             await _wait_for_job(job_id, connector_id, sync_seq)
 

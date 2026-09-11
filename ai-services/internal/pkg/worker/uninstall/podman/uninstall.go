@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -40,7 +38,7 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	return performCleanup(ctx, rt, pods)
+	return performCleanup(ctx, rt, pods, opts.SkipCleanup)
 }
 
 // ─── internal ─────────────────────────────────────────────────────────────────
@@ -55,7 +53,7 @@ type WorkerCaddyConfig struct {
 // performCleanup executes all cleanup operations after confirmation:
 // retrieves the Caddy pod config, deletes the pods, and removes the worker
 // data directory.
-func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) error {
+func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, skipCleanup bool) error {
 	logger.InfolnCtx(ctx, "Proceeding with deletion...")
 
 	var baseDir string
@@ -68,7 +66,8 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 		baseDir = config.BaseDir
 	}
 
-	volumesToDelete := fetchVolumesToDelete(pods)
+	secretsToDelete, secretsToSkip := podmanutils.FetchSecretsToDelete(pods)
+	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 
 	logger.InfofCtx(ctx, "Using base directory for cleanup: %s\n", baseDir)
 
@@ -76,7 +75,6 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 		return err
 	}
 
-	secretsToDelete := []string{constants.PodmanAuthSecret}
 	if err := podmanutils.DeleteSecrets(ctx, rt, secretsToDelete); err != nil {
 		return err
 	}
@@ -86,19 +84,18 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod) e
 	}
 
 	workerDataPath := filepath.Join(baseDir, workerconstants.WorkerDataSubDir)
-
-	return podmanutils.RemoveDataDir(ctx, workerDataPath)
-}
-func fetchVolumesToDelete(pods []types.Pod) []string {
-	volumesToDelete := []string{}
-	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
-			volumes := strings.Split(volumeNames, ",")
-			volumesToDelete = append(volumesToDelete, volumes...)
-		}
+	if err := podmanutils.RemoveDataDir(ctx, workerDataPath); err != nil {
+		return err
 	}
 
-	return volumesToDelete
+	// Delete skip-cleanup resources (secrets and volumes preserved when --skip-cleanup is set)
+	if err := podmanutils.CleanupSkippedResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
+		return err
+	}
+
+	logger.Infoln("Worker service removed successfully")
+
+	return nil
 }
 
 // getWorkerCaddyPodConfig retrieves worker Caddy pod configuration by inspecting

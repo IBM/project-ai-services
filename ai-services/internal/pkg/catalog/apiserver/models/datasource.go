@@ -85,16 +85,16 @@ type DatasourceProviderInfo struct {
 // ConnectorSyncState holds the sync fields returned by the downstream service pod's
 // GET /v1/connectors/{id} endpoint.
 type ConnectorSyncState struct {
-	SyncStatus    string  `json:"sync_status"`
-	TotalFiles    *int    `json:"total_files"`
-	LastSyncAt    *string `json:"last_sync_at"`
-	LastSyncError *string `json:"last_sync_error"`
+	SyncStatus string  `json:"status"`
+	TotalFiles *int    `json:"total_files"`
+	LastSyncAt *string `json:"last_sync_at"`
+	Message    string  `json:"message,omitempty"`
 }
 
 // ServiceSyncDetails holds the live sync state fetched from the connected service for a
 // single linked service. Fields map directly to what the downstream connector API returns.
 // ErrMsg is populated when the sync state could not be fetched; omitted on success.
-// This matches the err_msg pattern used in ConnectedServiceItem.
+// This matches the err_msg pattern used in ConnectedApplicationItem.
 type ServiceSyncDetails struct {
 	// SyncStatus is the current sync state from the service. Set to "unknown" when unreachable.
 	SyncStatus string `json:"sync_status"`
@@ -102,8 +102,10 @@ type ServiceSyncDetails struct {
 	TotalFiles *int `json:"total_files"`
 	// LastSyncAt is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
 	LastSyncAt *string `json:"last_sync_at"`
-	// LastSyncError is the error string from the last failed sync, or null on success.
-	LastSyncError *string `json:"last_sync_error"`
+	// Message contains the current status and phase description from the connector
+	// (e.g. "x new files found", "Processing x/y files", or error details).
+	// Omitted when empty.
+	Message string `json:"message,omitempty"`
 	// ErrMsg is populated when the connected service was unreachable or returned an error.
 	// Omitted from the JSON response when empty (i.e. when the service was reachable).
 	ErrMsg string `json:"err_msg,omitempty"`
@@ -128,6 +130,18 @@ type GetApplicationDatasourceResponse struct {
 	Provider DatasourceProviderInfo `json:"provider"`
 	// ServiceDetails contains live sync state fetched from the linked service.
 	ServiceDetails ServiceSyncDetails `json:"service_details"`
+}
+
+// ConnectorItem is one entry returned by GET /v1/connectors on the service pod.
+// It mirrors the ConnectorListItem shape from the downstream service's models.
+// Message carries all status phases and error details; the separate error field has been
+// removed from the downstream API.
+type ConnectorItem struct {
+	ID         string  `json:"id"`
+	SyncStatus string  `json:"status"`
+	LastSyncAt *string `json:"last_sync_at"`
+	TotalFiles int     `json:"total_files"`
+	Message    string  `json:"message,omitempty"`
 }
 
 // ConnectedApplicationItem is one entry in the applications array of GetDatasourceResponse and
@@ -209,6 +223,45 @@ type ListDatasourcesRequest struct {
 	PageSize int
 	Status   string
 	Provider string
+}
+
+// ApplicationDatasourceItem is one entry in the GET /api/v1/applications/:id/datasources list.
+type ApplicationDatasourceItem struct {
+	// ID is the UUID of the datasource connector.
+	ID string `json:"id"`
+	// Name is the human-readable label of the datasource.
+	Name string `json:"name"`
+	// Provider contains the provider ID and its resolved display name.
+	Provider DatasourceProviderInfo `json:"provider"`
+	// Status is the connector's sync_status sourced live from the service pod.
+	// Set to "unknown" when the service pod is unreachable.
+	Status string `json:"status"`
+	// Files is the total number of files tracked by the connector (total_files from the service).
+	Files int `json:"files"`
+	// LastSync is the ISO-8601 timestamp of the last completed sync, or null when unavailable.
+	LastSync *string `json:"last_sync"`
+	// Message is sourced directly from the connector's message field on the service pod.
+	// It covers all phases: "x new files found", "Processing x/y files", and error details.
+	// Empty when no sync has run yet or the service pod is unreachable.
+	Message string `json:"message,omitempty"`
+	// ErrMsg is populated when sync state could not be fetched (e.g. service unreachable or
+	// no endpoint registered). Empty on success.
+	ErrMsg string `json:"err_msg,omitempty"`
+}
+
+// ApplicationDatasourceListResponse is the paginated response for
+// GET /api/v1/applications/:id/datasources.
+type ApplicationDatasourceListResponse struct {
+	Data       []ApplicationDatasourceItem `json:"data"`
+	Pagination types.PaginationMetadata    `json:"pagination"`
+}
+
+// ListApplicationDatasourcesRequest carries validated pagination params for the
+// application-scoped datasource list endpoint.
+type ListApplicationDatasourcesRequest struct {
+	ApplicationID string
+	Page          int
+	PageSize      int
 }
 
 // ConnectDatasourceRequest is the payload sent to the downstream Digitize service.

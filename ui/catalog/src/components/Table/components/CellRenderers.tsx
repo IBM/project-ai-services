@@ -46,15 +46,59 @@ export const STATUS_CONFIG = {
     className: sharedStyles.statusTagError,
   },
   // ── Data source connector statuses ──────────────────────────────────────────
-  Connected: {
+  connected: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: sharedStyles.statusTagSuccess,
   },
-  Offline: {
+  offline: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
+  },
+  // ── Worker statuses ──────────────────────────────────────────────────────────
+  ready: {
+    tagType: "green" as const,
+    icon: CheckmarkFilled,
+    className: sharedStyles.statusTagSuccess,
+  },
+  pending: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: sharedStyles.statusTagInfo,
+  },
+  disconnected: {
+    tagType: "red" as const,
+    icon: ErrorFilled,
+    className: sharedStyles.statusTagError,
+  },
+  // ── Application datasource statuses ─────────────────────────────────────────
+  "up to date": {
+    tagType: "green" as const,
+    icon: CheckmarkFilled,
+    className: sharedStyles.statusTagSuccess,
+  },
+  "out of sync": {
+    tagType: "red" as const,
+    icon: ErrorFilled,
+    className: sharedStyles.statusTagError,
+  },
+  syncing: {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: sharedStyles.statusTagInfo,
+  },
+  // Transient state while the connector record is being deleted on the service pod
+  "delete pending": {
+    tagType: "blue" as const,
+    icon: InProgress,
+    className: sharedStyles.statusTagInfo,
+  },
+  // Service pod was unreachable when the catalog last attempted to fetch sync state
+  unknown: {
+    tagType: "gray" as const,
+    icon: ErrorFilled,
+    className: sharedStyles.statusTagSecondary,
   },
 } as const;
 
@@ -110,20 +154,40 @@ export const StatusCell = ({ value }: SharedCellRendererProps) => {
   );
 };
 
-export const MessageCell = ({ value, rowData }: SharedCellRendererProps) => {
+export interface MessageCellProps extends SharedCellRendererProps {
+  /**
+   * Statuses that indicate a clean/healthy state — message is suppressed when
+   * the row's status is in this list (or when the message is empty).
+   * Defaults to ["Running", "connected", "up to date"] — covers the deployments table
+   * (Running) and the connectors table (connected) and the application datasources table (up to date).
+   */
+  hideStatuses?: string[];
+  /**
+   * Statuses that warrant the error icon instead of the in-progress icon.
+   * Defaults to ["Error", "offline"] to preserve existing behaviour for the deployments table.
+   */
+  errorStatuses?: string[];
+}
+
+export const MessageCell = ({
+  value,
+  rowData,
+  hideStatuses = ["Running", "connected", "up to date"],
+  errorStatuses = ["Error", "offline", "out of sync"],
+}: MessageCellProps) => {
   const message = String(value || "");
   const status = rowData?.status || "";
 
-  // Hide message if status is Running or if message is empty
-  if (status === "Running" || !message) {
+  // Hide message when the row is in a clean/healthy state or there is no message
+  if (hideStatuses.includes(status) || !message) {
     return <span></span>;
   }
 
   let MessageIcon;
   let iconClassName: string;
 
-  // Error and Offline both indicate a hard failure — use the error icon
-  if (status === "Error" || status === "Offline") {
+  // Hard-failure statuses get the error icon; everything else gets the in-progress icon
+  if (errorStatuses.includes(status)) {
     MessageIcon = ErrorFilled;
     iconClassName = sharedStyles.messageIconError;
   } else {

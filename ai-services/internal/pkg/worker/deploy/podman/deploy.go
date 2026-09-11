@@ -1,24 +1,20 @@
-// Package deploy provides worker-node setup and pod deployment helpers.
-// It writes prerequisite config files (e.g. Caddyfile), checks whether worker
-// components are already running, and deploys pods from the assets/worker
-// template tree via EmbedTemplateProvider.
-package deploy
+package podman
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	ttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
@@ -26,17 +22,15 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
 
 const (
-	caddyfileSubDir = "worker/caddy"
-	caddyfilePath   = "worker/podman/Caddyfile.tmpl"
-
-	dirPerm  = 0o750
-	filePerm = 0o644
+	caddyfilePath = "worker/podman/Caddyfile.tmpl"
+	kindSecret    = "Secret"
 )
 
 // Options carries the parameters needed to set up the worker node.
@@ -73,7 +67,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 
 	rt, err := runtime.CreateRuntime(types.RuntimeTypePodman, "")
 	if err != nil {
-		return fmt.Errorf("worker join: init runtime: %w", err)
+		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
@@ -89,11 +83,28 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return nil
 	}
 
-	if err := writeCaddyfile(opts.Setup.BaseDir); err != nil {
-		return fmt.Errorf("worker setup: write Caddyfile: %w", err)
+	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
+	if err != nil {
+		return fmt.Errorf("worker join: compute domain suffix: %w", err)
 	}
 
-	if err := deployAll(ctx, rt, tp, opts, existingResource); err != nil {
+	if err := deployAll(ctx, rt, tp, opts, existingResource, domainSuffix); err != nil {
+		return err
+	}
+
+	logger.DebugfCtx(ctx, "Using domain suffix: %s\n", domainSuffix)
+
+	// Create Caddy context with pod name and domain suffix (NO template dependencies)
+	caddyCtx := caddy.NewContext(workerconstants.WorkerCaddyPodName, domainSuffix)
+
+	// Load SSL certificates if provided
+	if err := caddyCtx.LoadSSLCertificates(ctx, opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath); err != nil {
+		return err
+	}
+
+	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
+		cleanupFailedWorkerPods(ctx, rt)
+
 		return err
 	}
 
@@ -102,76 +113,124 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	return nil
 }
 
+// cleanupFailedWorkerPods deletes all worker pods after a failed join attempt.
+func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
+	pods, listErr := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
+	if listErr != nil {
+		logger.ErrorfCtx(ctx, "failed to list worker pods for cleanup: %v\n", listErr)
+
+		return
+	}
+
+	for _, pod := range pods {
+		logger.InfofCtx(ctx, "Deleting '%s' pod, as worker failed to join", pod.Name)
+		if delErr := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); delErr != nil {
+			logger.ErrorfCtx(ctx, "failed to delete worker pod %s: %v\n", pod.Name, delErr)
+		}
+	}
+}
+
 // CheckStatus checks whether the worker node is already deployed by listing
 // pods with the worker proxy and worker pod labels.
 // Returns (true, existingResources, nil) when all worker pods are already running.
 func CheckStatus(ctx context.Context, rt runtime.Runtime, tp templates.Template) (bool, []string, error) {
 	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
+	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to load templates: %w", err)
+	}
 
-	var existingResources []string
-	for _, label := range labels {
-		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
-		if err != nil {
-			return false, nil, fmt.Errorf("worker setup: list pods: %w", err)
-		}
+	secretNames, err := collectWorkerSecretNames(tmpls)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to collect secret names: %w", err)
+	}
 
-		for _, p := range pods {
-			existingResources = append(existingResources, p.Name)
-		}
+	existingResources, err := helpers.CheckExistingResourcesForWorker(ctx, rt, labels, secretNames)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
 	logger.InfofCtx(ctx, "List of existing resources: %v", existingResources)
 
-	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
+	workerResourceCount := len(tmpls)
+
+	// Checking if 'caddy-cert-secret' optional secret is present or not
+	exists, err := rt.SecretExists(ctx, workerconstants.CaddyCertSecretName)
 	if err != nil {
-		return false, nil, fmt.Errorf("worker setup: load templates: %w", err)
+		return false, nil, err
+	}
+	if exists {
+		existingResources = append(existingResources, workerconstants.CaddyCertSecretName)
+	} else {
+		// When 'caddy-cert-secret' secret not created, decrement workerResourceCount by one,
+		// as resource is created based on optional flag (--ssl-cert and --ssl-key)
+		workerResourceCount--
 	}
 
-	return len(existingResources) == len(tmpls), existingResources, nil
+	return len(existingResources) == workerResourceCount, existingResources, nil
+}
+
+// collectWorkerSecretNames renders each worker template with empty params and
+// returns the names of all resources whose Kind is "Secret".
+func collectWorkerSecretNames(tmpls map[string]*ttemplate.Template) ([]string, error) {
+	var secretNames []string
+
+	for tmplName, tmpl := range tmpls {
+		var rendered bytes.Buffer
+		if err := tmpl.Execute(&rendered, nil); err != nil {
+			// Skip templates that require params — they are not secrets.
+			return nil, err
+		}
+
+		if strings.TrimSpace(rendered.String()) == "" {
+			continue
+		}
+
+		var podSpec podmodels.PodSpec
+		if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
+			return nil, fmt.Errorf("failed to parse template %q: %w", tmplName, err)
+		}
+
+		if podSpec.Kind == kindSecret {
+			secretNames = append(secretNames, podSpec.Name)
+		}
+	}
+
+	return secretNames, nil
 }
 
 // ─── internal ────────────────────────────────────────────────────────────────
 
-// writeCaddyfile writes the static worker Caddyfile to
-// <baseDir>/worker/caddy/Caddyfile. The Caddyfile has no template variables —
-// it is written verbatim. Caddy must find it at container start.
-func writeCaddyfile(baseDir string) error {
+func readCaddyConfig(sslCertPath, sslKeyPath string) (string, string, string, error) {
 	raw, err := assets.WorkerFS.ReadFile(caddyfilePath)
 	if err != nil {
-		return fmt.Errorf("read Caddyfile: %w", err)
+		return "", "", "", fmt.Errorf("read Caddyfile: %w", err)
 	}
 
-	dir := filepath.Join(baseDir, caddyfileSubDir)
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return fmt.Errorf("create dir %s: %w", dir, err)
+	var sslCertContent, sslKeyContent string
+	if sslCertPath != "" && sslKeyPath != "" {
+		certbyte, keyBytes, _, err := utils.ReadAndParseCertificates(sslCertPath, sslKeyPath)
+		if err != nil {
+			return "", "", "", fmt.Errorf("failed to load ssl certs: %w", err)
+		}
+		sslCertContent = string(certbyte)
+		sslKeyContent = string(keyBytes)
 	}
 
-	dst := filepath.Join(dir, "Caddyfile")
-	if err := os.WriteFile(dst, raw, filePerm); err != nil {
-		return fmt.Errorf("write Caddyfile to %s: %w", dst, err)
-	}
-
-	logger.Infof("worker setup: Caddyfile written to %s\n", dst)
-
-	return nil
+	return string(raw), sslCertContent, sslKeyContent, nil
 }
 
 // deployAll loads all pod templates from assets/worker/<runtime>/templates and
 // deploys each one in the order defined by metadata.yaml podTemplateExecutions.
-func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string) error {
+func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, opts workertypes.PodmanWorkerOptions, existingResources []string, domainSuffix string) error {
 	var appMetadata templates.AppMetadata
 	if err := tp.LoadMetadata(workerconstants.WorkerAppTemplate, true, &appMetadata); err != nil {
-		return fmt.Errorf("worker setup: load metadata: %w", err)
+		return fmt.Errorf("failed to load metadata: %w", err)
 	}
 
 	tmpls, err := tp.LoadAllTemplates(workerconstants.WorkerAppTemplate)
 	if err != nil {
-		return fmt.Errorf("worker setup: load templates: %w", err)
-	}
-
-	domainSuffix, err := utils.ComputeDomainSuffix(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath, opts.Setup.DomainName)
-	if err != nil {
-		return fmt.Errorf("worker setup: compute domain suffix: %w", err)
+		return fmt.Errorf("failed to load templates: %w", err)
 	}
 
 	argParams, err := buildArgParams(opts)
@@ -181,8 +240,10 @@ func deployAll(ctx context.Context, rt runtime.Runtime, tp templates.Template, o
 
 	values, err := tp.LoadValues(workerconstants.WorkerAppTemplate, nil, argParams)
 	if err != nil {
-		return fmt.Errorf("worker setup: load values: %w", err)
+		return fmt.Errorf("failed to load values: %w", err)
 	}
+
+	values["hostAliases"] = opts.Setup.HostAliases
 
 	params := map[string]any{
 		"BaseDir":         opts.Setup.BaseDir,
@@ -212,45 +273,29 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 	// worker container gets the correct CONTAINER_HOST and volume mount.
 	podmanURI, err := utils.ResolvePodmanURI()
 	if err != nil {
-		return nil, fmt.Errorf("worker setup: resolve podman URI: %w", err)
+		return nil, fmt.Errorf("failed to resolve podman URI: %w", err)
 	}
 
-	authFileBase64, err := readAuthFileBase64()
+	authFileBase64, err := utils.ReadAuthFileBase64()
 	if err != nil {
 		return nil, err
 	}
 
+	caddyFileContent, sslCertContent, sslKeyContent, err := readCaddyConfig(opts.Setup.SSLCertPath, opts.Setup.SSLKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Caddyfile: %w", err)
+	}
+
 	return map[string]string{
-		workerconstants.ArgParamCaddyHTTPSPort:    strconv.Itoa(opts.Setup.HTTPSPort),
+		constants.ArgParamCaddyHTTPSPort:          strconv.Itoa(opts.Setup.HTTPSPort),
+		constants.ArgParamCaddyFileContent:        utils.IndentString(caddyFileContent, utils.CaddyFileIndent),
+		constants.ArgParamSSLCertFileContent:      utils.IndentString(sslCertContent, utils.CertContentIndent),
+		constants.ArgParamSSLKeyFileContent:       utils.IndentString(sslKeyContent, utils.CertContentIndent),
 		workerconstants.ArgParamWorkerToken:       opts.Token,
 		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
 		workerconstants.ArgParamWorkerPodmanURI:   strings.TrimPrefix(podmanURI, "unix://"),
 		workerconstants.ArgParamWorkerAuthFile:    authFileBase64,
 	}, nil
-}
-
-// readAuthFileBase64 reads the podman auth file and returns its contents
-// base64-encoded. If the file does not exist, it returns an encoded empty
-// JSON object and logs a warning.
-func readAuthFileBase64() (string, error) {
-	authFilePath, err := utils.GetAuthFilePath()
-	if err != nil {
-		return "", fmt.Errorf("worker setup: resolve auth file path: %w", err)
-	}
-
-	content, err := os.ReadFile(authFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Warningln("Podman auth file not found. Image pulls may fail if the registry requires authentication.")
-			// TODO: worker join- > worker --reset-podman-auth when implemented
-			logger.Warningln("Run 'podman login' then re-run 'worker join' to update credentials.")
-			content = []byte("{}")
-		} else {
-			return "", fmt.Errorf("worker setup: read auth file %s: %w", authFilePath, err)
-		}
-	}
-
-	return base64.StdEncoding.EncodeToString(content), nil
 }
 
 // renderAndDeploy renders a single pod template and deploys it.
@@ -259,17 +304,24 @@ func readAuthFileBase64() (string, error) {
 func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*ttemplate.Template, tmplName string, params map[string]any, existingResources []string) error {
 	tmpl, ok := tmpls[tmplName]
 	if !ok {
-		return fmt.Errorf("worker setup: template %q not found", tmplName)
+		return fmt.Errorf("template %q not found", tmplName)
 	}
 
 	var rendered bytes.Buffer
 	if err := tmpl.Execute(&rendered, params); err != nil {
-		return fmt.Errorf("worker setup: render %s: %w", tmplName, err)
+		return fmt.Errorf("failed to render template %s: %w", tmplName, err)
+	}
+
+	// If the rendered template is empty, skip deploying it
+	if strings.TrimSpace(rendered.String()) == "" {
+		logger.Infof("%s: Skipping resource deploy as it rendered empty", tmplName)
+
+		return nil
 	}
 
 	var podSpec podmodels.PodSpec
 	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-		return fmt.Errorf("worker setup: parse pod spec %s: %w", tmplName, err)
+		return fmt.Errorf("failed to parse pod spec %s: %w", tmplName, err)
 	}
 	// Skipping deployment of existing resources
 	if slices.Contains(existingResources, podSpec.Name) {
@@ -280,7 +332,7 @@ func renderAndDeploy(ctx context.Context, rt runtime.Runtime, tmpls map[string]*
 
 	deployOpts := clipodman.ConstructPodDeployOptions(specs.FetchPodAnnotations(podSpec))
 
-	logger.InfofCtx(ctx, "worker setup: deploying %s\n", podSpec.Name)
+	logger.InfofCtx(ctx, "Deploying %s\n", podSpec.Name)
 
 	return clipodman.DeployPodAndReadinessCheck(ctx, rt, &podSpec, tmplName,
 		bytes.NewReader(rendered.Bytes()), deployOpts)

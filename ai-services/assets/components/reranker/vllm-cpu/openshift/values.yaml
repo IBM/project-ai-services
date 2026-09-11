@@ -1,5 +1,4 @@
-storageUri: hf://BAAI/bge-reranker-v2-m3
-model: BAAI/bge-reranker-v2-m3
+model: ""
 resources:
   requests:
     cpu: "8"

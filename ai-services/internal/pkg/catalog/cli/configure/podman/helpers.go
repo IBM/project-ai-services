@@ -7,16 +7,19 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	commonutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // getExistingConfigFromCatalogBackend retrieves the existing configuration from the catalog pod.
 // These values are used to validate that configuration hasn't changed during reconfigure operations.
 func getExistingConfigFromCatalogBackend(ctx context.Context, rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, error) {
-	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstants.CatalogComponentValue
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt, catalogPodLabel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
@@ -103,28 +106,12 @@ func validateCertificateChanges(ctx context.Context, opts *catalogUtils.PodmanCo
 	return nil
 }
 
-// validateDomainUnchanged validates that the domain hasn't changed from the existing configuration.
-func validateDomainUnchanged(existingOpts *catalogUtils.PodmanConfigureOptions, sslCertPath, sslKeyPath string) error {
-	// Compute the current domain configuration based on the provided SSL certificates
-	// This uses the same logic as initial configuration
-	currentDomainSuffix, err := utils.ComputeDomainSuffix(sslCertPath, sslKeyPath, "")
-	if err != nil {
-		return fmt.Errorf("failed to compute current domain: %w", err)
-	}
-
-	// Compare existing domain with current domain
-	if existingOpts.DomainName != currentDomainSuffix {
-		return fmt.Errorf("domain change detected: existing=%s, current=%s. Domain changes are not allowed during reset-certificate. Please uninstall the catalog deployment and re-run configure with the new domain", existingOpts.DomainName, currentDomainSuffix)
-	}
-
-	return nil
-}
-
 // IsCatalogServiceRunning checks if the catalog service is configured and running.
 func IsCatalogServiceRunning(ctx context.Context, rt runtime.Runtime) (bool, error) {
-	_, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstants.CatalogComponentValue
+	_, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt, catalogPodLabel)
 	if err != nil {
-		if errors.Is(err, catalogUtils.ErrCatalogPodNotFound) {
+		if errors.Is(err, commonutils.ErrPodNotFound) {
 			logger.InfolnCtx(ctx, "Catalog service is not configured or running.")
 			logger.InfolnCtx(ctx, "Run 'ai-services catalog configure --runtime podman' to set up the catalog service.")
 

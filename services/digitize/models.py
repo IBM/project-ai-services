@@ -20,6 +20,8 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
+    CANCEL_PENDING = "cancel_pending"
+    CANCELLED = "cancelled"
 
 
 class DocStatus(str, Enum):
@@ -32,6 +34,7 @@ class DocStatus(str, Enum):
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
     ALREADY_EXISTS = "already_exists"
+    CANCELLED = "cancelled"
 
 
 class AlreadyExistsFile(BaseModel):
@@ -54,6 +57,8 @@ class JobsListResponse(BaseModel):
 class JobCreatedResponse(BaseModel):
     """Response model for job creation."""
     job_id: str
+
+
 
 class DocumentListItem(BaseModel):
     """Minimal document information for list responses."""
@@ -82,6 +87,13 @@ class DocumentDetailResponse(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    duplicate_names: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of shadow 'already_exists' document entries that point to this "
+            "document as their original. These duplicates will also be removed on delete."
+        ),
+    )
 
 
 class DocumentContentResponse(BaseModel):
@@ -194,6 +206,7 @@ class ExportJobRecord(BaseModel):
     job_id: str
     operation: str
     status: str
+    source: str = "user"
     job_name: Optional[str] = None
     submitted_at: str
     completed_at: Optional[str] = None
@@ -208,11 +221,47 @@ class ExportDocumentRecord(BaseModel):
     name: str
     type: str
     status: str
+    source: str = "user"
     output_format: str
     submitted_at: str
     completed_at: Optional[str] = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExportConnectorRecord(BaseModel):
+    """Serializable connector record for export/import APIs.
+
+    connection_details is intentionally excluded — encrypted credentials
+    cannot be round-tripped; connectors must be re-registered with fresh
+    credentials after restore. The record carries all other config fields
+    so the connector shell (id, name, type, extensions, interval, state)
+    is preserved.
+    """
+    id: str
+    name: str
+    type: str
+    allowed_extensions: List[str] = Field(default_factory=list)
+    sync_interval_seconds: int = 300
+    attached_at: str
+    last_sync_at: Optional[str] = None
+    status: str = "up to date"
+    total_files: int = 0
+    message: Optional[str] = None
+
+
+class ExportSyncLogRecord(BaseModel):
+    """Serializable connector sync-log record for export/import APIs."""
+    connector_id: str
+    seq: int
+    started_at: str
+    finished_at: Optional[str] = None
+    total_files: int = 0
+    new_files: int = 0
+    completed_files: int = 0
+    removed_files: int = 0
+    status: str
+    error: str = ""
 
 
 class ImportRequest(BaseModel):
@@ -223,7 +272,9 @@ class ImportRequest(BaseModel):
     @model_validator(mode="after")
     def validate_non_empty_payload(self):
         if not self.data.jobs and not self.data.documents:
-            raise ValueError("At least one job or document record must be provided")
+            raise ValueError(
+                "At least one job or document record must be provided"
+            )
         return self
 
 
@@ -244,7 +295,7 @@ class ImportEntitySummary(BaseModel):
 
 
 class ImportSummary(BaseModel):
-    """Import summary grouped by jobs and documents."""
+    """Import summary grouped by entity type."""
     jobs: ImportEntitySummary
     documents: ImportEntitySummary
 
@@ -266,7 +317,7 @@ class ExportEntitySummary(BaseModel):
 
 
 class ExportSummary(BaseModel):
-    """Export summary grouped by jobs and documents."""
+    """Export summary grouped by entity type."""
     jobs: ExportEntitySummary
     documents: ExportEntitySummary
 

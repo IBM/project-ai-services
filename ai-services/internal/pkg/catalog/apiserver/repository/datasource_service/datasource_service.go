@@ -137,7 +137,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}
 
-	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFieldsFromSchema(schema), s.encryptionKey)
+	encryptedParams, err := encryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -201,7 +201,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
 	}
 
-	sensitiveFields := sensitiveFieldsFromSchema(schema)
+	sensitiveFields := catalogutils.SensitiveFieldsFromSchema(schema)
 
 	// Steps 3–4: fetch linked applications and enrich each with live Digitize sync state.
 	applications, err := s.buildConnectedApplications(ctx, id)
@@ -389,7 +389,7 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 
 	applications := make([]apimodels.ConnectedApplicationItem, 0, len(linkedRows))
 	for _, row := range linkedRows {
-		baseURL := extractAPIEndpointURL(row.EndpointsJSON)
+		baseURL := extractInternalEndpointURL(row.EndpointsJSON)
 		syncStatus, lastSyncAt, syncErr := fetchSyncState(ctx, connectorID, baseURL)
 
 		// Resolve the type name from catalog metadata; fall back to catalog_id.
@@ -551,9 +551,9 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 		}
 
 		endpointsJSON, _ := json.Marshal(svc.Endpoints)
-		url := extractAPIEndpointURL(endpointsJSON)
+		url := extractInternalEndpointURL(endpointsJSON)
 		if url == "" {
-			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no API endpoint — skipping", svc.ID, svc.CatalogID)
+			logger.WarningfCtx(ctx, "service %s (%s) accepts datasource but has no internal endpoint — skipping", svc.ID, svc.CatalogID)
 
 			continue
 		}
@@ -600,7 +600,7 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
 	}
 
-	return catalogutils.DecryptSensitiveFields(connector.Metadata, sensitiveFieldsFromSchema(schema), s.encryptionKey)
+	return catalogutils.DecryptSensitiveFields(connector.Metadata, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
 }
 
 // sendToService POSTs the connector payload to a single eligible service and records the
@@ -692,8 +692,8 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", existing.Provider, err)
 	}
 
-	updatable := updatableFieldsFromSchema(schema)
-	sensitive := sensitiveFieldsFromSchema(schema)
+	updatable := catalogutils.UpdatableFieldsFromSchema(schema)
+	sensitive := catalogutils.SensitiveFieldsFromSchema(schema)
 
 	// Phase 3: look up the ConnectionTester for this provider.
 	tester, ok := s.testers[existing.Provider]
@@ -864,7 +864,7 @@ func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Con
 // error if appropriate. DB cleanup failures are logged but do not block the caller.
 func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) error {
 	for _, svc := range linkedServices {
-		url := extractAPIEndpointURL(svc.EndpointsJSON)
+		url := extractInternalEndpointURL(svc.EndpointsJSON)
 		if url != "" {
 			if err := s.serviceClient.Disconnect(ctx, url, datasourceID.String()); err != nil {
 				// 404 means the connector is already gone on the downstream side —
@@ -900,7 +900,7 @@ func (s *DatasourceService) resolveLinkedEndpoint(ctx context.Context, applicati
 
 	for _, row := range allRows {
 		if row.ApplicationID == applicationID {
-			return extractAPIEndpointURL(row.EndpointsJSON), nil
+			return extractInternalEndpointURL(row.EndpointsJSON), nil
 		}
 	}
 
@@ -993,7 +993,7 @@ func (s *DatasourceService) propagateCredentials(
 	var propErrors []apimodels.PropagationError
 
 	for _, svc := range serviceEndpoints {
-		baseURL := extractAPIEndpointURL(svc.EndpointsJSON)
+		baseURL := extractInternalEndpointURL(svc.EndpointsJSON)
 		if baseURL == "" {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ID:    svc.ApplicationID.String(),
@@ -1069,8 +1069,7 @@ func fetchSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) 
 // fetchServiceSyncDetails calls GET /v1/connectors/{connectorID} on the connected service
 // at baseURL and returns a fully-populated ServiceSyncDetails. On failure (empty baseURL
 // or HTTP error) it degrades gracefully: SyncStatus = "unknown", all numeric/timestamp
-// fields = nil, ErrMsg populated — identical degradation pattern to
-// fetchDigitzeSyncState / ConnectedServiceItem.
+// fields = nil, ErrMsg populated.
 func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL string) apimodels.ServiceSyncDetails {
 	if baseURL == "" {
 		return apimodels.ServiceSyncDetails{
@@ -1090,18 +1089,18 @@ func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL
 	}
 
 	return apimodels.ServiceSyncDetails{
-		SyncStatus:    state.SyncStatus,
-		TotalFiles:    state.TotalFiles,
-		LastSyncAt:    state.LastSyncAt,
-		LastSyncError: state.LastSyncError,
+		SyncStatus: state.SyncStatus,
+		TotalFiles: state.TotalFiles,
+		LastSyncAt: state.LastSyncAt,
+		Message:    state.Message,
 	}
 }
 
-// extractAPIEndpointURL parses a JSONB endpoints array (shape: [{"type":"...","url":"..."},...])
-// and returns the URL of the first entry whose "type" is "api".
-// Both Podman and OpenShift deployers register the service backend URL with type "api".
-// Returns an empty string when the array is empty, malformed, or contains no "api" entry.
-func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
+// extractInternalEndpointURL parses a JSONB endpoints array and returns the URL of the
+// first entry whose "type" is "internal". The internal endpoint is the plain-HTTP pod-to-pod
+// URL (http://podname:port) stored at deploy time.
+// Returns an empty string when the array is empty, malformed, or contains no "internal" entry.
+func extractInternalEndpointURL(endpointsJSON json.RawMessage) string {
 	if len(endpointsJSON) == 0 {
 		return ""
 	}
@@ -1112,7 +1111,7 @@ func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
 	}
 
 	for _, ep := range endpoints {
-		if t, ok := ep["type"].(string); ok && t == "api" {
+		if t, ok := ep["type"].(string); ok && t == "internal" {
 			if u, ok := ep["url"].(string); ok {
 				return u
 			}
@@ -1120,6 +1119,169 @@ func extractAPIEndpointURL(endpointsJSON json.RawMessage) string {
 	}
 
 	return ""
+}
+
+// ListApplicationDatasources returns a paginated list of datasource connectors linked to the
+// given application, enriched with live sync state from the connected service pod.
+//
+// Pagination is driven entirely by the service response:
+//  1. All connector IDs for the application are fetched from the DB in one query.
+//  2. The service pod is called once with the requested limit/offset; its Total field
+//     drives the pagination metadata returned to the caller.
+//  3. The DB connectors for the IDs returned by the service are fetched in one bulk query.
+//
+// This eliminates both the DB-vs-service pagination mismatch (the old per-page DB offset
+// could return a different slice than the service's own offset) and the N per-connector
+// DB round-trips.
+//
+// Returns a *ValidationError with code 404 when the application does not exist.
+func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req apimodels.ListApplicationDatasourcesRequest) (*apimodels.ApplicationDatasourceListResponse, error) {
+	appID, err := uuid.Parse(req.ApplicationID)
+	if err != nil {
+		return nil, &ValidationError{Code: http.StatusBadRequest, Message: "invalid application ID"}
+	}
+
+	app, err := s.appRepo.GetByID(ctx, appID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up application: %w", err)
+	}
+
+	if app == nil {
+		return nil, &ValidationError{Code: http.StatusNotFound, Message: "application not found"}
+	}
+
+	// Fetch all connector IDs for this app so we can locate the service base URL.
+	allConnectorIDs, err := s.svcDepRepo.GetConnectorsByAppID(ctx, appID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list application connectors: %w", err)
+	}
+
+	offset := (req.Page - 1) * req.PageSize
+
+	// Resolve the service base URL and call GET /v1/connectors with the caller's pagination
+	// params. The service response is authoritative for both the page content and total count.
+	baseURL, servicePage := s.fetchServiceConnectors(ctx, allConnectorIDs, req.PageSize, offset)
+
+	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID)
+	if err != nil {
+		return nil, err
+	}
+
+	total := servicePage.Total
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + req.PageSize - 1) / req.PageSize
+	}
+
+	return &apimodels.ApplicationDatasourceListResponse{
+		Data: data,
+		Pagination: catalogtypes.PaginationMetadata{
+			Page:       req.Page,
+			PageSize:   req.PageSize,
+			TotalItems: total,
+			TotalPages: totalPages,
+			HasNext:    req.Page < totalPages,
+			HasPrev:    req.Page > 1,
+		},
+	}, nil
+}
+
+// fetchServiceConnectors resolves the service base URL from the first connector ID in the
+// list (via the existing GetLinkedServiceEndpoints + extractInternalEndpointURL path), then calls
+// GET /v1/connectors once with the given limit/offset. Returns an empty-page result when no
+// endpoint is found or the call fails.
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
+	empty := catalogclient.ServiceConnectorPage{ByID: make(map[string]apimodels.ConnectorItem)}
+
+	if len(connectorIDs) == 0 {
+		return "", empty
+	}
+
+	linkedRows, err := s.svcDepRepo.GetLinkedServiceEndpoints(ctx, connectorIDs[0], dbmodels.DependencyTypeConnector)
+	if err != nil {
+		logger.WarningfCtx(ctx, "failed to resolve service endpoint for connector %s: %v", connectorIDs[0], err)
+
+		return "", empty
+	}
+
+	baseURL := ""
+	for _, row := range linkedRows {
+		if u := extractInternalEndpointURL(row.EndpointsJSON); u != "" {
+			baseURL = u
+
+			break
+		}
+	}
+
+	if baseURL == "" {
+		return "", empty
+	}
+
+	page, err := catalogclient.NewServiceClient(baseURL).ListConnectors(ctx, limit, offset)
+	if err != nil {
+		logger.WarningfCtx(ctx, "failed to list connectors from service at %s: %v", baseURL, err)
+
+		return baseURL, empty
+	}
+
+	return baseURL, *page
+}
+
+// buildDatasourcePage bulk-fetches the DB connector rows for the IDs in serviceItems and
+// assembles the slice of ApplicationDatasourceItem for the current page.
+// IDs in serviceItems are UUIDs stored by this service, so no parse-error handling is needed.
+func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL string, serviceItems map[string]apimodels.ConnectorItem) ([]apimodels.ApplicationDatasourceItem, error) {
+	ids := make([]uuid.UUID, 0, len(serviceItems))
+	for idStr := range serviceItems {
+		ids = append(ids, uuid.MustParse(idStr))
+	}
+
+	dbConnectors, err := s.connectorRepo.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch connector details: %w", err)
+	}
+
+	items := make([]apimodels.ApplicationDatasourceItem, 0, len(serviceItems))
+	for _, serviceConn := range serviceItems {
+		item := s.buildApplicationDatasourceItem(uuid.MustParse(serviceConn.ID), serviceConn, baseURL, dbConnectors)
+		items = append(items, *item)
+	}
+
+	return items, nil
+}
+
+// buildApplicationDatasourceItem assembles one ApplicationDatasourceItem from the pre-fetched
+// service connector entry and the pre-fetched DB connector map — no additional DB or HTTP calls.
+func (s *DatasourceService) buildApplicationDatasourceItem(connectorID uuid.UUID, serviceConn apimodels.ConnectorItem, baseURL string, dbConnectors map[uuid.UUID]dbmodels.Connector) *apimodels.ApplicationDatasourceItem {
+	item := &apimodels.ApplicationDatasourceItem{
+		ID:       connectorID.String(),
+		Status:   serviceConn.SyncStatus,
+		LastSync: serviceConn.LastSyncAt,
+		Files:    serviceConn.TotalFiles,
+		Message:  serviceConn.Message,
+	}
+
+	if baseURL == "" {
+		item.Status = "unknown"
+		item.ErrMsg = "no api endpoint registered for this service"
+	}
+
+	connector, found := dbConnectors[connectorID]
+	if found {
+		item.Name = connector.Name
+
+		providerName := connector.Provider
+		if catalogConn, loadErr := s.catalogProvider.LoadConnector(catalogconstants.ConnectorTypeDatasource, connector.Provider); loadErr == nil {
+			providerName = catalogConn.Name
+		}
+
+		item.Provider = apimodels.DatasourceProviderInfo{
+			ID:   connector.Provider,
+			Name: providerName,
+		}
+	}
+
+	return item
 }
 
 // Made with Bob

@@ -3,6 +3,7 @@ export const RUNTIME_TYPE_LABELS: Record<string, string> = {
   podman: "RHAIIS",
   openshift: "RHOAI",
 };
+export const APP_NAME = "IBM Power AI Launchpad";
 
 export const COMPONENT_TYPES = {
   LLM: "llm",

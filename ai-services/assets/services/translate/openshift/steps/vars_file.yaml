@@ -1,5 +1,6 @@
 containers:
   - name: "translate-api"
+    workload: "translate-api"
     format: ".Status"
     alias: API_STATUS
 

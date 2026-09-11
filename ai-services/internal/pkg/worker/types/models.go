@@ -22,9 +22,25 @@ type PodmanWorkerOptions struct {
 	Setup Options
 }
 
+// HostAlias maps an IP address to one or more hostnames, injected into the
+// worker pod's /etc/hosts file via the Kubernetes hostAliases spec field.
+type HostAlias struct {
+	IP        string
+	Hostnames []string
+}
+
+// CommonWorkerOptions holds options that are shared across all runtime types.
+type CommonWorkerOptions struct {
+	// HostAliases is an optional list of extra /etc/hosts entries to inject
+	// into the worker pod. Each entry is supplied via --add-host=DOMAIN:IP on
+	// the CLI and is rendered into the pod spec's hostAliases field.
+	HostAliases []HostAlias
+}
+
 // OpenshiftWorkerOptions carries everything needed to join a worker to the catalog control plane.
 type OpenshiftWorkerOptions struct {
 	WorkerConnectionOptions
+	CommonWorkerOptions
 }
 
 // GrpcStreamOptions carries everything needed to join a worker to the catalog control plane.
@@ -34,6 +50,8 @@ type GrpcStreamOptions struct {
 
 // Options carries the parameters needed to set up the worker node.
 type Options struct {
+	CommonWorkerOptions
+
 	// BaseDir is the host directory used for worker data / config volumes
 	// (Caddy config, models, etc.).
 	// Set once at first join; ignored on subsequent runs if already deployed.
@@ -51,4 +69,10 @@ type Options struct {
 	// SSLKeyPath is the path to a user-provided SSL private key (PEM).
 	// Must be used together with SSLCertPath.
 	SSLKeyPath string
+}
+
+type DeployOpts struct {
+	WorkerConnectionOptions
+	Options
+	RuntimeType string
 }
