@@ -12,7 +12,7 @@ spec:
     - name: dshm
       emptyDir:
         medium: Memory
-        sizeLimit: 2Gi
+        sizeLimit: 512Mi
     - name: models
       hostPath:
         path: "{{ .BaseDir }}/models"
@@ -36,9 +36,6 @@ spec:
         periodSeconds: 30
         timeoutSeconds: 5
         failureThreshold: 3
-      env:
-        - name: OMP_NUM_THREADS
-          value: "8"
       resources:
         requests:
           memory: "5Gi"

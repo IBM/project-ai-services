@@ -59,7 +59,7 @@ def search_only(question, top_k, top_r):
                 "top_k": top_k,
                 "rerank": settings.chatbot.rerank
             },
-            timeout=120
+            timeout=30
         )
         response.raise_for_status()
 
