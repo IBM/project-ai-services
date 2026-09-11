@@ -140,7 +140,12 @@ const WorkerResourcesTable = ({
     [],
   );
 
+  const selectedRowSnapshot = useRef<WorkerResourceRow | undefined>(undefined);
   const selectedRow = state.rowsData.find((r) => r.id === state.selectedRowId);
+  if (selectedRow) selectedRowSnapshot.current = selectedRow;
+  const modalRow = state.isDeleteDialogOpen
+    ? (selectedRow ?? selectedRowSnapshot.current)
+    : selectedRowSnapshot.current;
 
   const handleDeregister = useCallback(async () => {
     const id = state.selectedRowId;
@@ -425,9 +430,9 @@ const WorkerResourcesTable = ({
             <DeregisterWorkerModal
               isOpen={state.isDeleteDialogOpen}
               isDeregistering={state.isDeleting}
-              workerName={selectedRow?.name ?? ""}
-              workerStatus={selectedRow?.status ?? ""}
-              runtimeType={selectedRow?.runtime_type ?? ""}
+              workerName={modalRow?.name ?? ""}
+              workerStatus={modalRow?.status ?? ""}
+              runtimeType={modalRow?.runtime_type ?? ""}
               onConfirm={() => void handleDeregister()}
               onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
             />

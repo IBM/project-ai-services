@@ -12,7 +12,7 @@ export interface DeregisterWorkerModalProps {
 }
 
 const buildCleanupCommand = (runtimeType: string) =>
-  `ai-services worker uninstall --runtime ${!runtimeType || runtimeType === "unknown" ? "<podman|openshift>" : runtimeType} --yes`;
+  `ai-services worker uninstall --runtime ${!runtimeType || runtimeType === "unknown" ? "RUNTIME" : runtimeType} --yes`;
 
 const DeregisterWorkerModal = ({
   isOpen,
@@ -29,6 +29,7 @@ const DeregisterWorkerModal = ({
     <Modal
       open={isOpen}
       size="sm"
+      danger
       modalLabel={`Deregister ${workerName}`}
       modalHeading="Deregister worker resource"
       primaryButtonText={isDeregistering ? "Deregistering..." : "Deregister"}
