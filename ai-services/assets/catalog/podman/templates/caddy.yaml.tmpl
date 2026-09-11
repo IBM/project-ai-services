@@ -7,7 +7,11 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "proxy"
-    ai-services.io/volume: "caddy-catalog"
+    {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
+    ai-services.io/secret: "catalog-caddy-cert-secret"
+    ai-services.io/secret-skip-cleanup: "true"
+    {{- end }}
+    ai-services.io/volume: "caddy-catalog,catalog-caddy-cert-secret"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
     ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443"
@@ -45,7 +49,7 @@ spec:
         - name: caddy-data
           mountPath: /config:z
         {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
-        - name: caddy-cert-certs
+        - name: caddy-certs
           mountPath: /etc/secret/ssl
           readOnly: true
         {{- end }}
@@ -68,7 +72,7 @@ spec:
       persistentVolumeClaim:
         claimName: "caddy-catalog"
     {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
-    - name: caddy-cert-certs
+    - name: caddy-certs
       secret:
         secretName: catalog-caddy-cert-secret
     {{- end }}

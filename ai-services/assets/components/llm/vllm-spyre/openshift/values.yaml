@@ -1,5 +1,4 @@
-storageUri: hf://ibm-granite/granite-3.3-8b-instruct
-model: ibm-granite/granite-3.3-8b-instruct
+model: ""
 apiKey: ""
 resources:
   requests:

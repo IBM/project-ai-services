@@ -538,10 +538,16 @@ definitions:
         type: string
       name:
         type: string
+      namespace:
+        type: string
+      runtime_type:
+        type: string
       services:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod'
         type: array
+      worker_name:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse:
     properties:
@@ -2856,6 +2862,11 @@ paths:
           description: Worker deleted
         "400":
           description: Invalid worker ID
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Local worker cannot be deleted
           schema:
             additionalProperties: true
             type: object

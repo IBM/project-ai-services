@@ -7,7 +7,9 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "worker"
-    ai-services.io/volume: "podman-auth-secret,worker-tls"
+    ai-services.io/secret: "podman-auth-secret,worker-mtls-encryption-secret"
+    ai-services.io/secret-skip-cleanup: "true"
+    ai-services.io/volume: "podman-auth-secret,worker-mtls-encryption-secret,worker-tls"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
     run.oci.keep_original_groups: "1"
@@ -36,6 +38,7 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
+          export MTLS_ENCRYPTION_KEY=$(cat /etc/secret/worker-mtls-encryption-secret/mtls-encryption-key)
           exec /usr/bin/ai-services worker grpcstream {{ .Values.worker.gatewayAddr }} --token={{ .Values.worker.token }} --runtime={{ .Values.worker.runtime }}
       env:
         - name: AI_SERVICES_LOG_LEVEL
@@ -54,6 +57,8 @@ spec:
           value: "{{ .Values.caddy.httpsPort }}"
         - name: DOMAIN_SUFFIX
           value: "{{ .DomainSuffix }}"
+        - name: GATEWAY_ADDR
+          value: "{{ .Values.worker.gatewayAddr }}"
       volumeMounts:
         - name: podman-socket
           mountPath: {{ .Values.worker.podman.uri }}
@@ -64,8 +69,11 @@ spec:
         - name: iommu-groups
           mountPath: /sys/kernel/iommu_groups
           readOnly: true
+        - name: worker-mtls-encryption-secret
+          mountPath: /etc/secret/worker-mtls-encryption-secret
+          readOnly: true
         - name: worker-tls
-          mountPath: /var/lib/ai-services/worker-tls
+          mountPath: /data/worker-tls
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
       resources:
@@ -88,6 +96,9 @@ spec:
       hostPath:
         path: /sys/kernel/iommu_groups
         type: Directory
+    - name: worker-mtls-encryption-secret
+      secret:
+        secretName: worker-mtls-encryption-secret
     - name: worker-tls
       persistentVolumeClaim:
         claimName: worker-tls
