@@ -3,7 +3,6 @@ package podman
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
@@ -59,49 +58,23 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 }
 
 // resolveLocalWorkerRegistration decides whether to issue a new bootstrap token
-// or reuse existing credentials.
-//
-// It skips Preregister (which would reset the DB row to pending and break
-// Restore) when BOTH conditions hold:
-//  1. The worker-mtls-encryption-secret exists — the worker's TLS encryption key
-//     is available, so hasValidTLSCredentials will succeed inside the container.
-//  2. The catalog DB already has a completed registration row for "Local"
-//     (status ready or disconnected) — Restore will find it on the next
-//     CommandStream attempt.
-//
-// If either condition is false (fresh install, or DB/secret was wiped by a
-// non-skip-cleanup uninstall), the normal RegisterLocalWorker path runs.
+// or reuse existing credentials. It delegates the two-condition check to the
+// shared configure.CheckLocalWorkerSkip and only handles the Podman-specific
+// gateway address construction.
 func resolveLocalWorkerRegistration(ctx context.Context, rt *podmanruntime.PodmanClient, c *catalogclient.Client, opts catalogUtils.PodmanConfigureOptions) (token, gatewayAddr string, err error) {
-	// Check 1: mTLS secret exists on this host.
-	secretExists, err := rt.SecretExists(ctx, workerconstants.WorkerMTLSSecretName)
+	skip, err := configure.CheckLocalWorkerSkip(ctx, rt.SecretExists, c)
 	if err != nil {
-		return "", "", fmt.Errorf("check worker mTLS secret: %w", err)
+		return "", "", err
 	}
 
-	if !secretExists {
+	if !skip {
 		return configure.RegisterLocalWorker(ctx, c)
 	}
 
-	// Check 2: catalog DB has a completed (non-pending) row for "Local".
-	workerClient := catalogclient.NewWorkerClientFromClient(c)
+	// Both conditions met — skip registration, reconstruct gateway address.
+	logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
 
-	workers, err := workerClient.ListWorkers(ctx)
-	if err != nil {
-		return "", "", fmt.Errorf("list workers: %w", err)
-	}
+	gatewayAddr = fmt.Sprintf("%s.%s:%d", workerconstants.WorkerGatewayName, opts.DomainName, opts.WorkerGatewayPort)
 
-	for _, w := range workers {
-		if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) &&
-			w.Status != "pending" {
-			// Both conditions met — skip registration, reconstruct gateway address.
-			logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
-
-			gatewayAddr = workerconstants.WorkerGatewayName + "." + opts.DomainName + ":" + fmt.Sprintf("%d", opts.WorkerGatewayPort)
-
-			return "", gatewayAddr, nil
-		}
-	}
-
-	// DB row is missing or still pending — run the full registration flow.
-	return configure.RegisterLocalWorker(ctx, c)
+	return "", gatewayAddr, nil
 }

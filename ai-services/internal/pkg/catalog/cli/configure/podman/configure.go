@@ -10,7 +10,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
-	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -50,7 +49,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword)
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, secretExists)
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
@@ -112,7 +111,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 // handlePostDeployment handles route registration, login verification,
 // local worker join, and next steps display after catalog deployment.
-func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, adminPassword string) error {
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, adminPassword string, isReinstall bool) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -135,11 +134,9 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("admin password verification failed: %w", err)
 	}
 
-	// Validate that --skip-local-worker is not set when workers are already registered.
-	if opts.SkipLocalWorker {
-		if err := validateSkipLocalWorker(ctx, catalogClient); err != nil {
-			return err
-		}
+	// Validate --skip-local-worker has not changed since the original install.
+	if err := configure.ValidateSkipLocalWorker(ctx, catalogClient, isReinstall, opts.SkipLocalWorker); err != nil {
+		return err
 	}
 
 	if !opts.SkipLocalWorker {
@@ -268,24 +265,6 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.Podman
 	caddyCtx := caddy.NewContext(caddyPodName, domainSuffix)
 
 	return caddyCtx, nil
-}
-
-// validateSkipLocalWorker returns an error if any workers are already registered in the catalog.
-// The --skip-local-worker flag must not be set when workers exist, because it would leave them
-// without a gateway configuration.
-func validateSkipLocalWorker(ctx context.Context, c *catalogclient.Client) error {
-	workerClient := catalogclient.NewWorkerClientFromClient(c)
-
-	workers, err := workerClient.ListWorkers(ctx)
-	if err != nil {
-		return fmt.Errorf("skip-local-worker validation: list workers: %w", err)
-	}
-
-	if len(workers) > 0 {
-		return fmt.Errorf("--skip-local-worker flag changed; to change this setting, uninstall and re-run catalog configure")
-	}
-
-	return nil
 }
 
 // Made with Bob

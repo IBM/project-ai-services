@@ -11,7 +11,6 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
-	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -79,12 +78,12 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	logger.Infoln("-------")
 
 	// Step 7: Login to catalog API, join as local worker, print next steps
-	return handlePostDeployment(ctx, tp, runtime, opts, adminPassword)
+	return handlePostDeployment(ctx, tp, runtime, opts, adminPassword, secretExists)
 }
 
 // handlePostDeployment logs in to the catalog API (verifying the admin password),
 // optionally joins the local worker, and prints next steps.
-func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *runtimeOpenshift.OpenshiftClient, opts catalogutils.OpenShiftConfigureOptions, adminPassword string) error {
+func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *runtimeOpenshift.OpenshiftClient, opts catalogutils.OpenShiftConfigureOptions, adminPassword string, isReinstall bool) error {
 	// Login to the catalog API — this both verifies the admin password and gives
 	// us a client to reuse for local worker registration without a second login.
 	catalogAPIURL, err := getCatalogAPIURL(ctx, runtime)
@@ -97,11 +96,9 @@ func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *r
 		return fmt.Errorf("admin password verification failed: %w", err)
 	}
 
-	// Validate that --skip-local-worker is not set when workers are already registered.
-	if opts.SkipLocalWorker {
-		if err := validateSkipLocalWorker(ctx, catalogClient); err != nil {
-			return err
-		}
+	// Validate --skip-local-worker has not changed since the original install.
+	if err := configure.ValidateSkipLocalWorker(ctx, catalogClient, isReinstall, opts.SkipLocalWorker); err != nil {
+		return err
 	}
 
 	// Step 8: Join as local worker
@@ -194,24 +191,6 @@ func deployCatalogHelm(ctx context.Context, chartData chart.Charter, timeout tim
 	}
 
 	s.Stop("Catalog deployed successfully")
-
-	return nil
-}
-
-// validateSkipLocalWorker returns an error if any workers are already registered in the catalog.
-// The --skip-local-worker flag must not be set when workers exist, because it would leave them
-// without a gateway configuration.
-func validateSkipLocalWorker(ctx context.Context, c *catalogclient.Client) error {
-	workerClient := catalogclient.NewWorkerClientFromClient(c)
-
-	workers, err := workerClient.ListWorkers(ctx)
-	if err != nil {
-		return fmt.Errorf("skip-local-worker validation: list workers: %w", err)
-	}
-
-	if len(workers) > 0 {
-		return fmt.Errorf("--skip-local-worker flag changed; to change this setting, uninstall and re-run catalog configure")
-	}
 
 	return nil
 }
