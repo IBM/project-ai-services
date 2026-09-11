@@ -11,7 +11,8 @@ This guide walks you through creating, packaging, uploading, and managing custom
    - 2.1 [Top-level `metadata.yaml` (shared by both runtimes)](#21-top-level-metadatayaml-shared-by-both-runtimes)
    - 2.2 [Podman Bundle Structure](#22-podman-bundle-structure)
    - 2.3 [OpenShift Bundle Structure](#23-openshift-bundle-structure)
-   - 2.4 [Packaging as `.tar.gz`](#24-packaging-as-targz)
+   - 2.4 [Steps Folder (Optional)](#24-steps-folder-optional)
+   - 2.5 [Packaging as `.tar.gz`](#25-packaging-as-targz)
 3. [Supported Services and Components](#3-supported-services-and-components)
    - 3.1 [Built-in Services](#31-built-in-services)
    - 3.2 [Built-in Components by Runtime](#32-built-in-components-by-runtime)
@@ -159,6 +160,10 @@ my-service/
     ├── metadata.yaml                ← required: name, version, resources, podTemplateExecutions
     ├── values.yaml                  ← required: default parameter values
     ├── values.schema.json           ← optional: user-configurable parameters for the UI
+    ├── steps/                       ← optional: post-deploy messaging (see §2.4)
+    │   ├── next.md                  ← shown after deploy
+    │   ├── info.md                  ← shown by the info command
+    │   └── vars_file.yaml           ← variable bindings for the templates above
     └── templates/
         └── my-service.yaml.tmpl     ← Go template; every file here must appear in podTemplateExecutions
 ```
@@ -227,6 +232,10 @@ my-service/
     ├── metadata.yaml                ← required: name, version, resources — no podTemplateExecutions
     ├── values.yaml                  ← required: default Helm values
     ├── values.schema.json           ← optional: user-configurable parameters for the UI
+    ├── steps/                       ← optional: post-deploy messaging (see §2.4)
+    │   ├── next.md                  ← shown after deploy
+    │   ├── info.md                  ← shown by the info command
+    │   └── vars_file.yaml           ← variable bindings for the templates above
     └── templates/
         ├── my-service-deployment.yaml
         ├── my-service-service.yaml
@@ -308,7 +317,170 @@ myservice:
 
 ---
 
-### 2.4 Packaging as `.tar.gz`
+### 2.4 Steps Folder (Optional)
+
+A `steps/` directory can be placed under `podman/` or `openshift/` (or both) to display contextual messages to users immediately after deployment and when they run `ai-services application info`. If the directory is absent the platform skips this feature gracefully — no error is produced.
+
+**Files inside `steps/`:**
+
+| File | Purpose |
+|---|---|
+| `next.md` | Printed once right after a successful deploy, under a **Next Steps** heading. |
+| `info.md` | Printed by `ai-services application info …`, under an **Info** heading. |
+| `vars_file.yaml` | Declares variable bindings (pod ports, container statuses, route URLs, host IP) that are injected into the templates above before they are rendered. |
+
+All three files are optional — include only the ones you need. The `steps/` directory itself is only meaningful when at least one of these files is present.
+
+#### `next.md` and `info.md` — Go templates
+
+Both files are rendered as `text/template` Go templates. The following variables are always available:
+
+| Variable | Description |
+|---|---|
+| `{{ .SERVICE_NAME }}` | The `type` of the service as registered in the catalog. |
+| `{{ .AppName }}` | The application instance name (e.g. `my-deployment`). |
+| `{{ .UI_URL }}` / `{{ .API_URL }}` | Populated automatically from the stored service endpoints when their `type` is `ui` or `api` respectively. |
+
+Any additional variable declared in `vars_file.yaml` under a `pods`, `containers`, or `hosts` entry is also available by its `alias`.
+
+**Example `next.md` — API service:**
+
+```markdown
+- {{ .SERVICE_NAME }} API is available at {{ .API_URL }}.
+
+- Run "ai-services application info {{ .AppName }} --runtime podman" to view live endpoint status.
+```
+
+**Example `info.md` — service with conditional status:**
+
+```markdown
+Day N:
+
+{{- if eq .API_STATUS "running" }}
+
+- {{ .SERVICE_NAME }} API is available at {{ .API_URL }}.
+{{- else }}
+
+- {{ .SERVICE_NAME }} API is unavailable. Please make sure the 'my-service' pod is running.
+{{- end }}
+```
+
+> See [`assets/services/chat/podman/steps/info.md`](assets/services/chat/podman/steps/info.md) and [`assets/services/summarize/podman/steps/info.md`](assets/services/summarize/podman/steps/info.md) for real examples.
+
+#### `vars_file.yaml` — variable bindings
+
+`vars_file.yaml` tells the platform which runtime values to collect and under what alias to expose them in your templates. It is a YAML file with three optional top-level keys: `pods`, `containers`, and `hosts`.
+
+**Podman vs OpenShift differences:**
+
+| Field | Podman | OpenShift |
+|---|---|---|
+| `pods[].name` | Full Podman pod name; may use `{{ .AppName }}` | Not applicable — omit `pods` entirely |
+| `containers[].name` | Full container name; may use `{{ .InstanceSlug }}` | Container name inside the pod (short, e.g. `"ui"`) |
+| `containers[].workload` | Not used | **Required** — Deployment name used to prefix-match the OCP pod name (e.g. `"chat-bot-ui"`) |
+| `hosts[].type: "ip"` | Resolves the host machine IP into `HOST_IP` | Not applicable |
+| `hosts[].type: "route"` | Not applicable | Fetches all OpenShift Routes and exposes each as `<ROUTE_NAME>_ROUTE` |
+
+**`pods` (Podman only) — expose port numbers:**
+
+Each entry inspects a named Podman pod and evaluates a `--format`-style expression to extract a value (typically a host-mapped port).
+
+```yaml
+pods:
+  - name: "{{ .AppName }}--my-service"       # Podman pod name; AppName is the instance name
+    format: "index .Ports \"8080/tcp\" 0"    # extract the first mapped host port for 8080/tcp
+    default: ""                              # value to use when the pod is missing or the port is unmapped
+    alias: MY_SERVICE_PORT                   # becomes {{ .MY_SERVICE_PORT }} in templates
+```
+
+> See [`assets/applications/rag/podman/steps/vars_file.yaml`](assets/applications/rag/podman/steps/vars_file.yaml) for a real multi-service example.
+
+**`containers` — expose container status:**
+
+Each entry inspects a named container and evaluates a format expression. The most common use is polling `.Status` to derive a `"running"` / `""` value for conditional rendering in `info.md`.
+
+_Podman:_
+
+```yaml
+containers:
+  - name: "my-service-{{ .InstanceSlug }}-my-container"   # full container name
+    format: ".Status"
+    alias: MY_SERVICE_STATUS   # "running" when healthy, "" otherwise
+```
+
+_OpenShift:_
+
+```yaml
+containers:
+  - name: "my-container"          # container name inside the pod spec (ContainerStatus.Name)
+    workload: "my-service"        # Deployment name — OCP pods are named "{workload}-{hash}-{hash}"
+    format: ".Status"
+    alias: MY_SERVICE_STATUS
+```
+
+> See [`assets/services/summarize/podman/steps/vars_file.yaml`](assets/services/summarize/podman/steps/vars_file.yaml) (Podman) and [`assets/services/summarize/openshift/steps/vars_file.yaml`](assets/services/summarize/openshift/steps/vars_file.yaml) (OpenShift) for real examples.
+
+**`hosts` — expose route URLs or host IP:**
+
+_Podman — resolve host machine IP:_
+
+```yaml
+hosts:
+  - fetch: HOST_IP   # populates {{ .HOST_IP }} in templates
+    type: ip
+```
+
+_OpenShift — fetch all Routes:_
+
+```yaml
+hosts:
+  - fetch: MY_SERVICE_ROUTE   # populates {{ .MY_SERVICE_ROUTE }} in templates
+    type: route               # fetches all routes; each route name is uppercased and suffixed with _ROUTE
+```
+
+> When `type: route` is used, the platform fetches every OpenShift Route in the namespace and exposes them as `<ROUTE_NAME_UPPERCASED>_ROUTE`. For example a Route named `my-service-api` becomes `{{ .MY_SERVICE_API_ROUTE }}`. See [`assets/catalog/openshift/steps/vars_file.yaml`](assets/catalog/openshift/steps/vars_file.yaml) for a real example.
+
+**Complete `vars_file.yaml` — Podman service with two pods:**
+
+```yaml
+pods:
+  - name: "{{ .AppName }}--my-service"
+    format: "index .Ports \"8080/tcp\" 0"
+    default: ""
+    alias: MY_SERVICE_PORT
+
+containers:
+  - name: "my-service-{{ .InstanceSlug }}-server"
+    format: ".Status"
+    alias: MY_SERVICE_STATUS
+
+hosts:
+  - fetch: HOST_IP
+    type: ip
+```
+
+**Complete `vars_file.yaml` — OpenShift service:**
+
+```yaml
+containers:
+  - name: "server"
+    workload: "my-service"
+    format: ".Status"
+    alias: MY_SERVICE_STATUS
+
+hosts:
+  - fetch: MY_SERVICE_ROUTE
+    type: route
+```
+
+> **Reference — full steps trees:**
+> Podman service: [`assets/services/chat/podman/steps/`](assets/services/chat/podman/steps/) · [`assets/services/summarize/podman/steps/`](assets/services/summarize/podman/steps/)
+> OpenShift service: [`assets/services/chat/openshift/steps/`](assets/services/chat/openshift/steps/) · [`assets/services/summarize/openshift/steps/`](assets/services/summarize/openshift/steps/)
+> Application (multi-service): [`assets/applications/rag/podman/steps/`](assets/applications/rag/podman/steps/) · [`assets/applications/rag/openshift/steps/`](assets/applications/rag/openshift/steps/)
+
+---
+
+### 2.5 Packaging as `.tar.gz`
 
 Pack the service or component directory into a `.tar.gz` archive. The archive must contain **exactly one top-level directory** — the top-level directory name does not matter.
 
@@ -441,8 +613,16 @@ Only service pods carry routing annotations. The Caddy reverse-proxy reads these
 
 | Annotation | Description |
 |---|---|
-| `ai-services.io/routes` | Comma-separated `<containerPort>:<caddy-upstream-name>:<role>` tuples. `role` is `ui` (browser-facing) or `api` (machine-facing). |
+| `ai-services.io/routes` | Comma-separated `<containerPort>:<caddy-upstream-name>:<role>` tuples. |
 | `ai-services.io/ports` | Comma-separated `<hostPort>:<containerPort>` tuples. Exposes the port directly on the host, bypassing Caddy. Commented out by default. |
+
+Each tuple in `ai-services.io/routes` has exactly three colon-separated fields:
+
+| Field | Description |
+|---|---|
+| `containerPort` | The port the container listens on inside the pod (e.g. `3000`). Caddy forwards inbound HTTPS traffic to this port on the pod. |
+| `caddy-upstream-name` | The subdomain Caddy registers for this endpoint. Must be unique per deployment — include `{{ .InstanceSlug }}` to avoid collisions between instances (e.g. `my-service-ui-{{ .InstanceSlug }}`). |
+| `role` | `ui` for browser-facing endpoints; `api` for machine-facing endpoints. The platform uses this to classify and store the endpoint URL after deploy. |
 
 **Example — service with a UI on port 3000 and an API on port 5000:**
 
