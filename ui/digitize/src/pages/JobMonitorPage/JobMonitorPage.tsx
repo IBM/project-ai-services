@@ -59,7 +59,7 @@ interface JobMonitorState {
   cancelStatus: NotificationStatus;
   showDeleteModal: boolean;
   jobToDelete: string | null;
-  isCancelling: boolean;
+  cancellingIds: Set<string>;
   isConfirmed: boolean;
   toastOpen: boolean;
   errorMessage: string;
@@ -87,7 +87,8 @@ type JobMonitorAction =
   | { type: 'HIDE_UPLOAD_STATUS' }
   | { type: 'HIDE_DELETE_STATUS' }
   | { type: 'HIDE_CANCEL_STATUS' }
-  | { type: 'SET_IS_CANCELLING'; payload: boolean }
+  | { type: 'ADD_CANCELLING_ID'; payload: string }
+  | { type: 'REMOVE_CANCELLING_ID'; payload: string }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
   | { type: 'CLOSE_DELETE_MODAL' }
   | { type: 'CLOSE_DELETE_MODAL_KEEP_JOB' }
@@ -96,6 +97,7 @@ type JobMonitorAction =
   | { type: 'HIDE_ERROR' }
   | { type: 'SET_IS_DELETING'; payload: boolean }
   | { type: 'DELETE_JOB'; payload: string }
+  | { type: 'UPDATE_JOB_STATUS'; payload: { jobId: string; status: string } }
   | { type: 'OPEN_EXPORT_DIALOG' }
   | { type: 'CLOSE_EXPORT_DIALOG' }
   | { type: 'SET_CSV_FILENAME'; payload: string }
@@ -118,7 +120,7 @@ const initialState: JobMonitorState = {
   deleteStatus: { show: false, kind: 'info', title: '' },
   cancelStatus: { show: false, kind: 'info', title: '' },
   showDeleteModal: false,
-  isCancelling: false,
+  cancellingIds: new Set<string>(),
   jobToDelete: null,
   isConfirmed: false,
   toastOpen: false,
@@ -208,8 +210,13 @@ const jobMonitorReducer = (
         ...state,
         cancelStatus: { show: false, kind: 'info', title: '' },
       };
-    case 'SET_IS_CANCELLING':
-      return { ...state, isCancelling: action.payload };
+    case 'ADD_CANCELLING_ID':
+      return { ...state, cancellingIds: new Set(state.cancellingIds).add(action.payload) };
+    case 'REMOVE_CANCELLING_ID': {
+      const next = new Set(state.cancellingIds);
+      next.delete(action.payload);
+      return { ...state, cancellingIds: next };
+    }
     case 'OPEN_DELETE_MODAL':
       return {
         ...state,
@@ -238,6 +245,13 @@ const jobMonitorReducer = (
         jobs: state.jobs.filter((j) => j.job_id !== action.payload),
         showDeleteModal: false,
         isConfirmed: false,
+      };
+    case 'UPDATE_JOB_STATUS':
+      return {
+        ...state,
+        jobs: state.jobs.map((j) =>
+          j.job_id === action.payload.jobId ? { ...j, status: action.payload.status } : j
+        ),
       };
     case 'SHOW_ERROR':
       return {
@@ -547,9 +561,11 @@ const JobMonitorPage = () => {
   };
 
   const handleCancelJob = async (jobId: string) => {
-    dispatch({ type: 'SET_IS_CANCELLING', payload: true });
+    dispatch({ type: 'ADD_CANCELLING_ID', payload: jobId });
     try {
       await cancelJob(jobId);
+      // Optimistically update the job row to cancel_pending immediately
+      dispatch({ type: 'UPDATE_JOB_STATUS', payload: { jobId, status: JOB_STATUS.CANCEL_PENDING } });
       dispatch({
         type: 'SET_CANCEL_STATUS',
         payload: {
@@ -577,7 +593,7 @@ const JobMonitorPage = () => {
         dispatch({ type: 'HIDE_CANCEL_STATUS' });
       }, 5000);
     } finally {
-      dispatch({ type: 'SET_IS_CANCELLING', payload: false });
+      dispatch({ type: 'REMOVE_CANCELLING_ID', payload: jobId });
     }
   };
 
@@ -756,14 +772,14 @@ const JobMonitorPage = () => {
           View details
         </Button>
       ),
-      cancel_action: (job.status === JOB_STATUS.ACCEPTED || job.status === JOB_STATUS.IN_PROGRESS || job.status === JOB_STATUS.CANCEL_PENDING) ? (
+      cancel_action: (job.status === JOB_STATUS.ACCEPTED || job.status === JOB_STATUS.IN_PROGRESS) ? (
         <Button
           hasIconOnly
           kind="ghost"
           size="sm"
           renderIcon={Close}
           iconDescription="Cancel job"
-          disabled={state.isCancelling}
+          disabled={state.cancellingIds.has(job.job_id)}
           onClick={() => handleCancelJob(job.job_id)}
         />
       ) : null,

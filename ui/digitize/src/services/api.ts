@@ -165,15 +165,12 @@ export const listDocuments = async (params: ListDocumentsParams = {}): Promise<D
   return response.data;
 };
 
-export const getDocumentMetadata = async (docId: string, details: boolean = false): Promise<Document> => {
-  const response: AxiosResponse<Document> = await api.get(`/documents/${docId}?details=${details}`);
+export async function getDocumentMetadata(docId: string, details: true): Promise<DocumentDetail>;
+export async function getDocumentMetadata(docId: string, details?: false): Promise<Document>;
+export async function getDocumentMetadata(docId: string, details: boolean = false): Promise<Document | DocumentDetail> {
+  const response: AxiosResponse<Document | DocumentDetail> = await api.get(`/documents/${docId}?details=${details}`);
   return response.data;
-};
-
-export const getDocumentDetail = async (docId: string): Promise<DocumentDetail> => {
-  const response: AxiosResponse<DocumentDetail> = await api.get(`/documents/${docId}`);
-  return response.data;
-};
+}
 
 
 export const getDocumentContent = async (docId: string): Promise<any> => {

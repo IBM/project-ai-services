@@ -28,7 +28,7 @@ import {
 } from '@carbon/react';
 import { Renew, TrashCan, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
 import { useTheme } from '../../contexts/useTheme';
-import { listDocuments, getDocumentContent, deleteDocument, getDocumentDetail, Document } from '../../services/api';
+import { listDocuments, getDocumentContent, deleteDocument, getDocumentMetadata, Document } from '../../services/api';
 import { exportToCSV, validateFilename } from '../../utils/csvExport';
 import styles from './DocumentListPage.module.scss';
 
@@ -88,7 +88,7 @@ type DocumentListAction =
   | { type: 'OPEN_CONTENT_MODAL'; payload: { doc: Document; content: DocumentContentData } }
   | { type: 'CLOSE_CONTENT_MODAL' }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
-  | { type: 'SET_DUPLICATE_NAMES'; payload: { names: string[]; loading: boolean } }
+  | { type: 'SET_DUPLICATE_NAMES'; payload: { names: string[]; loading: boolean; forDocId: string } }
   | { type: 'CLOSE_DELETE_MODAL' }
   | { type: 'CLOSE_DELETE_MODAL_KEEP_DOC' }
   | { type: 'SET_CONFIRMED'; payload: boolean }
@@ -218,6 +218,8 @@ const documentListReducer = (
         toastOpen: false,
       };
     case 'SET_DUPLICATE_NAMES':
+      // Guard: discard result if the modal was closed or re-opened for a different doc
+      if (action.payload.forDocId !== state.docToDelete) return state;
       return {
         ...state,
         duplicateNames: action.payload.names,
@@ -330,7 +332,7 @@ const getStatusIcon = (status: string) => {
     case 'completed_with_errors':
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case 'cancelled':
-      return <ErrorFilled size={16} className={styles.errorInfoIcon} />;
+      return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
     default:
       return null;
   }
@@ -504,16 +506,16 @@ const DocumentListPage = () => {
   const handleOpenDeleteModal = async (docId: string) => {
     dispatch({ type: 'OPEN_DELETE_MODAL', payload: docId });
     try {
-      const detail = await getDocumentDetail(docId);
+      const detail = await getDocumentMetadata(docId, true);
       dispatch({
         type: 'SET_DUPLICATE_NAMES',
-        payload: { names: detail.duplicate_names ?? [], loading: false },
+        payload: { names: detail.duplicate_names ?? [], loading: false, forDocId: docId },
       });
     } catch {
       // Non-critical — proceed without duplicate names
       dispatch({
         type: 'SET_DUPLICATE_NAMES',
-        payload: { names: [], loading: false },
+        payload: { names: [], loading: false, forDocId: docId },
       });
     }
   };
@@ -689,7 +691,7 @@ const DocumentListPage = () => {
           size="sm"
           renderIcon={TrashCan}
           iconDescription="Delete"
-           onClick={() => handleOpenDeleteModal(doc.id)}
+          onClick={() => handleOpenDeleteModal(doc.id)}
         />
       ),
     };
