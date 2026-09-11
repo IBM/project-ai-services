@@ -18,10 +18,6 @@ interface TableEmptyStatesProps {
   noDataSubtitle?: string;
   /** Optional CSS class forwarded to the NoDataEmptyState root element. */
   className?: string;
-  /** Override the title shown when the table has no rows and no error. */
-  noDataTitle?: string;
-  /** Override the subtitle shown when the table has no rows and no error. */
-  noDataSubtitle?: string;
 }
 
 const TableEmptyStates = ({
@@ -32,8 +28,6 @@ const TableEmptyStates = ({
   noDataTitle,
   noDataSubtitle,
   className,
-  noDataTitle,
-  noDataSubtitle,
 }: TableEmptyStatesProps) => {
   if (fetchError) {
     return (
