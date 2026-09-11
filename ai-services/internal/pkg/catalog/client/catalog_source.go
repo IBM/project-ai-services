@@ -33,6 +33,10 @@ type CatalogSource interface {
 	// ListComponents returns all available component templates.
 	// This always reads from the embedded catalog — no API endpoint exists.
 	ListComponents(ctx context.Context) ([]types.Component, error)
+	// GetServiceDeployOptions returns the full deploy options for a service,
+	// including all available component providers (embedded + active bundles).
+	// runtimeType selects the runtime (e.g. "podman" or "openshift").
+	GetServiceDeployOptions(ctx context.Context, serviceID, runtimeType string) (*types.DeployOptionsService, error)
 	// LoadArchitecture returns the full details of a single architecture.
 	LoadArchitecture(ctx context.Context, id string) (*types.Architecture, error)
 	// LoadService returns the full details of a single service.
@@ -127,6 +131,22 @@ func (s *apiSource) ListComponents(_ context.Context) ([]types.Component, error)
 	return listComponentsFromEmbedded(s.embedded)
 }
 
+func (s *apiSource) GetServiceDeployOptions(ctx context.Context, serviceID, runtimeType string) (*types.DeployOptionsService, error) {
+	opts, err := s.api.GetServiceDeployOptions(ctx, serviceID, runtimeType)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API GetServiceDeployOptions unreachable, falling back to embedded: %v", err)
+
+		scopedCatalog, scopeErr := s.embedded.WithRuntime(runtimeType)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+
+		return scopedCatalog.GetServiceDeployOptions(ctx, serviceID)
+	}
+
+	return opts, err
+}
+
 func (s *apiSource) LoadArchitecture(ctx context.Context, id string) (*types.Architecture, error) {
 	arch, err := s.api.GetArchitectureDetails(ctx, id)
 	if err != nil && isConnectivityError(err) {
@@ -211,6 +231,15 @@ func (s *embeddedOnlySource) ListServices(_ context.Context) ([]types.ServiceSum
 
 func (s *embeddedOnlySource) ListComponents(_ context.Context) ([]types.Component, error) {
 	return listComponentsFromEmbedded(s.embedded)
+}
+
+func (s *embeddedOnlySource) GetServiceDeployOptions(ctx context.Context, serviceID, runtimeType string) (*types.DeployOptionsService, error) {
+	scopedCatalog, err := s.embedded.WithRuntime(runtimeType)
+	if err != nil {
+		return nil, err
+	}
+
+	return scopedCatalog.GetServiceDeployOptions(ctx, serviceID)
 }
 
 func (s *embeddedOnlySource) LoadArchitecture(_ context.Context, id string) (*types.Architecture, error) {
