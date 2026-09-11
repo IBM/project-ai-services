@@ -10,8 +10,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeOpenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-	workergateway "github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
+	workergateway "github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
