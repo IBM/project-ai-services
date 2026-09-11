@@ -12,6 +12,10 @@ interface TableEmptyStatesProps {
    * Used to generate human-readable titles and subtitles.
    */
   entityName: string;
+  /** Override the default "no data" title. */
+  noDataTitle?: string;
+  /** Override the default "no data" subtitle. */
+  noDataSubtitle?: string;
   /** Optional CSS class forwarded to the NoDataEmptyState root element. */
   className?: string;
   /** Override the title shown when the table has no rows and no error. */
@@ -25,6 +29,8 @@ const TableEmptyStates = ({
   noData,
   noSearchResults,
   entityName,
+  noDataTitle,
+  noDataSubtitle,
   className,
   noDataTitle,
   noDataSubtitle,

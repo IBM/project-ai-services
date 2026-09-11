@@ -59,11 +59,8 @@ from digitize.utils.db import (
     update_sync_log,
 )
 from digitize.db.models import JobSource
-from digitize.utils.jobs import (
-    generate_uuid,
-    get_job_document_stats,
-    initialize_and_launch,
-)
+
+from digitize.utils.jobs import generate_uuid, get_job_document_stats, initialize_and_launch, request_job_cancellation, NON_CANCELLABLE_JOB_STATUSES
 
 logger = get_logger("sync_tick")
 
@@ -286,18 +283,33 @@ async def _wait_for_job(
     Raises ``asyncio.CancelledError`` if the connector is marked for deletion
     or a stop-sync request is issued during the wait.
     """
-    _TERMINAL = {JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value}
+    _TERMINAL = {
+        JobStatus.COMPLETED.value,
+        JobStatus.COMPLETED_WITH_ERRORS.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    }
     prev_completed_count = 0
     while True:
         await asyncio.sleep(_JOB_POLL_INTERVAL)
-        interrupt = _check_interrupt_call(connector_id, sync_seq)
-        if interrupt:
-            raise asyncio.CancelledError(
-                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
-            )
         job_data = get_job(job_id)
         status = (job_data or {}).get("status", "")
         logger.debug(f"Polling job {job_id!r} for connector {connector_id!r}: status={status!r}")
+
+        interrupt = _check_interrupt_call(connector_id, sync_seq)
+        if interrupt:
+            # Only cancel if the job hasn't already reached a terminal state
+            # (e.g. it finished naturally just before the interrupt arrived).
+            if status not in NON_CANCELLABLE_JOB_STATUSES:
+                # DELETE_CONNECTOR: connector is being removed — clean up any
+                # already-indexed vector chunks (clean_files=True).
+                # SYNC_CANCEL: just stop the current sync — leave indexed
+                # data intact (clean_files=False).
+                clean_files = interrupt == InterruptType.DELETE_CONNECTOR
+                request_job_cancellation(job_id, clean_files=clean_files)
+            raise asyncio.CancelledError(
+                f"Connector {connector_id!r} interrupted (type={interrupt.value})"
+            )
 
         # Count any docs that newly reached 'completed' since the last poll.
         job_stats = get_job_document_stats(job_id)
@@ -515,15 +527,6 @@ async def _handle_interrupt(
     elif interrupt_type == InterruptType.DELETE_CONNECTOR:
         logger.info(f"Handling delete connector for {connector_id!r}")
         _cancel_tick(sync_seq, connector_id)
-        # Purge conversion tasks the tick may have enqueued before being interrupted.
-        # Must happen here (Case A only) — _run_teardown is shared with Case B where
-        # no tick was running so no in-flight tasks exist to purge.
-        from digitize.db.manager import db_manager
-        deleted_tasks = db_manager.delete_conversion_tasks_for_connector(connector_id)
-        if deleted_tasks:
-            logger.info(
-                f"Purged {deleted_tasks} queued conversion task(s) for connector {connector_id!r}"
-            )
         # Run full teardown: remove checksums, delete orphaned docs, delete connector row
         from digitize.api.v1.connectors import _run_teardown
         await _run_teardown(connector_id)

@@ -12,11 +12,12 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 
 from common.misc_utils import get_logger, validate_document_file, generate_file_checksum
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 import digitize.utils.jobs as dg_util
+from digitize.utils.jobs import request_job_cancellation, NON_CANCELLABLE_JOB_STATUSES
 import digitize.models as models
 import digitize.utils.db as db_ops
 from digitize.settings import settings
@@ -391,3 +392,65 @@ async def delete_job(job_id: str):
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"Failed to delete job '{job_id}'",
         )
+
+
+
+# ------------------------------------------------------------------ #
+# Cancel endpoint                                                     #
+# ------------------------------------------------------------------ #
+
+@router.post(
+    "/{job_id}/cancel",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_class=Response,
+    responses={
+        404: http_error_responses[404],
+        409: http_error_responses[409],
+        500: http_error_responses[500],
+    },
+    summary="Cancel a job",
+    description=(
+        "Request cancellation of an active job (accepted or in_progress). "
+        "The job status is immediately set to 'cancel_pending' in the database; "
+        "the background pipeline will observe this at its next checkpoint, stop, "
+        "and then mark the job as 'cancelled'. "
+        "Pass clean_files=true to also delete any vector-DB chunks already indexed "
+        "for this job's documents (ingestion jobs only)."
+    ),
+    response_description="Cancellation accepted",
+)
+async def cancel_job(
+    job_id: str,
+    clean_files: bool = Query(False, description="Delete already-indexed vector DB chunks for this job"),
+):
+    """Mark an active job as CANCEL_PENDING. The pipeline will stop at its next checkpoint and write CANCELLED."""
+    try:
+        from digitize.utils.db import get_job as _get_job
+
+        job_data = _get_job(job_id)
+
+        if job_data is None:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_NOT_FOUND,
+                f"No job found with id '{job_id}'",
+            )
+
+        job_status = job_data.get("status", "")
+        if job_status in NON_CANCELLABLE_JOB_STATUSES:
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                f"Job '{job_id}' is already in terminal state '{job_status}' and cannot be cancelled",
+            )
+
+        request_job_cancellation(job_id, clean_files=clean_files)
+
+    except HTTPException as http_exc:
+        logger.warning(f"HTTP error while cancelling job '{job_id}': {http_exc.status_code} {http_exc.detail}")
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to cancel job {job_id}: {exc}", exc_info=True)
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Failed to cancel job '{job_id}'",
+        )
+
