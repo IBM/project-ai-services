@@ -161,6 +161,11 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	}
 
 	if !opts.SkipLocalWorker {
+		// Ensure the resolved domain suffix (extracted from cert or computed from
+		// host IP) is propagated — opts.DomainName may be empty when custom certs
+		// were used and the domain was derived from the certificate CN/SAN.
+		opts.DomainName = caddyCtx.GetDomainSuffix()
+
 		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts, catalogClient); err != nil {
 			return fmt.Errorf("local worker join failed: %v", err)
 		}
