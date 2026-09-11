@@ -56,7 +56,7 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 
 	opts.SSLCertPath = sslCertPath
 	opts.SSLKeyPath = sslKeyPath
-	caddyCtx, err := executeCatalogDeployment(ctx, deployCtx, *opts, "")
+	caddyCtx, _, err := executeCatalogDeployment(ctx, deployCtx, *opts, "")
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)
 	}
