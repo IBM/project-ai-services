@@ -189,6 +189,12 @@ func validatePodmanTemplates(templFiles map[string][]byte) error {
 			}
 		}
 
+		// doc is nil when the template rendered to empty output (e.g. a
+		// conditional-only template gated on an optional value). Skip.
+		if doc == nil {
+			continue
+		}
+
 		if err := checkTemplateSpec(doc, podmanRuntime, path); err != nil {
 			return err
 		}
