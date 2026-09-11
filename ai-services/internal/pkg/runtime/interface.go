@@ -22,7 +22,7 @@ type Runtime interface {
 	StartPod(ctx context.Context, id string) error
 	InspectPod(ctx context.Context, nameOrId string) (*types.Pod, error)
 	PodExists(ctx context.Context, nameOrID string) (bool, error)
-	PodLogs(ctx context.Context, nameOrID string) error
+	PodLogs(ctx context.Context, nameOrID string, stream bool) ([]string, error)
 	GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error)
 	GetNamespace(ctx context.Context) (string, error)
 
@@ -55,6 +55,9 @@ type Runtime interface {
 
 	// PVC operations
 	DeletePVCs(ctx context.Context, appLabel string) error
+
+	// Secret label operations
+	DeleteSecrets(ctx context.Context, labelSelector string) error
 
 	// System information
 	GetSystemInfo(ctx context.Context) (*models.SystemInfo, error)

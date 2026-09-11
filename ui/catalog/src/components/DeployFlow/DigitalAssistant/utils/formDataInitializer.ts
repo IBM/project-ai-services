@@ -63,6 +63,8 @@ export function initializeFormData(
     version: deployOptions.version,
     globalComponents,
     services,
+    dataSources: [],
+    uploadFromSourceEnabled: false,
   };
 }
 

@@ -280,6 +280,7 @@ async def enqueue_conversion_tasks(
 
 _TERMINAL_DOC_STATUSES = (
     models.DocStatus.COMPLETED.value,
+    models.DocStatus.COMPLETED_WITH_ERRORS.value,
     models.DocStatus.FAILED.value,
     models.DocStatus.CANCELLED.value,
     models.DocStatus.ALREADY_EXISTS.value,

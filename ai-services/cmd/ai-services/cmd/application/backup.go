@@ -10,8 +10,6 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -30,14 +28,14 @@ Arguments:
 Supported targets:
   - opensearch: Backup OpenSearch indices and data (Podman and OpenShift)
   - digitize:   Backup digitize metadata (jobs and documents) (Podman and OpenShift)`,
-	Example: `  # Backup OpenSearch data with Podman (auto-generated filename)
-  ai-services application backup myapp --target opensearch --runtime podman
+	Example: `  # Backup OpenSearch data
+	 ai-services application backup myapp --target opensearch
 
-  # Backup digitize data with OpenShift
-  ai-services application backup myapp --target digitize --runtime openshift
+  # Backup digitize data
+  ai-services application backup myapp --target digitize
 
   # Backup digitize data with custom filename
-  ai-services application backup myapp --target digitize --filename mybackup.tar.gz --runtime podman`,
+  ai-services application backup myapp --target digitize --filename mybackup.tar.gz`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		target := backupTarget
@@ -81,13 +79,16 @@ Supported targets:
 		// Once precheck passes, silence usage for any later internal errors
 		cmd.SilenceUsage = true
 
-		rt := vars.RuntimeFactory.GetRuntimeType()
-		logger.Infof("Runtime: %s\n", rt)
+		// Derive the runtime from the application's Worker record in the catalog,
+		// or use --runtime directly if it was supplied.
+		rt, err := resolveRuntimeForApp(ctx, applicationName, runtimeType)
+		if err != nil {
+			return err
+		}
 
 		// Get absolute path to backup file if provided
 		var absFilename string
 		if backupFilename != "" {
-			var err error
 			absFilename, err = filepath.Abs(backupFilename)
 			if err != nil {
 				return fmt.Errorf("failed to get absolute path for backup file: %w", err)

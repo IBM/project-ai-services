@@ -28,6 +28,6 @@ spec:
           cpu: {{ .Values.resources.limits.cpu | quote }}
           memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
-      storageUri: {{ .Values.storageUri }}
+      storageUri: hf://{{ .Values.model }}
       args:
         - --served-model-name={{ .Values.model }}

@@ -239,7 +239,6 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 							serverURL,
 							"admin", // correct username — only the password is wrong
 							invalidCatalogPassword,
-							appRuntime,
 							bootstrap.GetCatalogInsecure(),
 						)
 
@@ -295,7 +294,6 @@ var _ = ginkgo.Describe("Bootstrap Failure Scenarios",
 							unreachableCatalogURL,
 							"admin",
 							invalidCatalogPassword,
-							appRuntime,
 							true, // insecure=true — self-signed / no cert on a fake host
 						)
 

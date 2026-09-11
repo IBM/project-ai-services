@@ -36,10 +36,10 @@ spec:
                 fieldRef:
                   apiVersion: v1
                   fieldPath: metadata.name
-            - name: cluster.initial_master_nodes
+            - name: cluster.initial_cluster_manager_nodes
               value: "{{ range $i := until (int .Values.replicas) }}{{ if $i }},{{ end }}opensearch-{{ $i }}{{ end }}"
             - name: discovery.seed_hosts
-              value: opensearch-headless
+              value: "opensearch-headless"
             - name: network.host
               value: 0.0.0.0
             - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD

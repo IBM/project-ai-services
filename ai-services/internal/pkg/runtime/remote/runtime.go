@@ -158,10 +158,18 @@ func (r *RemoteRuntime) PodExists(ctx context.Context, nameOrID string) (bool, e
 	return exists, nil
 }
 
-func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
+func (r *RemoteRuntime) PodLogs(ctx context.Context, nameOrID string, _ bool) ([]string, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_POD_LOGS, payload.NameOrID{Namespace: r.namespace, NameOrID: nameOrID})
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	var podLogsLines []string
+	if err := unmarshalData(res, &podLogsLines); err != nil {
+		return nil, err
+	}
+
+	return podLogsLines, nil
 }
 
 func (r *RemoteRuntime) GetPodResources(ctx context.Context, nameOrID string) (*types.PodResources, error) {
@@ -402,6 +410,12 @@ func (r *RemoteRuntime) DeleteNamespace(ctx context.Context, name string) error 
 
 func (r *RemoteRuntime) DeletePVCs(ctx context.Context, appLabel string) error {
 	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_PVCS, payload.Name{Namespace: r.namespace, Name: appLabel})
+
+	return err
+}
+
+func (r *RemoteRuntime) DeleteSecrets(ctx context.Context, labelSelector string) error {
+	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_DELETE_SECRETS, payload.Name{Namespace: r.namespace, Name: labelSelector})
 
 	return err
 }

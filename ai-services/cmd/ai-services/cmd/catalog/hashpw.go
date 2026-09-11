@@ -8,10 +8,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
-	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 )
 
 const (
@@ -20,10 +20,9 @@ const (
 
 func NewHashpwCmd() *cobra.Command {
 	var (
-		fromStdin   bool
-		noConfirm   bool
-		iterations  = 100000 // NIST recommended minimum
-		runtimeType string
+		fromStdin  bool
+		noConfirm  bool
+		iterations = 100000 // NIST recommended minimum
 	)
 
 	cmd := &cobra.Command{
@@ -31,15 +30,12 @@ func NewHashpwCmd() *cobra.Command {
 		Short: "Generate a password hash",
 		Long:  `Reads a password securely and prints a PBKDF2 hash to stdout.`,
 		Example: `  # Interactive (hidden input, with confirmation)
-  ai-services catalog hashpw --iterations 150000 --runtime podman
+  ai-services catalog hashpw --iterations 150000
 
   # Non-interactive (CI): read from stdin
   printf '%s\n' 'S3cureP@ss!' | ai-services catalog hashpw --stdin --iterations 150000
 
 Tip: Avoid passing plain passwords as CLI args (they can leak via process list).`,
-		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return common.InitAndValidateRuntimeFlag(runtimeType)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pw, err := getPassword(fromStdin, noConfirm, cmd)
 			if err != nil {
@@ -59,14 +55,13 @@ Tip: Avoid passing plain passwords as CLI args (they can leak via process list).
 				return fmt.Errorf("write output: %w", err)
 			}
 
-			return common.InitAndValidateRuntimeFlag(runtimeType)
+			return nil
 		},
 	}
 
 	cmd.Flags().IntVar(&iterations, "iterations", iterations, "PBKDF2 iterations (100000+ recommended)")
 	cmd.Flags().BoolVar(&fromStdin, "stdin", false, "read password from stdin (non-interactive)")
 	cmd.Flags().BoolVar(&noConfirm, "no-confirm", false, "skip confirmation prompt")
-	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	return cmd
 }

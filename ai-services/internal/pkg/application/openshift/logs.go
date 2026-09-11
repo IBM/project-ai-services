@@ -14,7 +14,7 @@ func (o *OpenshiftApplication) Logs(ctx context.Context, opts types.LogsOptions)
 	logger.Infof("Fetching logs for application pod: %s", opts.PodName)
 
 	if opts.ContainerNameOrID == "" {
-		if err := o.runtime.PodLogs(ctx, opts.PodName); err != nil {
+		if _, err := o.runtime.PodLogs(ctx, opts.PodName, true); err != nil {
 			return fmt.Errorf("failed to fetch pod: %s logs; err: %w", opts.PodName, err)
 		}
 

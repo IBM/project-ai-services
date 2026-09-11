@@ -2168,7 +2168,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves system resource information including CPU, memory, and accelerator availability.\nWhen the optional `worker` query parameter is provided, the resources are fetched from\nthat remote worker node instead of the local runtime.",
+                "description": "Retrieves system resource information including CPU, memory, and accelerator availability.\nDefaults to the local worker when the `worker` query parameter is omitted.",
                 "produces": [
                     "application/json"
                 ],
@@ -2179,7 +2179,7 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Worker name to query resources from",
+                        "description": "Worker name to query resources from (default: Local)",
                         "name": "worker",
                         "in": "query"
                     }
@@ -2779,6 +2779,13 @@
                     },
                     "400": {
                         "description": "Invalid worker ID",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Local worker cannot be deleted",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -3515,11 +3522,20 @@
                 "name": {
                     "type": "string"
                 },
+                "namespace": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
                 "services": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod"
                     }
+                },
+                "worker_name": {
+                    "type": "string"
                 }
             }
         },
@@ -4192,9 +4208,7 @@
             ],
             "properties": {
                 "worker_name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
+                    "type": "string"
                 }
             }
         },

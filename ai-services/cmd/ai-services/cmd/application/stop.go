@@ -3,13 +3,14 @@ package application
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -28,22 +29,35 @@ Arguments:
 Note:
   - Supported for podman runtime only.
 `,
-	Example: `  # Stop an application
+	Example: `  # Stop an application (runtime resolved from worker)
+  ai-services application stop rag
+
+  # Stop an application with explicit runtime
   ai-services application stop rag --runtime podman
 
   # Stop specific pods in an application
-  ai-services application stop rag --pod pod1 --pod pod2 --runtime podman
+  ai-services application stop rag --pod pod1 --pod pod2
 
   # Stop specific pods using comma-separated list
-  ai-services application stop rag --pod pod1,pod2 --runtime podman
+  ai-services application stop rag --pod pod1,pod2
 
   # Stop with auto-accept confirmation prompts
-  ai-services application stop rag --yes --runtime podman
+  ai-services application stop rag --yes
 
-  # Stop using legacy implementation
+  # Stop using legacy implementation (requires --runtime)
   ai-services application stop rag --legacy --runtime podman`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// --runtime is required for legacy stop; the catalog path derives it from the Worker record.
+		if legacyStop && runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set (required with --legacy)")
+		}
+
+		// stop is only supported for podman runtime.
+		if runtimeType != "" && runtimeType != string(types.RuntimeTypePodman) {
+			return fmt.Errorf("stop is only supported for podman runtime")
+		}
+
 		var err error
 		stopPodNames, err = cmd.Flags().GetStringSlice("pod")
 		if err != nil {
@@ -59,10 +73,18 @@ Note:
 		cmd.SilenceUsage = true
 
 		ctx := cmd.Context()
-		rt := vars.RuntimeFactory.GetRuntimeType()
 
-		// For podman runtime with default mode, validate application name using catalog API.
-		if !legacyStop && rt == types.RuntimeTypePodman {
+		var rt types.RuntimeType
+
+		if !legacyStop {
+			// Default: resolve runtime from the application's Worker record in the catalog.
+			var err error
+			rt, err = resolveRuntimeForApp(ctx, applicationName, runtimeType)
+			if err != nil {
+				return err
+			}
+
+			// Validate application name using catalog API.
 			appClient, err := catalogClient.NewApplicationClient(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
@@ -70,6 +92,8 @@ Note:
 			if _, err := utils.GetAppByName(ctx, appClient, applicationName); err != nil {
 				return err
 			}
+		} else {
+			rt = vars.RuntimeFactory.GetRuntimeType()
 		}
 
 		// Create application instance using factory

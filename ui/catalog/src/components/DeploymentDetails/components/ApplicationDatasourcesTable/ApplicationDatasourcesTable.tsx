@@ -109,8 +109,8 @@ const ApplicationDatasourcesTable = ({
           pageSize,
         );
 
-        const totalPages = pagination.total_pages;
-        if (page > totalPages) {
+        const totalPages = pagination.total_pages ?? 1;
+        if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
           void loadDatasources(totalPages, pageSize);
