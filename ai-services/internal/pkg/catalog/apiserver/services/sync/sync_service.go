@@ -221,8 +221,7 @@ func (s *SyncService) performSync(ctx context.Context) {
 // 3. Update application status based on collected errors.
 func (s *SyncService) syncApplication(ctx context.Context, app *models.Application) error {
 	// Initialize runtime client.
-	// For remote worker apps resolve a RemoteRuntime via the worker registry;
-	// for local apps use the local runtime factory.
+	// For remote worker apps resolve a RemoteRuntime via the worker registry.
 	rt, err := s.createRuntime(ctx, app)
 	if errors.Is(err, errWorkerDisconnected) {
 		return s.updateApplicationStatus(ctx, app, false, []string{err.Error()})
@@ -304,20 +303,14 @@ func (s *SyncService) collectApplicationSyncState(
 }
 
 // createRuntime returns the appropriate runtime.Runtime for the given application.
-// When the app has a WorkerID and the worker is connected, a RemoteRuntime is
-// returned. Returns errWorkerDisconnected (not a hard error) when the worker is
-// absent from the registry or its status is not ready.
-// TODO: in future, set the application status to Error with message
-// "orphaned: worker was deregistered" when worker_id is NULL — this happens
-// because the ON DELETE SET NULL migration nulls worker_id on all applications
-// assigned to a deregistered worker.
+// Every application has a WorkerID (NOT NULL column, migration 20260801000003).
+// When the worker is connected a RemoteRuntime is returned. Returns
+// errWorkerDisconnected (not a hard error) when the worker is absent from the
+// registry — this happens transiently when the worker pod restarts. Worker
+// deregistration is blocked by ON DELETE RESTRICT while applications exist.
 func (s *SyncService) createRuntime(ctx context.Context, app *models.Application) (runtime.Runtime, error) {
-	// TODO: Once remote runtime is enabled by default this check is not needed
-	// and the last return line must be deleted.
 	if app.WorkerID == nil {
-		logger.DebugfCtx(ctx, "Using local runtime %q for application %s sync", s.runtimeType, app.ID)
-
-		return s.runtimeFactory.Create(catalogutils.AppNamespace(app.ID))
+		return nil, fmt.Errorf("application %s has no worker_id: every application must be deployed through a worker", app.ID)
 	}
 
 	if s.workerRegistry == nil {
