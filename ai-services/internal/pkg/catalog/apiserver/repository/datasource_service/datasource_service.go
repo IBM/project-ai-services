@@ -409,14 +409,14 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 		baseURL := extractInternalEndpointURL(row.EndpointsJSON)
 
 		app, appErr := s.appRepo.GetByID(ctx, row.ApplicationID)
-		var workerID *uuid.UUID
-		if appErr == nil && app != nil {
-			workerID = app.WorkerID
+		if appErr != nil {
+			return nil, fmt.Errorf("failed to load application %s: %w", row.ApplicationID, appErr)
 		}
 
-		rt, rtErr := s.runtimeFor(ctx, workerID)
+		rt, rtErr := s.runtimeFor(ctx, app.WorkerID)
 		if rtErr != nil {
 			logger.WarningfCtx(ctx, "worker not reachable for application %s: %v", row.ApplicationID, rtErr)
+			continue
 		}
 
 		syncDetails := s.fetchServiceSyncDetails(ctx, rt, connectorID, baseURL)
@@ -1060,22 +1060,22 @@ func (s *DatasourceService) propagateCredentials(
 		}
 
 		app, appErr := s.appRepo.GetByID(ctx, svc.ApplicationID)
-		var rt runtime.Runtime
-		var rtErr error
-		if appErr == nil {
-			rt, rtErr = s.runtimeFor(ctx, app.WorkerID)
-		}
-
-		if appErr != nil || rtErr != nil {
-			msg := fmt.Sprintf("failed to load application: %v", appErr)
-			if rtErr != nil {
-				msg = fmt.Sprintf("worker not reachable: %v", rtErr)
-			}
-
+		if appErr != nil {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ID:    svc.ApplicationID.String(),
 				Name:  svc.ApplicationName,
-				Error: msg,
+				Error: fmt.Sprintf("failed to load application: %v", appErr),
+			})
+
+			continue
+		}
+
+		rt, rtErr := s.runtimeFor(ctx, app.WorkerID)
+		if rtErr != nil {
+			propErrors = append(propErrors, apimodels.PropagationError{
+				ID:    svc.ApplicationID.String(),
+				Name:  svc.ApplicationName,
+				Error: fmt.Sprintf("worker not reachable: %v", rtErr),
 			})
 
 			continue
