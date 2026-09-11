@@ -1,12 +1,9 @@
-{{- if not (lookup "v1" "ServiceAccount" .Release.Namespace "ai-services-sa") }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ai-services-sa
   namespace: {{ .Release.Namespace }}
-{{- end }}
 ---
-{{- if not (lookup "rbac.authorization.k8s.io/v1" "ClusterRole" "" "ai-services-manager") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -48,9 +45,7 @@ rules:
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["list"]
-{{- end }}
 ---
-{{- if not (lookup "rbac.authorization.k8s.io/v1" "ClusterRoleBinding" "" "ai-services-manager-binding") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -63,9 +58,7 @@ roleRef:
   kind: ClusterRole
   name: ai-services-manager
   apiGroup: rbac.authorization.k8s.io
-{{- end }}
 ---
-{{- if not (lookup "rbac.authorization.k8s.io/v1" "ClusterRoleBinding" "" "ai-services-monitoring-view-binding") }}
 # Grants the backend SA access to query the OpenShift Thanos Querier (port 9091).
 # Without this the Thanos HTTP endpoint returns 403 Forbidden (plain text),
 # which causes a JSON parse error in GetSystemInfo.
@@ -81,4 +74,3 @@ roleRef:
   kind: ClusterRole
   name: cluster-monitoring-view
   apiGroup: rbac.authorization.k8s.io
-{{- end }}
