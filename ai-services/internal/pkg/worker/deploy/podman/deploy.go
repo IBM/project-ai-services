@@ -116,7 +116,6 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	return nil
 }
 
-
 // CheckStatus checks whether the worker node is already deployed by listing
 // pods with the worker proxy and worker pod labels.
 // Returns (true, existingResources, nil) when all worker pods are already running.
