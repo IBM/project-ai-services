@@ -337,7 +337,7 @@ const getStatusIcon = (status: string) => {
     case JOB_STATUS.CANCELLED:
     case DISPLAY_STATUS.CANCELLED:
     case DOC_STATUS.CANCELLED:
-      return <ErrorFilled size={16} className={styles.errorInfoIcon} />;
+      return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
     case DOC_STATUS.ALREADY_EXISTS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     default:
