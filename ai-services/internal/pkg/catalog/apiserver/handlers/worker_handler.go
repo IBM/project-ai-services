@@ -19,6 +19,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
 
+const (
+	// workerNameMinLen is the minimum allowed length for a worker name after trimming whitespace.
+	workerNameMinLen = 3
+	// workerNameMaxLen is the maximum allowed length for a worker name after trimming whitespace.
+	workerNameMaxLen = 64
+)
+
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
 	reg         *registry.Registry
@@ -34,7 +41,7 @@ func NewWorkerHandler(reg *registry.Registry, repo repository.WorkerRepository, 
 
 // createWorkerReq is the request body for registering a new worker.
 type createWorkerReq struct {
-	WorkerName string `json:"worker_name" binding:"required,max=64"`
+	WorkerName string `json:"worker_name" binding:"required"`
 }
 
 // createWorkerResp is the response body for a newly registered worker.
@@ -71,10 +78,8 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 	// All lookups use case-insensitive comparison so "Worker-A" and "worker-a"
 	// resolve to the same entry regardless of how it was registered.
 	req.WorkerName = strings.TrimSpace(req.WorkerName)
-	// Re-check length after trimming: a value like "  ab  " passes the binder
-	// (raw length ≤ 64) but may be too short once whitespace is removed.
-	if len(req.WorkerName) < 3 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "worker_name must be between 3 and 64 characters"})
+	if len(req.WorkerName) < workerNameMinLen || len(req.WorkerName) > workerNameMaxLen {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "worker name must be between 3 and 64 characters"})
 
 		return
 	}

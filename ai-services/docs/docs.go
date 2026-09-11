@@ -4214,9 +4214,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "worker_name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "minLength": 1
+                    "type": "string"
                 }
             }
         },

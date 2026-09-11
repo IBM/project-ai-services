@@ -995,8 +995,6 @@ definitions:
   internal_pkg_catalog_apiserver_handlers.createWorkerReq:
     properties:
       worker_name:
-        maxLength: 100
-        minLength: 1
         type: string
     required:
     - worker_name
