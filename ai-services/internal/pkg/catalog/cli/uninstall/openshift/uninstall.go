@@ -13,7 +13,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
+	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
+	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
 
 // UninstallCatalog removes the catalog helm release and optionally cleans up PVCs and catalog namespace.
@@ -26,11 +30,36 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
+	// Check before catalog pods are deleted whether a local worker is co-located.
+	isLocalWorker, err := workercommon.IsOpenShiftLocalWorker(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("failed to check local worker: %w", err)
+	}
+
 	// Confirm deletion unless auto-yes is set
 	if confirmed, err := confirmDeletion(ctx, rt, opts.AutoYes); err != nil || !confirmed {
 		return err
 	}
 
+	if err := uninstallCatalogResources(ctx, rt, catalog, namespace, opts.SkipCleanup); err != nil {
+		return err
+	}
+
+	// Only uninstall the co-located worker if LOCAL_WORKER is true
+	if isLocalWorker {
+		if err := workeruninstall.Uninstall(ctx, workerutils.UninstallOptions{
+			RuntimeType: types.RuntimeTypeOpenShift,
+			AutoYes:     true,
+			SkipCleanup: opts.SkipCleanup,
+		}); err != nil {
+			return fmt.Errorf("worker uninstall failed: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func uninstallCatalogResources(ctx context.Context, rt runtime.Runtime, catalog, namespace string, skipCleanup bool) error {
 	logger.InfolnCtx(ctx, "Proceeding with uninstall...")
 
 	s := spinner.New("Uninstalling catalog service...")
@@ -42,13 +71,23 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 		return fmt.Errorf("failed to uninstall catalog: %w", err)
 	}
 
-	if !opts.SkipCleanup {
+	if !skipCleanup {
+		appLabel := fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)
+
 		logger.DebuglnCtx(ctx, "Delete catalog PVCs...")
 
-		if err := rt.DeletePVCs(ctx, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalog)); err != nil {
+		if err := rt.DeletePVCs(ctx, appLabel); err != nil {
 			s.Fail("failed to delete catalog pvc")
 
 			return fmt.Errorf("failed to delete PVCs: %w", err)
+		}
+
+		logger.DebuglnCtx(ctx, "Delete catalog secrets...")
+
+		if err := rt.DeleteSecrets(ctx, appLabel); err != nil {
+			s.Fail("failed to delete catalog secrets")
+
+			return fmt.Errorf("failed to delete secrets: %w", err)
 		}
 
 		if err := rt.DeleteNamespace(ctx, namespace); err != nil {

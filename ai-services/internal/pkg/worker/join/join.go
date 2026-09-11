@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -231,60 +232,150 @@ func runStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRou
 	}
 
 	// Send the first message so the gateway can identify which worker this is.
+	// This is the only direct stream.Send call — after this, all writes go
+	// through recvLoop's single sender goroutine to avoid concurrent sends.
 	if err := sendHeartbeat(stream, workerName); err != nil {
 		return fmt.Errorf("initial heartbeat: %w", err)
 	}
 
 	logger.InfofCtx(ctx, "CommandStream open for worker %q \n", workerName)
 
-	// Two concurrent activities:
-	//   • recv goroutine: read Commands from the gateway and handle them.
-	//   • heartbeat ticker: periodically send keep-alives.
-	recvErrCh := make(chan error, 1)
+	// recvLoop owns all subsequent stream.Send calls (results + heartbeats).
+	return recvLoop(ctx, rt, pr, stream, workerName)
+}
 
-	go func() {
-		recvErrCh <- recvLoop(ctx, rt, pr, stream, workerName)
-	}()
+// recvLoop reads Commands from the gateway stream and dispatches each one in
+// its own goroutine so that long-running commands (e.g. HELM_INSTALL) do not
+// block reception of subsequent commands.  Results and heartbeats are
+// funnelled through a single send channel so that stream.Send is always
+// called from one goroutine (gRPC streams are not safe for concurrent sends).
+// The loop exits when the stream is closed or returns an error.
+//
+//nolint:cyclop // complexity comes from select branches, not logic depth
+func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
+	// sendCh serialises all stream.Send calls — both command results and
+	// heartbeats. Buffer of 32 prevents dispatch goroutines from blocking
+	// on a momentarily busy sender.
+	const sendBufSize = 32
+	sendCh := make(chan *workerpb.CommandResult, sendBufSize)
+	senderErrCh, senderDone := startSender(stream, sendCh)
 
+	var wg sync.WaitGroup
+	drain := makeDrainer(&wg, sendCh, senderDone, senderErrCh)
+
+	// Heartbeat ticker — keep-alives go through sendCh so they share the
+	// same stream.Send goroutine as command results.
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
+
+	heartbeat := &workerpb.CommandResult{WorkerName: workerName, IsHeartbeat: true}
+
+	// recvCh carries commands (and the terminal error) from a background
+	// stream.Recv goroutine so we can select on it with the ticker and ctx.
+	recvCh := startRecvGoroutine(stream)
+
+	// One Dispatcher per stream lifetime — it tracks all in-flight command
+	// contexts so COMMAND_TYPE_CANCEL can abort a specific command.
+	d := dispatch.New()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-
-		case err := <-recvErrCh:
-			return err
+			return drain(ctx.Err())
 
 		case <-ticker.C:
-			if err := sendHeartbeat(stream, workerName); err != nil {
-				return fmt.Errorf("heartbeat: %w", err)
+			select {
+			case sendCh <- heartbeat:
+			default: // drop heartbeat if sender is backed up; not critical
 			}
+
+		case msg := <-recvCh:
+			if msg.err != nil {
+				return drain(msg.err)
+			}
+
+			logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
+				workerName, msg.cmd.GetCommandId(), msg.cmd.GetType())
+
+			wg.Add(1)
+
+			go func(c *workerpb.Command) {
+				defer wg.Done()
+
+				result := d.Dispatch(ctx, rt, pr, c)
+				result.WorkerName = workerName
+
+				select {
+				case sendCh <- result:
+				case <-ctx.Done():
+				}
+			}(msg.cmd)
 		}
 	}
 }
 
-// recvLoop reads Commands from the gateway stream, dispatches each one to the
-// local runtime, and sends the result back on the stream.
-// The loop exits when the stream is closed or returns an error.
-func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], workerName string) error {
-	for {
-		cmd, err := stream.Recv()
-		if err != nil {
-			return err
-		}
+// makeDrainer returns a function that waits for all in-flight dispatch
+// goroutines to finish, closes sendCh, waits for the sender goroutine to
+// exit, and returns any sender error in preference to the recv error.
+func makeDrainer(wg *sync.WaitGroup, sendCh chan *workerpb.CommandResult, senderDone <-chan struct{}, senderErrCh <-chan error) func(error) error {
+	return func(recvErr error) error {
+		wg.Wait()
+		close(sendCh)
+		<-senderDone
 
-		logger.InfofCtx(ctx, "Worker %q received command id=%s type=%s\n",
-			workerName, cmd.GetCommandId(), cmd.GetType())
-
-		result := dispatch.Dispatch(ctx, rt, pr, cmd)
-		result.WorkerName = workerName
-
-		if err := stream.Send(result); err != nil {
-			return fmt.Errorf("send command result id=%s: %w", cmd.GetCommandId(), err)
+		select {
+		case sErr := <-senderErrCh:
+			return sErr
+		default:
+			return recvErr
 		}
 	}
+}
+
+// startSender starts the dedicated stream.Send goroutine and returns its error
+// channel and done channel.
+func startSender(stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], sendCh <-chan *workerpb.CommandResult) (chan error, chan struct{}) {
+	senderErrCh := make(chan error, 1)
+	senderDone := make(chan struct{})
+
+	go func() {
+		defer close(senderDone)
+
+		for result := range sendCh {
+			if err := stream.Send(result); err != nil {
+				senderErrCh <- fmt.Errorf("send result/heartbeat id=%s: %w", result.GetCommandId(), err)
+
+				return
+			}
+		}
+	}()
+
+	return senderErrCh, senderDone
+}
+
+// streamRecvMsg is a command received from the stream, or an error.
+type streamRecvMsg struct {
+	cmd *workerpb.Command
+	err error
+}
+
+// startRecvGoroutine starts a goroutine that reads from stream.Recv and
+// forwards each message (or error) to the returned channel.
+func startRecvGoroutine(stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command]) chan streamRecvMsg {
+	recvCh := make(chan streamRecvMsg, 1)
+
+	go func() {
+		for {
+			cmd, err := stream.Recv()
+			recvCh <- streamRecvMsg{cmd, err}
+
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	return recvCh
 }
 
 // sendHeartbeat sends a heartbeat CommandResult on the stream.

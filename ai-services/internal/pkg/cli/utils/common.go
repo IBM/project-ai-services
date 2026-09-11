@@ -38,12 +38,12 @@ func FetchApplications(ctx context.Context, appClient *catalogClient.Application
 }
 
 // BuildPodRowFromAPI builds a table row from API response data.
-func BuildPodRowFromAPI(appName string, pod catalogTypes.Pod, wideOutput bool) []string {
+func BuildPodRowFromAPI(appName, workerName, namespace, runtimeType string, pod catalogTypes.Pod, wideOutput bool) []string {
 	status := getPodStatusFromAPI(pod)
 
-	// If wide option flag is not set, return appName, podName and status only
+	// If wide option flag is not set, return normal columns only
 	if !wideOutput {
-		return []string{appName, pod.PodName, status}
+		return []string{appName, workerName, runtimeType, namespace, pod.PodName, status}
 	}
 
 	containerNames := getContainerNamesFromAPI(pod)
@@ -51,18 +51,19 @@ func BuildPodRowFromAPI(appName string, pod catalogTypes.Pod, wideOutput bool) [
 	// Parse the Created string and convert to TimeAgo format
 	created := "N/A"
 	if pod.Created != "" {
-		// Try to parse the Created timestamp
 		parsedTime, err := time.Parse(catalogConstants.RFC3339WithTimezone, pod.Created)
 		if err == nil {
 			created = utils.TimeAgo(parsedTime)
 		} else {
-			// If parsing fails, use the original string
 			created = pod.Created
 		}
 	}
 
 	return []string{
 		appName,
+		workerName,
+		runtimeType,
+		namespace,
 		pod.PodID[:12],
 		pod.PodName,
 		status,

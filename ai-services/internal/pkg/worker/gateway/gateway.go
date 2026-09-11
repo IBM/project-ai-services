@@ -135,7 +135,8 @@ func (g *Gateway) runSweeper(ctx context.Context) {
 // cannot self-assign a name different from what was pre-registered by an admin.
 // Metadata supplied in the request is persisted to the DB metadata JSON column.
 func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (*workerpb.RegisterResponse, error) {
-	// 1. Validate token — worker name is bound to the token, not the request.
+	// 1. Validate the bootstrap token. Every worker — including the local one —
+	//    must present a token issued by Preregister via the catalog API.
 	workerName, err := g.registry.ValidateToken(req.GetPreSharedToken())
 	if err != nil {
 		logger.WarningfCtx(ctx, "WorkerGateway: rejected registration: %v", err)

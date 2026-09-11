@@ -22,6 +22,16 @@ spec:
     spec:
       serviceAccountName: ai-services-sa
       automountServiceAccountToken: true
+      {{- if .Values.hostAliases }}
+      hostAliases:
+      {{- range .Values.hostAliases }}
+      - ip: "{{ .IP }}"
+        hostnames:
+        {{- range .Hostnames }}
+          - "{{ . }}"
+        {{- end }}
+      {{- end }}
+      {{- end }}
       containers:
         - name: worker
           image: "{{ .Values.worker.image }}"
@@ -37,6 +47,11 @@ spec:
               value: "info"
             - name: AI_SERVICES_LOG_FORMAT
               value: "service"
+            - name: MTLS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: worker-mtls-encryption-secret
+                  key: mtls-encryption-key
           resources:
             requests:
               memory: "{{ .Values.worker.resources.requests.memory }}"
@@ -46,7 +61,7 @@ spec:
               cpu: "{{ .Values.worker.resources.limits.cpu }}"
           volumeMounts:
             - name: worker-tls
-              mountPath: /var/lib/ai-services/worker-tls
+              mountPath: /data/worker-tls
       volumes:
         - name: worker-tls
           persistentVolumeClaim:

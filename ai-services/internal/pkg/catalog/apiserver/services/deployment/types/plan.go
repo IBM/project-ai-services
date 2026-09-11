@@ -11,6 +11,7 @@ import (
 type DeploymentPlan struct {
 	ApplicationID   uuid.UUID                 // Generated application ID
 	ApplicationName string                    // Application name
+	Namespace       string                    // Namespace derived from ApplicationID
 	CatalogID       string                    // Architecture or service catalog ID
 	Version         string                    // Application version from request
 	IsArchitecture  bool                      // true for architecture, false for standalone service
@@ -45,13 +46,14 @@ type ComponentPlan struct {
 
 // ServicePlan represents a single service deployment.
 type ServicePlan struct {
-	CatalogID     string            // Service catalog ID (e.g., "chat", "digitize")
-	CatalogPath   string            // Dynamic catalog path (e.g., "services/chat/podman")
-	DatabaseID    uuid.UUID         // Database UUID for this service record (set after DB insertion)
-	Version       string            // Service version
-	ComponentRefs []string          // List of component hashes this service uses
-	Values        map[string]any    // Structured values from LoadServiceValues + component values
-	Routes        map[string]string // Routes extracted during deployment: podName -> routes annotation
+	CatalogID        string            // Service catalog ID (e.g., "chat", "digitize")
+	CatalogPath      string            // Dynamic catalog path (e.g., "services/chat/podman")
+	DatabaseID       uuid.UUID         // Database UUID for this service record (set after DB insertion)
+	Version          string            // Service version
+	ComponentRefs    []string          // List of component hashes this service uses
+	Values           map[string]any    // Structured values from LoadServiceValues + component values
+	Routes           map[string]string // Routes extracted during deployment: podName -> routes annotation
+	InternalEndpoint string            // Internal pod-to-pod endpoint URL (http://podname:port), populated by deployer
 }
 
 // SpyreCardPool manages allocation of PCI addresses to components.

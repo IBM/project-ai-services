@@ -28,4 +28,4 @@ spec:
   name: spyre-operator
   source: certified-operators
   sourceNamespace: openshift-marketplace
-  startingCSV: spyre-operator.v1.3.0
+  startingCSV: spyre-operator.v1.3.1

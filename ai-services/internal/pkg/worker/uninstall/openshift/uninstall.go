@@ -17,7 +17,6 @@ import (
 // Uninstall removes all worker components deployed by `worker join`.
 func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 	namespace := workerconstants.WorkerAppName
-	release := workerconstants.WorkerHelmReleaseName
 
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, namespace)
 	if err != nil {
@@ -42,6 +41,12 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
+	return performCleanup(ctx, rt, namespace, opts.SkipCleanup)
+}
+
+func performCleanup(ctx context.Context, rt runtime.Runtime, namespace string, skipCleanup bool) error {
+	release := workerconstants.WorkerHelmReleaseName
+
 	logger.InfolnCtx(ctx, "Proceeding with uninstall...")
 
 	s := spinner.New("Uninstalling worker service...")
@@ -51,7 +56,7 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	if !opts.SkipCleanup {
+	if !skipCleanup {
 		logger.DebuglnCtx(ctx, "Delete worker PVCs...")
 
 		if err := rt.DeletePVCs(ctx, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, workerconstants.WorkerHelmReleaseName)); err != nil {

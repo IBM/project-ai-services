@@ -8,9 +8,9 @@ Exposes one router:
 
 import asyncio
 import uuid
-from typing import  Optional
+from typing import  Optional, Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, Query
 from fastapi.responses import  Response
 from sqlalchemy.exc import IntegrityError
 from common.misc_utils import get_logger, get_llm_endpoint
@@ -68,7 +68,30 @@ logger = get_logger("schema_router")
     ),
     tags=["schemas"],
 )
-async def register_schema(body: SchemaRegisterRequest) -> SchemaCreatedResponse:
+async def register_schema(body: Annotated[SchemaRegisterRequest, Body(
+    openapi_examples={
+        "example": {
+            "summary": "Default Example",
+            "description": "Default Example",
+            "value": {
+                "name": "example_schema",
+                "description": "string",
+                "json_schema": {
+                  "type":"object",
+                  "basic": {}
+                },
+                "examples": [
+                  {
+                    "output": {
+                      "example_argument1": "example value"
+                    },
+                    "text": "Sample test"
+                  }
+                ],
+                "custom_prompt": "string"
+            }
+        }
+    }),]) -> SchemaCreatedResponse:
     """Register and validate a new schema for data extraction."""
     # --- Conflict check (name uniqueness) ---
     if db_repo.schema_name_exists(body.name):
