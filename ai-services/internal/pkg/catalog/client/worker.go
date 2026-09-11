@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -100,7 +101,7 @@ func (c *WorkerClient) DeleteWorkerByName(ctx context.Context, name string) erro
 	}
 
 	for _, w := range workers {
-		if w.Name == name {
+		if strings.EqualFold(w.Name, name) {
 			return c.deleteWorkerByID(ctx, w.ID)
 		}
 	}
