@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -39,6 +40,12 @@ func NewWorkerClient(ctx context.Context) (*WorkerClient, error) {
 	}
 
 	return &WorkerClient{client: c}, nil
+}
+
+// NewWorkerClientFromClient creates a WorkerClient from an already-authenticated Client.
+// Use this when you have obtained a Client via NewWithLogin (e.g. during catalog configure).
+func NewWorkerClientFromClient(c *Client) *WorkerClient {
+	return &WorkerClient{client: c}
 }
 
 // ServerURL returns the catalog API server URL this client is connected to.
@@ -94,7 +101,7 @@ func (c *WorkerClient) DeleteWorkerByName(ctx context.Context, name string) erro
 	}
 
 	for _, w := range workers {
-		if w.Name == name {
+		if strings.EqualFold(w.Name, name) {
 			return c.deleteWorkerByID(ctx, w.ID)
 		}
 	}

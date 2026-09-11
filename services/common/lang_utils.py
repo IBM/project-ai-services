@@ -29,6 +29,7 @@ class LanguageCodes:
     GERMAN = "DE"
     ITALIAN = "IT"
     FRENCH = "FR"
+    JAPANESE = "JA"
 
     # Mapping from uppercase ISO codes to ISO-639-1 lowercase splitter codes
     _TO_SENTENCE_SPLITTER = {
@@ -36,16 +37,17 @@ class LanguageCodes:
         GERMAN: "de",
         ITALIAN: "it",
         FRENCH: "fr",
+        JAPANESE: "ja",
     }
 
-    _SUPPORTED: frozenset = frozenset({"EN", "DE", "IT", "FR"})
+    _SUPPORTED: frozenset = frozenset({"EN", "DE", "IT", "FR", "JA"})
 
     @classmethod
     def supported_languages(cls) -> frozenset:
         """Get set of supported language codes.
 
         Returns:
-            frozenset of supported language codes (e.g., {'EN', 'DE', 'IT', 'FR'})
+            frozenset of supported language codes (e.g., {'EN', 'DE', 'IT', 'FR', 'JA'})
         """
         return cls._SUPPORTED
 
@@ -54,10 +56,10 @@ def to_sentence_splitter_lang(lingua_code: str) -> str:
     """Convert a lingua ISO code to a lowercase sentence-splitter language code.
 
     Args:
-        lingua_code: Lingua ISO code (e.g., 'EN', 'DE', 'IT', 'FR')
+        lingua_code: Lingua ISO code (e.g., 'EN', 'DE', 'IT', 'FR', 'JA')
 
     Returns:
-        Lowercase ISO-639-1 language code (e.g., 'en', 'de', 'it', 'fr').
+        Lowercase ISO-639-1 language code (e.g., 'en', 'de', 'it', 'fr', 'ja').
         Falls back to 'en' for unrecognised codes.
     """
     return LanguageCodes._TO_SENTENCE_SPLITTER.get(lingua_code, "en")
@@ -162,6 +164,7 @@ def get_max_tokens_map() -> dict[str, int]:
         LanguageCodes.GERMAN: chatbot_settings.llm.german.max_tokens,
         LanguageCodes.ITALIAN: chatbot_settings.llm.italian.max_tokens,
         LanguageCodes.FRENCH: chatbot_settings.llm.french.max_tokens,
+        LanguageCodes.JAPANESE: chatbot_settings.llm.japanese.max_tokens,
     }
 
 def setup_language_detector(languages: list[Language]):

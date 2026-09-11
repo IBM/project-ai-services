@@ -47,3 +47,8 @@ export const CONNECTORS_ENDPOINTS = {
     `/connectors/datasource/providers/${connectorId}/params`,
   CREATE_DATASOURCE: "/datasources",
 };
+
+export const WORKERS_ENDPOINTS = {
+  LIST_WORKERS: "/workers",
+  REGISTER_WORKER: "/workers",
+};

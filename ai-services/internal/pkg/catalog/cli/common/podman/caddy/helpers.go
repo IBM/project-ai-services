@@ -30,7 +30,7 @@ func getCaddyAdminPort(ctx context.Context, podName string) (string, error) {
 	// Example: {"2019/tcp": ["37249"], "443/tcp": ["39341"]}
 	for containerPort, hostPorts := range pod.Ports {
 		// Check if this is the admin API port (2019)
-		if strings.HasPrefix(containerPort, "2019/") && len(hostPorts) > 0 {
+		if strings.HasPrefix(containerPort, constants.CaddyAdminInternalPort) && len(hostPorts) > 0 {
 			return hostPorts[0], nil
 		}
 	}

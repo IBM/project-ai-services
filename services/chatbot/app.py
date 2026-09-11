@@ -3,6 +3,7 @@ import logging
 import asyncio
 import uuid
 from typing import Optional
+from urllib.parse import quote
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -58,6 +59,7 @@ NO_DOCUMENTS_FOUND_MESSAGES = {
     "DE": "Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.",
     "IT": "Nessun documento trovato nella base di conoscenza per questa richiesta.",
     "FR": "Aucun document trouvé dans la base de connaissances pour cette requête.",
+    "JA": "このクエリに対してナレッジベースにドキュメントが見つかりませんでした。",
 }
 
 # Cache for auth requirement check
@@ -615,9 +617,10 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 )
                 # For streaming, release is handled in locked_stream's finally block
                 response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
-                # Add rephrased query as a custom header if available
+                # Add rephrased query as a custom header if available.
+                # Percent-encode so non-Latin-1 scripts (Japanese, etc.) are safe in headers.
                 if rephrased_query and rephrased_query != current_query:
-                    response.headers["X-Rephrased-Query"] = rephrased_query
+                    response.headers["X-Rephrased-Query"] = quote(rephrased_query)
                 return response
 
             vllm_non_stream = await asyncio.to_thread(
@@ -655,12 +658,13 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                 response_data = ChatCompletionResponse(
                     choices=choices
                 )
-                # Add rephrased query as a custom header if available
+                # Add rephrased query as a custom header if available.
+                # Percent-encode so non-Latin-1 scripts (Japanese, etc.) are safe in headers.
                 if rephrased_query and rephrased_query != current_query:
                     return Response(
                         content=response_data.model_dump_json(),
                         media_type="application/json",
-                        headers={"X-Rephrased-Query": rephrased_query}
+                        headers={"X-Rephrased-Query": quote(rephrased_query)}
                     )
                 return response_data
 

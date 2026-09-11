@@ -13,6 +13,7 @@ const (
 	ArgParamPodmanAuthFileContent = "backend.podman.authFileContent"
 	ArgParamPodmanURI             = "backend.podman.uri"
 	ArgParamCaddyHTTPSPort        = "caddy.httpsPort"
+	ArgParamLocalWorker           = "backend.localWorker"
 	ArgParamCaddyFileContent      = "caddy.caddyFileContent"
 	ArgParamSSLCertFileContent    = "caddy.sslCertContent"
 	ArgParamSSLKeyFileContent     = "caddy.sslKeyContent"

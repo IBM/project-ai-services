@@ -474,6 +474,47 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
         raise
 
 
+def get_shadow_documents_for(doc_id: str) -> List[str]:
+    """
+    Return the names of all 'already_exists' shadow document rows whose
+    ``existing_doc_id`` metadata key references *doc_id*.
+
+    These placeholder rows are created whenever a duplicate file is submitted
+    (the original was already ingested).  They will be automatically removed
+    by :meth:`~digitize.db.manager.DatabaseManager.delete_document` when the
+    original document is deleted, so callers should surface this list to the
+    user before confirming deletion.
+
+    Returns an empty list when there are no duplicates or the DB is unavailable.
+    """
+    if engine is None:
+        return []
+    try:
+        from digitize.db.connection import get_db_session
+        from sqlalchemy import select as _select
+
+        with get_db_session() as session:
+            stmt = (
+                _select(Document.name)
+                .where(
+                    Document.status == DocStatus.ALREADY_EXISTS.value,
+                    Document.doc_metadata["existing_doc_id"].as_string() == doc_id,
+                )
+                .order_by(Document.submitted_at)
+            )
+            names: List[str] = list(session.scalars(stmt).all())
+            logger.debug(
+                f"Found {len(names)} shadow duplicate(s) for doc_id={doc_id!r}"
+            )
+            return names
+    except Exception as exc:
+        logger.error(
+            f"DB error in get_shadow_documents_for({doc_id!r}): {exc}",
+            exc_info=True,
+        )
+        return []
+
+
 def is_connector_sourced_document(doc_id: str) -> bool:
     """
     Return True if *doc_id* has source='connector' in the documents table.
