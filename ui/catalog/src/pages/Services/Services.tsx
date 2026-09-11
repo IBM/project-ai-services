@@ -42,8 +42,7 @@ const transformServiceData = (service: Service): ServiceDetailData => {
 };
 
 const Services = () => {
-  // Use unified services cache - autoFetch on mount
-  const { services, isLoading, error, refetch } = useServices(true);
+  const { services, isLoading, error, refetch } = useServices();
 
   // Local UI state using useReducer
   const [state, dispatch] = useReducer(servicesReducer, initialState);
@@ -60,9 +59,8 @@ const Services = () => {
 
   const handleTabChange = (evt: { selectedIndex: number }) => {
     dispatch({ type: "SET_SELECTED_TAB", payload: evt.selectedIndex });
-    // Catalog tab is at index 1
-    // Services are static data, only fetch if not already cached
-    if (evt.selectedIndex === 1 && services.length === 0) {
+    // Catalog tab is index 1 — fetch fresh data every time the user switches to it
+    if (evt.selectedIndex === 1) {
       refetch();
     }
   };
