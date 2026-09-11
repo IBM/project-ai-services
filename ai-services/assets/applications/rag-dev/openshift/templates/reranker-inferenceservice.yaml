@@ -26,7 +26,7 @@ spec:
           memory: "5Gi"
         requests:
           cpu: "8"
-          memory: "5Gi"
+          memory: "4Gi"
       runtime: cpu-temp
       storageUri: {{ .Values.reranker.storageUri }}
       args:
