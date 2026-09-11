@@ -1,4 +1,11 @@
-import { useReducer, useEffect, useRef, useMemo, useState } from "react";
+import {
+  useReducer,
+  useEffect,
+  useRef,
+  useMemo,
+  useState,
+  useCallback,
+} from "react";
 import { COMPONENT_TYPES } from "@/constants";
 import { useWorkers } from "@/hooks/useWorkers";
 import type {
@@ -363,6 +370,15 @@ export const ServicesDeployFlow = ({
   // The configure step is always the step just before the optional datasource step.
   const CONFIGURE_STEP = hasDatasourceStep ? LAST_STEP - 1 : LAST_STEP;
 
+  const handleWorkerErrorReset = useCallback(
+    () =>
+      dispatch({
+        type: ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
+        payload: false,
+      }),
+    [dispatch],
+  );
+
   return (
     <DeployTearsheetShell
       open={open}
@@ -400,12 +416,7 @@ export const ServicesDeployFlow = ({
           selectedServiceId={state.selectedServiceId}
           showNameError={state.showStepOneNameError}
           showWorkerError={state.showStepOneWorkerError}
-          onWorkerErrorReset={() =>
-            dispatch({
-              type: ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
-              payload: false,
-            })
-          }
+          onWorkerErrorReset={handleWorkerErrorReset}
           runtime={runtime}
           workers={workers}
           isLoadingWorkers={isLoadingWorkers}

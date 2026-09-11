@@ -1,4 +1,11 @@
-import { useReducer, useEffect, useRef, useMemo, useState } from "react";
+import {
+  useReducer,
+  useEffect,
+  useRef,
+  useMemo,
+  useState,
+  useCallback,
+} from "react";
 import type { DeployFlowAction } from "./types";
 import type {
   BaseDeployFlowProps,
@@ -288,6 +295,15 @@ export const DeployFlow = ({
       (hasStep2SchemaError || state.isEditing)) ||
     (isLastStep && hasStep3SchemaError);
 
+  const handleWorkerErrorReset = useCallback(
+    () =>
+      dispatch({
+        type: ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
+        payload: false,
+      }),
+    [dispatch],
+  );
+
   return (
     <DeployTearsheetShell
       open={open}
@@ -317,12 +333,7 @@ export const DeployFlow = ({
           providerParamsByType={providerParamsByType}
           showNameError={state.showStepOneNameError}
           showWorkerError={state.showStepOneWorkerError}
-          onWorkerErrorReset={() =>
-            dispatch({
-              type: ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
-              payload: false,
-            })
-          }
+          onWorkerErrorReset={handleWorkerErrorReset}
           onComponentError={setHasStep1SchemaError}
           runtime={runtime}
           workers={workers}

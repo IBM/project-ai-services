@@ -219,8 +219,10 @@ export const SharedStepOne = ({
     const exists = realOptions.some((w) => w.id === formData.workerName);
     if (!exists) {
       const next = realOptions[0]?.id ?? "";
-      onChange({ workerName: next });
-      if (next) onWorkerErrorReset?.();
+      if (formData.workerName !== next) {
+        onChange({ workerName: next });
+        if (next) onWorkerErrorReset?.();
+      }
     }
   }, [
     workerOptions,
