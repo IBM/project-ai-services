@@ -2790,6 +2790,13 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     },
+                    "403": {
+                        "description": "Local worker cannot be deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "404": {
                         "description": "Worker not found",
                         "schema": {
@@ -3521,11 +3528,20 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "namespace": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
                 "services": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod"
                     }
+                },
+                "worker_name": {
+                    "type": "string"
                 }
             }
         },

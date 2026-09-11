@@ -55,10 +55,11 @@ type Image struct {
 }
 
 type Route struct {
-	Name       string
-	HostPort   string
-	TargetPort string
-	Labels     map[string]string
+	Name        string
+	HostPort    string
+	TargetPort  string
+	ServiceName string // Spec.To.Name — the K8s Service the route points to
+	Labels      map[string]string
 }
 
 // PodResources represents resource allocation and usage for a pod including accelerators.

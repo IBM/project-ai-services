@@ -7,6 +7,10 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/component: "proxy"
+    {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
+    ai-services.io/secret: "caddy-cert-secret"
+    ai-services.io/secret-skip-cleanup: "true"
+    {{- end }}
     ai-services.io/volume: "caddy-worker,caddy-cert-secret"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:

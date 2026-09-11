@@ -56,6 +56,9 @@ type Runtime interface {
 	// PVC operations
 	DeletePVCs(ctx context.Context, appLabel string) error
 
+	// Secret label operations
+	DeleteSecrets(ctx context.Context, labelSelector string) error
+
 	// System information
 	GetSystemInfo(ctx context.Context) (*models.SystemInfo, error)
 

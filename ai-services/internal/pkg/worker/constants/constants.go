@@ -78,6 +78,7 @@ const (
 	// OpenShiftCatalogPodName is the pod name prefix used by the catalog-backend
 	// Deployment on OpenShift.
 	OpenShiftCatalogPodName = "catalog-backend"
+	CaddyCertSecretName     = "caddy-cert-secret"
 
 	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
 	// auto-generated gateway server certificate for internal cluster communication.
@@ -86,10 +87,6 @@ const (
 	// LocalWorkerEnvVar is the environment variable name that enables local-worker mode.
 	LocalWorkerEnvVar = "LOCAL_WORKER"
 
-	// LocalWorkerToken is the bootstrap token used for the local
-	// self-join. The catalog-backend gateway accepts this token without
-	// ValidateToken when LOCAL_WORKER=true.
-	LocalWorkerToken = "local-worker"
 	// MTLSEncryptionKeyEnv is the environment variable that holds the AES-256 key used to
 	// encrypt mTLS private key files at rest (gateway CA key, server key, worker client key).
 	// Sourced from the catalog-mtls-encryption-secret Podman/OpenShift secret at runtime.

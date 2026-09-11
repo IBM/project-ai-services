@@ -70,3 +70,9 @@ type Options struct {
 	// Must be used together with SSLCertPath.
 	SSLKeyPath string
 }
+
+type DeployOpts struct {
+	WorkerConnectionOptions
+	Options
+	RuntimeType string
+}
