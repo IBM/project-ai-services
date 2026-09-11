@@ -10,6 +10,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -134,7 +135,18 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("admin password verification failed: %w", err)
 	}
 
+	// Validate that --skip-local-worker is not set when workers are already registered.
+	if opts.SkipLocalWorker {
+		if err := validateSkipLocalWorker(ctx, catalogClient); err != nil {
+			return err
+		}
+	}
+
 	if !opts.SkipLocalWorker {
+		// Ensure the resolved domain suffix (extracted from cert or computed from
+		// host IP) is propagated — opts.DomainName may be empty when custom certs
+		// were used and the domain was derived from the certificate CN/SAN.
+		opts.DomainName = caddyCtx.GetDomainSuffix()
 		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts, catalogClient); err != nil {
 			return fmt.Errorf("worker join failed: %v", err)
 		}
@@ -256,6 +268,24 @@ func setupCaddyContext(deployCtx *deploy.DeployContext, opts catalogUtils.Podman
 	caddyCtx := caddy.NewContext(caddyPodName, domainSuffix)
 
 	return caddyCtx, nil
+}
+
+// validateSkipLocalWorker returns an error if any workers are already registered in the catalog.
+// The --skip-local-worker flag must not be set when workers exist, because it would leave them
+// without a gateway configuration.
+func validateSkipLocalWorker(ctx context.Context, c *catalogclient.Client) error {
+	workerClient := catalogclient.NewWorkerClientFromClient(c)
+
+	workers, err := workerClient.ListWorkers(ctx)
+	if err != nil {
+		return fmt.Errorf("skip-local-worker validation: list workers: %w", err)
+	}
+
+	if len(workers) > 0 {
+		return fmt.Errorf("--skip-local-worker cannot be set when workers are already registered; found %d worker(s)", len(workers))
+	}
+
+	return nil
 }
 
 // Made with Bob

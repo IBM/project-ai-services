@@ -373,7 +373,7 @@ func unregisterRoutes(ctx context.Context, proxyManager ProxyManager, routeIDs m
 	for routeID := range routeIDs {
 		if err := proxyManager.UnregisterRoute(ctx, routeID); err == nil {
 			logger.InfofCtx(ctx, "%s %s: Successfully unregistered route: %s", instanceType, instanceID, routeID)
-		} else if errors.Is(err, ErrRouteNotFound) {
+		} else if errors.Is(err, ErrRouteNotFound) || strings.Contains(err.Error(), ErrRouteNotFound.Error()) {
 			logger.InfofCtx(ctx, "%s %s: Route not configured for %s (already unregistered)", instanceType, instanceID, routeID)
 		} else {
 			logger.ErrorfCtx(ctx, "%s %s: Error unregistering route %s: %v", instanceType, instanceID, routeID, err)

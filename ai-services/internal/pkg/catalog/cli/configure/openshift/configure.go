@@ -9,6 +9,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart"
 
 	"github.com/project-ai-services/ai-services/assets"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -94,6 +95,13 @@ func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *r
 	catalogClient, err := configure.LoginToCatalog(ctx, catalogAPIURL, adminPassword)
 	if err != nil {
 		return fmt.Errorf("admin password verification failed: %w", err)
+	}
+
+	// Validate that --skip-local-worker is not set when workers are already registered.
+	if opts.SkipLocalWorker {
+		if err := validateSkipLocalWorker(ctx, catalogClient); err != nil {
+			return err
+		}
 	}
 
 	// Step 8: Join as local worker
@@ -186,6 +194,24 @@ func deployCatalogHelm(ctx context.Context, chartData chart.Charter, timeout tim
 	}
 
 	s.Stop("Catalog deployed successfully")
+
+	return nil
+}
+
+// validateSkipLocalWorker returns an error if any workers are already registered in the catalog.
+// The --skip-local-worker flag must not be set when workers exist, because it would leave them
+// without a gateway configuration.
+func validateSkipLocalWorker(ctx context.Context, c *catalogclient.Client) error {
+	workerClient := catalogclient.NewWorkerClientFromClient(c)
+
+	workers, err := workerClient.ListWorkers(ctx)
+	if err != nil {
+		return fmt.Errorf("skip-local-worker validation: list workers: %w", err)
+	}
+
+	if len(workers) > 0 {
+		return fmt.Errorf("--skip-local-worker cannot be set when workers are already registered; found %d worker(s)", len(workers))
+	}
 
 	return nil
 }
