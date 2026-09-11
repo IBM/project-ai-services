@@ -7,6 +7,8 @@ import type {
   CreateDatasourceResponse,
   DataSourceConnectorApiResponse,
   DataSourceConnectorsListResponse,
+  DataSourceDetailResponse,
+  UpdateDataSourceAuthRequest,
 } from "@/types/api.types";
 import type { DataSourceConnectorRow } from "@/components/DataSourceConnectorsTable/types";
 
@@ -96,4 +98,28 @@ export async function createDataSourceConnector(
     payload,
   );
   return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Fetch a single datasource connector by id
+// ---------------------------------------------------------------------------
+
+export async function fetchDataSourceById(
+  id: string,
+): Promise<DataSourceDetailResponse> {
+  const res = await api.get<DataSourceDetailResponse>(
+    CONNECTORS_ENDPOINTS.GET_DATASOURCE(id),
+  );
+  return res.data;
+}
+
+// ---------------------------------------------------------------------------
+// Update authentication key for a datasource connector
+// ---------------------------------------------------------------------------
+
+export async function updateDataSourceAuth(
+  id: string,
+  payload: UpdateDataSourceAuthRequest,
+): Promise<void> {
+  await api.put(CONNECTORS_ENDPOINTS.UPDATE_DATASOURCE(id), payload);
 }

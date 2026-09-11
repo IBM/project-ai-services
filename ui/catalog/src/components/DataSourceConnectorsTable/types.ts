@@ -24,12 +24,15 @@ export interface DataSourceConnectorRow {
 export interface AppState extends BaseTableState<DataSourceConnectorRow> {
   // Selected connector for the details side panel
   selectedConnectorId: string | null;
+  detailsPanelMode: DetailsPanelMode;
   isDetailsPanelOpen: boolean;
   // Text typed into the Remove confirmation input
   confirmTextValue: string;
   // Error message shown inside the Remove modal
   modalDeleteError: string;
 }
+
+export type DetailsPanelMode = "view" | "update-key";
 
 export const ACTION_TYPES = {
   FETCH_CONNECTORS_SUCCESS: "FETCH_CONNECTORS_SUCCESS",
@@ -47,6 +50,11 @@ export type AppAction =
         pagination: PaginationMetadata;
       };
     }
+  | {
+      type: typeof ACTION_TYPES.OPEN_DETAILS_PANEL;
+      payload: { id: string; mode: DetailsPanelMode };
+    }
+  | { type: typeof ACTION_TYPES.CLOSE_DETAILS_PANEL }
   | { type: typeof ACTION_TYPES.SET_CONFIRM_TEXT; payload: string }
   | { type: typeof ACTION_TYPES.SET_MODAL_DELETE_ERROR; payload: string };
 
@@ -99,6 +107,7 @@ export const INITIAL_STATE: AppState = {
   isLoading: true,
   fetchError: null,
   selectedConnectorId: null,
+  detailsPanelMode: "view",
   isDetailsPanelOpen: false,
   confirmTextValue: "",
 };
@@ -114,6 +123,18 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ),
         totalItems: action.payload.pagination.total_items,
         fetchError: null,
+      };
+    case ACTION_TYPES.OPEN_DETAILS_PANEL:
+      return {
+        ...state,
+        selectedConnectorId: action.payload.id,
+        detailsPanelMode: action.payload.mode,
+        isDetailsPanelOpen: true,
+      };
+    case ACTION_TYPES.CLOSE_DETAILS_PANEL:
+      return {
+        ...state,
+        isDetailsPanelOpen: false,
       };
     case ACTION_TYPES.SET_CONFIRM_TEXT:
       return { ...state, confirmTextValue: action.payload };
