@@ -98,6 +98,11 @@ spec:
                 secretKeyRef:
                   name: catalog-db-encryption-secret
                   key: db-encryption-key
+            - name: MTLS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-mtls-encryption-secret
+                  key: mtls-encryption-key
             - name: GIN_MODE
               value: "release"
             - name: AI_SERVICES_LOG_LEVEL
@@ -112,6 +117,8 @@ spec:
               value: "{{ .Values.db.user }}"
             - name: WORKER_GATEWAY_PORT
               value: "{{ .Values.backend.workerGatewayPort }}"
+            - name: LOCAL_WORKER
+              value: "{{ .Values.backend.localWorker }}"
           ports:
             - containerPort: 8080
               protocol: TCP
@@ -137,7 +144,7 @@ spec:
             - name: catalog-bundles
               mountPath: /data/catalog-bundles
             - name: gateway-pki
-              mountPath: /var/lib/ai-services/gateway-pki
+              mountPath: /data/gateway-pki
           resources:
             requests:
               memory: "{{ .Values.backend.resources.requests.memory }}"

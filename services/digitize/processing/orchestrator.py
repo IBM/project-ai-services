@@ -49,6 +49,32 @@ WORKER_SIZE = settings.digitize.doc_worker_size
 
 
 # ---------------------------------------------------------------------------
+# Japanese sentence splitting
+# ---------------------------------------------------------------------------
+
+def _split_japanese_sentences(text: str) -> list[str]:
+    """Split Japanese text into sentences on 。！？ delimiters.
+
+    Each delimiter is retained at the end of its sentence.  Empty strings
+    produced by consecutive delimiters (e.g. ``。。``) are filtered out.
+
+    Args:
+        text: Input string (Japanese or mixed Japanese/English).
+
+    Returns:
+        List of sentence strings.  Returns ``[]`` for empty input and
+        ``[text]`` when no Japanese sentence-ending punctuation is present.
+    """
+    if not text:
+        return []
+
+    import re
+    # Split after each 。！？, keeping the delimiter attached to the preceding token.
+    parts = re.split(r'(?<=[。！？])', text)
+    return [s for s in parts if s]
+
+
+# ---------------------------------------------------------------------------
 # Token-level chunking helpers
 # ---------------------------------------------------------------------------
 

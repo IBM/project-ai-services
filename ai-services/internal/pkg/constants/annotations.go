@@ -9,4 +9,5 @@ const (
 	ApplicationTemplateKey   = "ai-services.io/template"
 	PrerequisiteLabelKey     = "ai-services.io/prerequisite"
 	ComponentLabelKey        = "ai-services.io/component-type"
+	EndpointTypeLabelKey     = "ai-services.io/endpoint-type"
 )

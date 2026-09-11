@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -67,6 +66,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 		baseDir = config.BaseDir
 	}
 
+	secretsToDelete, secretsToSkip := podmanutils.FetchSecretsToDelete(pods)
 	volumesToDelete, volumesToSkip := podmanutils.FetchVolumesToDelete(pods)
 
 	logger.InfofCtx(ctx, "Using base directory for cleanup: %s\n", baseDir)
@@ -75,7 +75,6 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 		return err
 	}
 
-	secretsToDelete := []string{constants.PodmanAuthSecret}
 	if err := podmanutils.DeleteSecrets(ctx, rt, secretsToDelete); err != nil {
 		return err
 	}
@@ -90,7 +89,7 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 	}
 
 	// Delete skip-cleanup resources (secrets and volumes preserved when --skip-cleanup is set)
-	if err := podmanutils.CleanupSkippedResources(ctx, rt, []string{}, volumesToSkip, skipCleanup); err != nil {
+	if err := podmanutils.CleanupSkippedResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
 		return err
 	}
 
