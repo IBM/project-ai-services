@@ -319,10 +319,22 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 //
 // Returns a list of error messages for any secrets that failed to delete.
 func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
-	var errorMessages []string
-	secretsToDelete := make(map[string]bool) // Use map to avoid duplicates
+	secretsToDelete := collectSecretsFromPods(pods, keepData)
 
-	// Extract the comma-separated secret names from each pod label.
+	if len(secretsToDelete) == 0 {
+		return nil
+	}
+
+	logger.InfofCtx(ctx, "Deleting %d secret(s) for %s %s (keepData=%v)", len(secretsToDelete), instanceType, instanceID, keepData)
+
+	return s.deleteSecrets(ctx, secretsToDelete, instanceType, instanceID)
+}
+
+// collectSecretsFromPods extracts the set of secret names to delete from pod labels,
+// respecting the keepData flag to preserve secrets marked with the skip-cleanup label.
+func collectSecretsFromPods(pods []runtimeTypes.Pod, keepData bool) map[string]bool {
+	secretsToDelete := make(map[string]bool)
+
 	for _, pod := range pods {
 		secretNames, ok := pod.Labels[catalogconstants.CatalogSecretLabel]
 		if !ok {
@@ -343,14 +355,14 @@ func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runti
 		}
 	}
 
-	if len(secretsToDelete) == 0 {
-		// no secrets found to delete, just return
-		return errorMessages
-	}
+	return secretsToDelete
+}
 
-	logger.InfofCtx(ctx, "Deleting %d secret(s) for %s %s (keepData=%v)", len(secretsToDelete), instanceType, instanceID, keepData)
+// deleteSecrets deletes each secret in the provided set, ignoring not-found errors.
+// Returns a list of error messages for any secrets that failed to delete.
+func (s *PodmanDeletion) deleteSecrets(ctx context.Context, secretsToDelete map[string]bool, instanceType string, instanceID uuid.UUID) []string {
+	var errorMessages []string
 
-	// Delete each unique secret
 	for secretName := range secretsToDelete {
 		if err := s.rt.DeleteSecret(ctx, secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed
