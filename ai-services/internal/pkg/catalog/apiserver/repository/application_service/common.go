@@ -141,28 +141,25 @@ func (s *ApplicationServiceBase) createRuntime(app *models.Application) (runtime
 	return rt, nil
 }
 
-// buildWorkerInfo resolves the worker name and runtime type from the registry and returns
-// an ApplicationWorker for embedding in the application response.
-func (s *ApplicationServiceBase) buildWorkerInfo(workerID uuid.UUID) (*types.ApplicationWorker, error) {
+// buildWorkerInfo resolves the worker name and runtime type for the given worker UUID.
+// Delegates to WorkerRegistry.WorkerInfoByID which tries the live registry first
+// and falls back to the DB for disconnected workers.
+func (s *ApplicationServiceBase) buildWorkerInfo(ctx context.Context, workerID uuid.UUID) (*types.ApplicationWorker, error) {
 	if s.WorkerRegistry == nil {
 		return nil, fmt.Errorf("worker registry not configured")
 	}
 
-	name, ok := s.WorkerRegistry.WorkerNameByID(workerID)
-	if !ok {
-		return nil, fmt.Errorf("worker %s is not connected", workerID)
-	}
+	name, rtStr := s.WorkerRegistry.WorkerInfoByID(ctx, workerID)
 
-	w := &types.ApplicationWorker{ID: workerID.String(), Name: name}
-	if rtStr, ok := s.WorkerRegistry.WorkerRuntimeType(name); ok {
-		w.RuntimeType = rtStr
-	}
-
-	return w, nil
+	return &types.ApplicationWorker{
+		ID:          workerID.String(),
+		Name:        name,
+		RuntimeType: rtStr,
+	}, nil
 }
 
 // buildApplication creates an Application from a models.Application.
-func (s *ApplicationServiceBase) buildApplication(app models.Application) (types.Application, error) {
+func (s *ApplicationServiceBase) buildApplication(ctx context.Context, app models.Application) (types.Application, error) {
 	// Get type (display name) from catalog metadata
 	typeName, err := s.getApplicationType(app.CatalogID, app.DeploymentType)
 	if err != nil {
@@ -186,7 +183,7 @@ func (s *ApplicationServiceBase) buildApplication(app models.Application) (types
 		return types.Application{}, fmt.Errorf("application %s has no worker_id", app.ID)
 	}
 
-	worker, err := s.buildWorkerInfo(*app.WorkerID)
+	worker, err := s.buildWorkerInfo(ctx, *app.WorkerID)
 	if err != nil {
 		return types.Application{}, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
 	}
@@ -289,7 +286,7 @@ func (s *ApplicationServiceBase) UpdateApplication(ctx context.Context, id uuid.
 		}
 	}
 
-	appData, err := s.buildApplication(*updatedApp)
+	appData, err := s.buildApplication(ctx, *updatedApp)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +336,7 @@ func (s *ApplicationServiceBase) buildGetApplicationResponse(ctx context.Context
 		return nil, fmt.Errorf("application %s has no worker_id", app.ID)
 	}
 
-	worker, err := s.buildWorkerInfo(*app.WorkerID)
+	worker, err := s.buildWorkerInfo(ctx, *app.WorkerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
 	}
@@ -696,7 +693,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 
 	apps := make([]types.Application, 0, len(applications))
 	for _, app := range applications {
-		appData, err := s.buildApplication(app)
+		appData, err := s.buildApplication(ctx, app)
 		if err != nil {
 			return nil, err
 		}
@@ -1182,7 +1179,7 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		return nil, fmt.Errorf("application %s has no worker_id", app.ID)
 	}
 
-	workerInfo, err := s.buildWorkerInfo(*app.WorkerID)
+	workerInfo, err := s.buildWorkerInfo(ctx, *app.WorkerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
 	}
