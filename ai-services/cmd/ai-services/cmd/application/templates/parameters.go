@@ -47,16 +47,14 @@ func NewParametersCmd() *cobra.Command {
 				return err
 			}
 
-			// Try to load as architecture first
-			arch, err := source.LoadArchitecture(cmd.Context(), templateID)
-			if err == nil {
-				return displayArchitectureParameters(cmd.Context(), source, templateID, arch.Services)
+			// Try to display as architecture first
+			if err := displayArchitectureParameters(cmd.Context(), source, templateID); err == nil {
+				return nil
 			}
 
-			// Try to load as service
-			service, err := source.LoadService(cmd.Context(), templateID)
-			if err == nil {
-				return displayServiceParameters(cmd.Context(), source, templateID, service.Dependencies)
+			// Try to display as service
+			if err := displayServiceParameters(cmd.Context(), source, templateID); err == nil {
+				return nil
 			}
 
 			return fmt.Errorf("template '%s' not found as service or architecture", templateID)
@@ -69,22 +67,27 @@ func NewParametersCmd() *cobra.Command {
 	return cmd
 }
 
-// displayServiceParameters displays all parameters for a specific service.
-func displayServiceParameters(ctx context.Context, source catalogClient.CatalogSource, serviceID string, _ []catalogTypes.DependencyReference) error {
-	logger.Infof("Supported Parameters for '%s':", serviceID)
-
+// displayServiceParameters loads a service and displays its parameters.
+func displayServiceParameters(ctx context.Context, source catalogClient.CatalogSource, serviceID string) error {
 	deployOpts, err := source.GetServiceDeployOptions(ctx, serviceID, runtimeType())
 	if err != nil {
 		return fmt.Errorf("failed to get deploy options for service '%s': %w", serviceID, err)
 	}
+
+	logger.Infof("Supported Parameters for '%s':", serviceID)
 
 	displayDeployOptionsParameters(ctx, source, deployOpts, nil)
 
 	return nil
 }
 
-// displayArchitectureParameters displays all parameters for all services in an architecture.
-func displayArchitectureParameters(ctx context.Context, source catalogClient.CatalogSource, archID string, services []catalogTypes.ServiceReference) error {
+// displayArchitectureParameters loads an architecture and displays parameters for all its services.
+func displayArchitectureParameters(ctx context.Context, source catalogClient.CatalogSource, archID string) error {
+	arch, err := source.LoadArchitecture(ctx, archID)
+	if err != nil {
+		return err
+	}
+
 	logger.Infof("Supported Parameters for '%s':", archID)
 
 	// Track displayed components to avoid duplicates across services
@@ -92,7 +95,7 @@ func displayArchitectureParameters(ctx context.Context, source catalogClient.Cat
 
 	// Display parameters for each service in the architecture.
 	// Log a warning if a service fails so the user knows output may be incomplete.
-	for _, svcRef := range services {
+	for _, svcRef := range arch.Services {
 		deployOpts, err := source.GetServiceDeployOptions(ctx, svcRef.ID, runtimeType())
 		if err != nil {
 			logger.Warningf("skipping parameters for service '%s': %v", svcRef.ID, err)
