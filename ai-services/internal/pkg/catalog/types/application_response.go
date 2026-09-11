@@ -26,7 +26,7 @@ type Application struct {
 	Services       []ApplicationService `json:"services,omitempty"`
 	CreatedAt      string               `json:"created_at"`
 	UpdatedAt      string               `json:"updated_at"`
-	Worker         *ApplicationWorker   `json:"worker,omitempty"`
+	Worker         *ApplicationWorker   `json:"worker"`
 }
 
 // ApplicationService represents an application service in the list/get response.

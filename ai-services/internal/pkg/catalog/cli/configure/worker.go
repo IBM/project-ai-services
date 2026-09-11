@@ -29,11 +29,11 @@ func LoginToCatalog(ctx context.Context, catalogAPIURL, adminPassword string) (*
 // RegisterLocalWorker pre-registers the Local worker using the already-authenticated
 // client and returns the bootstrap token and gateway address.
 func RegisterLocalWorker(ctx context.Context, c *catalogclient.Client) (token, gatewayAddr string, err error) {
-	logger.InfolnCtx(ctx, "Registering local worker via catalog API...")
+	logger.InfolnCtx(ctx, "Registering worker via catalog API...")
 
 	resp, err := catalogclient.NewWorkerClientFromClient(c).CreateWorker(ctx, workerconstants.LocalWorkerName)
 	if err != nil {
-		return "", "", fmt.Errorf("register local worker: %w", err)
+		return "", "", fmt.Errorf("register worker: %w", err)
 	}
 
 	return resp.Token, resp.GatewayAddress, nil

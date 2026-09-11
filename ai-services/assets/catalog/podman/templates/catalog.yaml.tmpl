@@ -33,7 +33,6 @@ spec:
             echo "Migration attempt $attempt of $max_retries..."
 
             if /usr/bin/ai-services catalog dbmigrate init \
-              --runtime={{ .Values.backend.runtime }} \
               --db-host={{ .AppName }}--db \
               --db-port=5432 \
               --db-user={{ .Values.db.user }} \
