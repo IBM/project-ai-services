@@ -954,19 +954,18 @@ func ExtractCatalogBackendURLFromConfigureOutput(configureOutput string) string 
 }
 
 // CatalogLogin runs a non-interactive catalog login, piping the password via stdin.
-func CatalogLogin(ctx context.Context, cfg *config.Config, serverURL, username, password, appRuntime string, insecure bool) (string, error) {
+func CatalogLogin(ctx context.Context, cfg *config.Config, serverURL, username, password string, insecure bool) (string, error) {
 	args := []string{
 		"catalog", "login",
 		"--server", serverURL,
 		"--username", username,
 		"--password-stdin",
-		"--runtime", appRuntime,
 	}
 	if insecure {
 		args = append(args, "--insecure")
 	}
-	logger.Infof("[CLI] Running: %s catalog login --server %s --username %s --password-stdin --runtime %s (insecure=%v)",
-		cfg.AIServiceBin, serverURL, username, appRuntime, insecure)
+	logger.Infof("[CLI] Running: %s catalog login --server %s --username %s --password-stdin (insecure=%v)",
+		cfg.AIServiceBin, serverURL, username, insecure)
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	cmd.Stdin = bytes.NewBufferString(password + "\n")
 	out, err := cmd.CombinedOutput()
@@ -1085,8 +1084,8 @@ func CatalogApiServerHelp(ctx context.Context, cfg *config.Config, appRuntime st
 }
 
 // CatalogHashpw runs 'catalog hashpw --stdin' with the provided password piped via stdin.
-func CatalogHashpw(ctx context.Context, cfg *config.Config, password, appRuntime string) (string, error) {
-	args := []string{"catalog", "hashpw", "--stdin", "--runtime", appRuntime}
+func CatalogHashpw(ctx context.Context, cfg *config.Config, password string) (string, error) {
+	args := []string{"catalog", "hashpw", "--stdin"}
 	logger.Infof("[CLI] Running: %s %s", cfg.AIServiceBin, strings.Join(args, " "))
 	cmd := exec.CommandContext(ctx, cfg.AIServiceBin, args...)
 	cmd.Stdin = bytes.NewBufferString(password + "\n")
@@ -1100,13 +1099,13 @@ func CatalogHashpw(ctx context.Context, cfg *config.Config, password, appRuntime
 }
 
 // CatalogWhoami runs 'catalog whoami' and returns the combined output.
-func CatalogWhoami(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	return runCLI(ctx, cfg, "catalog whoami", "catalog", "whoami", "--runtime", appRuntime)
+func CatalogWhoami(ctx context.Context, cfg *config.Config) (string, error) {
+	return runCLI(ctx, cfg, "catalog whoami", "catalog", "whoami")
 }
 
 // CatalogLogout runs 'catalog logout' and returns the combined output.
-func CatalogLogout(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
-	return runCLI(ctx, cfg, "catalog logout", "catalog", "logout", "--runtime", appRuntime)
+func CatalogLogout(ctx context.Context, cfg *config.Config) (string, error) {
+	return runCLI(ctx, cfg, "catalog logout", "catalog", "logout")
 }
 
 // CatalogDbMigrateHelp runs 'catalog dbmigrate --help'; full dbmigrate requires a live DB so only help is tested.
@@ -1130,13 +1129,12 @@ func CatalogDbMigrateHelp(ctx context.Context, cfg *config.Config) (string, erro
 //
 // Returns combined stdout+stderr (always populated for flag errors) and the
 // exec error.
-func CatalogLoginMissingServer(ctx context.Context, cfg *config.Config, appRuntime string) (string, error) {
+func CatalogLoginMissingServer(ctx context.Context, cfg *config.Config) (string, error) {
 	args := []string{
 		"catalog", "login",
 		// --server is intentionally omitted.
 		"--username", "admin",
 		"--password-stdin",
-		"--runtime", appRuntime,
 	}
 
 	logger.Infof(
@@ -1161,13 +1159,12 @@ func CatalogLoginMissingServer(ctx context.Context, cfg *config.Config, appRunti
 // reject it in PreRunE before any network call is made.
 //
 // Returns combined stdout+stderr and the exec error.
-func CatalogLoginInvalidURL(ctx context.Context, cfg *config.Config, badURL, appRuntime string) (string, error) {
+func CatalogLoginInvalidURL(ctx context.Context, cfg *config.Config, badURL string) (string, error) {
 	args := []string{
 		"catalog", "login",
 		"--server", badURL,
 		"--username", "admin",
 		"--password-stdin",
-		"--runtime", appRuntime,
 	}
 
 	logger.Infof(
@@ -1193,10 +1190,9 @@ func CatalogLoginInvalidURL(ctx context.Context, cfg *config.Config, badURL, app
 //
 // homeDir must be an existing, empty directory that the calling test owns.
 // Returns combined stdout+stderr and the exec error.
-func CatalogWhoamiWithoutLogin(ctx context.Context, cfg *config.Config, homeDir, appRuntime string) (string, error) {
+func CatalogWhoamiWithoutLogin(ctx context.Context, cfg *config.Config, homeDir string) (string, error) {
 	args := []string{
 		"catalog", "whoami",
-		"--runtime", appRuntime,
 	}
 
 	logger.Infof(

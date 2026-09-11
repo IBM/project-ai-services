@@ -8,16 +8,16 @@ CREATE TYPE deployment_type AS ENUM (
 
 -- Create applications table
 CREATE TABLE applications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100),
-    catalog_id VARCHAR(100),
-    deployment_type deployment_type,
-    status status,
-    message TEXT,
-    version VARCHAR(50),
-    created_by VARCHAR(100),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    id              UUID             PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(100)     NOT NULL,
+    catalog_id      VARCHAR(100)     NOT NULL,
+    deployment_type deployment_type  NOT NULL,
+    status          status           NOT NULL,
+    message         TEXT,
+    version         VARCHAR(50)      NOT NULL,
+    created_by      VARCHAR(100)     NOT NULL,
+    created_at      TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ      NOT NULL DEFAULT NOW()
 );
 
 -- Create trigger to automatically update updated_at timestamp

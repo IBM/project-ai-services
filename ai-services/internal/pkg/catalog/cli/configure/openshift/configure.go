@@ -99,7 +99,7 @@ func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *r
 	// Step 8: Join as local worker
 	if !opts.SkipLocalWorker {
 		if err := JoinAsLocalWorker(ctx, runtime, catalogClient); err != nil {
-			return fmt.Errorf("local worker join failed: %w", err)
+			return fmt.Errorf("worker join failed: %w", err)
 		}
 	}
 

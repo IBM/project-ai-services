@@ -40,7 +40,8 @@ func InitAndValidateRuntimeFlag(runtimeType string) error {
 }
 
 // ConfigureRuntimeFlag registers the --runtime / -r flag on cmd and marks it
-// required. Use this in every command that accepts a runtime type.
+// required. Use this in every command that must know the runtime up-front
+// (bootstrap, catalog configure, catalog apiserver, worker join, worker uninstall).
 func ConfigureRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
 	cmd.Flags().StringVarP(runtimeType, constants.RuntimeFlag, "r", "",
 		fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))

@@ -33,7 +33,7 @@ func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	// Check before catalog pods are deleted whether a local worker is co-located.
 	isLocalWorker, err := workercommon.IsOpenShiftLocalWorker(ctx, rt)
 	if err != nil {
-		return fmt.Errorf("failed to check local worker: %w", err)
+		return fmt.Errorf("failed to check worker: %w", err)
 	}
 
 	// Confirm deletion unless auto-yes is set

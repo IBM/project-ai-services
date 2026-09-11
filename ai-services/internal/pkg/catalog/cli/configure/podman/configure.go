@@ -136,7 +136,7 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 
 	if !opts.SkipLocalWorker {
 		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts, catalogClient); err != nil {
-			return fmt.Errorf("local worker join failed: %v", err)
+			return fmt.Errorf("worker join failed: %v", err)
 		}
 	}
 

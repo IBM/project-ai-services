@@ -2484,10 +2484,9 @@ paths:
     get:
       description: |-
         Retrieves system resource information including CPU, memory, and accelerator availability.
-        When the optional `worker` query parameter is provided, the resources are fetched from
-        that remote worker node instead of the local runtime.
+        Defaults to the local worker when the `worker` query parameter is omitted.
       parameters:
-      - description: Worker name to query resources from
+      - description: 'Worker name to query resources from (default: Local)'
         in: query
         name: worker
         type: string

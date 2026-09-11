@@ -27,7 +27,7 @@ func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient
 
 	token, gatewayAddr, err := configure.RegisterLocalWorker(ctx, c)
 	if err != nil {
-		return fmt.Errorf("local worker join: %w", err)
+		return fmt.Errorf("worker join: %w", err)
 	}
 
 	opts := workertypes.OpenshiftWorkerOptions{
@@ -38,10 +38,10 @@ func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient
 	}
 
 	if err := workeropenshift.DeployWorker(ctx, opts); err != nil {
-		return fmt.Errorf("local worker join: deploy worker: %w", err)
+		return fmt.Errorf("worker join: deploy worker: %w", err)
 	}
 
-	logger.InfolnCtx(ctx, "Local worker joined successfully.")
+	logger.InfolnCtx(ctx, "worker joined successfully.")
 
 	return nil
 }
