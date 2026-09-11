@@ -7,6 +7,10 @@ import type {
 } from "@/types/api.types";
 import type { WorkerResourceRow } from "@/components/WorkerResourcesTable/types";
 
+export async function deregisterWorker(id: string): Promise<void> {
+  await api.delete(WORKERS_ENDPOINTS.DEREGISTER_WORKER(id));
+}
+
 export function transformWorkerToRow(
   worker: WorkerApiResponse,
 ): WorkerResourceRow {
