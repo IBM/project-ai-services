@@ -49,7 +49,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword)
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, secretExists)
 }
 
 func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
@@ -111,7 +111,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 
 // handlePostDeployment handles route registration, login verification,
 // local worker join, and next steps display after catalog deployment.
-func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, adminPassword string) error {
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, adminPassword string, isReinstall bool) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -134,7 +134,16 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("admin password verification failed: %w", err)
 	}
 
+	// Validate --skip-local-worker has not changed since the original install.
+	if err := configure.ValidateSkipLocalWorker(ctx, catalogClient, isReinstall, opts.SkipLocalWorker); err != nil {
+		return err
+	}
+
 	if !opts.SkipLocalWorker {
+		// Ensure the resolved domain suffix (extracted from cert or computed from
+		// host IP) is propagated — opts.DomainName may be empty when custom certs
+		// were used and the domain was derived from the certificate CN/SAN.
+		opts.DomainName = caddyCtx.GetDomainSuffix()
 		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts, catalogClient); err != nil {
 			return fmt.Errorf("worker join failed: %v", err)
 		}
