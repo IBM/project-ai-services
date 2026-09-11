@@ -22,7 +22,7 @@ interface ServiceDeployState {
   // Provider schemas cache - keyed by "serviceId:componentType:providerId:runtime"
   providerSchemas: Record<string, ProviderSchema>;
 
-  // Services cache (for StepZero) (static data - no refetch needed)
+  // Services list — always fetched fresh, not persisted
   services: Service[] | null;
   servicesLoading: boolean;
   servicesError: string | null;
@@ -325,7 +325,9 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
           servicesLoading: false,
         }),
 
-      setServicesLoading: (loading) => set({ servicesLoading: loading }),
+      // Clear existing data when loading starts so stale data is never shown
+      setServicesLoading: (loading) =>
+        set({ servicesLoading: loading, ...(loading && { services: null }) }),
 
       setServicesError: (error) =>
         set({ servicesError: error, servicesLoading: false }),
@@ -416,7 +418,6 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
         serviceDeployOptions: state.serviceDeployOptions,
         componentModels: state.componentModels,
         providerSchemas: state.providerSchemas,
-        services: state.services,
         catalogServices: state.catalogServices,
         // Do NOT persist dynamic data (deployed services with timestamps)
       }),

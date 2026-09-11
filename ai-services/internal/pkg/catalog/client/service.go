@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -55,21 +54,17 @@ type serviceUpdatePayload struct {
 }
 
 // ServiceClient is an HTTP client for downstream service API calls (e.g. Digitize).
-// TLS verification is skipped because services are deployed with
-// cluster-internal self-signed certificates (nip.io / OpenShift routes).
 type ServiceClient struct {
 	http *resty.Client
 }
 
 // NewServiceClient creates a ServiceClient pointed at baseURL.
-// The resty client is configured with a 15-second timeout and TLS verification
-// skipped for internal cluster communications.
-// TODO : set the Insecure flag to conditionally based on self-signed certificates used.
+// The resty client is configured with a 15-second timeout. Calls go to the internal
+// pod-to-pod endpoint (plain HTTP), so no TLS configuration is required.
 func NewServiceClient(baseURL string) *ServiceClient {
 	r := resty.New().
 		SetBaseURL(baseURL).
-		SetTimeout(serviceHTTPTimeout).
-		SetTLSClientConfig(&tls.Config{InsecureSkipVerify: true}) //nolint:gosec // internal service-to-service call with self-signed cert
+		SetTimeout(serviceHTTPTimeout)
 
 	return &ServiceClient{http: r}
 }

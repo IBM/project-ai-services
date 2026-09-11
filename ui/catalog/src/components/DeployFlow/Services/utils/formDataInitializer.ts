@@ -16,6 +16,8 @@ export const initializeFormData = (
     globalComponents: {}, // Empty for service deployments
     services: {},
     ...DEFAULT_FORM_DATA,
+    dataSources: [],
+    uploadFromSourceEnabled: false,
   };
 
   // Initialize the selected service with ALL components from API

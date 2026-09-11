@@ -41,3 +41,8 @@ export const WORKER_RUNTIME_LABELS: Record<
     disabled: true,
   },
 } as const;
+// runtime mapping
+export const RUNTIME_TYPE_LABELS: Record<string, string> = {
+  podman: "RHAIIS",
+  openshift: "RHOAI",
+};

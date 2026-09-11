@@ -17,6 +17,7 @@ import { runDeployment } from "../Shared/utils/runDeployment";
 import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell";
 import { StepOne } from "./steps/DAStepOne";
 import { DAStepTwo as StepTwo } from "./steps/DAStepTwo";
+import { SharedDatasourceStep as StepThree } from "../Shared/steps/SharedDatasourceStep";
 import { useDeployOptions } from "./hooks/useDeployOptions";
 import { useDeployStore } from "@/store/deploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
@@ -27,7 +28,7 @@ import {
 import { dedupe } from "@/utils/requestManager";
 import { useWorkers } from "@/hooks/useWorkers";
 
-const STEPS = [
+const BASE_STEPS = [
   {
     label: "Provide assistant details",
     description: "Configure basic settings",
@@ -37,8 +38,14 @@ const STEPS = [
     description: "Select and configure services",
   },
 ];
+
+const DATASOURCE_STEP = {
+  label: "Select data sources",
+  description: "Connect data sources to your assistant",
+};
+
 const STEP_ONE = 0;
-const LAST_STEP = STEPS.length - 1;
+const STEP_TWO = 1;
 
 const getInitialState = (formData: DeployFormData): BaseDeployFlowState => ({
   ...BASE_INITIAL_STATE,
@@ -57,6 +64,8 @@ const daDeployFlowReducer = (
         globalComponents: {},
         services: {},
         ...DEFAULT_FORM_DATA,
+        dataSources: [],
+        uploadFromSourceEnabled: false,
       });
     default:
       return sharedDeployFlowReducer(state, action);
@@ -70,6 +79,10 @@ export const DeployFlow = ({
 }: BaseDeployFlowProps) => {
   const [hasStep1SchemaError, setHasStep1SchemaError] = useState(false);
   const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
+  const [hasStep3SchemaError, setHasStep3SchemaError] = useState(false);
+  // Flipped to true on the first deploy attempt when toggle is on but nothing
+  // is selected. Cleared when the user changes the toggle or closes the flow.
+  const [showStep3SelectionError, setShowStep3SelectionError] = useState(false);
 
   const {
     workers,
@@ -107,6 +120,20 @@ export const DeployFlow = ({
 
   const { deployOptions, isLoading, isProviderParamsLoading, error } =
     useDeployOptions(open, runtime);
+
+  const hasDatasourceStep = useMemo(
+    () =>
+      deployOptions?.services.some((s) => s.accepts_datasource === true) ??
+      false,
+    [deployOptions],
+  );
+
+  const steps = useMemo(
+    () => (hasDatasourceStep ? [...BASE_STEPS, DATASOURCE_STEP] : BASE_STEPS),
+    [hasDatasourceStep],
+  );
+
+  const LAST_STEP = steps.length - 1;
 
   // Build once here and pass down — both StepOne and StepTwo need the same map.
   const providerParamsByType = useMemo(() => {
@@ -197,6 +224,14 @@ export const DeployFlow = ({
       return;
     }
 
+    // If toggle is on but no data sources selected, show inline error and bail.
+    const uploadEnabled = state.formData.uploadFromSourceEnabled ?? false;
+    const hasDataSources = (state.formData.dataSources ?? []).length > 0;
+    if (hasDatasourceStep && uploadEnabled && !hasDataSources) {
+      setShowStep3SelectionError(true);
+      return;
+    }
+
     await runDeployment({
       dispatch,
       deploy: async () => {
@@ -219,6 +254,7 @@ export const DeployFlow = ({
         await deployApplication(deploymentPayload);
       },
       onSuccess: () => {
+        setShowStep3SelectionError(false);
         onSubmit();
         dispatch({ type: ACTION_TYPES.RESET_STATE });
         onClose();
@@ -231,6 +267,8 @@ export const DeployFlow = ({
     hasInitialized.current = false;
     setHasStep1SchemaError(false);
     setHasStep2SchemaError(false);
+    setHasStep3SchemaError(false);
+    setShowStep3SelectionError(false);
     onClose();
   };
 
@@ -242,21 +280,24 @@ export const DeployFlow = ({
   // user sees a spinner rather than a populated step with a grey Next button.
   const shellIsLoading = isLoading || isProviderParamsLoading;
 
+  const isPrimaryDisabled =
+    shellIsLoading ||
+    !!error ||
+    (state.currentStep === STEP_ONE && hasStep1SchemaError) ||
+    (state.currentStep === STEP_TWO &&
+      (hasStep2SchemaError || state.isEditing)) ||
+    (isLastStep && hasStep3SchemaError);
+
   return (
     <DeployTearsheetShell
       open={open}
       onClose={handleClose}
       title="Deploy digital assistant"
-      steps={STEPS}
+      steps={steps}
       currentStep={state.currentStep}
       isLastStep={isLastStep}
       isDeploying={state.isDeploying}
-      isPrimaryDisabled={
-        shellIsLoading ||
-        !!error ||
-        (!isLastStep && hasStep1SchemaError) ||
-        (isLastStep && (hasStep2SchemaError || state.isEditing))
-      }
+      isPrimaryDisabled={isPrimaryDisabled}
       onBack={handleBack}
       onNext={() => handleNext(state.formData.name, state.formData.workerName)}
       onSubmit={handleSubmit}
@@ -289,7 +330,7 @@ export const DeployFlow = ({
           refetchWorkers={refetchWorkers}
         />
       )}
-      {state.currentStep === LAST_STEP && deployOptions && (
+      {state.currentStep === STEP_TWO && deployOptions && (
         <StepTwo
           title="Configure services"
           formData={state.formData}
@@ -300,6 +341,25 @@ export const DeployFlow = ({
           onResourceStatusChange={handleResourceStatusChange}
           onComponentError={setHasStep2SchemaError}
           runtime={runtime}
+        />
+      )}
+      {isLastStep && hasDatasourceStep && (
+        <StepThree
+          title="Select data sources"
+          formData={state.formData}
+          onChange={(updates) => {
+            // Clear the selection error as soon as the user interacts
+            // (toggles off, or picks a source).
+            if (
+              updates.uploadFromSourceEnabled === false ||
+              (updates.dataSources && updates.dataSources.length > 0)
+            ) {
+              setShowStep3SelectionError(false);
+            }
+            handleFormDataChange(updates);
+          }}
+          onComponentError={setHasStep3SchemaError}
+          showSelectionError={showStep3SelectionError}
         />
       )}
     </DeployTearsheetShell>

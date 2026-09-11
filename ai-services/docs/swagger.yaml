@@ -538,10 +538,16 @@ definitions:
         type: string
       name:
         type: string
+      namespace:
+        type: string
+      runtime_type:
+        type: string
       services:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod'
         type: array
+      worker_name:
+        type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationResourcesResponse:
     properties:
@@ -989,8 +995,6 @@ definitions:
   internal_pkg_catalog_apiserver_handlers.createWorkerReq:
     properties:
       worker_name:
-        maxLength: 100
-        minLength: 1
         type: string
     required:
     - worker_name
@@ -2478,10 +2482,9 @@ paths:
     get:
       description: |-
         Retrieves system resource information including CPU, memory, and accelerator availability.
-        When the optional `worker` query parameter is provided, the resources are fetched from
-        that remote worker node instead of the local runtime.
+        Defaults to the local worker when the `worker` query parameter is omitted.
       parameters:
-      - description: Worker name to query resources from
+      - description: 'Worker name to query resources from (default: Local)'
         in: query
         name: worker
         type: string
@@ -2856,6 +2859,11 @@ paths:
           description: Worker deleted
         "400":
           description: Invalid worker ID
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Local worker cannot be deleted
           schema:
             additionalProperties: true
             type: object

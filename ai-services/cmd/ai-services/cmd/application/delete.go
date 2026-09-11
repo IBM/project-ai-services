@@ -16,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -33,14 +34,19 @@ var deleteCmd = &cobra.Command{
 
 Arguments:
   [name] : Application name (required)`,
-	Example: `  # Delete an application from podman runtime
-  ai-services application delete rag --runtime podman
-  
-  # Delete an application from openshift runtime
-  ai-services application delete rag --runtime openshift
+	Example: `  # Delete an application
+  ai-services application delete rag
+
+  # Delete an application using the legacy path (requires --runtime)
+  ai-services application delete rag --legacy --runtime podman
   `,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// --runtime is only required for legacy delete; the catalog path does not need it.
+		if legacyDelete && runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set (required with --legacy)")
+		}
+
 		// Build and run flag validator
 		flagValidator := buildDeleteFlagValidator()
 		if err := flagValidator.Validate(cmd); err != nil {
@@ -109,9 +115,7 @@ func initDeleteOpenShiftFlags() {
 
 // buildDeleteFlagValidator creates and configures the flag validator for the delete command.
 func buildDeleteFlagValidator() *flagvalidator.FlagValidator {
-	runtimeType := vars.RuntimeFactory.GetRuntimeType()
-
-	builder := flagvalidator.NewFlagValidatorBuilder(runtimeType)
+	builder := flagvalidator.NewFlagValidatorBuilder(runtimeTypes.RuntimeType(runtimeType))
 
 	// Register common flags
 	builder.

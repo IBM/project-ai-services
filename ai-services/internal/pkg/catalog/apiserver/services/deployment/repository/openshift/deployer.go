@@ -67,7 +67,7 @@ func (d *OpenShiftDeployer) ExecuteDeployment(
 	plan *DeploymentPlan,
 	_ apimodels.CreateApplicationRequest,
 ) error {
-	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	ns := plan.Namespace
 
 	if rrt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
 		d.helm = helmutil.NewRemoteHelmManager(rrt.Sender, ns)
@@ -184,17 +184,19 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, plan *Deploymen
 
 	// KServe marks an InferenceService "Ready=True" only once the predictor pod is fully up.
 	// Helm considers the InferenceService "Current" as soon as the CRD is accepted,
-	// so we must poll the InferenceService status directly.
-	// Non-OpenShift runtimes return nil immediately (no-op).
-	isvcName := comp.ComponentType
+	// so we must poll the InferenceService status directly — but only when the
+	// chart actually deploys an InferenceService resource.
+	if catalogutils.ChartHasInferenceService(fsys, comp.CatalogPath) {
+		isvcName := comp.ComponentType
 
-	logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
+		logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
 
-	waitCtx, cancel := context.WithTimeout(ctx, constants.PredictorWaitTimeout)
-	defer cancel()
+		waitCtx, cancel := context.WithTimeout(ctx, constants.PredictorWaitTimeout)
+		defer cancel()
 
-	if err := d.runtime.WaitForInferenceServiceReady(waitCtx, isvcName); err != nil {
-		return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
+		if err := d.runtime.WaitForInferenceServiceReady(waitCtx, isvcName); err != nil {
+			return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
+		}
 	}
 
 	if err := d.updateComponentEndpoint(ctx, plan, comp); err != nil {
@@ -243,7 +245,7 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 		return err
 	}
 
-	if err := d.registerServiceEndpoints(ctx, releaseName, svc); err != nil {
+	if err := d.registerServiceEndpoints(ctx, plan, releaseName, svc); err != nil {
 		// Non-fatal: log and continue — deployment itself succeeded.
 		logger.ErrorfCtx(ctx, "Failed to register service %s endpoints in DB: %v\n", svc.CatalogID, err)
 	}
@@ -251,10 +253,11 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 	return nil
 }
 
-// registerServiceEndpoints reads the OpenShift Routes created for the given Helm release
-// and writes them as HTTPS endpoints into the service database record.
+// registerServiceEndpoints reads the OpenShift Routes created for the given Helm release,
+// writes them as HTTPS endpoints into the service database record, and also stores the
+// internal cluster-DNS endpoint (type: "internal").
 // Routes are identified by the label "ai-services.io/service: <releaseName>".
-func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, releaseName string, svc *ServicePlan) error {
+func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, plan *DeploymentPlan, releaseName string, svc *ServicePlan) error {
 	labelSelector := fmt.Sprintf("ai-services.io/service=%s", releaseName)
 	routes, err := d.runtime.ListRoutes(ctx, labelSelector)
 	if err != nil {
@@ -267,16 +270,29 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, releas
 		return nil
 	}
 
-	endpoints := make([]map[string]any, 0, len(routes))
+	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	endpoints := make([]map[string]any, 0, len(routes)+1)
+
 	for _, route := range routes {
 		if route.HostPort == "" {
 			continue
 		}
 
 		endpoints = append(endpoints, map[string]any{
-			"type": route.Labels["ai-services.io/endpoint-type"],
+			"type": route.Labels[constants.EndpointTypeLabelKey],
 			"url":  fmt.Sprintf("https://%s", route.HostPort),
 		})
+
+		// For the api-type route, also derive the internal cluster-DNS endpoint
+		// Use route.ServiceName (the K8s Service the route points to) as the hostname —
+		// not releaseName, which is the Helm release name and has no corresponding Service.
+		if route.Labels[constants.EndpointTypeLabelKey] == "api" && route.TargetPort != "" && route.ServiceName != "" {
+			internalURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%s", route.ServiceName, ns, route.TargetPort)
+			endpoints = append(endpoints, map[string]any{
+				"type": "internal",
+				"url":  internalURL,
+			})
+		}
 	}
 
 	if len(endpoints) == 0 {
@@ -296,7 +312,7 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, releas
 // into the component database record.
 // KServe (RawDeployment) creates a Service named "<inferenceServiceName>-predictor" in the namespace.
 func (d *OpenShiftDeployer) updateComponentEndpoint(ctx context.Context, plan *DeploymentPlan, comp *ComponentPlan) error {
-	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	ns := plan.Namespace
 	if comp.DatabaseID == uuid.Nil {
 		return nil
 	}

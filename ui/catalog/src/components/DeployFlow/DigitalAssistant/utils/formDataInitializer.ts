@@ -65,5 +65,89 @@ export function initializeFormData(
     globalComponents,
     services,
     ...DEFAULT_FORM_DATA,
+    dataSources: [],
+    uploadFromSourceEnabled: false,
+  };
+}
+
+// Updates a specific component configuration within a service
+export function updateServiceComponent(
+  formData: DeployFormData,
+  serviceId: string,
+  componentType: string,
+  updates: Partial<ComponentConfig>,
+): DeployFormData {
+  return {
+    ...formData,
+    services: {
+      ...formData.services,
+      [serviceId]: {
+        ...formData.services[serviceId],
+        components: {
+          ...formData.services[serviceId].components,
+          [componentType]: {
+            ...formData.services[serviceId].components[componentType],
+            ...updates,
+          },
+        },
+      },
+    },
+  };
+}
+
+// Updates service-level parameters for a specific service
+export function updateServiceParams(
+  formData: DeployFormData,
+  serviceId: string,
+  params: Record<string, unknown>,
+): DeployFormData {
+  return {
+    ...formData,
+    services: {
+      ...formData.services,
+      [serviceId]: {
+        ...formData.services[serviceId],
+        params: {
+          ...formData.services[serviceId].params,
+          ...params,
+        },
+      },
+    },
+  };
+}
+
+// Updates a global component configuration shared across services
+export function updateGlobalComponent(
+  formData: DeployFormData,
+  componentType: string,
+  updates: Partial<ComponentConfig>,
+): DeployFormData {
+  return {
+    ...formData,
+    globalComponents: {
+      ...formData.globalComponents,
+      [componentType]: {
+        ...formData.globalComponents[componentType],
+        ...updates,
+      },
+    },
+  };
+}
+
+// Toggles the enabled/disabled state of a service
+export function toggleService(
+  formData: DeployFormData,
+  serviceId: string,
+  enabled: boolean,
+): DeployFormData {
+  return {
+    ...formData,
+    services: {
+      ...formData.services,
+      [serviceId]: {
+        ...formData.services[serviceId],
+        enabled,
+      },
+    },
   };
 }

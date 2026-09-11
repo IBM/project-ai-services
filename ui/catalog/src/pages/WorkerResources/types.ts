@@ -17,7 +17,7 @@ export type WorkerResourcesAction =
   | { type: "SET_PHASE"; payload: RegisterPhase }
   | {
       type: "REGISTER_SUCCESS";
-      payload: { token: string; gatewayAddress: string };
+      payload: { token: string; gatewayAddress: string; workerName: string };
     }
   | { type: "REGISTER_ERROR"; payload: string }
   | { type: "CLEAR_REGISTER_ERROR" };
@@ -63,6 +63,7 @@ export const workerResourcesReducer = (
         phase: "success",
         token: action.payload.token,
         gatewayAddress: action.payload.gatewayAddress,
+        workerName: action.payload.workerName,
         refreshTrigger: state.refreshTrigger + 1,
       };
     case "REGISTER_ERROR":

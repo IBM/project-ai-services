@@ -11,7 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	remoteRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -37,12 +37,11 @@ type ResourcesResponse struct {
 //
 //	@Summary		Get system resources
 //	@Description	Retrieves system resource information including CPU, memory, and accelerator availability.
-//	@Description	When the optional `worker` query parameter is provided, the resources are fetched from
-//	@Description	that remote worker node instead of the local runtime.
+//	@Description	Defaults to the local worker when the `worker` query parameter is omitted.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			worker	query		string	false	"Worker name to query resources from"
+//	@Param			worker	query		string	false	"Worker name to query resources from (default: Local)"
 //	@Success		200		{object}	ResourcesResponse
 //	@Failure		400		{object}	ErrorResponse	"Worker not connected"
 //	@Failure		401		{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
@@ -52,32 +51,28 @@ func (h *ResourcesHandler) GetResources(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	workerName := c.Query("worker")
-
-	var rt runtime.Runtime
-
-	if workerName != "" && h.workerRegistry != nil {
-		rtStr, ok := h.workerRegistry.WorkerRuntimeType(workerName)
-		if !ok {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
-				Error: fmt.Sprintf("worker %q is not connected", workerName),
-			})
-
-			return
-		}
-
-		rt = remoteRuntime.New(workerName, runtimeTypes.RuntimeType(rtStr), h.workerRegistry)
-	} else {
-		var err error
-		rt, err = vars.RuntimeFactory.Create("")
-		if err != nil {
-			logger.ErrorfCtx(ctx, "Could not create runtime client: %v", err)
-			c.JSON(http.StatusInternalServerError, ErrorResponse{
-				Error: fmt.Sprintf("Failed to create runtime client: %v", err),
-			})
-
-			return
-		}
+	if workerName == "" {
+		workerName = workerconstants.LocalWorkerName
 	}
+
+	if h.workerRegistry == nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: "worker registry not configured",
+		})
+
+		return
+	}
+
+	rtStr, ok := h.workerRegistry.WorkerRuntimeType(workerName)
+	if !ok {
+		c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: fmt.Sprintf("worker %q is not connected", workerName),
+		})
+
+		return
+	}
+
+	rt := remoteRuntime.New(workerName, runtimeTypes.RuntimeType(rtStr), h.workerRegistry)
 
 	resp, err := getResourcesResponse(ctx, rt)
 	if err != nil {

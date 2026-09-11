@@ -21,6 +21,7 @@ const WorkerResources = () => {
         payload: {
           token: result.token,
           gatewayAddress: result.gateway_address,
+          workerName: result.worker_name,
         },
       });
     } catch (err) {

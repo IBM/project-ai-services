@@ -84,7 +84,7 @@ async def import_metadata(payload: models.ImportRequest):
         logger.error(f"Failed to import metadata: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            "Database connection failed during import",
+            f"Import failed: {exc}",
         )
 
 

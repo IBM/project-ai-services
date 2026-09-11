@@ -18,6 +18,7 @@ import { DeployTearsheetShell } from "../Shared/components/DeployTearsheetShell"
 import { StepOne } from "./steps/ServicesStepOne";
 import { ServicesStepTwo as StepTwo } from "./steps/ServicesStepTwo";
 import { StepZero } from "./steps/StepZero";
+import { SharedDatasourceStep } from "../Shared/steps/SharedDatasourceStep";
 import { useServiceDeployOptions } from "./hooks/useServiceDeployOptions";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
@@ -26,7 +27,7 @@ import {
   DEFAULT_FORM_DATA,
 } from "../Shared/utils/formData";
 
-const STEPS = [
+const BASE_STEPS = [
   {
     label: "Select service",
     description: "Choose a service to deploy",
@@ -40,8 +41,13 @@ const STEPS = [
     description: "Select and configure service",
   },
 ];
+
+const DATASOURCE_STEP = {
+  label: "Select data sources",
+  description: "Connect data sources to your service",
+};
+
 const STEP_ONE = 1;
-const LAST_STEP = STEPS.length - 1;
 
 const getInitialState = (): DeployFlowState => ({
   ...BASE_INITIAL_STATE,
@@ -51,9 +57,13 @@ const getInitialState = (): DeployFlowState => ({
     globalComponents: {},
     services: {},
     ...DEFAULT_FORM_DATA,
+    dataSources: [],
+    uploadFromSourceEnabled: false,
   },
   selectedServiceId: null,
   currentStep: 0,
+  hasDatasourceStepError: false,
+  showDatasourceSelectionError: false,
 });
 
 const servicesDeployFlowReducer = (
@@ -63,6 +73,10 @@ const servicesDeployFlowReducer = (
   switch (action.type) {
     case ACTION_TYPES.SET_SELECTED_SERVICE:
       return { ...state, selectedServiceId: action.payload };
+    case ACTION_TYPES.SET_DATASOURCE_STEP_ERROR:
+      return { ...state, hasDatasourceStepError: action.payload };
+    case ACTION_TYPES.SET_SHOW_DATASOURCE_SELECTION_ERROR:
+      return { ...state, showDatasourceSelectionError: action.payload };
     case ACTION_TYPES.RESET_STATE:
       return getInitialState();
     default:
@@ -104,6 +118,20 @@ export const ServicesDeployFlow = ({
       open,
       runtime,
     );
+
+  // Derive the dynamic step list once deploy options are loaded.
+  // Must be declared after deployOptions to avoid a TDZ ReferenceError.
+  const hasDatasourceStep = useMemo(
+    () => deployOptions?.accepts_datasource === true,
+    [deployOptions],
+  );
+
+  const steps = useMemo(
+    () => (hasDatasourceStep ? [...BASE_STEPS, DATASOURCE_STEP] : BASE_STEPS),
+    [hasDatasourceStep],
+  );
+
+  const LAST_STEP = steps.length - 1;
 
   // Get component models loading and error state from store
   const componentModelsLoading = useServiceDeployStore(
@@ -261,6 +289,17 @@ export const ServicesDeployFlow = ({
       return;
     }
 
+    // If toggle is on but no data sources selected, show inline error and bail.
+    const uploadEnabled = state.formData.uploadFromSourceEnabled ?? false;
+    const hasDataSources = (state.formData.dataSources ?? []).length > 0;
+    if (hasDatasourceStep && uploadEnabled && !hasDataSources) {
+      dispatch({
+        type: ACTION_TYPES.SET_SHOW_DATASOURCE_SELECTION_ERROR,
+        payload: true,
+      });
+      return;
+    }
+
     await runDeployment({
       dispatch,
       deploy: async () => {
@@ -309,21 +348,27 @@ export const ServicesDeployFlow = ({
     (state.currentStep === 0 && !state.selectedServiceId) ||
     !!shellError ||
     (state.currentStep === STEP_ONE && hasStep1ComponentsError) ||
-    (isLastStep && state.isEditing) ||
-    (isLastStep && !areAllRequiredFieldsFilled) ||
-    (isLastStep && (hasStep2SchemaError || hasLlmError));
+    (isLastStep && !hasDatasourceStep && state.isEditing) ||
+    (isLastStep && !hasDatasourceStep && !areAllRequiredFieldsFilled) ||
+    (isLastStep &&
+      !hasDatasourceStep &&
+      (hasStep2SchemaError || hasLlmError)) ||
+    (isLastStep && hasDatasourceStep && state.hasDatasourceStepError);
 
-  const steps = [
-    { ...STEPS[0], complete: !!state.selectedServiceId },
-    ...STEPS.slice(1),
+  const stepsWithCompletion = [
+    { ...steps[0], complete: !!state.selectedServiceId },
+    ...steps.slice(1),
   ];
+
+  // The configure step is always the step just before the optional datasource step.
+  const CONFIGURE_STEP = hasDatasourceStep ? LAST_STEP - 1 : LAST_STEP;
 
   return (
     <DeployTearsheetShell
       open={open}
       onClose={handleClose}
       title="Deploy service"
-      steps={steps}
+      steps={stepsWithCompletion}
       currentStep={state.currentStep}
       isLastStep={isLastStep}
       isDeploying={state.isDeploying}
@@ -367,7 +412,7 @@ export const ServicesDeployFlow = ({
           refetchWorkers={refetchWorkers}
         />
       )}
-      {state.currentStep === LAST_STEP && deployOptions && (
+      {state.currentStep === CONFIGURE_STEP && deployOptions && (
         <StepTwo
           title="Configure services"
           formData={state.formData}
@@ -381,6 +426,33 @@ export const ServicesDeployFlow = ({
           isLoadingLlmModels={!!isLoading}
           onComponentError={setHasStep2SchemaError}
           runtime={runtime}
+        />
+      )}
+      {isLastStep && hasDatasourceStep && (
+        <SharedDatasourceStep
+          title="Select data sources"
+          formData={state.formData}
+          onChange={(updates) => {
+            // Clear the selection error as soon as the user interacts
+            // (toggles off, or picks a source).
+            if (
+              updates.uploadFromSourceEnabled === false ||
+              (updates.dataSources && updates.dataSources.length > 0)
+            ) {
+              dispatch({
+                type: ACTION_TYPES.SET_SHOW_DATASOURCE_SELECTION_ERROR,
+                payload: false,
+              });
+            }
+            handleFormDataChange(updates);
+          }}
+          onComponentError={(hasError) =>
+            dispatch({
+              type: ACTION_TYPES.SET_DATASOURCE_STEP_ERROR,
+              payload: hasError,
+            })
+          }
+          showSelectionError={state.showDatasourceSelectionError}
         />
       )}
     </DeployTearsheetShell>
