@@ -352,15 +352,22 @@ func (r *Registry) UpdateHeartbeat(ctx context.Context, workerName string) {
 // Use this when a worker is permanently decommissioned, not just temporarily offline.
 // Returns (true, nil) if a row was deleted, (false, nil) if not found.
 func (r *Registry) Deregister(ctx context.Context, id uuid.UUID) (bool, error) {
+	var found *WorkerEntry
+
 	r.mu.Lock()
 	for name, entry := range r.workers {
 		if entry.DBID == id {
+			found = entry
 			delete(r.workers, name)
 
 			break
 		}
 	}
 	r.mu.Unlock()
+
+	if found != nil {
+		close(found.CommandCh)
+	}
 
 	if r.repo == nil {
 		return false, nil
