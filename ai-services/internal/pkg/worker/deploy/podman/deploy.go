@@ -130,6 +130,16 @@ func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
 	}
 }
 
+// IsWorkerDeployed reports whether the local worker pod and all its secrets are
+// already present. It is used by JoinAsLocalWorker to skip re-registration when
+// the worker was preserved by a --skip-cleanup uninstall.
+func IsWorkerDeployed(ctx context.Context, rt runtime.Runtime) (bool, error) {
+	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
+	deployed, _, err := CheckStatus(ctx, rt, tp)
+
+	return deployed, err
+}
+
 // CheckStatus checks whether the worker node is already deployed by listing
 // pods with the worker proxy and worker pod labels.
 // Returns (true, existingResources, nil) when all worker pods are already running.
