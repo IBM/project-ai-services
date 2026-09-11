@@ -241,7 +241,8 @@ func (r *Registry) Preregister(ctx context.Context, workerName string) (string, 
 		return "", fmt.Errorf("worker registry: no repository configured")
 	}
 
-	// Evict any live in-memory entry.
+	// Evict any live in-memory entry so UpdateHeartbeat stops updating the row
+	// we are about to reset to pending.
 	r.Disconnect(ctx, workerName)
 
 	existing, err := r.repo.GetByName(ctx, workerName)
