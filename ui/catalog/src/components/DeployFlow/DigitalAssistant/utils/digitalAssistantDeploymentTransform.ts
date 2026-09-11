@@ -8,6 +8,7 @@ import type {
   DeployOptionsComponent as Component,
   Provider,
   ArchitectureDeploymentPayload,
+  ConnectorRef,
   DeploymentComponent,
   DeploymentService,
   ProviderSchema,
@@ -182,6 +183,19 @@ export function transformToDeploymentPayload(
       deploymentService.params = {
         backend: serviceBackendParams,
       };
+    }
+
+    // Attach datasource connectors to services that accept them when the user
+    // has enabled upload-from-source and selected at least one connector.
+    if (
+      serviceDefinition.accepts_datasource &&
+      formData.uploadFromSourceEnabled &&
+      formData.dataSources &&
+      formData.dataSources.length > 0
+    ) {
+      deploymentService.connectors = formData.dataSources.map(
+        (id): ConnectorRef => ({ id, type: "datasource" }),
+      );
     }
 
     services.push(deploymentService);

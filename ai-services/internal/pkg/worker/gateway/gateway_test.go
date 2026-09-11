@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"google.golang.org/grpc"
@@ -499,6 +500,7 @@ func TestGenerateServerCert_MultiSAN(t *testing.T) {
 func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DOMAIN_SUFFIX", "example.com")
+	t.Setenv(workerconstants.MTLSEncryptionKeyEnv, "test-mtls-secret")
 
 	res, err := generateAndPersistPKI(t.Context(), dir, "podman")
 	if err != nil {
@@ -510,8 +512,9 @@ func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 		t.Fatalf("ParseCertificate: %v", err)
 	}
 
-	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "catalog-worker-gateway.example.com" {
-		t.Errorf("expected SANs [catalog-worker-gateway.example.com]; got DNSNames=%v", leaf.DNSNames)
+	expectedSANs := []string{"catalog-worker-gateway.example.com", workerconstants.PodmanGatewayPodName}
+	if len(leaf.DNSNames) != len(expectedSANs) || leaf.DNSNames[0] != expectedSANs[0] || leaf.DNSNames[1] != expectedSANs[1] {
+		t.Errorf("expected SANs %v; got DNSNames=%v", expectedSANs, leaf.DNSNames)
 	}
 }
 

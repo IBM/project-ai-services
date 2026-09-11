@@ -35,10 +35,20 @@ export const APPLICATION_ENDPOINTS = {
   GET_APPLICATION_DETAILS: (id: string) => `/applications/${id}`,
   GET_APPLICATION_RESOURCES: (id: string) => `/applications/${id}/resources`,
   UPDATE_APPLICATION: (id: string) => `/applications/${id}`,
+  GET_APPLICATION_DATASOURCES: (id: string) =>
+    `/applications/${id}/datasources/`,
 };
 
 export const CONNECTORS_ENDPOINTS = {
-  LIST_CONNECTORS: "/connectors/datasources",
+  LIST_CONNECTORS: "/datasources",
   GET_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
-  DELETE_CONNECTOR: (id: string) => `/connectors/datasources/${id}`,
+  DELETE_CONNECTOR: (id: string) => `/datasources/${id}`,
+  GET_CONNECTOR_TYPES: "/connectors",
+  GET_CONNECTOR_PARAMS: (connectorId: string) =>
+    `/connectors/datasource/providers/${connectorId}/params`,
+  CREATE_DATASOURCE: "/datasources",
+};
+
+export const WORKERS_ENDPOINTS = {
+  LIST_WORKERS: "/workers",
 };

@@ -3,19 +3,16 @@ package deployment
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -75,10 +72,8 @@ func (e *DeploymentExecutor) executeDeployment(
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
 ) error {
-	// ── Remote worker deployment ──────────────────────────────────────────────
-	// TODO Remove the check when remote deployment is by default
-	// and the remaining code will be dead
-	if plan.WorkerName != "" && !strings.EqualFold(plan.WorkerName, workerconstants.LocalWorkerName) {
+	// Route through worker when a worker name is set (includes "Local").
+	if plan.WorkerName != "" {
 		return e.executeWorkerDeployment(ctx, plan, req)
 	}
 
@@ -114,7 +109,7 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 
 	// RemoteRuntime forwards every call over the gRPC CommandStream — the
 	// deployer does not need to know it is talking to a remote machine.
-	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry, catalogutils.AppNamespace(plan.ApplicationID))
+	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry, plan.Namespace)
 	if err != nil {
 		return fmt.Errorf("create remote runtime for worker %q: %w", plan.WorkerName, err)
 	}
@@ -187,7 +182,7 @@ func (e *DeploymentExecutor) executeOpenShiftDeployment(
 ) error {
 	// Initialize OpenShift runtime client scoped to the application's namespace
 	// so that ListRoutes, ListPods etc. query the correct namespace.
-	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	ns := plan.Namespace
 	rt, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
 	if err != nil {
 		return fmt.Errorf("failed to initialize OpenShift runtime: %w", err)

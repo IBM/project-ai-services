@@ -87,6 +87,7 @@ export interface DeployOptionsService {
     storage?: number;
     accelerators?: Record<string, number>;
   };
+  accepts_datasource?: boolean;
 }
 
 export interface DeployOptionsResponse {
@@ -312,6 +313,7 @@ export interface ServiceDeployOptions {
     storage?: number;
     accelerators?: Record<string, number>;
   };
+  accepts_datasource?: boolean;
 }
 
 export interface SchemaProperty {
@@ -367,6 +369,11 @@ export interface DeploymentComponent {
   params?: Record<string, unknown>;
 }
 
+export interface ConnectorRef {
+  id: string;
+  type: string;
+}
+
 export interface DeploymentService {
   catalog_id: string;
   version: string;
@@ -374,6 +381,7 @@ export interface DeploymentService {
   params?: {
     backend?: Record<string, unknown>;
   };
+  connectors?: ConnectorRef[];
 }
 
 export interface ArchitectureDeploymentPayload {
@@ -396,7 +404,28 @@ export type DeploymentPayload =
   | ArchitectureDeploymentPayload
   | ServiceDeploymentPayload;
 
-export type ConnectorStatus = "Connected" | "Offline";
+export type ConnectorStatus = "connected" | "offline";
+
+export type WorkerStatus = "pending" | "ready" | "disconnected";
+export type WorkerRuntimeType = "unknown" | "podman" | "openshift";
+
+export interface WorkerApiResponse {
+  id: string;
+  name: string;
+  status: WorkerStatus;
+  runtime_type: WorkerRuntimeType;
+  last_heartbeat?: string;
+  registered_at: string;
+  updated_at: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WorkerListResponse {
+  data: WorkerApiResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+}
 
 export interface ConnectorProvider {
   id: string;
@@ -418,7 +447,97 @@ export interface DataSourceConnectorApiResponse {
 
 export interface DataSourceConnectorsListResponse {
   data: DataSourceConnectorApiResponse[];
-  total: number;
-  page: number;
-  page_size: number;
+  pagination: PaginationMetadata;
+}
+
+/** Shape returned by GET /api/v1/connectors */
+export interface ConnectorTypeProvider {
+  id: string;
+  name: string;
+  description: string;
+  schema: string;
+}
+
+export interface ConnectorType {
+  type: string;
+  name: string;
+  provider: ConnectorTypeProvider;
+}
+
+/** A single property inside the JSON-Schema params response */
+export interface ParamProperty {
+  type?: string;
+  title?: string;
+  description?: string;
+  format?: string;
+  /** Present on array-type fields — defines allowed enum values */
+  items?: {
+    type?: string;
+    enum?: string[];
+  };
+  minItems?: number;
+  uniqueItems?: boolean;
+  /** Carbon UI extension — the section heading this field belongs to */
+  "ui:section"?: string;
+}
+
+/** Full response from GET /api/v1/connectors/datasource/providers/:id/params */
+export interface ConnectorParamsSchema {
+  $schema?: string;
+  type: string;
+  additionalProperties?: boolean;
+  properties: Record<string, ParamProperty>;
+  required?: string[];
+}
+
+/** POST /datasources — request body */
+export interface CreateDatasourceRequest {
+  name: string;
+  provider_id: string;
+  params: Record<string, string | string[]>;
+}
+
+/** POST /datasources — response body */
+export interface CreateDatasourceResponse {
+  id: string;
+}
+
+// Sync-state status values produced by the Digitize service pod.
+// "unknown" is set by the Go catalog when the pod is unreachable.
+export type DatasourceSyncStatus =
+  | "up to date"
+  | "syncing"
+  | "out of sync"
+  | "delete pending"
+  | "unknown";
+
+// Matches backend ApplicationDatasourceItem (GET /applications/:id/datasources).
+export interface ApplicationDatasourceApiItem {
+  id: string;
+  name: string;
+  provider: {
+    id: string;
+    name: string;
+  };
+  status: DatasourceSyncStatus;
+  // Always a number — defaults to 0 before any sync has run, never null.
+  files: number;
+  // ISO-8601 timestamp of the last completed sync, or null when no sync has run yet.
+  last_sync: string | null;
+  // Status/phase message from the Digitize pod (omitempty — absent when empty).
+  message?: string;
+  // Populated when the catalog could not reach the Digitize pod (omitempty — absent on success).
+  err_msg?: string;
+}
+
+export interface ApplicationDatasourcesListResponse {
+  data: ApplicationDatasourceApiItem[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
 }

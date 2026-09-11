@@ -90,10 +90,13 @@ type ApplicationMemInfo struct {
 
 // ApplicationPSResponse represents the response for pod/container status.
 type ApplicationPSResponse struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Services   []Pod  `json:"services"`
-	Components []Pod  `json:"components"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	WorkerName  string `json:"worker_name,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+	RuntimeType string `json:"runtime_type,omitempty"`
+	Services    []Pod  `json:"services"`
+	Components  []Pod  `json:"components"`
 }
 
 type Status string

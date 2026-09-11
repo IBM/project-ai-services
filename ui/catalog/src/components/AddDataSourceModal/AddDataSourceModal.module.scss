@@ -1,0 +1,93 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/theme";
+
+// ── Panel body ──────────────────────────────────────────────────────────────
+.panelBody {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-06;
+  padding: spacing.$spacing-05;
+}
+
+.detailsSection {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+}
+
+.sectionHeading {
+  @include type.type-style("heading-03");
+  color: theme.$text-primary;
+  margin: 0 0 spacing.$spacing-05;
+}
+
+.sectionDivider {
+  border: none;
+  border-top: 1px solid theme.$border-subtle-00;
+  margin: 0;
+}
+
+.paramSection {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+}
+
+.sectionTitle {
+  @include type.type-style("heading-02");
+  color: theme.$text-primary;
+  margin: 0;
+}
+
+.connectorDescription {
+  @include type.type-style("helper-text-01");
+  color: theme.$text-secondary;
+  margin: 0;
+}
+
+.checkboxGroup {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-03;
+
+  :global(.cds--form-item) {
+    margin-bottom: 0;
+  }
+}
+
+// Error message shown below a checkbox group when validation fails
+.checkboxError {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+  @include type.type-style("label-01");
+  color: theme.$support-error;
+  margin: spacing.$spacing-02 0 0;
+
+  // Carbon ErrorFilled icon inherits the error color
+  svg {
+    fill: theme.$support-error;
+    flex-shrink: 0;
+  }
+}
+
+.fileFiltersInfo {
+  // Make the inline notification stretch to fill the section width
+  :global(.cds--inline-notification) {
+    max-width: 100%;
+  }
+}
+
+// ── FieldLabel — label text + optional Toggletip info icon ──────────────────
+// Mirrors the .labelWithInfo pattern used in DeployFlow/Shared
+.labelWithInfo {
+  display: flex;
+  align-items: center;
+  gap: spacing.$spacing-03;
+}
+
+// ── "Add prefix +" button in the Location section ───────────────────────────
+.addPrefixButton {
+  align-self: flex-start;
+}

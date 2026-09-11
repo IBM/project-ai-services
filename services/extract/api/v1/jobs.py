@@ -70,6 +70,30 @@ logger = get_logger("jobs_router")
 
 
 # ---------------------------------------------------------------------------
+# Module-level schema resolution helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_schema_id(schema_id: str):
+    """Return the schema row for *schema_id*, raising 404 if not found."""
+    row = db_repo.get_schema_by_id(schema_id)
+    if row is None:
+        msg = f"No schema with id {schema_id!r}."
+        logger.error(msg)
+        raise ExtractException(404, "SCHEMA_NOT_FOUND", msg)
+    return row
+
+
+def _resolve_schema_name(schema_name: str):
+    """Return the schema row for *schema_name*, raising 404 if not found."""
+    row = db_repo.get_schema_by_name(schema_name)
+    if row is None:
+        msg = f"No schema with name {schema_name!r}."
+        logger.error(msg)
+        raise ExtractException(404, "SCHEMA_NOT_FOUND", msg)
+    return row
+
+
+# ---------------------------------------------------------------------------
 # POST /v1/extract — Synchronous extraction
 # ---------------------------------------------------------------------------
 
@@ -110,7 +134,20 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         msg = "text field is empty"
         logger.error(msg)
         raise ExtractException(400, "INVALID_REQUEST", msg)
-    schema_row = resolve_schema(body.schema_id)
+    if not body.schema_name and not body.schema_id:
+        raise ExtractException(
+            400,
+            "INVALID_REQUEST",
+            "Either schema_id or schema_name must be provided.")
+    elif body.schema_id:
+        schema_row = _resolve_schema_id(body.schema_id)
+        if body.schema_name and schema_row.name != body.schema_name:
+            raise ExtractException(
+                400,
+                "INVALID_REQUEST",
+                "Schema name and id are not for the same record")
+    else:
+        schema_row = _resolve_schema_name(body.schema_name)
 
     # ------------------------------------------------------------------
     # 2. Semaphore check (non-blocking — reject immediately if saturated)
@@ -126,7 +163,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
     llm_model_dict = get_llm_endpoint()
     llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
     llm_model: str = llm_model_dict.get("llm_model", "")
-    max_model_len: int = llm_model_dict.get('max_model_len', "")
+    max_model_len: int = llm_model_dict.get("max_model_len", 0)
 
     # ------------------------------------------------------------------
     # 3–8. Core extraction
@@ -253,7 +290,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         content={
             "data": {
                 "extraction": parsed_output,
-                "schema_id": body.schema_id,
+                "schema_id": schema_row.schema_id,
                 "source": {
                     "input_type": "text",
                     "input_tokens": input_tokens,
@@ -297,18 +334,28 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         "against a registered schema.  Returns immediately with a `job_id`.\n\n"
         "**Form parameters:**\n"
         "- `files` (required): One or more `.txt` or `.md` files (no duplicates)\n"
-        "- `schema_id` (required): ID of a registered extraction schema\n"
+        "- `schema_id` (optional): ID of a registered extraction schema\n"
+        "- `schema_name` (optional): Name of a registered extraction schema\n"
         "- `job_name` (optional): Human-readable label for the job\n"
+        "\nEither `schema_id` or `schema_name` must be provided.\n"
     ),
     tags=["jobs"],
 )
 async def create_extract_job(
     files: List[UploadFile] = File(...),
-    schema_id: str = Form(...),
+    schema_id: Optional[str] = Form(None),
+    schema_name: Optional[str] = Form(None),
     job_name: Optional[str] = Form(None),
 ) -> JobCreatedResponse:
     """Validate, stage, record, and enqueue an async extraction job (single or batch)."""
     check_job_admission()
+
+    if not schema_id and not schema_name:
+        raise ExtractException(
+            400,
+            "INVALID_REQUEST",
+            "Either schema_id or schema_name must be provided.",
+        )
 
     # ------------------------------------------------------------------
     # 1. File count validation
@@ -391,7 +438,15 @@ async def create_extract_job(
     # ------------------------------------------------------------------
     # 3. Schema lookup
     # ------------------------------------------------------------------
-    resolve_schema(schema_id)
+    if schema_id:
+        schema_row = _resolve_schema_id(schema_id)
+        if schema_name and schema_row.name != schema_name:
+            raise ExtractException(
+                400,
+                "INVALID_REQUEST",
+                "Schema name and id are not for the same record")
+    else:
+        schema_row = _resolve_schema_name(schema_name)
 
     # ------------------------------------------------------------------
     # 4. Stage all files, create job + document rows
@@ -409,6 +464,7 @@ async def create_extract_job(
             row = db_repo.create_job(
                 job_id=job_id,
                 schema_id=schema_id,
+                schema_name=schema_name,
                 job_name=job_name,
                 submitted_at=datetime.now(timezone.utc),
                 file_count=len(files),
@@ -469,7 +525,8 @@ async def create_extract_job(
         "- `offset` (int): Records to skip. Default: 0\n"
         "- `status` (string): Filter by `accepted`, `in_progress`, `completed`, "
         "`completed_with_errors`, or `failed`\n"
-        "- `schema_id` (string): Filter jobs by the schema they extract against\n"
+        "- `schema_id` (string): Filter jobs by schema ID\n"
+        "- `schema_name` (string): Filter jobs by schema name\n"
     ),
     tags=["jobs"],
 )
@@ -479,6 +536,7 @@ async def list_extract_jobs(
     offset: int = Query(default=0, ge=0, description="Records to skip"),
     status: Optional[str] = Query(default=None, description="Status filter"),
     schema_id: Optional[str] = Query(default=None, description="Filter by schema_id"),
+    schema_name: Optional[str] = Query(default=None, description="Filter by schema_name"),
 ) -> JobsListResponse:
     """Retrieve a list of extraction jobs with pagination and optional status/schema filtering."""
     _VALID_STATUSES = {s.value for s in JobStatus}
@@ -493,6 +551,7 @@ async def list_extract_jobs(
     rows, total = db_repo.list_jobs(
         status=status,
         schema_id=schema_id,
+        schema_name=schema_name,
         limit=limit,
         offset=offset,
         latest=bool(latest),
@@ -577,9 +636,22 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
             error=row.error,
         )
     else:
-        msg = f"No documents found for job {job_id!r}"
-        logger.error(msg)
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
+        # Job exists but has no document rows — return the bare job status.
+        return JobDetailResponse(
+            job_id=row.job_id,
+            job_name=row.job_name,
+            schema_id=row.schema_id,
+            status=row.status,
+            documents=None,
+            file_count=row.file_count,
+            files_completed=None,
+            files_failed=None,
+            files_pending=None,
+            metadata=row.job_metadata,
+            submitted_at=fmt_dt(row.submitted_at) or "",
+            completed_at=fmt_dt(row.completed_at) or "",
+            error=row.error,
+        )
 
 
 # ---------------------------------------------------------------------------
