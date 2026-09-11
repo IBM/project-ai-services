@@ -23,10 +23,10 @@ spec:
       resources:
         limits:
           cpu: "8"
-          memory: "4Gi"
+          memory: "5Gi"
         requests:
           cpu: "8"
-          memory: "4Gi"
+          memory: "5Gi"
       runtime: cpu-temp
       storageUri: {{ .Values.reranker.storageUri }}
       args:

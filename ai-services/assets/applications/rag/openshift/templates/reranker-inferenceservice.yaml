@@ -28,11 +28,11 @@ spec:
       resources:
         limits:
           cpu: "8"
-          memory: "4Gi"
+          memory: "5Gi"
           ibm.com/spyre_pf: "1"
         requests:
           cpu: "8"
-          memory: "4Gi"
+          memory: "5Gi"
           ibm.com/spyre_pf: "1"
       runtime: spyre-temp
       storageUri: {{ .Values.reranker.storageUri }}
