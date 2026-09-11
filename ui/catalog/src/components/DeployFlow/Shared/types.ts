@@ -1,3 +1,8 @@
+export interface DropdownItem {
+  id: string;
+  label: string;
+}
+
 export interface ComponentConfig {
   providerId: string;
   params: Record<string, unknown>;
@@ -15,6 +20,8 @@ export interface DeployFormData {
   version: string;
   globalComponents: Record<string, ComponentConfig>; // e.g., { embedding: {...}, vector_store: {...} }
   services: Record<string, ServiceConfig>; // e.g., { digitize: {...}, chat: {...} }
+  dataSources?: string[]; // selected data source connector IDs
+  uploadFromSourceEnabled?: boolean; // toggle for "Upload data from source locations"
 }
 
 export interface BaseStepProps {
