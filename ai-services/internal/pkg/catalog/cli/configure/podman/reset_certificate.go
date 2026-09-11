@@ -8,6 +8,7 @@ import (
 	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -73,7 +74,8 @@ func ResetCatalogCertificate(ctx context.Context, sslCertPath, sslKeyPath string
 // prepareCatalogOpts fetches the current catalog pod config, validates the base dir,
 // and ensures the domain has not changed relative to the new certificates.
 func prepareCatalogOpts(ctx context.Context, deployCtx *deploy.DeployContext, sslCertPath, sslKeyPath string) (*catalogUtils.PodmanConfigureOptions, error) {
-	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstant.CatalogComponentValue
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime, catalogPodLabel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get catalog pod details: %w", err)
 	}

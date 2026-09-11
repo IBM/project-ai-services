@@ -59,7 +59,8 @@ Note: Supported for podman runtime only.`,
 		ctx := cmd.Context()
 
 		if resetPodmanAuthFlag {
-			return workerpodman.ResetPodmanAuth(ctx)
+			// Delete the secret so the fresh auth.json is picked up on pod recreation.
+			return workerpodman.ResetPodmanAuth(ctx, true)
 		} else if resetCertificateFlag {
 			return workerpodman.ResetWorkerCertificate(ctx,
 				catalogUtils.SanitizeFilePath(sslCertPath),
