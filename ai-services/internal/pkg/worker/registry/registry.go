@@ -220,30 +220,47 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 	return entry, nil
 }
 
-// Preregister creates a pending DB row for a named worker and returns a single-use
-// bootstrap token the operator passes to the worker daemon at startup.
-// If a row already exists (re-registration), it is reset to pending and a new token
-// supersedes the old one.
+// Preregister issues a single-use bootstrap token for a named worker and
+// updates the database accordingly.
 //
-// If the worker is currently active in the in-memory map (i.e. its stream is still
-// open), it is evicted first so that the stale connection can no longer update the
-// heartbeat on the now-pending row.
+// For a worker that has never registered before (no DB row, or status=pending),
+// a new row is upserted with status=pending — the full Register RPC + token
+// exchange is required to complete bootstrap.
+//
+// For a worker that has already completed bootstrap (status=ready or
+// status=disconnected), the DB row is left intact so that Restore can still
+// find it on the next CommandStream attempt.  Only a fresh token is issued.
+// This covers the --skip-cleanup uninstall + re-configure cycle: the worker
+// has valid mTLS credentials on disk and will skip Register and reconnect
+// directly via ConnectAndStream.
+//
+// In both cases any live in-memory entry is evicted first so that a stale
+// UpdateHeartbeat can no longer write to the row.
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
 	}
 
-	// Evict any live in-memory entry so UpdateHeartbeat stops updating the row
-	// we are about to reset to pending.
+	// Evict any live in-memory entry.
 	r.Disconnect(ctx, workerName)
 
-	w := &models.Worker{
-		Name:        workerName,
-		RuntimeType: models.WorkerRuntimeTypeUnknown,
-		Status:      models.WorkerStatusPending,
+	existing, err := r.repo.GetByName(ctx, workerName)
+	if err != nil {
+		return "", fmt.Errorf("worker registry: DB lookup for %s: %w", workerName, err)
 	}
-	if err := r.repo.Upsert(ctx, w); err != nil {
-		return "", fmt.Errorf("worker registry: DB upsert failed for %s: %w", workerName, err)
+
+	// Only reset to pending when this is a first registration or a retry of an
+	// incomplete bootstrap. For ready/disconnected workers the row stays as-is
+	// so Restore can reconnect them without the full Register flow.
+	if existing == nil || existing.Status == models.WorkerStatusPending {
+		w := &models.Worker{
+			Name:        workerName,
+			RuntimeType: models.WorkerRuntimeTypeUnknown,
+			Status:      models.WorkerStatusPending,
+		}
+		if err := r.repo.Upsert(ctx, w); err != nil {
+			return "", fmt.Errorf("worker registry: DB upsert failed for %s: %w", workerName, err)
+		}
 	}
 
 	return r.tokenStore.IssueToken(workerName), nil
