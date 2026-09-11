@@ -16,6 +16,8 @@ export { default as DataSourceConnectorsTable } from "./DataSourceConnectorsTabl
 export type { DataSourceConnectorsTableProps } from "./DataSourceConnectorsTable";
 export { default as ConnectorDetailsPanel } from "./ConnectorDetailsPanel";
 export type { ConnectorDetailsPanelProps } from "./ConnectorDetailsPanel";
+export { default as WorkerResourcesTable } from "./WorkerResourcesTable";
+export type { WorkerResourcesTableProps } from "./WorkerResourcesTable";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
   DeployFormData,

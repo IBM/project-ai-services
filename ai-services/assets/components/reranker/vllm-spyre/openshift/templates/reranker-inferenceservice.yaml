@@ -37,7 +37,7 @@ spec:
           memory: {{ .Values.resources.limits.memory | quote }}
           ibm.com/spyre_pf: {{ index .Values.resources.limits "ibm.com/spyre_pf" | quote }}
       runtime: spyre-temp
-      storageUri: {{ .Values.storageUri }}
+      storageUri: hf://{{ .Values.model }}
       args:
         - --served-model-name={{ .Values.model }}
         - -tp 1

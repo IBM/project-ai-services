@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import type { ReactNode } from "react";
 import {
   TableToolbar,
@@ -49,6 +50,33 @@ interface TableToolbarActionsProps {
   children?: ReactNode;
 }
 
+/**
+ * Carbon's OverflowMenu clones internal props (closeMenu, handleOverflowMenuItemFocus)
+ * onto each direct child. A plain <li> forwards them to the DOM, causing React warnings.
+ * This wrapper absorbs those props so they never reach the DOM.
+ */
+
+const OverflowMenuPanel = forwardRef<
+  HTMLLIElement,
+  {
+    children?: ReactNode;
+    className?: string;
+    role?: string;
+    closeMenu?: unknown;
+    handleOverflowMenuItemFocus?: unknown;
+  }
+>(
+  (
+    { children, closeMenu: _c, handleOverflowMenuItemFocus: _h, ...rest },
+    ref,
+  ) => (
+    <li ref={ref} {...rest}>
+      {children}
+    </li>
+  ),
+);
+OverflowMenuPanel.displayName = "OverflowMenuPanel";
+
 const TableToolbarActions = ({
   search,
   headers,
@@ -95,9 +123,12 @@ const TableToolbarActions = ({
             size="lg"
             flipped
           >
-            <li className={sharedStyles.overflowMenuContent} role="none">
+            <OverflowMenuPanel
+              className={sharedStyles.overflowMenuContent}
+              role="none"
+            >
               {filterSlot}
-            </li>
+            </OverflowMenuPanel>
           </OverflowMenu>
         )}
 
@@ -117,7 +148,10 @@ const TableToolbarActions = ({
           size="lg"
           flipped
         >
-          <li className={sharedStyles.overflowMenuContent} role="none">
+          <OverflowMenuPanel
+            className={sharedStyles.overflowMenuContent}
+            role="none"
+          >
             <h6 className={sharedStyles.overflowMenuHeading}>Edit columns</h6>
             <CheckboxGroup legendText="">
               {toggleableHeaders.map((header) => (
@@ -136,7 +170,7 @@ const TableToolbarActions = ({
                 Reset
               </Button>
             </div>
-          </li>
+          </OverflowMenuPanel>
         </OverflowMenu>
 
         {children}

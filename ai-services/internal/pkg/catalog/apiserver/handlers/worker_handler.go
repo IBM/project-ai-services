@@ -19,6 +19,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
 
+const (
+	// workerNameMinLen is the minimum allowed length for a worker name after trimming whitespace.
+	workerNameMinLen = 3
+	// workerNameMaxLen is the maximum allowed length for a worker name after trimming whitespace.
+	workerNameMaxLen = 64
+)
+
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
 	reg         *registry.Registry
@@ -34,7 +41,7 @@ func NewWorkerHandler(reg *registry.Registry, repo repository.WorkerRepository, 
 
 // createWorkerReq is the request body for registering a new worker.
 type createWorkerReq struct {
-	WorkerName string `json:"worker_name" binding:"required,min=1,max=100"`
+	WorkerName string `json:"worker_name" binding:"required"`
 }
 
 // createWorkerResp is the response body for a newly registered worker.
@@ -66,13 +73,30 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 		return
 	}
 
-	// Normalise: trim surrounding whitespace and lowercase so that
-	// "Worker-A", "worker-a", and " worker-a " all resolve to the same name.
-	req.WorkerName = strings.ToLower(strings.TrimSpace(req.WorkerName))
-	if req.WorkerName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "worker_name must not be blank"})
+	// Normalise: trim surrounding whitespace only. Case is preserved so that
+	// the DB row and in-memory entry reflect the name as the operator gave it.
+	// All lookups use case-insensitive comparison so "Worker-A" and "worker-a"
+	// resolve to the same entry regardless of how it was registered.
+	req.WorkerName = strings.TrimSpace(req.WorkerName)
+	if len(req.WorkerName) < workerNameMinLen || len(req.WorkerName) > workerNameMaxLen {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "worker name must be between 3 and 64 characters"})
 
 		return
+	}
+
+	// "Local" is reserved for the catalog-machine worker registered by the
+	// configure flow. It is only allowed when LOCAL_WORKER=true, meaning this
+	// catalog instance is configured to host a co-located worker.
+	// Normalise to the canonical casing so the DB row and token store always
+	// use "Local" regardless of how the operator typed it.
+	if strings.EqualFold(req.WorkerName, workerconstants.LocalWorkerName) {
+		if utils.GetEnv(workerconstants.LocalWorkerEnvVar, "") != "true" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("worker name %q is reserved", req.WorkerName)})
+
+			return
+		}
+
+		req.WorkerName = workerconstants.LocalWorkerName
 	}
 
 	ctx := c.Request.Context()
@@ -102,7 +126,12 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 
 func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 	if h.runtimeType == types.RuntimeTypeOpenShift {
-		return gateway.GatewayRouteHost(ctx)
+		host, err := gateway.GatewayRouteHost(ctx)
+		if err != nil {
+			return "", err
+		}
+
+		return fmt.Sprintf("%s:%d", host, workerconstants.OpenShiftRoutePort), nil
 	}
 
 	port := fmt.Sprintf("%d", h.gatewayPort)
@@ -209,6 +238,7 @@ func (h *WorkerHandler) GetWorker(c *gin.Context) {
 //	@Param			id	path	string	true	"Worker ID (UUID)"
 //	@Success		204	"Worker deleted"
 //	@Failure		400	{object}	map[string]interface{}	"Invalid worker ID"
+//	@Failure		403	{object}	map[string]interface{}	"Local worker cannot be deleted"
 //	@Failure		404	{object}	map[string]interface{}	"Worker not found"
 //	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
@@ -222,6 +252,27 @@ func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+
+	// Resolve the worker name before deletion so we can block the Local worker.
+	w, err := h.repo.GetByID(ctx, workerID)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to fetch worker %s: %v", workerID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete worker"})
+
+		return
+	}
+
+	if w == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "worker not found"})
+
+		return
+	}
+
+	if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "the Local worker cannot be deleted"})
+
+		return
+	}
 
 	deleted, err := h.reg.Deregister(ctx, workerID)
 	if err != nil {

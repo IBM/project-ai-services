@@ -13,7 +13,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	swaggerFiles "github.com/swaggo/files"
@@ -42,11 +41,11 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	datasourceH := handlers.NewDatasourceHandler(datasourceSvc)
 	registerCatalogRoutes(v1, handlers.NewCatalogHandler(catalogProvider), handlers.NewResourcesHandler(workerReg), auth)
 	registerApplicationRoutes(v1, handlers.NewApplicationHandler(appService), datasourceH, auth)
-	runtimeType := types.RuntimeTypePodman
-	if vars.RuntimeFactory != nil {
-		runtimeType = vars.RuntimeFactory.GetRuntimeType()
+	if vars.RuntimeFactory == nil {
+		panic("runtime factory not initialised: --runtime flag is required")
 	}
-	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg, workerRepo, runtimeType, workerGatewayPort), auth)
+
+	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg, workerRepo, vars.RuntimeFactory.GetRuntimeType(), workerGatewayPort), auth)
 	registerDatasourceRoutes(v1, datasourceH, auth)
 	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
 

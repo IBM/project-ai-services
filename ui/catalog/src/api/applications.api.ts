@@ -24,9 +24,12 @@ import type {
   ProviderSchema,
   LLMOption,
   DeploymentPayload,
+  ApplicationDatasourceApiItem,
+  ApplicationDatasourcesListResponse,
 } from "@/types/api.types";
 import type { DigitalAssistantRow } from "@/pages/DigitalAssistants/types";
 import type { DeployedServicesRow } from "@/components/DeployedServicesTable/types";
+import type { ApplicationDatasourceRow } from "@/components/DeploymentDetails/components/ApplicationDatasourcesTable/types";
 
 // Fetches the list of available digital assistant architectures
 export async function fetchArchitectures(): Promise<ArchitectureSummary[]> {
@@ -395,4 +398,72 @@ export async function fetchAllDeployedServices(
   }
 
   return allData;
+}
+
+// Transforms an ApplicationDatasourceApiItem into an ApplicationDatasourceRow for display
+export function transformDatasourceToRow(
+  item: ApplicationDatasourceApiItem,
+): ApplicationDatasourceRow {
+  const raw = item.last_sync ?? "";
+  return {
+    id: item.id,
+    name: item.name,
+    source_type: item.provider.name,
+    status: item.status,
+    files:
+      item.files === null || item.files === undefined || item.files === 0
+        ? "-"
+        : String(item.files),
+    // Show "In progress" whenever a sync is active, regardless of whether a
+    // previous sync timestamp exists. Only fall back to calculateUptime once
+    // the sync has completed (status is no longer "syncing").
+    last_sync:
+      item.status === "syncing"
+        ? "In progress"
+        : raw
+          ? calculateUptime(raw)
+          : "—",
+    messages: item.message ?? "",
+    actions: "",
+  };
+}
+
+// Fetches a single page of datasources for a given application
+export async function fetchApplicationDatasources(
+  applicationId: string,
+  page: number,
+  pageSize: number,
+): Promise<{
+  rows: ApplicationDatasourceRow[];
+  pagination: PaginationMetadata;
+}> {
+  const response = await api.get<ApplicationDatasourcesListResponse>(
+    APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+    { params: { page, page_size: pageSize } },
+  );
+  return {
+    rows: response.data.data.map(transformDatasourceToRow),
+    pagination: response.data.pagination,
+  };
+}
+
+// Fetches all datasources for a given application — used for CSV export
+export async function fetchAllApplicationDatasources(
+  applicationId: string,
+): Promise<ApplicationDatasourceRow[]> {
+  let currentPage = 1;
+  let hasNext = true;
+  const allData: ApplicationDatasourceApiItem[] = [];
+
+  while (hasNext) {
+    const response = await api.get<ApplicationDatasourcesListResponse>(
+      APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+      { params: { page: currentPage, page_size: 100 } },
+    );
+    allData.push(...response.data.data);
+    hasNext = response.data.pagination?.has_next ?? false;
+    currentPage++;
+  }
+
+  return allData.map(transformDatasourceToRow);
 }
