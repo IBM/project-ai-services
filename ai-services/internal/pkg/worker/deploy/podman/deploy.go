@@ -72,8 +72,9 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
 
-	if err := checkAndCleanExistingWorkerPods(ctx, rt); err != nil {
-		return fmt.Errorf("failed to verify existing worker pods: %w", err)
+	// Check existing worker logs; if a failure is detected, uninstall all worker components.
+	if err := deployutils.CheckLogsAndUninstall(ctx, rt); err != nil {
+		return err
 	}
 
 	deployed, existingResource, err := CheckStatus(ctx, rt, tp)
@@ -106,9 +107,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 		return err
 	}
 
-	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
-		cleanupFailedWorkerPods(ctx, rt)
-
+	if err := deployutils.CheckLogsAndUninstall(ctx, rt); err != nil {
 		return err
 	}
 
@@ -117,44 +116,6 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	return nil
 }
 
-// checkAndCleanExistingWorkerPods checks if any worker pods are present and inspects
-// their container logs. If an error is detected or logs indicate failure, it cleans up
-// the failed pods so setup can proceed cleanly.
-func checkAndCleanExistingWorkerPods(ctx context.Context, rt runtime.Runtime) error {
-	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {workerconstants.WorkerPodLabel},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	if len(pods) > 0 {
-		logger.InfolnCtx(ctx, "Existing worker pods found, verifying container logs...")
-		if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
-			logger.WarningfCtx(ctx, "Existing worker pod is in a failed state (%v); deleting pod and proceeding with setup", err)
-			cleanupFailedWorkerPods(ctx, rt)
-		}
-	}
-
-	return nil
-}
-
-// cleanupFailedWorkerPods deletes all worker pods after a failed join attempt.
-func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
-	pods, listErr := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
-	if listErr != nil {
-		logger.ErrorfCtx(ctx, "failed to list worker pods for cleanup: %v\n", listErr)
-
-		return
-	}
-
-	for _, pod := range pods {
-		logger.InfofCtx(ctx, "Deleting '%s' pod, as worker failed to join", pod.Name)
-		if delErr := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); delErr != nil {
-			logger.ErrorfCtx(ctx, "failed to delete worker pod %s: %v\n", pod.Name, delErr)
-		}
-	}
-}
 
 // CheckStatus checks whether the worker node is already deployed by listing
 // pods with the worker proxy and worker pod labels.

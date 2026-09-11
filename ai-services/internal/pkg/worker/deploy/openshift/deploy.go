@@ -53,10 +53,12 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
-	if err := checkAndCleanExistingWorkerPods(ctx, rt, namespace); err != nil {
-		return fmt.Errorf("failed to verify existing worker pods: %w", err)
+	// Step 3: Check existing worker logs; if a failure is detected, uninstall all worker components.
+	if err := deployutils.CheckLogsAndUninstall(ctx, rt); err != nil {
+		return err
 	}
 
+	// Step4: Deploy worker helm chart
 	return deployWorkerHelm(ctx, chartData, values, namespace, rt)
 }
 
@@ -101,7 +103,7 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 		s.Fail("failed to deploy worker")
 
 		// Verifying worker pod logs for the error message from 'grpcstream' cmd
-		if err := checkAndUninstallOnWorkerErr(ctx, rt, namespace); err != nil {
+		if err := deployutils.CheckLogsAndUninstall(ctx, rt); err != nil {
 			return err
 		}
 
@@ -109,50 +111,13 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 	}
 
 	// Verifying worker pod logs for the error message from 'grpcstream' cmd
-	if err := checkAndUninstallOnWorkerErr(ctx, rt, namespace); err != nil {
+	if err := deployutils.CheckLogsAndUninstall(ctx, rt); err != nil {
 		s.Fail("worker failed to join")
 
 		return err
 	}
 
 	s.Stop("Worker deployed successfully")
-
-	return nil
-}
-
-// checkAndCleanExistingWorkerPods checks if any worker pods are present and inspects
-// their container logs. If an error is detected or logs indicate failure, it uninstalls
-// the Helm release so setup can proceed cleanly.
-func checkAndCleanExistingWorkerPods(ctx context.Context, rt runtime.Runtime, namespace string) error {
-	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {workerconstants.WorkerPodLabel},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list pods: %w", err)
-	}
-
-	if len(pods) > 0 {
-		logger.InfolnCtx(ctx, "Existing worker pods found, verifying container logs...")
-		if err := checkAndUninstallOnWorkerErr(ctx, rt, namespace); err != nil {
-			logger.WarningfCtx(ctx, "Existing worker pod was in a failed state (%v); uninstalled release and proceeding with setup", err)
-		}
-	}
-
-	return nil
-}
-
-// checkAndUninstallOnWorkerErr checks the worker container logs for a gRPC join
-// error. If a join error is found, it uninstalls the Helm release before
-// returning the error so the namespace is left clean for a retry.
-func checkAndUninstallOnWorkerErr(ctx context.Context, rt runtime.Runtime, namespace string) error {
-	if workerErr := deployutils.CheckWorkerContainerLogs(ctx, rt); workerErr != nil {
-		uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
-		if uninstallErr != nil {
-			logger.ErrorfCtx(ctx, "failed to delete '%s' release: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
-		}
-
-		return workerErr
-	}
 
 	return nil
 }
