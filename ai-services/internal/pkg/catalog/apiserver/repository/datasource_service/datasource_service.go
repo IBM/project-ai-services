@@ -18,7 +18,11 @@ import (
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
+	runtimetypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 const (
@@ -28,14 +32,6 @@ const (
 
 // ValidationError re-exported so callers use the same type as for application errors.
 type ValidationError = validators.ValidationError
-
-// ServiceConnectorClientInterface is the contract for sending connector payloads to downstream
-// services that accept datasource connectors.
-type ServiceConnectorClientInterface interface {
-	Connect(ctx context.Context, baseURL string, req apimodels.ConnectDatasourceRequest) error
-	// Disconnect calls DELETE /v1/connectors/{connectorID} on the service.
-	Disconnect(ctx context.Context, baseURL, connectorID string) error
-}
 
 // DatasourceService is the single implementation of the datasource connector business logic.
 // It is provider-agnostic: provider-specific behaviour (connection testing and
@@ -49,7 +45,7 @@ type DatasourceService struct {
 	svcDepRepo      dbrepo.ServiceDependencyRepository
 	validator       *validators.ConnectorValidator
 	catalogProvider *catalog.CatalogProvider
-	serviceClient   ServiceConnectorClientInterface
+	workerRegistry  stream.WorkerRegistry
 	encryptionKey   string
 	// testers maps providerID → ConnectionTester. Populated by NewDatasourceService.
 	testers map[string]ConnectionTester
@@ -65,7 +61,7 @@ func NewDatasourceService(
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	validator *validators.ConnectorValidator,
 	catalogProvider *catalog.CatalogProvider,
-	serviceClient ServiceConnectorClientInterface,
+	workerRegistry stream.WorkerRegistry,
 	encryptionKey string,
 ) *DatasourceService {
 	return &DatasourceService{
@@ -74,13 +70,34 @@ func NewDatasourceService(
 		svcDepRepo:      svcDepRepo,
 		validator:       validator,
 		catalogProvider: catalogProvider,
-		serviceClient:   serviceClient,
+		workerRegistry:  workerRegistry,
 		encryptionKey:   encryptionKey,
 		testers: map[string]ConnectionTester{
 			catalogconstants.DatasourceProviderObjectStorage: NewObjectStorageTester(),
 			catalogconstants.DatasourceProviderFileSystem:    NewFileSystemTester(),
 		},
 	}
+}
+
+// runtimeFor returns a RemoteRuntime for the given worker UUID by looking up the
+// worker name and runtime type from the registry. Returns an error if the worker
+// is not connected.
+func (s *DatasourceService) runtimeFor(ctx context.Context, workerID *uuid.UUID) (runtime.Runtime, error) {
+	if workerID == nil {
+		return nil, fmt.Errorf("application has no worker assigned")
+	}
+
+	workerName, ok := s.workerRegistry.WorkerNameByID(*workerID)
+	if !ok {
+		return nil, fmt.Errorf("worker %s is not connected", *workerID)
+	}
+
+	rtStr, ok := s.workerRegistry.WorkerRuntimeType(workerName)
+	if !ok {
+		return nil, fmt.Errorf("runtime type for worker %s not available", workerName)
+	}
+
+	return remoteruntime.New(workerName, runtimetypes.RuntimeType(rtStr), s.workerRegistry), nil
 }
 
 // CreateDatasource is the single create flow shared by all providers:
@@ -390,7 +407,19 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 	applications := make([]apimodels.ConnectedApplicationItem, 0, len(linkedRows))
 	for _, row := range linkedRows {
 		baseURL := extractInternalEndpointURL(row.EndpointsJSON)
-		syncStatus, lastSyncAt, syncErr := fetchSyncState(ctx, connectorID, baseURL)
+
+		app, appErr := s.appRepo.GetByID(ctx, row.ApplicationID)
+		var workerID *uuid.UUID
+		if appErr == nil && app != nil {
+			workerID = app.WorkerID
+		}
+
+		rt, rtErr := s.runtimeFor(ctx, workerID)
+		if rtErr != nil {
+			logger.WarningfCtx(ctx, "worker not reachable for application %s: %v", row.ApplicationID, rtErr)
+		}
+
+		syncDetails := s.fetchServiceSyncDetails(ctx, rt, connectorID, baseURL)
 
 		// Resolve the type name from catalog metadata; fall back to catalog_id.
 		typeName := row.ApplicationCatalogID
@@ -409,11 +438,9 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 			Name:       row.ApplicationName,
 			CatalogID:  row.ApplicationCatalogID,
 			Type:       typeName,
-			SyncStatus: syncStatus,
-			LastSyncAt: lastSyncAt,
-		}
-		if syncErr != "" {
-			item.ErrMsg = syncErr
+			SyncStatus: syncDetails.SyncStatus,
+			LastSyncAt: syncDetails.LastSyncAt,
+			ErrMsg:     syncDetails.ErrMsg,
 		}
 		applications = append(applications, item)
 	}
@@ -514,10 +541,28 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 		return uuid.Nil, err
 	}
 
+	// All eligible services belong to the same application — resolve runtime once.
+	if len(linkedServices) == 0 {
+		return uuid.Nil, nil
+	}
+
+	app, appErr := s.appRepo.GetByID(ctx, linkedServices[0].ApplicationID)
+	if appErr != nil {
+		return uuid.Nil, fmt.Errorf("failed to load application: %w", appErr)
+	}
+
+	rt, rtErr := s.runtimeFor(ctx, app.WorkerID)
+	if rtErr != nil {
+		return uuid.Nil, &ValidationError{
+			Code:    http.StatusBadGateway,
+			Message: fmt.Sprintf("worker not reachable: %v", rtErr),
+		}
+	}
+
 	var connectedServiceID uuid.UUID
 
 	for _, svc := range linkedServices {
-		if err := s.sendToService(ctx, svc, connector, connectionDetails, datasourceID); err != nil {
+		if err := s.sendToService(ctx, rt, svc, connector, connectionDetails, datasourceID); err != nil {
 			return uuid.Nil, err
 		}
 
@@ -607,6 +652,7 @@ func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, conn
 // service_dependency row. Returns a *ValidationError on downstream failure.
 func (s *DatasourceService) sendToService(
 	ctx context.Context,
+	rt runtime.Runtime,
 	svc dbrepo.LinkedServiceRow,
 	connector *dbmodels.Connector,
 	connectionDetails map[string]any,
@@ -636,7 +682,7 @@ func (s *DatasourceService) sendToService(
 		ConnectionDetails: connectionDetails,
 	}
 
-	if err := s.serviceClient.Connect(ctx, svc.URL, connectReq); err != nil {
+	if err := catalogclient.NewServiceClient(rt, svc.URL).Connect(ctx, connectReq); err != nil {
 		return &ValidationError{
 			Code:    http.StatusBadGateway,
 			Message: fmt.Sprintf("failed to connect datasource to service %s: %v", svc.ServiceCatalogID, err),
@@ -791,7 +837,12 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 
 	// Step 5: fetch live sync state using the endpoint URL captured in step 3.
 	// Degrades gracefully to sync_status="unknown" when the service is unreachable.
-	serviceDetails := fetchServiceSyncDetails(ctx, datasourceID, baseURL)
+	rt, rtErr := s.runtimeFor(ctx, app.WorkerID)
+	if rtErr != nil {
+		logger.WarningfCtx(ctx, "worker not reachable for application %s: %v", applicationID, rtErr)
+	}
+
+	serviceDetails := s.fetchServiceSyncDetails(ctx, rt, datasourceID, baseURL)
 
 	return &apimodels.GetApplicationDatasourceResponse{
 		ID:             connector.ID.String(),
@@ -853,25 +904,29 @@ func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Con
 		}
 	}
 
-	return s.disconnectOneDatasource(ctx, datasourceID, appLinked)
+	// Resolve runtime once from the already-loaded app.
+	rt, rtErr := s.runtimeFor(ctx, app.WorkerID)
+	if rtErr != nil {
+		logger.WarningfCtx(ctx, "worker not reachable for application %s during disconnect: %v", applicationID, rtErr)
+	}
+
+	return s.disconnectOneDatasource(ctx, rt, datasourceID, appLinked)
 }
 
 // disconnectOneDatasource calls DELETE /v1/connectors/{id} on each linked service and
 // removes the service_dependency row.
 // A 404 from the downstream service is treated as success — the connector was already
-// removed (idempotency for partial-failure retries). The 404 handling lives here rather
-// than in the client so that other callers of Disconnect can choose to treat 404 as an
-// error if appropriate. DB cleanup failures are logged but do not block the caller.
-func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) error {
+// removed (idempotency for partial-failure retries). DB cleanup failures are logged
+// but do not block the caller.
+func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, rt runtime.Runtime, datasourceID uuid.UUID, linkedServices []dbrepo.LinkedServiceRow) error {
 	for _, svc := range linkedServices {
 		url := extractInternalEndpointURL(svc.EndpointsJSON)
 		if url != "" {
-			if err := s.serviceClient.Disconnect(ctx, url, datasourceID.String()); err != nil {
-				// 404 means the connector is already gone on the downstream side —
-				// treat as success so we still clean up the DB row.
+			err := catalogclient.NewServiceClient(rt, url).Disconnect(ctx, datasourceID.String())
+			if err != nil {
 				var httpErr *catalogclient.ServiceHTTPError
 				if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-					logger.InfofCtx(ctx, "connector %s not found from service %s, continuing cleanup", datasourceID, svc.ServiceCatalogID)
+					logger.InfofCtx(ctx, "connector %s not found on service %s, continuing cleanup", datasourceID, svc.ServiceCatalogID)
 				} else {
 					return &ValidationError{
 						Code:    http.StatusBadGateway,
@@ -1004,7 +1059,29 @@ func (s *DatasourceService) propagateCredentials(
 			continue
 		}
 
-		if err := catalogclient.NewServiceClient(baseURL).UpdateConnector(ctx, datasourceID.String(), credPayload); err != nil {
+		app, appErr := s.appRepo.GetByID(ctx, svc.ApplicationID)
+		var rt runtime.Runtime
+		var rtErr error
+		if appErr == nil {
+			rt, rtErr = s.runtimeFor(ctx, app.WorkerID)
+		}
+
+		if appErr != nil || rtErr != nil {
+			msg := fmt.Sprintf("failed to load application: %v", appErr)
+			if rtErr != nil {
+				msg = fmt.Sprintf("worker not reachable: %v", rtErr)
+			}
+
+			propErrors = append(propErrors, apimodels.PropagationError{
+				ID:    svc.ApplicationID.String(),
+				Name:  svc.ApplicationName,
+				Error: msg,
+			})
+
+			continue
+		}
+
+		if err := catalogclient.NewServiceClient(rt, baseURL).UpdateConnector(ctx, datasourceID.String(), credPayload); err != nil {
 			propErrors = append(propErrors, apimodels.PropagationError{
 				ID:    svc.ApplicationID.String(),
 				Name:  svc.ApplicationName,
@@ -1046,31 +1123,9 @@ func datasourceItemFromConnector(c *dbmodels.Connector) apimodels.DatasourceItem
 	}
 }
 
-// fetchSyncState calls GET /v1/connectors/{connectorID} on the downstream service pod at baseURL
-// using catalogclient.ServiceClient (resty-based) and returns the sync_status, last_sync_at,
-// and a non-empty errMsg when the state could not be fetched (empty baseURL or HTTP failure).
-// The caller embeds errMsg in the response item so users know why sync state is unavailable;
-// the connector record is always returned regardless of sync-state fetch outcome.
-func fetchSyncState(ctx context.Context, connectorID uuid.UUID, baseURL string) (syncStatus string, lastSyncAt *string, errMsg string) {
-	if baseURL == "" {
-		return "unknown", nil, "no api endpoint registered for this service"
-	}
-
-	state, err := catalogclient.NewServiceClient(baseURL).GetConnectorSync(ctx, connectorID.String())
-	if err != nil {
-		logger.WarningfCtx(ctx, "failed to fetch sync state for datasource %s from %s: %v", connectorID, baseURL, err)
-
-		return "unknown", nil, fmt.Sprintf("failed to fetch sync state: %v", err)
-	}
-
-	return state.SyncStatus, state.LastSyncAt, ""
-}
-
-// fetchServiceSyncDetails calls GET /v1/connectors/{connectorID} on the connected service
-// at baseURL and returns a fully-populated ServiceSyncDetails. On failure (empty baseURL
-// or HTTP error) it degrades gracefully: SyncStatus = "unknown", all numeric/timestamp
-// fields = nil, ErrMsg populated.
-func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL string) apimodels.ServiceSyncDetails {
+// fetchServiceSyncDetails calls GET /v1/connectors/{connectorID} via HTTPProxy and returns a
+// fully-populated ServiceSyncDetails. Degrades gracefully on failure.
+func (s *DatasourceService) fetchServiceSyncDetails(ctx context.Context, rt runtime.Runtime, connectorID uuid.UUID, baseURL string) apimodels.ServiceSyncDetails {
 	if baseURL == "" {
 		return apimodels.ServiceSyncDetails{
 			SyncStatus: "unknown",
@@ -1078,7 +1133,7 @@ func fetchServiceSyncDetails(ctx context.Context, connectorID uuid.UUID, baseURL
 		}
 	}
 
-	state, err := catalogclient.NewServiceClient(baseURL).GetConnectorSync(ctx, connectorID.String())
+	state, err := catalogclient.NewServiceClient(rt, baseURL).GetConnectorSync(ctx, connectorID.String())
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to fetch sync state for connector %s from %s: %v", connectorID, baseURL, err)
 
@@ -1156,11 +1211,16 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 		return nil, fmt.Errorf("failed to list application connectors: %w", err)
 	}
 
+	rt, err := s.runtimeFor(ctx, app.WorkerID)
+	if err != nil {
+		return nil, &ValidationError{Code: http.StatusBadGateway, Message: fmt.Sprintf("worker not reachable: %v", err)}
+	}
+
 	offset := (req.Page - 1) * req.PageSize
 
 	// Resolve the service base URL and call GET /v1/connectors with the caller's pagination
 	// params. The service response is authoritative for both the page content and total count.
-	baseURL, servicePage := s.fetchServiceConnectors(ctx, allConnectorIDs, req.PageSize, offset)
+	baseURL, servicePage := s.fetchServiceConnectors(ctx, rt, allConnectorIDs, req.PageSize, offset)
 
 	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID)
 	if err != nil {
@@ -1187,10 +1247,9 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 }
 
 // fetchServiceConnectors resolves the service base URL from the first connector ID in the
-// list (via the existing GetLinkedServiceEndpoints + extractInternalEndpointURL path), then calls
-// GET /v1/connectors once with the given limit/offset. Returns an empty-page result when no
-// endpoint is found or the call fails.
-func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
+// list via GetLinkedServiceEndpoints, then calls GET /v1/connectors via HTTPProxy.
+// Returns an empty-page result when no endpoint is found or the call fails.
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, rt runtime.Runtime, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
 	empty := catalogclient.ServiceConnectorPage{ByID: make(map[string]apimodels.ConnectorItem)}
 
 	if len(connectorIDs) == 0 {
@@ -1217,7 +1276,7 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, connecto
 		return "", empty
 	}
 
-	page, err := catalogclient.NewServiceClient(baseURL).ListConnectors(ctx, limit, offset)
+	page, err := catalogclient.NewServiceClient(rt, baseURL).ListConnectors(ctx, limit, offset)
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to list connectors from service at %s: %v", baseURL, err)
 
