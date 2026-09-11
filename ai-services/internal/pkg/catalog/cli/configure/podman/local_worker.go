@@ -9,6 +9,7 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmanruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
@@ -26,15 +27,16 @@ import (
 func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts catalogUtils.PodmanConfigureOptions, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	// If the worker is already fully deployed (pods + secrets all present),
-	// skip registration and re-deploy — it will reconnect on its own.
-	deployed, err := workerpodman.IsWorkerDeployed(ctx, rt)
+	// If the worker's mTLS secret is already present (preserved by --skip-cleanup),
+	// the worker has valid on-disk TLS credentials and will reconnect to the new
+	// control plane on its own — skip registration and re-deploy entirely.
+	workerSecretsExist, err := rt.SecretExists(ctx, workerconstants.WorkerMTLSSecretName)
 	if err != nil {
-		return fmt.Errorf("local worker join: check worker status: %w", err)
+		return fmt.Errorf("local worker join: check worker secrets: %w", err)
 	}
 
-	if deployed {
-		logger.InfolnCtx(ctx, "Local worker already deployed — skipping registration.")
+	if workerSecretsExist {
+		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
 
 		return nil
 	}
