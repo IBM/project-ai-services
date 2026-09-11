@@ -57,7 +57,7 @@ instruct:
   apiKey: ""
   model:
     # @hidden
-    name: ibm-granite/granite-4.1-8b-fp8
+    name: ibm-granite/granite-4.1-8b
     # @hidden
     maxModelLen: 32768
     # @hidden

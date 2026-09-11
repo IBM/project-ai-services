@@ -59,11 +59,11 @@ instruct:
   apiKey: ""
   model:
     # @hidden
-    name: ibm-granite/granite-3.3-8b-instruct
+    name: ibm-granite/granite-4.1-8b
     # @hidden
-    maxNumBatchedTokens: 26208
+    maxNumBatchedTokens: 8096
     # @hidden
-    maxModelLen: 26208
+    maxModelLen: 8096
     # @hidden
     maxBatchSize: 32
 
