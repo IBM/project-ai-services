@@ -547,3 +547,14 @@ export interface ApplicationDatasourcesListResponse {
     has_prev: boolean;
   };
 }
+
+// Matches backend ConnectDatasourcesResponse (PUT /applications/:id/datasources → 207).
+// Each entry describes one datasource that failed to connect.
+export interface ConnectDatasourceError {
+  datasource_id: string;
+  error: string;
+}
+
+export interface ConnectDatasourcesResponse {
+  errors: ConnectDatasourceError[];
+}

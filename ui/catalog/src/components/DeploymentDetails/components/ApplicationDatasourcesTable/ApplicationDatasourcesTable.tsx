@@ -350,12 +350,12 @@ const ApplicationDatasourcesTable = ({
             <ConnectDatasourceModal
               open={isConnectModalOpen}
               applicationId={applicationId}
-              connectedIds={new Set(state.rowsData.map((r) => r.id))}
               onClose={() => setIsConnectModalOpen(false)}
               onConnected={() => {
                 setIsConnectModalOpen(false);
                 void loadDatasources();
               }}
+              onPartialConnect={() => void loadDatasources()}
             />
 
             {/* Export modal */}

@@ -26,3 +26,8 @@
   // Let tags wrap naturally — never hide in overflow
   flex-shrink: 0;
 }
+
+.errorList {
+  // Spacing override only — UnorderedList handles markers and typography.
+  margin-top: spacing.$spacing-02;
+}
