@@ -235,7 +235,7 @@ export interface DeployIntegrationEndpoints {
   title: string;
   description: string;
   baseURL: string;
-  apiDocumentaion: string;
+  apiDocumentation: string;
   interactiveAPIs: string[];
 }
 
@@ -425,6 +425,12 @@ export interface WorkerListResponse {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface WorkerRegisterResponse {
+  worker_name: string;
+  gateway_address: string;
+  token: string;
 }
 
 export interface ConnectorProvider {
