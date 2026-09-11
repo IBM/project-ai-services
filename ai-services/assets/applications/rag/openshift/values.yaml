@@ -38,12 +38,12 @@ digitizeUi:
 
 instruct:
   # @hidden
-  storageUri: hf://ibm-granite/granite-4.1-8b-fp8
+  storageUri: hf://ibm-granite/granite-4.1-8b
   # @description API key for vLLM instruct service authentication. If empty, authentication is disabled. Provide a key to enable authentication.
   apiKey: ""
   model:
     # @hidden
-    name: ibm-granite/granite-4.1-8b-fp8
+    name: ibm-granite/granite-4.1-8b
     # @hidden
     maxModelLen: 32768
     # @hidden
