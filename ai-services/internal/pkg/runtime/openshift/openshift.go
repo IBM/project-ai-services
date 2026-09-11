@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
@@ -980,35 +979,4 @@ func (kc *OpenshiftClient) DeleteNamespace(ctx context.Context, name string) err
 	}
 
 	return nil
-}
-
-// HTTPProxy executes an HTTP request from within the OpenShift cluster.
-// The control plane runs inside the cluster and can resolve svc.cluster.local
-// DNS natively, so resty makes the call directly — identical to Podman.
-func (kc *OpenshiftClient) HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error) {
-	client := resty.New()
-
-	req := client.R().SetContext(ctx)
-	for k, v := range headers {
-		req.SetHeader(k, v)
-	}
-	if len(body) > 0 {
-		req.SetBody(body)
-	}
-
-	resp, err := req.Execute(method, targetURL)
-	if err != nil {
-		return nil, fmt.Errorf("HTTPProxy: execute request: %w", err)
-	}
-
-	respHeaders := make(map[string]string, len(resp.Header()))
-	for k := range resp.Header() {
-		respHeaders[k] = resp.Header().Get(k)
-	}
-
-	return &types.HTTPProxyResponse{
-		StatusCode: resp.StatusCode(),
-		Headers:    respHeaders,
-		Body:       resp.Body(),
-	}, nil
 }

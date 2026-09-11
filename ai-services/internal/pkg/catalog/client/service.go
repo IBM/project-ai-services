@@ -8,7 +8,7 @@ import (
 	"strconv"
 
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/httpproxy"
 )
 
 const (
@@ -50,18 +50,18 @@ type serviceUpdatePayload struct {
 }
 
 // ServiceClient calls downstream service pod endpoints (e.g. Digitize) via
-// runtime.HTTPProxy — all HTTP traffic is tunnelled through the worker so that
+// an HTTPProxier — all HTTP traffic is tunnelled through the worker so that
 // internal pod URLs (svc.cluster.local or Podman container names) are reachable
 // from the control plane.
 type ServiceClient struct {
-	rt      runtime.Runtime
+	proxy   httpproxy.HTTPProxier
 	baseURL string
 }
 
-// NewServiceClient creates a ServiceClient that routes all calls through rt.HTTPProxy
+// NewServiceClient creates a ServiceClient that routes all calls through proxy
 // to the given baseURL.
-func NewServiceClient(rt runtime.Runtime, baseURL string) *ServiceClient {
-	return &ServiceClient{rt: rt, baseURL: baseURL}
+func NewServiceClient(proxy httpproxy.HTTPProxier, baseURL string) *ServiceClient {
+	return &ServiceClient{proxy: proxy, baseURL: baseURL}
 }
 
 // do executes a single HTTP request via HTTPProxy and returns the raw response.
@@ -71,7 +71,7 @@ func (c *ServiceClient) do(ctx context.Context, method, path string, body []byte
 		headers = map[string]string{"Content-Type": "application/json"}
 	}
 
-	resp, err := c.rt.HTTPProxy(ctx, method, c.baseURL+path, headers, body)
+	resp, err := c.proxy.HTTPProxy(ctx, method, c.baseURL+path, headers, body)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -93,11 +93,13 @@ func (c *ServiceClient) UpdateConnector(ctx context.Context, connectorID string,
 		status, _, reqErr := c.do(ctx, http.MethodPut, serviceConnectPath+"/"+connectorID, body)
 		if reqErr != nil {
 			lastErr = fmt.Errorf("service PUT request failed: %w", reqErr)
+
 			continue
 		}
 
 		if status < 200 || status >= 300 {
 			lastErr = fmt.Errorf("service returned unexpected status %d", status)
+
 			continue
 		}
 
