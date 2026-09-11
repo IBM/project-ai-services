@@ -87,19 +87,29 @@ const ConnectorDetailsPanel = ({
       return;
     }
 
+    let cancelled = false;
+
     dispatch({ type: PANEL_ACTION_TYPES.FETCH_START });
 
     fetchDataSourceById(connectorId)
       .then((data) => {
-        dispatch({ type: PANEL_ACTION_TYPES.FETCH_SUCCESS, payload: data });
+        if (!cancelled) {
+          dispatch({ type: PANEL_ACTION_TYPES.FETCH_SUCCESS, payload: data });
+        }
       })
       .catch((err: unknown) => {
-        const msg =
-          err instanceof Error
-            ? err.message
-            : "Failed to load connector details";
-        dispatch({ type: PANEL_ACTION_TYPES.FETCH_FAILURE, payload: msg });
+        if (!cancelled) {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : "Failed to load connector details";
+          dispatch({ type: PANEL_ACTION_TYPES.FETCH_FAILURE, payload: msg });
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, connectorId]);
 
   // ── Derive fields from params schema ──────────────────────────────────────
