@@ -20,6 +20,8 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
+    CANCEL_PENDING = "cancel_pending"
+    CANCELLED = "cancelled"
 
 
 class DocStatus(str, Enum):
@@ -32,6 +34,7 @@ class DocStatus(str, Enum):
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
     ALREADY_EXISTS = "already_exists"
+    CANCELLED = "cancelled"
 
 
 class AlreadyExistsFile(BaseModel):
@@ -54,6 +57,8 @@ class JobsListResponse(BaseModel):
 class JobCreatedResponse(BaseModel):
     """Response model for job creation."""
     job_id: str
+
+
 
 class DocumentListItem(BaseModel):
     """Minimal document information for list responses."""
@@ -82,6 +87,13 @@ class DocumentDetailResponse(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    duplicate_names: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of shadow 'already_exists' document entries that point to this "
+            "document as their original. These duplicates will also be removed on delete."
+        ),
+    )
 
 
 class DocumentContentResponse(BaseModel):

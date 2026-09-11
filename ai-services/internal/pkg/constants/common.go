@@ -10,7 +10,7 @@ const (
 	OperatorPollTimeout  = 3 * time.Minute
 
 	// HelmTimeout is the default timeout for a Helm install/upgrade operation.
-	HelmTimeout = 10 * time.Minute
+	HelmTimeout = 20 * time.Minute
 	// HelmUninstallTimeout is the default timeout for a Helm uninstall operation.
 	HelmUninstallTimeout = 5 * time.Minute
 	// PredictorWaitTimeout is the maximum time to wait for a KServe InferenceService
@@ -130,4 +130,25 @@ const (
 	ArgParamCaddyFileContent   = "caddy.caddyFileContent"
 	ArgParamSSLCertFileContent = "caddy.sslCertContent"
 	ArgParamSSLKeyFileContent  = "caddy.sslKeyContent"
+)
+
+const (
+	CaddyAdminInternalPort = "2019/"
+)
+
+const (
+	TokenFlag             = "token"
+	BaseDirFlag           = "basedir"
+	HTTPSPortFlag         = "https-port"
+	DomainNameFlag        = "domain-name"
+	SSLCertFlag           = "ssl-cert"
+	SSLKeyFlag            = "ssl-key"
+	AddHostFlag           = "add-host"
+	SkipLocalWorkerFlag   = "skip-local-worker"
+	WorkerGatewayPortFlag = "workergateway-port"
+	TimeoutFlag           = "timeout"
+
+	ResetPasswordFlag   = "reset-password"
+	ResetPodmanAuthFlag = "reset-podman-auth"
+	ResetSSLCertFlag    = "reset-certificate"
 )

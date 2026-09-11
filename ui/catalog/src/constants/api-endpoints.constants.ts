@@ -35,6 +35,8 @@ export const APPLICATION_ENDPOINTS = {
   GET_APPLICATION_DETAILS: (id: string) => `/applications/${id}`,
   GET_APPLICATION_RESOURCES: (id: string) => `/applications/${id}/resources`,
   UPDATE_APPLICATION: (id: string) => `/applications/${id}`,
+  GET_APPLICATION_DATASOURCES: (id: string) =>
+    `/applications/${id}/datasources/`,
 };
 
 export const CONNECTORS_ENDPOINTS = {

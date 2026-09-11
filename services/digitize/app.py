@@ -52,9 +52,9 @@ def _init_language_detector():
     """Initialize the language detector used for document processing."""
     try:
         setup_language_detector(
-            [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH]
+            [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH, Language.JAPANESE]
         )
-        logger.info("Language detector initialized for EN, DE, IT, FR")
+        logger.info("Language detector initialized for EN, DE, IT, FR, JA")
     except Exception as exc:
         logger.error(f"Error initializing language detector: {exc}", exc_info=True)
 

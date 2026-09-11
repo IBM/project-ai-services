@@ -136,6 +136,49 @@ def _make_async_cm_mock():
     return cm
 
 
+def _standard_patches(
+    *,
+    job_row=None,
+    schema_row=None,
+    file_text: str = "INVOICE #INV-001 Vendor: Acme TOTAL: EUR 100",
+    input_tokens: int = 50,
+    reserved_output: int = 512,
+    vllm_response=None,
+    validate_return=None,
+    update_job_return: bool = True,
+):
+    """
+    Return a dict of patch targets and their configured mocks for the happy path.
+    Callers override individual entries as needed.
+    """
+    if job_row is None:
+        job_row = _mock_job_row()
+    if schema_row is None:
+        schema_row = _mock_schema_row()
+    if vllm_response is None:
+        vllm_response = _vllm_response(VALID_EXTRACTION_JSON)
+    if validate_return is None:
+        validate_return = (VALID_EXTRACTION, 1, 0, 0)
+
+    patches = {
+        # Semaphores: replaced with loop-agnostic async context-manager mocks.
+        "extract.state.job_limiter": _make_async_cm_mock(),
+        "extract.api.v1.jobs.concurrency_limiter": _make_async_cm_mock(),
+        "extract.api.v1.jobs.get_llm_endpoint": Mock(return_value=LLM_DICT),
+        "extract.api.v1.jobs.db_repo.get_job_by_id": Mock(return_value=job_row),
+        "extract.api.v1.jobs.db_repo.update_job": Mock(return_value=update_job_return),
+        "extract.api.v1.jobs._resolve_schema_id": Mock(return_value=schema_row),
+        "extract.api.v1.jobs._tokenize": Mock(return_value=input_tokens),
+        "extract.api.v1.jobs.check_extraction_budget": Mock(return_value=reserved_output),
+        "extract.api.v1.jobs.render_few_shot_block": Mock(return_value=""),
+        "extract.api.v1.jobs.build_messages": Mock(return_value=[{"role": "user", "content": "..."}]),
+        "extract.api.v1.jobs.call_vllm_safe": AsyncMock(return_value=vllm_response),
+        "extract.api.v1.jobs.validate_with_retry": AsyncMock(return_value=validate_return),
+        "extract.api.v1.jobs.cleanup_staging_directory": Mock(),
+    }
+    return patches
+
+
 def _apply_patches(patches: dict):
     """Context-manager stack for all patch targets."""
     from contextlib import ExitStack
