@@ -16,7 +16,7 @@ const (
 // LoadSSLCertificates stages user-provided certificates for the Caddy pod and updates TLS config via Admin API.
 // Certificate validation is done in the CLI command's PreRunE hook before calling this function.
 // Uses timestamped filenames to ensure Caddy loads fresh certificates without requiring a restart.
-func (c *Context) LoadSSLCertificates(ctx context.Context, baseDir, sslCertPath, sslKeyPath string) error {
+func (c *Context) LoadSSLCertificates(ctx context.Context, sslCertPath, sslKeyPath string) error {
 	logger.Debugln("loading ssl certificate to caddy...")
 	if sslCertPath == "" || sslKeyPath == "" {
 		return nil

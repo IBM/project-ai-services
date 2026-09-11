@@ -13,16 +13,15 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	apiModels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/image"
@@ -72,12 +71,20 @@ Arguments:
 	Example: createExample(),
 	Args:    cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		// Check if podman runtime is being used on unsupported platform
-		if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
-			return err
+		// --runtime is required only for legacy mode; in the default flow the
+		// runtime is resolved from the Worker record registered with the catalog.
+		if legacyCreate && runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set (required with --legacy)")
 		}
 
-		// Build and run flag validator
+		// Only validate platform support when runtime is explicitly given.
+		if runtimeType != "" {
+			if err := utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType()); err != nil {
+				return err
+			}
+		}
+
+		// Build and run flag validator (runtime may be empty for default flow).
 		flagValidator := buildFlagValidator()
 		if err := flagValidator.Validate(cmd); err != nil {
 			return err
@@ -94,13 +101,15 @@ Arguments:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		if err := doBootstrapValidate(ctx); err != nil {
-			return err
-		}
-
-		rt := vars.RuntimeFactory.GetRuntimeType()
-		// When legacyCreate is true, use the older/stable code path
+		// When legacyCreate is true, use the older/stable code path.
+		// This path requires --runtime (enforced in PreRunE above).
 		if legacyCreate {
+			rt := vars.RuntimeFactory.GetRuntimeType()
+
+			if err := cmdcommon.DoBootstrapValidate(ctx, skipChecks); err != nil {
+				return err
+			}
+
 			// Create application instance using factory
 			appFactory := application.NewFactory(rt)
 			app, err := appFactory.Create(appName)
@@ -128,38 +137,20 @@ Arguments:
 }
 
 func createExample() string {
-	return `  For Podman:
-  # Deploy with default mode (5 Spyre cards)
-  ai-services application create rag --template rag --runtime podman
+	return `  # Deploy using the local worker
+  ai-services application create rag --template rag
 
-  # Deploy with default mode (4 Spyre cards - reranker on CPU)
-  ai-services application create rag --template rag --runtime podman --params reranker.vllm-cpu=true
+  # Deploy to a specific remote worker
+  ai-services application create rag --template rag --worker node-1
 
-  # Deploy with default mode (CPU mode)
-  ai-services application create rag --template rag --runtime podman --params reranker.vllm-cpu=true,llm.vllm-cpu=true
+  # Deploy with extra parameters
+  ai-services application create rag --template rag --params reranker.vllm-cpu=true
 
-  # Deploy with legacy mode
-  ai-services application create rag --template rag --runtime podman --legacy
+  # Deploy in CPU mode
+  ai-services application create rag --template rag --params reranker.vllm-cpu=true,llm.vllm-cpu=true
 
-  For Openshift:
-  # Deploy with default mode (5 Spyre cards)
-  ai-services application create rag --template rag --runtime openshift`
-}
-
-func doBootstrapValidate(ctx context.Context) error {
-	skip := helpers.ParseSkipChecks(skipChecks)
-	if len(skip) > 0 {
-		logger.Warningf("Skipping validation checks (skipped: %v)\n", skipChecks)
-	}
-
-	// Create bootstrap instance based on runtime
-	factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
-
-	if err := factory.Validate(ctx, skip); err != nil {
-		return fmt.Errorf("bootstrap validation failed: %w", err)
-	}
-
-	return nil
+  # Deploy with legacy mode (requires --runtime)
+  ai-services application create rag --template rag --legacy --runtime podman`
 }
 
 func init() {
@@ -175,9 +166,7 @@ func initCreateCommonFlags() {
 	createCmd.Flags().StringVarP(&templateName, appFlags.Create.Template, "t", "", "Application template to use (required)")
 	_ = createCmd.MarkFlagRequired(appFlags.Create.Template)
 
-	// TODO: Once runtime deployment is enabled, use default value as workerconstants.LocalWorkerName
-	// createCmd.Flags().StringVar(&workerName, appFlags.Create.WorkerName, workerconstants.LocalWorkerName,
-	createCmd.Flags().StringVar(&workerName, appFlags.Create.WorkerName, "",
+	createCmd.Flags().StringVar(&workerName, appFlags.Create.WorkerName, workerconstants.LocalWorkerName,
 		"Name of a connected remote worker to deploy to.\n"+
 			fmt.Sprintf("Defaults to %q (local deployment).\n", workerconstants.LocalWorkerName)+
 			"Example: --worker node-1\n")
@@ -272,14 +261,16 @@ func deprecatedPodmanFlags() {
 }
 
 // buildFlagValidator creates and configures the flag validator with all flag definitions.
+// When --runtime is not provided (new default flow), the runtime is resolved from the
+// Worker record by the catalog; all create flags are common-scoped or only validated
+// in the legacy path, so an empty runtime is safe here.
 func buildFlagValidator() *flagvalidator.FlagValidator {
-	runtimeType := vars.RuntimeFactory.GetRuntimeType()
-
-	builder := flagvalidator.NewFlagValidatorBuilder(runtimeType)
+	// Use the package-level runtimeType (may be "" in the default flow).
+	builder := flagvalidator.NewFlagValidatorBuilder(runtimeTypes.RuntimeType(runtimeType))
 
 	// Register common flags with their validation functions
 	builder.
-		AddCommonFlag(appFlags.Create.SkipValidation, validateSkipChecksFlag).
+		AddCommonFlag(appFlags.Create.SkipValidation, cmdcommon.ValidateSkipChecksFlag).
 		AddCommonFlag(appFlags.Create.Template, validateTemplateFlag).
 		AddCommonFlag(appFlags.Create.Params, validateParamsFlag).
 		AddCommonFlag(appFlags.Create.Values, validateValuesFlag).
@@ -372,28 +363,6 @@ func validateImagePullPolicyFlag(cmd *cobra.Command) error {
 	return nil
 }
 
-// validateSkipChecksFlag validates the skipChecks flag for the current runtime.
-func validateSkipChecksFlag(cmd *cobra.Command) error {
-	if len(skipChecks) == 0 {
-		return nil
-	}
-
-	// Build valid checks dynamically from runtime
-	validChecks := make(map[string]bool, len(bootstrap.GetRulesForRuntime()))
-	for _, r := range bootstrap.GetRulesForRuntime() {
-		validChecks[r.Name()] = true
-	}
-
-	// Validate each skip check
-	for _, s := range skipChecks {
-		if !validChecks[s] {
-			return fmt.Errorf("invalid skip-validation value '%s' for runtime '%s'", s, vars.RuntimeFactory.GetRuntimeType())
-		}
-	}
-
-	return nil
-}
-
 func createApp(ctx context.Context, appName string) error {
 	// 1. Initialize catalog client
 	appClient, err := catalogClient.NewApplicationClient(ctx)
@@ -455,7 +424,10 @@ func buildCatalogPayload(ctx context.Context, appClient *catalogClient.Applicati
 	}
 
 	// Resolve the target runtime once here so all downstream calls use the same value.
-	deployRT := resolveDeployRuntimeType(ctx)
+	deployRT, err := resolveDeployRuntimeType(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Try architecture first; fall through to service on not-found.
 	arch, err := source.LoadArchitecture(ctx, templateName)
@@ -557,13 +529,9 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 		return fmt.Errorf("failed to get application pods for next steps: %w", err)
 	}
 
-	rt := vars.RuntimeFactory.GetRuntimeType()
-	// When the application is deployed on a remote worker, use the worker's
-	// runtime type to select the correct service steps (vars_file.yaml, next.md).
-	// TODO: worker will always exist so we do not need to read from cmd
-	if application.Worker != nil && application.Worker.RuntimeType != "" {
-		rt = runtimeTypes.RuntimeType(application.Worker.RuntimeType)
-	}
+	// Every application is always deployed through a worker (WorkerID is NOT NULL).
+	// Read the runtime type directly from the worker record — no CLI fallback needed.
+	rt := runtimeTypes.RuntimeType(application.Worker.RuntimeType)
 
 	// InstanceSlug is derived from the application UUID — same as at deploy time
 	instanceSlug := catalogUtils.GenerateInstanceSlug(app.ID)
@@ -576,7 +544,7 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 	}
 
 	// Print the info command regardless of whether any service has next.md
-	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", application.Name, runtimeType)
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", application.Name, rt)
 
 	return nil
 }
@@ -642,34 +610,31 @@ func printNextStepsMD(tmpls map[string]*template.Template, params map[string]str
 	return nil
 }
 
-// resolveDeployRuntimeType returns the RuntimeType to use when fetching deploy
-// options. When a --worker flag is given and the worker is connected, its
-// declared runtime type is returned so that the server serves the correct
-// runtime-specific assets (schemas, resource specs, vars_file).
-// Falls back to the locally configured runtime when the worker is absent or
-// its runtime type cannot be determined.
-func resolveDeployRuntimeType(ctx context.Context) runtimeTypes.RuntimeType {
-	if workerName == "" {
-		return vars.RuntimeFactory.GetRuntimeType()
-	}
-
+// resolveDeployRuntimeType returns the RuntimeType for the target worker by
+// querying the catalog. The worker must be registered and connected; an error
+// is returned otherwise so that the create call fails fast before any API work.
+func resolveDeployRuntimeType(ctx context.Context) (runtimeTypes.RuntimeType, error) {
 	wc, err := catalogClient.NewWorkerClient(ctx)
 	if err != nil {
-		return vars.RuntimeFactory.GetRuntimeType()
+		return "", fmt.Errorf("failed to create worker client: %w", err)
 	}
 
 	workers, err := wc.ListWorkers(ctx)
 	if err != nil {
-		return vars.RuntimeFactory.GetRuntimeType()
+		return "", fmt.Errorf("failed to list workers: %w", err)
 	}
 
 	for _, w := range workers {
-		if w.Name == workerName {
-			return runtimeTypes.RuntimeType(w.RuntimeType)
+		if strings.EqualFold(w.Name, workerName) {
+			if w.RuntimeType == "" {
+				return "", fmt.Errorf("worker %q has no runtime type", workerName)
+			}
+
+			return runtimeTypes.RuntimeType(w.RuntimeType), nil
 		}
 	}
 
-	return vars.RuntimeFactory.GetRuntimeType()
+	return "", fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", workerName)
 }
 
 // buildArchitecturePayload builds the payload for an architecture deployment.

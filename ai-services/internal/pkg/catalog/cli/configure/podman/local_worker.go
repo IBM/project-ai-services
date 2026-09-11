@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmanruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
@@ -16,23 +16,20 @@ import (
 // JoinAsLocalWorker deploys the worker pod on this machine and connects it to
 // the catalog-backend as the "Local" worker.
 //
-// A sentinel token (LocalWorkerToken) is passed so the worker pod's
-// join guard is satisfied. The catalog-backend gateway skips ValidateToken when
-// LOCAL_WORKER=true, so no token needs to live in any TokenStore.
-func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts catalogUtils.PodmanConfigureOptions) error {
+// It uses the already-authenticated catalog client to call POST /api/v1/workers,
+// obtaining a real bootstrap token without a second login.
+func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts catalogUtils.PodmanConfigureOptions, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	hostIP, err := utils.GetHostIP()
-	if err != nil || hostIP == "" {
-		return fmt.Errorf("local worker join: resolve host IP: %w", err)
+	token, gatewayAddr, err := configure.RegisterLocalWorker(ctx, c)
+	if err != nil {
+		return fmt.Errorf("worker join: %w", err)
 	}
-
-	gatewayAddr := fmt.Sprintf("%s:%d", hostIP, opts.WorkerGatewayPort)
 
 	workerOpts := workertypes.PodmanWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
 			GatewayAddr: gatewayAddr,
-			Token:       workerconstants.LocalWorkerToken,
+			Token:       token,
 		},
 		Setup: workertypes.Options{
 			BaseDir:     opts.BaseDir,
@@ -44,10 +41,10 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 	}
 
 	if err := workerpodman.DeployWorker(ctx, workerOpts); err != nil {
-		return fmt.Errorf("local worker join: deploy worker pod: %w", err)
+		return fmt.Errorf("worker join: deploy worker pod: %w", err)
 	}
 
-	logger.InfolnCtx(ctx, "Local worker joined successfully.")
+	logger.InfolnCtx(ctx, "worker joined successfully.")
 
 	return nil
 }

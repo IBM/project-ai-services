@@ -8,6 +8,7 @@ import type {
   ServiceDeploymentPayload,
   DeploymentComponent,
   DeploymentService,
+  ConnectorRef,
 } from "@/types/api.types";
 import { fetchProviderSchema } from "@/api/applications.api";
 import { COMPONENT_TYPES } from "@/constants";
@@ -197,11 +198,26 @@ export async function transformToDeploymentPayload(
     // Wait for all components of this service to be ready
     const components = await Promise.all(componentPromises);
 
-    services.push({
+    const deploymentService: DeploymentService = {
       catalog_id: currentServiceId,
       version: serviceConfig.version,
       components,
-    });
+    };
+
+    // Attach datasource connectors when the service accepts them and the user
+    // has enabled upload-from-source with at least one connector selected.
+    if (
+      deployOptions.accepts_datasource &&
+      formData.uploadFromSourceEnabled &&
+      formData.dataSources &&
+      formData.dataSources.length > 0
+    ) {
+      deploymentService.connectors = formData.dataSources.map(
+        (id): ConnectorRef => ({ id, type: "datasource" }),
+      );
+    }
+
+    services.push(deploymentService);
   }
 
   return {

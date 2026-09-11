@@ -512,8 +512,9 @@ func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 		t.Fatalf("ParseCertificate: %v", err)
 	}
 
-	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != "catalog-worker-gateway.example.com" {
-		t.Errorf("expected SANs [catalog-worker-gateway.example.com]; got DNSNames=%v", leaf.DNSNames)
+	expectedSANs := []string{"catalog-worker-gateway.example.com", workerconstants.PodmanGatewayPodName}
+	if len(leaf.DNSNames) != len(expectedSANs) || leaf.DNSNames[0] != expectedSANs[0] || leaf.DNSNames[1] != expectedSANs[1] {
+		t.Errorf("expected SANs %v; got DNSNames=%v", expectedSANs, leaf.DNSNames)
 	}
 }
 

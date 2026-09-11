@@ -274,6 +274,10 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 	// stream.Recv goroutine so we can select on it with the ticker and ctx.
 	recvCh := startRecvGoroutine(stream)
 
+	// One Dispatcher per stream lifetime — it tracks all in-flight command
+	// contexts so COMMAND_TYPE_CANCEL can abort a specific command.
+	d := dispatch.New()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -298,7 +302,7 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 			go func(c *workerpb.Command) {
 				defer wg.Done()
 
-				result := dispatch.Dispatch(ctx, rt, pr, c)
+				result := d.Dispatch(ctx, rt, pr, c)
 				result.WorkerName = workerName
 
 				select {

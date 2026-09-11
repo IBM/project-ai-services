@@ -5,8 +5,10 @@ metadata:
   labels:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/component: "catalog"
     ai-services.io/version: "{{ .Version }}"
-    ai-services.io/secret: "catalog-secret"
+    ai-services.io/secret: "catalog-secret,catalog-db-encryption-secret,catalog-mtls-encryption-secret,podman-auth-secret"
+    ai-services.io/secret-skip-cleanup: "true"
     ai-services.io/volume: "podman-auth-secret,catalog-secret,catalog-db-encryption-secret,catalog-mtls-encryption-secret,catalog-bundles,catalog-caddy-cert-secret,gateway-pki"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
@@ -32,7 +34,6 @@ spec:
             echo "Migration attempt $attempt of $max_retries..."
 
             if /usr/bin/ai-services catalog dbmigrate init \
-              --runtime={{ .Values.backend.runtime }} \
               --db-host={{ .AppName }}--db \
               --db-port=5432 \
               --db-user={{ .Values.db.user }} \
@@ -157,7 +158,7 @@ spec:
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
         - name: gateway-pki
-          mountPath: /var/lib/ai-services/gateway-pki
+          mountPath: /data/gateway-pki
         - name: catalog-secret
           mountPath: /etc/secret/catalog-secret
           readOnly: true

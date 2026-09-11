@@ -1,9 +1,9 @@
-{{- if not (lookup "v1" "ServiceAccount" "ai-services" "ai-services-sa") }}
+{{- if not (lookup "v1" "ServiceAccount" .Release.Namespace "ai-services-sa") }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ai-services-sa
-  namespace: ai-services
+  namespace: {{ .Release.Namespace }}
 {{- end }}
 ---
 {{- if not (lookup "rbac.authorization.k8s.io/v1" "ClusterRole" "" "ai-services-manager") }}
@@ -58,7 +58,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: ai-services-sa
-    namespace: ai-services
+    namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
   name: ai-services-manager
@@ -76,7 +76,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: ai-services-sa
-    namespace: ai-services
+    namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
   name: cluster-monitoring-view

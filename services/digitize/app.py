@@ -52,9 +52,9 @@ def _init_language_detector():
     """Initialize the language detector used for document processing."""
     try:
         setup_language_detector(
-            [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH]
+            [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH, Language.JAPANESE]
         )
-        logger.info("Language detector initialized for EN, DE, IT, FR")
+        logger.info("Language detector initialized for EN, DE, IT, FR, JA")
     except Exception as exc:
         logger.error(f"Error initializing language detector: {exc}", exc_info=True)
 
@@ -288,10 +288,6 @@ tags_metadata = [
         "name": "documents",
         "description": "Document management operations including retrieval and deletion",
     },
-    {
-        "name": "connectors",
-        "description": "Data-source connector lifecycle management (file_system, object_storage)",
-    },
 ]
 
 app = FastAPI(
@@ -379,7 +375,7 @@ from digitize.api.v1.connectors import router as connectors_router
 app.include_router(jobs_router, prefix="/v1/jobs", tags=["jobs"])
 app.include_router(admin_router, prefix="/v1", tags=["jobs"])
 app.include_router(documents_router, prefix="/v1/documents", tags=["documents"])
-app.include_router(connectors_router, prefix="/v1/connectors", tags=["connectors"])
+app.include_router(connectors_router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False)
 
 
 if __name__ == "__main__":

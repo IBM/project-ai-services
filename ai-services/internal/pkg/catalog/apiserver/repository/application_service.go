@@ -73,7 +73,6 @@ func NewApplicationService(
 		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo).WithWorkerRegistry(reg),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validator,
-		RuntimeType:           runtimeType,
 		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
 		WorkerRegistry:        reg,
 		DatasourceService:     datasourceSvc,

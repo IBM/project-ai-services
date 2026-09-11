@@ -103,6 +103,7 @@ const WorkerResourcesTable = ({
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
   const registerRetryRef = useRef<(() => void) | null>(null);
+  const isRegisterError = useRef(false);
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
 
@@ -215,6 +216,7 @@ const WorkerResourcesTable = ({
   useEffect(() => {
     if (!registerError) return;
     registerRetryRef.current = registerError.onRetry;
+    isRegisterError.current = true;
     dispatch({
       type: ACTION_TYPES.SHOW_REGISTER_ERROR,
       payload: registerError.message,
@@ -222,6 +224,7 @@ const WorkerResourcesTable = ({
   }, [registerError]);
 
   const handleRegisterErrorClose = useCallback(() => {
+    isRegisterError.current = false;
     dispatch({ type: ACTION_TYPES.HIDE_REGISTER_ERROR });
     onRegisterErrorDismiss?.();
   }, [onRegisterErrorDismiss]);
@@ -239,6 +242,7 @@ const WorkerResourcesTable = ({
           className={sharedStyles.customToast}
           onCloseButtonClick={handleRegisterErrorClose}
           onActionButtonClick={() => {
+            isRegisterError.current = false;
             dispatch({ type: ACTION_TYPES.HIDE_REGISTER_ERROR });
             registerRetryRef.current?.();
           }}
@@ -371,6 +375,8 @@ const WorkerResourcesTable = ({
                         noData={noData}
                         noSearchResults={noSearchResults}
                         entityName="worker resource"
+                        noDataTitle="No worker resources registered yet"
+                        noDataSubtitle="To register a new worker resource, click Register."
                         className={styles.noDataContent}
                       />
                     </TableContainer>

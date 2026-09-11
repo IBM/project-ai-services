@@ -9,7 +9,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
-	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
@@ -110,7 +109,7 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 
 	// RemoteRuntime forwards every call over the gRPC CommandStream — the
 	// deployer does not need to know it is talking to a remote machine.
-	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry, catalogutils.AppNamespace(plan.ApplicationID))
+	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry, plan.Namespace)
 	if err != nil {
 		return fmt.Errorf("create remote runtime for worker %q: %w", plan.WorkerName, err)
 	}
@@ -183,7 +182,7 @@ func (e *DeploymentExecutor) executeOpenShiftDeployment(
 ) error {
 	// Initialize OpenShift runtime client scoped to the application's namespace
 	// so that ListRoutes, ListPods etc. query the correct namespace.
-	ns := catalogutils.AppNamespace(plan.ApplicationID)
+	ns := plan.Namespace
 	rt, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
 	if err != nil {
 		return fmt.Errorf("failed to initialize OpenShift runtime: %w", err)
