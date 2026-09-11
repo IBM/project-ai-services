@@ -5,6 +5,7 @@ metadata:
   labels:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/component: "catalog"
     ai-services.io/version: "{{ .Version }}"
     ai-services.io/secret: "catalog-secret,catalog-db-encryption-secret,catalog-mtls-encryption-secret,podman-auth-secret"
     ai-services.io/secret-skip-cleanup: "true"

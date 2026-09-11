@@ -243,6 +243,16 @@ func CleanupSkippedResources(ctx context.Context, rt runtime.Runtime, secretsToS
 	return DeleteVolumes(ctx, rt, volumesToSkip)
 }
 
+// DeletePod force-deletes the named pod.
+func DeletePod(ctx context.Context, rt runtime.Runtime, podName string) error {
+	logger.InfofCtx(ctx, "Deleting existing pod %s", podName)
+	if err := rt.DeletePod(ctx, podName, utils.BoolPtr(true)); err != nil {
+		return fmt.Errorf("failed to delete existing pod %s: %w", podName, err)
+	}
+
+	return nil
+}
+
 // DeleteSecretAndPod deletes the named secret and then force-deletes the named pod.
 // It is used during certificate reset operations to remove the existing secret and
 // pod before redeployment with new credentials.
@@ -252,12 +262,7 @@ func DeleteSecretAndPod(ctx context.Context, rt runtime.Runtime, secretName, pod
 		return fmt.Errorf("failed to delete existing secret %s: %w", secretName, err)
 	}
 
-	logger.InfofCtx(ctx, "Deleting existing pod %s", podName)
-	if err := rt.DeletePod(ctx, podName, utils.BoolPtr(true)); err != nil {
-		return fmt.Errorf("failed to delete existing pod %s: %w", podName, err)
-	}
-
-	return nil
+	return DeletePod(ctx, rt, podName)
 }
 
 // LoadCertificatesToCaddy checks Caddy health and loads SSL certificates.
