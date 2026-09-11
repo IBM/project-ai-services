@@ -277,7 +277,7 @@ func LoadUserCertificates(hostCertPath, hostKeyPath, caddyCertPath, caddyKeyPath
 	}
 
 	// Load into Caddy using container-visible mounted file paths
-	if err := loadCertificatesIntoCaddy(caddyCertPath, caddyKeyPath, adminURL); err != nil {
+	if err := LoadCertificatesIntoCaddy(caddyCertPath, caddyKeyPath, adminURL); err != nil {
 		return err
 	}
 
@@ -418,8 +418,8 @@ func matchPublicPrivateKeys(publicKey, privateKey interface{}) error {
 	return fmt.Errorf("unable to compare public keys: public key type does not support Equal method")
 }
 
-// loadCertificatesIntoCaddy updates the live Caddy config to load mounted certificate files.
-func loadCertificatesIntoCaddy(certPath, keyPath, adminURL string) error {
+// LoadCertificatesIntoCaddy updates the live Caddy config to load mounted certificate files.
+func LoadCertificatesIntoCaddy(certPath, keyPath, adminURL string) error {
 	payload := map[string]any{
 		"certificates": map[string]any{
 			"load_files": []map[string]string{

@@ -44,6 +44,29 @@ func (c *Context) LoadSSLCertificates(ctx context.Context, sslCertPath, sslKeyPa
 	return nil
 }
 
+// LoadCertificatesFromContainerPaths tells Caddy to load the certificates that are
+// already mounted inside the container at the well-known paths
+// (/etc/secret/ssl/tls.crt and /etc/secret/ssl/tls.key).
+// This is used during re-configure when the cert secret was preserved by
+// --skip-cleanup and no new host-side cert paths were supplied: the secret is
+// already mounted, so only the Caddy Admin API call is needed.
+func (c *Context) LoadCertificatesFromContainerPaths(ctx context.Context) error {
+	logger.Debugln("loading existing mounted ssl certificates into caddy...")
+
+	adminURL, err := c.GetHostAdminURL(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get Caddy admin URL: %w", err)
+	}
+
+	if err := utils.LoadCertificatesIntoCaddy(containerCertPath, containerkeyPath, adminURL); err != nil {
+		return fmt.Errorf("failed to load mounted certificates via Admin API: %w", err)
+	}
+
+	logger.Infoln("Existing SSL certificates loaded successfully into Caddy")
+
+	return nil
+}
+
 // IsCustomCertLoaded checks whether custom SSL certificates are currently loaded in Caddy's live config.
 // It queries the Caddy Admin API at /config/apps/tls/certificates and returns true if a load_files entry
 // matching the expected container cert and key paths (/etc/secret/ssl/tls.crt and /etc/secret/ssl/tls.key)
