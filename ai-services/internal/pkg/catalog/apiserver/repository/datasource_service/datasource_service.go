@@ -1220,7 +1220,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 
 	// Resolve the service base URL and call GET /v1/connectors with the caller's pagination
 	// params. The service response is authoritative for both the page content and total count.
-	baseURL, servicePage := s.fetchServiceConnectors(ctx, rt, allConnectorIDs, req.PageSize, offset)
+	baseURL, servicePage := s.fetchServiceConnectors(ctx, rt, appID, allConnectorIDs, req.PageSize, offset)
 
 	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID)
 	if err != nil {
@@ -1248,8 +1248,10 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 
 // fetchServiceConnectors resolves the service base URL from the first connector ID in the
 // list via GetLinkedServiceEndpoints, then calls GET /v1/connectors via HTTPProxy.
+// Only rows belonging to appID are considered when selecting the base URL, preventing a
+// mismatch when the same connector is linked to multiple applications.
 // Returns an empty-page result when no endpoint is found or the call fails.
-func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, rt runtime.Runtime, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, rt runtime.Runtime, appID uuid.UUID, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
 	empty := catalogclient.ServiceConnectorPage{ByID: make(map[string]apimodels.ConnectorItem)}
 
 	if len(connectorIDs) == 0 {
@@ -1265,6 +1267,10 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, rt runti
 
 	baseURL := ""
 	for _, row := range linkedRows {
+		if row.ApplicationID != appID {
+			continue
+		}
+
 		if u := extractInternalEndpointURL(row.EndpointsJSON); u != "" {
 			baseURL = u
 
