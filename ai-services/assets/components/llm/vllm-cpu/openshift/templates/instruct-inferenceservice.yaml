@@ -22,7 +22,7 @@ spec:
         name: vLLM
       args:
         - --served-model-name={{ .Values.model }}
-        - --max-model-len=32768
+        - --max-model-len=8096
         - --max-num-seqs=32
       env:
         - name: VLLM_CPU_OMP_THREADS_BIND
@@ -45,3 +45,11 @@ spec:
           memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
       storageUri: hf://{{ .Values.model }}
+      volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm
+    volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi

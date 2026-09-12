@@ -9,6 +9,10 @@ metadata:
 spec:
   restartPolicy: always
   volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
     - name: models
       hostPath:
         path: "{{ .BaseDir }}/models"
@@ -22,6 +26,7 @@ spec:
       - --served-model-name
       - {{ .Values.model }}
       - --port=8001
+      - --gpu-memory-utilization=0.5
       livenessProbe:
         httpGet:
           path: /health
@@ -35,12 +40,14 @@ spec:
           value: "16"
       resources:
         requests:
-          memory: "4Gi"
+          memory: "5Gi"
         limits:
-          memory: "4Gi"
+          memory: "5Gi"
       ports:
         - containerPort: 8001
       volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm
         - mountPath: /models:z
           name: models
           readOnly: true

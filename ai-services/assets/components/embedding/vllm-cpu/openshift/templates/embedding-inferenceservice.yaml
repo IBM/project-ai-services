@@ -32,3 +32,12 @@ spec:
       args:
         - --served-model-name={{ .Values.model }}
         - --max-model-len=512
+        - --gpu-memory-utilization=0.5
+      volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm
+    volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
