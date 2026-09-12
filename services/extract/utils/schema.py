@@ -688,4 +688,144 @@ def fmt_dt(dt) -> Optional[str]:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat().replace("+00:00", "Z")
 
+# ---------------------------------------------------------------------------
+# Schema input resolver — used by the sync extraction endpoint
+# ---------------------------------------------------------------------------
+
+class _EphemeralSchemaRow:
+    """Minimal duck-type for a schema DB row, used for ephemeral (unregistered) schemas.
+
+    Carries only the fields that ``extract_sync`` reads from a registered row.
+    Token counts are computed on-demand inside :func:`resolve_schema_input`.
+    """
+
+    def __init__(
+        self,
+        json_schema: Dict[str, Any],
+        schema_tokens: int = 0,
+        examples_tokens: int = 0,
+        custom_prompt_tokens: int = 0,
+    ) -> None:
+        self.schema_id: Optional[str] = None
+        self.json_schema = json_schema
+        self.examples: Optional[List[Dict[str, Any]]] = None
+        self.custom_prompt: Optional[str] = None
+        self.schema_tokens = schema_tokens
+        self.examples_tokens = examples_tokens
+        self.custom_prompt_tokens = custom_prompt_tokens
+
+
+def resolve_schema_input(
+    schema_id: Optional[str],
+    schema_name: Optional[str],
+    json_schema: Optional[Dict[str, Any]],
+    json_example: Optional[Dict[str, Any]],
+    llm_endpoint: str,
+):
+    """Resolve and validate the schema source for a sync extraction request.
+
+    Priority: ``schema_id`` → ``schema_name`` → ``json_schema`` → ``json_example``.
+
+    For registered schemas (``schema_id`` / ``schema_name``), the stored DB row
+    is returned directly — token counts are pre-computed at registration time.
+
+    For ephemeral schemas (``json_schema`` / ``json_example``), the same
+    structural validations applied during schema registration are performed:
+
+    - ``json_schema``: normalized then validated with
+      :func:`validate_json_schema_structure`.
+    - ``json_example``: inferred via :func:`infer_schema_from_examples`, which
+      applies the same inference logic used during registration.
+
+    Token counts for ephemeral schemas are computed here so that
+    ``check_extraction_budget`` can use them.
+
+    Returns:
+        A DB row object (or :class:`_EphemeralSchemaRow`) whose attributes
+        ``json_schema``, ``examples``, ``custom_prompt``, ``schema_tokens``,
+        ``examples_tokens``, and ``custom_prompt_tokens`` are all populated.
+
+    Raises:
+        :class:`ExtractException` (404) when a registered schema cannot be found.
+        :class:`SchemaValidationError` (400) when an ephemeral schema fails
+        structural validation.
+    """
+    from extract.db.manager import db_repo  # local import to avoid circular deps
+
+    # ── Priority 1: schema_id ─────────────────────────────────────────────
+    if schema_id is not None:
+        row = db_repo.get_schema_by_id(schema_id)
+        if row is None:
+            logger.error("Schema not found for schema_id=%r", schema_id)
+            raise ExtractException(
+                404, "SCHEMA_NOT_FOUND", f"No schema with id {schema_id!r}."
+            )
+        if schema_name is not None and row.name != schema_name:
+            logger.error(
+                "Schema name mismatch: schema_id=%r resolved to name %r, but request specified schema_name=%r",
+                schema_id, row.name, schema_name
+            )
+            raise ExtractException(
+                400, "INVALID_REQUEST", "Schema name and id are not for the same record"
+            )
+        return row
+
+    # ── Priority 2: schema_name ───────────────────────────────────────────
+    if schema_name is not None:
+        row = db_repo.get_schema_by_name(schema_name)
+        if row is None:
+            logger.error("Schema not found for schema_name=%r", schema_name)
+            raise ExtractException(
+                404, "SCHEMA_NOT_FOUND", f"No schema with name {schema_name!r}."
+            )
+        return row
+
+    # ── Priority 3: raw JSON Schema ───────────────────────────────────────
+    if json_schema is not None:
+        try:
+            normalized = normalize_schema(json_schema)
+            validate_json_schema_structure(normalized)
+        except SchemaValidationError as exc:
+            logger.error(
+                "Ephemeral json_schema failed validation: [%s] %s", exc.code, exc.message
+            )
+            raise
+        schema_tokens, _, _ = compute_token_counts(normalized, None, None, llm_endpoint)
+        return _EphemeralSchemaRow(
+            json_schema=normalized,
+            schema_tokens=schema_tokens,
+        )
+
+    # ── Priority 4: JSON example ──────────────────────────────────────────
+    if json_example is not None:
+        if not isinstance(json_example, dict) or not json_example:
+            logger.error("json_example is not a non-empty object: %r", type(json_example).__name__)
+            raise SchemaValidationError(
+                "INVALID_EXAMPLE",
+                "json_example must be a non-empty JSON object.",
+                status=400,
+            )
+        # Wrap as an example record so infer_schema_from_examples can process it.
+        examples_raw = [{"text": "", "output": json_example}]
+        try:
+            normalized = infer_schema_from_examples(examples_raw)
+        except SchemaValidationError as exc:
+            logger.error(
+                "Schema inference from json_example failed: [%s] %s", exc.code, exc.message
+            )
+            raise
+        schema_tokens, _, _ = compute_token_counts(normalized, None, None, llm_endpoint)
+        return _EphemeralSchemaRow(
+            json_schema=normalized,
+            schema_tokens=schema_tokens,
+        )
+
+    # Guard: ExtractionRequest.model_post_init ensures we never reach here at runtime.
+    logger.error("resolve_schema_input called with all schema inputs None")
+    raise ExtractException(
+        400, "INVALID_REQUEST",
+        "One of schema_id, schema_name, json_schema, or json_example must be provided.",
+    )
+
+
 # Made with Bob

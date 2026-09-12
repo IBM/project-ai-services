@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
 	"sync"
 
 	"github.com/google/uuid"
@@ -76,4 +78,32 @@ func RunConcurrently(
 	}
 
 	return nil
+}
+
+// ChartHasInferenceService reports whether any template file under catalogPath
+// in fsys declares a KServe InferenceService (i.e. contains "kind: InferenceService").
+// It is used to decide whether WaitForInferenceServiceReady must be called after
+// a Helm install — Helm marks an InferenceService "Current" as soon as the CRD is
+// accepted, but KServe only sets Ready=True once the predictor pod is fully up.
+func ChartHasInferenceService(fsys fs.FS, catalogPath string) bool {
+	found := false
+
+	_ = fs.WalkDir(fsys, catalogPath, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || found {
+			return err
+		}
+
+		data, readErr := fs.ReadFile(fsys, p)
+		if readErr != nil {
+			return nil
+		}
+
+		if bytes.Contains(data, []byte("kind: InferenceService")) {
+			found = true
+		}
+
+		return nil
+	})
+
+	return found
 }

@@ -62,14 +62,6 @@ type Runtime interface {
 	// System information
 	GetSystemInfo(ctx context.Context) (*models.SystemInfo, error)
 
-	// HTTPProxy tunnels an HTTP request through the gRPC stream to a worker
-	// pod endpoint and returns the response.
-	// method is the HTTP verb (GET, POST, …), targetURL is the full URL of the
-	// pod endpoint on the worker, headers are optional extra request headers,
-	// and body is the request body (may be nil). Returns the HTTP status code,
-	// response headers, and body.
-	HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error)
-
 	// WaitForInferenceServiceReady polls a KServe InferenceService until its
 	// Ready condition is True or the context deadline is exceeded.
 	// Non-OpenShift runtimes return nil immediately (no-op).

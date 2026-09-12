@@ -21,20 +21,18 @@ spec:
       modelFormat:
         name: vLLM
       env:
-        - name: VLLM_SPYRE_WARMUP_BATCH_SIZES
+        - name: SENDNN_INFERENCE_WARMUP_BATCH_SIZES
           value: "4"
-        - name: VLLM_SPYRE_WARMUP_PROMPT_LENS
+        - name: SENDNN_INFERENCE_WARMUP_PROMPT_LENS
           value: "1024"
-        - name: VLLM_SPYRE_USE_CHUNKED_PREFILL
-          value: "0"
       resources:
         limits:
           cpu: "8"
-          memory: "4Gi"
+          memory: "5Gi"
           ibm.com/spyre_pf: "1"
         requests:
           cpu: "8"
-          memory: "4Gi"
+          memory: "5Gi"
           ibm.com/spyre_pf: "1"
       runtime: spyre-temp
       storageUri: {{ .Values.reranker.storageUri }}
