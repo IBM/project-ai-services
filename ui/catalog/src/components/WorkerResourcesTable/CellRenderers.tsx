@@ -23,6 +23,12 @@ export const RuntimeTypeCell = ({
   return <span>{String(value ?? "")}</span>;
 };
 
+export const MessageCell = ({
+  value,
+}: CellRendererProps): React.ReactElement => {
+  return <span>{String(value ?? "")}</span>;
+};
+
 export const NameCell = ({ value, rowId }: CellRendererProps) => (
   <SharedNameCell value={value} rowId={rowId} isLinkEnabled={false} />
 );
@@ -50,5 +56,6 @@ export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
   runtime_type: RuntimeTypeCell as RendererFn,
+  message: MessageCell as RendererFn,
   actions: ActionCell,
 };

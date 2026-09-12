@@ -428,6 +428,7 @@ export interface WorkerApiResponse {
   registered_at: string;
   updated_at: string;
   metadata?: Record<string, unknown>;
+  message?: string;
 }
 
 export interface WorkerListResponse {
