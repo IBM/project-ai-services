@@ -19,7 +19,7 @@ python-multipart==0.0.31
 # Additional utilities
 python-dotenv>=1.0.0
 pydantic>=2.0.0
-pydantic-settings==2.14.1
+pydantic-settings==2.14.2
 
 # Language detection (required by chatbot)
 lingua-language-detector==2.2.0
