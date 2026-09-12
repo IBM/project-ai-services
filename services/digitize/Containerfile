@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/service-base:v0.0.38
+FROM icr.io/ai-services-cicd/service-base:v0.0.39
 
 WORKDIR /opt/services/digitize
 
@@ -7,7 +7,15 @@ ENV PYTHONPATH=/opt/services
 COPY common /opt/services/common
 COPY digitize/ .
 
-RUN source /var/venv/bin/activate && pip install -r requirements.txt --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux && pip cache purge
+# The base venv ships without pip; bootstrap it via ensurepip only to install the
+# service deps, then strip it again so the runtime image stays pip-free.
+RUN source /var/venv/bin/activate && \
+    python -m ensurepip --upgrade && \
+    pip install -r requirements.txt --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux --prefer-binary && \
+    pip cache purge && \
+    rm -rf /var/venv/lib/python3.12/site-packages/pip \
+           /var/venv/lib/python3.12/site-packages/pip-*.dist-info \
+           /var/venv/bin/pip /var/venv/bin/pip3 /var/venv/bin/pip3.12
 
 CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
      "--host", "0.0.0.0", "--port", "4000", \
