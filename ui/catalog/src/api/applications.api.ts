@@ -26,6 +26,8 @@ import type {
   DeploymentPayload,
   ApplicationDatasourceApiItem,
   ApplicationDatasourcesListResponse,
+  ConnectDatasourceError,
+  ConnectDatasourcesResponse,
 } from "@/types/api.types";
 import type { DigitalAssistantRow } from "@/pages/DigitalAssistants/types";
 import type { DeployedServicesRow } from "@/components/DeployedServicesTable/types";
@@ -504,7 +506,7 @@ export async function fetchApplicationDatasources(
   pagination: PaginationMetadata;
 }> {
   const response = await api.get<ApplicationDatasourcesListResponse>(
-    APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+    APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
     { params: { page, page_size: pageSize } },
   );
   return {
@@ -523,7 +525,7 @@ export async function fetchAllApplicationDatasources(
 
   while (hasNext) {
     const response = await api.get<ApplicationDatasourcesListResponse>(
-      APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+      APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
       { params: { page: currentPage, page_size: 100 } },
     );
     allData.push(...response.data.data);
@@ -532,4 +534,44 @@ export async function fetchAllApplicationDatasources(
   }
 
   return allData.map(transformDatasourceToRow);
+}
+
+// Connects one or more data source connectors to an application
+/**
+ * Connects one or more datasources to an application.
+ *
+ * Returns an array of per-datasource errors for any connections that failed
+ * (HTTP 207 Multi-Status). An empty array means every datasource connected
+ * successfully (HTTP 204 No Content).
+ *
+ * Throws for network errors or unexpected non-2xx responses.
+ */
+export async function connectApplicationDatasources(
+  applicationId: string,
+  datasourceIds: string[],
+): Promise<ConnectDatasourceError[]> {
+  const response = await api.put<ConnectDatasourcesResponse | null>(
+    APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
+    { datasource_ids: datasourceIds },
+    // Accept 207 without throwing so we can inspect the body ourselves.
+    { validateStatus: (status) => status === 204 || status === 207 },
+  );
+
+  // 204 No Content — all succeeded
+  if (response.status === 204 || !response.data) return [];
+
+  // 207 Multi-Status — at least one datasource failed
+  return response.data.errors ?? [];
+}
+// Removes a single datasource from an application
+export async function removeApplicationDatasource(
+  applicationId: string,
+  datasourceId: string,
+): Promise<void> {
+  await api.delete(
+    APPLICATION_ENDPOINTS.REMOVE_APPLICATION_DATASOURCE(
+      applicationId,
+      datasourceId,
+    ),
+  );
 }
