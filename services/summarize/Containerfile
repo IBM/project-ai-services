@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/service-base:v0.0.34
+FROM icr.io/ai-services-cicd/service-base:v0.0.39
 
 WORKDIR /opt/services/summarize
 
@@ -8,7 +8,7 @@ COPY common /opt/services/common
 COPY summarize/ .
 
 # Uncomment when you have summarize specific requirements.txt
-# RUN source /var/venv/bin/activate && pip install -r requirements.txt && pip cache purge
+# RUN source /var/venv/bin/activate && python -m ensurepip --upgrade && pip install -r requirements.txt --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux --prefer-binary && pip cache purge && rm -rf /var/venv/lib/python3.12/site-packages/pip /var/venv/lib/python3.12/site-packages/pip-*.dist-info /var/venv/bin/pip*
 
 CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
      "--host", "0.0.0.0", "--port", "6000", \
