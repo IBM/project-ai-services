@@ -6,10 +6,10 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
-	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // NewDatasourceService creates the DatasourceService wired with all known provider testers.
@@ -20,6 +20,7 @@ func NewDatasourceService(
 	appRepo dbrepo.ApplicationRepository,
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	provider *catalog.CatalogProvider,
+	workerRegistry stream.WorkerRegistry,
 ) (DatasourceServiceInterface, error) {
 	encryptionKey := os.Getenv(catalogconstants.DBEncryptionKeyEnv)
 	if encryptionKey == "" {
@@ -34,7 +35,7 @@ func NewDatasourceService(
 		svcDepRepo,
 		validator,
 		provider,
-		catalogclient.NewServiceClient(""),
+		workerRegistry,
 		encryptionKey,
 	), nil
 }

@@ -66,10 +66,10 @@ Arguments:
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
 
-		rt := vars.RuntimeFactory.GetRuntimeType()
-
 		// When legacyDelete is true use the older/stable code path
 		if legacyDelete {
+			rt := vars.RuntimeFactory.GetRuntimeType()
+
 			// Create application instance using factory
 			factory := application.NewFactory(rt)
 			app, err := factory.Create(applicationName)

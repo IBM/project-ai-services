@@ -389,6 +389,7 @@ export interface ArchitectureDeploymentPayload {
   catalog_id: string;
   version: string;
   services: DeploymentService[];
+  worker_name?: string;
 }
 
 export interface ServiceDeploymentPayload {
@@ -398,6 +399,7 @@ export interface ServiceDeploymentPayload {
   deployment_type: "service";
   services: DeploymentService[];
   global_components?: Record<string, string>;
+  worker_name?: string;
 }
 
 export type DeploymentPayload =

@@ -272,6 +272,12 @@ func checkOpenShiftTemplateLabels(rendered map[string]string) error {
 			continue
 		}
 
+		// doc is nil when the template rendered to empty output (e.g. a
+		// conditional-only template gated on an optional value). Skip.
+		if doc == nil {
+			continue
+		}
+
 		path := openShiftRuntime + "/templates"
 
 		// Use only the base filename to avoid the "chartname/templates/" prefix.

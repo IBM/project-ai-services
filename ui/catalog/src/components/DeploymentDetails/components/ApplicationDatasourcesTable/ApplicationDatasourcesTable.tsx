@@ -1,4 +1,5 @@
 import { useReducer, useCallback, useRef, useState } from "react";
+import { isAxiosError } from "axios";
 import {
   DataTable,
   Table,
@@ -29,6 +30,7 @@ import ConnectDatasourceModal from "./ConnectDatasourceModal";
 import type { SharedTableAction } from "@/components/Table/types";
 import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
 import ExportModal from "@/components/Table/components/ExportModal";
+import DeleteConfirmNameModal from "@/components/DeleteConfirmNameModal";
 import TableToasts from "@/components/Table/components/TableToasts";
 import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
@@ -41,6 +43,7 @@ import {
 import {
   fetchApplicationDatasources,
   fetchAllApplicationDatasources,
+  removeApplicationDatasource,
 } from "@/api/applications.api";
 import styles from "./ApplicationDatasourcesTable.module.scss";
 
@@ -132,6 +135,34 @@ const ApplicationDatasourcesTable = ({
     [applicationId],
   );
 
+  const handleRemove = async () => {
+    if (!state.selectedRowId) {
+      dispatch({
+        type: "SHARED_SHOW_ERROR",
+        payload: { message: "No data source selected for removal" },
+      });
+      return;
+    }
+
+    dispatch({ type: "SHARED_SET_DELETING", payload: true });
+    dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: "" });
+
+    try {
+      await removeApplicationDatasource(applicationId, state.selectedRowId);
+      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+      dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+      await loadDatasources();
+    } catch (err) {
+      const msg =
+        isAxiosError(err) && err.response?.data?.error
+          ? (err.response.data.error as string)
+          : "Failed to remove data source";
+      dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: msg });
+    } finally {
+      dispatch({ type: "SHARED_SET_DELETING", payload: false });
+    }
+  };
+
   // Mount fetch + optional 2-minute auto-refresh (paused during delete flow)
   useAutoRefresh({
     fetchFn: loadDatasources,
@@ -189,8 +220,8 @@ const ApplicationDatasourcesTable = ({
         deleteErrorRowName={state.deleteErrorRowName}
         deleteErrorMessage={state.deleteErrorMessage}
         entityLabel="data source"
-        onDeleteErrorClose={() => {}}
-        onDeleteErrorRetry={async () => {}}
+        onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
+        onDeleteErrorRetry={handleRemove}
         exportToastOpen={state.exportToastOpen}
         exportToastKind={state.exportToastKind}
         exportToastMessage={state.exportToastMessage}
@@ -356,6 +387,34 @@ const ApplicationDatasourcesTable = ({
                 void loadDatasources();
               }}
               onPartialConnect={() => void loadDatasources()}
+            />
+            
+            {/* Remove data source modal */}
+            <DeleteConfirmNameModal
+              isOpen={state.isDeleteDialogOpen}
+              isDeleting={state.isDeleting}
+              itemName={
+                state.rowsData.find((r) => r.id === state.selectedRowId)
+                  ?.name ?? ""
+              }
+              warningText="Disconnecting this data source will remove it from this service and permanently delete its indexed data from this service's vector store. Syncing and ingestion will continue for any other services still connected to this data source."
+              confirmValue={state.confirmTextValue}
+              onConfirmValueChange={(value) =>
+                dispatch({
+                  type: ACTION_TYPES.SET_CONFIRM_TEXT,
+                  payload: value,
+                })
+              }
+              errorMessage={state.modalDeleteError}
+              onConfirm={() => void handleRemove()}
+              onClose={() => {
+                dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+                dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+                dispatch({
+                  type: ACTION_TYPES.SET_MODAL_DELETE_ERROR,
+                  payload: "",
+                });
+              }}
             />
 
             {/* Export modal */}

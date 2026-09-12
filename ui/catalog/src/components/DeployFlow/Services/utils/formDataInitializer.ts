@@ -3,18 +3,19 @@ import type {
   ServiceConfig,
   ComponentConfig,
 } from "../../Shared/types";
-import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
+import type { ServiceDeployOptions } from "@/types/api.types";
+import { DEFAULT_FORM_DATA } from "../../Shared/utils/formData";
 
 export const initializeFormData = (
   deployOptions: ServiceDeployOptions,
   selectedServiceId: string,
-  componentModels?: Record<string, LLMOption[]>,
 ): DeployFormData => {
   const formData: DeployFormData = {
     name: "Service deployment",
     version: deployOptions.version,
     globalComponents: {}, // Empty for service deployments
     services: {},
+    ...DEFAULT_FORM_DATA,
     dataSources: [],
     uploadFromSourceEnabled: false,
   };
@@ -30,22 +31,14 @@ export const initializeFormData = (
   // Add ALL components to the service config (no filtering)
   // The API returns only the components needed for this specific service
   deployOptions.components?.forEach((component) => {
-    const componentKey = `${selectedServiceId}:${component.type}`;
-    const models = componentModels?.[componentKey] || [];
     const defaultProvider =
       component.providers.find((provider) => provider.default === true) ||
       component.providers[0];
-    const defaultModelForProvider = models.find(
-      (model) => model.providerId === defaultProvider?.id,
-    );
 
-    // Only include params if there is a model for the selected default provider
-    // Components like vector_store don't have models and shouldn't have params
+    // Default model seeding is handled reactively in ServicesStepOne via useEffect
     const componentConfig: ComponentConfig = {
       providerId: defaultProvider?.id || "",
-      params: defaultModelForProvider
-        ? { model: defaultModelForProvider.id }
-        : {},
+      params: {},
     };
     serviceConfig.components[component.type] = componentConfig;
   });
