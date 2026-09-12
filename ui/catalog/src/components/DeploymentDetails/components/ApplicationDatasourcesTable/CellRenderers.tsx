@@ -27,15 +27,23 @@ export const LastSyncCell = ({ value }: Pick<CellRendererProps, "value">) => (
   <span>{String(value ?? "")}</span>
 );
 
-export const DeleteCell = () => (
-  <Button
-    hasIconOnly
-    kind="ghost"
-    size="sm"
-    renderIcon={TrashCan}
-    iconDescription="Delete"
-  />
-);
+export const DeleteCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
+  const isDisabled =
+    rowData?.status === "syncing" || rowData?.status === "delete pending";
+  return (
+    <Button
+      hasIconOnly
+      kind="ghost"
+      size="sm"
+      renderIcon={TrashCan}
+      iconDescription="Remove"
+      disabled={isDisabled}
+      onClick={() =>
+        dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
+      }
+    />
+  );
+};
 
 export const CELL_RENDERERS: Record<string, RendererFn> = {
   status: StatusCell as RendererFn,
