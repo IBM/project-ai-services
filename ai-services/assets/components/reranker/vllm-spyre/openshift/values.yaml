@@ -2,9 +2,9 @@ model: ""
 resources:
   requests:
     cpu: "8"
-    memory: "4Gi"
+    memory: "5Gi"
     ibm.com/spyre_pf: "1"
   limits:
     cpu: "8"
-    memory: "4Gi"
+    memory: "5Gi"
     ibm.com/spyre_pf: "1"

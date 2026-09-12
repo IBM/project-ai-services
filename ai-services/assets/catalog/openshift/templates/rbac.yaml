@@ -1,84 +1,29 @@
-{{- if not (lookup "v1" "ServiceAccount" .Release.Namespace "ai-services-sa") }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ai-services-sa
+  name: ai-services-catalog-sa
   namespace: {{ .Release.Namespace }}
-{{- end }}
 ---
-{{- if not (lookup "rbac.authorization.k8s.io/v1" "ClusterRole" "" "ai-services-manager") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ai-services-manager
+  name: ai-services-catalog-reader
 rules:
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["serving.kserve.io"]
-    resources: ["inferenceservices", "servingruntimes"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  # Required by execEnvInContainer to read live container env vars (Spyre card PCI addresses)
-  # via the Kubernetes API pod/exec subresource — no oc binary needed.
-  - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments", "statefulsets", "replicasets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["policy"]
-    resources: ["poddisruptionbudgets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Required by GatewayRouteHost to look up the catalog-worker-gateway Route host
+  # in order to embed the correct DNS SAN in the server certificate and bootstrap token.
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Required by GetSystemInfo / getSpyreCardInfo to read node capacity and allocatable resources.
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["list"]
-{{- end }}
+    verbs: ["get", "list"]
 ---
-{{- if not (lookup "rbac.authorization.k8s.io/v1" "ClusterRoleBinding" "" "ai-services-manager-binding") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ai-services-manager-binding
+  name: ai-services-catalog-reader-binding
 subjects:
   - kind: ServiceAccount
-    name: ai-services-sa
+    name: ai-services-catalog-sa
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: ai-services-manager
+  name: ai-services-catalog-reader
   apiGroup: rbac.authorization.k8s.io
-{{- end }}
----
-{{- if not (lookup "rbac.authorization.k8s.io/v1" "ClusterRoleBinding" "" "ai-services-monitoring-view-binding") }}
-# Grants the backend SA access to query the OpenShift Thanos Querier (port 9091).
-# Without this the Thanos HTTP endpoint returns 403 Forbidden (plain text),
-# which causes a JSON parse error in GetSystemInfo.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: ai-services-monitoring-view-binding
-subjects:
-  - kind: ServiceAccount
-    name: ai-services-sa
-    namespace: {{ .Release.Namespace }}
-roleRef:
-  kind: ClusterRole
-  name: cluster-monitoring-view
-  apiGroup: rbac.authorization.k8s.io
-{{- end }}

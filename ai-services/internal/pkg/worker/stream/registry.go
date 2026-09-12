@@ -34,6 +34,12 @@ type WorkerRegistry interface {
 	// or ("", false) if no connected worker has that ID.
 	WorkerNameByID(id uuid.UUID) (string, bool)
 
+	// WorkerInfoByID returns the name and runtime-type string for the given database
+	// UUID. It checks the live in-memory registry first; if the worker is not currently
+	// connected it falls back to the DB so that the values are still available for
+	// offline workers. Returns ("", "") when the worker cannot be found at all.
+	WorkerInfoByID(ctx context.Context, id uuid.UUID) (name, runtimeType string)
+
 	// IsWorkerConnected reports whether the named worker has status=ready in the DB.
 	IsWorkerConnected(ctx context.Context, workerName string) bool
 }
