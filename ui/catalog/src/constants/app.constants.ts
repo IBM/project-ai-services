@@ -10,7 +10,12 @@ export const COMPONENT_TYPES = {
 export type ComponentType =
   (typeof COMPONENT_TYPES)[keyof typeof COMPONENT_TYPES];
 
-// description and disabled will be used by the other worker PRs
+// The worker name used by the local (same-node) deployment target.
+export const LOCAL_WORKER_NAME = "Local";
+
+// The default runtime used when no worker runtime is known yet.
+export const DEFAULT_RUNTIME = "podman" as const;
+
 export const WORKER_RUNTIME_LABELS: Record<
   string,
   { short: string; label: string; description: string; disabled?: boolean }

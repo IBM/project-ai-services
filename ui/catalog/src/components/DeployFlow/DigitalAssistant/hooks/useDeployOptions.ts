@@ -7,7 +7,7 @@ import {
   fetchServiceParams,
 } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
-import { RUNTIMES } from "@/constants";
+import { WORKER_RUNTIME_LABELS } from "@/constants";
 
 /** Extracts LLMOption entries for a single provider from its resolved schema. */
 function extractModelsFromSchema(
@@ -85,7 +85,7 @@ export const useDeployOptions = (open: boolean, runtime: string) => {
   useEffect(() => {
     if (!open || !selectedArchitectureId) return;
 
-    RUNTIMES.forEach((rt) => {
+    Object.keys(WORKER_RUNTIME_LABELS).forEach((rt) => {
       const isStale = isDeployOptionsStale(selectedArchitectureId, rt);
       const cached = getDeployOptions(selectedArchitectureId, rt);
 
