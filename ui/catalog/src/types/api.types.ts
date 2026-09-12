@@ -123,6 +123,12 @@ export interface ApplicationService {
   }>;
 }
 
+export interface ApplicationWorker {
+  id: string;
+  name: string;
+  runtime_type: string;
+}
+
 export interface Application {
   id: string;
   name: string;
@@ -133,6 +139,7 @@ export interface Application {
   created_at: string;
   updated_at: string;
   services: ApplicationService[];
+  worker?: ApplicationWorker;
 }
 
 export interface PaginationMetadata {
@@ -244,6 +251,7 @@ export interface ApplicationDetailsApiResponse {
   name: string;
   type: string;
   status: string;
+  worker?: ApplicationWorker;
   services: Array<{
     id: string;
     type: string;
@@ -420,6 +428,7 @@ export interface WorkerApiResponse {
   registered_at: string;
   updated_at: string;
   metadata?: Record<string, unknown>;
+  message?: string;
 }
 
 export interface WorkerListResponse {

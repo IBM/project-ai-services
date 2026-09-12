@@ -3,7 +3,6 @@ import type { DataTableHeader } from "@carbon/react";
 export interface BaseTableRow {
   id: string;
   status: string;
-  messages: string;
 }
 
 export type RowStatus =

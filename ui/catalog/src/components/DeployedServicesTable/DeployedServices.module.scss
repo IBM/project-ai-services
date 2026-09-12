@@ -9,7 +9,7 @@
   :global(.cds--data-table) {
     width: 100%;
 
-    // Make first 4 columns compact (sized to content) - name, status, uptime, service
+    // Make compact columns (sized to content) - name, status, uptime, worker resource, worker type, service
     :global(th:nth-child(1)),
     :global(td:nth-child(1)),
     :global(th:nth-child(2)),
@@ -17,7 +17,11 @@
     :global(th:nth-child(3)),
     :global(td:nth-child(3)),
     :global(th:nth-child(4)),
-    :global(td:nth-child(4)) {
+    :global(td:nth-child(4)),
+    :global(th:nth-child(5)),
+    :global(td:nth-child(5)),
+    :global(th:nth-child(6)),
+    :global(td:nth-child(6)) {
       width: 1%;
       white-space: nowrap;
     }

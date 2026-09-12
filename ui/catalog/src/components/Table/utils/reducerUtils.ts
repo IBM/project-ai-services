@@ -298,8 +298,6 @@ export function updateRowStatus<TRow extends BaseTableRow>(
       ? {
           ...r,
           status: payload.status,
-          messages:
-            payload.message !== undefined ? payload.message : r.messages,
         }
       : r,
   );

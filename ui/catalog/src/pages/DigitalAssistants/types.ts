@@ -22,6 +22,8 @@ export interface DigitalAssistantRow {
     | "Initializing";
   type?: string;
   uptime: string;
+  workerResource: string;
+  workerType: string;
   messages: string;
   actions: string;
   children?: DigitalAssistantRow[];
@@ -74,6 +76,8 @@ export const HEADERS: DataTableHeader[] = [
   { header: "Name", key: "name" },
   { header: "Status", key: "status" },
   { header: "Uptime", key: "uptime" },
+  { header: "Worker resource", key: "workerResource" },
+  { header: "Worker type", key: "workerType" },
   { header: "Messages", key: "messages" },
   { header: "", key: "actions" },
 ];
@@ -82,6 +86,8 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
   uptime: true,
+  workerResource: true,
+  workerType: true,
   messages: true,
 };
 

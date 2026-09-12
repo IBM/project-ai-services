@@ -461,6 +461,28 @@
   }
 }
 
+.workerInfoRow {
+  display: flex;
+  margin-top: $spacing-06;
+}
+
+.workerInfoField {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-02;
+  flex: 0 0 50%;
+}
+
+.workerInfoLabel {
+  @include type-style("label-01");
+  color: $text-secondary;
+}
+
+.workerInfoValue {
+  @include type-style("body-short-01");
+  color: $text-primary;
+}
+
 // Accelerator cards styles
 .acceleratorCardsColumn {
   padding-top: 0;
