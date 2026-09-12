@@ -9,12 +9,13 @@ import { COMPONENT_TYPES } from "@/constants";
 
 /**
  * Custom hook to fetch and cache service deploy options, LLM models, and component models.
- * Uses Zustand store to cache data per service and avoid redundant API calls.
- * On reopen, retries only errored models
+ * Uses Zustand store to cache data per service+runtime and avoid redundant API calls.
+ * On reopen, retries only errored models.
  */
 export const useServiceDeployOptions = (
   serviceId: string | null,
   open: boolean,
+  runtime: string,
 ) => {
   const {
     getServiceDeployOptions,
@@ -28,31 +29,40 @@ export const useServiceDeployOptions = (
     setProviderSchema,
   } = useServiceDeployStore();
 
+  // Keyed by "serviceId:runtime" to prevent stale cache hits across runtime switches
   const hasFetchedOptions = useRef<Record<string, boolean>>({});
 
-  // Get cached data for this service
-  const deployOptions = serviceId ? getServiceDeployOptions(serviceId) : null;
+  // Get cached data for this service+runtime
+  const deployOptions = serviceId
+    ? getServiceDeployOptions(serviceId, runtime)
+    : null;
   const llmModels = serviceId
-    ? getComponentModels(serviceId, COMPONENT_TYPES.LLM)
+    ? getComponentModels(serviceId, COMPONENT_TYPES.LLM, runtime)
     : [];
 
   // Get loading and error states from store
   const deployOptionsLoading = useServiceDeployStore((state) =>
-    serviceId ? state.serviceDeployOptionsLoading[serviceId] || false : false,
+    serviceId
+      ? state.serviceDeployOptionsLoading[`${serviceId}:${runtime}`] || false
+      : false,
   );
   const deployOptionsError = useServiceDeployStore((state) =>
-    serviceId ? state.serviceDeployOptionsError[serviceId] || null : null,
+    serviceId
+      ? state.serviceDeployOptionsError[`${serviceId}:${runtime}`] || null
+      : null,
   );
   const llmModelsLoading = useServiceDeployStore((state) =>
     serviceId
-      ? state.componentModelsLoading[`${serviceId}:${COMPONENT_TYPES.LLM}`] ||
-        false
+      ? state.componentModelsLoading[
+          `${serviceId}:${COMPONENT_TYPES.LLM}:${runtime}`
+        ] || false
       : false,
   );
   const llmModelsError = useServiceDeployStore((state) =>
     serviceId
-      ? state.componentModelsError[`${serviceId}:${COMPONENT_TYPES.LLM}`] ||
-        null
+      ? state.componentModelsError[
+          `${serviceId}:${COMPONENT_TYPES.LLM}:${runtime}`
+        ] || null
       : null,
   );
 
@@ -66,23 +76,24 @@ export const useServiceDeployOptions = (
     if (!open || !serviceId) return;
 
     const storeState = useServiceDeployStore.getState();
+    const fetchKey = `${serviceId}:${runtime}`;
 
     // --- Path A: deploy options not cached yet — full fetch ---
     if (
       !deployOptions &&
-      !hasFetchedOptions.current[serviceId] &&
+      !hasFetchedOptions.current[fetchKey] &&
       !deployOptionsLoading
     ) {
-      hasFetchedOptions.current[serviceId] = true;
-      setServiceDeployOptionsLoading(serviceId, true);
-      setComponentModelsLoading(serviceId, COMPONENT_TYPES.LLM, true);
-      setServiceDeployOptionsError(serviceId, null);
-      setComponentModelsError(serviceId, COMPONENT_TYPES.LLM, null);
+      hasFetchedOptions.current[fetchKey] = true;
+      setServiceDeployOptionsLoading(serviceId, runtime, true);
+      setComponentModelsLoading(serviceId, COMPONENT_TYPES.LLM, runtime, true);
+      setServiceDeployOptionsError(serviceId, runtime, null);
+      setComponentModelsError(serviceId, COMPONENT_TYPES.LLM, runtime, null);
 
       // First, fetch deploy options to know which components exist
-      fetchServiceDeployOptions(serviceId)
+      fetchServiceDeployOptions(serviceId, runtime)
         .then(async (deployData) => {
-          setServiceDeployOptions(serviceId, deployData);
+          setServiceDeployOptions(serviceId, runtime, deployData);
 
           // Identify Step 1 components (exclude llm and reranker)
           const step1Components =
@@ -102,17 +113,31 @@ export const useServiceDeployOptions = (
                 component.providers.length > 0,
             ) || [];
 
-          // STAGE 1: Fetch Step 1 component models in parallel (Promise.allSettled so a single failure does not block the rest).
+          // STAGE 1: Fetch Step 1 component models in parallel (Promise.allSettled so a
+          // single failure does not block the rest).
           const step1Results = await Promise.allSettled(
             step1Components.map(async (component) => {
-              setComponentModelsLoading(serviceId, component.type, true);
+              setComponentModelsLoading(
+                serviceId,
+                component.type,
+                runtime,
+                true,
+              );
               const models = await fetchComponentModelsWithSchemas(
                 serviceId,
                 component.type,
-                setProviderSchema,
+                (svcId, compType, providerId, schema) =>
+                  setProviderSchema(
+                    svcId,
+                    compType,
+                    providerId,
+                    runtime,
+                    schema,
+                  ),
                 deployData,
+                runtime,
               );
-              setComponentModels(serviceId, component.type, models);
+              setComponentModels(serviceId, component.type, runtime, models);
               return { type: component.type, models };
             }),
           );
@@ -124,7 +149,12 @@ export const useServiceDeployOptions = (
                 result.reason instanceof Error
                   ? result.reason.message
                   : `Failed to load ${component.type} models`;
-              setComponentModelsError(serviceId, component.type, errorMessage);
+              setComponentModelsError(
+                serviceId,
+                component.type,
+                runtime,
+                errorMessage,
+              );
             }
           });
 
@@ -134,19 +164,35 @@ export const useServiceDeployOptions = (
               component.type === COMPONENT_TYPES.LLM
                 ? fetchLLMOptionsWithModels(
                     serviceId,
-                    setProviderSchema,
+                    (svcId, compType, providerId, schema) =>
+                      setProviderSchema(
+                        svcId,
+                        compType,
+                        providerId,
+                        runtime,
+                        schema,
+                      ),
                     deployData,
+                    runtime,
                   )
                 : fetchComponentModelsWithSchemas(
                     serviceId,
                     component.type,
-                    setProviderSchema,
+                    (svcId, compType, providerId, schema) =>
+                      setProviderSchema(
+                        svcId,
+                        compType,
+                        providerId,
+                        runtime,
+                        schema,
+                      ),
                     deployData,
+                    runtime,
                   );
 
             fetchFn
               .then((models) => {
-                setComponentModels(serviceId, component.type, models);
+                setComponentModels(serviceId, component.type, runtime, models);
               })
               .catch((err) => {
                 const errorMessage =
@@ -156,6 +202,7 @@ export const useServiceDeployOptions = (
                 setComponentModelsError(
                   serviceId,
                   component.type,
+                  runtime,
                   errorMessage,
                 );
               });
@@ -166,11 +213,16 @@ export const useServiceDeployOptions = (
             err instanceof Error
               ? err.message
               : "Failed to load deploy options";
-          setServiceDeployOptionsError(serviceId, errorMessage);
-          setComponentModelsError(serviceId, COMPONENT_TYPES.LLM, errorMessage);
+          setServiceDeployOptionsError(serviceId, runtime, errorMessage);
+          setComponentModelsError(
+            serviceId,
+            COMPONENT_TYPES.LLM,
+            runtime,
+            errorMessage,
+          );
         })
         .finally(() => {
-          hasFetchedOptions.current[serviceId] = false;
+          hasFetchedOptions.current[fetchKey] = false;
         });
 
       return;
@@ -180,18 +232,27 @@ export const useServiceDeployOptions = (
     if (!deployOptions) return;
 
     const llmError =
-      storeState.componentModelsError[`${serviceId}:${COMPONENT_TYPES.LLM}`];
+      storeState.componentModelsError[
+        `${serviceId}:${COMPONENT_TYPES.LLM}:${runtime}`
+      ];
     if (llmError) {
-      setComponentModelsError(serviceId, COMPONENT_TYPES.LLM, null);
-      setComponentModelsLoading(serviceId, COMPONENT_TYPES.LLM, true);
-      fetchLLMOptionsWithModels(serviceId, setProviderSchema, deployOptions)
+      setComponentModelsError(serviceId, COMPONENT_TYPES.LLM, runtime, null);
+      setComponentModelsLoading(serviceId, COMPONENT_TYPES.LLM, runtime, true);
+      fetchLLMOptionsWithModels(
+        serviceId,
+        (svcId, compType, providerId, schema) =>
+          setProviderSchema(svcId, compType, providerId, runtime, schema),
+        deployOptions,
+        runtime,
+      )
         .then((llmData) =>
-          setComponentModels(serviceId, COMPONENT_TYPES.LLM, llmData),
+          setComponentModels(serviceId, COMPONENT_TYPES.LLM, runtime, llmData),
         )
         .catch((err) => {
           setComponentModelsError(
             serviceId,
             COMPONENT_TYPES.LLM,
+            runtime,
             err instanceof Error ? err.message : "Failed to load LLM models",
           );
         });
@@ -206,21 +267,28 @@ export const useServiceDeployOptions = (
       ) ?? [];
     step1Components.forEach((component) => {
       const err =
-        storeState.componentModelsError[`${serviceId}:${component.type}`];
+        storeState.componentModelsError[
+          `${serviceId}:${component.type}:${runtime}`
+        ];
       if (!err) return;
-      setComponentModelsError(serviceId, component.type, null);
-      setComponentModelsLoading(serviceId, component.type, true);
+      setComponentModelsError(serviceId, component.type, runtime, null);
+      setComponentModelsLoading(serviceId, component.type, runtime, true);
       fetchComponentModelsWithSchemas(
         serviceId,
         component.type,
-        setProviderSchema,
+        (svcId, compType, providerId, schema) =>
+          setProviderSchema(svcId, compType, providerId, runtime, schema),
         deployOptions,
+        runtime,
       )
-        .then((models) => setComponentModels(serviceId, component.type, models))
+        .then((models) =>
+          setComponentModels(serviceId, component.type, runtime, models),
+        )
         .catch((retryErr) => {
           setComponentModelsError(
             serviceId,
             component.type,
+            runtime,
             retryErr instanceof Error
               ? retryErr.message
               : `Failed to load ${component.type} models`,
@@ -230,6 +298,7 @@ export const useServiceDeployOptions = (
   }, [
     open,
     serviceId,
+    runtime,
     deployOptions,
     deployOptionsLoading,
     setServiceDeployOptions,

@@ -9,6 +9,7 @@ import type {
   ComponentConfig,
   ServiceConfig,
 } from "@/components/DeployFlow/Shared/types";
+import { DEFAULT_FORM_DATA } from "@/components/DeployFlow/Shared/utils/formData";
 
 // Initializes form data structure from deploy options with default values
 export function initializeFormData(
@@ -63,6 +64,7 @@ export function initializeFormData(
     version: deployOptions.version,
     globalComponents,
     services,
+    ...DEFAULT_FORM_DATA,
     dataSources: [],
     uploadFromSourceEnabled: false,
   };

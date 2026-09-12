@@ -33,6 +33,8 @@ export function sharedDeployFlowReducer<S extends BaseDeployFlowState>(
       return handleUpdateFormData(state, action.payload);
     case SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR:
       return { ...state, showStepOneNameError: action.payload };
+    case SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR:
+      return { ...state, showStepOneWorkerError: action.payload };
     default:
       return state;
   }
@@ -47,17 +49,29 @@ export function useDeployFlowReducer(
   lastStep: number,
 ) {
   const handleNext = useCallback(
-    (formDataName: string) => {
-      if (currentStep === stepOne && !formDataName.trim()) {
-        dispatch({
-          type: SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
-          payload: true,
-        });
-        return;
+    (formDataName: string, workerName: string) => {
+      if (currentStep === stepOne) {
+        const nameInvalid = !formDataName.trim();
+        const workerInvalid = !workerName.trim();
+        if (nameInvalid || workerInvalid) {
+          dispatch({
+            type: SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
+            payload: nameInvalid,
+          });
+          dispatch({
+            type: SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
+            payload: workerInvalid,
+          });
+          return;
+        }
       }
       if (currentStep < lastStep) {
         dispatch({
           type: SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR,
+          payload: false,
+        });
+        dispatch({
+          type: SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
           payload: false,
         });
         dispatch({
