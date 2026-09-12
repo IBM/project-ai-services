@@ -55,7 +55,7 @@ type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
-  runtime_type: RuntimeTypeCell as RendererFn,
+  runtime_label: RuntimeTypeCell as RendererFn,
   message: MessageCell as RendererFn,
   actions: ActionCell,
 };

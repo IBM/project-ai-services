@@ -19,7 +19,8 @@ export function transformWorkerToRow(
     id: worker.id,
     name: worker.name,
     status: worker.status,
-    runtime_type:
+    runtime_type: worker.runtime_type,
+    runtime_label:
       WORKER_RUNTIME_LABELS[worker.runtime_type]?.short ?? worker.runtime_type,
     message: worker.message ?? "",
     actions: "actions",

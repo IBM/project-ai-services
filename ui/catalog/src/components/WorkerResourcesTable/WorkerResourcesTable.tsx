@@ -187,7 +187,7 @@ const WorkerResourcesTable = ({
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: ["name", "status", "runtime_type", "message"],
+    searchFields: ["name", "status", "runtime_label", "message"],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
     fetchAllRows: async () => {
@@ -203,7 +203,7 @@ const WorkerResourcesTable = ({
   const filteredRows = filterRowsBySearch<Record<string, unknown>>(
     state.rowsData as unknown as Record<string, unknown>[],
     state.search,
-    ["name", "status", "runtime_type", "message"],
+    ["name", "status", "runtime_label", "message"],
   ) as unknown as WorkerResourceRow[];
 
   const noData =

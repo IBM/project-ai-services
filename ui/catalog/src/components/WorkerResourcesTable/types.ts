@@ -1,5 +1,5 @@
 import type { DataTableHeader } from "@carbon/react";
-import type { WorkerStatus } from "@/types/api.types";
+import type { WorkerRuntimeType, WorkerStatus } from "@/types/api.types";
 import type {
   BaseTableState,
   SharedTableAction,
@@ -21,7 +21,8 @@ export interface WorkerResourceRow {
   id: string;
   name: string;
   status: WorkerStatus;
-  runtime_type: string;
+  runtime_type: WorkerRuntimeType;
+  runtime_label: string;
   message: string;
   actions: string;
 }
@@ -49,7 +50,7 @@ export type AppAction =
 export const HEADERS: DataTableHeader[] = [
   { header: "Name", key: "name" },
   { header: "Status", key: "status" },
-  { header: "Type", key: "runtime_type" },
+  { header: "Type", key: "runtime_label" },
   { header: "Message", key: "message" },
   { header: "", key: "actions" },
 ];
@@ -64,7 +65,7 @@ export const STATUS_SORT_ORDER: Record<WorkerStatus, number> = {
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
-  runtime_type: true,
+  runtime_label: true,
   message: true,
 };
 
