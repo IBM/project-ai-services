@@ -8,7 +8,7 @@ COPY common /opt/services/common
 COPY translate/ .
 
 # Uncomment when translate-specific requirements.txt is added:
-# RUN source /var/venv/bin/activate && python -m ensurepip --upgrade && pip install -r requirements.txt --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux --prefer-binary && pip cache purge && rm -rf /var/venv/lib/python3.12/site-packages/pip /var/venv/lib/python3.12/site-packages/pip-*.dist-info /var/venv/bin/pip*
+# RUN source /var/venv/bin/activate && python -m ensurepip --upgrade && python -m pip install --upgrade pip && python -m pip install -r requirements.txt --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux --prefer-binary && python -m pip cache purge && rm -rf /var/venv/lib/python3.12/site-packages/pip /var/venv/lib/python3.12/site-packages/pip-*.dist-info /var/venv/bin/pip*
 
 CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
      "--host", "0.0.0.0", "--port", "9000", \
