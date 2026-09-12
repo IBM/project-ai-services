@@ -15,11 +15,15 @@ export interface ServiceConfig {
   params: Record<string, unknown>; // Service-level params from schema
 }
 
+export type DeploymentRuntimeType = "podman" | "openshift";
+
 export interface DeployFormData {
   name: string;
   version: string;
   globalComponents: Record<string, ComponentConfig>; // e.g., { embedding: {...}, vector_store: {...} }
   services: Record<string, ServiceConfig>; // e.g., { digitize: {...}, chat: {...} }
+  deploymentType: DeploymentRuntimeType;
+  workerName: string;
   dataSources?: string[]; // selected data source connector IDs
   uploadFromSourceEnabled?: boolean; // toggle for "Upload data from source locations"
 }
@@ -31,6 +35,8 @@ export interface BaseStepProps {
   onEditingChange?: (isEditing: boolean) => void;
   onResourceStatusChange?: (hasInsufficientResources: boolean) => void;
   showNameError?: boolean;
+  showWorkerError?: boolean;
+  onWorkerErrorReset?: () => void;
   onComponentError?: (hasError: boolean) => void;
 }
 
@@ -64,6 +70,7 @@ export const SHARED_ACTION_TYPES = {
   SET_FORM_DATA: "SET_FORM_DATA",
   UPDATE_FORM_DATA: "UPDATE_FORM_DATA",
   SET_SHOW_STEP_ONE_NAME_ERROR: "SET_SHOW_STEP_ONE_NAME_ERROR",
+  SET_SHOW_STEP_ONE_WORKER_ERROR: "SET_SHOW_STEP_ONE_WORKER_ERROR",
   SHOW_DEPLOY_TOAST: "SHOW_DEPLOY_TOAST",
   HIDE_DEPLOY_TOAST: "HIDE_DEPLOY_TOAST",
 } as const;
@@ -89,6 +96,10 @@ export type SharedDeployFlowAction =
       type: typeof SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_NAME_ERROR;
       payload: boolean;
     }
+  | {
+      type: typeof SHARED_ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR;
+      payload: boolean;
+    }
   | { type: typeof SHARED_ACTION_TYPES.SHOW_DEPLOY_TOAST }
   | { type: typeof SHARED_ACTION_TYPES.HIDE_DEPLOY_TOAST };
 
@@ -107,4 +118,5 @@ export interface BaseDeployFlowState {
   deployToastOpen: boolean;
   formData: DeployFormData;
   showStepOneNameError: boolean;
+  showStepOneWorkerError: boolean;
 }
