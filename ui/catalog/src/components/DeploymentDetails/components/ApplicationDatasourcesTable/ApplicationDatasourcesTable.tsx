@@ -388,7 +388,7 @@ const ApplicationDatasourcesTable = ({
               }}
               onPartialConnect={() => void loadDatasources()}
             />
-            
+
             {/* Remove data source modal */}
             <DeleteConfirmNameModal
               isOpen={state.isDeleteDialogOpen}
