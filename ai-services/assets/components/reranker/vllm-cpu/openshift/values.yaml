@@ -2,7 +2,7 @@ model: ""
 resources:
   requests:
     cpu: "8"
-    memory: "6Gi"
+    memory: "4Gi"
   limits:
     cpu: "8"
-    memory: "6Gi"
+    memory: "4Gi"
