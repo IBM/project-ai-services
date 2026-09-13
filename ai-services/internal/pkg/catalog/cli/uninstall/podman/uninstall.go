@@ -7,9 +7,10 @@ import (
 
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -46,7 +47,8 @@ func performCleanup(ctx context.Context, rt *podman.PodmanClient, pods []types.P
 
 	// Retrieve the BaseDir from the catalog pod configuration
 	var baseDir string
-	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstants.CatalogComponentValue
+	config, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt, catalogPodLabel)
 	if err != nil {
 		logger.Warningf("Failed to retrieve BaseDir from catalog pod: %v. Using default BaseDir.\n", err)
 		baseDir = utils.GetBaseDir()

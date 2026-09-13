@@ -35,8 +35,11 @@ export const APPLICATION_ENDPOINTS = {
   GET_APPLICATION_DETAILS: (id: string) => `/applications/${id}`,
   GET_APPLICATION_RESOURCES: (id: string) => `/applications/${id}/resources`,
   UPDATE_APPLICATION: (id: string) => `/applications/${id}`,
-  GET_APPLICATION_DATASOURCES: (id: string) =>
-    `/applications/${id}/datasources/`,
+  APPLICATION_DATASOURCES: (id: string) => `/applications/${id}/datasources`,
+  REMOVE_APPLICATION_DATASOURCE: (
+    applicationId: string,
+    datasourceId: string,
+  ) => `/applications/${applicationId}/datasources/${datasourceId}`,
 };
 
 export const CONNECTORS_ENDPOINTS = {
@@ -54,4 +57,5 @@ export const CONNECTORS_ENDPOINTS = {
 export const WORKERS_ENDPOINTS = {
   LIST_WORKERS: "/workers",
   REGISTER_WORKER: "/workers",
+  DEREGISTER_WORKER: (id: string) => `/workers/${id}`,
 };

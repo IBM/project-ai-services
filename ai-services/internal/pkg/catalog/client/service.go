@@ -2,13 +2,19 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 
-	"github.com/go-resty/resty/v2"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/httpproxy"
+)
+
+const (
+	// serviceMaxRetries is the number of retries on failure (one retry = two total attempts).
+	serviceMaxRetries  = 1
+	serviceConnectPath = "/v1/connectors"
 )
 
 // serviceConnectorListResponse is the paginated envelope returned by
@@ -27,14 +33,6 @@ type ServiceConnectorPage struct {
 	Total int
 }
 
-const (
-	// serviceHTTPTimeout is the per-request timeout for calls to a downstream service pod.
-	serviceHTTPTimeout = 15 * time.Second
-	// serviceMaxRetries is the number of retries on failure (one retry = two total attempts).
-	serviceMaxRetries  = 1
-	serviceConnectPath = "/v1/connectors"
-)
-
 // ServiceHTTPError is returned by client methods when the downstream service responds
 // with a non-2xx status code. Callers can type-assert to inspect the status code and
 // decide whether to treat specific codes (e.g. 404) as non-fatal.
@@ -47,48 +45,60 @@ func (e *ServiceHTTPError) Error() string {
 }
 
 // serviceUpdatePayload is the request body for PUT /v1/connectors/<connector_id>.
-// Only the fields being updated are sent; the service performs a partial update.
 type serviceUpdatePayload struct {
-	// ConnectionDetails holds the updated credential fields.
 	ConnectionDetails map[string]any `json:"connection_details"`
 }
 
-// ServiceClient is an HTTP client for downstream service API calls (e.g. Digitize).
+// ServiceClient calls downstream service pod endpoints (e.g. Digitize) via
+// an HTTPProxier — all HTTP traffic is tunnelled through the worker so that
+// internal pod URLs (svc.cluster.local or Podman container names) are reachable
+// from the control plane.
 type ServiceClient struct {
-	http *resty.Client
+	proxy   httpproxy.HTTPProxier
+	baseURL string
 }
 
-// NewServiceClient creates a ServiceClient pointed at baseURL.
-// The resty client is configured with a 15-second timeout. Calls go to the internal
-// pod-to-pod endpoint (plain HTTP), so no TLS configuration is required.
-func NewServiceClient(baseURL string) *ServiceClient {
-	r := resty.New().
-		SetBaseURL(baseURL).
-		SetTimeout(serviceHTTPTimeout)
-
-	return &ServiceClient{http: r}
+// NewServiceClient creates a ServiceClient that routes all calls through proxy
+// to the given baseURL.
+func NewServiceClient(proxy httpproxy.HTTPProxier, baseURL string) *ServiceClient {
+	return &ServiceClient{proxy: proxy, baseURL: baseURL}
 }
 
-// UpdateConnector calls PUT /v1/connectors/{connectorID} on the service pod to propagate
-// updated credentials. Retries once on failure. Returns nil on success.
+// do executes a single HTTP request via HTTPProxy and returns the raw response.
+func (c *ServiceClient) do(ctx context.Context, method, path string, body []byte) (statusCode int, respBody []byte, err error) {
+	headers := map[string]string(nil)
+	if len(body) > 0 {
+		headers = map[string]string{"Content-Type": "application/json"}
+	}
+
+	resp, err := c.proxy.HTTPProxy(ctx, method, c.baseURL+path, headers, body)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return resp.StatusCode, resp.Body, nil
+}
+
+// UpdateConnector calls PUT /v1/connectors/{connectorID} to propagate updated credentials.
+// Retries once on failure.
 func (c *ServiceClient) UpdateConnector(ctx context.Context, connectorID string, updatedCreds map[string]any) error {
-	payload := serviceUpdatePayload{ConnectionDetails: updatedCreds}
+	body, err := json.Marshal(serviceUpdatePayload{ConnectionDetails: updatedCreds})
+	if err != nil {
+		return fmt.Errorf("marshal update payload: %w", err)
+	}
 
 	var lastErr error
 
 	for attempt := 0; attempt <= serviceMaxRetries; attempt++ {
-		resp, err := c.http.R().
-			SetContext(ctx).
-			SetBody(payload).
-			Put("/v1/connectors/" + connectorID)
-		if err != nil {
-			lastErr = fmt.Errorf("service PUT request failed: %w", err)
+		status, _, reqErr := c.do(ctx, http.MethodPut, serviceConnectPath+"/"+connectorID, body)
+		if reqErr != nil {
+			lastErr = fmt.Errorf("service PUT request failed: %w", reqErr)
 
 			continue
 		}
 
-		if resp.IsError() {
-			lastErr = fmt.Errorf("service returned unexpected status %d", resp.StatusCode())
+		if status < 200 || status >= 300 {
+			lastErr = fmt.Errorf("service returned unexpected status %d", status)
 
 			continue
 		}
@@ -96,59 +106,50 @@ func (c *ServiceClient) UpdateConnector(ctx context.Context, connectorID string,
 		return nil
 	}
 
-	return fmt.Errorf("failed to propagate credentials to service after %d attempt(s): %w", serviceMaxRetries+1, lastErr)
+	return fmt.Errorf("failed to propagate credentials after %d attempt(s): %w", serviceMaxRetries+1, lastErr)
 }
 
-// GetConnectorSync calls GET /v1/connectors/{connectorID} on the service pod and
-// returns the connector's sync_status and last_sync_at values.
-// Returns an error when the HTTP call fails or the pod returns a non-200 status.
+// GetConnectorSync calls GET /v1/connectors/{connectorID} and returns the connector's
+// sync_status and related fields. Returns an error on HTTP failure or non-200 response.
 func (c *ServiceClient) GetConnectorSync(ctx context.Context, connectorID string) (*apimodels.ConnectorSyncState, error) {
-	var result apimodels.ConnectorSyncState
-
-	resp, err := c.http.R().
-		SetContext(ctx).
-		SetResult(&result).
-		Get("/v1/connectors/" + connectorID)
+	status, body, err := c.do(ctx, http.MethodGet, serviceConnectPath+"/"+connectorID, nil)
 	if err != nil {
-		return nil, fmt.Errorf("service request failed: %w", err)
+		return nil, fmt.Errorf("service GET request failed: %w", err)
 	}
 
-	if resp.IsError() {
-		return nil, fmt.Errorf("service returned status %d", resp.StatusCode())
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("service returned status %d", status)
+	}
+
+	var result apimodels.ConnectorSyncState
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode sync state: %w", err)
 	}
 
 	return &result, nil
 }
 
-// ListConnectors calls GET /v1/connectors on the service pod with limit/offset pagination
-// and returns a ServiceConnectorPage containing a map keyed by connector ID for O(1) lookup
-// and the Total count from the service response — used to drive API-level pagination.
-// The ConnectorListItem already includes the message field covering all status phases and
-// error details — no separate sync-log call is required.
-// Pass limit=0 to use the service default (50). offset is zero-based.
-// Returns an error when the HTTP call fails or the pod returns a non-200 status.
+// ListConnectors calls GET /v1/connectors with limit/offset pagination and returns a
+// ServiceConnectorPage keyed by connector ID for O(1) lookup. Pass limit=0 to use the
+// service default. Returns an error on HTTP failure or non-200 response.
 func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int) (*ServiceConnectorPage, error) {
-	var result serviceConnectorListResponse
-
-	req := c.http.R().
-		SetContext(ctx).
-		SetResult(&result)
-
-	if limit > 0 {
-		req = req.SetQueryParam("limit", strconv.Itoa(limit))
+	path := serviceConnectPath
+	if limit > 0 || offset > 0 {
+		path += "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
 	}
 
-	if offset > 0 {
-		req = req.SetQueryParam("offset", strconv.Itoa(offset))
-	}
-
-	resp, err := req.Get(serviceConnectPath)
+	status, body, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("service request failed: %w", err)
+		return nil, fmt.Errorf("service GET request failed: %w", err)
 	}
 
-	if resp.IsError() {
-		return nil, fmt.Errorf("service returned status %d", resp.StatusCode())
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("service returned status %d", status)
+	}
+
+	var result serviceConnectorListResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode connector list: %w", err)
 	}
 
 	byID := make(map[string]apimodels.ConnectorItem, len(result.Items))
@@ -159,39 +160,40 @@ func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int) (
 	return &ServiceConnectorPage{ByID: byID, Total: result.Total}, nil
 }
 
-// Connect calls POST /v1/connectors on the given service base URL.
-// 409 Conflict is treated as success (idempotent — connector already exists).
-func (c *ServiceClient) Connect(ctx context.Context, baseURL string, req apimodels.ConnectDatasourceRequest) error {
-	resp, err := c.http.R().
-		SetContext(ctx).
-		SetBody(req).
-		Post(baseURL + serviceConnectPath)
+// Connect calls POST /v1/connectors on the service pod.
+// 409 Conflict is treated as success — connector already exists (idempotent).
+func (c *ServiceClient) Connect(ctx context.Context, req apimodels.ConnectDatasourceRequest) error {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal connect request: %w", err)
+	}
+
+	status, _, err := c.do(ctx, http.MethodPost, serviceConnectPath, body)
 	if err != nil {
 		return fmt.Errorf("service POST request failed: %w", err)
 	}
 
-	if resp.StatusCode() == http.StatusConflict {
+	if status == http.StatusConflict {
 		return nil
 	}
 
-	if resp.IsError() {
-		return fmt.Errorf("service returned unexpected status %d", resp.StatusCode())
+	if status < 200 || status >= 300 {
+		return fmt.Errorf("service returned unexpected status %d", status)
 	}
 
 	return nil
 }
 
-// Disconnect calls DELETE /v1/connectors/{connectorID} on the given service base URL.
-func (c *ServiceClient) Disconnect(ctx context.Context, baseURL, connectorID string) error {
-	resp, err := c.http.R().
-		SetContext(ctx).
-		Delete(baseURL + serviceConnectPath + "/" + connectorID)
+// Disconnect calls DELETE /v1/connectors/{connectorID} on the service pod.
+// Returns a *ServiceHTTPError so callers can inspect the status code (e.g. treat 404 as success).
+func (c *ServiceClient) Disconnect(ctx context.Context, connectorID string) error {
+	status, _, err := c.do(ctx, http.MethodDelete, serviceConnectPath+"/"+connectorID, nil)
 	if err != nil {
 		return fmt.Errorf("service DELETE request failed: %w", err)
 	}
 
-	if resp.IsError() {
-		return &ServiceHTTPError{StatusCode: resp.StatusCode()}
+	if status < 200 || status >= 300 {
+		return &ServiceHTTPError{StatusCode: status}
 	}
 
 	return nil

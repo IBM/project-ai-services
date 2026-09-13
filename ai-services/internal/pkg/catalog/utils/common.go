@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -46,10 +45,8 @@ type OpenShiftConfigureOptions struct {
 
 // GetCatalogPodConfig retrieves catalog pod configuration by inspecting the running pod and its containers.
 // It extracts environment variables like AI_SERVICES_BASE_DIR, DOMAIN_SUFFIX, and CADDY_HTTPS_PORT.
-func GetCatalogPodConfig(ctx context.Context, rt runtime.Runtime) (*PodmanConfigureOptions, string, error) {
-	label := fmt.Sprintf("%s=%s", catalogConstants.CatalogSecretLabel, catalogConstants.CatalogSecretName)
-
-	podmanOpts, podID, err := cliutils.GetPodConfig(ctx, rt, label)
+func GetCatalogPodConfig(ctx context.Context, rt runtime.Runtime, podLabel string) (*PodmanConfigureOptions, string, error) {
+	podmanOpts, podID, err := cliutils.GetPodConfig(ctx, rt, podLabel)
 	if err != nil {
 		return nil, "", err
 	}

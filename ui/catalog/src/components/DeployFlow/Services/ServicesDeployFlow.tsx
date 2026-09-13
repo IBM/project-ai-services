@@ -1,5 +1,13 @@
-import { useReducer, useEffect, useRef, useMemo, useState } from "react";
+import {
+  useReducer,
+  useEffect,
+  useRef,
+  useMemo,
+  useState,
+  useCallback,
+} from "react";
 import { COMPONENT_TYPES } from "@/constants";
+import { useWorkers } from "@/hooks/useWorkers";
 import type {
   ServicesDeployFlowProps,
   DeployFlowState,
@@ -21,7 +29,10 @@ import { SharedDatasourceStep } from "../Shared/steps/SharedDatasourceStep";
 import { useServiceDeployOptions } from "./hooks/useServiceDeployOptions";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { initializeFormData } from "./utils/formDataInitializer";
-import { BASE_INITIAL_STATE } from "../Shared/utils/formData";
+import {
+  BASE_INITIAL_STATE,
+  DEFAULT_FORM_DATA,
+} from "../Shared/utils/formData";
 
 const BASE_STEPS = [
   {
@@ -52,6 +63,7 @@ const getInitialState = (): DeployFlowState => ({
     version: "",
     globalComponents: {},
     services: {},
+    ...DEFAULT_FORM_DATA,
     dataSources: [],
     uploadFromSourceEnabled: false,
   },
@@ -87,6 +99,12 @@ export const ServicesDeployFlow = ({
 }: ServicesDeployFlowProps) => {
   const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
 
+  const {
+    workers,
+    isLoading: isLoadingWorkers,
+    refetch: refetchWorkers,
+  } = useWorkers();
+
   const [state, dispatch] = useReducer(servicesDeployFlowReducer, {
     ...getInitialState(),
     selectedServiceId: preSelectedServiceId ?? null,
@@ -96,6 +114,8 @@ export const ServicesDeployFlow = ({
   // Track if form data has been initialized for the current service to prevent re-initialization
   const hasInitializedFormData = useRef<string | null>(null);
 
+  const runtime = state.formData.deploymentType;
+
   // Only fetch deploy options when on step 1 or later (after user clicks Next)
   const shouldFetchDeployOptions =
     state.currentStep >= STEP_ONE && state.selectedServiceId;
@@ -103,6 +123,7 @@ export const ServicesDeployFlow = ({
     useServiceDeployOptions(
       shouldFetchDeployOptions ? state.selectedServiceId : null,
       open,
+      runtime,
     );
 
   // Derive the dynamic step list once deploy options are loaded.
@@ -149,18 +170,23 @@ export const ServicesDeployFlow = ({
   const isStep1ComponentsLoading = useMemo(() => {
     if (!state.selectedServiceId || !step1Components.length) return false;
     return step1Components.some((component) => {
-      const key = `${state.selectedServiceId}:${component.type}`;
+      const key = `${state.selectedServiceId}:${component.type}:${runtime}`;
       return componentModelsLoading[key] === true;
     });
-  }, [state.selectedServiceId, step1Components, componentModelsLoading]);
+  }, [
+    state.selectedServiceId,
+    step1Components,
+    componentModelsLoading,
+    runtime,
+  ]);
 
   const hasStep1ComponentsError = useMemo(() => {
     if (!state.selectedServiceId || !step1Components.length) return false;
     return step1Components.some((component) => {
-      const key = `${state.selectedServiceId}:${component.type}`;
+      const key = `${state.selectedServiceId}:${component.type}:${runtime}`;
       return !!componentModelsError[key];
     });
-  }, [state.selectedServiceId, step1Components, componentModelsError]);
+  }, [state.selectedServiceId, step1Components, componentModelsError, runtime]);
 
   useEffect(() => {
     if (open && preSelectedServiceId) {
@@ -220,7 +246,7 @@ export const ServicesDeployFlow = ({
     }
 
     // Get the provider schema for the selected LLM provider
-    const schemaKey = `${state.selectedServiceId}:llm:${llmComponent.providerId}`;
+    const schemaKey = `${state.selectedServiceId}:llm:${llmComponent.providerId}:${runtime}`;
     const providerSchema = providerSchemas[schemaKey];
 
     if (!providerSchema || !providerSchema.required) {
@@ -241,7 +267,12 @@ export const ServicesDeployFlow = ({
         value !== undefined && value !== null && String(value).trim() !== ""
       );
     });
-  }, [state.selectedServiceId, state.formData.services, providerSchemas]);
+  }, [
+    state.selectedServiceId,
+    state.formData.services,
+    providerSchemas,
+    runtime,
+  ]);
 
   const {
     handleNext,
@@ -279,10 +310,19 @@ export const ServicesDeployFlow = ({
     await runDeployment({
       dispatch,
       deploy: async () => {
+        const runtimeSuffix = `:${runtime}`;
+        const resolvedSchemas = Object.fromEntries(
+          Object.entries(providerSchemas)
+            .filter(([key]) => key.endsWith(runtimeSuffix))
+            .map(([key, schema]) => [
+              key.slice(0, key.length - runtimeSuffix.length),
+              schema,
+            ]),
+        );
         const deploymentPayload = await transformToDeploymentPayload(
           state.formData,
           deployOptions,
-          providerSchemas,
+          resolvedSchemas,
           state.selectedServiceId,
         );
         await deployApplication(deploymentPayload);
@@ -330,6 +370,15 @@ export const ServicesDeployFlow = ({
   // The configure step is always the step just before the optional datasource step.
   const CONFIGURE_STEP = hasDatasourceStep ? LAST_STEP - 1 : LAST_STEP;
 
+  const handleWorkerErrorReset = useCallback(
+    () =>
+      dispatch({
+        type: ACTION_TYPES.SET_SHOW_STEP_ONE_WORKER_ERROR,
+        payload: false,
+      }),
+    [dispatch],
+  );
+
   return (
     <DeployTearsheetShell
       open={open}
@@ -341,7 +390,7 @@ export const ServicesDeployFlow = ({
       isDeploying={state.isDeploying}
       isPrimaryDisabled={isPrimaryDisabled}
       onBack={handleBack}
-      onNext={() => handleNext(state.formData.name)}
+      onNext={() => handleNext(state.formData.name, state.formData.workerName)}
       onSubmit={handleSubmit}
       deployError={state.deployError}
       deployToastOpen={state.deployToastOpen}
@@ -366,6 +415,12 @@ export const ServicesDeployFlow = ({
           deployOptions={deployOptions}
           selectedServiceId={state.selectedServiceId}
           showNameError={state.showStepOneNameError}
+          showWorkerError={state.showStepOneWorkerError}
+          onWorkerErrorReset={handleWorkerErrorReset}
+          runtime={runtime}
+          workers={workers}
+          isLoadingWorkers={isLoadingWorkers}
+          refetchWorkers={refetchWorkers}
         />
       )}
       {state.currentStep === CONFIGURE_STEP && deployOptions && (
@@ -381,6 +436,7 @@ export const ServicesDeployFlow = ({
           serviceDescription={selectedService?.description}
           isLoadingLlmModels={!!isLoading}
           onComponentError={setHasStep2SchemaError}
+          runtime={runtime}
         />
       )}
       {isLastStep && hasDatasourceStep && (

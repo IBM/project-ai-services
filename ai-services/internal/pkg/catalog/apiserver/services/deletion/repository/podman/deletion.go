@@ -319,32 +319,50 @@ func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runti
 //
 // Returns a list of error messages for any secrets that failed to delete.
 func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
-	var errorMessages []string
-	secretsToDelete := make(map[string]bool) // Use map to avoid duplicates
-
-	// Extract secret names from pod labels
-	for _, pod := range pods {
-		if secretName, ok := pod.Labels[catalogconstants.CatalogSecretLabel]; ok {
-			// If keepData=false, delete ALL secrets
-			if !keepData {
-				secretsToDelete[secretName] = true
-			} else {
-				// If keepData=true, only delete secrets without skip-cleanup or with skip-cleanup="false"
-				if skipValue, hasSkipLabel := pod.Labels[catalogconstants.CatalogSecretSkipLabel]; !hasSkipLabel || skipValue == "false" {
-					secretsToDelete[secretName] = true
-				}
-			}
-		}
-	}
+	secretsToDelete := collectSecretsFromPods(pods, keepData)
 
 	if len(secretsToDelete) == 0 {
-		// no secrets found to delete, just return
-		return errorMessages
+		return nil
 	}
 
 	logger.InfofCtx(ctx, "Deleting %d secret(s) for %s %s (keepData=%v)", len(secretsToDelete), instanceType, instanceID, keepData)
 
-	// Delete each unique secret
+	return s.deleteSecrets(ctx, secretsToDelete, instanceType, instanceID)
+}
+
+// collectSecretsFromPods extracts the set of secret names to delete from pod labels,
+// respecting the keepData flag to preserve secrets marked with the skip-cleanup label.
+func collectSecretsFromPods(pods []runtimeTypes.Pod, keepData bool) map[string]bool {
+	secretsToDelete := make(map[string]bool)
+
+	for _, pod := range pods {
+		secretNames, ok := pod.Labels[catalogconstants.CatalogSecretLabel]
+		if !ok {
+			continue
+		}
+
+		// With keepData enabled, preserve secrets explicitly marked for cleanup skip.
+		if skipValue, hasSkipLabel := pod.Labels[catalogconstants.CatalogSecretSkipLabel]; keepData && hasSkipLabel && skipValue != "false" {
+			continue
+		}
+
+		// Trim entries and use a map so duplicate secret names are deleted once.
+		for secretName := range strings.SplitSeq(secretNames, ",") {
+			secretName = strings.TrimSpace(secretName)
+			if secretName != "" {
+				secretsToDelete[secretName] = true
+			}
+		}
+	}
+
+	return secretsToDelete
+}
+
+// deleteSecrets deletes each secret in the provided set, ignoring not-found errors.
+// Returns a list of error messages for any secrets that failed to delete.
+func (s *PodmanDeletion) deleteSecrets(ctx context.Context, secretsToDelete map[string]bool, instanceType string, instanceID uuid.UUID) []string {
+	var errorMessages []string
+
 	for secretName := range secretsToDelete {
 		if err := s.rt.DeleteSecret(ctx, secretName); err != nil {
 			// Ignore "not found" errors - secret already deleted or never existed

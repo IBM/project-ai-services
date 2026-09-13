@@ -704,7 +704,10 @@ def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
     return timestamp.isoformat().replace("+00:00", "Z")
 
 
-def _build_import_summary(total_jobs: int, total_documents: int) -> ImportSummary:
+def _build_import_summary(
+    total_jobs: int,
+    total_documents: int,
+) -> ImportSummary:
     """Create an initialized import summary object."""
     return ImportSummary(
         jobs=ImportEntitySummary(total_received=total_jobs),
@@ -788,6 +791,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             job_id=job.job_id,
             operation=job.operation,
             status=job.status,
+            source=job.source or JobSource.USER.value,
             job_name=job.job_name,
             submitted_at=_serialize_datetime(job.submitted_at) or "",
             completed_at=_serialize_datetime(job.completed_at),
@@ -804,6 +808,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             name=doc.name,
             type=doc.type,
             status=doc.status,
+            source=doc.source or DocumentSource.USER.value,
             output_format=doc.output_format,
             submitted_at=_serialize_datetime(doc.submitted_at) or "",
             completed_at=_serialize_datetime(doc.completed_at),
@@ -819,7 +824,10 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
     return ExportResponse(
         status="completed",
-        data=ImportExportData(jobs=exported_jobs, documents=exported_documents),
+        data=ImportExportData(
+            jobs=exported_jobs,
+            documents=exported_documents,
+        ),
         summary=ExportSummary(
             jobs=ExportEntitySummary(
                 total_exported=len(exported_jobs),
@@ -863,8 +871,11 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     if engine is None:
         raise RuntimeError("Database not available. Cannot import metadata without database connection.")
 
-    started_at = perf_counter()
-    summary = _build_import_summary(len(payload.data.jobs), len(payload.data.documents))
+    _perf_start = perf_counter()
+    summary = _build_import_summary(
+        len(payload.data.jobs),
+        len(payload.data.documents),
+    )
     warnings: list[ImportRecordIssue] = []
     errors: list[ImportRecordIssue] = []
 
@@ -873,12 +884,12 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
 
     importable_job_ids = set(existing_job_ids)
 
+    # ── Jobs ─────────────────────────────────────────────────────────────────
     for job_record in payload.data.jobs:
         if job_record.job_id in existing_job_ids:
             summary.jobs.skipped += 1
             continue
 
-        # Parse and validate timestamps once, then reuse
         try:
             submitted_at = _parse_iso_datetime(job_record.submitted_at)
             completed_at = _parse_iso_datetime(job_record.completed_at)
@@ -899,11 +910,13 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             importable_job_ids.add(job_record.job_id)
             continue
 
+        source = JobSource.CONNECTOR if job_record.source == JobSource.CONNECTOR.value else JobSource.USER
         created_job = db_manager.create_job(
             job_id=job_record.job_id,
             operation=job_record.operation,
             status=JobStatus(job_record.status),
             job_name=job_record.job_name,
+            source=source,
             submitted_at=submitted_at,
             completed_at=completed_at,
             error=job_record.error,
@@ -925,6 +938,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
         summary.jobs.imported += 1
         importable_job_ids.add(job_record.job_id)
 
+    # ── Documents ─────────────────────────────────────────────────────────────
     for document_record in payload.data.documents:
         if document_record.id in existing_document_ids:
             summary.documents.skipped += 1
@@ -942,7 +956,6 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             )
             continue
 
-        # Parse and validate timestamps once, then reuse
         try:
             submitted_at = _parse_iso_datetime(document_record.submitted_at)
             completed_at = _parse_iso_datetime(document_record.completed_at)
@@ -962,6 +975,11 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             summary.documents.imported += 1
             continue
 
+        doc_source = (
+            DocumentSource.CONNECTOR
+            if document_record.source == DocumentSource.CONNECTOR.value
+            else DocumentSource.USER
+        )
         created_document = db_manager.create_document(
             doc_id=document_record.id,
             name=document_record.name,
@@ -972,6 +990,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             completed_at=completed_at,
             error=document_record.error,
             job_id=document_record.job_id,
+            source=doc_source,
             metadata=document_record.metadata,
         )
 
@@ -992,7 +1011,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     return ImportResponse(
         status="completed",
         summary=summary,
-        duration_seconds=round(perf_counter() - started_at, 4),
+        duration_seconds=round(perf_counter() - _perf_start, 4),
         errors=errors,
         warnings=warnings,
     )

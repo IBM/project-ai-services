@@ -184,17 +184,19 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, plan *Deploymen
 
 	// KServe marks an InferenceService "Ready=True" only once the predictor pod is fully up.
 	// Helm considers the InferenceService "Current" as soon as the CRD is accepted,
-	// so we must poll the InferenceService status directly.
-	// Non-OpenShift runtimes return nil immediately (no-op).
-	isvcName := comp.ComponentType
+	// so we must poll the InferenceService status directly — but only when the
+	// chart actually deploys an InferenceService resource.
+	if catalogutils.ChartHasInferenceService(fsys, comp.CatalogPath) {
+		isvcName := comp.ComponentType
 
-	logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
+		logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
 
-	waitCtx, cancel := context.WithTimeout(ctx, constants.PredictorWaitTimeout)
-	defer cancel()
+		waitCtx, cancel := context.WithTimeout(ctx, constants.PredictorWaitTimeout)
+		defer cancel()
 
-	if err := d.runtime.WaitForInferenceServiceReady(waitCtx, isvcName); err != nil {
-		return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
+		if err := d.runtime.WaitForInferenceServiceReady(waitCtx, isvcName); err != nil {
+			return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
+		}
 	}
 
 	if err := d.updateComponentEndpoint(ctx, plan, comp); err != nil {

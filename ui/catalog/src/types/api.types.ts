@@ -389,6 +389,7 @@ export interface ArchitectureDeploymentPayload {
   catalog_id: string;
   version: string;
   services: DeploymentService[];
+  worker_name?: string;
 }
 
 export interface ServiceDeploymentPayload {
@@ -398,6 +399,7 @@ export interface ServiceDeploymentPayload {
   deployment_type: "service";
   services: DeploymentService[];
   global_components?: Record<string, string>;
+  worker_name?: string;
 }
 
 export type DeploymentPayload =
@@ -575,4 +577,15 @@ export interface DataSourceDetailResponse {
 /** PATCH /datasources/:id — update authentication key request */
 export interface UpdateDataSourceAuthRequest {
   params: Record<string, string | string[]>;
+}
+
+// Matches backend ConnectDatasourcesResponse (PUT /applications/:id/datasources → 207).
+// Each entry describes one datasource that failed to connect.
+export interface ConnectDatasourceError {
+  datasource_id: string;
+  error: string;
+}
+
+export interface ConnectDatasourcesResponse {
+  errors: ConnectDatasourceError[];
 }

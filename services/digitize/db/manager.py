@@ -1615,6 +1615,136 @@ class DatabaseManager:
             logger.error(f"DB error in get_sync_logs({connector_id}): {e}", exc_info=True)
             return []
 
+    @staticmethod
+    def get_all_sync_logs() -> List[ConnectorSyncLog]:
+        """Return every sync-log row across all connectors, ordered by connector_id, seq asc.
+
+        Used exclusively by export_metadata to snapshot full history.
+        Each object is eagerly loaded and expunged from the session.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = select(ConnectorSyncLog).order_by(
+                    ConnectorSyncLog.connector_id,
+                    ConnectorSyncLog.seq,
+                )
+                rows = list(session.scalars(stmt).all())
+                for row in rows:
+                    _ = (
+                        row.connector_id, row.seq,
+                        row.started_at, row.finished_at,
+                        row.total_files, row.new_files, row.completed_files,
+                        row.removed_files, row.status, row.error,
+                    )
+                    session.expunge(row)
+                logger.debug(f"get_all_sync_logs: returned {len(rows)} row(s)")
+                return rows
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in get_all_sync_logs: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def import_connector(
+        connector_id: str,
+        name: str,
+        connector_type: str,
+        allowed_extensions: list,
+        sync_interval_seconds: int,
+        attached_at: datetime,
+        last_sync_at: Optional[datetime],
+        status: str,
+        total_files: int,
+        message: Optional[str],
+    ) -> bool:
+        """Insert a connector row during import (no credentials — shell only).
+
+        Uses ON CONFLICT DO NOTHING so re-importing the same snapshot is safe.
+        Returns True if the row was inserted, False if it already existed.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    pg_insert(Connector)
+                    .values(
+                        id=connector_id,
+                        name=name,
+                        type=connector_type,
+                        connection_details={},
+                        allowed_extensions=allowed_extensions,
+                        sync_interval_seconds=sync_interval_seconds,
+                        attached_at=attached_at,
+                        last_sync_at=last_sync_at,
+                        status=status,
+                        total_files=total_files,
+                        message=message,
+                    )
+                    .on_conflict_do_nothing(index_elements=["id"])
+                )
+                result = session.execute(stmt)
+                inserted = result.rowcount == 1
+                if inserted:
+                    logger.info(f"import_connector: inserted connector {connector_id!r} ({name!r})")
+                else:
+                    logger.debug(f"import_connector: connector {connector_id!r} already exists — skipped")
+                return inserted
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in import_connector({connector_id!r}): {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def import_sync_log(
+        connector_id: str,
+        seq: int,
+        started_at: datetime,
+        finished_at: Optional[datetime],
+        total_files: int,
+        new_files: int,
+        completed_files: int,
+        removed_files: int,
+        status: str,
+        error: str,
+    ) -> bool:
+        """Insert a sync-log row during import.
+
+        Uses ON CONFLICT DO NOTHING so re-importing the same snapshot is safe.
+        Returns True if the row was inserted, False if it already existed.
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    pg_insert(ConnectorSyncLog)
+                    .values(
+                        connector_id=connector_id,
+                        seq=seq,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        total_files=total_files,
+                        new_files=new_files,
+                        completed_files=completed_files,
+                        removed_files=removed_files,
+                        status=status,
+                        error=error,
+                    )
+                    .on_conflict_do_nothing(index_elements=["connector_id", "seq"])
+                )
+                result = session.execute(stmt)
+                inserted = result.rowcount == 1
+                if inserted:
+                    logger.debug(
+                        f"import_sync_log: inserted connector={connector_id!r} seq={seq}"
+                    )
+                else:
+                    logger.debug(
+                        f"import_sync_log: connector={connector_id!r} seq={seq} already exists — skipped"
+                    )
+                return inserted
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in import_sync_log(connector={connector_id!r}, seq={seq}): {e}",
+                exc_info=True,
+            )
+            raise
+
     # ========================================================================
     # Document metadata helper
     # ========================================================================

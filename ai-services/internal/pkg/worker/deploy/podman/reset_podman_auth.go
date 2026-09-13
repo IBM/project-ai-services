@@ -12,7 +12,8 @@ import (
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
-func ResetPodmanAuth(ctx context.Context) error {
+// ResetPodmanAuth resets the worker pod's podman auth.
+func ResetPodmanAuth(ctx context.Context, deleteSecret bool) error {
 	rt, err := runtime.CreateRuntime(types.RuntimeTypePodman, "")
 	if err != nil {
 		return fmt.Errorf("worker reset: init runtime: %w", err)
@@ -26,9 +27,15 @@ func ResetPodmanAuth(ctx context.Context) error {
 		return fmt.Errorf("failed to get existing worker pod details: %w", err)
 	}
 
-	// 2. Delete the podman auth secret and worker pod.
-	if err := podmanutils.DeleteSecretAndPod(ctx, rt, constants.PodmanAuthSecret, podID); err != nil {
-		return err
+	// 2. Optionally delete the podman auth secret, always delete the worker pod.
+	if deleteSecret {
+		if err := podmanutils.DeleteSecretAndPod(ctx, rt, constants.PodmanAuthSecret, podID); err != nil {
+			return err
+		}
+	} else {
+		if err := podmanutils.DeletePod(ctx, rt, podID); err != nil {
+			return err
+		}
 	}
 
 	// 3. Re-deploy the worker pod with the extracted configuration.

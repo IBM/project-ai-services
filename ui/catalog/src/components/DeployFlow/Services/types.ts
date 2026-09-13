@@ -1,4 +1,8 @@
-import type { ServiceDeployOptions, LLMOption } from "@/types/api.types";
+import type {
+  ServiceDeployOptions,
+  LLMOption,
+  WorkerApiResponse,
+} from "@/types/api.types";
 
 import { SHARED_ACTION_TYPES } from "../Shared/types";
 import type {
@@ -45,4 +49,8 @@ export interface StepProps extends BaseStepProps {
   llmModelsWithProviders?: LLMOption[];
   serviceDescription?: string;
   isLoadingLlmModels?: boolean;
+  runtime?: string;
+  workers?: WorkerApiResponse[];
+  isLoadingWorkers?: boolean;
+  refetchWorkers?: () => void;
 }

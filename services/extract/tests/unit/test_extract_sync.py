@@ -321,6 +321,20 @@ class TestExtractionRequestModel:
         assert req.schema_id is None
         assert req.schema_name is None
 
+    def test_schema_name_accepted(self):
+        req = ExtractionRequest(text="hello", schema_name="my-schema")
+        assert req.schema_name == "my-schema"
+        assert req.schema_id is None
+
+    def test_json_schema_accepted(self):
+        schema = {"type": "object", "properties": {"x": {"type": "string"}}}
+        req = ExtractionRequest(text="hello", json_schema=schema)
+        assert req.json_schema == schema
+
+    def test_json_example_accepted(self):
+        req = ExtractionRequest(text="hello", json_example={"name": "Alice"})
+        assert req.json_example == {"name": "Alice"}
+
 
 # ---------------------------------------------------------------------------
 # settings.extract.max_request_body_bytes

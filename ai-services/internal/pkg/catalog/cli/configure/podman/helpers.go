@@ -7,8 +7,10 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	commonutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
@@ -16,7 +18,8 @@ import (
 // getExistingConfigFromCatalogBackend retrieves the existing configuration from the catalog pod.
 // These values are used to validate that configuration hasn't changed during reconfigure operations.
 func getExistingConfigFromCatalogBackend(ctx context.Context, rt runtime.Runtime) (*catalogUtils.PodmanConfigureOptions, error) {
-	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstants.CatalogComponentValue
+	opts, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt, catalogPodLabel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get catalog pod details: %w", err)
 	}
@@ -105,7 +108,8 @@ func validateCertificateChanges(ctx context.Context, opts *catalogUtils.PodmanCo
 
 // IsCatalogServiceRunning checks if the catalog service is configured and running.
 func IsCatalogServiceRunning(ctx context.Context, rt runtime.Runtime) (bool, error) {
-	_, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstants.CatalogComponentValue
+	_, _, err := catalogUtils.GetCatalogPodConfig(ctx, rt, catalogPodLabel)
 	if err != nil {
 		if errors.Is(err, commonutils.ErrPodNotFound) {
 			logger.InfolnCtx(ctx, "Catalog service is not configured or running.")

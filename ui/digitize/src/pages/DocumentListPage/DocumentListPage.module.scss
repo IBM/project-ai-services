@@ -179,6 +179,10 @@
   fill: var(--cds-support-warning);
 }
 
+.statusIconCancelled {
+  fill: var(--cds-icon-secondary);
+}
+
 .errorInfoButton {
   display: inline-flex;
   align-items: center;
@@ -280,6 +284,27 @@
   margin: 0;
   font-family: 'IBM Plex Mono', 'Menlo', 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', Courier, monospace;
   line-height: 1.5;
+}
+
+.duplicatesSection {
+  margin-top: $spacing-05;
+}
+
+.duplicatesHelperText {
+  font-size: 0.875rem;
+  color: var(--cds-text-secondary);
+  margin: $spacing-03 0 $spacing-02 0;
+}
+
+.duplicatesList {
+  margin: 0;
+  padding-left: $spacing-05;
+  font-size: 0.875rem;
+  color: var(--cds-text-primary);
+
+  li {
+    padding: $spacing-01 0;
+  }
 }
 
 // Made with Bob

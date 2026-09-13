@@ -280,6 +280,35 @@ func TestRegistry_DeregisterUnknown(t *testing.T) {
 	}
 }
 
+func TestRegistry_Deregister_ClosesCommandChannel(t *testing.T) {
+	reg := New(nil)
+
+	entry, err := reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Manually set a DBID so Deregister can locate the entry by UUID.
+	testID := uuid.New()
+	entry.DBID = testID
+
+	if _, err := reg.Deregister(context.Background(), testID); err != nil {
+		t.Fatalf("Deregister: %v", err)
+	}
+
+	// CommandCh must be closed so that a waiting CommandStream goroutine exits.
+	select {
+	case _, ok := <-entry.CommandCh:
+		if ok {
+			t.Error("expected CommandCh to be closed, but received a value")
+		}
+	default:
+		t.Error("expected CommandCh to be closed, but it is still open")
+	}
+}
+
+
+
 func TestRegistry_WaitForResult_WorkerNotConnected(t *testing.T) {
 	reg := New(nil)
 

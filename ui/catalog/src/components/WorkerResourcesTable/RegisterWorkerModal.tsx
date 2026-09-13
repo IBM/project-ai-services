@@ -40,7 +40,7 @@ const RegisterWorkerModal = ({
     const gateway = gatewayAddress || "<catalog-host>:9090";
     return [
       `ai-services worker join ${gateway} \\`,
-      "  --runtime <podman|openshift> \\",
+      '  --runtime "<podman|openshift>" \\',
       `  --token "${token}"`,
     ].join("\n");
   }, [isSuccess, token, gatewayAddress]);

@@ -91,15 +91,14 @@ class DatabaseManager:
             return None
 
     @staticmethod
-    def get_schema_by_name(schema_name: str) -> Optional[ExtractionSchema]:
-        """Return a schema row or None if not found."""
+    def get_schema_by_name(name: str) -> Optional[ExtractionSchema]:
+        """Return a schema row by its unique name, or None if not found."""
         try:
             with get_db_session() as session:
                 row = session.scalar(
-                    select(ExtractionSchema).where(ExtractionSchema.name == schema_name)
+                    select(ExtractionSchema).where(ExtractionSchema.name == name)
                 )
                 if row:
-                    # Eagerly load all columns before session closes.
                     _ = (
                         row.schema_id, row.name, row.description, row.json_schema,
                         row.examples, row.custom_prompt, row.schema_tokens,
@@ -108,7 +107,7 @@ class DatabaseManager:
                     session.expunge(row)
                 return row
         except SQLAlchemyError as exc:
-            logger.error(f"DB error retrieving schema {schema_name}: {exc}", exc_info=True)
+            logger.error(f"DB error retrieving schema by name {name!r}: {exc}", exc_info=True)
             return None
 
     @staticmethod

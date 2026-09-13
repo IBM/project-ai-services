@@ -26,6 +26,8 @@ type CatalogProvider interface {
 	Reload(ctx context.Context) error
 	ServiceExists(id string) bool
 	ComponentExists(componentType, id string) bool
+	ListServices() ([]catalogtypes.Service, error)
+	ListComponents() ([]catalogtypes.Component, error)
 }
 
 // bundleService implements BundleServiceInterface.
@@ -111,7 +113,7 @@ func (s *bundleService) ValidateBundle(_ context.Context, file io.Reader) (any, 
 }
 
 // checkCatalogCollision returns a ValidationError when the metadata conflicts with a
-// registered catalog entry. Returns nil when catalog is nil (CLI/test paths).
+// registered catalog entry (by id or by name). Returns nil when catalog is nil (CLI/test paths).
 func (s *bundleService) checkCatalogCollision(meta any) error {
 	if s.catalog == nil {
 		return nil
@@ -125,11 +127,59 @@ func (s *bundleService) checkCatalogCollision(meta any) error {
 				Message: fmt.Sprintf("metadata.yaml: service id %q conflicts with an existing catalog service; choose a unique id", m.ID),
 			}
 		}
+		if err := checkNameCollisionServices(s.catalog, m.Name); err != nil {
+			return err
+		}
 	case *bundlemetadata.ComponentMetadataYAML:
 		if s.catalog.ComponentExists(m.ComponentType, m.ID) {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("metadata.yaml: component %q (type: %s) conflicts with an existing catalog component; choose a unique id", m.ID, m.ComponentType),
+			}
+		}
+		if err := checkNameCollisionComponents(s.catalog, m.ComponentType, m.Name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkNameCollisionServices returns a ValidationError when the given name
+// (case-insensitive) matches any existing service's name.
+func checkNameCollisionServices(catalog CatalogProvider, name string) error {
+	services, err := catalog.ListServices()
+	if err != nil {
+		return fmt.Errorf("name collision check failed: %w", err)
+	}
+
+	lower := strings.ToLower(name)
+	for _, svc := range services {
+		if strings.ToLower(svc.Name) == lower {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("metadata.yaml: service name %q conflicts with an existing catalog service name; choose a unique name", name),
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkNameCollisionComponents returns a ValidationError when the given name
+// (case-insensitive) matches any existing component's name within the same component_type.
+func checkNameCollisionComponents(catalog CatalogProvider, componentType, name string) error {
+	components, err := catalog.ListComponents()
+	if err != nil {
+		return fmt.Errorf("name collision check failed: %w", err)
+	}
+
+	lower := strings.ToLower(name)
+	for _, comp := range components {
+		if comp.ComponentType == componentType && strings.ToLower(comp.Name) == lower {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("metadata.yaml: component name %q conflicts with an existing %s component name; choose a unique name", name, componentType),
 			}
 		}
 	}
@@ -258,6 +308,37 @@ func (s *bundleService) insertActivateAndFetch(ctx context.Context, catalogType,
 	return s.GetBundleByID(ctx, row.ID.String())
 }
 
+// checkReplaceIdentity enforces the two pre-validation checks for ReplaceBundle:
+//  1. catalog_id and catalog_type are immutable — archive values must match the existing record.
+//  2. name must not collide with any other catalog entry (skipped when the name is unchanged).
+func (s *bundleService) checkReplaceIdentity(meta any, existing *BundleResponse, catalogType, catalogID, name string) error {
+	if catalogID != existing.CatalogID {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("catalog_id mismatch: archive contains %q but existing bundle has %q", catalogID, existing.CatalogID),
+		}
+	}
+	if catalogType != existing.CatalogType {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("catalog_type mismatch: archive contains %q but existing bundle has %q", catalogType, existing.CatalogType),
+		}
+	}
+
+	if s.catalog == nil || strings.EqualFold(name, existing.Name) {
+		return nil
+	}
+
+	switch m := meta.(type) {
+	case *bundlemetadata.ServiceMetadataYAML:
+		return checkNameCollisionServices(s.catalog, name)
+	case *bundlemetadata.ComponentMetadataYAML:
+		return checkNameCollisionComponents(s.catalog, m.ComponentType, name)
+	}
+
+	return nil
+}
+
 // ReplaceBundle is the synchronous PUT update path.
 //
 //  1. peekMetadata: read minimal identity fields from the archive.
@@ -282,24 +363,9 @@ func (s *bundleService) ReplaceBundle(ctx context.Context, existing *BundleRespo
 
 	catalogType, catalogID, version, name := metaFields(meta)
 
-	// Step 2: immutability check — catalog_id and catalog_type must not change.
-	if catalogID != existing.CatalogID {
-		return nil, &validators.ValidationError{
-			Code: http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf(
-				"catalog_id mismatch: archive contains %q but existing bundle has %q",
-				catalogID, existing.CatalogID,
-			),
-		}
-	}
-	if catalogType != existing.CatalogType {
-		return nil, &validators.ValidationError{
-			Code: http.StatusUnprocessableEntity,
-			Message: fmt.Sprintf(
-				"catalog_type mismatch: archive contains %q but existing bundle has %q",
-				catalogType, existing.CatalogType,
-			),
-		}
+	// Steps 2–2b: immutability + name collision checks.
+	if err := s.checkReplaceIdentity(meta, existing, catalogType, catalogID, name); err != nil {
+		return nil, err
 	}
 
 	// Step 3: full validation — same rules as POST /validate, no re-read needed.

@@ -26,6 +26,8 @@ import type {
   DeploymentPayload,
   ApplicationDatasourceApiItem,
   ApplicationDatasourcesListResponse,
+  ConnectDatasourceError,
+  ConnectDatasourcesResponse,
 } from "@/types/api.types";
 import type { DigitalAssistantRow } from "@/pages/DigitalAssistants/types";
 import type { DeployedServicesRow } from "@/components/DeployedServicesTable/types";
@@ -68,9 +70,11 @@ export async function fetchServiceDetails(serviceId: string): Promise<Service> {
 // Fetches deployment options for a specific architecture
 export async function fetchDeployOptions(
   architectureId: string,
+  runtime?: string,
 ): Promise<DeployOptionsResponse> {
   const response = await api.get<DeployOptionsResponse>(
     DIGITAL_ASSISTANTS_ENDPOINTS.DEPLOY_OPTIONS(architectureId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
@@ -78,9 +82,11 @@ export async function fetchDeployOptions(
 // Fetches deploy options for a specific service
 export async function fetchServiceDeployOptions(
   serviceId: string,
+  runtime?: string,
 ): Promise<ServiceDeployOptions> {
   const response = await api.get<ServiceDeployOptions>(
     SERVICE_ENDPOINTS.GET_SERVICE_DEPLOY_OPTIONS(serviceId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
@@ -96,20 +102,24 @@ export async function fetchDigitalAssistantDeployOptions(): Promise<DeployOption
 // Fetches configuration parameters schema for a specific service
 export async function fetchServiceParams(
   serviceId: string,
+  runtime?: string,
 ): Promise<ProviderSchema> {
   const response = await api.get(
     DIGITAL_ASSISTANTS_ENDPOINTS.SERVICE_PARAMS(serviceId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
 
-// Fetches provider schema parameters (services flow)
+// Fetches provider schema parameters for a component provider
 export async function fetchProviderSchema(
   componentType: string,
   providerId: string,
+  runtime?: string,
 ): Promise<ProviderSchema> {
   const response = await api.get<ProviderSchema>(
     SERVICE_ENDPOINTS.GET_COMPONENT_PROVIDER_PARAMS(componentType, providerId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
@@ -124,8 +134,10 @@ export async function fetchLLMOptionsWithModels(
     schema: ProviderSchema,
   ) => void,
   deployOptions?: ServiceDeployOptions,
+  runtime?: string,
 ): Promise<LLMOption[]> {
-  const options = deployOptions || (await fetchServiceDeployOptions(serviceId));
+  const options =
+    deployOptions || (await fetchServiceDeployOptions(serviceId, runtime));
 
   const llmComponent = options.components.find(
     (component) => component.type === COMPONENT_TYPES.LLM,
@@ -147,7 +159,11 @@ export async function fetchLLMOptionsWithModels(
       ];
     }
 
-    const schema = await fetchProviderSchema(COMPONENT_TYPES.LLM, provider.id);
+    const schema = await fetchProviderSchema(
+      COMPONENT_TYPES.LLM,
+      provider.id,
+      runtime,
+    );
 
     if (setProviderSchema) {
       setProviderSchema(serviceId, COMPONENT_TYPES.LLM, provider.id, schema);
@@ -199,8 +215,10 @@ export async function fetchComponentModelsWithSchemas(
     schema: ProviderSchema,
   ) => void,
   deployOptions?: ServiceDeployOptions,
+  runtime?: string,
 ): Promise<LLMOption[]> {
-  const options = deployOptions || (await fetchServiceDeployOptions(serviceId));
+  const options =
+    deployOptions || (await fetchServiceDeployOptions(serviceId, runtime));
 
   const component = options.components.find((c) => c.type === componentType);
 
@@ -213,7 +231,11 @@ export async function fetchComponentModelsWithSchemas(
       return [];
     }
 
-    const schema = await fetchProviderSchema(componentType, provider.id);
+    const schema = await fetchProviderSchema(
+      componentType,
+      provider.id,
+      runtime,
+    );
 
     if (setProviderSchema) {
       setProviderSchema(serviceId, componentType, provider.id, schema);
@@ -300,10 +322,14 @@ export async function deleteApplication(
   return response.data;
 }
 
-// Fetches available resources for deployments
-export async function fetchResources(): Promise<ResourcesResponse> {
+// Fetches available resources for deployments.
+// Pass workerName to query a specific remote worker; omit for the local runtime.
+export async function fetchResources(
+  workerName?: string,
+): Promise<ResourcesResponse> {
   const response = await api.get<ResourcesResponse>(
     DIGITAL_ASSISTANTS_ENDPOINTS.RESOURCES,
+    { params: workerName ? { worker: workerName } : undefined },
   );
   return response.data;
 }
@@ -438,7 +464,7 @@ export async function fetchApplicationDatasources(
   pagination: PaginationMetadata;
 }> {
   const response = await api.get<ApplicationDatasourcesListResponse>(
-    APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+    APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
     { params: { page, page_size: pageSize } },
   );
   return {
@@ -457,7 +483,7 @@ export async function fetchAllApplicationDatasources(
 
   while (hasNext) {
     const response = await api.get<ApplicationDatasourcesListResponse>(
-      APPLICATION_ENDPOINTS.GET_APPLICATION_DATASOURCES(applicationId),
+      APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
       { params: { page: currentPage, page_size: 100 } },
     );
     allData.push(...response.data.data);
@@ -466,4 +492,44 @@ export async function fetchAllApplicationDatasources(
   }
 
   return allData.map(transformDatasourceToRow);
+}
+
+// Connects one or more data source connectors to an application
+/**
+ * Connects one or more datasources to an application.
+ *
+ * Returns an array of per-datasource errors for any connections that failed
+ * (HTTP 207 Multi-Status). An empty array means every datasource connected
+ * successfully (HTTP 204 No Content).
+ *
+ * Throws for network errors or unexpected non-2xx responses.
+ */
+export async function connectApplicationDatasources(
+  applicationId: string,
+  datasourceIds: string[],
+): Promise<ConnectDatasourceError[]> {
+  const response = await api.put<ConnectDatasourcesResponse | null>(
+    APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
+    { datasource_ids: datasourceIds },
+    // Accept 207 without throwing so we can inspect the body ourselves.
+    { validateStatus: (status) => status === 204 || status === 207 },
+  );
+
+  // 204 No Content — all succeeded
+  if (response.status === 204 || !response.data) return [];
+
+  // 207 Multi-Status — at least one datasource failed
+  return response.data.errors ?? [];
+}
+// Removes a single datasource from an application
+export async function removeApplicationDatasource(
+  applicationId: string,
+  datasourceId: string,
+): Promise<void> {
+  await api.delete(
+    APPLICATION_ENDPOINTS.REMOVE_APPLICATION_DATASOURCE(
+      applicationId,
+      datasourceId,
+    ),
+  );
 }

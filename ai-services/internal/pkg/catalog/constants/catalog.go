@@ -63,6 +63,10 @@ const (
 	// CatalogAPIRouteKey is the routeURLs map key for the catalog backend API URL,
 	// populated by caddy.RegisterCatalogRoutes during podman configure.
 	CatalogAPIRouteKey = "CATALOG_API_ROUTE"
+
+	// CatalogComponentValue is the ai-services.io/component label value
+	// stamped on the catalog pod.
+	CatalogComponentValue = "catalog"
 )
 
 // Pagination constants.

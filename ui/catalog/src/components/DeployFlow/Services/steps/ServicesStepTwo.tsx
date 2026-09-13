@@ -2,7 +2,7 @@ import { useMemo, useEffect } from "react";
 import { formatVersion } from "@/utils/string";
 import { InlineLoading, InlineNotification } from "@carbon/react";
 import { sumProviderResources } from "../../Shared/utils/resources";
-import { COMPONENT_TYPES } from "@/constants";
+import { COMPONENT_TYPES, DEFAULT_RUNTIME } from "@/constants";
 import type {
   ServiceDeployOptions,
   DeployOptionsComponent,
@@ -97,8 +97,11 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   serviceDescription,
   isLoadingLlmModels = false,
   onComponentError,
+  runtime = DEFAULT_RUNTIME,
 }) => {
-  const { resources, resourcesLoading, resourcesError } = useResources();
+  const { resources, resourcesLoading, resourcesError } = useResources(
+    formData.workerName,
+  );
 
   const componentModels = useServiceDeployStore(
     (state) => state.componentModels,
@@ -121,7 +124,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   const inferenceModelsError =
     selectedServiceId && inferenceComponentType
       ? (componentModelsError[
-          `${selectedServiceId}:${inferenceComponentType}`
+          `${selectedServiceId}:${inferenceComponentType}:${runtime}`
         ] ?? null)
       : null;
 
@@ -142,7 +145,9 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     if (!llmConfig || llmConfig.params?.model) return;
 
     const llmModels =
-      componentModels[`${selectedServiceId}:${COMPONENT_TYPES.LLM}`] ?? [];
+      componentModels[
+        `${selectedServiceId}:${COMPONENT_TYPES.LLM}:${runtime}`
+      ] ?? [];
     const matchingModel = llmModels.find(
       (m) => m.providerId === llmConfig.providerId,
     );
@@ -163,7 +168,13 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
         },
       },
     });
-  }, [selectedServiceId, formData.services, componentModels, onChange]);
+  }, [
+    selectedServiceId,
+    formData.services,
+    componentModels,
+    onChange,
+    runtime,
+  ]);
 
   const selectedServiceConfig = selectedServiceId
     ? formData.services[selectedServiceId]
@@ -205,7 +216,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     ];
 
     deployOptions.components.forEach((component) => {
-      const componentKey = `${selectedServiceId}:${component.type}`;
+      const componentKey = `${selectedServiceId}:${component.type}:${runtime}`;
       const modelOptions = componentModels[componentKey] || [];
       const isStep1Component =
         component.type !== COMPONENT_TYPES.LLM &&
@@ -268,6 +279,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     llmOptions,
     componentModels,
     selectedServiceId,
+    runtime,
   ]);
 
   const inferenceComponent = useMemo((): DeployOptionsComponent | null => {
@@ -288,24 +300,32 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
         ? llmModelsWithProviders.length === 0 && llmOptions.length === 0
         : !selectedServiceId ||
           (
-            componentModels[`${selectedServiceId}:${inferenceComponentType}`] ??
-            []
+            componentModels[
+              `${selectedServiceId}:${inferenceComponentType}:${runtime}`
+            ] ?? []
           ).length === 0));
 
   const providerParamsByType = useMemo(() => {
     if (!selectedServiceId) return {};
+    // Store key format: "serviceId:componentType:providerId:runtime"
+    // Extract only keys matching this service and the active runtime.
     const prefix = `${selectedServiceId}:`;
+    const runtimeSuffix = `:${runtime}`;
     const result: Record<string, Record<string, ProviderSchema>> = {};
     for (const [storeKey, schema] of Object.entries(providerSchemas)) {
-      if (!storeKey.startsWith(prefix)) continue;
-      const rest = storeKey.slice(prefix.length);
-      const colonIdx = rest.indexOf(":");
+      if (!storeKey.startsWith(prefix) || !storeKey.endsWith(runtimeSuffix))
+        continue;
+      // Strip serviceId prefix and :runtime suffix to get "componentType:providerId"
+      const middle = storeKey.slice(prefix.length, -runtimeSuffix.length);
+      const colonIdx = middle.indexOf(":");
       if (colonIdx === -1) continue;
-      result[rest.slice(0, colonIdx)] ??= {};
-      result[rest.slice(0, colonIdx)][rest.slice(colonIdx + 1)] = schema;
+      const componentType = middle.slice(0, colonIdx);
+      const providerId = middle.slice(colonIdx + 1);
+      result[componentType] ??= {};
+      result[componentType][providerId] = schema;
     }
     return result;
-  }, [selectedServiceId, providerSchemas]);
+  }, [selectedServiceId, providerSchemas, runtime]);
 
   const handleServiceChange = (serviceId: string, updated: ServiceConfig) => {
     onChange({ services: { ...formData.services, [serviceId]: updated } });
@@ -316,9 +336,11 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   const inferenceModels = useMemo(() => {
     if (!selectedServiceId || !inferenceComponent) return [];
     return (
-      componentModels[`${selectedServiceId}:${inferenceComponent.type}`] ?? []
+      componentModels[
+        `${selectedServiceId}:${inferenceComponent.type}:${runtime}`
+      ] ?? []
     );
-  }, [selectedServiceId, inferenceComponent, componentModels]);
+  }, [selectedServiceId, inferenceComponent, componentModels, runtime]);
 
   // Build the single-item services array for SharedStepTwo
   const serviceItems = useMemo((): SharedStepTwoServiceItem[] => {

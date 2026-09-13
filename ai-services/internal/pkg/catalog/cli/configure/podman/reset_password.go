@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
 	catalogConstant "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -42,7 +43,8 @@ func ResetCatalogPassword(ctx context.Context) error {
 		return fmt.Errorf("failed to delete existing catalog secret: %w", err)
 	}
 
-	opts, podID, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime)
+	catalogPodLabel := constants.PodComponentKey + "=" + catalogConstant.CatalogComponentValue
+	opts, podID, err := catalogUtils.GetCatalogPodConfig(ctx, deployCtx.Runtime, catalogPodLabel)
 	if err != nil {
 		return fmt.Errorf("failed to get existing catalog pod details: %w", err)
 	}

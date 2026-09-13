@@ -32,6 +32,7 @@ import TableToolbarActions from "@/components/Table/components/TableToolbarActio
 import ExportModal from "@/components/Table/components/ExportModal";
 import TableToasts from "@/components/Table/components/TableToasts";
 import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
+import DeregisterWorkerModal from "./DeregisterWorkerModal";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
 import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
 import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
@@ -43,6 +44,7 @@ import {
   fetchWorkerResources,
   fetchAllWorkerResources,
   transformWorkerToRow,
+  deregisterWorker,
 } from "@/api/workerResources.api";
 import styles from "./WorkerResourcesTable.module.scss";
 
@@ -138,6 +140,36 @@ const WorkerResourcesTable = ({
     [],
   );
 
+  const selectedRowSnapshot = useRef<WorkerResourceRow | undefined>(undefined);
+  const selectedRow = state.rowsData.find((r) => r.id === state.selectedRowId);
+  if (selectedRow) selectedRowSnapshot.current = selectedRow;
+  const modalRow = state.isDeleteDialogOpen
+    ? (selectedRow ?? selectedRowSnapshot.current)
+    : selectedRowSnapshot.current;
+
+  const handleDeregister = useCallback(async () => {
+    const id = state.selectedRowId;
+    if (!id) return;
+
+    const rowName = state.rowsData.find((r) => r.id === id)?.name ?? "";
+    dispatch({ type: "SHARED_SET_DELETING", payload: true });
+
+    try {
+      await deregisterWorker(id);
+      dispatch({ type: "SHARED_HIDE_ERROR" });
+      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+      void loadWorkers();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to deregister worker";
+      dispatch({
+        type: "SHARED_SHOW_ERROR",
+        payload: { message, rowName },
+      });
+      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+    }
+  }, [state.selectedRowId, state.rowsData, loadWorkers]);
+
   useAutoRefresh({
     fetchFn: loadWorkers,
     hasData: state.rowsData.length > 0,
@@ -222,9 +254,7 @@ const WorkerResourcesTable = ({
         deleteErrorMessage={state.deleteErrorMessage}
         entityLabel="worker resource"
         onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
-        onDeleteErrorRetry={async () => {
-          dispatch({ type: "SHARED_HIDE_ERROR" });
-        }}
+        onDeleteErrorRetry={handleDeregister}
         exportToastOpen={state.exportToastOpen}
         exportToastKind={state.exportToastKind}
         exportToastMessage={state.exportToastMessage}
@@ -395,6 +425,16 @@ const WorkerResourcesTable = ({
               onClearError={() =>
                 dispatch({ type: "SHARED_CLEAR_EXPORT_ERROR" })
               }
+            />
+
+            <DeregisterWorkerModal
+              isOpen={state.isDeleteDialogOpen}
+              isDeregistering={state.isDeleting}
+              workerName={modalRow?.name ?? ""}
+              workerStatus={modalRow?.status ?? ""}
+              runtimeType={modalRow?.runtime_type ?? ""}
+              onConfirm={() => void handleDeregister()}
+              onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
             />
           </Column>
         </Grid>

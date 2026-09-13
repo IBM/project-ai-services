@@ -25,6 +25,10 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 64Gi
+    - name: dshm3
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
     - name: models
       hostPath:
         path: "{{ .BaseDir }}/models"
@@ -55,8 +59,6 @@ spec:
           value: "/models/{{ .Values.instruct.model.name }}"
         - name: AIU_WORLD_SIZE
           value: "4"
-        - name: VLLM_SPYRE_USE_CB
-          value: "1"
         - name: MAX_MODEL_LEN
           value: "{{ .Values.instruct.model.maxModelLen }}"
         - name: MAX_BATCH_SIZE
@@ -93,7 +95,7 @@ spec:
       image: "{{ .Values.embedding.image }}"
       command: ["/bin/sh", "-c"]
       args: [
-          "vllm serve /models/{{ .Values.embedding.model.name }} --served-model-name {{ .Values.embedding.model.name }} --port 8001"
+          "vllm serve /models/{{ .Values.embedding.model.name }} --served-model-name {{ .Values.embedding.model.name }} --port 8001 --gpu-memory-utilization=0.5"
       ]
       livenessProbe:
         httpGet:
@@ -105,15 +107,17 @@ spec:
         failureThreshold: 3
       resources:
         requests:
-          memory: "4Gi"
+          memory: "5Gi"
         limits:
-          memory: "4Gi"
+          memory: "5Gi"
       ports:
         - containerPort: 8001
       volumeMounts:
         - mountPath: /models:z
           name: models
           readOnly: true
+        - mountPath: /dev/shm
+          name: dshm3
     - name: reranker
       image: "{{ .Values.reranker.image }}"
       command: ["/bin/bash"]
@@ -123,7 +127,7 @@ spec:
           /opt/app-root/spyre_entrypoint.sh \
           --model ${VLLM_MODEL_PATH} \
           -tp ${AIU_WORLD_SIZE} \
-          --served-model-name {{ .Values.reranker.model.name }} --port 8002
+          --served-model-name {{ .Values.reranker.model.name }} --port 8002 --gpu-memory-utilization=0.5
       livenessProbe:
         httpGet:
           path: /health
@@ -137,11 +141,9 @@ spec:
           value: "/models/{{ .Values.reranker.model.name }}"
         - name: AIU_WORLD_SIZE
           value: "1"
-        - name: VLLM_SPYRE_USE_CHUNKED_PREFILL
-          value: "0"
-        - name: VLLM_SPYRE_WARMUP_BATCH_SIZES
+        - name: SENDNN_INFERENCE_WARMUP_BATCH_SIZES
           value: "4"
-        - name: VLLM_SPYRE_WARMUP_PROMPT_LENS
+        - name: SENDNN_INFERENCE_WARMUP_PROMPT_LENS
           value: "1024"
         - name: MASTER_PORT
           value: "12356"
