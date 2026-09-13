@@ -22,9 +22,6 @@ interface CellRendererProps {
   rowData?: { status?: string; name?: string; services?: number | null };
 }
 
-const isOffline = (rowData?: { status?: string }) =>
-  rowData?.status === "offline";
-
 export const NameCell = ({ value, rowId, dispatch }: CellRendererProps) => (
   <SharedNameCell
     value={value}
@@ -48,8 +45,6 @@ export const ActionCell = ({ rowId, rowData, dispatch }: CellRendererProps) => {
   // Disable Remove when the connector still has connected services
   const hasConnectedServices =
     typeof rowData?.services === "number" && rowData.services > 0;
-  // Disable Update key when the connector is offline (design spec)
-  const offline = isOffline(rowData);
 
   return (
     <OverflowMenu size="lg" flipped aria-label="Actions">
@@ -60,7 +55,6 @@ export const ActionCell = ({ rowId, rowData, dispatch }: CellRendererProps) => {
             <Edit size={16} />
           </div>
         }
-        disabled={offline}
         onClick={() =>
           dispatch({
             type: ACTION_TYPES.OPEN_DETAILS_PANEL,

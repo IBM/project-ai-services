@@ -401,14 +401,10 @@ const ConnectorDetailsPanel = ({
           />
         )}
 
-        {/* View mode — "Update key" button; disabled when connector is offline */}
+        {/* View mode — "Update key" button; always enabled so the user can
+            fix credentials */}
         {authSectionState.kind === "button" && (
-          <Button
-            kind="tertiary"
-            size="sm"
-            disabled={state.detail?.status === "offline"}
-            onClick={handleShowAuthForm}
-          >
+          <Button kind="tertiary" size="sm" onClick={handleShowAuthForm}>
             Update key
           </Button>
         )}
