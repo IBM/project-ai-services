@@ -24,6 +24,10 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 64Gi
+    - name: dshm3
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
     - name: models
       hostPath:
         path: "{{ .BaseDir }}/models"
@@ -113,6 +117,8 @@ spec:
         - mountPath: /models:z
           name: models
           readOnly: true
+        - mountPath: /dev/shm
+          name: dshm3
     - name: reranker
       image: "{{ .Values.reranker.image }}"
       command: ["/bin/sh", "-c"]

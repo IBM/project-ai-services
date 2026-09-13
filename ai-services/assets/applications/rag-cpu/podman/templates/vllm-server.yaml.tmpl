@@ -17,6 +17,18 @@ spec:
       hostPath:
         path: "{{ .BaseDir }}/models"
         type: Directory
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
+    - name: dshm2
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
+    - name: dshm3
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
   containers:
 {{- if .Values.litellm.enable }}
     - name: litellm
@@ -101,6 +113,8 @@ spec:
       ports:
         - containerPort: 8000
       volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm
         - mountPath: /models:z
           name: models
           readOnly: true
@@ -132,6 +146,8 @@ spec:
       ports:
         - containerPort: 8001
       volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm2
         - mountPath: /models:z
           name: models
           readOnly: true
@@ -162,6 +178,8 @@ spec:
       ports:
         - containerPort: 8002
       volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm3
         - mountPath: /models:z
           name: models
           readOnly: true
