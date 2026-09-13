@@ -96,7 +96,7 @@ spec:
       image: "{{ .Values.embedding.image }}"
       command: ["/bin/sh", "-c"]
       args: [
-          "vllm serve /models/{{ .Values.embedding.model.name }} --served-model-name {{ .Values.embedding.model.name }} --port 8001"
+          "vllm serve /models/{{ .Values.embedding.model.name }} --served-model-name {{ .Values.embedding.model.name }} --port 8001 --gpu-memory-utilization=0.5"
       ]
       livenessProbe:
         httpGet:
@@ -108,9 +108,9 @@ spec:
         failureThreshold: 3
       resources:
         requests:
-          memory: "4Gi"
+          memory: "5Gi"
         limits:
-          memory: "4Gi"
+          memory: "5Gi"
       ports:
         - containerPort: 8001
       volumeMounts:
@@ -123,7 +123,7 @@ spec:
       image: "{{ .Values.reranker.image }}"
       command: ["/bin/sh", "-c"]
       args: [
-          "vllm serve /models/{{ .Values.reranker.model.name }} --served-model-name {{ .Values.reranker.model.name }} --port 8002"
+          "vllm serve /models/{{ .Values.reranker.model.name }} --served-model-name {{ .Values.reranker.model.name }} --port 8002 --gpu-memory-utilization=0.5"
       ]
       livenessProbe:
         httpGet:
