@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "embedding-api"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/service: {{ .Release.Name }}
+      ai-services.io/component: embedding-api
+  template:
+    metadata:
+      labels:
+        ai-services.io/service: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/component: embedding-api
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: embedding-api
+          image: "{{ .Values.embedding.image }}"
+          command:
+            - "/var/venv/bin/python"
+            - "-m"
+            - "uvicorn"
+            - "app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "7000"
+            - "--loop"
+            - "uvloop"
+            - "--http"
+            - "httptools"
+          env:
+            - name: PORT
+              value: "7000"
+            - name: EMBEDDING_MODEL_NAME
+              value: {{ .Values.model.name | quote }}
+            - name: LOG_LEVEL
+              value: "{{ .Values.embedding.log_level }}"
+          ports:
+            - containerPort: 7000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 7000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 7000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.embedding.resources.requests.cpu | quote }}
+              memory: {{ .Values.embedding.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.embedding.resources.limits.cpu | quote }}
+              memory: {{ .Values.embedding.resources.limits.memory | quote }}

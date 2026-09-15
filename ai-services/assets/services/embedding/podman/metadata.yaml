@@ -1,0 +1,8 @@
+name: embedding
+version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 1 # 1 core
+  memory: 1073741824 # 1Gi in bytes
+  storage: 0 # No persistent storage required

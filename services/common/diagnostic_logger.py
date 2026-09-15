@@ -1,5 +1,4 @@
-"""
-Diagnostic Logger Framework.
+"""Diagnostic Logger Framework.
 
 This module provides simplified system diagnostics logging for crash scenarios.
 It captures critical system metrics before the application crashes, including:
@@ -693,7 +692,7 @@ class SignalHandler:
         self.original_handlers = {}
     
     def setup(self):
-        """Setup signal handlers for fatal signals."""
+        """Set up signal handlers for fatal signals."""
         # Signals to handle
         signals_to_handle = []
         
@@ -760,17 +759,17 @@ def setup_comprehensive_crash_handler(logger: logging.Logger) -> tuple:
     1. Python exception handler (sys.excepthook)
     2. stderr monitor (for C-level library errors)
     3. Signal handler (for segfaults and fatal signals)
-    
+
     Args:
         logger: Logger instance to use for diagnostics
-    
+
     Returns:
         Tuple of (diagnostic_logger, stderr_monitor, signal_handler)
-    
+
     Example:
         logger = get_logger("app")
         diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
-        
+
         # In lifespan shutdown:
         stderr_monitor.stop()
     """
