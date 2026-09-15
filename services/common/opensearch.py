@@ -161,7 +161,7 @@ class OpensearchVectorStore(VectorStore):
             raise
 
     @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
-    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
+    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10, cancel_event=None):
         """Insert chunks using one of two modes, with retry logic for transient failures.
 
         Supports 2 modes of insertion:
@@ -173,10 +173,14 @@ class OpensearchVectorStore(VectorStore):
             vectors: Pre-computed embeddings (optional)
             embedding: Embedding instance to generate embeddings (optional)
             batch_size: Number of chunks to insert per batch
+            cancel_event: threading.Event signalling cancellation (optional).
+                If set before or between batches, raises JobCancelledError.
 
         Returns:
             bool: True if indexing succeeded, False if it failed
         """
+        from digitize.exceptions import JobCancelledError
+
         logger.debug("Starting insert_chunks operation")
 
         if not chunks:
@@ -184,6 +188,9 @@ class OpensearchVectorStore(VectorStore):
             return True
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelledError("Insertion cancelled before start")
 
         # Handle Pre-computed Vectors if provided
         final_embeddings = vectors
@@ -203,6 +210,8 @@ class OpensearchVectorStore(VectorStore):
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelledError("Insertion cancelled between batches")
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
 
