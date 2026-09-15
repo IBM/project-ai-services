@@ -20,6 +20,7 @@ import { WORKER_RUNTIME_LABELS, LOCAL_WORKER_NAME } from "@/constants";
 import RegisterWorkerModal from "@/components/WorkerResourcesTable/RegisterWorkerModal";
 import type { RegisterPhase } from "@/components/WorkerResourcesTable/types";
 import { registerWorker } from "@/api/workerResources.api";
+import { extractDeployError } from "../utils/deployError";
 
 interface RegisterState {
   isOpen: boolean;
@@ -202,8 +203,7 @@ export const SharedStepOne = ({
     } catch (err) {
       dispatchRegister({
         type: "ERROR",
-        payload:
-          err instanceof Error ? err.message : "Failed to register worker",
+        payload: extractDeployError(err, "Failed to register worker"),
       });
     }
   }, [registerState.workerName]);
