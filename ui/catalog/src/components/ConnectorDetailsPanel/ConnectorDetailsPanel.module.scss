@@ -1,0 +1,112 @@
+@use "@carbon/react/scss/spacing";
+@use "@carbon/react/scss/type";
+@use "@carbon/react/scss/theme";
+
+// ── Panel body ───────────────────────────────────────────────────────────────
+
+.content {
+  padding: spacing.$spacing-06 0;
+}
+
+// ── Section ──────────────────────────────────────────────────────────────────
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: spacing.$spacing-05;
+}
+
+.statusTag {
+  align-self: flex-start;
+}
+
+.sectionTitle {
+  @include type.type-style("heading-02");
+  color: theme.$text-primary;
+  margin: 0;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid theme.$border-subtle-00;
+  margin: 0;
+}
+
+// ── Read-only field ──────────────────────────────────────────────────────────
+
+.fieldLabel {
+  @include type.type-style("label-01");
+  color: theme.$text-secondary;
+  margin-bottom: spacing.$spacing-02;
+}
+
+.fieldValue {
+  @include type.type-style("body-compact-01");
+  color: theme.$text-primary;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+// ── Authentication section ────────────────────────────────────────────────────
+
+.authFormActions {
+  align-items: center;
+}
+
+.inlineNotification {
+  :global(.cds--inline-notification) {
+    max-width: 100%;
+  }
+}
+
+// ── Services section ──────────────────────────────────────────────────────────
+
+// Stack handles flex + gap; only alignment override needed
+.servicesHeader {
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+// Keep the Carbon DataTable size="sm" compact inside the panel
+// table-layout: fixed ensures columns respect explicit widths (e.g. .lastSyncCol)
+.servicesTable {
+  width: 100%;
+  table-layout: fixed;
+}
+
+// "Last sync" column — fixed width using Carbon spacing token so the column
+// sits close to the name column rather than stretching to the far right.
+.lastSyncCol {
+  width: spacing.$spacing-11; // 80 px
+  white-space: nowrap;
+}
+
+// Name cell: service type subtitle below the link
+.serviceTypeName {
+  @include type.type-style("label-01");
+  color: theme.$text-secondary;
+}
+
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+
+.skeletonContent {
+  padding: spacing.$spacing-06 0;
+}
+
+.serviceTag {
+  flex-shrink: 0;
+}
+
+.serviceName {
+  min-width: 0;
+}
+
+.serviceName :global(.cds--link) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

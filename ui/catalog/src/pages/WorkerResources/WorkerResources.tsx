@@ -1,4 +1,5 @@
 import { useReducer, useCallback } from "react";
+import { extractDeployError } from "@/components/DeployFlow/Shared/utils/deployError";
 import { PageHeader } from "@carbon/ibm-products";
 import WorkerResourcesTable from "@/components/WorkerResourcesTable";
 import RegisterWorkerModal from "@/components/WorkerResourcesTable/RegisterWorkerModal";
@@ -27,8 +28,7 @@ const WorkerResources = () => {
     } catch (err) {
       dispatch({
         type: "REGISTER_ERROR",
-        payload:
-          err instanceof Error ? err.message : "Failed to register worker",
+        payload: extractDeployError(err, "Failed to register worker"),
       });
     }
   }, [state.workerName]);
