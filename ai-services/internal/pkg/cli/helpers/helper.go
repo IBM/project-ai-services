@@ -15,15 +15,25 @@ import (
 )
 
 const (
-	inspectPollInterval = 10 * time.Second
+	defaultInspectPollInterval = 10 * time.Second
 )
 
-func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
+// WaitForContainerReadiness polls container health until it reaches "healthy", the context is
+// cancelled, or the deadline expires. The deadline is only enforced once Podman has left the
+// "starting" state — while a container is still in its initialDelaySeconds window no probe has
+// run yet and it is incorrect to time out.
+//
+// pollInterval controls how often InspectContainer is called; pass 0 to use the default (10 s).
+func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration, pollInterval time.Duration) error {
 	var containerStatus *types.Container
 	var err error
 
+	if pollInterval <= 0 {
+		pollInterval = defaultInspectPollInterval
+	}
+
 	deadline := time.Now().Add(timeout)
-	timer := time.NewTimer(inspectPollInterval)
+	timer := time.NewTimer(pollInterval)
 	defer timer.Stop()
 
 	for {
@@ -36,6 +46,7 @@ func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, con
 		healthStatus := containerStatus.Health
 
 		if healthStatus == "" {
+			// No healthcheck configured — consider the container ready.
 			return nil
 		}
 
@@ -43,13 +54,16 @@ func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, con
 			return nil
 		}
 
-		// if deadline exceeds, stop the container readiness check
-		if time.Now().After(deadline) {
+		// While Podman is inside the initialDelaySeconds window it reports "starting":
+		// no probe has executed yet so there is nothing meaningful to time out on.
+		// Only enforce the deadline once Podman has transitioned out of "starting"
+		// (i.e. the container is "unhealthy" or in an unknown state).
+		if healthStatus != string(constants.Starting) && time.Now().After(deadline) {
 			return fmt.Errorf("operation timed out waiting for container readiness")
 		}
 
 		// wait for next poll interval, but respect context cancellation
-		timer.Reset(inspectPollInterval)
+		timer.Reset(pollInterval)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -61,7 +75,7 @@ func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, con
 // WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
 func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	timer := time.NewTimer(inspectPollInterval)
+	timer := time.NewTimer(defaultInspectPollInterval)
 	defer timer.Stop()
 
 	for {
@@ -83,23 +97,13 @@ func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, pod
 		}
 
 		// wait for next poll interval, but respect context cancellation
-		timer.Reset(inspectPollInterval)
+		timer.Reset(defaultInspectPollInterval)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
 		}
 	}
-}
-
-func FetchContainerStartPeriod(ctx context.Context, runtime runtime.Runtime, containerNameOrId string) (time.Duration, error) {
-	// fetch the container stats
-	containerStats, err := runtime.InspectContainer(ctx, containerNameOrId)
-	if err != nil {
-		return 0, fmt.Errorf("failed to check container stats: %w", err)
-	}
-
-	return containerStats.HealthcheckStartPeriod, nil
 }
 
 // ListSpyreCards lists all Spyre cards attached to the system.
