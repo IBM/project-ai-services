@@ -1,0 +1,3 @@
+embedding:
+  image: localhost/embedding-service:local
+  log_level: "INFO"

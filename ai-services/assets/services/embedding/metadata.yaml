@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Service identification
+id: clip-embedding
+name: "Embedding service"
+version: "1.0.0"
+description: "Converts text and images into high-dimensional vectors using a multimodal or multilingual embedding model; enables semantic similarity search, cross-modal retrieval, and vector-based applications at scale."
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Component dependencies
+dependencies:
+  - id: embedding
+
+standalone: true
+
+# About field containing detailed service information
+about:
+  - title: "Service details"
+    sections:
+      - title: "Version"
+        value: "1.0.0"
+      - title: "Inference backend"
+        value: "vLLM 0.19.1 on IBM Power (ppc64le)"
+      - title: "Supported embedding models"
+        description: "All models are governed by APPROVED_EMBEDDING_MODELS.json. Set enabled=false to remove a model without deleting its audit record."
+        values:
+          - "CLIP ViT-B/32 (openai/clip-vit-base-patch32) — multimodal image + text, 512-d [default, DMG approval pending]"
+          - "Granite Embedding 278M Multilingual (ibm-granite/granite-embedding-278m-multilingual) — text, 768-d"
+          - "ResNet-18 (microsoft/resnet-18) — image, 512-d"
+          - "ResNet-50 (microsoft/resnet-50) — image, 2048-d"
+          - "ResNet-101 (microsoft/resnet-101) — image, 2048-d"
+          - "ViT-Base Patch16 224 (google/vit-base-patch16-224) — image, 768-d"
+          - "ViT-Base Patch16 384 (google/vit-base-patch16-384) — image, 768-d"
+          - "ViT-Large Patch16 224 (google/vit-large-patch16-224) — image, 1024-d"
+          - "BEiT-Base Patch16 384 (microsoft/beit-base-patch16-384) — image, 768-d"
+          - "BEiT-Base Patch16 224 PT22K-FT22K (microsoft/beit-base-patch16-224-pt22k-ft22k) — image, 768-d"
+          - "BEiT-Large Patch16 224 PT22K-FT22K (microsoft/beit-large-patch16-224-pt22k-ft22k) — image, 1024-d"
+          - "all-mpnet-base-v2 (sentence-transformers/all-mpnet-base-v2) — text, 768-d"
+
+  - title: "Inputs and outputs"
+    sections:
+      - title: "Inputs"
+        values:
+          - "Text string (POST /v1/embeddings with input array)"
+          - "Image as base64 data URI (CLIP model only, via messages/image_url format)"
+          - "Embedding model selected at deploy time"
+      - title: "Outputs"
+        values:
+          - "Float32 embedding vector"
+          - "OpenAI-compatible /v1/embeddings response format"
+
+  - title: "Use cases"
+    sections:
+      - title: "Semantic search"
+        values:
+          - "Text similarity and document retrieval"
+          - "Cross-modal image and text search (CLIP)"
+          - "Multilingual semantic search across 100+ languages (Granite)"
+      - title: "Integration"
+        values:
+          - "Compatible with any system supporting OpenAI embeddings API"
+          - "Usable as embedding backend for RAG pipelines"
+          - "Callable from Oracle PL/SQL via UTL_HTTP for vector storage"
+
+  - title: "Expected resource consumption"
+    sections:
+      - title: "CPU-only (no accelerator required)"
+        values:
+          - title: "Compute"
+            value: "16 CPU cores"
+          - title: "Memory"
+            value: "6 GB"
+          - title: "Storage"
+            value: "2 GB (model)"
+          - title: "Spyre acceleration cards"
+            value: 0
+
+  - title: "Assets"
+    sections:
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"

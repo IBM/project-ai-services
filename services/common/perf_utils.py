@@ -5,13 +5,11 @@ from common.misc_utils import get_request_id
 
 class PerfMetricsRegistry:
     def __init__(self, max_size=1000):
-        """Initialize the registry with a fixed maximum capacity."""
         self._metrics = {}
         self._max_size = max_size
         self._lock = threading.Lock()
 
     def add_metric(self, metric):
-        """Add a metric entry, tagging it with a timestamp and the current request ID."""
         # Store as float for precision but we can convert for output
         metric["timestamp"] = time.time()
         # Also add a readable string version

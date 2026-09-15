@@ -1,0 +1,4 @@
+containers:
+  - name: "embedding-api-{{ .InstanceSlug }}-embedding-api"
+    format: ".Status"
+    alias: API_STATUS

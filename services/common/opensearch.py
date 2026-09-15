@@ -29,6 +29,7 @@ class OpensearchNotReadyError(VectorStoreNotReadyError):
 
 class OpensearchVectorStore(VectorStore):
     def __init__(self):
+        logger.debug("Initializing OpensearchVectorStore")
 
         self.host = settings.vector_store.opensearch_host
         self.port = settings.vector_store.opensearch_port
@@ -40,6 +41,7 @@ class OpensearchVectorStore(VectorStore):
         self.num_shards = settings.vector_store.opensearch_num_shards
         
         logger.debug(f"Connecting to OpenSearch at {self.host}:{self.port}, index: {self.index_name}")
+        logger.debug(f"Index configuration: shards={self.num_shards}")
 
         self.client = OpenSearch(
             hosts=[{'host': self.host, 'port': self.port}],
@@ -159,9 +161,10 @@ class OpensearchVectorStore(VectorStore):
             raise
 
     @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
-    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10, cancel_event=None):
-        """Supports 2 modes of insertion with retry logic for transient failures.
+    def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
+        """Insert chunks using one of two modes, with retry logic for transient failures.
 
+        Supports 2 modes of insertion:
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
 
@@ -170,9 +173,6 @@ class OpensearchVectorStore(VectorStore):
             vectors: Pre-computed embeddings (optional)
             embedding: Embedding instance to generate embeddings (optional)
             batch_size: Number of chunks to insert per batch
-            cancel_event: Optional threading.Event; if set between batches, insertion
-                          is aborted and False is returned. Only passed when
-                          clean_files=True so any partial inserts will be cleaned up.
 
         Returns:
             bool: True if indexing succeeded, False if it failed
@@ -203,19 +203,6 @@ class OpensearchVectorStore(VectorStore):
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
-            # Check for cancellation before each batch. cancel_event is only set
-            # when clean_files=True, so any partial inserts will be removed by the
-            # post-cancellation VDB cleanup.
-            if cancel_event is not None and cancel_event.is_set():
-                logger.info(
-                    f"Cancellation requested — aborting insert_chunks after {i} of "
-                    f"{len(chunks)} chunks for doc '{chunks[i].get('filename')}' in index '{self.index_name}'"
-                )
-                from digitize.exceptions import JobCancelledError
-                raise JobCancelledError(
-                    f"insert_chunks cancelled at batch {i} of {len(chunks)} "
-                    f"for doc '{chunks[i].get('filename')}'"
-                )
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
 

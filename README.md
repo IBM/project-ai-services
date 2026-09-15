@@ -54,7 +54,8 @@ project-ai-services/
 │   ├── chatbot/       # RAG chatbot service
 │   ├── digitize/      # Document ingestion
 │   ├── summarize/     # Summarization service
-│   └── similarity/    # Similarity search
+│   ├── similarity/    # Similarity search
+│   └── embedding/     # Multimodal embedding service
 ├── ui/                # Frontend applications
 │   ├── chatbot/       # Chatbot UI
 │   ├── digitize/      # Digitize UI
@@ -82,6 +83,7 @@ The repository follows a microservices architecture with:
 - `digitize-service` - Document ingestion and processing
 - `summarize-service` - Text summarization
 - `similarity-service` - Semantic similarity search
+- `embedding-service` - Multimodal embedding service (text + image → vectors)
 
 **UI Images:**
 - `chatbot-ui` - Chatbot web interface

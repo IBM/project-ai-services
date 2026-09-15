@@ -1,0 +1,18 @@
+ARG SERVICE_BASE=icr.io/ai-services-cicd/service-base:v0.0.34
+FROM ${SERVICE_BASE}
+
+WORKDIR /opt/services/embedding
+
+ENV PYTHONPATH=/opt/services
+
+COPY common /opt/services/common
+COPY embedding/ .
+
+# Uncomment when you have embedding specific requirements.txt
+# RUN source /var/venv/bin/activate && pip install -r requirements.txt \
+#   --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux \
+#   --prefer-binary && pip cache purge
+
+CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
+     "--host", "0.0.0.0", "--port", "7000", \
+     "--loop", "uvloop", "--http", "httptools"]
