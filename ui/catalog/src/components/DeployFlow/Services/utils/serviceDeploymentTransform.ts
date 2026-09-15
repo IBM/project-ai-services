@@ -151,6 +151,38 @@ export async function transformToDeploymentPayload(
   )) {
     if (!serviceConfig.enabled) continue;
 
+    const hasComponents = Object.keys(serviceConfig.components).length > 0;
+
+    // ── Scenario B / D: no provider components ──────────────────────────────
+    // Emit components:[] and attach params only when something was collected.
+    if (!hasComponents) {
+      const entry: DeploymentService = {
+        catalog_id: currentServiceId,
+        version: serviceConfig.version,
+        components: [],
+      };
+      if (
+        serviceConfig.params &&
+        Object.keys(serviceConfig.params).length > 0
+      ) {
+        entry.params = serviceConfig.params as Record<string, unknown>;
+      }
+      // Attach datasource connectors if applicable
+      if (
+        deployOptions.accepts_datasource &&
+        formData.uploadFromSourceEnabled &&
+        formData.dataSources &&
+        formData.dataSources.length > 0
+      ) {
+        entry.connectors = formData.dataSources.map(
+          (id): ConnectorRef => ({ id, type: "datasource" }),
+        );
+      }
+      services.push(entry);
+      continue; // skip provider-component logic entirely
+    }
+
+    // ── Scenario A / C: has provider components ──────────────────────────────
     const inferenceComponentType =
       COMPONENT_TYPES.LLM in serviceConfig.components
         ? COMPONENT_TYPES.LLM
@@ -168,7 +200,10 @@ export async function transformToDeploymentPayload(
           ] ?? null)
         : null;
 
-    const { inferenceCredentialParams: credentialParams } = splitServiceParams(
+    const {
+      inferenceCredentialParams: credentialParams,
+      serviceBackendParams,
+    } = splitServiceParams(
       serviceConfig.params || {},
       null,
       inferenceProviderSchema,
@@ -205,6 +240,11 @@ export async function transformToDeploymentPayload(
       version: serviceConfig.version,
       components,
     };
+
+    // Scenario C: attach service-level schema params at the service level
+    if (Object.keys(serviceBackendParams).length > 0) {
+      deploymentService.params = serviceBackendParams;
+    }
 
     // Attach datasource connectors when the service accepts them and the user
     // has enabled upload-from-source with at least one connector selected.

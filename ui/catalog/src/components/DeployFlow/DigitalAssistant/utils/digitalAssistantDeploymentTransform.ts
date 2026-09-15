@@ -123,6 +123,34 @@ export function transformToDeploymentPayload(
       continue;
     }
 
+    // ── Scenario B / D: no provider components ──────────────────────────────
+    if (serviceDefinition.components.length === 0) {
+      const entry: DeploymentService = {
+        catalog_id: serviceId,
+        version: serviceConfig.version || formData.version,
+        components: [],
+      };
+      if (
+        serviceConfig.params &&
+        Object.keys(serviceConfig.params).length > 0
+      ) {
+        entry.params = serviceConfig.params;
+      }
+      if (
+        serviceDefinition.accepts_datasource &&
+        formData.uploadFromSourceEnabled &&
+        formData.dataSources &&
+        formData.dataSources.length > 0
+      ) {
+        entry.connectors = formData.dataSources.map(
+          (id): ConnectorRef => ({ id, type: "datasource" }),
+        );
+      }
+      services.push(entry);
+      continue;
+    }
+
+    // ── Scenario A / C: has provider components ──────────────────────────────
     // llm takes priority; fall back to reranker
     const inferenceComponentType =
       (
@@ -180,9 +208,7 @@ export function transformToDeploymentPayload(
     };
 
     if (Object.keys(serviceBackendParams).length > 0) {
-      deploymentService.params = {
-        backend: serviceBackendParams,
-      };
+      deploymentService.params = serviceBackendParams;
     }
 
     // Attach datasource connectors to services that accept them when the user

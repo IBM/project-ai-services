@@ -5,6 +5,7 @@ import type {
   LLMOption,
   Service,
   ProviderSchema,
+  JSONSchema,
 } from "@/types/api.types";
 import type { ServiceDetailData } from "@/components";
 
@@ -13,6 +14,11 @@ interface ServiceDeployState {
   serviceDeployOptions: Record<string, ServiceDeployOptions>;
   serviceDeployOptionsLoading: Record<string, boolean>;
   serviceDeployOptionsError: Record<string, string | null>;
+
+  // Service schemas cache - keyed by "serviceId:runtime"
+  serviceSchemas: Record<string, JSONSchema>;
+  serviceSchemasLoading: Record<string, boolean>;
+  serviceSchemasError: Record<string, string | null>;
 
   // Component models cache - keyed by "serviceId:componentType:runtime"
   componentModels: Record<string, LLMOption[]>;
@@ -90,6 +96,24 @@ interface ServiceDeployState {
     runtime: string,
   ) => void;
 
+  // Actions for service schemas
+  setServiceSchema: (
+    serviceId: string,
+    runtime: string,
+    schema: JSONSchema,
+  ) => void;
+  setServiceSchemaLoading: (
+    serviceId: string,
+    runtime: string,
+    loading: boolean,
+  ) => void;
+  setServiceSchemaError: (
+    serviceId: string,
+    runtime: string,
+    error: string | null,
+  ) => void;
+  getServiceSchema: (serviceId: string, runtime: string) => JSONSchema | null;
+
   // Actions for provider schemas
   setProviderSchema: (
     serviceId: string,
@@ -140,6 +164,11 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
       serviceDeployOptions: {},
       serviceDeployOptionsLoading: {},
       serviceDeployOptionsError: {},
+
+      // Service schemas state
+      serviceSchemas: {},
+      serviceSchemasLoading: {},
+      serviceSchemasError: {},
 
       // Component models state
       componentModels: {},
@@ -295,6 +324,47 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
         });
       },
 
+      // Service schemas actions — keyed by "serviceId"
+      setServiceSchema: (serviceId, runtime, schema) => {
+        const key = createKey(serviceId, runtime);
+        set((state) => ({
+          serviceSchemas: { ...state.serviceSchemas, [key]: schema },
+          serviceSchemasLoading: {
+            ...state.serviceSchemasLoading,
+            [key]: false,
+          },
+        }));
+      },
+
+      setServiceSchemaLoading: (serviceId, runtime, loading) => {
+        const key = createKey(serviceId, runtime);
+        set((state) => ({
+          serviceSchemasLoading: {
+            ...state.serviceSchemasLoading,
+            [key]: loading,
+          },
+        }));
+      },
+
+      setServiceSchemaError: (serviceId, runtime, error) => {
+        const key = createKey(serviceId, runtime);
+        set((state) => ({
+          serviceSchemasError: {
+            ...state.serviceSchemasError,
+            [key]: error,
+          },
+          serviceSchemasLoading: {
+            ...state.serviceSchemasLoading,
+            [key]: false,
+          },
+        }));
+      },
+
+      getServiceSchema: (serviceId, runtime) => {
+        const state = get();
+        return state.serviceSchemas[createKey(serviceId, runtime)] || null;
+      },
+
       // Provider schemas actions — keyed by "serviceId:componentType:providerId:runtime"
       setProviderSchema: (
         serviceId,
@@ -394,6 +464,9 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
           serviceDeployOptions: {},
           serviceDeployOptionsLoading: {},
           serviceDeployOptionsError: {},
+          serviceSchemas: {},
+          serviceSchemasLoading: {},
+          serviceSchemasError: {},
           componentModels: {},
           componentModelsLoading: {},
           componentModelsError: {},
@@ -416,6 +489,7 @@ export const useServiceDeployStore = create<ServiceDeployState>()(
       partialize: (state) => ({
         // Only persist static/configuration data (no refetch needed)
         serviceDeployOptions: state.serviceDeployOptions,
+        serviceSchemas: state.serviceSchemas,
         componentModels: state.componentModels,
         providerSchemas: state.providerSchemas,
         catalogServices: state.catalogServices,

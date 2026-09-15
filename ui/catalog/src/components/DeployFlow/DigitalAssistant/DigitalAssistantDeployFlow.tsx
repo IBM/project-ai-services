@@ -287,12 +287,34 @@ export const DeployFlow = ({
   // user sees a spinner rather than a populated step with a grey Next button.
   const shellIsLoading = isLoading || isProviderParamsLoading;
 
+  // Gate the Deploy button when any enabled service has a schema with unfilled
+  // required fields. Uses the runtime-prefixed cache key ("runtime:serviceId").
+  // Services without a schema or without required[] are permissive (return true).
+  const areAllRequiredFieldsFilled = useMemo(() => {
+    if (!deployOptions) return true;
+    const runtimePrefix = `${runtime}:`;
+    return deployOptions.services.every((service) => {
+      const serviceConfig = state.formData.services[service.id];
+      if (!serviceConfig?.enabled) return true;
+      const schema = serviceParams[`${runtimePrefix}${service.id}`]?.data;
+      if (!schema?.required) return true;
+      return schema.required.every((fieldKey: string) => {
+        const value = serviceConfig.params?.[fieldKey];
+        return (
+          value !== undefined && value !== null && String(value).trim() !== ""
+        );
+      });
+    });
+  }, [deployOptions, state.formData.services, serviceParams, runtime]);
+
   const isPrimaryDisabled =
     shellIsLoading ||
     !!error ||
     (state.currentStep === STEP_ONE && hasStep1SchemaError) ||
     (state.currentStep === STEP_TWO &&
-      (hasStep2SchemaError || state.isEditing)) ||
+      (hasStep2SchemaError ||
+        state.isEditing ||
+        !areAllRequiredFieldsFilled)) ||
     (isLastStep && hasStep3SchemaError);
 
   const handleWorkerErrorReset = useCallback(

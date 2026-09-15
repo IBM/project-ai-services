@@ -119,12 +119,19 @@ export const ServicesDeployFlow = ({
   // Only fetch deploy options when on step 1 or later (after user clicks Next)
   const shouldFetchDeployOptions =
     state.currentStep >= STEP_ONE && state.selectedServiceId;
-  const { deployOptions, llmModels, isLoading, error, llmError } =
-    useServiceDeployOptions(
-      shouldFetchDeployOptions ? state.selectedServiceId : null,
-      open,
-      runtime,
-    );
+  const {
+    deployOptions,
+    serviceSchema,
+    serviceSchemaError,
+    llmModels,
+    isLoading,
+    error,
+    llmError,
+  } = useServiceDeployOptions(
+    shouldFetchDeployOptions ? state.selectedServiceId : null,
+    open,
+    runtime,
+  );
 
   // Derive the dynamic step list once deploy options are loaded.
   // Must be declared after deployOptions to avoid a TDZ ReferenceError.
@@ -201,7 +208,9 @@ export const ServicesDeployFlow = ({
     }
   }, [open, preSelectedServiceId]);
 
-  // Initialize form data dynamically when deploy options are loaded (only once per service)
+  // Initialize form data dynamically when deploy options are loaded (only once per service).
+  // When a service declares a schema URL, wait for the schema to arrive before initializing
+  // so field defaults can be seeded correctly.
   useEffect(() => {
     if (
       open &&
@@ -210,12 +219,18 @@ export const ServicesDeployFlow = ({
       state.selectedServiceId &&
       hasInitializedFormData.current !== state.selectedServiceId
     ) {
+      // Guard: if schema URL is declared but schema hasn't arrived yet, wait.
+      // If the schema fetch errored, unblock so the error can be surfaced.
+      if (deployOptions.schema && !serviceSchema && !serviceSchemaError) return;
+
       hasInitializedFormData.current = state.selectedServiceId;
 
       // Initialize form data dynamically from API response
       const formData = initializeFormData(
         deployOptions,
         state.selectedServiceId,
+        undefined,
+        serviceSchema,
       );
 
       dispatch({
@@ -223,13 +238,21 @@ export const ServicesDeployFlow = ({
         payload: formData,
       });
     }
-  }, [open, state.currentStep, deployOptions, state.selectedServiceId]);
+  }, [
+    open,
+    state.currentStep,
+    deployOptions,
+    state.selectedServiceId,
+    serviceSchema,
+    serviceSchemaError,
+  ]);
 
   const providerSchemas = useServiceDeployStore(
     (state) => state.providerSchemas,
   );
 
-  // Helper function to check if all required credential fields are filled for all services
+  // Helper function to check if all required fields are filled for the selected service.
+  // Covers both LLM provider credential fields and service-level schema required fields.
   const areAllRequiredFieldsFilled = useMemo(() => {
     if (
       !state.selectedServiceId ||
@@ -239,38 +262,47 @@ export const ServicesDeployFlow = ({
     }
 
     const serviceConfig = state.formData.services[state.selectedServiceId];
+
+    // --- 1. LLM provider required credential fields (unchanged) ---
     const llmComponent = serviceConfig?.components?.llm;
+    if (llmComponent?.providerId) {
+      const schemaKey = `${state.selectedServiceId}:llm:${llmComponent.providerId}:${runtime}`;
+      const providerSchema = providerSchemas[schemaKey];
 
-    if (!llmComponent?.providerId) {
-      return true; // If no LLM provider selected, allow proceeding
+      if (providerSchema?.required) {
+        // Credentials land in serviceConfig.params; model lands in llmComponent.params.
+        const allParams = {
+          ...(llmComponent.params || {}),
+          ...(serviceConfig.params || {}),
+        };
+        const allFilled = providerSchema.required.every((fieldKey) => {
+          const value = allParams[fieldKey];
+          return (
+            value !== undefined && value !== null && String(value).trim() !== ""
+          );
+        });
+        if (!allFilled) return false;
+      }
     }
 
-    // Get the provider schema for the selected LLM provider
-    const schemaKey = `${state.selectedServiceId}:llm:${llmComponent.providerId}:${runtime}`;
-    const providerSchema = providerSchemas[schemaKey];
-
-    if (!providerSchema || !providerSchema.required) {
-      return true; // If no schema or no required fields, allow proceeding
+    // --- 2. Service-level schema required fields (new) ---
+    if (serviceSchema?.required) {
+      const params = serviceConfig.params || {};
+      const allFilled = serviceSchema.required.every((fieldKey) => {
+        const value = params[fieldKey];
+        return (
+          value !== undefined && value !== null && String(value).trim() !== ""
+        );
+      });
+      if (!allFilled) return false;
     }
 
-    const requiredFields = providerSchema.required;
-    // Credentials land in serviceConfig.params; model lands in llmComponent.params.
-    // Check both so required fields are found regardless of which bag they're in.
-    const allParams = {
-      ...(llmComponent.params || {}),
-      ...(serviceConfig.params || {}),
-    };
-
-    return requiredFields.every((fieldKey) => {
-      const value = allParams[fieldKey];
-      return (
-        value !== undefined && value !== null && String(value).trim() !== ""
-      );
-    });
+    return true;
   }, [
     state.selectedServiceId,
     state.formData.services,
     providerSchemas,
+    serviceSchema,
     runtime,
   ]);
 
@@ -347,8 +379,13 @@ export const ServicesDeployFlow = ({
   const onLoadingStep = state.currentStep > 0;
   const shellIsLoading =
     onLoadingStep &&
-    ((!deployOptions && isLoading) || isStep1ComponentsLoading);
-  const shellError = onLoadingStep ? error : null;
+    ((!deployOptions && isLoading) ||
+      isStep1ComponentsLoading ||
+      (deployOptions?.schema != null &&
+        !serviceSchema &&
+        !serviceSchemaError &&
+        isLoading));
+  const shellError = onLoadingStep ? (error ?? serviceSchemaError) : null;
   const hasLlmError = onLoadingStep ? !!llmError : false;
 
   const isPrimaryDisabled =
@@ -437,6 +474,7 @@ export const ServicesDeployFlow = ({
           isLoadingLlmModels={!!isLoading}
           onComponentError={setHasStep2SchemaError}
           runtime={runtime}
+          serviceSchema={serviceSchema}
         />
       )}
       {isLastStep && hasDatasourceStep && (

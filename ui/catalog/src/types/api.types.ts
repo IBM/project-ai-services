@@ -306,6 +306,7 @@ export interface ServiceDeployOptions {
   name: string;
   description?: string;
   version: string;
+  schema?: string;
   components: DeployComponent[];
   resources?: {
     cpu: number;
@@ -378,9 +379,7 @@ export interface DeploymentService {
   catalog_id: string;
   version: string;
   components: DeploymentComponent[];
-  params?: {
-    backend?: Record<string, unknown>;
-  };
+  params?: Record<string, unknown>;
   connectors?: ConnectorRef[];
 }
 
