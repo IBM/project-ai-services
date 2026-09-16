@@ -8,6 +8,7 @@ import (
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeOpenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
@@ -25,10 +26,16 @@ const (
 func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	token, gatewayAddr, err := configure.RegisterLocalWorker(ctx, c)
+	token, _, err := configure.RegisterLocalWorker(ctx, c)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
 	}
+
+	// For the co-located local worker on OpenShift, connect directly via the
+	// internal service DNS endpoint. This avoids routing out through the OpenShift
+	// router/external route. The internal service DNS name is already included in
+	// the gateway's TLS server certificate SANs.
+	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.OpenShiftGatewayServiceEndpoint, workerconstants.WorkerGatewayPort)
 
 	opts := workertypes.OpenshiftWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
