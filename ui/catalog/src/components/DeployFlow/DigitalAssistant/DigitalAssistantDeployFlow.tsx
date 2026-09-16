@@ -18,6 +18,7 @@ import {
   sharedDeployFlowReducer,
   useDeployFlowReducer,
 } from "../Shared/hooks/useDeployFlowReducer";
+import { getRequiredFieldKeys } from "../Shared/utils/paramFilter";
 import { deployApplication, fetchServices } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/digitalAssistantDeploymentTransform";
 import { runDeployment } from "../Shared/utils/runDeployment";
@@ -105,6 +106,7 @@ export const DeployFlow = ({
     isServiceSummariesStale,
     providerParams,
     serviceParams,
+    serviceParamsError,
     initialize,
   } = useDeployStore();
 
@@ -287,25 +289,48 @@ export const DeployFlow = ({
   // user sees a spinner rather than a populated step with a grey Next button.
   const shellIsLoading = isLoading || isProviderParamsLoading;
 
-  // Gate the Deploy button when any enabled service has a schema with unfilled
-  // required fields. Uses the runtime-prefixed cache key ("runtime:serviceId").
-  // Services without a schema or without required[] are permissive (return true).
+  // Gate the Deploy button when any enabled service
   const areAllRequiredFieldsFilled = useMemo(() => {
     if (!deployOptions) return true;
     const runtimePrefix = `${runtime}:`;
     return deployOptions.services.every((service) => {
       const serviceConfig = state.formData.services[service.id];
       if (!serviceConfig?.enabled) return true;
-      const schema = serviceParams[`${runtimePrefix}${service.id}`]?.data;
-      if (!schema?.required) return true;
-      return schema.required.every((fieldKey: string) => {
+
+      const cacheKey = `${runtimePrefix}${service.id}`;
+      const schema = serviceParams[cacheKey]?.data;
+      const fetchFailed = !!serviceParamsError?.[cacheKey];
+
+      // If the service declares a schema URL, wait for it before deploying.
+      // Sending params without the schema means nestParamsBySchema cannot nest them
+      // correctly and the server receives the wrong payload shape.
+      if (service.schema && !schema) {
+        // fetch failed → block (StepTwo error banner already explains why)
+        // still in-flight → block silently until schema arrives
+        return false;
+      }
+
+      // A schema fetch that failed for a service without an explicit schema URL
+      // (legacy endpoint path) should also block.
+      if (fetchFailed) return false;
+
+      if (!schema) return true;
+      const requiredFields = getRequiredFieldKeys(schema);
+      if (requiredFields.length === 0) return true;
+      return requiredFields.every((fieldKey: string) => {
         const value = serviceConfig.params?.[fieldKey];
         return (
           value !== undefined && value !== null && String(value).trim() !== ""
         );
       });
     });
-  }, [deployOptions, state.formData.services, serviceParams, runtime]);
+  }, [
+    deployOptions,
+    state.formData.services,
+    serviceParams,
+    serviceParamsError,
+    runtime,
+  ]);
 
   const isPrimaryDisabled =
     shellIsLoading ||

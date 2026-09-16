@@ -18,6 +18,7 @@ import {
   sharedDeployFlowReducer,
   useDeployFlowReducer,
 } from "../Shared/hooks/useDeployFlowReducer";
+import { getRequiredFieldKeys } from "../Shared/utils/paramFilter";
 import { deployApplication } from "@/api/applications.api";
 import { transformToDeploymentPayload } from "./utils/serviceDeploymentTransform";
 import { runDeployment } from "../Shared/utils/runDeployment";
@@ -286,15 +287,18 @@ export const ServicesDeployFlow = ({
     }
 
     // --- 2. Service-level schema required fields (new) ---
-    if (serviceSchema?.required) {
-      const params = serviceConfig.params || {};
-      const allFilled = serviceSchema.required.every((fieldKey) => {
-        const value = params[fieldKey];
-        return (
-          value !== undefined && value !== null && String(value).trim() !== ""
-        );
-      });
-      if (!allFilled) return false;
+    if (serviceSchema) {
+      const requiredFields = getRequiredFieldKeys(serviceSchema);
+      if (requiredFields.length > 0) {
+        const params = serviceConfig.params || {};
+        const allFilled = requiredFields.every((fieldKey) => {
+          const value = params[fieldKey];
+          return (
+            value !== undefined && value !== null && String(value).trim() !== ""
+          );
+        });
+        if (!allFilled) return false;
+      }
     }
 
     return true;
