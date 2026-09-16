@@ -127,7 +127,7 @@ class ConnectorCreateRequest(BaseModel):
                     "host": "sftp.example.com",
                     "port": 22,
                     "username": "sync_user",
-                    "password": "secret_password",
+                    "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
                     "remote_path": "/exports",
                 },
             }
