@@ -1165,11 +1165,8 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		return nil, fmt.Errorf("failed to init runtime client: %w", err)
 	}
 
-	servicePods, err := s.collectServicePods(ctx, rt, app.Services)
-	if err != nil {
-		return nil, fmt.Errorf("failed to collect service pods: %w", err)
-	}
-
+	servicePods := s.collectServicePods(ctx, rt, app.Services)
+	
 	componentPods, err := s.collectComponentPods(ctx, rt, app.Services)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect component pods: %w", err)
@@ -1205,20 +1202,22 @@ func (s *ApplicationServiceBase) collectServicePods(
 	ctx context.Context,
 	rt runtime.Runtime,
 	services []models.Service,
-) ([]types.Pod, error) {
+) []types.Pod {
 	servicePods := make([]types.Pod, 0, len(services))
 
 	for _, service := range services {
 		pod, err := loadApplicationPods(ctx, rt, service.ID.String())
 		if err != nil {
-			return nil, fmt.Errorf("failed to load service pod for service %s: %w", service.ID, err)
+			logger.ErrorfCtx(ctx, "failed to load service pod for service %s: %w", service.ID, err)
+
+			continue
 		}
 		servicePods = append(servicePods, pod...)
 	}
 
 	logger.InfofCtx(ctx, "Successfully collected %d service pods", len(servicePods))
 
-	return servicePods, nil
+	return servicePods
 }
 
 func (s *ApplicationServiceBase) collectComponentPods(
@@ -1247,7 +1246,9 @@ func (s *ApplicationServiceBase) collectComponentPods(
 
 			componentPod, err := loadApplicationPods(ctx, rt, componentID)
 			if err != nil {
-				return nil, fmt.Errorf("failed to load component pod %s: %w", componentID, err)
+				logger.ErrorfCtx(ctx, "failed to load component pod %s: %w", componentID, err)
+				
+				continue
 			}
 
 			componentMap[componentID] = componentPod

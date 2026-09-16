@@ -17,7 +17,6 @@ import (
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
 var (
@@ -163,18 +162,18 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 	for _, app := range applicationList {
 		// Skip GetApplicationPS when the application is not in running state;
 		// it won't return meaningful pod data until the app is running.
-		if !strings.EqualFold(app.Status, string(types.Running)) {
-			workerName, runtimeType := "", ""
-			if app.Worker != nil {
-				workerName = app.Worker.Name
-				runtimeType = app.Worker.RuntimeType
-			}
+		// if !strings.EqualFold(app.Status, string(types.Running)) {
+		// 	workerName, runtimeType := "", ""
+		// 	if app.Worker != nil {
+		// 		workerName = app.Worker.Name
+		// 		runtimeType = app.Worker.RuntimeType
+		// 	}
 
-			rows := cliUtils.BuildAppStatusRow(app.Name, workerName, runtimeType, app.Status, opts.OutputWide)
-			printer.AppendRow(rows...)
+		// 	rows := cliUtils.BuildAppStatusRow(app.Name, workerName, runtimeType, app.Status, opts.OutputWide)
+		// 	printer.AppendRow(rows...)
 
-			continue
-		}
+		// 	continue
+		// }
 
 		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
 		if err != nil {
