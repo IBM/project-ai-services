@@ -17,17 +17,24 @@ spec:
       type: Recreate
     maxReplicas: 1
     minReplicas: 1
+    volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
     model:
       modelFormat:
         name: vLLM
       resources:
         requests:
-          cpu: {{ .Values.resources.requests.cpu | quote }}
           memory: {{ .Values.resources.requests.memory | quote }}
         limits:
-          cpu: {{ .Values.resources.limits.cpu | quote }}
           memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
       storageUri: hf://{{ .Values.model }}
       args:
         - --served-model-name={{ .Values.model }}
+        - --gpu-memory-utilization=0.5
+      volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm
