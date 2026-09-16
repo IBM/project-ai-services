@@ -184,6 +184,15 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
         },
     )
 
+    # Schema validation: pass-through — connection_details validation has its
+    # own unit tests in test_connector_models_extra.py; endpoint tests focus on
+    # HTTP behaviour only.
+    from unittest.mock import MagicMock
+    mock_ssh_config = MagicMock()
+    mock_s3_config = MagicMock()
+    monkeypatch.setattr("digitize.api.v1.connectors.SSHConnectorConfig", mock_ssh_config)
+    monkeypatch.setattr("digitize.api.v1.connectors.S3ConnectorConfig", mock_s3_config)
+
     # db_ops connector stubs — return None by default (no pre-existing connector)
     monkeypatch.setattr("digitize.api.v1.connectors.db_ops.get_connector_by_id", Mock(return_value=None))
     monkeypatch.setattr("digitize.api.v1.connectors.db_ops.get_connector_by_name", Mock(return_value=None))
@@ -943,6 +952,7 @@ class TestPutConnectorTriggersSync:
 
     async def test_dispatches_sync_when_connection_details_changed(self, monkeypatch):
         """PUT with connection_details change schedules a dispatch_sync task."""
+        from unittest.mock import MagicMock
         from digitize.api.v1.connectors import update_connector
         from digitize.connectors.models import ConnectorUpdateRequest
 
@@ -955,6 +965,9 @@ class TestPutConnectorTriggersSync:
             "digitize.api.v1.connectors.merge_and_encrypt_partial",
             lambda ctype, existing, partial: {**existing, **partial},
         )
+        # Bypass schema validation — not under test here.
+        monkeypatch.setattr("digitize.api.v1.connectors.SSHConnectorConfig", MagicMock())
+        monkeypatch.setattr("digitize.api.v1.connectors.S3ConnectorConfig", MagicMock())
 
         tasks_created = []
 
