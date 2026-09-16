@@ -18,7 +18,7 @@
         "systemPrompt": {
           "type": "string",
           "title": "Prompt text",
-          "description": "Custom initial system prompt for conversational RAG",
+          "description": "Custom initial system prompt for conversational RAG. Language is auto-detected (English, German, Italian, French, Japanese) and applied to the appropriate language config.",
           "default": "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow.",
           "minLength": 10,
           "maxLength": 5000,

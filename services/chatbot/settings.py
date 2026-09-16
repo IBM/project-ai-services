@@ -20,7 +20,7 @@ def _ensure_language_detector_initialized():
     
     if _language_detector is None:
         logger.debug("Initializing language detector for settings validation")
-        setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH])
+        setup_language_detector([Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH, Language.JAPANESE])
 
 _ensure_language_detector_initialized()
 
@@ -207,19 +207,57 @@ class QueryRephrasingConfig(BaseSettings):
     )
     
     # Language-specific configurations
+    class JapaneseConfig(BaseSettings):
+        """Japanese-specific query rephrasing settings."""
+
+        rephrase_prompt_template: str = Field(
+            default=(
+                "会話の履歴と現在の質問をもとに、セマンティック検索のための独立したクエリを作成してください。\n\n"
+                "指示：\n"
+                "1. 現在の質問がすでに独立していて明確な場合は、そのまま完全に返してください（元の表現を保持すること）\n"
+                "2. 質問が前の文脈を参照している場合（「それ」「この」「あの」「彼ら」などの代名詞を使用）、会話履歴から具体的な名詞に置き換えてください\n"
+                "3. 現在の質問が明らかに前の情報を必要とするフォローアップ質問の場合のみ、文脈を統合してください\n"
+                "4. 会話的なフィラーワードを削除してください（例：「教えてください」「また」「ありがとう」「お願いします」）\n"
+                "5. クエリを簡潔に保ち、主要な検索意図に集中してください\n"
+                "6. 会話履歴が現在の質問に無関係な場合は、無視してください\n"
+                "7. 言い換えたクエリのみを返してください。説明や追加テキストは不要です\n\n"
+                "会話履歴：\n{conversation_history}\n\n"
+                "現在の質問：{current_query}\n\n"
+                "言い換えたクエリ："
+            ),
+            description="Japanese prompt template for query rephrasing with placeholders: {conversation_history}, {current_query}"
+        )
+
+        role_labels: dict[str, str] = Field(
+            default={
+                "user": "ユーザー",
+                "assistant": "アシスタント",
+                "system": "システム",
+                "unknown": "不明",
+            },
+            description="Japanese role labels for conversation message formatting"
+        )
+
+        stop_sequences: list[str] = Field(
+            default=["\n\n", "質問：", "現在の質問："],
+            description="Japanese stop sequences for LLM query rephrasing"
+        )
+
     english: EnglishConfig = Field(default_factory=EnglishConfig)
     german: GermanConfig = Field(default_factory=GermanConfig)
     italian: ItalianConfig = Field(default_factory=ItalianConfig)
     french: FrenchConfig = Field(default_factory=FrenchConfig)
+    japanese: JapaneseConfig = Field(default_factory=JapaneseConfig)
 
 class LLMConfig(BaseSettings):
     """Chatbot-specific LLM generation settings.
     
-    Token Ratios: English:French:Italian:German = 1 : 1.2305 : 1.3066 : 1.5
+    Token Ratios: English:French:Italian:German:Japanese = 1 : 1.2305 : 1.3066 : 1.5 : 2.3473
     
     These ratios account for the fact that different languages require different numbers
     of tokens to express the same semantic content, ensuring fair token allocation across
-    all supported languages.
+    all supported languages. Japanese has the highest ratio because the underlying
+    SentencePiece tokenizer produces significantly more tokens per character for CJK text.
     """
     
     class EnglishConfig(BaseSettings):
@@ -301,11 +339,36 @@ class LLMConfig(BaseSettings):
         description="Temperature for LLM generation",
     )
 
+    class JapaneseConfig(BaseSettings):
+        """Japanese-specific LLM settings.
+
+        max_tokens = round(512 * 2.3473) = 1202
+        Derived from the Japanese token ratio relative to English.
+        Japanese responses require more output tokens than English for equivalent
+        semantic content due to higher token density of the CJK tokenizer.
+        """
+
+        max_tokens: int = Field(
+            default=1202,
+            gt=0,
+            description="Maximum tokens for LLM generation (Japanese)",
+        )
+
+        @field_validator('max_tokens')
+        @classmethod
+        def validate_max_tokens(cls, v):
+            """Validate max_tokens with warning fallback."""
+            if not (isinstance(v, int) and v > 0):
+                logger.warning("Setting max_tokens_ja to default '1202' as it is missing or malformed in the settings")
+                return 1202
+            return v
+
     # Language-specific configurations
     english: EnglishConfig = Field(default_factory=EnglishConfig)
     german: GermanConfig = Field(default_factory=GermanConfig)
     italian: ItalianConfig = Field(default_factory=ItalianConfig)
     french: FrenchConfig = Field(default_factory=FrenchConfig)
+    japanese: JapaneseConfig = Field(default_factory=JapaneseConfig)
 
     @field_validator('temperature')
     @classmethod
@@ -517,12 +580,46 @@ class RAGConfig(BaseSettings):
             description="French conversational RAG system prompt template with context and search query",
         )
 
+    class JapaneseConfig(BaseSettings):
+        """Japanese-specific RAG settings."""
+
+        DEFAULT_SYSTEM_PROMPT: ClassVar[str] = (
+            "あなたは役立つ会話型AIアシスタントです。"
+            "会話言語は、ユーザーの最初のメッセージに基づいてセッション全体で固定されます。"
+            "後続のメッセージが複数の言語を混在させていても、常にこのセッション言語でのみ回答してください。"
+            "明確で正確かつ文脈に関連した回答を提供してください。"
+            "会話の流れを維持するために、適切な場合は以前のやり取りを参照してください。"
+            "質問された特定の質問にのみ答えてください。会話的な補足を追加したり、"
+            "追加のサポートを提供したり、次のステップを提案したり、回答の最後にフォローアップの質問をしたりしないでください。"
+            "質問に答えたらすぐに回答を終了してください。"
+        )
+
+        system_prompt: str = Field(
+            default=DEFAULT_SYSTEM_PROMPT,
+            description="Japanese conversational system prompt for session-based behavior",
+        )
+
+        query_system_prompt: str = Field(
+            default=(
+                "セッション言語：日本語\n\n"
+                "取得したコンテキスト：\n{context}\n\n"
+                "言い換えたクエリ：\n{rephrased_query}\n\n"
+                "指示：上記の取得したコンテキストに基づいてユーザーの現在の質問に答えてください。"
+                "自然な会話の流れを維持し、関連する場合は以前のメッセージを参照してください。"
+                "セッション言語はユーザーの最初のメッセージに基づいて固定されているため、日本語のみで回答してください。"
+                "取得したコンテキストに十分な情報が含まれていない場合は、その旨を明確に述べてください。"
+                "重要：回答は最大{max_tokens}トークンに制限してください。簡潔かつ的確にしてください。"
+            ),
+            description="Japanese conversational RAG system prompt template with context and search query",
+        )
+
     # Language-specific configurations
     english: EnglishConfig = Field(default_factory=EnglishConfig)
     german: GermanConfig = Field(default_factory=GermanConfig)
     italian: ItalianConfig = Field(default_factory=ItalianConfig)
     french: FrenchConfig = Field(default_factory=FrenchConfig)
-    
+    japanese: JapaneseConfig = Field(default_factory=JapaneseConfig)
+
     # Single env vars that get applied based on language detection
     system_prompt: str = Field(
         default="",
@@ -594,6 +691,9 @@ class RAGConfig(BaseSettings):
                 elif detected_lang == LanguageCodes.FRENCH:
                     self.french.system_prompt = self.system_prompt
                     logger.info("Applied custom system_prompt to French config")
+                elif detected_lang == LanguageCodes.JAPANESE:
+                    self.japanese.system_prompt = self.system_prompt
+                    logger.info("Applied custom system_prompt to Japanese config")
                 else:
                     self.english.system_prompt = self.system_prompt
                     logger.info("Applied custom system_prompt to English config")
@@ -718,6 +818,7 @@ _QUERY_REPHRASING_CONFIG_MAP: dict = {
     LanguageCodes.GERMAN: settings.query_rephrasing.german,
     LanguageCodes.ITALIAN: settings.query_rephrasing.italian,
     LanguageCodes.FRENCH: settings.query_rephrasing.french,
+    LanguageCodes.JAPANESE: settings.query_rephrasing.japanese,
 }
 
 _RAG_CONFIG_MAP: dict = {
@@ -725,6 +826,7 @@ _RAG_CONFIG_MAP: dict = {
     LanguageCodes.GERMAN: settings.chatbot.german,
     LanguageCodes.ITALIAN: settings.chatbot.italian,
     LanguageCodes.FRENCH: settings.chatbot.french,
+    LanguageCodes.JAPANESE: settings.chatbot.japanese,
 }
 
 _HISTORY_TOKEN_RATIOS: dict[str, float] = {
@@ -732,6 +834,7 @@ _HISTORY_TOKEN_RATIOS: dict[str, float] = {
     LanguageCodes.FRENCH:   1.2305,
     LanguageCodes.ITALIAN:  1.3066,
     LanguageCodes.GERMAN:   1.5,
+    LanguageCodes.JAPANESE: 2.3473,
 }
 
 def get_history_token_budget(lang: str, base: int) -> int:

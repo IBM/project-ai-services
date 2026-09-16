@@ -7,30 +7,29 @@ and the scheduler.
 
 Module-level state
 ------------------
-_scheduler : AsyncScheduler | None
+_scheduler : AsyncIOScheduler | None
     Assigned by app.py lifespan before any connector endpoint is called.
     Must not be referenced at import time.
 
 Usage
 -----
     # Inside lifespan (app.py):
-    async with AsyncScheduler(data_store=data_store) as sched:
-        import digitize.connectors.scheduler as scheduler_module
-        scheduler_module._scheduler = sched
-        await scheduler_module.register_connector_job(
-            connector_id, interval_seconds, fire_immediately=True
-        )
-        yield
-
-    # After lifespan exit:
-    #   The ``async with`` block runs __aexit__, which stops the scheduler.
+    sched = AsyncIOScheduler(jobstores={"default": job_store})
+    import digitize.connectors.scheduler as scheduler_module
+    scheduler_module._scheduler = sched
+    await scheduler_module.register_connector_job(
+        connector_id, interval_seconds, fire_immediately=True
+    )
+    sched.start()
+    yield
+    sched.shutdown()
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from apscheduler import AsyncScheduler, ConflictPolicy
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from common.misc_utils import get_logger
@@ -41,10 +40,10 @@ logger = get_logger("connector_scheduler")
 # Module-level scheduler singleton — set by lifespan in app.py
 # ---------------------------------------------------------------------------
 
-_scheduler: AsyncScheduler | None = None
+_scheduler: AsyncIOScheduler | None = None
 
 
-def _get_scheduler() -> AsyncScheduler:
+def _get_scheduler() -> AsyncIOScheduler:
     if _scheduler is None:
         raise RuntimeError(
             "ConnectorScheduler not initialised — "
@@ -78,15 +77,20 @@ async def register_connector_job(
     from digitize.api.v1.connectors import dispatch_sync
 
     now = datetime.now(timezone.utc)
-    start_time = now if fire_immediately else now + timedelta(seconds=interval_seconds)
+    # APScheduler v3: IntervalTrigger always schedules the first run at
+    # start_date + N*interval.
+    # Passing next_run_time=now overrides the trigger's first computed fire time
+    # so the job executes immediately, then repeats on the normal interval.
+    start_date = now if fire_immediately else now + timedelta(seconds=interval_seconds)
 
     sched = _get_scheduler()
-    await sched.add_schedule(
-        func_or_task_id=dispatch_sync,
-        trigger=IntervalTrigger(seconds=interval_seconds, start_time=start_time),
+    sched.add_job(
+        func=dispatch_sync,
+        trigger=IntervalTrigger(seconds=interval_seconds, start_date=start_date),
         args=[connector_id],
         id=connector_id,
-        conflict_policy=ConflictPolicy.replace,
+        replace_existing=True,
+        next_run_time=now if fire_immediately else None,
     )
     logger.info(
         f"Registered scheduler job for connector {connector_id!r} "
@@ -102,10 +106,10 @@ async def remove_connector_job(connector_id: str) -> None:
     """
     sched = _get_scheduler()
     try:
-        await sched.remove_schedule(connector_id)
+        sched.remove_job(connector_id)
         logger.info(f"Removed scheduler job for connector {connector_id!r}")
     except Exception as exc:
-        # LookupError or similar if the schedule doesn't exist — safe to ignore.
+        # JobLookupError or similar if the job doesn't exist — safe to ignore.
         logger.warning(
             f"Could not remove scheduler job for {connector_id!r} "
             f"(may not have been registered): {exc}"

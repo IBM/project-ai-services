@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -10,10 +11,11 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	appTemplates "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/application/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -25,21 +27,30 @@ var templatesCmd = &cobra.Command{
 	Short: "Lists the offered application templates and their supported parameters",
 	Long:  `Retrieves information about the offered application templates and their supported parameters`,
 	Example: `  For Podman:
-	 # List all available application templates (Podman)
-	 ai-services application templates --runtime podman
+  # List all available application templates (Podman)
+  ai-services application templates --runtime podman
 
-	 # List parameters for a specific template (see subcommand)
-	 ai-services application templates parameters --template digitize --runtime podman
+  # List parameters for a specific template (see subcommand)
+  ai-services application templates parameters --template digitize --runtime podman
 
-	 # List templates using legacy implementation
-	 ai-services application templates --legacy --runtime podman
+  # List templates using legacy implementation
+  ai-services application templates --legacy --runtime podman
 
-	 For OpenShift:
-	 # List all available application templates (OpenShift)
-	 ai-services application templates --runtime openshift
+  For OpenShift:
+  # List all available application templates (OpenShift)
+  ai-services application templates --runtime openshift
 
-	 # List parameters for a specific template (see subcommand)
-	 ai-services application templates parameters --template digitize --runtime openshift `,
+  # List parameters for a specific template (see subcommand)
+  ai-services application templates parameters --template digitize --runtime openshift`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// --runtime is required for templates: listing templates uses the runtime
+		// to filter supported parameter sets.
+		if runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set")
+		}
+
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Once precheck passes, silence usage for any *later* internal errors.
 		cmd.SilenceUsage = true
@@ -113,27 +124,24 @@ func init() {
 }
 
 // listCatalogTemplates lists architectures, services, and components from the catalog.
+// It always tries the API first and falls back to the embedded catalog when the
+// API is unreachable or the user is not logged in.
 func listCatalogTemplates(cmd *cobra.Command) error {
-	// Create catalog provider
-	provider, err := catalog.NewCatalogProvider(nil)
+	source, err := catalogClient.NewCatalogSource(cmd.Context())
 	if err != nil {
-		return fmt.Errorf("failed to create catalog provider: %w", err)
+		return err
 	}
 
-	// Get all data
-	architectures, err := provider.ListArchitectures()
+	runtimeType := string(vars.RuntimeFactory.GetRuntimeType())
+
+	architectures, err := source.ListArchitectures(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("failed to list architectures: %w", err)
 	}
 
-	services, err := provider.ListServices()
+	services, err := source.ListServices(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("failed to list services: %w", err)
-	}
-
-	components, err := provider.ListComponents()
-	if err != nil {
-		return fmt.Errorf("failed to list components: %w", err)
 	}
 
 	// Section 1: Deployment Architectures with list of services
@@ -145,17 +153,17 @@ func listCatalogTemplates(cmd *cobra.Command) error {
 	// Section 2: Deployment Services with metadata and required components
 	logger.Infoln("\nAvailable Services:")
 	for _, svc := range services {
-		displayServiceWithComponents(svc, components)
+		displayServiceWithComponents(cmd.Context(), source, svc, runtimeType)
 	}
 
 	// Inform user about parameters subcommand
-	logger.Infoln("\nTo list supported parameters for each template use: application templates parameters --template <Template ID>\n")
+	logger.Infof("\nTo list supported parameters for each template use: ai-services application templates parameters --template <Template ID> --runtime %s\n", runtimeType)
 
 	return nil
 }
 
 // displayArchitectureWithServiceList displays an architecture with just the list of service IDs.
-func displayArchitectureWithServiceList(arch catalogTypes.Architecture) {
+func displayArchitectureWithServiceList(arch catalogTypes.ArchitectureSummary) {
 	logger.Infof("- %s (%s)", arch.ID, arch.Name)
 	if arch.Description != "" {
 		logger.Infof("  Description: %s", arch.Description)
@@ -164,36 +172,47 @@ func displayArchitectureWithServiceList(arch catalogTypes.Architecture) {
 	// Display list of services in this architecture
 	if len(arch.Services) > 0 {
 		logger.Infoln("  Services:")
-		for _, svcRef := range arch.Services {
-			logger.Infof("     - %s", svcRef.ID)
+		for _, svcID := range arch.Services {
+			logger.Infof("     - %s", svcID)
 		}
 	}
 }
 
 // displayServiceWithComponents displays a service with its metadata and required components.
-func displayServiceWithComponents(svc catalogTypes.Service, components []catalogTypes.Component) {
+// It calls GetServiceDeployOptions so that custom bundle providers from the catalog volume
+// are included alongside the embedded ones.
+func displayServiceWithComponents(ctx context.Context, source catalogClient.CatalogSource, svc catalogTypes.ServiceSummary, runtimeType string) {
 	logger.Infof("- %s (%s)", svc.ID, svc.Name)
 	if svc.Description != "" {
 		logger.Infof("  Description: %s", svc.Description)
 	}
 
-	// Display component dependencies
-	if len(svc.Dependencies) > 0 {
+	if len(svc.Dependencies) == 0 {
+		return
+	}
+
+	deployOpts, err := source.GetServiceDeployOptions(ctx, svc.ID, runtimeType)
+	if err != nil {
+		// Fall back to dependency IDs only — better than nothing.
 		logger.Infoln("  Required Components:")
 		for _, dep := range svc.Dependencies {
-			// Find matching components by type
-			matchingComps := []string{}
-			for _, comp := range components {
-				if comp.ComponentType == dep.ID {
-					matchingComps = append(matchingComps, comp.ID)
-				}
-			}
+			logger.Infof("    %s: (providers unavailable)", dep.ID)
+		}
 
-			if len(matchingComps) > 0 {
-				logger.Infof("    %s: %s", dep.ID, strings.Join(matchingComps, ", "))
-			} else {
-				logger.Infof("    %s: (no components available)", dep.ID)
-			}
+		return
+	}
+
+	logger.Infoln("  Required Components:")
+	for _, comp := range deployOpts.Components {
+		providerIDs := make([]string, 0, len(comp.Providers))
+		for _, p := range comp.Providers {
+			providerIDs = append(providerIDs, p.ID)
+		}
+
+		if len(providerIDs) > 0 {
+			logger.Infof("    %s: %s", comp.Type, strings.Join(providerIDs, ", "))
+		} else {
+			logger.Infof("    %s: (no providers available)", comp.Type)
 		}
 	}
 }

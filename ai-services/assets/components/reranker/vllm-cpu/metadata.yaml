@@ -1,6 +1,7 @@
 # Component identification
 type: component
 id: vllm-cpu
+version: "1.0.0"
 name: "AI Inference on CPU"
 description: "Deploy reranker models on vLLM inference engine (CPU-only)"
 

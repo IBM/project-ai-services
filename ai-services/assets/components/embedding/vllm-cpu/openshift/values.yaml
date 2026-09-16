@@ -1,5 +1,4 @@
-storageUri: hf://ibm-granite/granite-embedding-278m-multilingual
-model: ibm-granite/granite-embedding-278m-multilingual
+model: ""
 resources:
   requests:
     cpu: "8"

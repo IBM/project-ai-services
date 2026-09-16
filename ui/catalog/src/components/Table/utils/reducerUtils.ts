@@ -136,11 +136,12 @@ export function closeDeleteDialog(
   selectedRowId: string | null,
 ): Pick<
   BaseTableState,
-  "isDeleteDialogOpen" | "isConfirmed" | "selectedRowId"
+  "isDeleteDialogOpen" | "isConfirmed" | "selectedRowId" | "isDeleting"
 > {
   return {
     isDeleteDialogOpen: false,
     isConfirmed: false,
+    isDeleting: false,
     selectedRowId: hasError ? selectedRowId : null,
   };
 }
@@ -297,8 +298,6 @@ export function updateRowStatus<TRow extends BaseTableRow>(
       ? {
           ...r,
           status: payload.status,
-          messages:
-            payload.message !== undefined ? payload.message : r.messages,
         }
       : r,
   );

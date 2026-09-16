@@ -132,9 +132,14 @@ async function customSendMessage(
       .create(payload)
       .withResponse();
 
-    // Extract rephrased query from response headers
-    const rephrasedQuery =
-      response.headers.get('x-rephrased-query') || userInput;
+    // Extract rephrased query from response headers.
+    // The server percent-encodes the value (urllib.parse.quote) so that
+    // non-Latin-1 characters (e.g. Japanese) are safe to transport in
+    // HTTP headers.  Decode it back here before use.
+    const rawRephrasedQuery = response.headers.get('x-rephrased-query');
+    const rephrasedQuery = rawRephrasedQuery
+      ? decodeURIComponent(rawRephrasedQuery)
+      : userInput;
 
     instance.updateIsMessageLoadingCounter('decrease');
 
@@ -262,6 +267,7 @@ async function customSendMessage(
       'Für diese Anfrage wurden keine Dokumente in der Wissensdatenbank gefunden.',
       'Nessun documento trovato nella base di conoscenza per questa richiesta.',
       'Aucun document trouvé dans la base de connaissances pour cette requête.',
+      'このクエリに対してナレッジベースにドキュメントが見つかりませんでした。',
     ];
     const hasNoDocsMessage = noDocsMessages.some((msg) =>
       fullText.includes(msg),

@@ -8,6 +8,7 @@ import type {
   ServiceDeploymentPayload,
   DeploymentComponent,
   DeploymentService,
+  ConnectorRef,
 } from "@/types/api.types";
 import { fetchProviderSchema } from "@/api/applications.api";
 import { COMPONENT_TYPES } from "@/constants";
@@ -65,8 +66,11 @@ function getProviderVersion(
     return provider.version;
   }
 
-  // Final fallback
-  return "1.0.0";
+  // Version must come from API - throw error if not found
+  throw new Error(
+    `Provider version not found in API response for component type "${componentType}" and provider "${providerId}". ` +
+      `This indicates a configuration issue - all provider versions must be defined in the API response.`,
+  );
 }
 
 // Builds a deployment component from ComponentConfig
@@ -130,8 +134,7 @@ export async function transformToDeploymentPayload(
   ) => {
     const key = `${componentType}:${providerId}`;
     if (!schemaFetchPromises.has(key)) {
-      // Check if we have a cached schema for this component/provider
-      // Schemas are stored with key format: serviceId:componentType:providerId
+      // cachedSchemas keys are pre-resolved to "serviceId:componentType:providerId" by the caller
       const cacheKey = `${currentServiceId}:${componentType}:${providerId}`;
       const cachedSchema = cachedSchemas?.[cacheKey] || null;
 
@@ -197,11 +200,26 @@ export async function transformToDeploymentPayload(
     // Wait for all components of this service to be ready
     const components = await Promise.all(componentPromises);
 
-    services.push({
+    const deploymentService: DeploymentService = {
       catalog_id: currentServiceId,
       version: serviceConfig.version,
       components,
-    });
+    };
+
+    // Attach datasource connectors when the service accepts them and the user
+    // has enabled upload-from-source with at least one connector selected.
+    if (
+      deployOptions.accepts_datasource &&
+      formData.uploadFromSourceEnabled &&
+      formData.dataSources &&
+      formData.dataSources.length > 0
+    ) {
+      deploymentService.connectors = formData.dataSources.map(
+        (id): ConnectorRef => ({ id, type: "datasource" }),
+      );
+    }
+
+    services.push(deploymentService);
   }
 
   return {
@@ -210,5 +228,6 @@ export async function transformToDeploymentPayload(
     version: formData.version,
     deployment_type: "service",
     services,
+    worker_name: formData.workerName,
   };
 }

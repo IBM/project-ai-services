@@ -1,5 +1,6 @@
 containers:
   - name: "similarity-api"
+    workload: "similarity-api"
     format: ".Status"
     alias: API_STATUS
 

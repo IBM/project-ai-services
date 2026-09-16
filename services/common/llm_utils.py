@@ -1,11 +1,9 @@
-import logging
 import os
 import requests
+import threading
 import time
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
-
+from concurrent.futures import ThreadPoolExecutor
 from common.misc_utils import get_logger, resolve_model_max_len
 from common.settings import settings
 from common.retry_utils import retry_on_transient_error
@@ -13,7 +11,7 @@ import common.misc_utils as misc_utils
 
 logger = get_logger("LLM")
 
-is_debug = logger.isEnabledFor(logging.DEBUG)
+
 
 def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None, context: str = "LLM") -> int:
     """
@@ -47,18 +45,12 @@ def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None,
     
     return effective_max_tokens
 
-def tqdm_wrapper(iterable, **kwargs):
-    """Wrapper for tqdm that only shows progress bar in debug mode."""
-    if is_debug:
-        return tqdm(iterable, **kwargs)
-    else:
-        return iterable
-
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024):
     """Combined function to summarize and classify a table in a single LLM call.
 
     Returns tuple: (summary, decision).
+    Raises on failure so that the retry decorator and the caller can handle it.
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
@@ -115,42 +107,84 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
 
     except Exception as e:
         logger.error(f"Error summarizing/classifying table: {e}")
-        return "No summary.", False
+        raise
 
-def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32):
+def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32, stop_event: threading.Event | None = None):
     """Combined function to summarize and classify tables using a single prompt.
 
-    Returns tuple: (summaries, decisions).
+    Args:
+        table_mds: List of table markdown strings.
+        gen_model: LLM model name.
+        llm_endpoint: LLM endpoint URL.
+        doc_path: Document path (used for logging).
+        prompt_template: Prompt template string with a {content} placeholder.
+        max_tokens: Maximum tokens for the LLM response.
+        max_workers: Maximum parallel LLM workers.
+        stop_event: Optional threading.Event. When set, the function stops
+                    collecting further LLM results between table calls and
+                    cancels any queued futures that have not yet started.
+
+    Returns tuple: (summaries, decisions, failures).
+        summaries:  List of summary strings in table-index order.
+        decisions:  List of booleans (keep/discard) in table-index order.
+        failures:   Dict mapping table index to error message for tables that
+                    could not be processed; those tables use fallback values
+                    and processing continues.
+    Raises JobCancelledError if stop_event is set mid-processing.
     """
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
-    results: list[tuple[str, bool] | None] = [None] * len(all_prompts)
+    if not all_prompts:
+        return [], [], {}
+
+    results: list[tuple[str, bool]] = [("No summary.", False)] * len(all_prompts)
+    summaries: list[str] = []
+    decisions: list[bool] = []
+    failures: dict[int, str] = {}
 
     with ThreadPoolExecutor(max_workers=min(max_workers, len(all_prompts))) as executor:
         futures = {
             executor.submit(summarize_and_classify_single_table, prompt, gen_model, llm_endpoint, max_tokens): idx
             for idx, prompt in enumerate(all_prompts)
         }
-        for future in tqdm_wrapper(as_completed(futures), total=len(all_prompts),
-                                   desc=f"Summarizing and classifying tables of '{doc_path}'"):
-            idx = futures[future]
-            results[idx] = future.result()
+        pending = dict(futures)  # future -> idx, shrinks as futures complete
+        while pending:
+            for fut in list(pending):
+                if not fut.done():
+                    # Cancel queued (not-yet-running) futures if stop_event is set.
+                    if stop_event is not None and stop_event.is_set() and not fut.running():
+                        fut.cancel()
+                        del pending[fut]
+                    continue
+                idx = pending.pop(fut)
+                try:
+                    results[idx] = fut.result()
+                    logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
+                except Exception as e:
+                    error_msg = f"Failed to process table {idx}: {str(e)}"
+                    logger.error(error_msg)
+                    results[idx] = ("No summary.", False)
+                    failures[idx] = error_msg
 
-    # Separate summaries and decisions with proper None handling
-    summaries: list[str] = []
-    decisions: list[bool] = []
+            if stop_event is not None and stop_event.is_set() and not pending:
+                from digitize.exceptions import JobCancelledError
+                raise JobCancelledError(
+                    f"Job cancelled during table summarization for '{doc_path}'"
+                )
 
-    for result in results:
-        if result is not None:
-            summary, decision = result
-            summaries.append(summary)
-            decisions.append(decision)
-        else:
-            # Default values for failed futures
-            summaries.append("No summary.")
-            decisions.append(False)
+            # Sleep once per outer-loop cycle so the loop never spins when all
+            # remaining futures are still running.  Skipped only when pending is
+            # empty (the while condition will end the loop on the next check).
+            if pending:
+                time.sleep(0.5)
 
-    return summaries, decisions
+    # Unpack results in index order. Every slot starts as the fallback
+    # and is overwritten either by a successful future or left as-is on failure.
+    for summary, decision in results:
+        summaries.append(summary)
+        decisions.append(decision)
+
+    return summaries, decisions, failures
 
 def get_vllm_headers(api_key: str | None = None):
     """Get headers for vLLM API calls, including auth if provided.

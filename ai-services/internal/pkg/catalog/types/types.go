@@ -153,12 +153,13 @@ func (s Service) MarshalJSON() ([]byte, error) {
 
 // ServiceSummary represents a service for list API responses.
 type ServiceSummary struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	CertifiedBy   string   `json:"certified_by"`
-	Architectures []string `json:"architectures"`
-	Standalone    bool     `json:"standalone"`
+	ID            string                `json:"id"`
+	Name          string                `json:"name"`
+	Description   string                `json:"description"`
+	CertifiedBy   string                `json:"certified_by"`
+	Architectures []string              `json:"architectures"`
+	Standalone    bool                  `json:"standalone"`
+	Dependencies  []DependencyReference `json:"dependencies,omitempty"`
 }
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).

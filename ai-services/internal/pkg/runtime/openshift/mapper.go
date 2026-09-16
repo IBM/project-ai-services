@@ -17,6 +17,7 @@ func toOpenshiftPodList(pods *corev1.PodList) []types.Pod {
 			Name:       pod.Name,
 			Status:     string(pod.Status.Phase),
 			Labels:     pod.Labels,
+			Env:        extractPodEnv(pod.Spec.Containers),
 			Containers: toOpenshiftContainerList(pod.Status.ContainerStatuses),
 			Created:    pod.CreationTimestamp.Time,
 			Ports:      extractPodPorts(pod.Spec.Containers),
@@ -33,10 +34,24 @@ func toOpenshiftPod(pod *corev1.Pod) *types.Pod {
 		Status:     string(pod.Status.Phase),
 		State:      string(pod.Status.Phase),
 		Labels:     pod.Labels,
+		Env:        extractPodEnv(pod.Spec.Containers),
 		Containers: toOpenshiftContainerList(pod.Status.ContainerStatuses),
 		Created:    pod.CreationTimestamp.Time,
 		Ports:      extractPodPorts(pod.Spec.Containers),
 	}
+}
+
+// extractPodEnv merges env vars from all containers in the pod spec into a
+// single map.
+func extractPodEnv(containers []corev1.Container) map[string]string {
+	env := make(map[string]string)
+	for _, c := range containers {
+		for _, e := range c.Env {
+			env[e.Name] = e.Value
+		}
+	}
+
+	return env
 }
 
 func extractPodPorts(containers []corev1.Container) map[string][]string {
@@ -103,10 +118,11 @@ func toOpenShiftRouteList(routes []routev1.Route) []types.Route {
 	routeList := make([]types.Route, 0, len(routes))
 	for _, route := range routes {
 		routeList = append(routeList, types.Route{
-			Name:       route.Name,
-			HostPort:   route.Spec.Host,
-			TargetPort: route.Spec.Port.TargetPort.String(),
-			Labels:     route.Labels,
+			Name:        route.Name,
+			HostPort:    route.Spec.Host,
+			TargetPort:  route.Spec.Port.TargetPort.String(),
+			ServiceName: route.Spec.To.Name,
+			Labels:      route.Labels,
 		})
 	}
 

@@ -11,14 +11,23 @@ document status transitions for digitization jobs.
 import time
 from pathlib import Path
 
-from common.misc_utils import get_logger, get_utc_timestamp
+from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
 from digitize.db.manager import db_manager
 from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.utils.db import get_status_manager
+from digitize.exceptions import JobCancelledError
 
 logger = get_logger("digitize")
+
+# Terminal statuses that end polling — includes CANCELLED so a cancelled task
+# does not leave the poll loop spinning until the deadline expires.
+_POLL_TERMINAL = frozenset({
+    ConversionTaskStatus.COMPLETED,
+    ConversionTaskStatus.FAILED,
+    ConversionTaskStatus.CANCELLED,
+})
 
 
 def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
@@ -28,7 +37,9 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
 
     Returns the task object (possibly in a terminal state) or ``None`` if the
     row disappeared.  Raises ``_DeadlineExceeded`` when the deadline is hit so
-    the caller can apply a consistent failure path.
+    the caller can apply a consistent failure path.  Raises ``JobCancelledError``
+    immediately if the job row is found to be ``cancel_pending`` or ``cancelled``
+    during polling (the task is also marked cancelled before raising).
 
     Args:
         job_id:           Job identifier used to look up the task row.
@@ -49,6 +60,13 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
         task = db_manager.get_conversion_task_by_job_id(job_id)
         if task is None:
             logger.warning(f"Task for job {job_id} disappeared during polling")
+            break
+        # Check job-level cancellation flag on every tick so a CANCEL_PENDING
+        # job whose task is still QUEUED is observed here rather than waiting
+        # for the dispatcher to write CANCELLED to the task row first.
+        if db_manager.is_job_cancelled(job_id):
+            db_manager.cancel_tasks_for_job(job_id)
+            raise JobCancelledError(f"Job {job_id} was cancelled during {phase_label} polling")
     return task
 
 
@@ -62,7 +80,8 @@ def digitize(
 ):
     """
     Poll the conversion_tasks row until the dispatcher marks it terminal
-    (completed or failed), then update job and document status accordingly.
+    (completed, failed, or cancelled), then update job and document status
+    accordingly.
 
     The dispatcher handles conversion, semaphore management, and writes
     result_path / error to the task row.  This function owns all
@@ -94,11 +113,21 @@ def digitize(
     timeout_s = settings.digitize.conversion_timeout_s
     deadline = time.monotonic() + timeout_s
 
+    # Check cancellation before starting to poll
+    if job_id and db_manager.is_job_cancelled(job_id):
+        db_manager.cancel_tasks_for_job(job_id)
+        raise JobCancelledError(f"Job {job_id} was cancelled before digitization started")
+
     try:
         # Phase 1: wait until the dispatcher picks up the task (queued → running).
         task = _poll_until(
             job_id,
-            {ConversionTaskStatus.RUNNING, ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED},
+            {
+                ConversionTaskStatus.RUNNING,
+                ConversionTaskStatus.COMPLETED,
+                ConversionTaskStatus.FAILED,
+                ConversionTaskStatus.CANCELLED,
+            },
             deadline, timeout_s, "start",
         )
 
@@ -110,13 +139,20 @@ def digitize(
         # Phase 2: wait until the dispatcher reaches a terminal state.
         task = _poll_until(
             job_id,
-            {ConversionTaskStatus.COMPLETED, ConversionTaskStatus.FAILED},
+            _POLL_TERMINAL,
             deadline, timeout_s, "complete",
         )
 
     except _DeadlineExceeded as exc:
         _fail(str(exc))
         return
+
+    finally:
+        # Remove the staging directory once the full digitization pipeline has
+        # finished (success, failure, timeout, or cancellation).  _run_digitize
+        # also calls cleanup_staging_directory in its own finally — that call is
+        # idempotent and will be a no-op once the directory is already gone.
+        cleanup_staging_directory(job_id, settings.digitize.staging_dir)
 
     if task is None or task.status == ConversionTaskStatus.FAILED:
         _fail((task.error or "Conversion failed") if task else "Task row missing")

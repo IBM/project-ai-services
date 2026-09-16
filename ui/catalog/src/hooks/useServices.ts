@@ -1,15 +1,14 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
 import { fetchServices } from "@/api/applications.api";
 
 /**
- * Custom hook to fetch and cache available services
- * Uses Zustand store to cache data and avoid redundant API calls
- * Note: Services are static data and don't need refetching
+ * Fetches available services.
  *
- * @param autoFetch - If true, automatically fetches on mount. If false, only returns cached data.
+ * @param autoFetch - When true, fetches services on mount.
+ *                    Pass `false` to defer fetching until `refetch()` is called.
  */
-export const useServices = (autoFetch: boolean = false) => {
+export const useServices = (autoFetch = true) => {
   const {
     services,
     servicesLoading,
@@ -19,17 +18,13 @@ export const useServices = (autoFetch: boolean = false) => {
     setServicesError,
   } = useServiceDeployStore();
 
-  const hasFetched = useRef(false);
-
-  // Determine if we should be in loading state
-  const shouldBeLoading = !services && !servicesError && !servicesLoading;
-
-  // Manual fetch function that can be called by components
+  // Read servicesLoading via getState() to keep it out of deps and prevent
+  // refetch from being recreated on every loading state change.
   const refetch = useCallback(async () => {
-    if (servicesLoading) return; // Don't fetch if already loading
+    if (useServiceDeployStore.getState().servicesLoading) return;
 
-    setServicesLoading(true);
     setServicesError(null);
+    setServicesLoading(true);
 
     try {
       const data = await fetchServices();
@@ -37,37 +32,21 @@ export const useServices = (autoFetch: boolean = false) => {
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to load services";
+
       setServicesError(errorMessage);
     }
-  }, [servicesLoading, setServices, setServicesLoading, setServicesError]);
+  }, [setServices, setServicesLoading, setServicesError]);
 
   useEffect(() => {
-    // Only proceed if autoFetch is enabled
-    if (!autoFetch) {
-      return;
-    }
+    if (!autoFetch) return;
 
-    // Check if we have valid cached data
-    const hasValidCache = services && services.length > 0;
-
-    // Only fetch if we don't have cached data and we're not already fetching
-    const shouldFetch =
-      !hasValidCache && !hasFetched.current && !servicesLoading;
-
-    if (shouldFetch) {
-      hasFetched.current = true;
-      refetch().finally(() => {
-        hasFetched.current = false;
-      });
-    }
-  }, [autoFetch, services, servicesLoading, refetch]);
+    void refetch();
+  }, [autoFetch, refetch]);
 
   return {
-    services: services || [],
-    isLoading: servicesLoading || shouldBeLoading,
+    services: services ?? [],
+    isLoading: servicesLoading || (!services && !servicesError),
     error: servicesError,
     refetch,
   };
 };
-
-// Made with Bob

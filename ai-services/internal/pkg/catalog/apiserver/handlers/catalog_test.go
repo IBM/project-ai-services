@@ -174,7 +174,7 @@ func TestListServices(t *testing.T) {
 
 				// Should have deployable services
 				assert.NotEmpty(t, services)
-	
+
 				serviceIDs := make(map[string]bool)
 				for _, svc := range services {
 					serviceIDs[svc.ID] = true
@@ -183,19 +183,19 @@ func TestListServices(t *testing.T) {
 					assert.NotEmpty(t, svc.Name)
 					assert.NotEmpty(t, svc.Description)
 				}
-	
+
 				// Should include deployable services
 				assert.True(t, serviceIDs["chat"])
 				assert.True(t, serviceIDs["digitize"])
 				assert.True(t, serviceIDs["summarize"])
-	
+
 				// Verify architectures for services known to have them
 				for _, svc := range services {
 					if svc.ID == "chat" || svc.ID == "digitize" || svc.ID == "similarity" {
 						assert.NotEmpty(t, svc.Architectures, "service %q should have architectures", svc.ID)
 					}
 				}
-	
+
 				// Components (opensearch, embedding, instruct, reranker) are not services
 				assert.False(t, serviceIDs["opensearch"])
 				assert.False(t, serviceIDs["embedding"])
@@ -285,6 +285,208 @@ func validateServiceNotFound(t *testing.T, body []byte) {
 	err := json.Unmarshal(body, &errResp)
 	require.NoError(t, err)
 	assert.Contains(t, errResp["error"], "not found")
+}
+
+// validateNotFoundBody asserts the response body contains a JSON error field with "not found".
+func validateNotFoundBody(t *testing.T, body []byte) {
+	t.Helper()
+
+	var errResp map[string]string
+	err := json.Unmarshal(body, &errResp)
+	require.NoError(t, err)
+	assert.Contains(t, errResp["error"], "not found")
+}
+
+func TestGetServiceImages(t *testing.T) {
+	router := setupTestRouter()
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/services/:id/images", handler.GetServiceImages)
+
+	tests := []struct {
+		name           string
+		serviceID      string
+		expectedStatus int
+		validateBody   func(t *testing.T, body []byte)
+	}{
+		{
+			name:           "Successfully get images for chat service",
+			serviceID:      "chat",
+			expectedStatus: http.StatusOK,
+			validateBody: func(t *testing.T, body []byte) {
+				var images []string
+				require.NoError(t, json.Unmarshal(body, &images))
+				assert.NotEmpty(t, images)
+			},
+		},
+		{
+			name:           "Architecture id returns 404 — wrong endpoint",
+			serviceID:      "rag",
+			expectedStatus: http.StatusNotFound,
+			validateBody:   validateNotFoundBody,
+		},
+		{
+			name:           "Unknown id returns 404",
+			serviceID:      "nonexistent",
+			expectedStatus: http.StatusNotFound,
+			validateBody:   validateNotFoundBody,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", "/api/v1/services/"+tt.serviceID+"/images", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.validateBody != nil {
+				tt.validateBody(t, w.Body.Bytes())
+			}
+		})
+	}
+}
+
+func TestGetArchitectureImages(t *testing.T) {
+	router := setupTestRouter()
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/architectures/:id/images", handler.GetArchitectureImages)
+
+	tests := []struct {
+		name           string
+		archID         string
+		expectedStatus int
+		validateBody   func(t *testing.T, body []byte)
+	}{
+		{
+			name:           "Successfully get images for rag architecture",
+			archID:         "rag",
+			expectedStatus: http.StatusOK,
+			validateBody: func(t *testing.T, body []byte) {
+				var images []string
+				require.NoError(t, json.Unmarshal(body, &images))
+				assert.NotEmpty(t, images)
+			},
+		},
+		{
+			name:           "Service id returns 404 — wrong endpoint",
+			archID:         "chat",
+			expectedStatus: http.StatusNotFound,
+			validateBody:   validateNotFoundBody,
+		},
+		{
+			name:           "Unknown id returns 404",
+			archID:         "nonexistent",
+			expectedStatus: http.StatusNotFound,
+			validateBody:   validateNotFoundBody,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("GET", "/api/v1/architectures/"+tt.archID+"/images", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.validateBody != nil {
+				tt.validateBody(t, w.Body.Bytes())
+			}
+		})
+	}
+}
+
+func TestGetServiceModels(t *testing.T) {
+	router := setupTestRouter()
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/services/:id/models", handler.GetServiceModels)
+
+	tests := []struct {
+		name           string
+		serviceID      string
+		expectedStatus int
+		validateBody   func(t *testing.T, body []byte)
+	}{
+		{
+			name:           "Returns models array for existing service",
+			serviceID:      "chat",
+			expectedStatus: http.StatusOK,
+			validateBody: func(t *testing.T, body []byte) {
+				var models []string
+				require.NoError(t, json.Unmarshal(body, &models))
+				assert.NotNil(t, models)
+			},
+		},
+		{
+			name:           "Returns 404 for unknown service",
+			serviceID:      "nonexistent",
+			expectedStatus: http.StatusNotFound,
+			validateBody: func(t *testing.T, body []byte) {
+				var errResp map[string]string
+				require.NoError(t, json.Unmarshal(body, &errResp))
+				assert.Contains(t, errResp["error"], "nonexistent")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/services/"+tt.serviceID+"/models", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.validateBody != nil {
+				tt.validateBody(t, w.Body.Bytes())
+			}
+		})
+	}
+}
+
+func TestGetArchitectureModels(t *testing.T) {
+	router := setupTestRouter()
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/architectures/:id/models", handler.GetArchitectureModels)
+
+	tests := []struct {
+		name           string
+		archID         string
+		expectedStatus int
+		validateBody   func(t *testing.T, body []byte)
+	}{
+		{
+			name:           "Returns models array for rag architecture",
+			archID:         "rag",
+			expectedStatus: http.StatusOK,
+			validateBody: func(t *testing.T, body []byte) {
+				var models []string
+				require.NoError(t, json.Unmarshal(body, &models))
+				assert.NotNil(t, models)
+			},
+		},
+		{
+			name:           "Returns 404 for unknown architecture",
+			archID:         "nonexistent",
+			expectedStatus: http.StatusNotFound,
+			validateBody: func(t *testing.T, body []byte) {
+				var errResp map[string]string
+				require.NoError(t, json.Unmarshal(body, &errResp))
+				assert.Contains(t, errResp["error"], "nonexistent")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/architectures/"+tt.archID+"/models", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.validateBody != nil {
+				tt.validateBody(t, w.Body.Bytes())
+			}
+		})
+	}
 }
 
 // Made with Bob

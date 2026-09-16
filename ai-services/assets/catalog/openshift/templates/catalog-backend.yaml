@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
+  minReadySeconds: 10
   selector:
     matchLabels:
       ai-services.io/application: {{ .Release.Name }}
@@ -20,7 +21,7 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: catalog-backend
     spec:
-      serviceAccountName: ai-services-sa
+      serviceAccountName: ai-services-catalog-sa
       automountServiceAccountToken: true
       initContainers:
         - name: db-migration
@@ -38,7 +39,6 @@ spec:
                 echo "Migration attempt $attempt of $max_retries..."
 
                 if /usr/bin/ai-services catalog dbmigrate init \
-                  --runtime={{ .Values.backend.runtime }} \
                   --db-host=catalog-db \
                   --db-port=5432 \
                   --db-user={{ .Values.db.user }} \
@@ -81,6 +81,7 @@ spec:
             - --admin-username=admin
             - --admin-password-hash=$(ADMIN_PASSWORD)
             - --runtime={{ .Values.backend.runtime }}
+            - --workergateway-port={{ .Values.backend.workerGatewayPort }}
           env:
             - name: ADMIN_PASSWORD
               valueFrom:
@@ -97,6 +98,11 @@ spec:
                 secretKeyRef:
                   name: catalog-db-encryption-secret
                   key: db-encryption-key
+            - name: MTLS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: catalog-mtls-encryption-secret
+                  key: mtls-encryption-key
             - name: GIN_MODE
               value: "release"
             - name: AI_SERVICES_LOG_LEVEL
@@ -109,8 +115,14 @@ spec:
               value: "5432"
             - name: DB_USER
               value: "{{ .Values.db.user }}"
+            - name: WORKER_GATEWAY_PORT
+              value: "{{ .Values.backend.workerGatewayPort }}"
+            - name: LOCAL_WORKER
+              value: "{{ .Values.backend.localWorker }}"
           ports:
             - containerPort: 8080
+              protocol: TCP
+            - containerPort: {{ .Values.backend.workerGatewayPort }}
               protocol: TCP
           livenessProbe:
             httpGet:
@@ -124,13 +136,15 @@ spec:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 30
-            timeoutSeconds: 5
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
             failureThreshold: 3
           volumeMounts:
             - name: catalog-bundles
               mountPath: /data/catalog-bundles
+            - name: gateway-pki
+              mountPath: /data/gateway-pki
           resources:
             requests:
               memory: "{{ .Values.backend.resources.requests.memory }}"
@@ -142,3 +156,6 @@ spec:
         - name: catalog-bundles
           persistentVolumeClaim:
             claimName: catalog-bundles
+        - name: gateway-pki
+          persistentVolumeClaim:
+            claimName: gateway-pki

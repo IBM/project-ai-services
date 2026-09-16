@@ -11,14 +11,16 @@ Responsibilities:
 """
 
 import json
+import threading
 import time
 import re
 from pathlib import Path
 from rapidfuzz import fuzz
 
 from common.lang_utils import LanguageCodes, get_prompt_for_language
-from common.llm_utils import summarize_and_classify_tables, tqdm_wrapper
+from common.llm_utils import summarize_and_classify_tables
 from common.misc_utils import get_logger
+from digitize.exceptions import JobCancelledError
 from digitize.settings import settings
 
 logger = get_logger("processing.tables")
@@ -259,8 +261,7 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-
-def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH):
+def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None):
     """Extract, process, and summarize tables found in a document.
 
     Saves the extracted tables and their LLM-generated summaries to a JSON file.
@@ -274,7 +275,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     if not converted_doc.tables:
         logger.debug(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
-        return table_count, process_time
+        return table_count, process_time, {}
 
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
@@ -283,14 +284,19 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     from digitize.parsing.docx import recover_table_caption_from_body_context
 
     table_dict = {}
-    for table_ix, table in enumerate(tqdm_wrapper(converted_doc.tables, desc=f"Processing table content for '{doc_path}'")):
+    for table_ix, table in enumerate(converted_doc.tables):
         table_dict[table_ix] = {}
 
         # Use Markdown format for better LLM understanding
         raw_markdown = table.export_to_markdown(doc=converted_doc)
         caption = table.caption_text(doc=converted_doc)
 
-        if not caption:
+        # DOCX only: caption_text() returns empty for most Word tables because
+        # Docling rarely populates captions[]. The recovery function scans nearby
+        # body/parent refs for a matching "Table X-Y ..." paragraph.
+        # Skipped for PDFs: Docling stores PDF captions in captions[] (already
+        # handled above), and the section-header fallback would give false positives.
+        if not caption and is_docx:
             caption = recover_table_caption_from_body_context(converted_doc, table_ix)
 
         # Clean the markdown to fix parser glitches and recover hidden captions
@@ -311,6 +317,9 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         else:
             table_dict[table_ix]["page_number"] = None
 
+    if stop_event and stop_event.is_set():
+        raise JobCancelledError(f"Job cancelled before merging tables for document: {doc_path}")
+
     logger.debug(f"Merging cross-page tables for '{doc_path}'")
     merged_table_dict = merge_consecutive_tables(table_dict)
 
@@ -328,6 +337,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         LanguageCodes.GERMAN: settings.table_summary.german.prompt,
         LanguageCodes.ITALIAN: settings.table_summary.italian.prompt,
         LanguageCodes.FRENCH: settings.table_summary.french.prompt,
+        LanguageCodes.JAPANESE: settings.table_summary.japanese.prompt,
     }
     selected_prompt = get_prompt_for_language(document_language, prompt_templates)
 
@@ -337,6 +347,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         LanguageCodes.GERMAN: settings.table_summary.german.max_tokens,
         LanguageCodes.ITALIAN: settings.table_summary.italian.max_tokens,
         LanguageCodes.FRENCH: settings.table_summary.french.max_tokens,
+        LanguageCodes.JAPANESE: settings.table_summary.japanese.max_tokens,
     }
     selected_max_tokens = max_tokens_config.get(document_language, settings.table_summary.english.max_tokens)
 
@@ -345,11 +356,15 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         f"for table summarization"
     )
 
+    if stop_event and stop_event.is_set():
+        raise JobCancelledError(f"Job cancelled before summarizing tables for document: {doc_path}")
+
     # Summarize and classify tables - use markdown directly
-    table_summaries, decisions = summarize_and_classify_tables(
+    table_summaries, decisions, failures = summarize_and_classify_tables(
         table_markdowns, gen_model, gen_endpoint, doc_path,
         prompt_template=selected_prompt,
         max_tokens=selected_max_tokens,
+        stop_event=stop_event,
     )
 
     filtered_table_dicts = {
@@ -367,4 +382,4 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     out_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
     process_time = time.time() - t0
 
-    return table_count, process_time
+    return table_count, process_time, failures

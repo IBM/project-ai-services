@@ -8,9 +8,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -29,12 +32,24 @@ func (e *ValidationError) Error() string {
 // ApplicationValidator handles validation of application deployment requests.
 type ApplicationValidator struct {
 	provider *catalog.CatalogProvider
+	// connectorRepo is optional; when set, ValidateConnectorRefs performs DB-level
+	// existence and status checks. When nil, only catalog-level rules are enforced.
+	connectorRepo dbrepo.ConnectorRepository
 }
 
 // NewApplicationValidator creates a new application validator.
 func NewApplicationValidator(provider *catalog.CatalogProvider) *ApplicationValidator {
 	return &ApplicationValidator{
 		provider: provider,
+	}
+}
+
+// WithConnectorRepo returns a copy of the validator with the connector repository set.
+// Calling this enables DB-level connector ref validation during CreateApplication.
+func (v *ApplicationValidator) WithConnectorRepo(repo dbrepo.ConnectorRepository) *ApplicationValidator {
+	return &ApplicationValidator{
+		provider:      v.provider,
+		connectorRepo: repo,
 	}
 }
 
@@ -234,7 +249,8 @@ func (v *ApplicationValidator) validateComponentsMatchDependencies(
 	return nil
 }
 
-// validateServiceCore performs core validation for a service (version, params, components).
+// validateServiceCore performs core validation for a service (version, params, components,
+// and optional connector refs).
 func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service apimodels.Service, catalogService *types.Service) error {
 	// Validate service version
 	if err := v.ValidateServiceVersion(service.CatalogID, service.Version); err != nil {
@@ -252,7 +268,12 @@ func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service 
 	}
 
 	// Validate all components
-	return v.validateServiceComponents(ctx, service.Components)
+	if err := v.validateServiceComponents(ctx, service.Components); err != nil {
+		return err
+	}
+
+	// Validate connector refs (catalog-level + optional DB-level when connectorRepo is set).
+	return v.ValidateConnectorRefs(ctx, service, catalogService, v.connectorRepo)
 }
 
 // ValidateSingleComponent validates a single component (existence, version, and parameters).
@@ -363,6 +384,126 @@ func (v *ApplicationValidator) ValidateServices(ctx context.Context, services []
 
 		if err := checkComponentConsistency(catalogService.Name, service, seenComponents); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// ValidateConnectorRefs validates the connectors list on a single service against both the
+// catalog YAML (accepts_datasource flag) and the DB connectors table (existence, type, status).
+//
+// Rules applied per service:
+//   - A ConnectorRef with type "datasource" is only valid when the service's catalog YAML
+//     declares accepts_datasource: true; otherwise returns 400.
+//   - Each ConnectorRef.ID must parse as a valid UUID; otherwise returns 400.
+//   - Each ConnectorRef.ID must reference a row in the connectors table whose type matches
+//     ConnectorRef.Type and whose status is "connected"; otherwise returns 400.
+//   - The same ID must not appear more than once within a single service's connectors list;
+//     otherwise returns 400.
+//
+// Pass a nil connectorRepo to skip the DB look-up (e.g. in unit tests that only exercise
+// catalog validation). In that case only the catalog-level rules are enforced.
+func (v *ApplicationValidator) ValidateConnectorRefs(
+	ctx context.Context,
+	service apimodels.Service,
+	catalogService *types.Service,
+	connectorRepo dbrepo.ConnectorRepository,
+) error {
+	if len(service.Connectors) == 0 {
+		return nil
+	}
+
+	seenIDs := make(map[string]bool, len(service.Connectors))
+
+	for _, ref := range service.Connectors {
+		if err := v.validateOneConnectorRef(ctx, ref, service.CatalogID, catalogService, seenIDs, connectorRepo); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateOneConnectorRef validates a single ConnectorRef entry: deduplication, catalog-level
+// guard, UUID format, and (when connectorRepo is non-nil) DB-level existence/type/status checks.
+func (v *ApplicationValidator) validateOneConnectorRef(
+	ctx context.Context,
+	ref apimodels.ConnectorRef,
+	serviceCatalogID string,
+	catalogService *types.Service,
+	seenIDs map[string]bool,
+	connectorRepo dbrepo.ConnectorRepository,
+) error {
+	if seenIDs[ref.ID] {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("duplicate connector ID %q in service %q connectors list", ref.ID, serviceCatalogID),
+		}
+	}
+	seenIDs[ref.ID] = true
+
+	// Catalog-level guard: the service must declare accepts_datasource: true.
+	if ref.Type == catalogconstants.ConnectorTypeDatasource && !catalogService.AcceptsDatasource {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("service %q does not accept datasource connectors (accepts_datasource is not set)", serviceCatalogID),
+		}
+	}
+
+	connectorID, err := uuid.Parse(ref.ID)
+	if err != nil {
+		return &ValidationError{
+			Code:    http.StatusBadRequest,
+			Message: fmt.Sprintf("connector ref ID %q is not a valid UUID: %v", ref.ID, err),
+		}
+	}
+
+	if connectorRepo == nil {
+		return nil
+	}
+
+	return validateConnectorInDB(ctx, connectorID, ref, serviceCatalogID, connectorRepo)
+}
+
+// validateConnectorInDB performs the DB-level existence, type, and status checks for a
+// single connector ref. It is called only when connectorRepo is non-nil.
+func validateConnectorInDB(
+	ctx context.Context,
+	connectorID uuid.UUID,
+	ref apimodels.ConnectorRef,
+	serviceCatalogID string,
+	connectorRepo dbrepo.ConnectorRepository,
+) error {
+	connector, err := connectorRepo.GetByID(ctx, connectorID, false)
+	if err != nil {
+		if err == dbrepo.ErrConnectorNotFound {
+			return &ValidationError{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("connector %q referenced in service %q not found", ref.ID, serviceCatalogID),
+			}
+		}
+
+		return fmt.Errorf("failed to look up connector %q: %w", ref.ID, err)
+	}
+
+	if connector.Type != ref.Type {
+		return &ValidationError{
+			Code: http.StatusBadRequest,
+			Message: fmt.Sprintf(
+				"connector %q has type %q but was referenced as type %q in service %q",
+				ref.ID, connector.Type, ref.Type, serviceCatalogID,
+			),
+		}
+	}
+
+	if connector.Status != dbmodels.ConnectorStatusConnected {
+		return &ValidationError{
+			Code: http.StatusBadRequest,
+			Message: fmt.Sprintf(
+				"connector %q (type %q) is not connected (status: %q); only connected datasources may be attached",
+				ref.ID, ref.Type, connector.Status,
+			),
 		}
 	}
 

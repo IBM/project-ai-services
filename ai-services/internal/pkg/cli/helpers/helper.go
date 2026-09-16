@@ -15,45 +15,77 @@ import (
 )
 
 const (
-	inspectPollInterval = 10 * time.Second
+	defaultInspectPollInterval = 10 * time.Second
 )
 
-func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
+// WaitForContainerReadiness polls container health until a conclusive result is
+// available, the context is cancelled, or the hard deadline expires.
+//
+// Podman health states and how each is handled:
+//
+//   - ""          : no healthcheck configured → success (nothing to wait for).
+//   - "healthy"   : probe passed → success.
+//   - "unhealthy" : probe ran and failed (failureThreshold exhausted, or
+//     HealthcheckOnFailureAction triggered) → fail immediately, no retry.
+//   - "starting"  : no conclusive result yet — this covers both the
+//     initialDelaySeconds window before the first probe runs AND any period
+//     where the container has restarted (resetting health state back to
+//     "starting") and is waiting for the next probe cycle. Keep polling
+//     until the hard deadline is hit.
+//
+// pollInterval controls how often InspectContainer is called; pass 0 to use the default (10 s).
+func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration, pollInterval time.Duration) error {
 	var containerStatus *types.Container
 	var err error
 
+	if pollInterval <= 0 {
+		pollInterval = defaultInspectPollInterval
+	}
+
+	// Single hard deadline covering all states, including "starting".
+	// This prevents the loop from hanging indefinitely if a container never
+	// leaves the starting/restarting cycle.
 	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(pollInterval)
+	defer timer.Stop()
 
 	for {
-		// fetch the container status
 		containerStatus, err = runtime.InspectContainer(ctx, containerNameOrId)
 		if err != nil {
 			return fmt.Errorf("failed to check container status: %w", err)
 		}
 
-		healthStatus := containerStatus.Health
-
-		if healthStatus == "" {
+		switch containerStatus.Health {
+		case "":
+			// No healthcheck configured — consider the container ready.
 			return nil
+		case string(constants.Ready):
+			return nil
+		case string(constants.NotReady):
+			// A conclusive probe failure — no point waiting further.
+			return fmt.Errorf("container health check failed (status: %s)", containerStatus.Health)
 		}
 
-		if healthStatus == string(constants.Ready) {
-			return nil
-		}
-
-		// if deadline exceeds, stop the container readiness check
+		// "starting": no conclusive result yet. Apply the hard deadline so we
+		// cannot loop forever, then wait for the next probe cycle.
 		if time.Now().After(deadline) {
 			return fmt.Errorf("operation timed out waiting for container readiness")
 		}
 
-		// every 10 seconds inspect the container
-		time.Sleep(inspectPollInterval)
+		timer.Reset(pollInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 
 // WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
 func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(defaultInspectPollInterval)
+	defer timer.Stop()
 
 	for {
 		// fetch the pod info
@@ -73,19 +105,14 @@ func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, pod
 			return fmt.Errorf("operation timed out waiting for container creation")
 		}
 
-		// every 10 seconds inspect the pod
-		time.Sleep(inspectPollInterval)
+		// wait for next poll interval, but respect context cancellation
+		timer.Reset(defaultInspectPollInterval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-}
-
-func FetchContainerStartPeriod(ctx context.Context, runtime runtime.Runtime, containerNameOrId string) (time.Duration, error) {
-	// fetch the container stats
-	containerStats, err := runtime.InspectContainer(ctx, containerNameOrId)
-	if err != nil {
-		return 0, fmt.Errorf("failed to check container stats: %w", err)
-	}
-
-	return containerStats.HealthcheckStartPeriod, nil
 }
 
 // ListSpyreCards lists all Spyre cards attached to the system.
@@ -118,7 +145,7 @@ func ParseSkipChecks(skipChecks []string) map[string]bool {
 // CheckExistingResourcesForApplication checks if there are resources already existing for the given application name.
 func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.Runtime, appName string, secretNames []string) ([]string, error) {
 	// check existing pods for the application
-	podsToSkip, err := existingRunningPods(ctx, runtime, appName)
+	podsToSkip, err := existingRunningPods(ctx, runtime, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, appName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing pods: %w", err)
 	}
@@ -134,14 +161,39 @@ func CheckExistingResourcesForApplication(ctx context.Context, runtime runtime.R
 	return resourcesToSkip, nil
 }
 
-// existingRunningPods lists pods for the given application. Any pod that is not in
+// CheckExistingResourcesForWorker checks if there are resources already existing for the worker,
+// querying pods by each of the provided labels and secrets by name.
+func CheckExistingResourcesForWorker(ctx context.Context, runtime runtime.Runtime, labels []string, secretNames []string) ([]string, error) {
+	var podsToSkip []string
+
+	for _, label := range labels {
+		pods, err := existingRunningPods(ctx, runtime, label)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check existing pods: %w", err)
+		}
+
+		podsToSkip = append(podsToSkip, pods...)
+	}
+
+	// check existing secrets for the worker
+	secretsToSkip, err := existingSecrets(ctx, runtime, secretNames)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check existing secrets: %w", err)
+	}
+
+	resourcesToSkip := append(podsToSkip, secretsToSkip...)
+
+	return resourcesToSkip, nil
+}
+
+// existingRunningPods lists pods matching the given label selector. Any pod that is not in
 // Running state is deleted so that the deployment layer can recreate it cleanly.
 // Only Running pod names are returned for the skip list.
-func existingRunningPods(ctx context.Context, runtime runtime.Runtime, appName string) ([]string, error) {
+func existingRunningPods(ctx context.Context, runtime runtime.Runtime, label string) ([]string, error) {
 	//nolint:prealloc // as capacity is unknown and depends on runtime.ListPods response
 	var podsToSkip []string
 	pods, err := runtime.ListPods(ctx, map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", appName)},
+		"label": {label},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)

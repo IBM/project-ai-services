@@ -39,12 +39,7 @@ func (c *Context) GetHostAdminURL(ctx context.Context) (string, error) {
 		return c.hostAdminURL, nil
 	}
 
-	rt, err := podman.NewPodmanClient()
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize podman client: %w", err)
-	}
-
-	adminPort, err := getCaddyAdminPort(ctx, rt, c.podName)
+	adminPort, err := getCaddyAdminPort(ctx, c.podName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Caddy admin port: %w", err)
 	}

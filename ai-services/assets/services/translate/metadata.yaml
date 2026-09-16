@@ -1,5 +1,6 @@
 # Service identification
 id: translate
+version: "1.0.0"
 name: "Translate"
 description: "Translates text and long-form documents between languages using an LLM; supports asynchronous document jobs and synchronous text translation with token-aware chunking."
 type: service

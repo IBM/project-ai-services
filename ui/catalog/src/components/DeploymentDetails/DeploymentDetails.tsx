@@ -14,6 +14,7 @@ import {
   SkeletonPlaceholder,
   ToastNotification,
 } from "@carbon/react";
+import ApplicationDatasourcesTable from "./components/ApplicationDatasourcesTable";
 import { PageHeader, ProductiveCard } from "@carbon/ibm-products";
 import {
   ArrowLeft,
@@ -30,7 +31,9 @@ import type {
   UsedResourcesResponse,
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
+  ApplicationWorker,
 } from "@/types/api.types";
+import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
 import axios from "axios";
@@ -38,6 +41,7 @@ import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
   COMPONENT_TYPES,
+  WORKER_RUNTIME_LABELS,
 } from "@/constants";
 
 interface DeploymentDetailsProps {
@@ -70,6 +74,7 @@ const DeploymentDetails = ({
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
+  const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
 
   useEffect(() => {
     setEditedName(deployment.name);
@@ -245,7 +250,7 @@ const DeploymentDetails = ({
                 service.type.charAt(0).toUpperCase() + service.type.slice(1),
               description: serviceDescription,
               baseURL: uiEndpoint?.url || apiEndpoint?.url || "",
-              apiDocumentaion: apiEndpoint?.url
+              apiDocumentation: apiEndpoint?.url
                 ? `${apiEndpoint.url}/docs`
                 : "",
               interactiveAPIs: service.endpoints
@@ -257,11 +262,13 @@ const DeploymentDetails = ({
         setServiceData(transformedServices);
         setIntegrationEndpoints(transformedEndpoints);
         setCertifiedBy(isDeploymentCertified ? "IBM" : null);
+        setWorkerInfo(applicationDetailsResponse.data.worker ?? null);
       } catch (error) {
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
         setCertifiedBy(null);
+        setWorkerInfo(null);
       }
     };
 
@@ -460,6 +467,14 @@ const DeploymentDetails = ({
               >
                 Integration endpoints
               </SideNavLink>
+              {deployment.type === "Digital Assistants" && (
+                <SideNavLink
+                  isActive={activeSection === "datasources"}
+                  onClick={() => setActiveSection("datasources")}
+                >
+                  Data sources
+                </SideNavLink>
+              )}
             </SideNavItems>
           </SideNav>
         </Column>
@@ -490,7 +505,7 @@ const DeploymentDetails = ({
                           <TextInput
                             className={styles.labelColor}
                             id="deployment-name"
-                            labelText="Name"
+                            labelText="AI deployment name"
                             value={editedName}
                             onChange={(e) => {
                               setEditedName(e.target.value);
@@ -501,6 +516,33 @@ const DeploymentDetails = ({
                         )}
                       </Column>
                     </Grid>
+
+                    {(workerInfo?.name || workerInfo?.runtime_type) && (
+                      <div className={styles.workerInfoRow}>
+                        {workerInfo.name && (
+                          <div className={styles.workerInfoField}>
+                            <span className={styles.workerInfoLabel}>
+                              Worker resource
+                            </span>
+                            <span className={styles.workerInfoValue}>
+                              {workerInfo.name}
+                            </span>
+                          </div>
+                        )}
+                        {workerInfo.runtime_type && (
+                          <div className={styles.workerInfoField}>
+                            <span className={styles.workerInfoLabel}>
+                              Deployment type
+                            </span>
+                            <span className={styles.workerInfoValue}>
+                              {WORKER_RUNTIME_LABELS[
+                                workerInfo.runtime_type.toLowerCase()
+                              ]?.label ?? workerInfo.runtime_type}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </ProductiveCard>
                 </Column>
               </Grid>
@@ -689,7 +731,7 @@ const DeploymentDetails = ({
                           Service version
                         </span>
                         <span className={styles.serviceDetailValue}>
-                          {deploymentServiceData.serviceVersion}
+                          {formatVersion(deploymentServiceData.serviceVersion)}
                         </span>
                       </div>
 
@@ -752,6 +794,11 @@ const DeploymentDetails = ({
             </Grid>
           )}
 
+          {activeSection === "datasources" &&
+            deployment.type === "Digital Assistants" && (
+              <ApplicationDatasourcesTable applicationId={deployment.id} />
+            )}
+
           {activeSection === "integration" && (
             <Grid className={styles.servicesGrid}>
               <Column sm={4} md={8} lg={16}>
@@ -789,7 +836,7 @@ const DeploymentDetails = ({
                             </span>
                           </div>
 
-                          {integrationEndpointsData.apiDocumentaion && (
+                          {integrationEndpointsData.apiDocumentation && (
                             <div className={styles.integrationEndpointField}>
                               <span
                                 className={
@@ -805,12 +852,12 @@ const DeploymentDetails = ({
                               >
                                 <a
                                   href={
-                                    integrationEndpointsData.apiDocumentaion
+                                    integrationEndpointsData.apiDocumentation
                                   }
                                   target="_blank"
                                   rel="noopener noreferrer"
                                 >
-                                  {integrationEndpointsData.apiDocumentaion}
+                                  {integrationEndpointsData.apiDocumentation}
                                 </a>
                               </span>
                             </div>

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
+	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogOpenShift "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/openshift"
 	catalogPodman "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/podman"
@@ -26,6 +26,7 @@ var (
 	// common flags.
 	// Runtime type flag for catalog configure command.
 	runtimeType string
+	skipChecks  []string
 	// Reset password flag for catalog configure command.
 	resetPasswordFlag bool
 
@@ -44,6 +45,8 @@ var (
 	resetPodmanAuthFlag bool
 	// Reset certificate flag for catalog configure command.
 	resetCertificateFlag bool
+	// Skip joining this machine as the Local worker.
+	skipLocalWorkerFlag bool
 
 	// openShift flags.
 	timeout time.Duration
@@ -60,19 +63,20 @@ var configureCmd = &cobra.Command{
 	Long: `Configure and deploy the AI Services catalog service with the specified runtime.
 
 This command performs the following operations:
-  - Deploys the catalog services
-  - Creates an admin user (if not already present)
-  - Initializes directory structure for applications and models
-
-Use --workergateway-port to set the gRPC port that workers connect to (default 9090).
-The worker gateway is always started; only the port number is configurable.
+	 - Deploys the catalog services
+	 - Creates an admin user (if not already present)
+	 - Initializes directory structure for applications and models
 
 Additional configuration options include base directory customization, domain name setup,
-SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.`,
-	Example: `  # Configure catalog service for podman (worker gateway on default port 9090)
+SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
+Note: --workergateway-port is supported for podman runtime only (default 9090).`,
+	Example: `  # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
 
-	 # Configure with a custom worker gateway port
+	 # Configure catalog service for OpenShift
+	 ai-services catalog configure --runtime openshift
+
+	 # Configure with a custom worker gateway port (podman only)
 	 ai-services catalog configure --runtime podman --workergateway-port 9191
 
 	 # Configure with custom HTTPS port
@@ -86,16 +90,16 @@ SSL/TLS certificate management, HTTPS port configuration, and credential/certifi
 		}
 
 		// Reject runtime-scoped flags early.
-		if err := buildFlagValidator().Validate(cmd); err != nil {
+		if err := buildCatalogFlagValidator().Validate(cmd); err != nil {
 			return err
 		}
 
 		if resetPasswordFlag {
-			return validateResetFlag(cmd, "reset-password")
+			return common.ValidateResetFlag(cmd, constants.ResetPasswordFlag)
 		} else if resetPodmanAuthFlag {
-			return validateResetFlag(cmd, "reset-podman-auth")
+			return common.ValidateResetFlag(cmd, constants.ResetPodmanAuthFlag)
 		} else if resetCertificateFlag {
-			return validateResetCertificateFlags(cmd, "reset-certificate")
+			return common.ValidateResetCertificateFlags(cmd, constants.ResetSSLCertFlag, sslCertPath, sslKeyPath, domainName)
 		}
 
 		return validateConfigureFlags()
@@ -111,6 +115,10 @@ SSL/TLS certificate management, HTTPS port configuration, and credential/certifi
 			return runResetCertificate(ctx)
 		}
 
+		if err := common.DoBootstrapValidate(ctx, skipChecks); err != nil {
+			return err
+		}
+
 		return runConfigure(ctx)
 	},
 }
@@ -124,6 +132,15 @@ func init() {
 	initConfigureCommonFlags()
 	initConfigurePodmanFlags()
 	initConfigureOpenShiftFlags()
+}
+
+// buildCatalogFlagValidator registers every catalog configure flag with its runtime scope.
+func buildCatalogFlagValidator() *flagvalidator.FlagValidator {
+	return common.BuildFlagValidator(
+		[]string{constants.ResetPasswordFlag, constants.SkipLocalWorkerFlag},
+		[]string{constants.WorkerGatewayPortFlag, constants.BaseDirFlag, constants.HTTPSPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag, constants.ResetPodmanAuthFlag, constants.ResetSSLCertFlag},
+		[]string{constants.TimeoutFlag},
+	)
 }
 
 // runConfigure executes the catalog configuration process.
@@ -151,14 +168,16 @@ func runConfigure(ctx context.Context) error {
 			SSLKeyPath:        catalogUtils.SanitizeFilePath(sslKeyPath),
 			HttpsPort:         httpsPort,
 			WorkerGatewayPort: workerGatewayPort,
+			SkipLocalWorker:   skipLocalWorkerFlag,
 		}
 
 		return catalogPodman.DeployCatalog(ctx, opts)
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace: catalogConstants.CatalogAppName,
-			Timeout:   timeout,
+			Namespace:       catalogConstants.CatalogAppName,
+			Timeout:         timeout,
+			SkipLocalWorker: skipLocalWorkerFlag,
 		}
 
 		return catalogOpenShift.DeployCatalog(ctx, opts)
@@ -167,27 +186,14 @@ func runConfigure(ctx context.Context) error {
 	}
 }
 
-func validateResetFlag(cmd *cobra.Command, flagName string) error {
-	// Check that no configuration parameters are provided with reset flag
-	var invalidFlags []string
-	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if f.Name == flagName || f.Name == constants.RuntimeFlag {
-			// Skip reset flag and runtime parameter
-			return
-		}
-		invalidFlags = append(invalidFlags, "--"+f.Name)
-	})
-	if len(invalidFlags) > 0 {
-		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
-	}
-
-	return nil
-}
-
 // validateConfigureFlags validates the configure command flags.
 func validateConfigureFlags() error {
-	// Validate SSL flags
+	// Podman-only validations
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
+		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
+			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
+		}
+
 		if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
 			return err
 		}
@@ -196,39 +202,6 @@ func validateConfigureFlags() error {
 		if httpsPort < 1 || httpsPort > 65535 {
 			return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 		}
-
-		// Validate workergateway-port is a valid port number
-		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
-			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
-		}
-	}
-
-	return nil
-}
-
-func validateResetCertificateFlags(cmd *cobra.Command, flagName string) error {
-	// Require SSL certificate flags with reset-certificate
-	if sslCertPath == "" || sslKeyPath == "" {
-		return fmt.Errorf("--ssl-cert and --ssl-key are required when using --reset-certificate")
-	}
-
-	if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
-		return err
-	}
-
-	// Check that no other configuration parameters are provided with reset-certificate flag
-	// Allow ssl-cert and ssl-key since they are required for this operation
-	var invalidFlags []string
-	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if f.Name == flagName || f.Name == constants.RuntimeFlag ||
-			f.Name == "ssl-cert" || f.Name == "ssl-key" {
-			// Skip reset flag, runtime parameter, and required SSL flags
-			return
-		}
-		invalidFlags = append(invalidFlags, "--"+f.Name)
-	})
-	if len(invalidFlags) > 0 {
-		return fmt.Errorf("the following flags cannot be used with --%s: %v", flagName, invalidFlags)
 	}
 
 	return nil
@@ -242,124 +215,36 @@ func runResetCertificate(ctx context.Context) error {
 func initConfigureCommonFlags() {
 	common.ConfigureRuntimeFlag(configureCmd, &runtimeType)
 
+	skipCheckDesc := appBootstrap.BuildSkipFlagDescription()
+	configureCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+
 	configureCmd.Flags().BoolVar(
 		&resetPasswordFlag,
-		"reset-password",
+		constants.ResetPasswordFlag,
 		false,
 		"Reset the password for the admin user",
+	)
+
+	configureCmd.Flags().BoolVar(
+		&skipLocalWorkerFlag,
+		constants.SkipLocalWorkerFlag,
+		false,
+		"Skip automatically joining this machine as the local worker after catalog deployment.",
 	)
 }
 
 func initConfigurePodmanFlags() {
-	initConfigurePodmanDeployFlags()
-	initConfigurePodmanResetFlags()
-}
-
-func initConfigurePodmanDeployFlags() {
-	configureCmd.Flags().StringVar(
-		&baseDir,
-		"basedir",
-		"",
-		"Base directory for AI services data (models, caddy).\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --basedir /custom/path\n",
-	)
-
-	configureCmd.Flags().IntVar(
-		&httpsPort,
-		"https-port",
-		defaultHTTPSPort,
-		"Custom HTTPS port to expose the service endpoints externally.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --https-port 8443\n",
-	)
+	common.ConfigurePodmanDeployFlags(configureCmd, &baseDir, &httpsPort, defaultHTTPSPort, &sslCertPath, &sslKeyPath, &domainName)
+	common.ConfigurePodmanResetFlags(configureCmd, &resetPodmanAuthFlag, &resetCertificateFlag)
 
 	configureCmd.Flags().IntVar(
 		&workerGatewayPort,
-		"workergateway-port",
+		constants.WorkerGatewayPortFlag,
 		defaultWorkerGatewayPort,
-		"Port for the gRPC worker gateway that workers connect to (always active).\n"+
+		"Port for the gRPC worker gateway that workers connect to.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --workergateway-port 9090\n",
 	)
-
-	configureCmd.Flags().StringVar(
-		&domainName,
-		"domain-name",
-		"",
-		"Custom domain name for self-signed certificates.\n"+
-			"If not provided, uses wildcard DNS format: <service>.<ip>.nip.io\n"+
-			"If a custom SSL certificate/key pair is provided, the domain is extracted from the certificate and the --domain flag is ignored.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --domain-name example.com generates certs for *.example.com\n",
-	)
-
-	configureCmd.Flags().StringVar(
-		&sslCertPath,
-		"ssl-cert",
-		"",
-		"Path to user-provided SSL certificate (optional).\n"+
-			"Must be used together with --ssl-key.\n"+
-			"Certificate must contain wildcard SAN entry (e.g., *.example.com).\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --ssl-cert /path/to/cert.pem\n",
-	)
-
-	configureCmd.Flags().StringVar(
-		&sslKeyPath,
-		"ssl-key",
-		"",
-		"Path to user-provided SSL private key (optional).\n"+
-			"Must be used together with --ssl-cert.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example: --ssl-key /path/to/key.pem\n",
-	)
-}
-
-func initConfigurePodmanResetFlags() {
-	configureCmd.Flags().BoolVar(
-		&resetPodmanAuthFlag,
-		"reset-podman-auth",
-		false,
-		"Reset podman authentication using the system's current auth.json.",
-	)
-
-	configureCmd.Flags().BoolVar(
-		&resetCertificateFlag,
-		"reset-certificate",
-		false,
-		"Reset the Caddy SSL certificates by loading new custom certificates.\n"+
-			"Requires --ssl-cert and --ssl-key flags to specify the new certificate files.\n"+
-			"This will reload the certificates in Caddy without restarting the pod.\n"+
-			"Note: Supported for podman runtime only.\n"+
-			"Example:\n"+
-			"  ai-services catalog configure --runtime podman --reset-certificate --ssl-cert /path/to/cert.pem --ssl-key /path/to/key.pem\n",
-	)
-}
-
-// buildFlagValidator registers every flag with its runtime scope.
-func buildFlagValidator() *flagvalidator.FlagValidator {
-	rt := vars.RuntimeFactory.GetRuntimeType()
-	builder := flagvalidator.NewFlagValidatorBuilder(rt)
-
-	// Common flags, valid for every runtime.
-	builder.AddCommonFlag("reset-password", nil)
-
-	// Podman-only flags.
-	builder.
-		AddPodmanFlag("basedir", nil).
-		AddPodmanFlag("https-port", nil).
-		AddPodmanFlag("workergateway-port", nil).
-		AddPodmanFlag("domain-name", nil).
-		AddPodmanFlag("ssl-cert", nil).
-		AddPodmanFlag("ssl-key", nil).
-		AddPodmanFlag("reset-podman-auth", nil).
-		AddPodmanFlag("reset-certificate", nil)
-
-	// OpenShift-only flags.
-	builder.AddOpenShiftFlag("timeout", nil)
-
-	return builder.Build()
 }
 
 func runResetPassword(ctx context.Context) error {
@@ -383,7 +268,7 @@ func runResetPodmanAuth(ctx context.Context) error {
 func initConfigureOpenShiftFlags() {
 	configureCmd.Flags().DurationVar(
 		&timeout,
-		"timeout",
+		constants.TimeoutFlag,
 		0,
 		"Timeout for the operation (e.g. 10s, 2m, 1h).\n"+
 			"Note: Supported for openshift runtime only.\n"+

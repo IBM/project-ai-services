@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -25,7 +24,6 @@ func NewLoginCmd() *cobra.Command {
 		passwordStdin bool
 		miqToken      string
 		insecure      bool
-		runtimeType   string
 	)
 
 	cmd := &cobra.Command{
@@ -43,16 +41,16 @@ unnecessary round-trips to the server.
 
 To get the Catalog backend endpoint, use: ai-services catalog info`,
 		Example: ` # Interactive login (password is prompted securely)
-  ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman
+  ai-services catalog login --server <catalog_backend_endpoint> --username admin
 
   # Non-interactive login via stdin pipe (password not recorded in shell history)
-  echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin --runtime podman
+  echo "$MY_PASSWORD" | ai-services catalog login --server <catalog_backend_endpoint> --username admin --password-stdin
 
-   # Login with insecure TLS (skip certificate verification)
-  ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure --runtime podman`,
+  # Login with insecure TLS (skip certificate verification)
+  ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure`,
 
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return validateLoginFlags(runtimeType, serverURL, username, miqToken, passwordStdin)
+			return validateLoginFlags(serverURL, username, miqToken, passwordStdin)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -70,7 +68,6 @@ To get the Catalog backend endpoint, use: ai-services catalog info`,
 	cmd.Flags().StringVar(&miqToken, "miq-token", "", "ManageIQ token for token passthrough login")
 	_ = cmd.Flags().MarkHidden("miq-token")
 	cmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification (NOT for production use)")
-	common.ConfigureRuntimeFlag(cmd, &runtimeType)
 
 	_ = cmd.MarkFlagRequired("server")
 
@@ -147,10 +144,7 @@ func promptPassword(passwordStdin bool) (string, error) {
 }
 
 // validateLoginFlags validates all PreRunE checks for the login command.
-func validateLoginFlags(runtimeType, serverURL, username, miqToken string, passwordStdin bool) error {
-	if err := common.InitAndValidateRuntimeFlag(runtimeType); err != nil {
-		return err
-	}
+func validateLoginFlags(serverURL, username, miqToken string, passwordStdin bool) error {
 	if err := validateServerURL(serverURL); err != nil {
 		return err
 	}

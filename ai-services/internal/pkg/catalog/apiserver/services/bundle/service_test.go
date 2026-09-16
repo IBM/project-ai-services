@@ -14,6 +14,7 @@ import (
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1352,6 +1353,8 @@ type mockCatalogProvider struct {
 	reload          func(ctx context.Context) error
 	serviceExists   func(id string) bool
 	componentExists func(componentType, id string) bool
+	listServices    func() ([]catalogtypes.Service, error)
+	listComponents  func() ([]catalogtypes.Component, error)
 }
 
 func (m *mockCatalogProvider) Reload(ctx context.Context) error {
@@ -1370,6 +1373,20 @@ func (m *mockCatalogProvider) ComponentExists(componentType, id string) bool {
 		return m.componentExists(componentType, id)
 	}
 	return false
+}
+
+func (m *mockCatalogProvider) ListServices() ([]catalogtypes.Service, error) {
+	if m.listServices != nil {
+		return m.listServices()
+	}
+	return nil, nil
+}
+
+func (m *mockCatalogProvider) ListComponents() ([]catalogtypes.Component, error) {
+	if m.listComponents != nil {
+		return m.listComponents()
+	}
+	return nil, nil
 }
 
 // alwaysReloads returns a reloader that records the number of calls and always succeeds.

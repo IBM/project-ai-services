@@ -22,6 +22,15 @@ export interface Document {
   message?: string | null;
 }
 
+export interface DocumentDetail extends Document {
+  job_id?: string | null;
+  type?: string;
+  completed_at?: string | null;
+  error?: string | null;
+  metadata?: Record<string, unknown> | null;
+  duplicate_names: string[];
+}
+
 export interface JobStats {
   total_documents: number;
   completed: number;
@@ -156,10 +165,13 @@ export const listDocuments = async (params: ListDocumentsParams = {}): Promise<D
   return response.data;
 };
 
-export const getDocumentMetadata = async (docId: string, details: boolean = false): Promise<Document> => {
-  const response: AxiosResponse<Document> = await api.get(`/documents/${docId}?details=${details}`);
+export async function getDocumentMetadata(docId: string, details: true): Promise<DocumentDetail>;
+export async function getDocumentMetadata(docId: string, details?: false): Promise<Document>;
+export async function getDocumentMetadata(docId: string, details: boolean = false): Promise<Document | DocumentDetail> {
+  const response: AxiosResponse<Document | DocumentDetail> = await api.get(`/documents/${docId}?details=${details}`);
   return response.data;
-};
+}
+
 
 export const getDocumentContent = async (docId: string): Promise<any> => {
   const response: AxiosResponse<any> = await api.get(`/documents/${docId}/content`);
@@ -188,6 +200,12 @@ export const bulkDeleteJobs = async (jobIds: string[]): Promise<{ message: strin
   return response.data;
 };
 
+export const cancelJob = async (jobId: string): Promise<{ message: string }> => {
+  const response: AxiosResponse<{ message: string }> = await api.post(`/jobs/${jobId}/cancel`);
+  return response.data;
+};
+
 export default api;
 
 // Made with Bob
+

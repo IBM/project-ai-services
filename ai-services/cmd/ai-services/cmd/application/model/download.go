@@ -82,6 +82,7 @@ func download(cmd *cobra.Command) error {
 }
 
 // downloadCatalogModels downloads models for services or architectures from the catalog.
+// watsonx models are excluded because they are not locally downloadable.
 func downloadCatalogModels(ctx context.Context, templateID string) error {
 	models, err := getCatalogModels(ctx, templateID, "watsonx")
 	if err != nil {

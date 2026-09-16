@@ -13,6 +13,10 @@ metadata:
 spec:
   restartPolicy: always
   volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 512Mi
     - name: models
       hostPath:
         path: "{{ .BaseDir }}/models"
@@ -58,6 +62,8 @@ spec:
       ports:
         - containerPort: 8000
       volumeMounts:
+        - mountPath: /dev/shm
+          name: dshm
         - mountPath: /models:z
           name: models
           readOnly: true

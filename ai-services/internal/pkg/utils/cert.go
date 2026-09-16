@@ -57,6 +57,23 @@ func ComputeDomainSuffix(sslCertPath, sslKeyPath, domainName string) (string, er
 	return fmt.Sprintf("%s.nip.io", hostIP), nil
 }
 
+// ValidateDomainUnchanged validates that the domain hasn't changed from the existing configuration.
+func ValidateDomainUnchanged(existingDomain string, sslCertPath, sslKeyPath string) error {
+	// Compute the current domain configuration based on the provided SSL certificates
+	// This uses the same logic as initial configuration
+	currentDomainSuffix, err := ComputeDomainSuffix(sslCertPath, sslKeyPath, "")
+	if err != nil {
+		return fmt.Errorf("failed to compute current domain: %w", err)
+	}
+
+	// Compare existing domain with current domain
+	if existingDomain != currentDomainSuffix {
+		return fmt.Errorf("domain change detected: existing=%s, current=%s. Domain changes are not allowed during reset-certificate. Please uninstall the catalog deployment and re-run configure with the new domain", existingDomain, currentDomainSuffix)
+	}
+
+	return nil
+}
+
 // ValidateSSLFlags is the shared entry-point for SSL flag validation used by
 // commands that accept --ssl-cert, --ssl-key, and --domain-name. It:
 //   - is a no-op when both paths are empty,

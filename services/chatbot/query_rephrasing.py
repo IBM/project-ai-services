@@ -69,7 +69,7 @@ def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = L
     Format conversation messages into a readable string for rephrasing context.
     
     Converts a list of conversation messages into a formatted string with localized
-    role labels based on the specified language. Supports English, German, and Italian.
+    role labels based on the specified language. Supports English, German, Italian, French, and Japanese.
     
     Args:
         messages: List of message dicts with 'role' and 'content' keys
@@ -77,7 +77,7 @@ def format_messages_for_rephrasing(messages: List[Dict[str, str]], lang: str = L
                  - 'role': One of 'user', 'assistant', 'system', or 'unknown'
                  - 'content': The message content string
         lang: Language code for role labels (default: English).
-              Supported values: LanguageCodes.ENGLISH, LanguageCodes.GERMAN, LanguageCodes.ITALIAN, LanguageCodes.FRENCH
+              Supported values: LanguageCodes.ENGLISH, LanguageCodes.GERMAN, LanguageCodes.ITALIAN, LanguageCodes.FRENCH, LanguageCodes.JAPANESE
     
     Returns:
         Formatted conversation history string with localized role labels.

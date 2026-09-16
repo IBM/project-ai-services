@@ -73,7 +73,7 @@ Use `-h` for more configuration options.
 **Step 1: Login to Catalog Backend**
 
 ```bash
-./bin/ai-services catalog login --server <catalog_backend_endpoint> --username admin --runtime podman --insecure
+./bin/ai-services catalog login --server <catalog_backend_endpoint> --username admin --insecure
 ```
 
 Use `-h` for more information.
@@ -132,10 +132,10 @@ Get application details:
 ./bin/ai-services catalog info --runtime podman
 
 # Check current login status
-./bin/ai-services catalog whoami --runtime podman
+./bin/ai-services catalog whoami
 
 # Logout from catalog
-./bin/ai-services catalog logout --runtime podman
+./bin/ai-services catalog logout
 
 # Uninstall catalog service (removes catalog pods and data)
 ./bin/ai-services catalog uninstall --runtime podman

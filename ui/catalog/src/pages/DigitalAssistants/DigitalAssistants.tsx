@@ -1,6 +1,5 @@
 import { Fragment, useReducer, useCallback, useRef } from "react";
 import { useDeployStore } from "@/store/deploy.store";
-import { useDeployOptions } from "@/components/DeployFlow/DigitalAssistant/hooks/useDeployOptions";
 import { PageHeader } from "@carbon/ibm-products";
 import {
   DataTable,
@@ -100,15 +99,14 @@ const renderCell = ({
 const DigitalAssistantsPage = () => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
 
-  // Get deploy options with automatic cache management
-  const { deployOptions: deployOptionsData } = useDeployOptions(true);
-  const catalogId = deployOptionsData?.id;
-
-  // Get architecture data from store for dynamic title and subtitle
+  // Get architecture data from store for dynamic title, subtitle, and catalogId.
   const architectures = useDeployStore((state) => state.architectures);
   const selectedArchitectureId = useDeployStore(
     (state) => state.selectedArchitectureId,
   );
+
+  // catalogId is the selected architecture's ID — already available in the store.
+  const catalogId = selectedArchitectureId ?? undefined;
 
   // Find the selected architecture to get name and description
   const selectedArchitecture = architectures.find(
@@ -241,7 +239,14 @@ const DigitalAssistantsPage = () => {
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: ["name", "status", "uptime", "messages"],
+    searchFields: [
+      "name",
+      "status",
+      "uptime",
+      "workerResource",
+      "workerType",
+      "messages",
+    ],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
     fetchAllRows: async () => {
@@ -272,7 +277,7 @@ const DigitalAssistantsPage = () => {
   const filteredRows = filterRowsBySearch<Record<string, unknown>>(
     state.rowsData as unknown as Record<string, unknown>[],
     state.search,
-    ["name", "status", "uptime", "messages"],
+    ["name", "status", "uptime", "workerResource", "workerType", "messages"],
   ) as unknown as DigitalAssistantRow[];
 
   const noApplications =
@@ -493,6 +498,14 @@ const DigitalAssistantsPage = () => {
                                                   )}
                                                   {state.visibleColumns
                                                     .uptime && <TableCell />}
+                                                  {state.visibleColumns
+                                                    .workerResource && (
+                                                    <TableCell />
+                                                  )}
+                                                  {state.visibleColumns
+                                                    .workerType && (
+                                                    <TableCell />
+                                                  )}
                                                   {state.visibleColumns
                                                     .messages && <TableCell />}
                                                   <TableCell />

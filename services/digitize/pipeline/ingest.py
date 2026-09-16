@@ -17,6 +17,8 @@ from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.utils.db import get_status_manager, DatabaseStatusManager
 from common.misc_utils import get_utc_timestamp
+from digitize.db.manager import db_manager
+from digitize.exceptions import JobCancelledError
 
 logger = get_logger("ingest")
 
@@ -46,7 +48,7 @@ def create_indexing_handler(
         emb_model_dict['max_model_len']
     )
 
-    def index_document_chunks(doc_id: str, chunks: list, path: str) -> bool:
+    def index_document_chunks(doc_id: str, chunks: list, path: str, cancel_event=None) -> bool:
         """
         Index a single document's chunks immediately after chunking completes.
 
@@ -54,6 +56,8 @@ def create_indexing_handler(
             doc_id: Document ID
             chunks: List of chunk dictionaries
             path: Original file path
+            cancel_event: Optional threading.Event; if set and clean_files=True, each
+                          inter-batch boundary inside insert_chunks will abort early.
 
         Returns:
             bool: True if indexing succeeded, False otherwise
@@ -67,7 +71,7 @@ def create_indexing_handler(
             indexing_start_time = time.time()
 
             # Index the chunks
-            success = vector_store.insert_chunks(chunks, embedding=embedder)
+            success = vector_store.insert_chunks(chunks, embedding=embedder, cancel_event=cancel_event)
             indexing_time = time.time() - indexing_start_time
 
             if not success:
@@ -84,29 +88,42 @@ def create_indexing_handler(
                     status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                 return False
 
-            # Update status to COMPLETED with indexing timing
+            # Update status to COMPLETED (or COMPLETED_WITH_ERRORS if table failures
+            # were recorded earlier in the pipeline for this document).
             if status_mgr and doc_id_dict:
-                logger.debug(f"Indexing Done: updating doc metadata to COMPLETED for document: {doc_id}")
+                from digitize.utils.db import get_document
+                try:
+                    current_doc = get_document(doc_id)
+                    had_partial = bool(
+                        (current_doc.metadata or {}).get("had_table_failures", False)
+                    )
+                except Exception:
+                    had_partial = False
+
+                final_doc_status = DocStatus.COMPLETED_WITH_ERRORS if had_partial else DocStatus.COMPLETED
+                logger.debug(
+                    f"Indexing Done: updating doc metadata to {final_doc_status.value} "
+                    f"for document: {doc_id}"
+                )
                 file_hash = (
                     file_checksum_dict.get(Path(path).name)
                     if file_checksum_dict else None
                 )
                 metadata_update = {
-                    "status": DocStatus.COMPLETED,
+                    "status": final_doc_status,
                     "completed_at": get_utc_timestamp(),
                     "timing_in_secs": {"indexing": round(indexing_time, 2)},
                 }
                 if file_hash:
                     metadata_update["file_hash"] = file_hash
-                status_mgr.update_doc_metadata(
-                    doc_id,
-                    metadata_update,
-                )
-                status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
+                status_mgr.update_doc_metadata(doc_id, metadata_update)
+                status_mgr.update_job_progress(doc_id, final_doc_status, JobStatus.IN_PROGRESS)
 
             logger.info(f"✅ Successfully indexed document {doc_id}")
             return True
 
+        except JobCancelledError:
+            raise
         except Exception as e:
             logger.error(f"Exception during indexing for {doc_id}: {e}", exc_info=True)
 
@@ -184,6 +201,10 @@ def ingest(
             emb_model_dict, status_mgr, doc_id_dict, file_checksum_dict
         )
 
+        # CHECK 1: abort before launching pipeline if cancellation was requested
+        if job_id and db_manager.is_job_cancelled(job_id):
+            raise JobCancelledError(f"Job {job_id} was cancelled before processing started")
+
         start_time = time.time()
         # Reserve 100 tokens from embedding model's max_model_len to account for metadata
         # that will be prepended to content during final merge, ensuring total tokens stay within embedding model limits
@@ -195,6 +216,10 @@ def ingest(
         if converted_pdf_stats is None:
             ingestion_failed()
             return
+
+        # CHECK 5: abort before writing final job status if cancelled during pipeline
+        if job_id and db_manager.is_job_cancelled(job_id):
+            raise JobCancelledError(f"Job {job_id} was cancelled during processing")
 
         # Note: Documents are now indexed immediately after chunking via the indexing_callback
         logger.info(f"All {len(converted_pdf_stats)} document(s) have been processed and indexed")
@@ -208,15 +233,17 @@ def ingest(
             doc_stats = get_job_document_stats(job_id)
             failed_docs = doc_stats["failed_docs"]
             completed_docs = doc_stats["completed_docs"]
+            completed_with_errors_docs = doc_stats["completed_with_errors_docs"]
 
-            pct = (len(completed_docs) / total_documents * 100) if total_documents > 0 else 100.0
+            all_terminal_docs = len(completed_docs) + len(completed_with_errors_docs)
+            pct = (all_terminal_docs / total_documents * 100) if total_documents > 0 else 100.0
             logger.info(
-                f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
+                f"Ingestion summary: {all_terminal_docs}/{total_documents} files ingested "
                 f"({pct:.2f}% of total documents)"
             )
 
             if len(failed_docs) > 0:
-                # At least one document failed
+                # At least one document hard-failed
                 failed_doc_names = [doc["name"] for doc in failed_docs]
                 failed_files_list = "\n".join(failed_doc_names)
 
@@ -236,6 +263,21 @@ def ingest(
                 )
 
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
+
+            elif len(completed_with_errors_docs) > 0:
+                # All documents reached a terminal state, but some had table summarization errors
+                cwe_msg = (
+                    f"{len(completed_with_errors_docs)} of {total_documents} document(s) completed with errors "
+                    f"due to table summarization failures. Those documents are queryable but their table summaries "
+                    f"may be incomplete."
+                )
+                logger.info(
+                    f"✅ Ingestion completed with errors, Time taken: {file_processing_time:.2f} seconds. "
+                    f"{cwe_msg}"
+                )
+                status_mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS,
+                                               error=cwe_msg)
+
             else:
                 # All documents completed successfully
                 logger.info(f"✅ Ingestion completed successfully, Time taken: {file_processing_time:.2f} seconds. You can query your documents via chatbot")
@@ -243,10 +285,13 @@ def ingest(
                     f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
                     f"(100.00% of total documents)"
                 )
-
                 status_mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
 
         return converted_pdf_stats
+
+    except JobCancelledError:
+        # Re-raise so the caller (_run_ingest) handles the cancellation cleanup
+        raise
 
     except Exception as e:
         logger.error(f"Error during ingestion: {str(e)}", exc_info=True)
@@ -258,6 +303,7 @@ def ingest(
                 doc_stats = get_job_document_stats(job_id)
                 processed_doc_ids = set(
                     [doc["id"] for doc in doc_stats["completed_docs"]] +
+                    [doc["id"] for doc in doc_stats["completed_with_errors_docs"]] +
                     [doc["id"] for doc in doc_stats["failed_docs"]]
                 )
 
@@ -278,3 +324,11 @@ def ingest(
                 raise fnf_error
 
         return None
+
+    finally:
+        # Remove the staging directory now that all processing (conversion,
+        # page loading, chunking, indexing) has finished.  Callers that do
+        # their own cleanup (sync_tick, _run_ingest) will find the directory
+        # already gone — cleanup_staging_directory is idempotent.
+        if job_id:
+            cleanup_staging_directory(job_id, directory_path.parent)

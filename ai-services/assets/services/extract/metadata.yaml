@@ -1,5 +1,6 @@
 # Service identification
 id: extract
+version: "1.0.0"
 name: "Extract Information"
 description: "The service takes relevant data from unstructured text and populates a user-supplied JSON schema, enabling robust information retrieval from documents such as emails, invoices, and contracts"
 type: service

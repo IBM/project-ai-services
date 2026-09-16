@@ -55,6 +55,10 @@ type ConnectorRepository interface {
 	// raw value to any API response.
 	// Returns ErrConnectorNotFound if the row does not exist.
 	GetByID(ctx context.Context, id uuid.UUID, includeCreds bool) (*models.Connector, error)
+	// GetByIDs fetches multiple connectors by their UUIDs in a single query and returns them
+	// as a map keyed by connector ID. Connectors not found in the DB are simply absent from
+	// the map. Sensitive metadata is never included.
+	GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]models.Connector, error)
 	// List returns a page of connectors matching the optional filters.
 	// Sensitive metadata is never included in the returned structs.
 	List(ctx context.Context, filters *ConnectorFilters) ([]models.Connector, error)
@@ -232,6 +236,40 @@ func (r *connectorRepo) GetByID(ctx context.Context, id uuid.UUID, includeCreds 
 	}
 
 	return scanConnector(rows)
+}
+
+// GetByIDs fetches all connectors whose IDs are in ids in a single query.
+// Returns a map keyed by connector ID; IDs absent from the DB are simply not present.
+// Sensitive metadata is never selected.
+func (r *connectorRepo) GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]models.Connector, error) {
+	if len(ids) == 0 {
+		return make(map[uuid.UUID]models.Connector), nil
+	}
+
+	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors WHERE id = ANY($1)`
+
+	rows, err := r.pool.Query(ctx, query, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connectors by IDs: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID]models.Connector, len(ids))
+
+	for rows.Next() {
+		c, err := scanConnector(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		result[c.ID] = *c
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating connectors by IDs: %w", err)
+	}
+
+	return result, nil
 }
 
 // buildWhereClause constructs the WHERE clause string and positional arguments from the

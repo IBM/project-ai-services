@@ -5,14 +5,14 @@ and the connector portion of services/digitize/utils/recovery.py.
 Coverage
 --------
 scheduler.register_connector_job
-  - calls sched.add_schedule with correct kwargs
-  - fire_immediately=True  → trigger.start_time is ~now (fires on first tick)
-  - fire_immediately=False → trigger.start_time is ~now+interval (deferred)
+  - calls sched.add_job with correct kwargs
+  - fire_immediately=True  → trigger.start_date is ~now (fires on first tick)
+  - fire_immediately=False → trigger.start_date is ~now+interval (deferred)
   - raises RuntimeError when _scheduler is None
 
 scheduler.remove_connector_job
-  - calls sched.remove_schedule with the connector_id
-  - silently handles LookupError (schedule not registered)
+  - calls sched.remove_job with the connector_id
+  - silently handles JobLookupError (job not registered)
   - raises RuntimeError when _scheduler is None
 
 recover_connector_sync_state
@@ -25,7 +25,7 @@ recover_connector_sync_state
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
@@ -56,9 +56,9 @@ class TestRegisterConnectorJob:
             sched_mod._scheduler = original
 
     @pytest.mark.asyncio
-    async def test_add_schedule_deferred_when_not_fire_immediately(self):
-        """fire_immediately=False → trigger.start_time is ~now + interval_seconds."""
-        mock_sched = AsyncMock()
+    async def test_add_job_deferred_when_not_fire_immediately(self):
+        """fire_immediately=False → trigger.start_date is ~now + interval_seconds."""
+        mock_sched = MagicMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
         sched_mod._scheduler = mock_sched
@@ -68,21 +68,27 @@ class TestRegisterConnectorJob:
             await register_connector_job("conn-A", 600, fire_immediately=False)
             after = datetime.now(timezone.utc)
 
-            mock_sched.add_schedule.assert_awaited_once()
-            _, kwargs = mock_sched.add_schedule.await_args
+            mock_sched.add_job.assert_called_once()
+            _, kwargs = mock_sched.add_job.call_args
             assert kwargs["id"] == "conn-A"
             trigger = kwargs["trigger"]
-            # start_time should be ~now + 600s (deferred by one full interval)
+            # start_date should be ~now + 600s (deferred by one full interval)
             expected_lo = before + timedelta(seconds=600)
             expected_hi = after + timedelta(seconds=600)
-            assert expected_lo <= trigger.start_time <= expected_hi
+            assert expected_lo <= trigger.start_date <= expected_hi
         finally:
             sched_mod._scheduler = original
 
     @pytest.mark.asyncio
-    async def test_add_schedule_fires_immediately_when_requested(self):
-        """fire_immediately=True → trigger.start_time is ~now (fires on first tick)."""
-        mock_sched = AsyncMock()
+    async def test_add_job_fires_immediately_when_requested(self):
+        """fire_immediately=True → job fires at ~now via next_run_time override.
+
+        APScheduler v3 IntervalTrigger always schedules the first run at
+        start_date + N*interval, so passing start_date=now would wait a full
+        interval.  The correct approach is next_run_time=now, which overrides
+        the trigger's first computed fire time.
+        """
+        mock_sched = MagicMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
         sched_mod._scheduler = mock_sched
@@ -92,19 +98,19 @@ class TestRegisterConnectorJob:
             await register_connector_job("conn-B", 300, fire_immediately=True)
             after = datetime.now(timezone.utc)
 
-            _, kwargs = mock_sched.add_schedule.await_args
-            trigger = kwargs["trigger"]
-            # start_time should be ~now (within the call window)
-            assert before <= trigger.start_time <= after
+            _, kwargs = mock_sched.add_job.call_args
+            # next_run_time must be set to ~now to trigger immediate execution
+            assert kwargs["next_run_time"] is not None
+            assert before <= kwargs["next_run_time"] <= after
+            # start_date is also ~now so the subsequent interval is anchored correctly
+            assert before <= kwargs["trigger"].start_date <= after
         finally:
             sched_mod._scheduler = original
 
     @pytest.mark.asyncio
-    async def test_uses_replace_conflict_policy(self):
-        """add_schedule must always use ConflictPolicy.replace to handle duplicates."""
-        from apscheduler import ConflictPolicy
-
-        mock_sched = AsyncMock()
+    async def test_uses_replace_existing(self):
+        """add_job must always pass replace_existing=True to handle duplicates."""
+        mock_sched = MagicMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
         sched_mod._scheduler = mock_sched
@@ -112,8 +118,8 @@ class TestRegisterConnectorJob:
             from digitize.connectors.scheduler import register_connector_job
             await register_connector_job("conn-C", 300, fire_immediately=False)
 
-            _, kwargs = mock_sched.add_schedule.await_args
-            assert kwargs["conflict_policy"] == ConflictPolicy.replace
+            _, kwargs = mock_sched.add_job.call_args
+            assert kwargs["replace_existing"] is True
         finally:
             sched_mod._scheduler = original
 
@@ -138,23 +144,25 @@ class TestRemoveConnectorJob:
             sched_mod._scheduler = original
 
     @pytest.mark.asyncio
-    async def test_calls_remove_schedule(self):
-        mock_sched = AsyncMock()
+    async def test_calls_remove_job(self):
+        mock_sched = MagicMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
         sched_mod._scheduler = mock_sched
         try:
             from digitize.connectors.scheduler import remove_connector_job
             await remove_connector_job("conn-X")
-            mock_sched.remove_schedule.assert_awaited_once_with("conn-X")
+            mock_sched.remove_job.assert_called_once_with("conn-X")
         finally:
             sched_mod._scheduler = original
 
     @pytest.mark.asyncio
-    async def test_silently_handles_lookup_error(self):
-        """remove_connector_job must not raise if the schedule was never registered."""
-        mock_sched = AsyncMock()
-        mock_sched.remove_schedule.side_effect = LookupError("not found")
+    async def test_silently_handles_job_lookup_error(self):
+        """remove_connector_job must not raise if the job was never registered."""
+        from apscheduler.jobstores.base import JobLookupError
+
+        mock_sched = MagicMock()
+        mock_sched.remove_job.side_effect = JobLookupError("conn-missing")
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
         sched_mod._scheduler = mock_sched
@@ -232,25 +240,26 @@ class TestLifespanRecoveryDeletePending:
         import sys
         import types
         import asyncio
-        # Ensure the submodule exists in sys.modules so patch() can resolve the
-        # attribute without importing the real package (which requires sniffio).
-        if "apscheduler.datastores.sqlalchemy" not in sys.modules:
-            _stub = types.ModuleType("apscheduler.datastores.sqlalchemy")
-            _stub.SQLAlchemyDataStore = None  # placeholder so patch() finds the attribute
-            sys.modules["apscheduler.datastores.sqlalchemy"] = _stub
-        from unittest.mock import MagicMock, AsyncMock, patch
+
+        # Stub out the apscheduler jobstore submodule so patch() can resolve it
+        # without importing the real package's optional SQLAlchemy dependency.
+        if "apscheduler.jobstores.sqlalchemy" not in sys.modules:
+            _stub = types.ModuleType("apscheduler.jobstores.sqlalchemy")
+            _stub.SQLAlchemyJobStore = None  # placeholder so patch() finds the attribute
+            sys.modules["apscheduler.jobstores.sqlalchemy"] = _stub
+
         from digitize.app import _connector_scheduler_lifespan
         from digitize.connectors.models import ConnectorStatus
 
         # Mock connectors list
         mock_conn_active = MagicMock()
         mock_conn_active.id = "conn-active"
-        mock_conn_active.sync_status = ConnectorStatus.UP_TO_DATE
+        mock_conn_active.status = ConnectorStatus.UP_TO_DATE
         mock_conn_active.sync_interval_seconds = 300
 
         mock_conn_delete = MagicMock()
         mock_conn_delete.id = "conn-delete"
-        mock_conn_delete.sync_status = ConnectorStatus.DELETE_PENDING
+        mock_conn_delete.status = ConnectorStatus.DELETE_PENDING
         mock_conn_delete.sync_interval_seconds = 300
 
         mock_connectors = [mock_conn_active, mock_conn_delete]
@@ -261,40 +270,43 @@ class TestLifespanRecoveryDeletePending:
         mock_register = AsyncMock()
         mock_teardown = AsyncMock()
 
-        # Mock scheduler instance
-        mock_sched_instance = AsyncMock()
-        mock_sched_instance.start_in_background = AsyncMock()
-        
-        # We need mock_sched_class to behave as an async context manager
-        mock_sched_class = MagicMock()
-        mock_sched_class.return_value.__aenter__.return_value = mock_sched_instance
+        # Mock scheduler instance (v3 API: synchronous start/shutdown)
+        mock_sched_instance = MagicMock()
+        mock_sched_instance.start = MagicMock()
+        mock_sched_instance.shutdown = MagicMock()
 
-        # Mock database datastore and engine
-        mock_datastore = MagicMock()
-        
+        mock_sched_class = MagicMock(return_value=mock_sched_instance)
+
+        # Mock job store and engine
+        mock_job_store = MagicMock()
+
         with patch("digitize.app.recover_connector_sync_state", mock_recover), \
              patch("digitize.utils.db.list_connectors", mock_list), \
              patch("digitize.connectors.scheduler.register_connector_job", mock_register), \
              patch("digitize.api.v1.connectors._run_teardown", mock_teardown), \
-             patch("apscheduler.AsyncScheduler", mock_sched_class), \
-             patch("apscheduler.datastores.sqlalchemy.SQLAlchemyDataStore", return_value=mock_datastore), \
+             patch("apscheduler.schedulers.asyncio.AsyncIOScheduler", mock_sched_class), \
+             patch("apscheduler.jobstores.sqlalchemy.SQLAlchemyJobStore", return_value=mock_job_store), \
              patch("digitize.db.connection.engine", MagicMock()):
-            
+
             # Run the context manager
             async with _connector_scheduler_lifespan():
                 # Let any background tasks (like the created task for teardown) yield control to execute
                 await asyncio.sleep(0.05)
 
-            # Assertions
-            mock_recover.assert_called_once()
-            mock_list.assert_called_once()
-            
-            # "conn-active" should be registered
-            mock_register.assert_awaited_once_with(
-                "conn-active",
-                300,
-                fire_immediately=False,
-            )
-            
-            # "conn-delete" should not be registered but teardown should be triggered
-            mock_teardown.assert_awaited_once_with("conn-delete")
+        # Assertions
+        mock_recover.assert_called_once()
+        mock_list.assert_called_once()
+
+        # "conn-active" should be registered
+        mock_register.assert_awaited_once_with(
+            "conn-active",
+            300,
+            fire_immediately=False,
+        )
+
+        # "conn-delete" should not be registered but teardown should be triggered
+        mock_teardown.assert_awaited_once_with("conn-delete")
+
+        # scheduler lifecycle
+        mock_sched_instance.start.assert_called_once()
+        mock_sched_instance.shutdown.assert_called_once()

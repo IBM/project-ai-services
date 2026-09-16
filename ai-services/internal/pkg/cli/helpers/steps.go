@@ -33,18 +33,12 @@ func PrintNextSteps(ctx context.Context, tp templates.Template, runtime runtime.
 	return nil
 }
 
-// PrintNextStepsWithProxy prints next steps with proxy route information.
-func PrintNextStepsWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
+// PrintNextStepsWithProxy prints next steps with proxy route URL information.
+func PrintNextStepsWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeURLs map[string]string) error {
 	params := map[string]string{"AppName": app}
 
-	// Add route domains to params
-	for key, value := range routeDomains {
+	for key, value := range routeURLs {
 		params[key] = value
-	}
-
-	// Add HTTPS port to params if provided
-	if httpsPort != "" {
-		params["HTTPS_PORT"] = httpsPort
 	}
 
 	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, nextStepsMDFile, nextStepsTitle); err != nil {
@@ -67,17 +61,11 @@ func PrintInfo(ctx context.Context, tp templates.Template, runtime runtime.Runti
 	return nil
 }
 
-// PrintInfoWithProxy prints info with proxy route information.
-func PrintInfoWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeDomains map[string]string, httpsPort string) error {
+// PrintInfoWithProxy prints info with proxy route URL information.
+func PrintInfoWithProxy(ctx context.Context, tp templates.Template, runtime runtime.Runtime, app, appTemplate string, routeURLs map[string]string) error {
 	params := map[string]string{"AppName": app}
 
-	// Add route domains to params
-	maps.Copy(params, routeDomains)
-
-	// Add HTTPS port to params if provided
-	if httpsPort != "" {
-		params["HTTPS_PORT"] = httpsPort
-	}
+	maps.Copy(params, routeURLs)
 
 	if err := renderStepsMarkdown(ctx, tp, runtime, appTemplate, params, infoMDFile, infoTitle); err != nil {
 		logger.InfofCtx(ctx, "Unable to load steps: %v\n", err)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
@@ -12,9 +14,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -35,33 +37,24 @@ Lists information about a specific application if the name is provided
 Arguments:
   [name] : Application name (required)
 `,
-	Example: `  For Podman:
-  # List all running applications
-  ai-services application ps --runtime podman
+	Example: `  # List all running applications
+  ai-services application ps
 
   # List a specific application
-  ai-services application ps myapp --runtime podman
+  ai-services application ps myapp
 
   # List applications with wide output format
-  ai-services application ps --output wide --runtime podman
+  ai-services application ps --output wide
 
-  # List a specific application with wide output
-  ai-services application ps myapp -o wide --runtime podman
-
-  # Use legacy implementation (Podman only)
-  ai-services application ps --legacy --runtime podman
-
-  For OpenShift:
-  # List all running applications
-  ai-services application ps --runtime openshift
-
-  # List a specific application
-  ai-services application ps myapp --runtime openshift
-
-  # List applications with wide output format
-  ai-services application ps --output wide --runtime openshift`,
+  # Use legacy implementation (requires --runtime)
+  ai-services application ps --legacy --runtime podman`,
 	Args: cobra.MaximumNArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// --runtime is only required for legacy ps; the catalog path does not need it.
+		if legacyPs && runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set (required with --legacy)")
+		}
+
 		// Build and run flag validator
 		flagValidator := buildPsFlagValidator()
 
@@ -78,14 +71,14 @@ Arguments:
 			applicationName = args[0]
 		}
 
-		rt := vars.RuntimeFactory.GetRuntimeType()
 		opts := appTypes.ListOptions{
 			ApplicationName: applicationName,
 			OutputWide:      isOutputWide(),
 		}
 
-		// When legacyPs is true and runtime is podman, use the older/stable code path
+		// When legacyPs is true, use the older/stable code path
 		if legacyPs {
+			rt := vars.RuntimeFactory.GetRuntimeType()
 			// Create application instance using factory
 			factory := application.NewFactory(rt)
 			app, err := factory.Create(applicationName)
@@ -129,9 +122,7 @@ func initPsCommonFlags() {
 
 // buildPsFlagValidator creates and configures the flag validator for the ps command.
 func buildPsFlagValidator() *flagvalidator.FlagValidator {
-	runtimeType := vars.RuntimeFactory.GetRuntimeType()
-
-	builder := flagvalidator.NewFlagValidatorBuilder(runtimeType)
+	builder := flagvalidator.NewFlagValidatorBuilder(runtimeTypes.RuntimeType(runtimeType))
 
 	// Register common flags
 	builder.
@@ -164,7 +155,7 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 	printer := utils.NewTableWriter()
 	defer printer.CloseTableWriter()
 
-	// Set table headers based on output format
+	// Set table headers and collapse indices based on output format
 	setApplicationPSTableHeaders(printer, opts.OutputWide)
 
 	// Process each application ID
@@ -177,13 +168,13 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 
 		// Process services pods
 		for _, pod := range psResp.Services {
-			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, pod, opts.OutputWide)
+			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, psResp.WorkerName, psResp.Namespace, psResp.RuntimeType, pod, opts.OutputWide)
 			printer.AppendRow(rows...)
 		}
 
 		// Process components pods
 		for _, pod := range psResp.Components {
-			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, pod, opts.OutputWide)
+			rows := cliUtils.BuildPodRowFromAPI(psResp.Name, psResp.WorkerName, psResp.Namespace, psResp.RuntimeType, pod, opts.OutputWide)
 			printer.AppendRow(rows...)
 		}
 	}
@@ -191,11 +182,21 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 	return nil
 }
 
-// setApplicationPSTableHeaders sets the table headers based on output format.
+// PS table column indices (shared across normal and wide output).
+const (
+	psColAppName   = 0
+	psColWorker    = 1
+	psColRuntime   = 2
+	psColNamespace = 3
+)
+
+// setApplicationPSTableHeaders sets the table headers and collapse indices based on output format.
 func setApplicationPSTableHeaders(printer *utils.Printer, outputWide bool) {
 	if outputWide {
-		printer.SetHeaders("APPLICATION NAME", "POD ID", "POD NAME", "STATUS", "CREATED", "CONTAINERS")
+		printer.SetHeaders("APPLICATION NAME", "WORKER", "RUNTIME", "NAMESPACE", "POD ID", "POD NAME", "STATUS", "CREATED", "CONTAINERS")
+		printer.SetCollapseIndices(psColAppName, psColWorker, psColRuntime)
 	} else {
-		printer.SetHeaders("APPLICATION NAME", "POD NAME", "STATUS")
+		printer.SetHeaders("APPLICATION NAME", "WORKER", "RUNTIME", "NAMESPACE", "POD NAME", "STATUS")
+		printer.SetCollapseIndices(psColAppName, psColWorker, psColRuntime)
 	}
 }

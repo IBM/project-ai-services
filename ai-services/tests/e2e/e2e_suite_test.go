@@ -223,7 +223,7 @@ func catalogLoginWithDiscovery(loginCtx context.Context, fatal bool) {
 		return
 	}
 
-	_, loginErr := cli.CatalogLogin(loginCtx, cfg, serverURL, loginUsername, loginPassword, appRuntime, loginInsecure)
+	_, loginErr := cli.CatalogLogin(loginCtx, cfg, serverURL, loginUsername, loginPassword, loginInsecure)
 	if loginErr != nil {
 		if fatal {
 			ginkgo.Fail(fmt.Sprintf("Catalog login failed: %v (server: %s, user: %s)", loginErr, serverURL, loginUsername))
@@ -457,7 +457,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			if catalogPassword == "" {
 				ginkgo.Skip("CATALOG_PASSWORD not set — skipping catalog hashpw test")
 			}
-			output, err := cli.CatalogHashpw(ctx, cfg, catalogPassword, appRuntime)
+			output, err := cli.CatalogHashpw(ctx, cfg, catalogPassword)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateCatalogHashpwOutput(output)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Catalog hashpw output validated successfully!")
@@ -570,7 +570,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 			ctx, cancel := withTimeout(1 * time.Minute)
 			defer cancel()
-			output, err := cli.CatalogLogin(ctx, cfg, catalogBackendURL, catalogUsername, catalogPassword, appRuntime, catalogInsecure)
+			output, err := cli.CatalogLogin(ctx, cfg, catalogBackendURL, catalogUsername, catalogPassword, catalogInsecure)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateCatalogLoginOutput(output)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Catalog login validated successfully!")
@@ -591,7 +591,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			}
 			ctx, cancel := withTimeout(1 * time.Minute)
 			defer cancel()
-			output, err := cli.CatalogWhoami(ctx, cfg, appRuntime)
+			output, err := cli.CatalogWhoami(ctx, cfg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateCatalogWhoamiOutput(output)).To(gomega.Succeed())
 			logger.Infoln("[TEST] Catalog whoami output validated successfully!")
@@ -615,19 +615,19 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := withTimeout(2 * time.Minute)
 			defer cancel()
 
-			_, err := cli.CatalogLogin(ctx, cfg, catalogBackendURL, catalogUsername, catalogPassword, appRuntime, catalogInsecure)
+			_, err := cli.CatalogLogin(ctx, cfg, catalogBackendURL, catalogUsername, catalogPassword, catalogInsecure)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			logoutOutput, err := cli.CatalogLogout(ctx, cfg, appRuntime)
+			logoutOutput, err := cli.CatalogLogout(ctx, cfg)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateCatalogLogoutOutput(logoutOutput)).To(gomega.Succeed())
 
-			_, whoamiErr := cli.CatalogWhoami(ctx, cfg, appRuntime)
+			_, whoamiErr := cli.CatalogWhoami(ctx, cfg)
 			gomega.Expect(whoamiErr).To(gomega.HaveOccurred(), "whoami should fail after logout but succeeded")
 			logger.Infoln("[TEST] Catalog logout invalidated session — whoami correctly rejected")
 
 			// Re-login so downstream specs retain a valid session.
-			_, err = cli.CatalogLogin(ctx, cfg, catalogBackendURL, catalogUsername, catalogPassword, appRuntime, catalogInsecure)
+			_, err = cli.CatalogLogin(ctx, cfg, catalogBackendURL, catalogUsername, catalogPassword, catalogInsecure)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			logger.Infoln("[TEST] Catalog logout / session-invalidation validated successfully!")
 		})
@@ -3332,7 +3332,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			ctx, cancel := withTimeout(1 * time.Minute)
 			defer cancel()
 
-			output, err := cli.CatalogLogout(ctx, cfg, appRuntime)
+			output, err := cli.CatalogLogout(ctx, cfg)
 			if err != nil {
 				// Non-fatal: expired token or catalog already down is acceptable here.
 				logger.Warningf("[TEARDOWN] [WARNING] Catalog logout failed (non-fatal): %v\nOutput: %s", err, output)

@@ -24,8 +24,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
+
+// DatasourceConnector is the minimal interface used by ApplicationServiceBase for
+// post-deploy connector attachment. It exposes only ConnectDatasourcesToApplication,
+// which is the single method called after a successful deployment. This narrow interface
+// breaks the import cycle between the application_service and repository packages.
+type DatasourceConnector interface {
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+}
 
 // ValidationError represents a validation error with HTTP status code.
 type ValidationError = validators.ValidationError
@@ -94,11 +103,63 @@ type ApplicationServiceBase struct {
 	// DeploymentRegistry tracks in-flight deployments so they can be cancelled
 	// by a concurrent delete request. Nil means no cancellation (e.g. OpenShift stub).
 	DeploymentRegistry *DeploymentRegistry
+
+	// DatasourceService is optional. When set, connector refs supplied in the create
+	// request are propagated to eligible Digitize services after the application reaches
+	// Running status. When nil, connector attachment is skipped (e.g. test environments
+	// where no datasource service is configured).
+	DatasourceService DatasourceConnector
+
+	// WorkerRegistry is used to resolve a remote runtime for worker-hosted applications.
+	WorkerRegistry stream.WorkerRegistry
 }
 
-// ListApplications retrieves a paginated list of applications with filters.
+// createRuntime returns the runtime.Runtime appropriate for app.
+// Every application has a WorkerID (NOT NULL column, migration 20260801000003). It
+// resolves the worker name and builds a RemoteRuntime over the gRPC CommandStream —
+// this covers both the "Local" worker and actual remote workers.
+func (s *ApplicationServiceBase) createRuntime(app *models.Application) (runtime.Runtime, error) {
+	if app.WorkerID == nil {
+		return nil, fmt.Errorf("application %s has no worker_id: every application must be deployed through a worker", app.ID)
+	}
+
+	if s.WorkerRegistry == nil {
+		return nil, fmt.Errorf("worker deployment not configured on this server")
+	}
+
+	workerName, ok := s.WorkerRegistry.WorkerNameByID(*app.WorkerID)
+	if !ok {
+		return nil, fmt.Errorf("worker %s for application %s is not connected", app.WorkerID, app.ID)
+	}
+
+	rtStr, _ := s.WorkerRegistry.WorkerRuntimeType(workerName)
+	rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.WorkerRegistry, catalogutils.AppNamespace(app.ID))
+	if err != nil {
+		return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
+	}
+
+	return rt, nil
+}
+
+// buildWorkerInfo resolves the worker name and runtime type for the given worker UUID.
+// Delegates to WorkerRegistry.WorkerInfoByID which tries the live registry first
+// and falls back to the DB for disconnected workers.
+func (s *ApplicationServiceBase) buildWorkerInfo(ctx context.Context, workerID uuid.UUID) (*types.ApplicationWorker, error) {
+	if s.WorkerRegistry == nil {
+		return nil, fmt.Errorf("worker registry not configured")
+	}
+
+	name, rtStr := s.WorkerRegistry.WorkerInfoByID(ctx, workerID)
+
+	return &types.ApplicationWorker{
+		ID:          workerID.String(),
+		Name:        name,
+		RuntimeType: rtStr,
+	}, nil
+}
+
 // buildApplication creates an Application from a models.Application.
-func (s *ApplicationServiceBase) buildApplication(app models.Application) (types.Application, error) {
+func (s *ApplicationServiceBase) buildApplication(ctx context.Context, app models.Application) (types.Application, error) {
 	// Get type (display name) from catalog metadata
 	typeName, err := s.getApplicationType(app.CatalogID, app.DeploymentType)
 	if err != nil {
@@ -117,6 +178,17 @@ func (s *ApplicationServiceBase) buildApplication(app models.Application) (types
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
+
+	if app.WorkerID == nil {
+		return types.Application{}, fmt.Errorf("application %s has no worker_id", app.ID)
+	}
+
+	worker, err := s.buildWorkerInfo(ctx, *app.WorkerID)
+	if err != nil {
+		return types.Application{}, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
+	}
+
+	appData.Worker = worker
 
 	// Add services array only for architectures (not for individual services)
 	if app.DeploymentType == models.DeploymentTypeArchitectures && len(app.Services) > 0 {
@@ -214,7 +286,7 @@ func (s *ApplicationServiceBase) UpdateApplication(ctx context.Context, id uuid.
 		}
 	}
 
-	appData, err := s.buildApplication(*updatedApp)
+	appData, err := s.buildApplication(ctx, *updatedApp)
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +331,17 @@ func (s *ApplicationServiceBase) buildGetApplicationResponse(ctx context.Context
 		CreatedAt:      app.CreatedAt.Format(constants.RFC3339WithTimezone),
 		UpdatedAt:      app.UpdatedAt.Format(constants.RFC3339WithTimezone),
 	}
+
+	if app.WorkerID == nil {
+		return nil, fmt.Errorf("application %s has no worker_id", app.ID)
+	}
+
+	worker, err := s.buildWorkerInfo(ctx, *app.WorkerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
+	}
+
+	appresponse.Worker = worker
 
 	// Load services with their components if present
 	if len(app.Services) > 0 {
@@ -355,13 +438,13 @@ func (s *ApplicationServiceBase) loadServiceComponents(ctx context.Context, sd [
 }
 
 // filterComponentMetadata filters component parameters to exclude sensitive data.
-func (s *ApplicationServiceBase) filterComponentMetadata(ctx context.Context, componentType, providerID string, params map[string]any) (map[string]any, error) {
+func (s *ApplicationServiceBase) filterComponentMetadata(ctx context.Context, provider *catalog.CatalogProvider, componentType, providerID string, params map[string]any) (map[string]any, error) {
 	if params == nil {
 		return nil, nil
 	}
 
 	// Load component schema to determine which fields are sensitive
-	schema, err := s.Provider.GetComponentProviderParams(ctx, componentType, providerID)
+	schema, err := provider.GetComponentProviderParams(ctx, componentType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load schema for component %s/%s: %w", componentType, providerID, err)
 	}
@@ -465,14 +548,19 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 		CreatedBy:      createdBy,
 	}
 
-	// Attach the worker FK for remote deployments. WorkerName is always set by
-	// PlanDeployment
-	// TODO: Remove the check once remote deployment is enabled by default.
-	if plan.WorkerName != "" {
-		if dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName); ok {
-			app.WorkerID = &dbID
-		}
+	// Attach the worker FK. Every deployment goes through a worker (the local worker
+	// is used for local deployments). WorkerName is always set by the CLI since the
+	// --worker flag defaults to workerconstants.LocalWorkerName.
+	if plan.WorkerName == "" {
+		return fmt.Errorf("worker name is required for application deployment; use --worker to specify a worker (default: %q)", workerconstants.LocalWorkerName)
 	}
+
+	dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName)
+	if !ok {
+		return fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", plan.WorkerName)
+	}
+
+	app.WorkerID = &dbID
 
 	if err := s.AppRepo.Insert(ctx, app); err != nil {
 		return fmt.Errorf("failed to insert application: %w", err)
@@ -487,12 +575,16 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 	plan *deployment.DeploymentPlan,
 ) (map[string]uuid.UUID, error) {
 	componentIDMap := make(map[string]uuid.UUID)
+	scopedProvider, err := s.Provider.WithRuntime(plan.RuntimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", plan.RuntimeType, err)
+	}
 
 	for hash, comp := range plan.Components {
 		instanceUUID := uuid.New()
 
 		// Filter metadata to exclude sensitive data based on schema
-		metadata, err := s.filterComponentMetadata(ctx, comp.ComponentType, comp.ProviderID, comp.Params)
+		metadata, err := s.filterComponentMetadata(ctx, scopedProvider, comp.ComponentType, comp.ProviderID, comp.Params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to filter component metadata for %s: %w", hash, err)
 		}
@@ -601,7 +693,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 
 	apps := make([]types.Application, 0, len(applications))
 	for _, app := range applications {
-		appData, err := s.buildApplication(app)
+		appData, err := s.buildApplication(ctx, app)
 		if err != nil {
 			return nil, err
 		}
@@ -629,57 +721,104 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 
 // CreateApplication validates, plans, persists, and asynchronously deploys a new application
 // for the given runtime type.
-func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) (*apimodels.CreateApplicationResponse, error) {
-	// Phase 1: check for duplicate name
+func (s *ApplicationServiceBase) CreateApplication(ctx context.Context, req apimodels.CreateApplicationRequest) (*apimodels.CreateApplicationResponse, error) {
+	effectiveRuntimeType, err := s.resolveRuntimeForCreateApplication(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.validateCreateApplicationRequest(ctx, req, effectiveRuntimeType); err != nil {
+		return nil, err
+	}
+
+	runtimeScopedPlanner, err := s.DeploymentPlanner.WithRuntime(effectiveRuntimeType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope deployment planner for runtime %q: %w", effectiveRuntimeType, err)
+	}
+
+	plan, err := s.createDeploymentPlan(ctx, runtimeScopedPlanner, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.InsertDeploymentRecords(ctx, plan, req.CreatedBy); err != nil {
+		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
+	}
+
+	deployCtx := s.prepareCreateDeploymentContext(ctx, plan.ApplicationID)
+	go s.executeDeploymentAsync(deployCtx, plan, req)
+
+	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
+}
+
+func (s *ApplicationServiceBase) resolveRuntimeForCreateApplication(ctx context.Context, req *apimodels.CreateApplicationRequest) (string, error) {
+	if req.WorkerName == "" {
+		req.WorkerName = workerconstants.LocalWorkerName
+	}
+
+	return s.DeploymentPlanner.ResolveRuntimeType(ctx, req.WorkerName)
+}
+
+func (s *ApplicationServiceBase) validateCreateApplicationRequest(
+	ctx context.Context,
+	req apimodels.CreateApplicationRequest,
+	runtimeType string,
+) error {
 	existingApp, err := s.AppRepo.GetByName(ctx, req.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to check for existing application: %w", err)
+		return fmt.Errorf("failed to check for existing application: %w", err)
 	}
 	if existingApp != nil {
-		return nil, &ValidationError{
+		return &ValidationError{
 			Code:    http.StatusConflict,
 			Message: fmt.Sprintf(ErrMsgApplicationNameExists, req.Name),
 		}
 	}
 
-	// Phase 2: validate payload
-	if err := s.Validator.ValidateDeploymentRequest(ctx, req); err != nil {
-		return nil, err
+	scopedProvider, err := s.Provider.WithRuntime(runtimeType)
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeType, err)
 	}
 
-	// Phase 3: create deployment plan
-	plan, err := s.DeploymentPlanner.PlanDeployment(ctx, req, runtimeType.String())
+	requestValidator := validators.NewApplicationValidator(scopedProvider)
+	if err := requestValidator.ValidateDeploymentRequest(ctx, req); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *ApplicationServiceBase) createDeploymentPlan(
+	ctx context.Context,
+	planner *deployment.DeploymentPlanner,
+	req apimodels.CreateApplicationRequest,
+) (*deployment.DeploymentPlan, error) {
+	plan, err := planner.PlanDeployment(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
 	}
 
-	// Phase 4: persist DB records
-	if err := s.InsertDeploymentRecords(ctx, plan, req.CreatedBy); err != nil {
-		return nil, fmt.Errorf("failed to insert deployment records: %w", err)
-	}
+	return plan, nil
+}
 
-	// Phase 5: async deployment.
-	// Build the deployment context here, before launching the goroutine, so that
-	// Register is called synchronously. This closes the race where a concurrent
-	// DeleteApplication could call Cancel before the goroutine has had a chance
-	// to call Register, causing cancellation to be silently missed.
+func (s *ApplicationServiceBase) prepareCreateDeploymentContext(ctx context.Context, applicationID uuid.UUID) context.Context {
+	// Build the deployment context before launching the goroutine so Register is
+	// called synchronously and cancellation cannot race with registration.
 	deployCtx := context.Background()
 	if id, ok := ctx.Value(logger.RequestIDKey).(string); ok && id != "" {
 		deployCtx = context.WithValue(deployCtx, logger.RequestIDKey, id)
 	}
 
 	if s.DeploymentRegistry != nil {
-		deployCtx = s.DeploymentRegistry.Register(deployCtx, plan.ApplicationID)
+		deployCtx = s.DeploymentRegistry.Register(deployCtx, applicationID)
 	}
 
-	go s.executeDeploymentAsync(deployCtx, plan, req, runtimeType)
-
-	return &apimodels.CreateApplicationResponse{ID: plan.ApplicationID.String()}, nil
+	return deployCtx
 }
 
-// executeDeploymentAsync runs the deployment in a background goroutine for the given runtime type.
+// executeDeploymentAsync runs the deployment in a background goroutine.
 // deployCtx is already derived and registered with the DeploymentRegistry by the caller.
-func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest, runtimeType runtimeTypes.RuntimeType) {
+func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Context, plan *deployment.DeploymentPlan, req apimodels.CreateApplicationRequest) {
 	ctx := deployCtx
 
 	// Deregister on any exit path — success, error, or panic.
@@ -698,7 +837,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 		}
 	}()
 
-	err := s.DeploymentExecutor.ExecuteWithPlan(ctx, plan, req, runtimeType)
+	err := s.DeploymentExecutor.ExecuteWithPlan(ctx, plan, req)
 	if err != nil {
 		// Context cancelled — deletion is in charge of status, exit silently.
 		if ctx.Err() != nil {
@@ -717,11 +856,85 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 	}
 
 	logger.InfolnCtx(ctx, fmt.Sprintf("Deployment completed successfully for application %s", plan.ApplicationName))
+
+	// Post-deploy connector attachment: once the application is Running, connect any
+	// datasource connectors that were specified in the create request.
+	// Failures here do NOT revert the Running status — the deployment succeeded; only
+	// the connector attachment is partial. Errors are logged for operator visibility.
+	s.attachConnectorsPostDeploy(ctx, plan.ApplicationID, req.Services)
+	logger.InfolnCtx(ctx, fmt.Sprintf("Post-deploy connector attachment completed for application %s", plan.ApplicationName))
+}
+
+// attachConnectorsPostDeploy calls ConnectDatasourcesToApplication with all unique connector
+// UUIDs found in the create request's service connector refs. It is a best-effort operation:
+// failures are logged but do not affect the application's Running status. No-op when
+// DatasourceService is nil or when no service in the request carries connector refs.
+func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context, applicationID uuid.UUID, services []apimodels.Service) {
+	if s.DatasourceService == nil {
+		logger.WarningfCtx(ctx, "DatasourceService is nil; skipping post-deploy connector attachment for application %s", applicationID)
+
+		return
+	}
+
+	datasourceIDs := collectDatasourceIDs(ctx, services)
+	if len(datasourceIDs) == 0 {
+		logger.WarningfCtx(ctx, "No datasource IDs collected; skipping post-deploy connector attachment for application %s", applicationID)
+
+		return
+	}
+
+	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, datasourceIDs)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "post-deploy connector attachment failed for application %s: %v", applicationID, err)
+
+		return
+	}
+
+	logConnectErrors(ctx, applicationID, resp)
+}
+
+// collectDatasourceIDs returns a deduplicated slice of connector UUIDs from all service
+// connector refs in the create request. The same connector ID may appear across multiple
+// services; ConnectDatasourcesToApplication resolves eligible services internally, so each
+// unique ID needs to be passed only once.
+func collectDatasourceIDs(ctx context.Context, services []apimodels.Service) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool)
+	var ids []uuid.UUID
+
+	for _, svc := range services {
+		for _, ref := range svc.Connectors {
+			id, err := uuid.Parse(ref.ID)
+			if err != nil {
+				// Should not happen — ValidateConnectorRefs already validated UUIDs.
+				logger.WarningfCtx(ctx, "skipping unparseable connector ref ID %q: %v", ref.ID, err)
+
+				continue
+			}
+
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	return ids
+}
+
+// logConnectErrors logs any per-datasource failures returned by ConnectDatasourcesToApplication.
+func logConnectErrors(ctx context.Context, applicationID uuid.UUID, resp *apimodels.ConnectDatasourcesResponse) {
+	if resp == nil || len(resp.Errors) == 0 {
+		return
+	}
+
+	for _, connErr := range resp.Errors {
+		logger.ErrorfCtx(ctx, "post-deploy connector %s failed for application %s: %s",
+			connErr.DatasourceID, applicationID, connErr.Error)
+	}
 }
 
 // GetApplicationResources retrieves CPU, memory, and Spyre-card usage for an application.
-// namespace is the runtime namespace to query: empty string for Podman, AppNamespace(app.ID) for OpenShift.
-func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id uuid.UUID, namespace string) (*types.ApplicationResourcesResponse, error) {
+func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id uuid.UUID) (*types.ApplicationResourcesResponse, error) {
 	app, err := s.AppRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
@@ -733,7 +946,7 @@ func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id
 		}
 	}
 
-	runtimeClient, err := vars.RuntimeFactory.Create(namespace)
+	runtimeClient, err := s.createRuntime(app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client: %w", err)
 	}
@@ -797,7 +1010,12 @@ func (s *ApplicationServiceBase) addServiceResources(
 	runtimeClient runtime.Runtime,
 	totals *resourceTotals,
 ) error {
-	runtimeMetadata, err := catalogProvider.LoadServiceRuntimeMetadata(service.CatalogID)
+	scopedProvider, err := catalogProvider.WithRuntime(runtimeClient.Type().String())
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeClient.Type().String(), err)
+	}
+
+	runtimeMetadata, err := scopedProvider.LoadServiceRuntimeMetadata(service.CatalogID)
 	if err != nil {
 		return fmt.Errorf("failed to load service runtime metadata for catalog ID %s: %w", service.CatalogID, err)
 	}
@@ -851,7 +1069,12 @@ func (s *ApplicationServiceBase) processComponentResources(
 		return fmt.Errorf("failed to get component %s: %w", componentID, err)
 	}
 
-	runtimeMetadata, err := catalogProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
+	scopedProvider, err := catalogProvider.WithRuntime(runtimeClient.Type().String())
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeClient.Type().String(), err)
+	}
+
+	runtimeMetadata, err := scopedProvider.LoadComponentRuntimeMetadata(component.Type, component.Provider)
 	if err != nil {
 		return fmt.Errorf("failed to load runtime metadata for component %s/%s: %w", component.Type, component.Provider, err)
 	}
@@ -925,7 +1148,7 @@ func buildResourcesResponse(totals *resourceTotals) *types.ApplicationResourcesR
 }
 
 // ApplicationsPs returns runtime pod/container status for an application by querying the configured runtime.
-func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.UUID, namespace string) (*types.ApplicationPSResponse, error) {
+func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.UUID) (*types.ApplicationPSResponse, error) {
 	app, err := s.AppRepo.GetByID(ctx, appID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
@@ -937,7 +1160,7 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		}
 	}
 
-	rt, err := vars.RuntimeFactory.Create(namespace)
+	rt, err := s.createRuntime(app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init runtime client: %w", err)
 	}
@@ -952,12 +1175,30 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		return nil, fmt.Errorf("failed to collect component pods: %w", err)
 	}
 
-	return &types.ApplicationPSResponse{
-		ID:         app.ID.String(),
-		Name:       app.Name,
-		Services:   servicePods,
-		Components: componentPods,
-	}, nil
+	if app.WorkerID == nil {
+		return nil, fmt.Errorf("application %s has no worker_id", app.ID)
+	}
+
+	workerInfo, err := s.buildWorkerInfo(ctx, *app.WorkerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve worker for application %s: %w", app.ID, err)
+	}
+
+	psResp := &types.ApplicationPSResponse{
+		ID:          app.ID.String(),
+		Name:        app.Name,
+		RuntimeType: workerInfo.RuntimeType,
+		WorkerName:  workerInfo.Name,
+		Services:    servicePods,
+		Components:  componentPods,
+	}
+
+	// Namespace is only meaningful for OpenShift workers
+	if runtimeTypes.RuntimeType(workerInfo.RuntimeType) == runtimeTypes.RuntimeTypeOpenShift {
+		psResp.Namespace = catalogutils.AppNamespace(app.ID)
+	}
+
+	return psResp, nil
 }
 
 func (s *ApplicationServiceBase) collectServicePods(
@@ -1069,30 +1310,37 @@ func loadApplicationPods(ctx context.Context, rt runtime.Runtime, appID string) 
 	return appPodList, nil
 }
 
-func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool, runtimeType runtimeTypes.RuntimeType) (*DeleteApplicationResponse, error) {
+// validateForDeletion fetches the application and validates that the requesting
+// user owns it and it is not already being deleted. Returns the app model on success.
+func (s *ApplicationServiceBase) validateForDeletion(ctx context.Context, id uuid.UUID, user string) (*models.Application, error) {
 	app, err := s.AppRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get application: %w", err)
 	}
 	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: ErrMsgApplicationNotFound,
-		}
+		return nil, &ValidationError{Code: http.StatusNotFound, Message: ErrMsgApplicationNotFound}
 	}
-
 	if app.CreatedBy != user {
-		return nil, &ValidationError{
-			Code:    http.StatusForbidden,
-			Message: ErrMsgUserNotOwner,
-		}
+		return nil, &ValidationError{Code: http.StatusForbidden, Message: ErrMsgUserNotOwner}
+	}
+	if app.Status == models.ApplicationStatusDeleting {
+		return nil, &ValidationError{Code: http.StatusConflict, Message: ErrMsgApplicationAlreadyDeleting}
 	}
 
-	if app.Status == models.ApplicationStatusDeleting {
-		return nil, &ValidationError{
-			Code:    http.StatusConflict,
-			Message: ErrMsgApplicationAlreadyDeleting,
-		}
+	return app, nil
+}
+
+func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.UUID, user string, keepData bool) (*DeleteApplicationResponse, error) {
+	app, err := s.validateForDeletion(ctx, id, user)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolve the runtime before cancelling or launching the goroutine so that
+	// worker connectivity errors surface synchronously to the HTTP caller.
+	rt, err := s.createRuntime(app)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve runtime for deletion: %w", err)
 	}
 
 	// Cancel any in-flight deployment before transitioning to Deleting.
@@ -1120,7 +1368,7 @@ func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.
 		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
 	}
 
-	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, runtimeType)
+	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, rt)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
@@ -1135,7 +1383,7 @@ func (s *ApplicationServiceBase) executeDeletionAsync(
 	services []models.Service,
 	orphanedComponentIDs []uuid.UUID,
 	keepData bool,
-	runtimeType runtimeTypes.RuntimeType,
+	rt runtime.Runtime,
 ) {
 	var requestID string
 	if id, ok := parentCtx.Value(logger.RequestIDKey).(string); ok {
@@ -1157,7 +1405,7 @@ func (s *ApplicationServiceBase) executeDeletionAsync(
 		}
 	}()
 
-	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, runtimeType)
+	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, rt)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Deletion failed for application %s: %v", appID.String(), err)
 

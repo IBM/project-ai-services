@@ -10,6 +10,7 @@ import (
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -37,12 +38,12 @@ func FetchApplications(ctx context.Context, appClient *catalogClient.Application
 }
 
 // BuildPodRowFromAPI builds a table row from API response data.
-func BuildPodRowFromAPI(appName string, pod catalogTypes.Pod, wideOutput bool) []string {
+func BuildPodRowFromAPI(appName, workerName, namespace, runtimeType string, pod catalogTypes.Pod, wideOutput bool) []string {
 	status := getPodStatusFromAPI(pod)
 
-	// If wide option flag is not set, return appName, podName and status only
+	// If wide option flag is not set, return normal columns only
 	if !wideOutput {
-		return []string{appName, pod.PodName, status}
+		return []string{appName, workerName, runtimeType, namespace, pod.PodName, status}
 	}
 
 	containerNames := getContainerNamesFromAPI(pod)
@@ -50,18 +51,19 @@ func BuildPodRowFromAPI(appName string, pod catalogTypes.Pod, wideOutput bool) [
 	// Parse the Created string and convert to TimeAgo format
 	created := "N/A"
 	if pod.Created != "" {
-		// Try to parse the Created timestamp
 		parsedTime, err := time.Parse(catalogConstants.RFC3339WithTimezone, pod.Created)
 		if err == nil {
 			created = utils.TimeAgo(parsedTime)
 		} else {
-			// If parsing fails, use the original string
 			created = pod.Created
 		}
 	}
 
 	return []string{
 		appName,
+		workerName,
+		runtimeType,
+		namespace,
 		pod.PodID[:12],
 		pod.PodName,
 		status,
@@ -136,4 +138,31 @@ func GetPodsFromApplicationsPS(ctx context.Context, appName string) ([]types.Pod
 	}
 
 	return pods, nil
+}
+
+// ConfirmUninstall prompts the user to confirm uninstall and logs pods to be deleted.
+func ConfirmUninstall(ctx context.Context, pods []types.Pod, autoYes bool) (bool, error) {
+	if autoYes {
+		return true, nil
+	}
+
+	// Print pods to be deleted
+	logger.InfofCtx(ctx, "Below are the list of pods to be deleted")
+	for _, pod := range pods {
+		logger.InfofCtx(ctx, "\t-> %s\n", pod.Name)
+	}
+
+	// Confirm Uninstall
+	confirmed, err := utils.ConfirmAction("\nDo you want to continue?")
+	if err != nil {
+		return false, fmt.Errorf("failed to get confirmation: %w", err)
+	}
+
+	if !confirmed {
+		logger.InfolnCtx(ctx, "Uninstall cancelled")
+
+		return false, nil
+	}
+
+	return true, nil
 }

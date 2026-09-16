@@ -1,3 +1,4 @@
+import { calculateUptime } from "@/utils/time";
 import { api } from "@/api/axios";
 import {
   DIGITAL_ASSISTANTS_ENDPOINTS,
@@ -5,6 +6,7 @@ import {
   SERVICE_ENDPOINTS,
 } from "@/constants/api-endpoints.constants";
 import { COMPONENT_TYPES } from "@/constants";
+import { WORKER_RUNTIME_LABELS } from "@/constants/app.constants";
 import type {
   ArchitectureSummary,
   ServiceSummary,
@@ -23,9 +25,14 @@ import type {
   ProviderSchema,
   LLMOption,
   DeploymentPayload,
+  ApplicationDatasourceApiItem,
+  ApplicationDatasourcesListResponse,
+  ConnectDatasourceError,
+  ConnectDatasourcesResponse,
 } from "@/types/api.types";
 import type { DigitalAssistantRow } from "@/pages/DigitalAssistants/types";
 import type { DeployedServicesRow } from "@/components/DeployedServicesTable/types";
+import type { ApplicationDatasourceRow } from "@/components/DeploymentDetails/components/ApplicationDatasourcesTable/types";
 
 // Fetches the list of available digital assistant architectures
 export async function fetchArchitectures(): Promise<ArchitectureSummary[]> {
@@ -64,9 +71,11 @@ export async function fetchServiceDetails(serviceId: string): Promise<Service> {
 // Fetches deployment options for a specific architecture
 export async function fetchDeployOptions(
   architectureId: string,
+  runtime?: string,
 ): Promise<DeployOptionsResponse> {
   const response = await api.get<DeployOptionsResponse>(
     DIGITAL_ASSISTANTS_ENDPOINTS.DEPLOY_OPTIONS(architectureId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
@@ -74,9 +83,11 @@ export async function fetchDeployOptions(
 // Fetches deploy options for a specific service
 export async function fetchServiceDeployOptions(
   serviceId: string,
+  runtime?: string,
 ): Promise<ServiceDeployOptions> {
   const response = await api.get<ServiceDeployOptions>(
     SERVICE_ENDPOINTS.GET_SERVICE_DEPLOY_OPTIONS(serviceId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
@@ -92,20 +103,24 @@ export async function fetchDigitalAssistantDeployOptions(): Promise<DeployOption
 // Fetches configuration parameters schema for a specific service
 export async function fetchServiceParams(
   serviceId: string,
+  runtime?: string,
 ): Promise<ProviderSchema> {
   const response = await api.get(
     DIGITAL_ASSISTANTS_ENDPOINTS.SERVICE_PARAMS(serviceId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
 
-// Fetches provider schema parameters (services flow)
+// Fetches provider schema parameters for a component provider
 export async function fetchProviderSchema(
   componentType: string,
   providerId: string,
+  runtime?: string,
 ): Promise<ProviderSchema> {
   const response = await api.get<ProviderSchema>(
     SERVICE_ENDPOINTS.GET_COMPONENT_PROVIDER_PARAMS(componentType, providerId),
+    { params: runtime ? { runtime } : undefined },
   );
   return response.data;
 }
@@ -120,8 +135,10 @@ export async function fetchLLMOptionsWithModels(
     schema: ProviderSchema,
   ) => void,
   deployOptions?: ServiceDeployOptions,
+  runtime?: string,
 ): Promise<LLMOption[]> {
-  const options = deployOptions || (await fetchServiceDeployOptions(serviceId));
+  const options =
+    deployOptions || (await fetchServiceDeployOptions(serviceId, runtime));
 
   const llmComponent = options.components.find(
     (component) => component.type === COMPONENT_TYPES.LLM,
@@ -143,7 +160,11 @@ export async function fetchLLMOptionsWithModels(
       ];
     }
 
-    const schema = await fetchProviderSchema(COMPONENT_TYPES.LLM, provider.id);
+    const schema = await fetchProviderSchema(
+      COMPONENT_TYPES.LLM,
+      provider.id,
+      runtime,
+    );
 
     if (setProviderSchema) {
       setProviderSchema(serviceId, COMPONENT_TYPES.LLM, provider.id, schema);
@@ -195,8 +216,10 @@ export async function fetchComponentModelsWithSchemas(
     schema: ProviderSchema,
   ) => void,
   deployOptions?: ServiceDeployOptions,
+  runtime?: string,
 ): Promise<LLMOption[]> {
-  const options = deployOptions || (await fetchServiceDeployOptions(serviceId));
+  const options =
+    deployOptions || (await fetchServiceDeployOptions(serviceId, runtime));
 
   const component = options.components.find((c) => c.type === componentType);
 
@@ -209,7 +232,11 @@ export async function fetchComponentModelsWithSchemas(
       return [];
     }
 
-    const schema = await fetchProviderSchema(componentType, provider.id);
+    const schema = await fetchProviderSchema(
+      componentType,
+      provider.id,
+      runtime,
+    );
 
     if (setProviderSchema) {
       setProviderSchema(serviceId, componentType, provider.id, schema);
@@ -296,45 +323,19 @@ export async function deleteApplication(
   return response.data;
 }
 
-// Fetches available resources for deployments
-export async function fetchResources(): Promise<ResourcesResponse> {
+// Fetches available resources for deployments.
+// Pass workerName to query a specific remote worker; omit for the local runtime.
+export async function fetchResources(
+  workerName?: string,
+): Promise<ResourcesResponse> {
   const response = await api.get<ResourcesResponse>(
     DIGITAL_ASSISTANTS_ENDPOINTS.RESOURCES,
+    { params: workerName ? { worker: workerName } : undefined },
   );
   return response.data;
 }
 
-// Calculates and formats the uptime duration from a creation timestamp
-export function calculateUptime(createdAt: string): string {
-  const created = new Date(createdAt);
-  const now = new Date();
-  const diffMs = now.getTime() - created.getTime();
-
-  const totalSeconds = Math.floor(diffMs / 1000);
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const totalHours = Math.floor(totalMinutes / 60);
-  const totalDays = Math.floor(totalHours / 24);
-
-  const minutes = totalMinutes % 60;
-  const hours = totalHours % 24;
-
-  if (totalDays > 0) {
-    const days = hours > 0 ? totalDays + 1 : totalDays;
-    return days === 1 ? "1 day" : `${days} days`;
-  } else if (totalHours > 0) {
-    const hrs = minutes > 0 ? totalHours + 1 : totalHours;
-    return hrs === 1 ? "1 hour" : `${hrs} hours`;
-  } else if (totalMinutes > 0) {
-    const mins = totalSeconds % 60 > 0 ? totalMinutes + 1 : totalMinutes;
-    return mins === 1 ? "1 minute" : `${mins} minutes`;
-  } else {
-    return totalSeconds === 1
-      ? "1 second"
-      : totalSeconds > 0
-        ? `${totalSeconds} seconds`
-        : "Just now";
-  }
-}
+export { calculateUptime } from "@/utils/time";
 
 // Transforms an Application object into a DigitalAssistantRow format for display
 export function transformApplicationToRow(
@@ -346,6 +347,11 @@ export function transformApplicationToRow(
     status: app.status as DigitalAssistantRow["status"],
     type: app.type,
     uptime: calculateUptime(app.created_at),
+    workerResource: app.worker?.name ?? "",
+    workerType:
+      WORKER_RUNTIME_LABELS[app.worker?.runtime_type ?? ""]?.short ??
+      app.worker?.runtime_type ??
+      "",
     messages: app.status === "Running" ? "" : app.message || "",
     actions: "actions",
     children: app.services.map((service) => ({
@@ -353,6 +359,8 @@ export function transformApplicationToRow(
       name: `${service.type} (service)`,
       status: service.status as DigitalAssistantRow["status"],
       uptime: "",
+      workerResource: "",
+      workerType: "",
       messages: "",
       actions: "actions",
     })),
@@ -369,6 +377,11 @@ export function transformDeployedServiceToRow(
     status: app.status as DeployedServicesRow["status"],
     type: app.type,
     uptime: calculateUptime(app.created_at),
+    workerResource: app.worker?.name ?? "",
+    workerType:
+      WORKER_RUNTIME_LABELS[app.worker?.runtime_type ?? ""]?.short ??
+      app.worker?.runtime_type ??
+      "",
     service: app.type || "",
     messages: app.message || "",
     actions: "actions",
@@ -424,4 +437,112 @@ export async function fetchAllDeployedServices(
   }
 
   return allData;
+}
+
+// Transforms an ApplicationDatasourceApiItem into an ApplicationDatasourceRow for display
+export function transformDatasourceToRow(
+  item: ApplicationDatasourceApiItem,
+): ApplicationDatasourceRow {
+  const raw = item.last_sync ?? "";
+  return {
+    id: item.id,
+    name: item.name,
+    source_type: item.provider.name,
+    status: item.status,
+    files:
+      item.files === null || item.files === undefined || item.files === 0
+        ? "-"
+        : String(item.files),
+    // Show "In progress" whenever a sync is active, regardless of whether a
+    // previous sync timestamp exists. Only fall back to calculateUptime once
+    // the sync has completed (status is no longer "syncing").
+    last_sync:
+      item.status === "syncing"
+        ? "In progress"
+        : raw
+          ? calculateUptime(raw)
+          : "—",
+    messages: item.message ?? "",
+    actions: "",
+  };
+}
+
+// Fetches a single page of datasources for a given application
+export async function fetchApplicationDatasources(
+  applicationId: string,
+  page: number,
+  pageSize: number,
+): Promise<{
+  rows: ApplicationDatasourceRow[];
+  pagination: PaginationMetadata;
+}> {
+  const response = await api.get<ApplicationDatasourcesListResponse>(
+    APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
+    { params: { page, page_size: pageSize } },
+  );
+  return {
+    rows: response.data.data.map(transformDatasourceToRow),
+    pagination: response.data.pagination,
+  };
+}
+
+// Fetches all datasources for a given application — used for CSV export
+export async function fetchAllApplicationDatasources(
+  applicationId: string,
+): Promise<ApplicationDatasourceRow[]> {
+  let currentPage = 1;
+  let hasNext = true;
+  const allData: ApplicationDatasourceApiItem[] = [];
+
+  while (hasNext) {
+    const response = await api.get<ApplicationDatasourcesListResponse>(
+      APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
+      { params: { page: currentPage, page_size: 100 } },
+    );
+    allData.push(...response.data.data);
+    hasNext = response.data.pagination?.has_next ?? false;
+    currentPage++;
+  }
+
+  return allData.map(transformDatasourceToRow);
+}
+
+// Connects one or more data source connectors to an application
+/**
+ * Connects one or more datasources to an application.
+ *
+ * Returns an array of per-datasource errors for any connections that failed
+ * (HTTP 207 Multi-Status). An empty array means every datasource connected
+ * successfully (HTTP 204 No Content).
+ *
+ * Throws for network errors or unexpected non-2xx responses.
+ */
+export async function connectApplicationDatasources(
+  applicationId: string,
+  datasourceIds: string[],
+): Promise<ConnectDatasourceError[]> {
+  const response = await api.put<ConnectDatasourcesResponse | null>(
+    APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
+    { datasource_ids: datasourceIds },
+    // Accept 207 without throwing so we can inspect the body ourselves.
+    { validateStatus: (status) => status === 204 || status === 207 },
+  );
+
+  // 204 No Content — all succeeded
+  if (response.status === 204 || !response.data) return [];
+
+  // 207 Multi-Status — at least one datasource failed
+  return response.data.errors ?? [];
+}
+// Removes a single datasource from an application
+export async function removeApplicationDatasource(
+  applicationId: string,
+  datasourceId: string,
+): Promise<void> {
+  await api.delete(
+    APPLICATION_ENDPOINTS.REMOVE_APPLICATION_DATASOURCE(
+      applicationId,
+      datasourceId,
+    ),
+  );
 }

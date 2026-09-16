@@ -1,9 +1,11 @@
 containers:
   - name: "ui"
+    workload: "chat-bot-ui"
     format: ".Status"
     alias: UI_STATUS
 
   - name: "backend-server"
+    workload: "chat-bot-api"
     format: ".Status"
     alias: API_STATUS
 

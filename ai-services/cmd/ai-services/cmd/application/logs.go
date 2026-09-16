@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/spf13/cobra"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/application"
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
@@ -11,8 +13,8 @@ import (
 	appFlags "github.com/project-ai-services/ai-services/internal/pkg/cli/constants/application"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -28,26 +30,27 @@ var logsCmd = &cobra.Command{
 
 Arguments:
   [name] : Application name (required)`,
-	Example: `  For Podman:
-  # Display logs from an application pod
+	Example: `  # Display logs
+  ai-services application logs rag --pod mypod
+
+  # Display logs with explicit runtime
   ai-services application logs rag --pod mypod --runtime podman
 
   # Display logs from a specific container in a pod
-  ai-services application logs rag --pod mypod --container mycontainer --runtime podman
+  ai-services application logs rag --pod mypod --container mycontainer
 
-  # Display logs using legacy implementation
+  # Display logs using legacy implementation (requires --runtime)
   ai-services application logs rag --pod mypod --legacy --runtime podman
 
-  For Openshift:
-  # Display logs from an application pod
-  ai-services application logs rag --pod mypod --runtime openshift
-
-  # Display logs from a specific container in a pod
-  ai-services application logs rag --pod mypod --container mycontainer --runtime openshift
-
-  `,
+  # Display logs from an OpenShift application
+  ai-services application logs rag --pod mypod --runtime openshift`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// --runtime is required for legacy logs; the catalog path derives it from the Worker record.
+		if legacyLogs && runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set (required with --legacy)")
+		}
+
 		// Build and run flag validator
 		flagValidator := buildLogsFlagValidator()
 		if err := flagValidator.Validate(cmd); err != nil {
@@ -68,10 +71,18 @@ Arguments:
 		cmd.SilenceUsage = true
 
 		ctx := cmd.Context()
-		rt := vars.RuntimeFactory.GetRuntimeType()
-		namespace := applicationName
+
+		var rt runtimeTypes.RuntimeType
+		var namespace string
 
 		if !legacyLogs {
+			// Default: resolve runtime and namespace from the catalog Worker record.
+			var err error
+			rt, err = resolveRuntimeForApp(ctx, applicationName, runtimeType)
+			if err != nil {
+				return err
+			}
+
 			appClient, err := catalogClient.NewApplicationClient(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to create application client: %w", err)
@@ -85,21 +96,22 @@ Arguments:
 				return fmt.Errorf("invalid application ID %q: %w", app.ID, err)
 			}
 			namespace = catalogutils.AppNamespace(appID)
+		} else {
+			// Legacy path: requires --runtime (enforced in PreRunE).
+			rt = vars.RuntimeFactory.GetRuntimeType()
+			namespace = applicationName
 		}
 
-		// Create application instance using factory
 		factory := application.NewFactory(rt)
-		app, err := factory.Create(namespace)
+		appInst, err := factory.Create(namespace)
 		if err != nil {
 			return fmt.Errorf("failed to create application instance: %w", err)
 		}
 
-		opts := appTypes.LogsOptions{
+		return appInst.Logs(ctx, appTypes.LogsOptions{
 			PodName:           podName,
 			ContainerNameOrID: containerNameOrID,
-		}
-
-		return app.Logs(ctx, opts)
+		})
 	},
 }
 
@@ -116,9 +128,11 @@ func initLogsCommonFlags() {
 
 // buildLogsFlagValidator creates and configures the flag validator for the logs command.
 func buildLogsFlagValidator() *flagvalidator.FlagValidator {
-	runtimeType := vars.RuntimeFactory.GetRuntimeType()
-
-	builder := flagvalidator.NewFlagValidatorBuilder(runtimeType)
+	// Use the package-level runtimeType flag value (may be empty when --runtime is
+	// omitted; runtime will be resolved from the application Worker in RunE).
+	// All logs flags are common-scoped so the validator does not need a specific
+	// runtime type to accept them.
+	builder := flagvalidator.NewFlagValidatorBuilder(runtimeTypes.RuntimeType(runtimeType))
 
 	// Register common flags
 	builder.

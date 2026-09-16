@@ -52,9 +52,9 @@ def _init_language_detector():
     """Initialize the language detector used for document processing."""
     try:
         setup_language_detector(
-            [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH]
+            [Language.ENGLISH, Language.GERMAN, Language.ITALIAN, Language.FRENCH, Language.JAPANESE]
         )
-        logger.info("Language detector initialized for EN, DE, IT, FR")
+        logger.info("Language detector initialized for EN, DE, IT, FR, JA")
     except Exception as exc:
         logger.error(f"Error initializing language detector: {exc}", exc_info=True)
 
@@ -148,73 +148,76 @@ def _recover_conversion_tasks():
 async def _connector_scheduler_lifespan():
     """Start the connector scheduler and keep it running for the app's lifetime.
 
-    Wraps `yield` in an `async with AsyncScheduler(...)` block so the scheduler
-    stays open until the application shuts down.
+    Creates an AsyncIOScheduler backed by SQLAlchemyJobStore, starts it, then
+    shuts it down cleanly on exit.
     """
     import digitize.connectors.scheduler as scheduler_module
     from digitize.utils.db import list_connectors
-    from apscheduler import AsyncScheduler
-    from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
     from digitize.db.connection import engine as db_engine
 
     try:
-        data_store = SQLAlchemyDataStore(db_engine, schema="scheduler")
-        async with AsyncScheduler(data_store=data_store) as sched:
-            scheduler_module._scheduler = sched
+        job_store = SQLAlchemyJobStore(engine=db_engine, tableschema="scheduler")
+        sched = AsyncIOScheduler(jobstores={"default": job_store})
+        scheduler_module._scheduler = sched
 
-            # Connector crash recovery — unlock connectors stuck in 'syncing'.
-            try:
-                recovered = recover_connector_sync_state()
-                if recovered:
-                    logger.info(
-                        f"Connector crash recovery: reset {recovered} stuck connector(s)"
-                    )
-            except Exception as exc:
-                logger.error(
-                    f"Error during connector sync state recovery: {exc}", exc_info=True
+        # Connector crash recovery — unlock connectors stuck in 'syncing'.
+        try:
+            recovered = recover_connector_sync_state()
+            if recovered:
+                logger.info(
+                    f"Connector crash recovery: reset {recovered} stuck connector(s)"
                 )
+        except Exception as exc:
+            logger.error(
+                f"Error during connector sync state recovery: {exc}", exc_info=True
+            )
 
-            # Re-register all existing connectors (fire_immediately=False so we
-            # don't trigger a duplicate tick for connectors that are already
-            # up-to-date after crash recovery).
-            # If a connector is in status 'delete pending', trigger the delete
-            # procedure again and do not register a job.
-            try:
-                import asyncio
-                from digitize.connectors.models import ConnectorStatus
-                from digitize.api.v1.connectors import _run_teardown
+        # Re-register all existing connectors (fire_immediately=False so we
+        # don't trigger a duplicate tick for connectors that are already
+        # up-to-date after crash recovery).
+        # If a connector is in status 'delete pending', trigger the delete
+        # procedure again and do not register a job.
+        try:
+            import asyncio
+            from digitize.connectors.models import ConnectorStatus
+            from digitize.api.v1.connectors import _run_teardown
 
-                connectors = list_connectors()
-                registered_count = 0
-                for connector in connectors:
-                    if connector.sync_status == ConnectorStatus.DELETE_PENDING:
-                        logger.info(
-                            f"Connector crash recovery: found connector {connector.id!r} "
-                            "in 'delete pending' status. Re-triggering delete procedure."
-                        )
-                        asyncio.create_task(_run_teardown(connector.id))
-                        continue
-
-                    await scheduler_module.register_connector_job(
-                        connector.id,
-                        connector.sync_interval_seconds,
-                        fire_immediately=False,
-                    )
-                    registered_count += 1
-
-                if registered_count:
+            connectors = list_connectors()
+            registered_count = 0
+            for connector in connectors:
+                if connector.status == ConnectorStatus.DELETE_PENDING:
                     logger.info(
-                        f"Re-registered {registered_count} connector job(s) with scheduler"
+                        f"Connector crash recovery: found connector {connector.id!r} "
+                        "in 'delete pending' status. Re-triggering delete procedure."
                     )
-            except Exception as exc:
-                logger.error(
-                    f"Error recovering/re-registering connector jobs: {exc}", exc_info=True
+                    asyncio.create_task(_run_teardown(connector.id))
+                    continue
+
+                await scheduler_module.register_connector_job(
+                    connector.id,
+                    connector.sync_interval_seconds,
+                    fire_immediately=False,
                 )
+                registered_count += 1
 
-            await sched.start_in_background()
-            logger.info("✅ Connector scheduler started")
+            if registered_count:
+                logger.info(
+                    f"Re-registered {registered_count} connector job(s) with scheduler"
+                )
+        except Exception as exc:
+            logger.error(
+                f"Error recovering/re-registering connector jobs: {exc}", exc_info=True
+            )
 
+        sched.start()
+        logger.info("✅ Connector scheduler started")
+
+        try:
             yield
+        finally:
+            sched.shutdown()
 
     except Exception as exc:
         logger.error(
@@ -284,10 +287,6 @@ tags_metadata = [
     {
         "name": "documents",
         "description": "Document management operations including retrieval and deletion",
-    },
-    {
-        "name": "connectors",
-        "description": "Data-source connector lifecycle management (file_system, object_storage)",
     },
 ]
 
@@ -376,7 +375,7 @@ from digitize.api.v1.connectors import router as connectors_router
 app.include_router(jobs_router, prefix="/v1/jobs", tags=["jobs"])
 app.include_router(admin_router, prefix="/v1", tags=["jobs"])
 app.include_router(documents_router, prefix="/v1/documents", tags=["documents"])
-app.include_router(connectors_router, prefix="/v1/connectors", tags=["connectors"])
+app.include_router(connectors_router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False)
 
 
 if __name__ == "__main__":

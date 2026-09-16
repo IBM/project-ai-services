@@ -12,7 +12,6 @@ import (
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 var (
@@ -35,19 +34,14 @@ Supported targets:
 
 Note:
   - WARNING: Restore will overwrite existing data`,
-	Example: `  For Podman:
-  # Restore OpenSearch data with Podman
-  ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime podman
+	Example: `  # Restore OpenSearch data
+  ai-services application restore myapp --target opensearch --filename backup.tar.gz
+
+  # Restore digitize data
+  ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz
 
   # Restore with automatic confirmation
-  ai-services application restore myapp --target digitize --filename backup.tar.gz --runtime podman --yes
-
-  For OpenShift:
-  # Restore OpenSearch data with OpenShift
-  ai-services application restore myapp --target opensearch --filename backup.tar.gz --runtime openshift
-
-  # Restore digitize data with OpenShift
-  ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz --runtime openshift `,
+  ai-services application restore myapp --target digitize --filename backup.tar.gz --yes`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		target := restoreTarget
@@ -86,8 +80,12 @@ Note:
 		applicationName := args[0]
 		ctx := cmd.Context()
 
-		rt := vars.RuntimeFactory.GetRuntimeType()
-		logger.Infof("Runtime: %s\n", rt)
+		// Derive the runtime from the application's Worker record in the catalog,
+		// or use --runtime directly if it was supplied.
+		rt, err := resolveRuntimeForApp(ctx, applicationName, runtimeType)
+		if err != nil {
+			return err
+		}
 
 		// Get absolute path to backup file
 		absFilename, err := filepath.Abs(restoreFilename)

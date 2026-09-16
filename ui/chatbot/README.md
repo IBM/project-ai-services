@@ -35,3 +35,7 @@ The build output is ready to be deployed.
 Serves the production build locally.
 After running npm run build, use this command to test your production output before deploying.
 Open http://localhost:3010 to view the production build.
+
+## Dependency Overrides
+
+- `qs`: `qs` is coming from `body-parser` (its latest version is used) which pins it at `6.15.2`, which in turn comes from `express` (also the latest available version). An `overrides` entry is used to upgrade `qs` to `^6.16.0` to remediate PVR0865005 / CVE-2026-82417. This can be removed once upstream publishes fixed versions.
