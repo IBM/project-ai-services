@@ -1166,7 +1166,7 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 	}
 
 	servicePods := s.collectServicePods(ctx, rt, app.Services)
-	
+
 	componentPods, err := s.collectComponentPods(ctx, rt, app.Services)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect component pods: %w", err)
@@ -1247,7 +1247,7 @@ func (s *ApplicationServiceBase) collectComponentPods(
 			componentPod, err := loadApplicationPods(ctx, rt, componentID)
 			if err != nil {
 				logger.ErrorfCtx(ctx, "failed to load component pod %s: %w", componentID, err)
-				
+
 				continue
 			}
 
