@@ -199,16 +199,22 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
 
         # If connection_details is being updated, validate the partial payload
         # against the typed config for this connector type before storing anything.
+        # Decrypt the existing stored details first — the DB holds ciphertext for
+        # secret fields, which would fail PEM / format validators if merged raw.
         merged_details: Optional[dict] = None
         if body.connection_details is not None:
             try:
+                from digitize.connectors.encryption import decrypt_secrets
+                decrypted_existing = decrypt_secrets(
+                    existing.type, existing.connection_details or {}
+                )
                 if existing.type == "file_system":
                     SSHConnectorConfig.model_validate(
-                        {**existing.connection_details, **body.connection_details}
+                        {**decrypted_existing, **body.connection_details}
                     )
                 elif existing.type == "object_storage":
                     S3ConnectorConfig.model_validate(
-                        {**existing.connection_details, **body.connection_details}
+                        {**decrypted_existing, **body.connection_details}
                     )
             except ValidationError as exc:
                 APIError.raise_error(
