@@ -18,10 +18,20 @@ const (
 	defaultInspectPollInterval = 10 * time.Second
 )
 
-// WaitForContainerReadiness polls container health until it reaches "healthy", the context is
-// cancelled, or the deadline expires. The deadline is only enforced once Podman has left the
-// "starting" state — while a container is still in its initialDelaySeconds window no probe has
-// run yet and it is incorrect to time out.
+// WaitForContainerReadiness polls container health until a conclusive result is
+// available, the context is cancelled, or the hard deadline expires.
+//
+// Podman health states and how each is handled:
+//
+//   - ""          : no healthcheck configured → success (nothing to wait for).
+//   - "healthy"   : probe passed → success.
+//   - "unhealthy" : probe ran and failed (failureThreshold exhausted, or
+//     HealthcheckOnFailureAction triggered) → fail immediately, no retry.
+//   - "starting"  : no conclusive result yet — this covers both the
+//     initialDelaySeconds window before the first probe runs AND any period
+//     where the container has restarted (resetting health state back to
+//     "starting") and is waiting for the next probe cycle. Keep polling
+//     until the hard deadline is hit.
 //
 // pollInterval controls how often InspectContainer is called; pass 0 to use the default (10 s).
 func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration, pollInterval time.Duration) error {
@@ -32,37 +42,36 @@ func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, con
 		pollInterval = defaultInspectPollInterval
 	}
 
+	// Single hard deadline covering all states, including "starting".
+	// This prevents the loop from hanging indefinitely if a container never
+	// leaves the starting/restarting cycle.
 	deadline := time.Now().Add(timeout)
 	timer := time.NewTimer(pollInterval)
 	defer timer.Stop()
 
 	for {
-		// fetch the container status
 		containerStatus, err = runtime.InspectContainer(ctx, containerNameOrId)
 		if err != nil {
 			return fmt.Errorf("failed to check container status: %w", err)
 		}
 
-		healthStatus := containerStatus.Health
-
-		if healthStatus == "" {
+		switch containerStatus.Health {
+		case "":
 			// No healthcheck configured — consider the container ready.
 			return nil
-		}
-
-		if healthStatus == string(constants.Ready) {
+		case string(constants.Ready):
 			return nil
+		case string(constants.NotReady):
+			// A conclusive probe failure — no point waiting further.
+			return fmt.Errorf("container health check failed (status: %s)", containerStatus.Health)
 		}
 
-		// While Podman is inside the initialDelaySeconds window it reports "starting":
-		// no probe has executed yet so there is nothing meaningful to time out on.
-		// Only enforce the deadline once Podman has transitioned out of "starting"
-		// (i.e. the container is "unhealthy" or in an unknown state).
-		if healthStatus != string(constants.Starting) && time.Now().After(deadline) {
+		// "starting": no conclusive result yet. Apply the hard deadline so we
+		// cannot loop forever, then wait for the next probe cycle.
+		if time.Now().After(deadline) {
 			return fmt.Errorf("operation timed out waiting for container readiness")
 		}
 
-		// wait for next poll interval, but respect context cancellation
 		timer.Reset(pollInterval)
 		select {
 		case <-ctx.Done():

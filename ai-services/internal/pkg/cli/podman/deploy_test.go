@@ -56,8 +56,10 @@ func loadLLMPodSpec(t *testing.T, templatePath string) *models.PodSpec {
 func TestFetchLivenessProbe_VllmCPU(t *testing.T) {
 	podSpec := loadLLMPodSpec(t, "components/llm/vllm-cpu/podman/templates/vllm-server.yaml.tmpl")
 
-	// The container name in the template is "llm".
-	probe := fetchLivenessProbe(podSpec, "llm")
+	// Podman names running containers as "<podname>-<specname>".
+	// Pod name rendered from the template is "llm-test1234ab"; spec container name is "llm".
+	// So the full running container name is "llm-test1234ab-llm".
+	probe := fetchLivenessProbe(podSpec, "llm-test1234ab-llm")
 	require.NotNil(t, probe, "expected a liveness probe on the 'llm' container")
 
 	// Verify each field the spec declares.
@@ -73,15 +75,16 @@ func TestFetchLivenessProbe_VllmCPU(t *testing.T) {
 func TestFetchLivenessProbe_InfraContainer_ReturnsNil(t *testing.T) {
 	podSpec := loadLLMPodSpec(t, "components/llm/vllm-cpu/podman/templates/vllm-server.yaml.tmpl")
 
-	// The infra container is injected by Podman at runtime; it is absent from the spec.
-	probe := fetchLivenessProbe(podSpec, "test1234ab-infra")
+	// Podman injects an infra container at runtime named "<podname>-infra".
+	// It is absent from the spec so no probe should be found.
+	probe := fetchLivenessProbe(podSpec, "llm-test1234ab-infra")
 	assert.Nil(t, probe, "infra container should have no probe in the pod spec")
 }
 
 func TestComputeReadinessTimeout_VllmCPU(t *testing.T) {
 	podSpec := loadLLMPodSpec(t, "components/llm/vllm-cpu/podman/templates/vllm-server.yaml.tmpl")
 
-	probe := fetchLivenessProbe(podSpec, "llm")
+	probe := fetchLivenessProbe(podSpec, "llm-test1234ab-llm")
 	require.NotNil(t, probe)
 
 	timeout, pollInterval := computeReadinessTimeout(probe)
@@ -103,7 +106,8 @@ func TestComputeReadinessTimeout_VllmCPU(t *testing.T) {
 func TestFetchLivenessProbe_VllmSpyre(t *testing.T) {
 	podSpec := loadLLMPodSpec(t, "components/llm/vllm-spyre/podman/templates/vllm-server.yaml.tmpl")
 
-	probe := fetchLivenessProbe(podSpec, "llm")
+	// Pod name is "llm-test1234ab"; spec container name is "llm" → running name "llm-test1234ab-llm".
+	probe := fetchLivenessProbe(podSpec, "llm-test1234ab-llm")
 	require.NotNil(t, probe, "expected a liveness probe on the 'llm' container")
 
 	assert.EqualValues(t, 420, probe.InitialDelaySeconds, "initialDelaySeconds")
@@ -118,7 +122,7 @@ func TestFetchLivenessProbe_VllmSpyre(t *testing.T) {
 func TestComputeReadinessTimeout_VllmSpyre(t *testing.T) {
 	podSpec := loadLLMPodSpec(t, "components/llm/vllm-spyre/podman/templates/vllm-server.yaml.tmpl")
 
-	probe := fetchLivenessProbe(podSpec, "llm")
+	probe := fetchLivenessProbe(podSpec, "llm-test1234ab-llm")
 	require.NotNil(t, probe)
 
 	timeout, pollInterval := computeReadinessTimeout(probe)

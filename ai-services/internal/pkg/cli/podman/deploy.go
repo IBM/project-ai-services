@@ -119,12 +119,20 @@ func doContainerReadinessCheck(ctx context.Context, rt runtime.Runtime, podSpec 
 
 // fetchLivenessProbe returns the LivenessProbe for the named container in the pod spec,
 // or nil if no probe is defined or the container is not found (e.g. the infra container).
+//
+// Podman names running containers as "<podname>-<specname>" (e.g. "llm-5c32c9e93e-llm"
+// for a spec container named "llm" inside pod "llm-5c32c9e93e"). The containerName
+// passed here comes from InspectContainer, so we strip the pod name prefix before
+// matching against the spec.
 func fetchLivenessProbe(podSpec *models.PodSpec, containerName string) *v1.Probe {
 	if podSpec == nil {
 		return nil
 	}
+	// Build the pod name prefix once so we only allocate the string once.
+	podPrefix := podSpec.Name + "-"
+	specName := strings.TrimPrefix(containerName, podPrefix)
 	for _, c := range podSpec.Spec.Containers {
-		if c.Name == containerName {
+		if c.Name == specName {
 			return c.LivenessProbe
 		}
 	}
