@@ -74,7 +74,7 @@ tqdm 4.68.2
 Source: https://github.com/tqdm/tqdm/tree/v4.68.2 
 License text: https://github.com/tqdm/tqdm/blob/v4.68.2/LICENCE
 
-The following component is separately licensed under the MPL-2.0 (https://www.mozilla.org/en-US/MPL/2.0/) or Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0) license (dual-licensed; you may choose either):
+The following component is separately licensed under the MPL-2.0 (https://www.mozilla.org/en-US/MPL/2.0/) or Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0) license (dual-licensed):
 dompurify 3.4.11
 Source: https://github.com/cure53/DOMPurify/tree/3.4.11
 License text: https://github.com/cure53/DOMPurify/blob/3.4.11/LICENSE
