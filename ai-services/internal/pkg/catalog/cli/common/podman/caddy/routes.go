@@ -2,17 +2,86 @@ package caddy
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 )
+
+const (
+	httpsReadyPollInterval   = 2 * time.Second
+	httpsReadyTimeout        = 60 * time.Second
+	httpsReadyRequestTimeout = 5 * time.Second
+)
+
+// WaitForTLSReady attempts a TLS handshake against rawURL until it succeeds,
+// indicating that Caddy has finished its TLS reload for the domain.
+//
+// It uses tls.DialWithDialer to perform only the TLS handshake without sending
+// application HTTP requests or hitting backend services.
+// Certificate verification is skipped because the catalog may use a self-signed
+// certificate; the goal is solely to confirm the TLS handshake completes without
+// a fatal alert.
+func WaitForTLSReady(ctx context.Context, rawURL string) error {
+	logger.Debugf("Waiting for Caddy TLS to be ready at %s...\n", rawURL)
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL %s: %w", rawURL, err)
+	}
+
+	host := parsed.Hostname()
+	port := parsed.Port()
+	if port == "" {
+		if parsed.Scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	}
+	addr := net.JoinHostPort(host, port)
+
+	dialer := &net.Dialer{Timeout: httpsReadyRequestTimeout}
+	tlsConfig := &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, //nolint:gosec // self-signed certs are expected
+	}
+
+	deadline := time.Now().Add(httpsReadyTimeout)
+	ticker := time.NewTicker(httpsReadyPollInterval)
+	defer ticker.Stop()
+
+	for {
+		conn, dialErr := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+		if dialErr == nil {
+			_ = conn.Close()
+			logger.Debugf("Caddy TLS ready at %s\n", addr)
+
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for Caddy TLS at %s: %w", addr, dialErr)
+		}
+
+		logger.Debugf("Caddy TLS not ready at %s (%v), retrying in %s...\n", addr, dialErr, httpsReadyPollInterval)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
 
 // TemplateRouteInfo contains route information extracted from a template.
 type TemplateRouteInfo struct {
@@ -68,6 +137,14 @@ func RegisterCatalogRoutes(ctx context.Context, runtime *podman.PodmanClient, ca
 	// Return error if any routes failed to register
 	if len(registrationErrors) > 0 {
 		return nil, fmt.Errorf("failed to register routes for %d pod(s): %w", len(registrationErrors), errors.Join(registrationErrors...))
+	}
+
+	// Ensure all registered routes have their TLS layer ready before returning.
+	// Route registration triggers a Caddy config reload that briefly interrupts TLS.
+	for _, routeURL := range routeDomains {
+		if err := WaitForTLSReady(ctx, routeURL); err != nil {
+			return nil, fmt.Errorf("TLS readiness check failed for %s: %w", routeURL, err)
+		}
 	}
 
 	logger.Infof("Successfully registered routes for %d pod(s)\n", len(routeInfos))
