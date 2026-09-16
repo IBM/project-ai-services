@@ -40,7 +40,7 @@ from digitize.connectors.models import (
 from digitize.connectors.encryption import (
     encrypt_secrets,
     merge_and_encrypt_partial,
-    strip_secrets,
+    safe_connection_details,
 )
 import digitize.utils.db as db_ops
 from digitize.settings import settings
@@ -567,7 +567,7 @@ async def get_connector(connector_id: str):
             attached_at=get_utc_timestamp(connector.attached_at),
             last_sync_at=get_utc_timestamp(connector.last_sync_at),
             status=connector.status,
-            connection_details=strip_secrets(connector.type, connector.connection_details or {}),
+            connection_details=safe_connection_details(connector.type, connector.connection_details or {}),
             total_files=connector.total_files,
             message=connector.message,
         )
