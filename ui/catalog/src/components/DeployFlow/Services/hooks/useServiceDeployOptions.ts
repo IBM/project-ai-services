@@ -267,10 +267,12 @@ export const useServiceDeployOptions = (
     // --- Path B: deploy options cached — retry only errored models on reopen ---
     if (!deployOptions) return;
 
-    // Retry schema fetch if it previously errored — mirrors the DA hook's hasError pattern.
-    const schemaError =
-      storeState.serviceSchemasError[`${serviceId}:${runtime}`];
-    if (schemaError && deployOptions.schema) {
+    // Fetch schema if deployOptions declares a schema URL but no schema is cached yet,
+    // or retry if a previous fetch errored (e.g. on rehydrate from persisted storage or after network error).
+    const cachedSchema = getServiceSchema(serviceId, runtime);
+    const schemaLoading =
+      storeState.serviceSchemasLoading[`${serviceId}:${runtime}`];
+    if (deployOptions.schema && !cachedSchema && !schemaLoading) {
       setServiceSchemaError(serviceId, runtime, null);
       setServiceSchemaLoading(serviceId, runtime, true);
       fetchServiceSchemaParams(deployOptions.schema)
@@ -361,6 +363,7 @@ export const useServiceDeployOptions = (
     setComponentModelsLoading,
     setComponentModelsError,
     setProviderSchema,
+    getServiceSchema,
     setServiceSchema,
     setServiceSchemaLoading,
     setServiceSchemaError,

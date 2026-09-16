@@ -417,6 +417,15 @@ export const ServicesDeployFlow = ({
     [dispatch],
   );
 
+  const handleDatasourceStepError = useCallback(
+    (hasError: boolean) =>
+      dispatch({
+        type: ACTION_TYPES.SET_DATASOURCE_STEP_ERROR,
+        payload: hasError,
+      }),
+    [dispatch],
+  );
+
   return (
     <DeployTearsheetShell
       open={open}
@@ -496,12 +505,7 @@ export const ServicesDeployFlow = ({
             }
             handleFormDataChange(updates);
           }}
-          onComponentError={(hasError) =>
-            dispatch({
-              type: ACTION_TYPES.SET_DATASOURCE_STEP_ERROR,
-              payload: hasError,
-            })
-          }
+          onComponentError={handleDatasourceStepError}
           showSelectionError={state.showDatasourceSelectionError}
         />
       )}
