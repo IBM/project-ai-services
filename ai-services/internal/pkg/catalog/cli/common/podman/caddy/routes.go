@@ -23,14 +23,7 @@ const (
 	httpsReadyRequestTimeout = 5 * time.Second
 )
 
-// WaitForTLSReady attempts a TLS handshake against rawURL until it succeeds,
-// indicating that Caddy has finished its TLS reload for the domain.
-//
-// It uses tls.DialWithDialer to perform only the TLS handshake without sending
-// application HTTP requests or hitting backend services.
-// Certificate verification is skipped because the catalog may use a self-signed
-// certificate; the goal is solely to confirm the TLS handshake completes without
-// a fatal alert.
+// WaitForTLSReady polls rawURL via TLS handshake until Caddy finishes reloading TLS for the domain.
 func WaitForTLSReady(ctx context.Context, rawURL string) error {
 	logger.Debugf("Waiting for Caddy TLS to be ready at %s...\n", rawURL)
 
@@ -137,14 +130,6 @@ func RegisterCatalogRoutes(ctx context.Context, runtime *podman.PodmanClient, ca
 	// Return error if any routes failed to register
 	if len(registrationErrors) > 0 {
 		return nil, fmt.Errorf("failed to register routes for %d pod(s): %w", len(registrationErrors), errors.Join(registrationErrors...))
-	}
-
-	// Ensure all registered routes have their TLS layer ready before returning.
-	// Route registration triggers a Caddy config reload that briefly interrupts TLS.
-	for _, routeURL := range routeDomains {
-		if err := WaitForTLSReady(ctx, routeURL); err != nil {
-			return nil, fmt.Errorf("TLS readiness check failed for %s: %w", routeURL, err)
-		}
 	}
 
 	logger.Infof("Successfully registered routes for %d pod(s)\n", len(routeInfos))
