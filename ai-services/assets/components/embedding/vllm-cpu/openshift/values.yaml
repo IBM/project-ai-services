@@ -1,6 +1,8 @@
 model: ""
 resources:
   requests:
-    memory: "5Gi"
+    cpu: 8
+    memory: "8Gi"
   limits:
-    memory: "5Gi"
+    cpu: 8
+    memory: "8Gi"
