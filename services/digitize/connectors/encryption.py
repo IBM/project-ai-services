@@ -37,7 +37,7 @@ logger = get_logger("connector_encryption")
 # responses for each connector type.  Every field NOT listed here is treated
 # as a secret: encrypted at rest and stripped from responses.
 _SAFE_FIELDS: dict[str, frozenset[str]] = {
-    "file_system": frozenset({"host", "port", "username", "remote_path"}),
+    "file_system": frozenset({"host", "port", "username", "remote_path", "allowed_extensions"}),
     "object_storage": frozenset({"bucket_name", "access_key_id", "endpoint_url",
                                  "prefix", "delimiter", "download_concurrency",
                                  "verify_ssl", "allowed_extensions"}),

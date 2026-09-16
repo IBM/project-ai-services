@@ -13,7 +13,7 @@ Covers:
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +148,11 @@ class ConnectorCreateRequest(BaseModel):
                 SSHConnectorConfig.model_validate(self.connection_details)
             elif self.type == "object_storage":
                 S3ConnectorConfig.model_validate(self.connection_details)
-        except Exception as exc:
+            else:
+                raise ValueError(
+                    f"No schema validator registered for connector type {self.type!r}"
+                )
+        except ValidationError as exc:
             raise ValueError(
                 f"Invalid connection_details for connector type {self.type!r}: {exc}"
             ) from exc

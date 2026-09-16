@@ -40,6 +40,7 @@ from digitize.connectors.models import (
 )
 from digitize.connectors.scanners.config import S3ConnectorConfig, SSHConnectorConfig
 from digitize.connectors.encryption import (
+    decrypt_secrets,
     encrypt_secrets,
     merge_and_encrypt_partial,
     safe_connection_details,
@@ -204,7 +205,6 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
         merged_details: Optional[dict] = None
         if body.connection_details is not None:
             try:
-                from digitize.connectors.encryption import decrypt_secrets
                 decrypted_existing = decrypt_secrets(
                     existing.type, existing.connection_details or {}
                 )
@@ -216,10 +216,16 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                     S3ConnectorConfig.model_validate(
                         {**decrypted_existing, **body.connection_details}
                     )
+                else:
+                    APIError.raise_error(
+                        ErrorCode.INVALID_REQUEST,
+                        f"Schema validation not supported for connector type {existing.type!r}",
+                    )
             except ValidationError as exc:
                 APIError.raise_error(
                     ErrorCode.INVALID_REQUEST,
-                    f"Invalid connection_details for connector type {existing.type!r}: {exc}",
+                    f"Invalid connection_details for connector type {existing.type!r}: "
+                    + str(exc.errors(include_input=False)),
                 )
             merged_details = merge_and_encrypt_partial(
                 existing.type,
