@@ -3,6 +3,7 @@ import type { Dispatch } from "react";
 import { OverflowMenu, OverflowMenuItem } from "@carbon/react";
 import { Delete, Edit } from "@carbon/icons-react";
 import type { AppAction } from "./types";
+import { ACTION_TYPES } from "./types";
 import type { SharedTableAction } from "@/components/Table/types";
 import {
   StatusCell,
@@ -21,8 +22,18 @@ interface CellRendererProps {
   rowData?: { status?: string; name?: string; services?: number | null };
 }
 
-export const NameCell = ({ value, rowId }: CellRendererProps) => (
-  <SharedNameCell value={value} rowId={rowId} isLinkEnabled={true} />
+export const NameCell = ({ value, rowId, dispatch }: CellRendererProps) => (
+  <SharedNameCell
+    value={value}
+    rowId={rowId}
+    isLinkEnabled={true}
+    onNameClick={(id) =>
+      dispatch({
+        type: ACTION_TYPES.OPEN_DETAILS_PANEL,
+        payload: { id, mode: "view" },
+      })
+    }
+  />
 );
 
 export const ServicesCell = ({ value }: Pick<CellRendererProps, "value">) => {
@@ -43,6 +54,12 @@ export const ActionCell = ({ rowId, rowData, dispatch }: CellRendererProps) => {
             <span>Update key</span>
             <Edit size={16} />
           </div>
+        }
+        onClick={() =>
+          dispatch({
+            type: ACTION_TYPES.OPEN_DETAILS_PANEL,
+            payload: { id: rowId, mode: "update-key" },
+          })
         }
       />
       <OverflowMenuItem
@@ -74,5 +91,5 @@ export const CELL_RENDERERS: Record<string, RendererFn> = {
   status: StatusCell as RendererFn,
   services: ServicesCell as RendererFn,
   messages: MessageCell as RendererFn,
-  actions: ActionCell,
+  actions: ActionCell as RendererFn,
 };

@@ -9,6 +9,7 @@ import (
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmanruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/podman"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
@@ -21,10 +22,15 @@ import (
 func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts catalogUtils.PodmanConfigureOptions, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	token, gatewayAddr, err := configure.RegisterLocalWorker(ctx, c)
+	token, err := configure.RegisterLocalWorker(ctx, c)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
 	}
+
+	// For the co-located local worker on Podman, use the internal pod DNS name
+	// directly. This bypasses external DNS resolution and requires no /etc/hosts entries.
+	// The internal pod name (PodmanGatewayPodName) is already included in the gateway's TLS SANs.
+	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.PodmanGatewayPodName, opts.WorkerGatewayPort)
 
 	workerOpts := workertypes.PodmanWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{

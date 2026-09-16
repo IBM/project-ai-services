@@ -1,7 +1,7 @@
 import type { ConnectorField } from "./schemaUtils";
 import type { FormValues, CreateDatasourceRequest } from "./types";
 
-function normalizePrivateKey(value: string): string {
+export function normalizePrivateKey(value: string): string {
   // Convert literal \n escape sequences to real newlines first.
   const withNewlines = value.replace(/\\n/g, "\n");
 

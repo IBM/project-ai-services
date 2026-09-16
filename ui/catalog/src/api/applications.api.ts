@@ -1,3 +1,4 @@
+import { calculateUptime } from "@/utils/time";
 import { api } from "@/api/axios";
 import {
   DIGITAL_ASSISTANTS_ENDPOINTS,
@@ -6,6 +7,7 @@ import {
 } from "@/constants/api-endpoints.constants";
 import { API_BASE_URL } from "@/constants/env.constants";
 import { COMPONENT_TYPES } from "@/constants";
+import { WORKER_RUNTIME_LABELS } from "@/constants/app.constants";
 import type {
   ArchitectureSummary,
   ServiceSummary,
@@ -351,37 +353,7 @@ export async function fetchResources(
   return response.data;
 }
 
-// Calculates and formats the uptime duration from a creation timestamp
-export function calculateUptime(createdAt: string): string {
-  const created = new Date(createdAt);
-  const now = new Date();
-  const diffMs = now.getTime() - created.getTime();
-
-  const totalSeconds = Math.floor(diffMs / 1000);
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const totalHours = Math.floor(totalMinutes / 60);
-  const totalDays = Math.floor(totalHours / 24);
-
-  const minutes = totalMinutes % 60;
-  const hours = totalHours % 24;
-
-  if (totalDays > 0) {
-    const days = hours > 0 ? totalDays + 1 : totalDays;
-    return days === 1 ? "1 day" : `${days} days`;
-  } else if (totalHours > 0) {
-    const hrs = minutes > 0 ? totalHours + 1 : totalHours;
-    return hrs === 1 ? "1 hour" : `${hrs} hours`;
-  } else if (totalMinutes > 0) {
-    const mins = totalSeconds % 60 > 0 ? totalMinutes + 1 : totalMinutes;
-    return mins === 1 ? "1 minute" : `${mins} minutes`;
-  } else {
-    return totalSeconds === 1
-      ? "1 second"
-      : totalSeconds > 0
-        ? `${totalSeconds} seconds`
-        : "Just now";
-  }
-}
+export { calculateUptime } from "@/utils/time";
 
 // Transforms an Application object into a DigitalAssistantRow format for display
 export function transformApplicationToRow(
@@ -393,6 +365,11 @@ export function transformApplicationToRow(
     status: app.status as DigitalAssistantRow["status"],
     type: app.type,
     uptime: calculateUptime(app.created_at),
+    workerResource: app.worker?.name ?? "",
+    workerType:
+      WORKER_RUNTIME_LABELS[app.worker?.runtime_type ?? ""]?.short ??
+      app.worker?.runtime_type ??
+      "",
     messages: app.status === "Running" ? "" : app.message || "",
     actions: "actions",
     children: app.services.map((service) => ({
@@ -400,6 +377,8 @@ export function transformApplicationToRow(
       name: `${service.type} (service)`,
       status: service.status as DigitalAssistantRow["status"],
       uptime: "",
+      workerResource: "",
+      workerType: "",
       messages: "",
       actions: "actions",
     })),
@@ -416,6 +395,11 @@ export function transformDeployedServiceToRow(
     status: app.status as DeployedServicesRow["status"],
     type: app.type,
     uptime: calculateUptime(app.created_at),
+    workerResource: app.worker?.name ?? "",
+    workerType:
+      WORKER_RUNTIME_LABELS[app.worker?.runtime_type ?? ""]?.short ??
+      app.worker?.runtime_type ??
+      "",
     service: app.type || "",
     messages: app.message || "",
     actions: "actions",
