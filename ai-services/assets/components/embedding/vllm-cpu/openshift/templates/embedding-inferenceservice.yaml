@@ -27,8 +27,10 @@ spec:
         name: vLLM
       resources:
         requests:
+          cpu: {{ .Values.resources.requests.cpu | quote }}
           memory: {{ .Values.resources.requests.memory | quote }}
         limits:
+          cpu: {{ .Values.resources.limits.cpu | quote }}
           memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
       storageUri: hf://{{ .Values.model }}
