@@ -35,11 +35,6 @@ export const WORKER_RUNTIME_LABELS: Record<
     description:
       "This mode deploys all services into a single worker resource, with additional resource requirements; and runs on the premises of the client, rather than at a remote facility.",
   },
-  powervs: {
-    label: "IBM Power Virtual Server (PowerVS)",
-    description: "Deploy on public cloud infrastructure with managed services.",
-    disabled: true,
-  },
 } as const;
 // runtime mapping
 export const RUNTIME_TYPE_LABELS: Record<string, string> = {

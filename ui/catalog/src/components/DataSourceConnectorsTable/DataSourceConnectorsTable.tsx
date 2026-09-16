@@ -1,4 +1,5 @@
 import { useReducer, useCallback, useRef, useEffect } from "react";
+import ConnectorDetailsPanel from "@/components/ConnectorDetailsPanel";
 import { isAxiosError } from "axios";
 import {
   DataTable,
@@ -151,7 +152,7 @@ const DataSourceConnectorsTable = ({
     [],
   );
 
-  // Background prefetch — fires once after the connector list loads successfully.
+  // Background prefetch — fires once after the first fetch completes (even if empty).
   useEffect(() => {
     // Skip if cache is still fresh
     if (!isConnectorTypesStale()) return;
@@ -253,6 +254,14 @@ const DataSourceConnectorsTable = ({
 
   return (
     <>
+      {/* Connector details panel */}
+      <ConnectorDetailsPanel
+        open={state.isDetailsPanelOpen}
+        connectorId={state.selectedConnectorId}
+        mode={state.detailsPanelMode}
+        onClose={() => dispatch({ type: ACTION_TYPES.CLOSE_DETAILS_PANEL })}
+      />
+
       {/* Toasts — rendered outside the grid to stay fixed-position */}
       <TableToasts
         toastOpen={state.toastOpen}
