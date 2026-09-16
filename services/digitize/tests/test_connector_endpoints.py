@@ -177,7 +177,7 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
         lambda connector_type, existing, partial: {**existing, **partial},
     )
     monkeypatch.setattr(
-        "digitize.api.v1.connectors.strip_secrets",
+        "digitize.api.v1.connectors.safe_connection_details",
         lambda connector_type, details: {
             k: v for k, v in details.items()
             if k not in {"private_key", "secret_access_key"}
