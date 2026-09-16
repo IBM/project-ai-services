@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
+from pydantic import ValidationError
 from digitize.connectors.models import (
     ConnectorCreateRequest,
     ConnectorCreateResponse,
@@ -37,6 +38,7 @@ from digitize.connectors.models import (
     SyncLogStatus,
     SyncTriggerResponse,
 )
+from digitize.connectors.scanners.config import S3ConnectorConfig, SSHConnectorConfig
 from digitize.connectors.encryption import (
     encrypt_secrets,
     merge_and_encrypt_partial,
@@ -195,10 +197,24 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
                 f"Connector {connector_id!r} is pending deletion and cannot be updated",
             )
 
-        # If connection_details is being updated, we need to merge with existing
-        # encrypted details so untouched keys stay encrypted and intact.
+        # If connection_details is being updated, validate the partial payload
+        # against the typed config for this connector type before storing anything.
         merged_details: Optional[dict] = None
         if body.connection_details is not None:
+            try:
+                if existing.type == "file_system":
+                    SSHConnectorConfig.model_validate(
+                        {**existing.connection_details, **body.connection_details}
+                    )
+                elif existing.type == "object_storage":
+                    S3ConnectorConfig.model_validate(
+                        {**existing.connection_details, **body.connection_details}
+                    )
+            except ValidationError as exc:
+                APIError.raise_error(
+                    ErrorCode.INVALID_REQUEST,
+                    f"Invalid connection_details for connector type {existing.type!r}: {exc}",
+                )
             merged_details = merge_and_encrypt_partial(
                 existing.type,
                 existing.connection_details,

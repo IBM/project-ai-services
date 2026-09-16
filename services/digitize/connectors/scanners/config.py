@@ -66,9 +66,12 @@ class S3ConnectorConfig(BaseModel):
 
     Works for both AWS S3 and IBM COS — provider is auto-detected from
     ``endpoint_url``.
+
+    extra="forbid" ensures that unrecognised fields (e.g. a stray 'password')
+    are rejected at the API boundary rather than silently ignored.
     """
 
-    model_config = {"extra": "ignore"}
+    model_config = {"extra": "forbid"}
 
     bucket_name: str = Field(
         description="S3 / COS bucket to sync documents from.",
