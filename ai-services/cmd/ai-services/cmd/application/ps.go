@@ -160,6 +160,7 @@ func renderApplicationPS(ctx context.Context, opts appTypes.ListOptions) error {
 
 	// Process each application ID
 	for _, app := range applicationList {
+		// Get PS information for the application
 		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch application: %w", err)
