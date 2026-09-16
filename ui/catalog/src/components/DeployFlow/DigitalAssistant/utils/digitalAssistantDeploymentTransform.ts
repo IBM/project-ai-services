@@ -17,6 +17,50 @@ import { COMPONENT_TYPES } from "@/constants";
 import { splitServiceParams } from "@/components/DeployFlow/Shared/utils/paramFilter";
 
 /**
+ * Re-nests a flat params object to match the structure of the given JSON Schema.
+ */
+function nestParamsBySchema(
+  flatParams: Record<string, unknown>,
+  schema: ProviderSchema | null | undefined,
+): Record<string, unknown> {
+  if (!schema?.properties || Object.keys(flatParams).length === 0) {
+    return flatParams;
+  }
+
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(flatParams)) {
+    let placed = false;
+    for (const [wrapperKey, wrapperProp] of Object.entries(schema.properties)) {
+      const prop = wrapperProp as
+        | {
+            type?: string;
+            properties?: Record<string, unknown>;
+          }
+        | undefined;
+      if (
+        prop?.type === "object" &&
+        prop.properties &&
+        key in prop.properties
+      ) {
+        if (!result[wrapperKey]) {
+          result[wrapperKey] = {};
+        }
+        (result[wrapperKey] as Record<string, unknown>)[key] = value;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      // Top-level key in schema (or not in schema) — keep flat
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Gets the provider version from the API response
  * Searches service-specific components first, then falls back to global components
  * Throws error if version not found - version must come from API
@@ -134,7 +178,10 @@ export function transformToDeploymentPayload(
         serviceConfig.params &&
         Object.keys(serviceConfig.params).length > 0
       ) {
-        entry.params = serviceConfig.params;
+        entry.params = nestParamsBySchema(
+          serviceConfig.params,
+          serviceSchemas[serviceId] ?? null,
+        );
       }
       if (
         serviceDefinition.accepts_datasource &&
@@ -208,7 +255,10 @@ export function transformToDeploymentPayload(
     };
 
     if (Object.keys(serviceBackendParams).length > 0) {
-      deploymentService.params = serviceBackendParams;
+      deploymentService.params = nestParamsBySchema(
+        serviceBackendParams,
+        serviceSchemas[serviceId] ?? null,
+      );
     }
 
     // Attach datasource connectors to services that accept them when the user

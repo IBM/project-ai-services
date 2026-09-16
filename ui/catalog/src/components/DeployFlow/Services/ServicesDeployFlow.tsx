@@ -356,6 +356,7 @@ export const ServicesDeployFlow = ({
           deployOptions,
           resolvedSchemas,
           state.selectedServiceId,
+          serviceSchema,
         );
         await deployApplication(deploymentPayload);
       },
