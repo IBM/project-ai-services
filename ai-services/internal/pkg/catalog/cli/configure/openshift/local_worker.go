@@ -26,7 +26,7 @@ const (
 func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	token, _, err := configure.RegisterLocalWorker(ctx, c)
+	token, err := configure.RegisterLocalWorker(ctx, c)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
 	}
