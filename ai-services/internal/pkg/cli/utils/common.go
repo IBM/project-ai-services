@@ -37,6 +37,16 @@ func FetchApplications(ctx context.Context, appClient *catalogClient.Application
 	return []catalogTypes.Application{*application}, nil
 }
 
+// BuildAppStatusRow builds a table row for an application that is not yet in the running state.
+// Pod-specific columns are filled with "N/A" since no pod data is available.
+func BuildAppStatusRow(appName, workerName, runtimeType, status string, wideOutput bool) []string {
+	if !wideOutput {
+		return []string{appName, workerName, runtimeType, "N/A", "N/A", status}
+	}
+
+	return []string{appName, workerName, runtimeType, "N/A", "N/A", "N/A", status, "N/A", "N/A"}
+}
+
 // BuildPodRowFromAPI builds a table row from API response data.
 func BuildPodRowFromAPI(appName, workerName, namespace, runtimeType string, pod catalogTypes.Pod, wideOutput bool) []string {
 	status := getPodStatusFromAPI(pod)
