@@ -11,6 +11,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
+	workerConstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -73,9 +75,16 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 
 	if catalogInstalled {
 		g.collectCatalogArtifacts(ctx, catalogCl, outDir)
-		appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		if isLocalWorker, err := workercommon.IsOpenShiftLocalWorker(ctx, catalogCl); err != nil {
+			logger.WarningfCtx(ctx, "Failed to check local worker: %v\n", err)
+		} else if isLocalWorker {
+			g.collectWorkerArtifacts(ctx, catalogCl, outDir)
+			appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		}
 	} else {
-		logger.WarninglnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+" — catalog is not installed. Skipping catalog artifacts and application pod collection.")
+		logger.InfolnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+". Collecting worker and application pods...")
+		g.collectWorkerArtifacts(ctx, catalogCl, outDir)
+		appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
 	}
 
 	// Always collected from the catalog namespace — written into catalog/ alongside catalog pods.
@@ -117,37 +126,40 @@ func (g *openshiftGatherer) collectCatalogArtifacts(ctx context.Context, rt *ope
 		return
 	}
 
-	g.collectCatalogPods(ctx, rt, catDir)
+	g.collectPodsByTemplate(ctx, rt, catDir, catalogConstants.CatalogAppTemplate)
 	collectCatalogCredentials(ctx, g.sanitizer, catDir)
 }
 
-// collectCatalogPods lists all pods labelled ai-services.io/application=ai-services
-// in the catalog namespace and collects inspect + logs for each.
-func (g *openshiftGatherer) collectCatalogPods(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, catDir string) {
+// collectWorkerArtifacts gathers data for the worker infrastructure (into worker/pods/).
+func (g *openshiftGatherer) collectWorkerArtifacts(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, outDir string) {
+	workerDir := filepath.Join(outDir, "worker")
+	g.collectPodsByTemplate(ctx, rt, workerDir, workerConstants.WorkerAppTemplate)
+}
+
+// collectPodsByTemplate lists all pods belonging to a given template in the namespace
+// and collects inspect + logs for each.
+func (g *openshiftGatherer) collectPodsByTemplate(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, targetDir, templateName string) {
 	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {"ai-services.io/application=" + catalogConstants.CatalogAppName},
+		"label": {"ai-services.io/template=" + templateName},
 	})
 	if err != nil {
-		logger.WarningfCtx(ctx, "Failed to list catalog pods: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to list %s pods: %v\n", templateName, err)
 
 		return
 	}
 
 	if len(pods) == 0 {
-		logger.WarninglnCtx(ctx, "No catalog pods found (catalog may not be configured).")
-
 		return
 	}
 
-	podsDir := filepath.Join(catDir, "pods")
+	podsDir := filepath.Join(targetDir, "pods")
 	if err := os.MkdirAll(podsDir, dirPerm); err != nil {
-		logger.WarningfCtx(ctx, "Failed to create catalog pods directory: %v\n", err)
+		logger.WarningfCtx(ctx, "Failed to create %s pods directory: %v\n", templateName, err)
 
 		return
 	}
 
 	for _, pod := range pods {
-		// Catalog pods live in the catalog namespace.
 		g.collectPod(ctx, podsDir, pod.Name, catalogConstants.CatalogAppName)
 	}
 }
