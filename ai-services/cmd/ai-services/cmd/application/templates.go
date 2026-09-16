@@ -157,7 +157,7 @@ func listCatalogTemplates(cmd *cobra.Command) error {
 	}
 
 	// Inform user about parameters subcommand
-	logger.Infoln("\nTo list supported parameters for each template use: application templates parameters --template <Template ID>\n")
+	logger.Infof("\nTo list supported parameters for each template use: ai-services application templates parameters --template <Template ID> --runtime %s\n", runtimeType)
 
 	return nil
 }
