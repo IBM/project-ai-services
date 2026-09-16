@@ -236,7 +236,16 @@ class S3ConnectorConfig(BaseModel):
 
 
 class SSHConnectorConfig(BaseModel):
-    model_config = {"extra": "ignore"}
+    """
+    Configuration for an SSH/SFTP data-source connector.
+
+    Authentication is exclusively via ``private_key`` (PEM-encoded).
+    Password authentication is not supported — if a ``password`` field is
+    present in the submitted connection_details it is rejected here so that
+    it is never silently stored or ignored.
+    """
+
+    model_config = {"extra": "forbid"}
 
     host: str = Field(description="SFTP server hostname or IP address.")
     port: int = Field(default=22, ge=1, le=65535, description="SFTP port.")
