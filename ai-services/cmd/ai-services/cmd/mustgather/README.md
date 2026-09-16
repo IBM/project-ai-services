@@ -216,8 +216,22 @@ must-gather.local.<timestamp>/
 │   │       └── logs/
 │   │           └── <container>.log   # last 1000 lines (sanitized)
 │   ├── catalog-credentials.json     # tokens redacted
-│   ├── secrets.json                  # K8s Secrets from catalog ns (metadata only)
-│   └── pvcs.json                     # PVCs from catalog ns
+│   ├── secrets/
+│   │   └── secrets.json              # K8s Secrets from catalog ns (metadata only)
+│   └── volumes/
+│       └── pvcs.json                 # PVCs from catalog ns
+├── worker/
+│   ├── pods/
+│   │   └── <worker-pod-name>/
+│   │       ├── inspect.json
+│   │       ├── inspect/
+│   │       │   └── <container>.json
+│   │       └── logs/
+│   │           └── <container>.log
+│   ├── secrets/
+│   │   └── secrets.json              # K8s Secrets from worker ns (metadata only)
+│   └── volumes/
+│       └── pvcs.json                 # PVCs from worker ns
 ├── applications/
 │   └── <app-namespace>/              # one directory per app namespace
 │       ├── pods/

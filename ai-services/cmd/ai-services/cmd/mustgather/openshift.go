@@ -87,11 +87,8 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 		appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
 	}
 
-	// Always collected from the catalog namespace — written into catalog/ alongside catalog pods.
+	// System info is collected from the cluster.
 	g.collectSystemInfo(ctx, catalogCl, outDir)
-	catalogDir := filepath.Join(outDir, "catalog")
-	g.collectSecretInfo(ctx, catalogCl, "secrets.json", catalogDir)
-	g.collectVolumeInfo(ctx, catalogCl, "pvcs.json", catalogDir)
 
 	// Always collected from every application namespace — each written into applications/<ns>/.
 	for _, ns := range appNamespaces {
@@ -115,7 +112,7 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 
 // ── catalog artifact collection ───────────────────────────────────────────────
 
-// collectCatalogArtifacts collects catalog pods (inspect + logs) and the local catalog-credentials.json.
+// collectCatalogArtifacts collects catalog pods (inspect + logs), secrets, PVCs, and the local catalog-credentials.json.
 func (g *openshiftGatherer) collectCatalogArtifacts(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, outDir string) {
 	logger.InfolnCtx(ctx, "Collecting catalog artifacts…")
 
@@ -127,13 +124,25 @@ func (g *openshiftGatherer) collectCatalogArtifacts(ctx context.Context, rt *ope
 	}
 
 	g.collectPodsByTemplate(ctx, rt, catDir, catalogConstants.CatalogAppTemplate)
+	g.collectSecretInfo(ctx, rt, "secrets.json", catDir)
+	g.collectVolumeInfo(ctx, rt, "pvcs.json", catDir)
 	collectCatalogCredentials(ctx, g.sanitizer, catDir)
 }
 
-// collectWorkerArtifacts gathers data for the worker infrastructure (into worker/pods/).
+// collectWorkerArtifacts gathers data for the worker infrastructure (into worker/pods/, worker/secrets, worker/volumes).
 func (g *openshiftGatherer) collectWorkerArtifacts(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, outDir string) {
+	logger.InfolnCtx(ctx, "Collecting worker artifacts…")
+
 	workerDir := filepath.Join(outDir, "worker")
+	if err := os.MkdirAll(workerDir, dirPerm); err != nil {
+		logger.WarningfCtx(ctx, "Failed to create worker directory: %v\n", err)
+
+		return
+	}
+
 	g.collectPodsByTemplate(ctx, rt, workerDir, workerConstants.WorkerAppTemplate)
+	g.collectSecretInfo(ctx, rt, "secrets.json", workerDir)
+	g.collectVolumeInfo(ctx, rt, "pvcs.json", workerDir)
 }
 
 // collectPodsByTemplate lists all pods belonging to a given template in the namespace
