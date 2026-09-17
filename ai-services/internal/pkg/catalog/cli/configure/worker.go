@@ -49,8 +49,7 @@ func RegisterLocalWorker(ctx context.Context, c *catalogclient.Client) (string, 
 //  2. The catalog DB has a completed (non-pending) registration row for "Local"
 //     — Restore will find it on the next CommandStream attempt.
 //
-// secretExists is rt.SecretExists from either PodmanClient or OpenshiftClient;
-// passing the method directly avoids the need for a new interface.
+// secretExists is runtime specific method to check if the worker-mtls-encryption-secret exists.
 func CheckLocalWorkerSkip(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (skip bool, err error) {
 	exists, err := secretExists(ctx, workerconstants.WorkerMTLSSecretName)
 	if err != nil {
@@ -80,8 +79,7 @@ func CheckLocalWorkerSkip(ctx context.Context, secretExists func(context.Context
 // are met (valid on-disk credentials + a completed catalog registration),
 // signalling to the caller that the worker will reconnect without re-registering.
 //
-// secretExists is rt.SecretExists from either PodmanClient or OpenshiftClient;
-// passing the method directly avoids the need for a new interface.
+// secretExists is runtime specific method to check if the worker-mtls-encryption-secret exists.
 func ResolveLocalWorkerToken(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (string, error) {
 	skip, err := CheckLocalWorkerSkip(ctx, secretExists, c)
 	if err != nil {
