@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useDeploymentDatasourceSupport } from "./hooks/useDeploymentDatasourceSupport";
 import {
   Grid,
   Column,
@@ -58,6 +59,14 @@ const DeploymentDetails = ({
   onNameUpdate,
 }: DeploymentDetailsProps) => {
   const [activeSection, setActiveSection] = useState("details");
+  const [deployedCatalogIds, setDeployedCatalogIds] = useState<
+    string[] | undefined
+  >(undefined);
+  const {
+    acceptsDatasource,
+    error: datasourceSupportError,
+    clearError: clearDatasourceSupportError,
+  } = useDeploymentDatasourceSupport(deploymentSource, deployedCatalogIds);
   const [resources, setResources] = useState<
     DeploymentDetailsType["resources"]
   >([]);
@@ -189,6 +198,11 @@ const DeploymentDetails = ({
         }, {});
 
         const deploymentServices = applicationDetailsResponse.data.services;
+
+        setDeployedCatalogIds(
+          deploymentServices.map((s) => s.catalog_id).filter(Boolean),
+        );
+
         const isDeploymentCertified =
           deployment.type === "Digital Assistant"
             ? deploymentServices.length > 0 &&
@@ -402,6 +416,16 @@ const DeploymentDetails = ({
           className={styles.toastNotification}
         />
       )}
+      {datasourceSupportError && (
+        <ToastNotification
+          kind="error"
+          title="Failed to determine data sources support"
+          subtitle={datasourceSupportError}
+          timeout={5000}
+          onClose={clearDatasourceSupportError}
+          className={styles.toastNotification}
+        />
+      )}
       <div>
         <PageHeader
           breadcrumbs={[
@@ -467,7 +491,7 @@ const DeploymentDetails = ({
               >
                 Integration endpoints
               </SideNavLink>
-              {deployment.type === "Digital Assistants" && (
+              {acceptsDatasource && (
                 <SideNavLink
                   isActive={activeSection === "datasources"}
                   onClick={() => setActiveSection("datasources")}
@@ -794,10 +818,9 @@ const DeploymentDetails = ({
             </Grid>
           )}
 
-          {activeSection === "datasources" &&
-            deployment.type === "Digital Assistants" && (
-              <ApplicationDatasourcesTable applicationId={deployment.id} />
-            )}
+          {activeSection === "datasources" && acceptsDatasource && (
+            <ApplicationDatasourcesTable applicationId={deployment.id} />
+          )}
 
           {activeSection === "integration" && (
             <Grid className={styles.servicesGrid}>
