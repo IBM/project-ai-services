@@ -126,9 +126,16 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
+	// Wait for Caddy's TLS layer to be ready for the catalog API before attempting login.
+	// Route registration triggers a Caddy config reload that briefly interrupts
+	// TLS, causing "tls: internal error" if login is attempted immediately.
+	catalogAPIURL := routeURLs[catalogconstants.CatalogAPIRouteKey]
+	if err := caddy.WaitForTLSReady(ctx, catalogAPIURL); err != nil {
+		return fmt.Errorf("catalog API TLS readiness check failed: %w", err)
+	}
+
 	// Login to the catalog API — this both verifies the admin password and gives
 	// us a client to reuse for local worker registration without a second login.
-	catalogAPIURL := routeURLs[catalogconstants.CatalogAPIRouteKey]
 	catalogClient, err := configure.LoginToCatalog(ctx, catalogAPIURL, adminPassword)
 	if err != nil {
 		return fmt.Errorf("admin password verification failed: %w", err)

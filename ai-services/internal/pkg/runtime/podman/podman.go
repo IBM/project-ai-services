@@ -11,8 +11,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/go-resty/resty/v2"
-
 	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/bindings"
 	"github.com/containers/podman/v5/pkg/bindings/containers"
@@ -953,40 +951,6 @@ func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, _, _ string, _
 	logger.Errorf("unsupported method called!")
 
 	return "", fmt.Errorf("unsupported method")
-}
-
-// ─── HTTP proxy tunnel ────────────────────────────────────────────────────────
-
-// HTTPProxy makes an HTTP request to targetURL from the worker node and returns
-// the response to the control plane. The worker pod runs in the same Podman
-// network as the target pods, so pod-name DNS resolution works natively inside
-// the container without any host-side IP lookup.
-func (pc *PodmanClient) HTTPProxy(ctx context.Context, method, targetURL string, headers map[string]string, body []byte) (*types.HTTPProxyResponse, error) {
-	client := resty.New()
-
-	req := client.R().SetContext(ctx)
-	for k, v := range headers {
-		req.SetHeader(k, v)
-	}
-	if len(body) > 0 {
-		req.SetBody(body)
-	}
-
-	resp, err := req.Execute(method, targetURL)
-	if err != nil {
-		return nil, fmt.Errorf("HTTPProxy: execute request: %w", err)
-	}
-
-	respHeaders := make(map[string]string, len(resp.Header()))
-	for k := range resp.Header() {
-		respHeaders[k] = resp.Header().Get(k)
-	}
-
-	return &types.HTTPProxyResponse{
-		StatusCode: resp.StatusCode(),
-		Headers:    respHeaders,
-		Body:       resp.Body(),
-	}, nil
 }
 
 // WaitForInferenceServiceReady is a no-op for Podman — KServe InferenceServices

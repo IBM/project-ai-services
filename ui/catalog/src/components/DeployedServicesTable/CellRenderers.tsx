@@ -79,9 +79,16 @@ type CellRendererComponent = (
   props: CellRendererProps,
 ) => React.ReactElement | null;
 
+export const WorkerTypeCell = ({
+  value,
+}: CellRendererProps): React.ReactElement => {
+  return <span>{String(value ?? "")}</span>;
+};
+
 export const CELL_RENDERERS: Record<string, CellRendererComponent> = {
   actions: ActionCell,
   name: NameCell,
   status: StatusCell,
+  workerType: WorkerTypeCell,
   messages: MessageCell,
 };

@@ -337,6 +337,11 @@ func extractRouteIDsFromEndpoints(endpoints []map[string]any) map[string]bool {
 	routesToUnregister := make(map[string]bool)
 
 	for _, endpoint := range endpoints {
+		// Skip internal routes as they are not registered with Caddy
+		if endpointType, ok := endpoint["type"].(string); ok && endpointType == "internal" {
+			continue
+		}
+
 		urlStr, ok := endpoint["url"].(string)
 		if !ok {
 			continue

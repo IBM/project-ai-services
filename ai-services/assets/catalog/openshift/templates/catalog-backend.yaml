@@ -8,6 +8,7 @@ metadata:
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
 spec:
   replicas: 1
+  minReadySeconds: 10
   selector:
     matchLabels:
       ai-services.io/application: {{ .Release.Name }}
@@ -135,9 +136,9 @@ spec:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 30
-            timeoutSeconds: 5
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
             failureThreshold: 3
           volumeMounts:
             - name: catalog-bundles

@@ -471,6 +471,31 @@ func (r *Registry) WorkerNameByID(id uuid.UUID) (string, bool) {
 	return "", false
 }
 
+// WorkerInfoByID returns the name and runtime-type string for the given worker UUID.
+// It checks the live in-memory cache first; if the worker is disconnected it falls
+// back to the DB (when repo is available) so callers always get a useful name.
+// Returns ("", "") when the worker cannot be found in either source.
+func (r *Registry) WorkerInfoByID(ctx context.Context, id uuid.UUID) (name, runtimeType string) {
+	r.mu.RLock()
+	for _, entry := range r.workers {
+		if entry.DBID == id {
+			r.mu.RUnlock()
+
+			return entry.WorkerName, entry.RuntimeType
+		}
+	}
+	r.mu.RUnlock()
+
+	// Not in the live cache — try the DB for disconnected workers.
+	if r.repo != nil {
+		if w, err := r.repo.GetByID(ctx, id); err == nil && w != nil {
+			return w.Name, string(w.RuntimeType)
+		}
+	}
+
+	return "", ""
+}
+
 // IsWorkerConnected checks the in-memory cache first, then confirms status=ready
 // in the DB. Returns false if the worker is absent from the cache, not found in
 // the DB, or has any status other than ready.

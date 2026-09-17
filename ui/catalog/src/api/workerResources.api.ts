@@ -1,11 +1,16 @@
 import { api } from "@/api/axios";
 import { WORKERS_ENDPOINTS } from "@/constants/api-endpoints.constants";
+import { WORKER_RUNTIME_LABELS } from "@/constants/app.constants";
 import type {
   WorkerApiResponse,
   WorkerListResponse,
   WorkerRegisterResponse,
 } from "@/types/api.types";
 import type { WorkerResourceRow } from "@/components/WorkerResourcesTable/types";
+
+export async function deregisterWorker(id: string): Promise<void> {
+  await api.delete(WORKERS_ENDPOINTS.DEREGISTER_WORKER(id));
+}
 
 export function transformWorkerToRow(
   worker: WorkerApiResponse,
@@ -15,7 +20,9 @@ export function transformWorkerToRow(
     name: worker.name,
     status: worker.status,
     runtime_type: worker.runtime_type,
-    messages: "",
+    runtime_label:
+      WORKER_RUNTIME_LABELS[worker.runtime_type]?.short ?? worker.runtime_type,
+    message: worker.message ?? "",
     actions: "actions",
   };
 }

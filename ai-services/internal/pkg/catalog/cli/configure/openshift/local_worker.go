@@ -10,7 +10,6 @@ import (
 	runtimeOpenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/openshift"
-	workergateway "github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 )
 
@@ -61,24 +60,30 @@ func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient
 // shared configure.CheckLocalWorkerSkip and only handles the OpenShift-specific
 // gateway address construction.
 func resolveLocalWorkerRegistration(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, c *catalogclient.Client) (token, gatewayAddr string, err error) {
+	// For the co-located local worker on OpenShift, connect directly via the
+	// internal service DNS endpoint. This avoids routing out through the OpenShift
+	// router/external route. The internal service DNS name is already included in
+	// the gateway's TLS server certificate SANs.
+	gatewayAddr = fmt.Sprintf("%s:%d", workerconstants.OpenShiftGatewayServiceEndpoint, workerconstants.WorkerGatewayPort)
+
 	skip, err := configure.CheckLocalWorkerSkip(ctx, rt.SecretExists, c)
 	if err != nil {
 		return "", "", err
 	}
 
-	if !skip {
-		return configure.RegisterLocalWorker(ctx, c)
+	if skip {
+		// Both conditions met — skip registration, reuse existing credentials.
+		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
+
+		return "", gatewayAddr, nil
 	}
 
-	// Both conditions met — skip registration, reconstruct gateway address.
-	logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
-
-	host, err := workergateway.GatewayRouteHost(ctx)
+	token, err = configure.RegisterLocalWorker(ctx, c)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve worker gateway route: %w", err)
+		return "", "", err
 	}
 
-	return "", fmt.Sprintf("%s:%d", host, workerconstants.OpenShiftRoutePort), nil
+	return token, gatewayAddr, nil
 }
 
 // getCatalogAPIURL looks up the catalog-api OpenShift route and returns the

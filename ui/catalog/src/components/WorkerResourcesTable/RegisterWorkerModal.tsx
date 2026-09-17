@@ -17,6 +17,7 @@ export interface RegisterWorkerModalProps {
   workerName: string;
   token: string;
   gatewayAddress: string;
+  errorMessage?: string;
   onWorkerNameChange: (value: string) => void;
   onGenerateToken: () => void;
   onClose: () => void;
@@ -28,19 +29,21 @@ const RegisterWorkerModal = ({
   workerName,
   token,
   gatewayAddress,
+  errorMessage,
   onWorkerNameChange,
   onGenerateToken,
   onClose,
 }: RegisterWorkerModalProps) => {
   const isLoading = phase === "loading";
   const isSuccess = phase === "success";
+  const isError = phase === "error";
 
   const runCommand = useMemo(() => {
     if (!isSuccess) return "";
     const gateway = gatewayAddress || "<catalog-host>:9090";
     return [
       `ai-services worker join ${gateway} \\`,
-      "  --runtime <podman|openshift> \\",
+      '  --runtime "<podman|openshift>" \\',
       `  --token "${token}"`,
     ].join("\n");
   }, [isSuccess, token, gatewayAddress]);
@@ -75,6 +78,16 @@ const RegisterWorkerModal = ({
           invalidText="Enter a valid worker resource name"
           onChange={(e) => onWorkerNameChange(e.target.value)}
         />
+
+        {isError && (
+          <InlineNotification
+            kind="error"
+            title="Failed to register worker resource."
+            subtitle={errorMessage}
+            lowContrast
+            hideCloseButton
+          />
+        )}
 
         {!isSuccess && (
           <div className={styles.generateRow}>

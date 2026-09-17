@@ -10,7 +10,9 @@ interface UseResourcesResult {
 }
 
 // No caching, re-fetched on every mount intentionally — available resources reflect live cluster state.
-export const useResources = (): UseResourcesResult => {
+// Pass workerName to scope the query to a specific worker's available capacity.
+// undefined queries the local runtime (no ?worker= param sent).
+export const useResources = (workerName?: string): UseResourcesResult => {
   const [resources, setResources] = useState<ResourcesResponse | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState<boolean>(true);
   const [resourcesError, setResourcesError] = useState<string | null>(null);
@@ -18,7 +20,10 @@ export const useResources = (): UseResourcesResult => {
   useEffect(() => {
     let cancelled = false;
 
-    dedupe("fetchResources", () => fetchResources())
+    // Scope the dedupe key per worker so switching workers always fires a fresh fetch.
+    dedupe(`fetchResources:${workerName ?? "local"}`, () =>
+      fetchResources(workerName),
+    )
       .then((data) => {
         if (!cancelled) {
           setResources(data);
@@ -37,7 +42,7 @@ export const useResources = (): UseResourcesResult => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workerName]);
 
   return { resources, resourcesLoading, resourcesError };
 };

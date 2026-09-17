@@ -29,6 +29,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
+	"github.com/project-ai-services/ai-services/internal/pkg/httpproxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -366,7 +367,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 		if err := json.Unmarshal(p, &req); err != nil {
 			return nil, fmt.Errorf("decode http_proxy payload: %w", err)
 		}
-		result, err := rt.HTTPProxy(ctx, req.Method, req.TargetURL, req.Headers, req.Body)
+		result, err := httpproxy.Exec(ctx, req.Method, req.TargetURL, req.Headers, req.Body)
 		if err != nil {
 			return nil, err
 		}

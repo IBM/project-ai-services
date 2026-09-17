@@ -243,7 +243,15 @@ const DeployedServicesTable = ({
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: ["name", "status", "uptime", "messages", "service"],
+    searchFields: [
+      "name",
+      "status",
+      "uptime",
+      "workerResource",
+      "workerType",
+      "messages",
+      "service",
+    ],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
     fetchAllRows: async () => {
@@ -260,7 +268,15 @@ const DeployedServicesTable = ({
   const filteredRows = filterRowsBySearch<Record<string, unknown>>(
     state.rowsData as unknown as Record<string, unknown>[],
     state.search,
-    ["name", "status", "uptime", "messages", "service"],
+    [
+      "name",
+      "status",
+      "uptime",
+      "workerResource",
+      "workerType",
+      "messages",
+      "service",
+    ],
   ) as unknown as DeployedServicesRow[];
 
   const noApplications =

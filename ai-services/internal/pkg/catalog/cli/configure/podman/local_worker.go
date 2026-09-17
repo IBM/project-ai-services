@@ -62,19 +62,27 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 // shared configure.CheckLocalWorkerSkip and only handles the Podman-specific
 // gateway address construction.
 func resolveLocalWorkerRegistration(ctx context.Context, rt *podmanruntime.PodmanClient, c *catalogclient.Client, opts catalogUtils.PodmanConfigureOptions) (token, gatewayAddr string, err error) {
+	// For the co-located local worker on Podman, use the internal pod DNS name
+	// directly. This bypasses external DNS resolution and requires no /etc/hosts entries.
+	// The internal pod name (PodmanGatewayPodName) is already included in the gateway's TLS SANs.
+	gatewayAddr = fmt.Sprintf("%s:%d", workerconstants.PodmanGatewayPodName, opts.WorkerGatewayPort)
+
 	skip, err := configure.CheckLocalWorkerSkip(ctx, rt.SecretExists, c)
 	if err != nil {
 		return "", "", err
 	}
 
-	if !skip {
-		return configure.RegisterLocalWorker(ctx, c)
+	if skip {
+		// Both conditions met — skip registration, reuse existing credentials.
+		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
+
+		return "", gatewayAddr, nil
 	}
 
-	// Both conditions met — skip registration, reconstruct gateway address.
-	logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
+	token, err = configure.RegisterLocalWorker(ctx, c)
+	if err != nil {
+		return "", "", err
+	}
 
-	gatewayAddr = fmt.Sprintf("%s.%s:%d", workerconstants.WorkerGatewayName, opts.DomainName, opts.WorkerGatewayPort)
-
-	return "", gatewayAddr, nil
+	return token, gatewayAddr, nil
 }

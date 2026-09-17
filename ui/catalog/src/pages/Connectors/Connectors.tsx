@@ -16,7 +16,7 @@ const Connectors = () => {
   }, [initialize]);
 
   return (
-    <div className={styles.connectorsContainer}>
+    <div id="connectors-page-content" className={styles.connectorsContainer}>
       <PageHeader title="Connectors" />
       <DataSourceConnectorsTable
         onAdd={() => setIsAddModalOpen(true)}

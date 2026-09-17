@@ -9,13 +9,10 @@ import {
   Dropdown,
   Section,
   Heading,
-  Toggletip,
-  ToggletipButton,
-  ToggletipContent,
   Button,
 } from "@carbon/react";
 import { SidePanel } from "@carbon/ibm-products";
-import { ErrorFilled, Information } from "@carbon/icons-react";
+import { ErrorFilled } from "@carbon/icons-react";
 import {
   ACTION_TYPES,
   INITIAL_STATE,
@@ -33,30 +30,7 @@ import { transformToCreateDatasourcePayload } from "./datasourceTransform";
 import { useConnectorsStore } from "@/store/connectors.store";
 import styles from "./AddDataSourceModal.module.scss";
 
-/**
- * Field label with an optional Toggletip — clicking the info icon shows the field description.
- */
-const FieldLabel = ({
-  text,
-  description,
-}: {
-  text: string;
-  description?: string;
-}) => (
-  <div className={styles.labelWithInfo}>
-    <span>{text}</span>
-    {description && (
-      <Toggletip align="top">
-        <ToggletipButton label="Additional information">
-          <Information />
-        </ToggletipButton>
-        <ToggletipContent>
-          <p>{description}</p>
-        </ToggletipContent>
-      </Toggletip>
-    )}
-  </div>
-);
+import ConnectorFieldLabel from "./ConnectorFieldLabel";
 
 const AddDataSourceModal = ({
   open,
@@ -214,7 +188,7 @@ const AddDataSourceModal = ({
     const fieldId = `add-datasource-${field.key}`;
     const fieldError = fieldErrors[field.key];
     const labelNode = (
-      <FieldLabel text={field.label} description={field.description} />
+      <ConnectorFieldLabel text={field.label} description={field.description} />
     );
 
     switch (field.type) {
@@ -226,7 +200,10 @@ const AddDataSourceModal = ({
           <CheckboxGroup
             key={field.key}
             legendText={
-              <FieldLabel text={groupLabel} description={field.description} />
+              <ConnectorFieldLabel
+                text={groupLabel}
+                description={field.description}
+              />
             }
             className={styles.checkboxGroup}
           >

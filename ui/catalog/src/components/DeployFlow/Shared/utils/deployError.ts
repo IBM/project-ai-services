@@ -1,5 +1,8 @@
 // Extracts error message from deployment error responses
-export function extractDeployError(error: unknown): string {
+export function extractDeployError(
+  error: unknown,
+  fallback = "Failed to deploy application",
+): string {
   if (error && typeof error === "object") {
     const err = error as {
       response?: {
@@ -15,5 +18,5 @@ export function extractDeployError(error: unknown): string {
       return err.response.data.error;
     if (error instanceof Error && !err.response) return error.message;
   }
-  return "Failed to deploy application";
+  return fallback;
 }
