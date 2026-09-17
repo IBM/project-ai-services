@@ -19,6 +19,8 @@ AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.i
 
 For detailed platform-specific installation instructions, see [Installation Guide](docs/INSTALLATION.md).
 
+For a comprehensive reference of supported runtimes, operator channels, and system dependencies, see [Runtimes, Operators, and Dependencies Reference](docs/runtimes-and-operators-reference.md).
+
 ### Run the binary to get started
 
 ```bash

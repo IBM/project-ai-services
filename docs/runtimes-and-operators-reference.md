@@ -18,7 +18,7 @@ This section serves as an executive quick-reference for the core components and 
 | **vLLM (CPU-Only)** | Podman | `v0.28.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` |
 | **vLLM (CPU-Only)** | OpenShift | `v0.19.1` | `icr.io/ppc64le-oss/vllm-ppc64le:0.19.1` |
 | **IBM Spyre Operator** | OpenShift | `stable-v1.3` (v1.3.1) | Managed via Subscription |
-| **Red Hat OpenShift AI (RHOAI)** | OpenShift | `stable-3.4` (v3.4.2) | Managed via Subscription |
+| **Red Hat OpenShift AI (RHOAI)** | OpenShift | `stable-3.5` (v3.5.0) | Managed via Subscription |
 
 ---
 
@@ -33,15 +33,15 @@ All operators are declared in the AI Services prerequisites at `ai-services/asse
 | Operator Name | Subscription Key | Namespace | Channel | Starting CSV | Catalog Source | Source Namespace |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **IBM Spyre Operator** | `spyre-operator` | `spyre-operator` | `stable-v1.3` | `spyre-operator.v1.3.1` | `certified-operators` | `openshift-marketplace` |
-| **Red Hat OpenShift AI (RHODS)** | `rhods-operator` | `redhat-ods-operator` | `stable-3.4` | `rhods-operator.3.4.2` | `redhat-operators` | `openshift-marketplace` |
+| **Red Hat OpenShift AI (RHODS)** | `rhods-operator` | `redhat-ods-operator` | `stable-3.5` | `rhods-operator.3.5.0` | `redhat-operators` | `openshift-marketplace` |
 | **OpenShift Service Mesh 3.x** | `servicemeshoperator3` | `openshift-operators` | `stable` | *Latest stable* | `redhat-operators` | `openshift-marketplace` |
 | **Node Feature Discovery (NFD)** | `nfd` | `openshift-nfd` | `stable` | *Latest stable* | `redhat-operators` | `openshift-marketplace` |
 | **Secondary Scheduler** | `openshift-secondary-scheduler-operator` | `openshift-secondary-scheduler-operator` | `stable` | *Latest stable* | `redhat-operators` | `openshift-marketplace` |
 | **Cert-Manager** | `openshift-cert-manager-operator` | `cert-manager-operator` | `stable-v1` | *Latest stable* | `redhat-operators` | `openshift-marketplace` |
 
-### 2.2 Operator-Managed Operands and Custom Resources
+### 2.2 RHOAI/RHODS Operator-Managed Operands and Custom Resources
 
-Once the subscriptions are healthy, the following configuration operands are applied to initialize the AI serving stack:
+Once the subscriptions are healthy, the following Red Hat OpenShift AI (RHOAI / RHODS) operator-managed configuration operands and custom resources are applied to initialize the AI serving stack:
 
 1. **`DSCInitialization` (Data Science Initializer):**
    - Deploys `default-dsci` in `redhat-ods-applications` and `redhat-ods-monitoring`.
@@ -92,6 +92,21 @@ In rootless Podman deployments, direct container workloads are run by local user
 To secure the environment without disabling SELinux, a minimal SELinux security module is compiled and loaded into the kernel during bootstrap:
 - **Policy Module:** `spyre-device-plugin-selinux-minimal`
 - **Enforcement:** Restricts container workloads to the `vfio_device_t` type context while allowing safe socket and memory sharing.
+
+---
+
+## 4. Simultaneous Multithreading (SMT) Reference
+
+Simultaneous Multithreading (SMT) levels on IBM Power Systems (ppc64le) govern the number of hardware threads per physical core. SMT configurations are set at the host operating system level; the AI Services deployment processes and catalog applications **do not dynamically modify, override, or change the host LPAR SMT settings at runtime**.
+
+### 4.1 Podman Runtime (SMT=2 Recommended)
+- **Optimal SMT Level:** For local Podman-based deployments optimized for IBM Spyre card performance, the host LPAR is expected to run with **SMT=2** to minimize thread scheduling latency and optimize memory access.
+- **Verification:** The environment validator checks the SMT configuration of the host by reading `ppc64_cpu --smt`.
+- **System Service:** Under the Podman environment, a persistent systemd service `smtstate.service` is used to maintain the configured state across reboots without modifying it during container execution.
+
+### 4.2 OpenShift Runtime (SMT=8 / Default)
+- **Optimal SMT Level:** On Red Hat OpenShift, worker nodes generally run on the default operating system SMT level, which is **SMT-8** (providing maximum scheduling density for multi-tenant container workloads).
+- **Cluster Management:** SMT levels on OpenShift nodes are managed strictly at the host Operating System / MachineConfig level by the cluster administrator, ensuring the deployment layer never interferes with cluster-wide hardware policies.
 
 ---
 
