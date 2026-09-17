@@ -7,8 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
+	workeruninstallutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
 
 const (
@@ -36,6 +39,25 @@ func CheckWorkerContainerLogs(ctx context.Context, rt runtime.Runtime) error {
 		if err := pollPodLogs(ctx, rt, pod.Name, deadline); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// CheckLogsAndUninstall checks worker container logs and, on failure, runs Uninstall
+// to clean up all worker components before returning the combined error.
+func CheckLogsAndUninstall(ctx context.Context, rt runtime.Runtime) error {
+	if err := CheckWorkerContainerLogs(ctx, rt); err != nil {
+		logger.WarningfCtx(ctx, "Worker container logs indicate a failure uninstalling worker components...\n")
+
+		if uninstallErr := workeruninstall.Uninstall(ctx, workeruninstallutils.UninstallOptions{
+			RuntimeType: rt.Type(),
+			AutoYes:     true,
+		}); uninstallErr != nil {
+			return fmt.Errorf("%w; worker uninstall: %w", err, uninstallErr)
+		}
+
+		return err
 	}
 
 	return nil

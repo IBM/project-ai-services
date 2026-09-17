@@ -51,6 +51,10 @@ const (
 
 	// retryBackoffFactor is the exponential multiplier applied to the backoff duration.
 	retryBackoffFactor = 2
+
+	// retryMaxAttempts is the maximum number of reconnect attempts before
+	// giving up, even for transient errors.
+	retryMaxAttempts = 10
 )
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
@@ -188,6 +192,7 @@ func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.P
 // reconnecting.
 func runStreamLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, client workerpb.WorkerGatewayClient, workerName string) error {
 	backoff := retryBase
+	attempts := 0
 
 	for {
 		if ctx.Err() != nil {
@@ -211,7 +216,18 @@ func runStreamLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Prox
 				"and 'worker join' to reconnect: %w", err)
 		}
 
-		logger.WarningfCtx(ctx, "CommandStream disconnected (%v) — retrying in %s...\n", err, backoff)
+		// Non-transient errors will not resolve on their own — retrying would
+		// loop forever without any chance of recovery.
+		if !isTransient(err) {
+			return fmt.Errorf("worker join: permanent stream error, not retrying: %w", err)
+		}
+
+		attempts++
+		if attempts >= retryMaxAttempts {
+			return fmt.Errorf("CommandStream failed to connect after %d attempts, giving up: %w", attempts, err)
+		}
+
+		logger.WarningfCtx(ctx, "CommandStream disconnected (%v) — retrying in %s (attempt %d/%d)...\n", err, backoff, attempts, retryMaxAttempts)
 
 		select {
 		case <-ctx.Done():
@@ -391,6 +407,45 @@ func sendHeartbeat(stream grpc.BidiStreamingClient[workerpb.CommandResult, worke
 // isUnauthenticated reports whether err carries gRPC status Unauthenticated.
 func isUnauthenticated(err error) bool {
 	return status.Code(err) == codes.Unauthenticated
+}
+
+// isTransient reports whether a CommandStream error is worth retrying.
+//
+// Transient errors are temporary conditions that can resolve without operator
+// intervention:
+//
+//   - codes.Unavailable       — gateway pod restarting, network blip, or load
+//     balancer dropped the connection.
+//   - codes.DeadlineExceeded  — gateway was slow accepting the stream open.
+//   - codes.ResourceExhausted — gateway is rate-limiting or at max concurrent
+//     streams; backing off and retrying is the correct response.
+//   - codes.Internal          — gateway panicked mid-stream and closed it; a
+//     fresh stream to a healthy replica is likely to succeed.
+//
+// Permanent errors will not resolve without operator action and must not be
+// retried — doing so would loop forever:
+//
+//   - codes.PermissionDenied    — mTLS certificate was revoked or the gateway
+//     explicitly denied this worker identity.
+//   - codes.NotFound            — the CommandStream RPC does not exist at the
+//     given address (wrong gateway version or wrong address entirely).
+//   - codes.Unimplemented       — the WorkerGateway service is not registered
+//     on that server.
+//   - codes.FailedPrecondition  — gateway rejected the stream due to a logic
+//     precondition (e.g. worker not in an expected state).
+//   - codes.Unauthenticated     — handled separately by the caller via
+//     isUnauthenticated; included here for completeness.
+//   - io.EOF on stream open     — gateway accepted the TCP connection but
+//     closed the stream immediately on every attempt; will not self-heal.
+func isTransient(err error) bool {
+	switch status.Code(err) {
+	case codes.Unavailable,
+		codes.DeadlineExceeded,
+		codes.ResourceExhausted,
+		codes.Internal:
+		return true
+	}
+	return false
 }
 
 // Made with Bob
