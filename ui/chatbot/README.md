@@ -38,4 +38,5 @@ Open http://localhost:3010 to view the production build.
 
 ## Dependency Overrides
 
+- `proxy-addr`: `proxy-addr` is coming from `express` (its latest version `5.2.1` is used) which pins it at `^2.0.7`. An `overrides` entry is used to upgrade `proxy-addr` to `^2.0.8` to remediate CVE-2026-90711. This can be removed once upstream publishes a fixed version.
 - `qs`: `qs` is coming from `body-parser` (its latest version is used) which pins it at `6.15.2`, which in turn comes from `express` (also the latest available version). An `overrides` entry is used to upgrade `qs` to `^6.16.0` to remediate PVR0865005 / CVE-2026-82417. This can be removed once upstream publishes fixed versions.
