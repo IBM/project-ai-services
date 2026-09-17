@@ -1,7 +1,15 @@
 diff --git a/go.mod b/go.mod
-index 3230b47c..5d5a7178 100644
+index 3230b47c..2726b858 100644
 --- a/go.mod
 +++ b/go.mod
+@@ -1,6 +1,6 @@
+ module github.com/caddyserver/caddy/v2
+ 
+-go 1.25.1
++go 1.26.0
+ 
+ require (
+ 	github.com/BurntSushi/toml v1.6.0
 @@ -34,24 +34,24 @@ require (
  	go.opentelemetry.io/contrib/exporters/autoexport v0.68.0
  	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0
