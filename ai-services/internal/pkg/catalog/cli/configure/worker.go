@@ -75,6 +75,29 @@ func CheckLocalWorkerSkip(ctx context.Context, secretExists func(context.Context
 	return false, nil
 }
 
+// ResolveLocalWorkerToken decides whether to issue a new bootstrap token or
+// reuse existing credentials. It returns an empty token when skip conditions
+// are met (valid on-disk credentials + a completed catalog registration),
+// signalling to the caller that the worker will reconnect without re-registering.
+//
+// secretExists is rt.SecretExists from either PodmanClient or OpenshiftClient;
+// passing the method directly avoids the need for a new interface.
+func ResolveLocalWorkerToken(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (string, error) {
+	skip, err := CheckLocalWorkerSkip(ctx, secretExists, c)
+	if err != nil {
+		return "", err
+	}
+
+	if skip {
+		// Both conditions met — skip registration, reuse existing credentials.
+		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
+
+		return "", nil
+	}
+
+	return RegisterLocalWorker(ctx, c)
+}
+
 // ValidateSkipLocalWorker enforces that --skip-local-worker cannot be
 // changed on a re-run. It infers what the original run used from the catalog DB:
 //

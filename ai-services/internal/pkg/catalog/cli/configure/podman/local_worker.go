@@ -29,10 +29,15 @@ import (
 func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts catalogUtils.PodmanConfigureOptions, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	token, gatewayAddr, err := resolveLocalWorkerRegistration(ctx, rt, c, opts)
+	token, err := configure.ResolveLocalWorkerToken(ctx, rt.SecretExists, c)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
 	}
+
+	// For the co-located local worker on Podman, use the internal pod DNS name
+	// directly. This bypasses external DNS resolution and requires no /etc/hosts entries.
+	// The internal pod name (PodmanGatewayPodName) is already included in the gateway's TLS SANs.
+	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.PodmanGatewayPodName, opts.WorkerGatewayPort)
 
 	workerOpts := workertypes.PodmanWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
@@ -55,34 +60,4 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 	logger.InfolnCtx(ctx, "worker joined successfully.")
 
 	return nil
-}
-
-// resolveLocalWorkerRegistration decides whether to issue a new bootstrap token
-// or reuse existing credentials. It delegates the two-condition check to the
-// shared configure.CheckLocalWorkerSkip and only handles the Podman-specific
-// gateway address construction.
-func resolveLocalWorkerRegistration(ctx context.Context, rt *podmanruntime.PodmanClient, c *catalogclient.Client, opts catalogUtils.PodmanConfigureOptions) (token, gatewayAddr string, err error) {
-	// For the co-located local worker on Podman, use the internal pod DNS name
-	// directly. This bypasses external DNS resolution and requires no /etc/hosts entries.
-	// The internal pod name (PodmanGatewayPodName) is already included in the gateway's TLS SANs.
-	gatewayAddr = fmt.Sprintf("%s:%d", workerconstants.PodmanGatewayPodName, opts.WorkerGatewayPort)
-
-	skip, err := configure.CheckLocalWorkerSkip(ctx, rt.SecretExists, c)
-	if err != nil {
-		return "", "", err
-	}
-
-	if skip {
-		// Both conditions met — skip registration, reuse existing credentials.
-		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
-
-		return "", gatewayAddr, nil
-	}
-
-	token, err = configure.RegisterLocalWorker(ctx, c)
-	if err != nil {
-		return "", "", err
-	}
-
-	return token, gatewayAddr, nil
 }

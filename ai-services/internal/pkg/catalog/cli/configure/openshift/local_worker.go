@@ -34,10 +34,16 @@ const (
 func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	token, gatewayAddr, err := resolveLocalWorkerRegistration(ctx, rt, c)
+	token, err := configure.ResolveLocalWorkerToken(ctx, rt.SecretExists, c)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
 	}
+
+	// For the co-located local worker on OpenShift, connect directly via the
+	// internal service DNS endpoint. This avoids routing out through the OpenShift
+	// router/external route. The internal service DNS name is already included in
+	// the gateway's TLS server certificate SANs.
+	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.OpenShiftGatewayServiceEndpoint, workerconstants.WorkerGatewayPort)
 
 	opts := workertypes.OpenshiftWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
@@ -53,37 +59,6 @@ func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient
 	logger.InfolnCtx(ctx, "worker joined successfully.")
 
 	return nil
-}
-
-// resolveLocalWorkerRegistration decides whether to issue a new bootstrap token
-// or reuse existing credentials. It delegates the two-condition check to the
-// shared configure.CheckLocalWorkerSkip and only handles the OpenShift-specific
-// gateway address construction.
-func resolveLocalWorkerRegistration(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, c *catalogclient.Client) (token, gatewayAddr string, err error) {
-	// For the co-located local worker on OpenShift, connect directly via the
-	// internal service DNS endpoint. This avoids routing out through the OpenShift
-	// router/external route. The internal service DNS name is already included in
-	// the gateway's TLS server certificate SANs.
-	gatewayAddr = fmt.Sprintf("%s:%d", workerconstants.OpenShiftGatewayServiceEndpoint, workerconstants.WorkerGatewayPort)
-
-	skip, err := configure.CheckLocalWorkerSkip(ctx, rt.SecretExists, c)
-	if err != nil {
-		return "", "", err
-	}
-
-	if skip {
-		// Both conditions met — skip registration, reuse existing credentials.
-		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
-
-		return "", gatewayAddr, nil
-	}
-
-	token, err = configure.RegisterLocalWorker(ctx, c)
-	if err != nil {
-		return "", "", err
-	}
-
-	return token, gatewayAddr, nil
 }
 
 // getCatalogAPIURL looks up the catalog-api OpenShift route and returns the
