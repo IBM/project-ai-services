@@ -599,16 +599,31 @@ class TestSSHConnectorConfig:
         )
         assert cfg.allowed_extensions == [".pdf"]
 
-    def test_extra_fields_ignored(self):
-        """model_config extra='ignore' — unknown keys must not raise."""
+    def test_extra_fields_forbidden(self):
+        """model_config extra='forbid' — unknown keys (e.g. 'password') must raise."""
+        import pytest
+        from pydantic import ValidationError
         from digitize.connectors.scanners.config import SSHConnectorConfig
-        cfg = SSHConnectorConfig.model_validate({
-            "host": "h",
-            "username": "u",
-            "private_key": _FAKE_PEM,
-            "unknown_field": "should_be_ignored",
-        })
-        assert cfg.host == "h"
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SSHConnectorConfig.model_validate({
+                "host": "h",
+                "username": "u",
+                "private_key": _FAKE_PEM,
+                "unknown_field": "should_be_rejected",
+            })
+
+    def test_password_field_is_rejected(self):
+        """Submitting a 'password' field must raise — password auth is not supported."""
+        import pytest
+        from pydantic import ValidationError
+        from digitize.connectors.scanners.config import SSHConnectorConfig
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+            SSHConnectorConfig.model_validate({
+                "host": "sftp.example.com",
+                "username": "sync_user",
+                "private_key": _FAKE_PEM,
+                "password": "hunter2",
+            })
 
 
 # ---------------------------------------------------------------------------

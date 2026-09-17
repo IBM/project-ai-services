@@ -98,6 +98,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   isLoadingLlmModels = false,
   onComponentError,
   runtime = DEFAULT_RUNTIME,
+  serviceSchema = null,
 }) => {
   const { resources, resourcesLoading, resourcesError } = useResources(
     formData.workerName,
@@ -353,7 +354,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
         description: serviceDescription ?? "",
         fields: serviceFields,
         inferenceComponent: inferenceComponent ?? null,
-        serviceSchema: null,
+        serviceSchema: serviceSchema ?? null,
         llmModelsWithProviders: inferenceModels,
       },
     ];
@@ -365,6 +366,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     serviceFields,
     inferenceComponent,
     inferenceModels,
+    serviceSchema,
   ]);
 
   return (

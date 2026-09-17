@@ -9,6 +9,18 @@ When the variable is absent (e.g. in tests), operations raise RuntimeError.
 
 Ciphertext wire format (stored as base64):
     base64( nonce[12] || tag[16] || ciphertext )
+
+Allowlist design
+----------------
+Rather than enumerating secret field *names* to encrypt/strip (which silently
+leaks any credential field not on the list), both protections use an allowlist
+of *safe, non-secret* fields that are permitted in API responses and stored
+unencrypted.  Any field not on the allowlist is:
+  - encrypted before being written to the database, and
+  - omitted from every API response.
+
+Adding a new connector type: add its safe fields to ``_SAFE_FIELDS``.
+Any field outside that set is treated as a secret automatically.
 """
 
 import base64
@@ -21,11 +33,14 @@ from common.misc_utils import get_logger
 
 logger = get_logger("connector_encryption")
 
-# Secret fields per connector type that must be encrypted before storage
-# and stripped before API responses.
-_SECRET_FIELDS: dict[str, set[str]] = {
-    "file_system": {"private_key"},
-    "object_storage": {"secret_access_key"},
+# Fields that are safe to store in plaintext and safe to return in API
+# responses for each connector type.  Every field NOT listed here is treated
+# as a secret: encrypted at rest and stripped from responses.
+_SAFE_FIELDS: dict[str, frozenset[str]] = {
+    "file_system": frozenset({"host", "port", "username", "remote_path", "allowed_extensions"}),
+    "object_storage": frozenset({"bucket_name", "access_key_id", "endpoint_url",
+                                 "prefix", "delimiter", "download_concurrency",
+                                 "verify_ssl", "allowed_extensions"}),
 }
 
 _NONCE_SIZE = 12  # 96-bit nonce recommended for GCM
@@ -73,17 +88,17 @@ def encrypt_secrets(
     connection_details: dict,
 ) -> dict:
     """
-    Return a copy of *connection_details* with secret fields encrypted.
+    Return a copy of *connection_details* with all non-safe fields encrypted.
 
-    Only the fields listed in _SECRET_FIELDS for the given connector type
-    are touched; all other fields are passed through unchanged.
+    Fields listed in ``_SAFE_FIELDS`` for the connector type are stored
+    verbatim; every other field is AES-256-GCM encrypted before storage.
     """
     cipher = _get_cipher()
-    secret_fields = _SECRET_FIELDS.get(connector_type, set())
+    safe = _SAFE_FIELDS.get(connector_type, frozenset())
     result = dict(connection_details)
-    for field in secret_fields:
-        if field in result and result[field] is not None:
-            result[field] = _encrypt_value(cipher, str(result[field]))
+    for field, value in connection_details.items():
+        if field not in safe and value is not None:
+            result[field] = _encrypt_value(cipher, str(value))
     return result
 
 
@@ -92,15 +107,15 @@ def decrypt_secrets(
     connection_details: dict,
 ) -> dict:
     """
-    Return a copy of *connection_details* with secret fields decrypted.
+    Return a copy of *connection_details* with all non-safe fields decrypted.
     """
     cipher = _get_cipher()
-    secret_fields = _SECRET_FIELDS.get(connector_type, set())
+    safe = _SAFE_FIELDS.get(connector_type, frozenset())
     result = dict(connection_details)
-    for field in secret_fields:
-        if field in result and result[field] is not None:
+    for field, value in connection_details.items():
+        if field not in safe and value is not None:
             try:
-                result[field] = _decrypt_value(cipher, result[field])
+                result[field] = _decrypt_value(cipher, value)
             except Exception as exc:
                 logger.error(
                     f"Failed to decrypt field {field!r} for connector type {connector_type!r}: {exc}",
@@ -110,15 +125,18 @@ def decrypt_secrets(
     return result
 
 
-def strip_secrets(connector_type: str, connection_details: dict) -> dict:
+def safe_connection_details(connector_type: str, connection_details: dict) -> dict:
     """
-    Return a copy of *connection_details* with all secret fields removed.
+    Return a copy of *connection_details* containing only the fields that are
+    safe to expose in an API response (i.e. those on the allowlist).
 
-    Used for safe API responses — ensures private keys / secrets are never
-    returned to callers.
+    Any field not explicitly listed in ``_SAFE_FIELDS`` for the connector type
+    is omitted — including credentials that may have been stored by older
+    versions of this service.  For unknown connector types every field is
+    omitted, which is the safe default.
     """
-    secret_fields = _SECRET_FIELDS.get(connector_type, set())
-    return {k: v for k, v in connection_details.items() if k not in secret_fields}
+    safe = _SAFE_FIELDS.get(connector_type, frozenset())
+    return {k: v for k, v in connection_details.items() if k in safe}
 
 
 def merge_and_encrypt_partial(
@@ -128,18 +146,18 @@ def merge_and_encrypt_partial(
 ) -> dict:
     """
     Merge *partial_update* into *existing_encrypted* at the key level,
-    re-encrypting any secret fields found in *partial_update*.
+    re-encrypting any non-safe fields found in *partial_update*.
 
     Keys absent from *partial_update* are preserved from *existing_encrypted*
     as-is (already encrypted). Only the supplied keys are overwritten.
 
-    Returns the merged dict (all secret fields encrypted).
+    Returns the merged dict (all non-safe fields encrypted).
     """
     cipher = _get_cipher()
-    secret_fields = _SECRET_FIELDS.get(connector_type, set())
+    safe = _SAFE_FIELDS.get(connector_type, frozenset())
     result = dict(existing_encrypted)
     for key, value in partial_update.items():
-        if key in secret_fields and value is not None:
+        if key not in safe and value is not None:
             result[key] = _encrypt_value(cipher, str(value))
         else:
             result[key] = value
