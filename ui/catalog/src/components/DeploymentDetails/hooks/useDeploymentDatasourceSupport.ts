@@ -27,20 +27,13 @@ export function useDeploymentDatasourceSupport(
   const selectedArchitectureId = useDeployStore(
     (s) => s.selectedArchitectureId,
   );
-  // Select via hook so React is aware of these dependencies, then hold in refs
-  // so the main effect's dependency array doesn't re-fire on unrelated store updates.
-  const getDeployOptions = useDeployStore((s) => s.getDeployOptions);
-  const getServiceDeployOptions = useServiceDeployStore(
-    (s) => s.getServiceDeployOptions,
+
+  const getDeployOptionsRef = useRef(
+    useDeployStore.getState().getDeployOptions,
   );
-  const getDeployOptionsRef = useRef(getDeployOptions);
-  const getServiceDeployOptionsRef = useRef(getServiceDeployOptions);
-  useEffect(() => {
-    getDeployOptionsRef.current = getDeployOptions;
-  }, [getDeployOptions]);
-  useEffect(() => {
-    getServiceDeployOptionsRef.current = getServiceDeployOptions;
-  }, [getServiceDeployOptions]);
+  const getServiceDeployOptionsRef = useRef(
+    useServiceDeployStore.getState().getServiceDeployOptions,
+  );
   const [acceptsDatasource, setAcceptsDatasource] = useState<
     boolean | undefined
   >(undefined);
@@ -136,7 +129,7 @@ export function useDeploymentDatasourceSupport(
 
     return () => {
       cancelled = true;
-      // Reset the in-flight guard so a re-mount
+      // Reset the in-flight guard
       fetchedKeyRef.current = null;
     };
   }, [isDA, selectedArchitectureId, catalogIds]);
