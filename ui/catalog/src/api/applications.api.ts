@@ -5,7 +5,9 @@ import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
 } from "@/constants/api-endpoints.constants";
+import { API_BASE_URL } from "@/constants/env.constants";
 import { COMPONENT_TYPES } from "@/constants";
+import { WORKER_RUNTIME_LABELS } from "@/constants/app.constants";
 import type {
   ArchitectureSummary,
   ServiceSummary,
@@ -108,6 +110,23 @@ export async function fetchServiceParams(
     DIGITAL_ASSISTANTS_ENDPOINTS.SERVICE_PARAMS(serviceId),
     { params: runtime ? { runtime } : undefined },
   );
+  return response.data;
+}
+
+// Fetches a service-level schema from a direct URL path declared in deployOptions.schema.
+// Normalises the path by stripping the API_BASE_URL prefix if present, since axios
+// already sets baseURL and would double-prefix it otherwise.
+// Trailing slash on API_BASE_URL is stripped before comparison so both "/api/v1"
+// and "/api/v1/" produce the same base and correctly normalise the path.
+export async function fetchServiceSchemaParams(
+  schemaPath: string,
+): Promise<ProviderSchema> {
+  const base = API_BASE_URL.replace(/\/$/, "");
+  const normalizedPath =
+    schemaPath.startsWith(base + "/") || schemaPath === base
+      ? schemaPath.slice(base.length)
+      : schemaPath;
+  const response = await api.get<ProviderSchema>(normalizedPath);
   return response.data;
 }
 
@@ -346,6 +365,11 @@ export function transformApplicationToRow(
     status: app.status as DigitalAssistantRow["status"],
     type: app.type,
     uptime: calculateUptime(app.created_at),
+    workerResource: app.worker?.name ?? "",
+    workerType:
+      WORKER_RUNTIME_LABELS[app.worker?.runtime_type ?? ""]?.short ??
+      app.worker?.runtime_type ??
+      "",
     messages: app.status === "Running" ? "" : app.message || "",
     actions: "actions",
     children: app.services.map((service) => ({
@@ -353,6 +377,8 @@ export function transformApplicationToRow(
       name: `${service.type} (service)`,
       status: service.status as DigitalAssistantRow["status"],
       uptime: "",
+      workerResource: "",
+      workerType: "",
       messages: "",
       actions: "actions",
     })),
@@ -369,6 +395,11 @@ export function transformDeployedServiceToRow(
     status: app.status as DeployedServicesRow["status"],
     type: app.type,
     uptime: calculateUptime(app.created_at),
+    workerResource: app.worker?.name ?? "",
+    workerType:
+      WORKER_RUNTIME_LABELS[app.worker?.runtime_type ?? ""]?.short ??
+      app.worker?.runtime_type ??
+      "",
     service: app.type || "",
     messages: app.message || "",
     actions: "actions",

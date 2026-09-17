@@ -13,7 +13,7 @@ Covers:
 import uuid
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -127,12 +127,36 @@ class ConnectorCreateRequest(BaseModel):
                     "host": "sftp.example.com",
                     "port": 22,
                     "username": "sync_user",
-                    "password": "secret_password",
+                    "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----",
                     "remote_path": "/exports",
                 },
             }
         }
     }
+
+    @model_validator(mode="after")
+    def validate_connection_details_schema(self) -> "ConnectorCreateRequest":
+        """Validate connection_details against the typed config for the connector type.
+
+        Ensures that invalid fields (e.g. 'password' on a file_system connector)
+        are rejected at the API boundary with a clear 422, before anything is
+        stored or encrypted.
+        """
+        from digitize.connectors.scanners.config import S3ConnectorConfig, SSHConnectorConfig
+        try:
+            if self.type == "file_system":
+                SSHConnectorConfig.model_validate(self.connection_details)
+            elif self.type == "object_storage":
+                S3ConnectorConfig.model_validate(self.connection_details)
+            else:
+                raise ValueError(
+                    f"No schema validator registered for connector type {self.type!r}"
+                )
+        except ValidationError as exc:
+            raise ValueError(
+                f"Invalid connection_details for connector type {self.type!r}: {exc}"
+            ) from exc
+        return self
 
     @field_validator("allowed_extensions")
     @classmethod

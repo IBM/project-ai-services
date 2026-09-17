@@ -9,6 +9,10 @@ ConnectorCreateRequest
   - None connector_id is accepted (auto-generated on server side)
   - invalid connector_id raises ValidationError
   - all required fields (connector_name, type, allowed_extensions, connection_details)
+  - file_system connection_details validated against SSHConnectorConfig
+  - object_storage connection_details validated against S3ConnectorConfig
+  - password field on file_system raises ValidationError at parse time
+  - extra field on file_system raises ValidationError at parse time
 
 ConnectorUpdateRequest
   - all fields are optional (empty body accepted)
@@ -112,54 +116,87 @@ class TestConnectorError:
 # ConnectorCreateRequest
 # ---------------------------------------------------------------------------
 
+_FAKE_PEM = "-----BEGIN OPENSSH PRIVATE KEY-----\nfakekey\n-----END OPENSSH PRIVATE KEY-----"
+
+_VALID_SSH_DETAILS = {
+    "host": "sftp.example.com",
+    "username": "sync_user",
+    "private_key": _FAKE_PEM,
+    "remote_path": "/exports",
+}
+
+_VALID_S3_DETAILS = {
+    "bucket_name": "my-bucket",
+    "access_key_id": "AKID",
+    "secret_access_key": "SECRET",
+    "endpoint_url": "https://s3.us-east-1.amazonaws.com",
+}
+
+
 class TestConnectorCreateRequest:
-    def _valid_payload(self, **overrides):
+    def _ssh_payload(self, **overrides):
         base = {
             "name": "my-connector",
             "type": "file_system",
             "allowed_extensions": [".pdf", ".docx"],
-            "connection_details": {"bucket": "my-bucket"},
+            "connection_details": dict(_VALID_SSH_DETAILS),
         }
         base.update(overrides)
         return base
 
-    def test_valid_payload_accepted(self):
-        req = ConnectorCreateRequest(**self._valid_payload())
+    def _s3_payload(self, **overrides):
+        base = {
+            "name": "my-s3-connector",
+            "type": "object_storage",
+            "allowed_extensions": [".pdf"],
+            "connection_details": dict(_VALID_S3_DETAILS),
+        }
+        base.update(overrides)
+        return base
+
+    def test_valid_ssh_payload_accepted(self):
+        req = ConnectorCreateRequest(**self._ssh_payload())
         assert req.name == "my-connector"
+        assert req.type == "file_system"
+
+    def test_valid_s3_payload_accepted(self):
+        req = ConnectorCreateRequest(**self._s3_payload())
+        assert req.name == "my-s3-connector"
+        assert req.type == "object_storage"
 
     def test_none_id_accepted(self):
-        req = ConnectorCreateRequest(**self._valid_payload(id=None))
+        req = ConnectorCreateRequest(**self._ssh_payload(id=None))
         assert req.id is None
 
     def test_valid_uuid_id_accepted(self):
         uid = "123e4567-e89b-12d3-a456-426614174000"
-        req = ConnectorCreateRequest(**self._valid_payload(id=uid))
+        req = ConnectorCreateRequest(**self._ssh_payload(id=uid))
         assert req.id == uid
 
     def test_invalid_id_raises(self):
         with pytest.raises(ValidationError, match="valid UUID"):
-            ConnectorCreateRequest(**self._valid_payload(id="not-a-uuid"))
+            ConnectorCreateRequest(**self._ssh_payload(id="not-a-uuid"))
 
     def test_missing_name_raises(self):
-        payload = self._valid_payload()
+        payload = self._ssh_payload()
         del payload["name"]
         with pytest.raises(ValidationError):
             ConnectorCreateRequest(**payload)
 
     def test_missing_type_raises(self):
-        payload = self._valid_payload()
+        payload = self._ssh_payload()
         del payload["type"]
         with pytest.raises(ValidationError):
             ConnectorCreateRequest(**payload)
 
     def test_missing_allowed_extensions_raises(self):
-        payload = self._valid_payload()
+        payload = self._ssh_payload()
         del payload["allowed_extensions"]
         with pytest.raises(ValidationError):
             ConnectorCreateRequest(**payload)
 
     def test_missing_connection_details_raises(self):
-        payload = self._valid_payload()
+        payload = self._ssh_payload()
         del payload["connection_details"]
         with pytest.raises(ValidationError):
             ConnectorCreateRequest(**payload)
@@ -167,8 +204,42 @@ class TestConnectorCreateRequest:
     def test_id_string_coerced(self):
         """A valid UUID passed as a stringified UUID object must be accepted."""
         uid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        req = ConnectorCreateRequest(**self._valid_payload(id=str(uid)))
+        req = ConnectorCreateRequest(**self._ssh_payload(id=str(uid)))
         assert req.id == uid
+
+    # ------------------------------------------------------------------
+    # connection_details schema validation
+    # ------------------------------------------------------------------
+
+    def test_file_system_password_field_rejected(self):
+        """password is not a valid field for file_system — must raise at parse time."""
+        bad_details = {**_VALID_SSH_DETAILS, "password": "hunter2"}
+        with pytest.raises(ValidationError, match="Invalid connection_details"):
+            ConnectorCreateRequest(**self._ssh_payload(connection_details=bad_details))
+
+    def test_file_system_extra_field_rejected(self):
+        """Any unrecognised field on file_system must raise at parse time."""
+        bad_details = {**_VALID_SSH_DETAILS, "api_token": "tok"}
+        with pytest.raises(ValidationError, match="Invalid connection_details"):
+            ConnectorCreateRequest(**self._ssh_payload(connection_details=bad_details))
+
+    def test_file_system_missing_required_field_rejected(self):
+        """Omitting a required field (private_key) must raise at parse time."""
+        bad_details = {"host": "sftp.example.com", "username": "u", "remote_path": "/"}
+        with pytest.raises(ValidationError, match="Invalid connection_details"):
+            ConnectorCreateRequest(**self._ssh_payload(connection_details=bad_details))
+
+    def test_object_storage_extra_field_rejected(self):
+        """Any unrecognised field on object_storage must raise at parse time."""
+        bad_details = {**_VALID_S3_DETAILS, "password": "oops"}
+        with pytest.raises(ValidationError, match="Invalid connection_details"):
+            ConnectorCreateRequest(**self._s3_payload(connection_details=bad_details))
+
+    def test_object_storage_missing_bucket_name_rejected(self):
+        """bucket_name is required for object_storage."""
+        bad_details = {k: v for k, v in _VALID_S3_DETAILS.items() if k != "bucket_name"}
+        with pytest.raises(ValidationError, match="Invalid connection_details"):
+            ConnectorCreateRequest(**self._s3_payload(connection_details=bad_details))
 
 
 # ---------------------------------------------------------------------------

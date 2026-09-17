@@ -74,9 +74,14 @@ interface CellRendererProps {
 
 type CellRendererComponent = (props: CellRendererProps) => ReactElement | null;
 
+export const WorkerTypeCell = ({ value }: CellRendererProps): ReactElement => {
+  return <span>{String(value ?? "")}</span>;
+};
+
 export const CELL_RENDERERS: Record<string, CellRendererComponent> = {
   actions: ActionCell,
   name: NameCell,
   status: StatusCell,
+  workerType: WorkerTypeCell,
   messages: MessageCell,
 };

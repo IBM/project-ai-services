@@ -130,3 +130,36 @@ export function splitServiceParams(
 
   return { serviceBackendParams, inferenceCredentialParams };
 }
+
+/**
+ * Extracts all leaf-level required field keys from a JSON Schema.
+ * Handles both flat schemas and schemas wrapped in 1-level object properties (e.g., backend.properties).
+ */
+export function getRequiredFieldKeys(
+  schema?: { properties?: Record<string, unknown>; required?: string[] } | null,
+): string[] {
+  if (!schema?.properties) {
+    return Array.isArray(schema?.required) ? schema.required : [];
+  }
+
+  const requiredKeys: string[] = [];
+  const topRequired = new Set(schema.required || []);
+
+  for (const [key, propValue] of Object.entries(schema.properties)) {
+    const prop = propValue as {
+      type?: string;
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+
+    if (prop?.type === "object" && prop.properties) {
+      if (Array.isArray(prop.required)) {
+        requiredKeys.push(...prop.required);
+      }
+    } else if (topRequired.has(key)) {
+      requiredKeys.push(key);
+    }
+  }
+
+  return requiredKeys;
+}

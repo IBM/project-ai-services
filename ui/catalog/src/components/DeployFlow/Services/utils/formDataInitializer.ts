@@ -3,12 +3,15 @@ import type {
   ServiceConfig,
   ComponentConfig,
 } from "../../Shared/types";
-import type { ServiceDeployOptions } from "@/types/api.types";
+import type { ServiceDeployOptions, JSONSchema } from "@/types/api.types";
 import { DEFAULT_FORM_DATA } from "../../Shared/utils/formData";
+import { parseSchema, getFieldDefault } from "@/utils/schemaParser";
 
 export const initializeFormData = (
   deployOptions: ServiceDeployOptions,
   selectedServiceId: string,
+  _componentModels?: Record<string, unknown>,
+  serviceSchema?: JSONSchema | null,
 ): DeployFormData => {
   const formData: DeployFormData = {
     name: "Service deployment",
@@ -28,20 +31,35 @@ export const initializeFormData = (
     params: {},
   };
 
-  // Add ALL components to the service config (no filtering)
-  // The API returns only the components needed for this specific service
-  deployOptions.components?.forEach((component) => {
-    const defaultProvider =
-      component.providers.find((provider) => provider.default === true) ||
-      component.providers[0];
+  const hasComponents = (deployOptions.components?.length ?? 0) > 0;
 
-    // Default model seeding is handled reactively in ServicesStepOne via useEffect
-    const componentConfig: ComponentConfig = {
-      providerId: defaultProvider?.id || "",
-      params: {},
-    };
-    serviceConfig.components[component.type] = componentConfig;
-  });
+  // Only iterate components when they exist (Scenarios A / C)
+  if (hasComponents) {
+    deployOptions.components?.forEach((component) => {
+      const defaultProvider =
+        component.providers.find((provider) => provider.default === true) ||
+        component.providers[0];
+
+      // Default model seeding is handled reactively in ServicesStepOne via useEffect
+      const componentConfig: ComponentConfig = {
+        providerId: defaultProvider?.id || "",
+        params: {},
+      };
+      serviceConfig.components[component.type] = componentConfig;
+    });
+  }
+
+  // Seed service-level params from schema defaults (Scenarios B / C)
+  if (serviceSchema) {
+    const fields = parseSchema(serviceSchema);
+    const defaultParams: Record<string, unknown> = {};
+    fields.forEach((field) => {
+      if (!field.uiOnly) {
+        defaultParams[field.key] = getFieldDefault(field);
+      }
+    });
+    serviceConfig.params = defaultParams;
+  }
 
   formData.services[selectedServiceId] = serviceConfig;
 

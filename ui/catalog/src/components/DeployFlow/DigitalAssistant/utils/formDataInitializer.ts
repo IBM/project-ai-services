@@ -3,18 +3,25 @@
  * Creates initial form data structure dynamically from deploy options API response
  */
 
-import type { DeployOptionsResponse } from "@/types/api.types";
+import type { DeployOptionsResponse, JSONSchema } from "@/types/api.types";
 import type {
   DeployFormData,
   ComponentConfig,
   ServiceConfig,
 } from "@/components/DeployFlow/Shared/types";
 import { DEFAULT_FORM_DATA } from "@/components/DeployFlow/Shared/utils/formData";
+import { parseSchema, getFieldDefault } from "@/utils/schemaParser";
 
-// Initializes form data structure from deploy options with default values
+// Initializes form data structure from deploy options with default values.
+// An optional serviceSchemas map (keyed by serviceId) is accepted so that
+// when schemas are already cached on re-open, their field defaults are seeded
+// immediately rather than waiting for DAStepTwo's reactive effect.
+// A service may have both components and a direct schema simultaneously — both
+// branches are handled independently (Scenario C).
 export function initializeFormData(
   deployOptions: DeployOptionsResponse,
   defaultName: string = "Digital assistant (copy)",
+  serviceSchemas?: Record<string, JSONSchema | null>,
 ): DeployFormData {
   // Initialize global components
   const globalComponents: Record<string, ComponentConfig> = {};
@@ -38,7 +45,7 @@ export function initializeFormData(
   deployOptions.services.forEach((service) => {
     const components: Record<string, ComponentConfig> = {};
 
-    // Initialize each component for the service
+    // Initialize each component for the service (independent of schema branch)
     service.components.forEach((component) => {
       const defaultProvider =
         component.providers.find((p) => p.default) || component.providers[0];
@@ -51,11 +58,24 @@ export function initializeFormData(
       }
     });
 
+    // Seed service-level params from schema defaults when already cached.
+    // This is independent of the components branch — both may run (Scenario C).
+    const schema = serviceSchemas?.[service.id];
+    const params: Record<string, unknown> = {};
+    if (schema) {
+      const fields = parseSchema(schema);
+      fields.forEach((field) => {
+        if (!field.uiOnly) {
+          params[field.key] = getFieldDefault(field);
+        }
+      });
+    }
+
     services[service.id] = {
       enabled: true,
       version: service.version || deployOptions.version,
       components,
-      params: {},
+      params,
     };
   });
 

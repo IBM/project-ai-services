@@ -8,8 +8,6 @@ import {
   NameCell as SharedNameCell,
 } from "@/components/Table/components/CellRenderers";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
-import { RUNTIME_TYPE_LABELS } from "@/constants/app.constants";
-
 export { StatusCell };
 
 interface CellRendererProps {
@@ -22,8 +20,13 @@ interface CellRendererProps {
 export const RuntimeTypeCell = ({
   value,
 }: CellRendererProps): React.ReactElement => {
-  const raw = String(value ?? "");
-  return <span>{RUNTIME_TYPE_LABELS[raw] ?? raw}</span>;
+  return <span>{String(value ?? "")}</span>;
+};
+
+export const MessageCell = ({
+  value,
+}: CellRendererProps): React.ReactElement => {
+  return <span>{String(value ?? "")}</span>;
 };
 
 export const NameCell = ({ value, rowId }: CellRendererProps) => (
@@ -52,6 +55,7 @@ type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
-  runtime_type: RuntimeTypeCell as RendererFn,
+  runtime_label: RuntimeTypeCell as RendererFn,
+  message: MessageCell as RendererFn,
   actions: ActionCell,
 };
