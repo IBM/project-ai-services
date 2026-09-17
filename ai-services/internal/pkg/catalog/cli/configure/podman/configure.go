@@ -50,17 +50,26 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	// Load SSL certificates into Caddy.
-	// When the cert secret was preserved by a previous --skip-cleanup uninstall and no
-	// new cert paths were supplied, the secret is already mounted inside the container;
-	// only the Caddy Admin API call is needed (no host-path validation).
-	// Otherwise load from the user-supplied host paths, or skip if none were provided.
-	if useExistingCert {
-		if err := caddyCtx.LoadCertificatesFromContainerPaths(ctx); err != nil {
+	// Load SSL certificates into Caddy when user-supplied paths are given.
+	// When useExistingCert is true the preserved caddy-data PVC already has an
+	// autosave that includes the load_files entry — Caddy resumes with the custom
+	// cert active, so no Admin API call is needed and triggering an unnecessary
+	// PATCH reload is avoided.
+	if !useExistingCert {
+		if err := caddyCtx.LoadSSLCertificates(ctx, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
 			return err
 		}
-	} else if err := caddyCtx.LoadSSLCertificates(ctx, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
-		return err
+	}
+
+	// When reusing the preserved cert (--skip-cleanup re-configure), the
+	// autosave routes carry the correct domain from the previous install.
+	// Query the live catalog-api route to recover it before RegisterCatalogRoutes
+	// sets DOMAIN_SUFFIX — otherwise ComputeDomainSuffix would have fallen back
+	// to the host IP and routes/WaitForTLSReady would use the wrong domain.
+	if useExistingCert {
+		if err := recoverDomainFromCaddy(ctx, caddyCtx); err != nil {
+			logger.Debugf("Could not recover domain from Caddy autosave routes: %v\n", err)
+		}
 	}
 
 	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword)
@@ -182,6 +191,33 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	return nil
 }
 
+// recoverDomainFromCaddy queries the live Caddy Admin API for the catalog-api
+// route and extracts its domain suffix, then updates caddyCtx. This is used
+// after --skip-cleanup re-configure when the autosave already has the correct
+// domain from the previous install but ComputeDomainSuffix had no cert paths
+// to work with and would have fallen back to the host IP.
+// Errors are non-fatal — the caller logs and continues with the host-IP domain.
+func recoverDomainFromCaddy(ctx context.Context, caddyCtx *caddy.Context) error {
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
+	if err != nil {
+		return err
+	}
+
+	route, err := proxyManager.GetRouteByID(ctx, "catalog-api")
+	if err != nil {
+		return err
+	}
+
+	// route.Domain is the full host (e.g. "catalog-api.powervm-spyre-pok.cis.ibm.net").
+	// Strip the "catalog-api." prefix to get the domain suffix.
+	const prefix = "catalog-api."
+	if strings.HasPrefix(route.Domain, prefix) {
+		caddyCtx.SetDomainSuffix(strings.TrimPrefix(route.Domain, prefix))
+	}
+
+	return nil
+}
+
 // resolveCertPaths returns the cert and key paths to use for template rendering.
 // When useExistingCert is true (the cert secret was preserved by --skip-cleanup
 // and no new paths were supplied), a non-empty sentinel is returned so the caddy
@@ -259,10 +295,18 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 }
 
 // readSSLContents reads and returns the PEM contents of the cert and key files.
-// Returns empty strings when either path is empty.
+// Returns the sentinel unchanged when useExistingCert is true — the caddy pod
+// template needs a non-empty sslCertContent value to render the /etc/secret/ssl
+// volume mount (the cert secret itself is already preserved and skipped by
+// existingResources, so the sentinel bytes never land in the secret).
+// Returns empty strings when either path is truly empty (no cert configured).
 func readSSLContents(certPath, keyPath string) (string, string, error) {
 	if certPath == "" || keyPath == "" {
 		return "", "", nil
+	}
+
+	if certPath == existingCertSentinel {
+		return existingCertSentinel, existingCertSentinel, nil
 	}
 
 	certBytes, keyBytes, _, err := utils.ReadAndParseCertificates(certPath, keyPath)
