@@ -17,10 +17,14 @@ RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz -o go.tar.
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
+COPY patches/ /tmp/patches/
+
 RUN set -eux; \
     git clone https://github.com/caddyserver/caddy.git /tmp/caddy; \
     cd /tmp/caddy; \
     git checkout ${CADDY_VERSION}; \
+    PATCH_FILE="/tmp/patches/caddy_${CADDY_VERSION}.patch"; \
+    if [ -f "${PATCH_FILE}" ]; then git apply "${PATCH_FILE}"; fi; \
     go build -o /usr/bin/caddy ./cmd/caddy; \
     cd /; \
     rm -rf /tmp/caddy; \
