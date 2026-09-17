@@ -277,7 +277,14 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 	// on a momentarily busy sender.
 	const sendBufSize = 32
 	sendCh := make(chan *workerpb.CommandResult, sendBufSize)
-	senderErrCh, senderDone := startSender(stream, sendCh)
+
+	// streamCtx is cancelled as soon as the sender goroutine exits (on stream
+	// error). This unblocks any dispatch goroutine that is blocked on
+	// sendCh <- result, preventing wg.Wait() from deadlocking inside drain.
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+
+	senderErrCh, senderDone := startSender(stream, sendCh, cancelStream)
 
 	var wg sync.WaitGroup
 	drain := makeDrainer(&wg, sendCh, senderDone, senderErrCh)
@@ -324,9 +331,16 @@ func recvLoop(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRout
 				result := d.Dispatch(ctx, rt, pr, c)
 				result.WorkerName = workerName
 
+				// Use streamCtx instead of ctx so that a sender-side stream
+				// error (which cancels streamCtx) also unblocks this goroutine.
+				// This prevents wg.Wait() from deadlocking in drain when the
+				// stream breaks before ctx is cancelled.
+				// Note: if streamCtx fires we do not send the result back.
+				// The control-plane side will time out / receive a disconnect
+				// error from Sender, so correctness is maintained.
 				select {
 				case sendCh <- result:
-				case <-ctx.Done():
+				case <-streamCtx.Done():
 				}
 			}(msg.cmd)
 		}
@@ -352,8 +366,10 @@ func makeDrainer(wg *sync.WaitGroup, sendCh chan *workerpb.CommandResult, sender
 }
 
 // startSender starts the dedicated stream.Send goroutine and returns its error
-// channel and done channel.
-func startSender(stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], sendCh <-chan *workerpb.CommandResult) (chan error, chan struct{}) {
+// channel and done channel. cancelStream is called when the sender exits on
+// error so dispatch goroutines waiting on streamCtx.Done() unblock immediately,
+// preventing wg.Wait() from deadlocking inside makeDrainer.
+func startSender(stream grpc.BidiStreamingClient[workerpb.CommandResult, workerpb.Command], sendCh <-chan *workerpb.CommandResult, cancelStream context.CancelFunc) (chan error, chan struct{}) {
 	senderErrCh := make(chan error, 1)
 	senderDone := make(chan struct{})
 
@@ -363,6 +379,9 @@ func startSender(stream grpc.BidiStreamingClient[workerpb.CommandResult, workerp
 		for result := range sendCh {
 			if err := stream.Send(result); err != nil {
 				senderErrCh <- fmt.Errorf("send result/heartbeat id=%s: %w", result.GetCommandId(), err)
+				// Cancel streamCtx so dispatch goroutines blocked on
+				// sendCh <- result unblock and wg.Wait() in drain can proceed.
+				cancelStream()
 
 				return
 			}
