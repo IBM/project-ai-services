@@ -15,41 +15,64 @@ import (
 )
 
 const (
-	inspectPollInterval = 10 * time.Second
+	defaultInspectPollInterval = 10 * time.Second
 )
 
-func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration) error {
+// WaitForContainerReadiness polls container health until a conclusive result is
+// available, the context is cancelled, or the hard deadline expires.
+//
+// Podman health states and how each is handled:
+//
+//   - ""          : no healthcheck configured → success (nothing to wait for).
+//   - "healthy"   : probe passed → success.
+//   - "unhealthy" : probe ran and failed (failureThreshold exhausted, or
+//     HealthcheckOnFailureAction triggered) → fail immediately, no retry.
+//   - "starting"  : no conclusive result yet — this covers both the
+//     initialDelaySeconds window before the first probe runs AND any period
+//     where the container has restarted (resetting health state back to
+//     "starting") and is waiting for the next probe cycle. Keep polling
+//     until the hard deadline is hit.
+//
+// pollInterval controls how often InspectContainer is called; pass 0 to use the default (10 s).
+func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, containerNameOrId string, timeout time.Duration, pollInterval time.Duration) error {
 	var containerStatus *types.Container
 	var err error
 
+	if pollInterval <= 0 {
+		pollInterval = defaultInspectPollInterval
+	}
+
+	// Single hard deadline covering all states, including "starting".
+	// This prevents the loop from hanging indefinitely if a container never
+	// leaves the starting/restarting cycle.
 	deadline := time.Now().Add(timeout)
-	timer := time.NewTimer(inspectPollInterval)
+	timer := time.NewTimer(pollInterval)
 	defer timer.Stop()
 
 	for {
-		// fetch the container status
 		containerStatus, err = runtime.InspectContainer(ctx, containerNameOrId)
 		if err != nil {
 			return fmt.Errorf("failed to check container status: %w", err)
 		}
 
-		healthStatus := containerStatus.Health
-
-		if healthStatus == "" {
+		switch containerStatus.Health {
+		case "":
+			// No healthcheck configured — consider the container ready.
 			return nil
+		case string(constants.Ready):
+			return nil
+		case string(constants.NotReady):
+			// A conclusive probe failure — no point waiting further.
+			return fmt.Errorf("container health check failed (status: %s)", containerStatus.Health)
 		}
 
-		if healthStatus == string(constants.Ready) {
-			return nil
-		}
-
-		// if deadline exceeds, stop the container readiness check
+		// "starting": no conclusive result yet. Apply the hard deadline so we
+		// cannot loop forever, then wait for the next probe cycle.
 		if time.Now().After(deadline) {
 			return fmt.Errorf("operation timed out waiting for container readiness")
 		}
 
-		// wait for next poll interval, but respect context cancellation
-		timer.Reset(inspectPollInterval)
+		timer.Reset(pollInterval)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -61,7 +84,7 @@ func WaitForContainerReadiness(ctx context.Context, runtime runtime.Runtime, con
 // WaitForContainersCreation waits until all the containers in the provided podID are created within the specified timeout.
 func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, podID string, expectedContainerCount int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	timer := time.NewTimer(inspectPollInterval)
+	timer := time.NewTimer(defaultInspectPollInterval)
 	defer timer.Stop()
 
 	for {
@@ -83,23 +106,13 @@ func WaitForContainersCreation(ctx context.Context, runtime runtime.Runtime, pod
 		}
 
 		// wait for next poll interval, but respect context cancellation
-		timer.Reset(inspectPollInterval)
+		timer.Reset(defaultInspectPollInterval)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
 		}
 	}
-}
-
-func FetchContainerStartPeriod(ctx context.Context, runtime runtime.Runtime, containerNameOrId string) (time.Duration, error) {
-	// fetch the container stats
-	containerStats, err := runtime.InspectContainer(ctx, containerNameOrId)
-	if err != nil {
-		return 0, fmt.Errorf("failed to check container stats: %w", err)
-	}
-
-	return containerStats.HealthcheckStartPeriod, nil
 }
 
 // ListSpyreCards lists all Spyre cards attached to the system.

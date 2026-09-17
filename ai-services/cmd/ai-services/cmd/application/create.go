@@ -544,7 +544,7 @@ func printNextSteps(ctx context.Context, app *catalogTypes.Application) error {
 	}
 
 	// Print the info command regardless of whether any service has next.md
-	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s --runtime %s`\n", application.Name, rt)
+	logger.Infof("\n- For detailed endpoint information, use: `ai-services application info %s`\n", application.Name)
 
 	return nil
 }

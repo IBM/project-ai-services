@@ -2,6 +2,7 @@ import type {
   ServiceDeployOptions,
   LLMOption,
   WorkerApiResponse,
+  JSONSchema,
 } from "@/types/api.types";
 
 import { SHARED_ACTION_TYPES } from "../Shared/types";
@@ -53,4 +54,5 @@ export interface StepProps extends BaseStepProps {
   workers?: WorkerApiResponse[];
   isLoadingWorkers?: boolean;
   refetchWorkers?: () => void;
+  serviceSchema?: JSONSchema | null;
 }

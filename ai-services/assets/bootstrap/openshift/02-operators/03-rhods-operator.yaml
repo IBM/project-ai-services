@@ -17,8 +17,8 @@ metadata:
   name: rhods-operator
   namespace: redhat-ods-operator
 spec:
-  channel: stable-3.4
+  channel: stable-3.5
   name: rhods-operator
   source: redhat-operators
   sourceNamespace: openshift-marketplace
-  startingCSV: rhods-operator.3.4.2
+  startingCSV: rhods-operator.3.5.0

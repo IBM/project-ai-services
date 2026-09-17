@@ -5,6 +5,7 @@ import type {
 import type {
   ServiceDeployOptions,
   ProviderSchema,
+  JSONSchema,
   ServiceDeploymentPayload,
   DeploymentComponent,
   DeploymentService,
@@ -13,6 +14,50 @@ import type {
 import { fetchProviderSchema } from "@/api/applications.api";
 import { COMPONENT_TYPES } from "@/constants";
 import { splitServiceParams } from "@/components/DeployFlow/Shared/utils/paramFilter";
+
+/**
+ * Re-nests a flat params object to match the structure of the given JSON Schema.
+ */
+function nestParamsBySchema(
+  flatParams: Record<string, unknown>,
+  schema: { properties?: Record<string, unknown> } | null | undefined,
+): Record<string, unknown> {
+  if (!schema?.properties || Object.keys(flatParams).length === 0) {
+    return flatParams;
+  }
+
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(flatParams)) {
+    let placed = false;
+    for (const [wrapperKey, wrapperProp] of Object.entries(schema.properties)) {
+      const prop = wrapperProp as
+        | {
+            type?: string;
+            properties?: Record<string, unknown>;
+          }
+        | undefined;
+      if (
+        prop?.type === "object" &&
+        prop.properties &&
+        key in prop.properties
+      ) {
+        if (!result[wrapperKey]) {
+          result[wrapperKey] = {};
+        }
+        (result[wrapperKey] as Record<string, unknown>)[key] = value;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      // Top-level key in schema (or not in schema) — keep flat
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
 
 /**
  * Extracts parameters with their defaults from a provider schema
@@ -118,6 +163,7 @@ export async function transformToDeploymentPayload(
   deployOptions: ServiceDeployOptions,
   cachedSchemas?: Record<string, ProviderSchema>,
   serviceId?: string | null,
+  serviceSchema?: JSONSchema | null,
 ): Promise<ServiceDeploymentPayload> {
   const services: DeploymentService[] = [];
 
@@ -151,6 +197,41 @@ export async function transformToDeploymentPayload(
   )) {
     if (!serviceConfig.enabled) continue;
 
+    const hasComponents = Object.keys(serviceConfig.components).length > 0;
+
+    // ── Scenario B / D: no provider components ──────────────────────────────
+    // Emit components:[] and attach params only when something was collected.
+    if (!hasComponents) {
+      const entry: DeploymentService = {
+        catalog_id: currentServiceId,
+        version: serviceConfig.version,
+        components: [],
+      };
+      if (
+        serviceConfig.params &&
+        Object.keys(serviceConfig.params).length > 0
+      ) {
+        entry.params = nestParamsBySchema(
+          serviceConfig.params as Record<string, unknown>,
+          serviceSchema,
+        );
+      }
+      // Attach datasource connectors if applicable
+      if (
+        deployOptions.accepts_datasource &&
+        formData.uploadFromSourceEnabled &&
+        formData.dataSources &&
+        formData.dataSources.length > 0
+      ) {
+        entry.connectors = formData.dataSources.map(
+          (id): ConnectorRef => ({ id, type: "datasource" }),
+        );
+      }
+      services.push(entry);
+      continue; // skip provider-component logic entirely
+    }
+
+    // ── Scenario A / C: has provider components ──────────────────────────────
     const inferenceComponentType =
       COMPONENT_TYPES.LLM in serviceConfig.components
         ? COMPONENT_TYPES.LLM
@@ -168,9 +249,12 @@ export async function transformToDeploymentPayload(
           ] ?? null)
         : null;
 
-    const { inferenceCredentialParams: credentialParams } = splitServiceParams(
+    const {
+      inferenceCredentialParams: credentialParams,
+      serviceBackendParams,
+    } = splitServiceParams(
       serviceConfig.params || {},
-      null,
+      serviceSchema ?? null,
       inferenceProviderSchema,
     );
 
@@ -205,6 +289,14 @@ export async function transformToDeploymentPayload(
       version: serviceConfig.version,
       components,
     };
+
+    // Scenario C: attach service-level schema params at the service level
+    if (Object.keys(serviceBackendParams).length > 0) {
+      deploymentService.params = nestParamsBySchema(
+        serviceBackendParams,
+        serviceSchema,
+      );
+    }
 
     // Attach datasource connectors when the service accepts them and the user
     // has enabled upload-from-source with at least one connector selected.
