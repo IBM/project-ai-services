@@ -1160,6 +1160,8 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 		}
 	}
 
+	logger.InfofCtx(ctx, "Starting application ps for application ID: %s, name: %s", appID.String(), app.Name)
+
 	rt, err := s.createRuntime(app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init runtime client: %w", err)
@@ -1208,7 +1210,7 @@ func (s *ApplicationServiceBase) collectServicePods(
 	for _, service := range services {
 		pod, err := loadApplicationPods(ctx, rt, service.ID.String())
 		if err != nil {
-			logger.ErrorfCtx(ctx, "failed to load service pod for service %s: %w", service.ID, err)
+			logger.ErrorfCtx(ctx, "failed to load service pod for service %s: %v", service.ID, err)
 
 			continue
 		}
@@ -1246,7 +1248,7 @@ func (s *ApplicationServiceBase) collectComponentPods(
 
 			componentPod, err := loadApplicationPods(ctx, rt, componentID)
 			if err != nil {
-				logger.ErrorfCtx(ctx, "failed to load component pod %s: %w", componentID, err)
+				logger.ErrorfCtx(ctx, "failed to load component pod %s: %v", componentID, err)
 
 				continue
 			}
