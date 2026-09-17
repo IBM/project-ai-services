@@ -9,7 +9,7 @@ ui:
       cpu: "500m"
 
 backend:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.378
+  image: icr.io/ai-services-cicd/ai-services:v0.0.379
   runtime: "openshift"
   adminPasswordHash: ""
   # @generate:password length=32, special=false
@@ -32,7 +32,7 @@ bundles:
   storage: 5Gi
 
 db:
-  image: icr.io/ai-services-cicd/postgres:18-5
+  image: icr.io/ai-services-cicd/postgres:18-6
   user: "postgres"
   database: "ai_services"
   password: ""
