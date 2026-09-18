@@ -28,6 +28,7 @@ spec:
       - --port=8002
       - --gpu-memory-utilization=0.5
       - --enforce-eager
+      - --max-model-len=1024
       livenessProbe:
         httpGet:
           path: /health
