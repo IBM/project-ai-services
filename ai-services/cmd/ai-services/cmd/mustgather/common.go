@@ -17,6 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // Compile-time assertions that both gatherers satisfy the podCollector interface.
@@ -80,15 +81,28 @@ func collectCatalogCredentials(ctx context.Context, san *sanitize.SecretSanitize
 
 // ── catalog installation check ────────────────────────────────────────────────
 
-// checkCatalogInstalled returns true if any pod carrying the
-// ai-services.io/application=ai-services label is present in the runtime,
-// confirming the catalog has been installed.
+// checkCatalogInstalled returns true if the catalog backend pod carrying the
+// ai-services.io/component=catalog (Podman) or ai-services.io/component=catalog-backend
+// (OpenShift) label is present in the runtime, confirming the catalog control plane
+// has been installed on this machine/cluster.
 func checkCatalogInstalled(ctx context.Context, rt runtime.Runtime) (bool, error) {
+	// Check for Podman catalog backend component label ("catalog")
 	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/application=%s", catalogConstants.CatalogAppName)},
+		"label": {fmt.Sprintf("%s=%s", workerconstants.CatalogBackendPodLabel, catalogConstants.CatalogComponentValue)},
 	})
 	if err != nil {
 		return false, fmt.Errorf("failed to list catalog pods: %w", err)
+	}
+	if len(pods) > 0 {
+		return true, nil
+	}
+
+	// Check for OpenShift catalog backend component label ("catalog-backend")
+	pods, err = rt.ListPods(ctx, map[string][]string{
+		"label": {fmt.Sprintf("%s=%s", workerconstants.CatalogBackendPodLabel, workerconstants.CatalogBackendPodLabelValue)},
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to list catalog backend pods: %w", err)
 	}
 
 	return len(pods) > 0, nil
