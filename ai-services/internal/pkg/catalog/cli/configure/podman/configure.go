@@ -23,7 +23,13 @@ import (
 // existingCertSentinel is a non-empty placeholder passed into sslCertContent/sslKeyContent
 // when the cert secret already exists from a previous run. It triggers the template
 // volume-mount guard without embedding real cert bytes (the secret is already stored).
-const existingCertSentinel = "_existing_"
+const (
+	existingCertSentinel = "_existing_"
+
+	// catalogAPIRouteID is the Caddy route ID for the catalog backend API,
+	// matching the subdomain registered by RegisterCatalogRoutes.
+	catalogAPIRouteID = "catalog-api"
+)
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
 func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions) error {
@@ -203,14 +209,14 @@ func recoverDomainFromCaddy(ctx context.Context, caddyCtx *caddy.Context) error 
 		return err
 	}
 
-	route, err := proxyManager.GetRouteByID(ctx, "catalog-api")
+	route, err := proxyManager.GetRouteByID(ctx, catalogAPIRouteID)
 	if err != nil {
 		return err
 	}
 
 	// route.Domain is the full host (e.g. "catalog-api.powervm-spyre-pok.cis.ibm.net").
 	// Strip the "catalog-api." prefix to get the domain suffix.
-	const prefix = "catalog-api."
+	const prefix = catalogAPIRouteID + "."
 	if strings.HasPrefix(route.Domain, prefix) {
 		caddyCtx.SetDomainSuffix(strings.TrimPrefix(route.Domain, prefix))
 	}
