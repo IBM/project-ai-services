@@ -34,7 +34,8 @@ spec:
       storageUri: hf://{{ .Values.model }}
       args:
         - --served-model-name={{ .Values.model }}
-        - --gpu-memory-utilization=0.5
+        - --gpu-memory-utilization=0.3
+        - --max-model-len=1024
       volumeMounts:
         - mountPath: /dev/shm
           name: dshm
