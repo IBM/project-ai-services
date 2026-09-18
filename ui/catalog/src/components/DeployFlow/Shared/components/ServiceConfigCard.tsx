@@ -7,7 +7,7 @@ import {
   AccordionItem,
 } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
-import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
+import { Edit, View, ViewOff } from "@carbon/icons-react";
 import styles from "../DeployFlow.shared.module.scss";
 import type { ServiceConfig, ServiceConfigField } from "../types";
 import { getDisplayName } from "../utils/displayHelpers";
@@ -315,7 +315,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       {isEditing && (
         <div className={styles.cardEditAction}>
           <Button
-            kind="ghost"
+            kind="secondary"
             size="sm"
             onClick={() => {
               setHasValidationError(false);
@@ -325,13 +325,8 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           >
             Cancel
           </Button>
-          <Button
-            kind="tertiary"
-            size="sm"
-            onClick={handleApplyWithValidation}
-            renderIcon={Checkmark}
-          >
-            Apply
+          <Button kind="primary" size="sm" onClick={handleApplyWithValidation}>
+            Save
           </Button>
         </div>
       )}

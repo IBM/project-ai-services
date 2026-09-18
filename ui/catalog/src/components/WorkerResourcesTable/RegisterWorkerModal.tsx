@@ -55,6 +55,7 @@ const RegisterWorkerModal = ({
       modalHeading="Register worker resource"
       passiveModal
       preventCloseOnClickOutside
+      className={styles.registerModal}
       onRequestClose={() => {
         if (!isLoading) onClose();
       }}
@@ -77,6 +78,7 @@ const RegisterWorkerModal = ({
           invalid={phase === "invalid"}
           invalidText="Enter a valid worker resource name"
           onChange={(e) => onWorkerNameChange(e.target.value)}
+          className={styles.textInput}
         />
 
         {isError && (

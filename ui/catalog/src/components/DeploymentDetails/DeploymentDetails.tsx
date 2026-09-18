@@ -431,9 +431,17 @@ const DeploymentDetails = ({
           breadcrumbOverflowAriaLabel="Show more breadcrumbs"
           title={deployment.name}
           subtitle={
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div className={styles.headerSubtitle}>
               {getStatusTag(deployment.status)}
               <Tag type="gray">{deployment.type}</Tag>
+              {certifiedBy && (
+                <span className={styles.headerCertifiedBadge}>
+                  <Badge size={16} className={styles.badgeIcon} />
+                  <span className={styles.badgeName}>
+                    {certifiedBy} certified
+                  </span>
+                </span>
+              )}
             </div>
           }
         />
@@ -488,15 +496,6 @@ const DeploymentDetails = ({
                     title="Details"
                     className={styles.detailsCard}
                   >
-                    {certifiedBy && (
-                      <span className={styles.certifiedBadge}>
-                        <Badge size={16} className={styles.badgeIcon} />
-                        <span className={styles.badgeName}>
-                          {certifiedBy} certified
-                        </span>
-                      </span>
-                    )}
-
                     <Grid className={styles.resourcesGrid}>
                       <Column lg={8} md={4} sm={2}>
                         {isLoadingResources ? (
@@ -553,32 +552,24 @@ const DeploymentDetails = ({
                     title="Allocated resources"
                     className={styles.resourceCard}
                   >
-                    <Grid className={styles.resourcesInnerGrid}>
+                    <div className={styles.resourcesRow}>
                       {isLoadingResources ? (
                         <>
                           {[0, 1].map((index) => (
-                            <Column
-                              key={index}
-                              sm={4}
-                              md={4}
-                              lg={8}
-                              className={styles.resourceColumn}
-                            >
-                              <div className={styles.resourceItem}>
-                                <SkeletonText lineCount={1} width="30%" />
-                                <SkeletonPlaceholder
-                                  style={{
-                                    width: "100%",
-                                    height: "0.5rem",
-                                    marginTop: "1rem",
-                                  }}
-                                />
-                                <div className={styles.resourceStats}>
-                                  <SkeletonText lineCount={1} width="35%" />
-                                  <SkeletonText lineCount={1} width="40%" />
-                                </div>
+                            <div key={index} className={styles.resourceItem}>
+                              <SkeletonText lineCount={1} width="30%" />
+                              <SkeletonPlaceholder
+                                style={{
+                                  width: "100%",
+                                  height: "0.5rem",
+                                  marginTop: "1rem",
+                                }}
+                              />
+                              <div className={styles.resourceStats}>
+                                <SkeletonText lineCount={1} width="35%" />
+                                <SkeletonText lineCount={1} width="40%" />
                               </div>
-                            </Column>
+                            </div>
                           ))}
                         </>
                       ) : (
@@ -589,46 +580,38 @@ const DeploymentDetails = ({
                           );
 
                           return (
-                            <Column
-                              key={index}
-                              sm={4}
-                              md={4}
-                              lg={8}
-                              className={styles.resourceColumn}
-                            >
-                              <div className={styles.resourceItem}>
-                                <h4 className={styles.resourceName}>
-                                  {resource.name}
-                                </h4>
-                                <ProgressBar
-                                  value={percentage}
-                                  max={100}
-                                  label="Progress"
-                                  helperText=""
-                                  hideLabel
-                                  className={
-                                    percentage > 90
-                                      ? styles.progressDanger
-                                      : percentage > 80
-                                        ? styles.progressWarning
-                                        : styles.progressSuccess
-                                  }
-                                />
-                                <div className={styles.resourceStats}>
-                                  <span className={styles.usedValue}>
-                                    {resource.used} {`(${percentage}%)`} used
-                                  </span>
-                                  <span className={styles.allocatedValue}>
-                                    {resource.used} / {resource.allocated}{" "}
-                                    {resource.unit} allocated
-                                  </span>
-                                </div>
+                            <div key={index} className={styles.resourceItem}>
+                              <h4 className={styles.resourceName}>
+                                {resource.name}
+                              </h4>
+                              <ProgressBar
+                                value={percentage}
+                                max={100}
+                                label="Progress"
+                                helperText=""
+                                hideLabel
+                                className={
+                                  percentage > 90
+                                    ? styles.progressDanger
+                                    : percentage > 80
+                                      ? styles.progressWarning
+                                      : styles.progressSuccess
+                                }
+                              />
+                              <div className={styles.resourceStats}>
+                                <span className={styles.usedValue}>
+                                  {resource.used} {`(${percentage}%)`} used
+                                </span>
+                                <span className={styles.allocatedValue}>
+                                  {resource.used} / {resource.allocated}{" "}
+                                  {resource.unit} allocated
+                                </span>
                               </div>
-                            </Column>
+                            </div>
                           );
                         })
                       )}
-                    </Grid>
+                    </div>
 
                     {/* Accelerator Cards Section - Integrated */}
                     {acceleratorCards.length > 0 && (
