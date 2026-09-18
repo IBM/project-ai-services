@@ -17,6 +17,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // Compile-time assertions that both gatherers satisfy the podCollector interface.
@@ -87,7 +88,7 @@ func collectCatalogCredentials(ctx context.Context, san *sanitize.SecretSanitize
 func checkCatalogInstalled(ctx context.Context, rt runtime.Runtime) (bool, error) {
 	// Check for Podman catalog backend component label ("catalog")
 	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {fmt.Sprintf("ai-services.io/component=%s", catalogConstants.CatalogComponentValue)},
+		"label": {fmt.Sprintf("%s=%s", workerconstants.CatalogBackendPodLabel, catalogConstants.CatalogComponentValue)},
 	})
 	if err != nil {
 		return false, fmt.Errorf("failed to list catalog pods: %w", err)
@@ -98,7 +99,7 @@ func checkCatalogInstalled(ctx context.Context, rt runtime.Runtime) (bool, error
 
 	// Check for OpenShift catalog backend component label ("catalog-backend")
 	pods, err = rt.ListPods(ctx, map[string][]string{
-		"label": {"ai-services.io/component=catalog-backend"},
+		"label": {fmt.Sprintf("%s=%s", workerconstants.CatalogBackendPodLabel, workerconstants.CatalogBackendPodLabelValue)},
 	})
 	if err != nil {
 		return false, fmt.Errorf("failed to list catalog backend pods: %w", err)
