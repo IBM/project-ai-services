@@ -3,6 +3,7 @@ package configure
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -37,6 +38,91 @@ func RegisterLocalWorker(ctx context.Context, c *catalogclient.Client) (string, 
 	}
 
 	return resp.Token, nil
+}
+
+// CheckLocalWorkerSkip determines whether local-worker registration can be
+// skipped because valid on-disk TLS credentials already exist.
+//
+// It returns skip=true when BOTH conditions hold:
+//  1. The worker-mtls-encryption-secret is present — the TLS encryption key is
+//     on disk, so hasValidTLSCredentials will succeed inside the worker container.
+//  2. The catalog DB has a completed (non-pending) registration row for "Local"
+//     — Restore will find it on the next CommandStream attempt.
+//
+// secretExists is runtime specific method to check if the worker-mtls-encryption-secret exists.
+func CheckLocalWorkerSkip(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (skip bool, err error) {
+	exists, err := secretExists(ctx, workerconstants.WorkerMTLSSecretName)
+	if err != nil {
+		return false, fmt.Errorf("check worker mTLS secret: %w", err)
+	}
+
+	if !exists {
+		return false, nil
+	}
+
+	workers, err := catalogclient.NewWorkerClientFromClient(c).ListWorkers(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list workers: %w", err)
+	}
+
+	for _, w := range workers {
+		if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) && w.Status != "pending" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// ResolveLocalWorkerToken decides whether to issue a new bootstrap token or
+// reuse existing credentials. It returns an empty token when skip conditions
+// are met (valid on-disk credentials + a completed catalog registration),
+// signalling to the caller that the worker will reconnect without re-registering.
+//
+// secretExists is runtime specific method to check if the worker-mtls-encryption-secret exists.
+func ResolveLocalWorkerToken(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (string, error) {
+	skip, err := CheckLocalWorkerSkip(ctx, secretExists, c)
+	if err != nil {
+		return "", err
+	}
+
+	if skip {
+		// Both conditions met — skip registration, reuse existing credentials.
+		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
+
+		return "", nil
+	}
+
+	return RegisterLocalWorker(ctx, c)
+}
+
+// ValidateSkipLocalWorker enforces that --skip-local-worker cannot be
+// changed on a re-run. It infers what the original run used from the catalog DB:
+//
+//   - workers registered (len > 0)  → original run had --skip-local-worker=false
+//   - no workers registered (len == 0) → original run had --skip-local-worker=true
+//
+// An error is returned when the current flag value contradicts that state.
+// This function is a no-op on a fresh install (isReinstall=false).
+func ValidateSkipLocalWorker(ctx context.Context, c *catalogclient.Client, isReinstall bool, skipLocalWorker bool) error {
+	if !isReinstall {
+		return nil
+	}
+
+	workers, err := catalogclient.NewWorkerClientFromClient(c).ListWorkers(ctx)
+	if err != nil {
+		return fmt.Errorf("skip-local-worker validation: list workers: %w", err)
+	}
+
+	workersExist := len(workers) > 0
+
+	// workersExist == true  → original flag was false (local worker was joined)
+	// workersExist == false → original flag was true  (local worker was skipped)
+	if skipLocalWorker == workersExist {
+		return fmt.Errorf("--skip-local-worker flag cannot be changed on re-run; to change this setting, uninstall and re-run catalog configure")
+	}
+
+	return nil
 }
 
 // Made with Bob

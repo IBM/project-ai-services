@@ -23,10 +23,18 @@ const (
 //
 // It uses the already-authenticated catalog client to call POST /api/v1/workers,
 // obtaining a real bootstrap token without a second login.
+//
+// When the worker's mTLS secret already exists (preserved by --skip-cleanup via
+// helm.sh/resource-policy: keep) AND the catalog DB has a completed registration
+// row for "Local" (status ready or disconnected), registration is skipped — the
+// worker has valid on-disk TLS credentials and will reconnect using them. The
+// Helm release is still upgraded (it was removed during uninstall) with an empty
+// token; StartGrpcStream detects the existing credentials and bypasses the
+// Register RPC automatically.
 func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	token, err := configure.RegisterLocalWorker(ctx, c)
+	token, err := configure.ResolveLocalWorkerToken(ctx, rt.SecretExists, c)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
 	}
