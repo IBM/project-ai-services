@@ -17,7 +17,7 @@ spec:
   - args:
     - --port=8000
     - --model=/mnt/models
-    - --served-model-name={{ "{{.Name}}" }}
+    - --gpu-memory-utilization=0.3
     command:
     - python
     - -m
@@ -30,6 +30,14 @@ spec:
     ports:
     - containerPort: 8000
       protocol: TCP
+    volumeMounts:
+    - mountPath: /dev/shm
+      name: dshm
+  volumes:
+  - emptyDir:
+      medium: Memory
+      sizeLimit: 512Mi
+    name: dshm
   multiModel: false
   supportedModelFormats:
   - autoSelect: true
