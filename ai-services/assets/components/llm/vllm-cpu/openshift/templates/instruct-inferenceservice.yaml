@@ -17,11 +17,6 @@ spec:
       type: Recreate
     maxReplicas: 1
     minReplicas: 1
-    volumes:
-      - name: dshm
-        emptyDir:
-          medium: Memory
-          sizeLimit: 512Mi
     model:
       modelFormat:
         name: vLLM
@@ -29,7 +24,6 @@ spec:
         - --served-model-name={{ .Values.model }}
         - --max-model-len=8096
         - --max-num-seqs=32
-        - --gpu-memory-utilization=0.3
       env:
         - name: VLLM_CPU_OMP_THREADS_BIND
           value: "auto"
@@ -49,6 +43,3 @@ spec:
           memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
       storageUri: hf://{{ .Values.model }}
-      volumeMounts:
-        - mountPath: /dev/shm
-          name: dshm
