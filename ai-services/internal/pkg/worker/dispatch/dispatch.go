@@ -40,28 +40,46 @@ import (
 
 // Dispatcher routes commands to the local runtime and tracks in-flight
 // commands so they can be cancelled by COMMAND_TYPE_CANCEL.
+// maxCancelledTombstones is the maximum number of pre-register cancel tombstones
+// held in memory at once. If a cancel arrives for an ID that never calls
+// register() (stale cancel, malformed message, control-plane retry storm) the
+// entry would otherwise accumulate forever. When the cap is exceeded one entry
+// is evicted before the new one is added.
+const maxCancelledTombstones = 1024
+
 type Dispatcher struct {
-	mu       sync.Mutex
-	inflight map[string]context.CancelFunc // commandID → cancel
+	mu        sync.Mutex
+	inflight  map[string]context.CancelFunc // commandID → cancel
+	cancelled map[string]struct{}           // tombstones for cancels that arrived before register()
 }
 
 // New returns a ready-to-use Dispatcher.
 func New() *Dispatcher {
-	return &Dispatcher{inflight: make(map[string]context.CancelFunc)}
+	return &Dispatcher{
+		inflight:  make(map[string]context.CancelFunc),
+		cancelled: make(map[string]struct{}),
+	}
 }
 
 // register creates a per-command context derived from parent, stores its cancel
-// func keyed by commandID, and returns the derived context.
+// func keyed by commandID, and returns the derived context. If a cancel arrived
+// before register was called (tombstone exists), it returns an already-cancelled context.
 func (d *Dispatcher) register(parent context.Context, commandID string) context.Context {
 	ctx, cancel := context.WithCancel(parent)
 	d.mu.Lock()
+	if _, wasCancelled := d.cancelled[commandID]; wasCancelled {
+		delete(d.cancelled, commandID)
+		d.mu.Unlock()
+		cancel()
+		return ctx
+	}
 	d.inflight[commandID] = cancel
 	d.mu.Unlock()
 
 	return ctx
 }
 
-// deregister removes the command from the inflight map and calls cancel() to
+// deregister removes the command from inflight and cancelled maps and calls cancel() to
 // release the context node from the parent tree (avoids a context leak).
 func (d *Dispatcher) deregister(commandID string) {
 	d.mu.Lock()
@@ -74,12 +92,26 @@ func (d *Dispatcher) deregister(commandID string) {
 	}
 }
 
-// cancelCommand signals the in-flight command to stop. No-op if already done.
+// cancelCommand signals the in-flight command to stop, or records a tombstone
+// in cancelled if the command has not called register() yet. If the tombstone
+// map has reached maxCancelledTombstones, the oldest entry is evicted (FIFO)
+// before the new one is added, bounding memory consumption.
 func (d *Dispatcher) cancelCommand(commandID string) {
 	d.mu.Lock()
 	cancel, ok := d.inflight[commandID]
 	if ok {
 		delete(d.inflight, commandID)
+	} else {
+		// Evict one tombstone when the cap is reached. All entries at this
+		// point are stale (cancels for IDs that never registered), so eviction
+		// order does not matter — any one will do.
+		if len(d.cancelled) >= maxCancelledTombstones {
+			for id := range d.cancelled {
+				delete(d.cancelled, id)
+				break
+			}
+		}
+		d.cancelled[commandID] = struct{}{}
 	}
 	d.mu.Unlock()
 

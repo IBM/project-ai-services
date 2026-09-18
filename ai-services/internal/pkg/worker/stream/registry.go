@@ -11,8 +11,14 @@ import (
 // *worker/registry.Registry satisfies it automatically.
 type WorkerRegistry interface {
 	// WaitForResult registers a result channel for commandID on workerName and
-	// returns it. The channel receives exactly one value when the worker replies.
+	// returns it. The channel receives exactly one value when the worker replies,
+	// or is closed (yielding nil) if the worker disconnects before replying.
 	WaitForResult(workerName, commandID string) (chan *workerpb.CommandResult, error)
+
+	// CancelWait removes the pending result channel for commandID without
+	// delivering a result. Must be called when the caller times out or cancels
+	// so the channel does not leak inside the WorkerEntry.
+	CancelWait(workerName, commandID string)
 
 	// WorkerCommandChannel returns the command channel for the named worker, or
 	// (nil, false) if the worker is not currently connected.

@@ -11,24 +11,26 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
-// cancelEnqueueTimeout is the maximum time sendCancel will wait to place the
-// COMMAND_TYPE_CANCEL message onto the worker's command channel. The channel
-// has a fixed capacity (32); under normal conditions a slot is available
-// immediately. 5 s is enough to outlast any transient back-pressure without
-// risking an indefinite block.
-const cancelEnqueueTimeout = 5 * time.Second
+// defaultCancelEnqueueTimeout is the maximum time sendCancel will wait to
+// place the COMMAND_TYPE_CANCEL message onto the worker's command channel.
+// The channel has a fixed capacity (32); under normal conditions a slot is
+// available immediately. 5 s is enough to outlast any transient back-pressure
+// without risking an indefinite block.
+const defaultCancelEnqueueTimeout = 5 * time.Second
 
 const CommandTimeout = 10 * time.Minute
 
 // Sender encapsulates the logic for sending a Command to a worker over the
 // gRPC CommandStream and waiting for its CommandResult.
 type Sender struct {
-	workerName string
-	registry   WorkerRegistry
+	workerName             string
+	registry               WorkerRegistry
+	cancelEnqueueTimeout   time.Duration // zero → defaultCancelEnqueueTimeout; injectable for tests
 }
 
 // New returns a Sender targeting the named worker.
@@ -70,6 +72,10 @@ func (s *Sender) Send(ctx context.Context, cmdType workerpb.CommandType, payload
 
 	cmdCh, ok := s.registry.WorkerCommandChannel(s.workerName)
 	if !ok {
+		// Worker disconnected between WaitForResult and here — clean up the
+		// result channel we just registered so it does not leak.
+		s.registry.CancelWait(s.workerName, commandID)
+
 		return nil, fmt.Errorf("stream: worker %s disconnected", s.workerName)
 	}
 
@@ -82,6 +88,10 @@ func (s *Sender) Send(ctx context.Context, cmdType workerpb.CommandType, payload
 	select {
 	case cmdCh <- cmd:
 	case <-ctx.Done():
+		// Context cancelled before the command was enqueued — remove the
+		// result channel registered above so it does not leak in the registry.
+		s.registry.CancelWait(s.workerName, commandID)
+
 		return nil, ctx.Err()
 	}
 
@@ -90,13 +100,22 @@ func (s *Sender) Send(ctx context.Context, cmdType workerpb.CommandType, payload
 
 // waitForResult blocks until the worker returns a result for commandID, the
 // context is cancelled, or CommandTimeout elapses. On cancellation or timeout
-// it fires a best-effort COMMAND_TYPE_CANCEL to the worker.
+// it fires a best-effort COMMAND_TYPE_CANCEL to the worker and removes the
+// pending result channel from the registry so it does not leak.
+// If the result channel is closed (nil receive) it means the worker disconnected
+// before delivering the result — this is treated as a disconnect error.
 func (s *Sender) waitForResult(ctx context.Context, cmdType workerpb.CommandType, commandID string, resultCh <-chan *workerpb.CommandResult) (*workerpb.CommandResult, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, CommandTimeout)
 	defer cancel()
 
 	select {
-	case res := <-resultCh:
+	case res, ok := <-resultCh:
+		if !ok {
+			// Channel closed by drainResults — the worker disconnected.
+			return nil, fmt.Errorf("stream: worker %s disconnected while waiting for command %s result",
+				s.workerName, cmdType)
+		}
+
 		if !res.GetSuccess() {
 			return nil, fmt.Errorf("stream: worker %s: command %s failed: %s",
 				s.workerName, cmdType, res.GetError())
@@ -106,9 +125,10 @@ func (s *Sender) waitForResult(ctx context.Context, cmdType workerpb.CommandType
 
 	case <-timeoutCtx.Done():
 		// ctx was cancelled (mid-deployment delete) or the command timed out.
+		// Remove the pending result channel so it does not leak inside the registry.
+		s.registry.CancelWait(s.workerName, commandID)
 		// Send a best-effort COMMAND_TYPE_CANCEL so the worker stops the in-flight
 		// work (aborts Helm install, stops model-download container, etc.).
-		// Use a fresh background context — the caller's ctx is already done.
 		s.sendCancel(commandID)
 
 		if ctx.Err() != nil {
@@ -145,13 +165,19 @@ func (s *Sender) sendCancel(commandID string) {
 
 	// Use a short timeout context so we never block indefinitely if the worker
 	// is overwhelmed or disconnected between WorkerCommandChannel and here.
-	ctx, cancel := context.WithTimeout(context.Background(), cancelEnqueueTimeout)
+	timeout := s.cancelEnqueueTimeout
+	if timeout == 0 {
+		timeout = defaultCancelEnqueueTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	select {
 	case cmdCh <- cancelCmd:
 	case <-ctx.Done():
-		// Channel still full after cancelEnqueueTimeout — worker is either
-		// overwhelmed or has disconnected. Best-effort: give up rather than block.
+		// Channel still full after timeout — worker is either overwhelmed or
+		// has disconnected. Best-effort: give up rather than block.
+		logger.Warningf("stream: dropped cancel command for %s to worker %s: command channel remained full after %s",
+			commandID, s.workerName, timeout)
 	}
 }
