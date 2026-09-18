@@ -1,6 +1,6 @@
 model: ""
 resources:
   requests:
-    memory: "8Gi"
+    memory: "5Gi"
   limits:
-    memory: "8Gi"
+    memory: "5Gi"

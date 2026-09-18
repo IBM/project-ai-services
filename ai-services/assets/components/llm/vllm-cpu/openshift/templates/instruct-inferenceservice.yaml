@@ -29,7 +29,7 @@ spec:
         - --served-model-name={{ .Values.model }}
         - --max-model-len=8096
         - --max-num-seqs=32
-        - --gpu-memory-utilization=0.5
+        - --gpu-memory-utilization=0.3
       env:
         - name: VLLM_CPU_OMP_THREADS_BIND
           value: "auto"
