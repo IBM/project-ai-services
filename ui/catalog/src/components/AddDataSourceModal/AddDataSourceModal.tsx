@@ -28,6 +28,7 @@ import {
 } from "./schemaUtils";
 import { transformToCreateDatasourcePayload } from "./datasourceTransform";
 import { useConnectorsStore } from "@/store/connectors.store";
+import { parseMessageCheckType } from "@/components/ConnectorDetailsPanel/types";
 import styles from "./AddDataSourceModal.module.scss";
 
 import ConnectorFieldLabel from "./ConnectorFieldLabel";
@@ -58,6 +59,7 @@ const AddDataSourceModal = ({
     formValues,
     nameInvalid,
     fieldErrors,
+    sectionErrors,
     isSubmitting,
     submitError,
   } = state;
@@ -107,14 +109,21 @@ const AddDataSourceModal = ({
   }, [onClose]);
 
   // ── Field value helpers ────────────────────────────────────────────────────
-  const setTextValue = (key: string, value: string) => {
-    dispatch({ type: ACTION_TYPES.SET_TEXT_VALUE, payload: { key, value } });
+  const setTextValue = (key: string, value: string, sectionTitle: string) => {
+    dispatch({
+      type: ACTION_TYPES.SET_TEXT_VALUE,
+      payload: { key, value, sectionTitle },
+    });
   };
 
-  const toggleCheckboxValue = (key: string, option: string) => {
+  const toggleCheckboxValue = (
+    key: string,
+    option: string,
+    sectionTitle: string,
+  ) => {
     dispatch({
       type: ACTION_TYPES.TOGGLE_CHECKBOX_VALUE,
-      payload: { key, option },
+      payload: { key, option, sectionTitle },
     });
   };
 
@@ -134,7 +143,7 @@ const AddDataSourceModal = ({
       valid = false;
     }
 
-    const errors: Record<string, string> = {};
+    const fieldErrors: Record<string, string> = {};
     for (const field of fields) {
       if (!field.isRequired) continue;
       const val = formValues[field.key];
@@ -143,13 +152,112 @@ const AddDataSourceModal = ({
           ? (val as string[]).length === 0
           : !val || !String(val).trim();
       if (isEmpty) {
-        errors[field.key] = `Provide a valid ${field.label.toLowerCase()}`;
+        fieldErrors[field.key] = `Provide a valid ${field.label.toLowerCase()}`;
         valid = false;
       }
     }
-    dispatch({ type: ACTION_TYPES.SET_FIELD_ERRORS, payload: errors });
+
+    dispatch({
+      type: ACTION_TYPES.SET_FIELD_ERRORS,
+      payload: { fieldErrors, sectionErrors: {} },
+    });
 
     return valid;
+  };
+
+  // Maps a server error message to { fieldErrors, sectionErrors } for inline
+  // display, or null when nothing matched (caller shows a top-level banner).
+  //
+  // Steps:
+  //   1. Extract [AUTH]/[ACCESS] prefix → limits word-scan to that section's
+  //      fields so "host" in an AUTH message can't bleed into Location.
+  //   2. Per field: try exact  at '/key':  match (schema errors), then
+  //      \bkey\b word scan (connection-test errors, prefix-section only).
+  //   3. No field hit + prefix present → section banner only.
+  //      [ACCESS] also pins an inline error on the primary resource field
+  //      (bucket_name / remote_path) since those messages never name the key.
+  //   4. Nothing matched → return null.
+  const parseServerError = (
+    message: string,
+  ): {
+    fieldErrors: Record<string, string>;
+    sectionErrors: Record<string, string>;
+  } | null => {
+    const fieldErrors: Record<string, string> = {};
+    const sectionErrors: Record<string, string> = {};
+
+    // Step 1 — extract prefix; maps to the section that owns it.
+    const prefixSectionMap: Record<string, string> = {
+      auth: "Authentication",
+      access: "Location",
+    };
+    const inner = message.replace(/^Connection test failed:\s*/i, "");
+    const { checkType, strippedMessage } = parseMessageCheckType(inner);
+    const prefixSection = checkType ? prefixSectionMap[checkType] : undefined;
+
+    // Step 2 — scan fields: exact at '/key': match first, then \bkey\b
+    //          word scan restricted to the prefix section (if any).
+    const structuredRe = /at\s+'\/([^']+)':/g;
+
+    for (const field of fields) {
+      let matched = false;
+
+      // A: exact key from JSON Schema output — no section restriction needed.
+      structuredRe.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = structuredRe.exec(message)) !== null) {
+        if (m[1] === field.key) {
+          matched = true;
+          break;
+        }
+      }
+
+      // B: word scan — only within the prefix section to avoid cross-section hits.
+      if (
+        !matched &&
+        (!prefixSection || field.sectionTitle === prefixSection)
+      ) {
+        matched = new RegExp(`\\b${field.key}\\b`).test(message);
+      }
+
+      if (matched) {
+        fieldErrors[field.key] =
+          `Provide a valid ${field.label.toLowerCase()}.`;
+        sectionErrors[field.sectionTitle] = strippedMessage;
+      }
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      return { fieldErrors, sectionErrors };
+    }
+
+    // Step 3 — no field hit: section banner only.
+    //          [ACCESS] additionally pins the primary resource field inline.
+    if (prefixSection) {
+      const accessFieldByProvider: Record<string, string> = {
+        object_storage: "bucket_name",
+        file_system: "remote_path",
+      };
+      const accessTargetKey =
+        checkType === "access" && selectedType
+          ? accessFieldByProvider[selectedType.provider.id]
+          : undefined;
+      const accessTargetField = accessTargetKey
+        ? fields.find((f) => f.key === accessTargetKey)
+        : undefined;
+
+      return {
+        fieldErrors: accessTargetField
+          ? {
+              [accessTargetField.key]: `Provide a valid ${accessTargetField.label.toLowerCase()}.`,
+            }
+          : {},
+        sectionErrors: { [prefixSection]: strippedMessage },
+      };
+    }
+
+    // Step 4 — nothing matched: caller shows top-level banner.
+    return null;
   };
 
   // ── Submit ─────────────────────────────────────────────────────────────────
@@ -172,6 +280,28 @@ const AddDataSourceModal = ({
       const serverMessage = (
         err as { response?: { data?: { error?: string } } }
       )?.response?.data?.error;
+
+      if (serverMessage) {
+        // [NETWORK] has no matching section — top-level banner.
+        const inner = serverMessage.replace(/^Connection test failed:\s*/i, "");
+        const { checkType, strippedMessage } = parseMessageCheckType(inner);
+        if (checkType === "network") {
+          dispatch({
+            type: ACTION_TYPES.SUBMIT_FAILURE,
+            payload: strippedMessage,
+          });
+          return;
+        }
+
+        // Route to field/section errors if possible.
+        const parsed = parseServerError(serverMessage);
+        if (parsed) {
+          dispatch({ type: ACTION_TYPES.SET_FIELD_ERRORS, payload: parsed });
+          return;
+        }
+      }
+
+      // Unclassified error (name conflict, 500, etc.) — top-level banner.
       dispatch({
         type: ACTION_TYPES.SUBMIT_FAILURE,
         payload:
@@ -214,7 +344,9 @@ const AddDataSourceModal = ({
                 labelText={option}
                 checked={selected.includes(option)}
                 disabled={isSubmitting}
-                onChange={() => toggleCheckboxValue(field.key, option)}
+                onChange={() =>
+                  toggleCheckboxValue(field.key, option, field.sectionTitle)
+                }
               />
             ))}
             {fieldError && (
@@ -238,7 +370,9 @@ const AddDataSourceModal = ({
             invalidText={fieldError}
             disabled={isSubmitting}
             value={(formValues[field.key] as string) ?? ""}
-            onChange={(e) => setTextValue(field.key, e.target.value)}
+            onChange={(e) =>
+              setTextValue(field.key, e.target.value, field.sectionTitle)
+            }
           />
         );
 
@@ -252,7 +386,9 @@ const AddDataSourceModal = ({
             invalidText={fieldError}
             disabled={isSubmitting}
             value={(formValues[field.key] as string) ?? ""}
-            onChange={(e) => setTextValue(field.key, e.target.value)}
+            onChange={(e) =>
+              setTextValue(field.key, e.target.value, field.sectionTitle)
+            }
           />
         );
 
@@ -389,11 +525,24 @@ const AddDataSourceModal = ({
               ? section.fields.filter((f) => f.isOptional)
               : [];
 
+            const sectionError = sectionErrors[section.title];
+
             return (
               <Section key={section.title} className={styles.paramSection}>
                 <Heading className={styles.sectionTitle}>
                   {section.title}
                 </Heading>
+
+                {sectionError && (
+                  <InlineNotification
+                    kind="error"
+                    title="Error"
+                    subtitle={sectionError}
+                    lowContrast
+                    hideCloseButton
+                    className={styles.sectionErrorNotification}
+                  />
+                )}
 
                 {section.title === "File filters" && (
                   <div className={styles.fileFiltersInfo}>
