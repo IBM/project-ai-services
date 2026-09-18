@@ -246,7 +246,7 @@ func (g *podmanGatherer) collectWorkerArtifacts(ctx context.Context, outDir stri
 func (g *podmanGatherer) collectPodsByTemplate(ctx context.Context, targetDir, templateName string) {
 	raw, err := cliUtils.PodmanRun(
 		"pod", "ps",
-		"--filter", fmt.Sprintf("label=ai-services.io/template=%s", templateName),
+		"--filter", fmt.Sprintf("label=%s=%s", constants.ApplicationTemplateKey, templateName),
 		"--format", "json",
 	)
 	if err != nil {

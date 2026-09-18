@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
@@ -149,7 +150,7 @@ func (g *openshiftGatherer) collectWorkerArtifacts(ctx context.Context, rt *open
 // and collects inspect + logs for each.
 func (g *openshiftGatherer) collectPodsByTemplate(ctx context.Context, rt *openshiftRuntime.OpenshiftClient, targetDir, templateName string) {
 	pods, err := rt.ListPods(ctx, map[string][]string{
-		"label": {"ai-services.io/template=" + templateName},
+		"label": {fmt.Sprintf("%s=%s", constants.ApplicationTemplateKey, templateName)},
 	})
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to list %s pods: %v\n", templateName, err)
