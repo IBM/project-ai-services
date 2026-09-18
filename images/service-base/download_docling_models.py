@@ -1,5 +1,3 @@
-import multiprocessing
-multiprocessing.set_start_method("spawn", force=True)
 from docling.utils import model_downloader
 from pathlib import Path
 import os
