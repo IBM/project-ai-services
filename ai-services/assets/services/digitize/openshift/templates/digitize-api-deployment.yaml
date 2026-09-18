@@ -99,7 +99,7 @@ spec:
             - name: DB_MAX_OVERFLOW
               value: "5"
             - name: EMB_ENDPOINT
-              value: http://embedding-predictor:8080
+              value: http://embedding-predictor:8000
             - name: EMB_MODEL
               value: {{ .Values.embedding.model | quote }}
             - name: EMB_MAX_MODEL_LEN

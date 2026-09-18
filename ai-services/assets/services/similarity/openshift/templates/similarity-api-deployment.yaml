@@ -42,13 +42,13 @@ spec:
             - name: PORT
               value: "7000"
             - name: EMB_ENDPOINT
-              value: http://embedding-predictor:8080
+              value: http://embedding-predictor:8000
             - name: EMB_MODEL
               value: {{ .Values.embedding.model | quote }}
             - name: EMB_MAX_MODEL_LEN
               value: "512"
             - name: RERANKER_ENDPOINT
-              value: http://reranker-predictor:8080
+              value: http://reranker-predictor:8000
             - name: RERANKER_MODEL
               value: {{ .Values.reranker.model | quote }}
             - name: OPENSEARCH_HOST
