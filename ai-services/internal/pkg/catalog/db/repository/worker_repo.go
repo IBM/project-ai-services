@@ -64,12 +64,12 @@ func (r *workerRepo) Upsert(ctx context.Context, worker *models.Worker) error {
 	}
 
 	query := `
-		INSERT INTO workers (name, runtime_type, status, metadata)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO workers (name, runtime_type, status, message, metadata)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (name) DO UPDATE
 			SET runtime_type   = EXCLUDED.runtime_type,
 			    status         = EXCLUDED.status,
-			    message        = '',
+			    message        = EXCLUDED.message,
 			    metadata       = EXCLUDED.metadata,
 			    registered_at  = NOW(),
 			    updated_at     = NOW()
@@ -80,6 +80,7 @@ func (r *workerRepo) Upsert(ctx context.Context, worker *models.Worker) error {
 		worker.Name,
 		worker.RuntimeType,
 		worker.Status,
+		worker.Message,
 		metadataJSON,
 	).Scan(&worker.ID, &worker.RegisteredAt, &worker.UpdatedAt)
 	if err != nil {
