@@ -60,10 +60,6 @@ jobs:
          - path: services
            image: extract-service
            service: extract
-         - path: images/service-base/prebuilder
-           image: service-base-prebuilder
-         - path: images/service-base/docling
-           image: service-base-docling
          - path: mcp
            image: mcp
          - path: ai-services
