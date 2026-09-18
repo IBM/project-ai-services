@@ -54,6 +54,18 @@ jobs:
          - path: services
            image: summarize-service
            service: summarize
+         - path: services
+           image: translate-service
+           service: translate
+         - path: services
+           image: extract-service
+           service: extract
+         - path: images/service-base/prebuilder
+           image: service-base-prebuilder
+         - path: images/service-base/docling
+           image: service-base-docling
+         - path: mcp
+           image: mcp
          - path: ai-services
            image: ai-services
     uses: ./.github/workflows/scanner.yml
