@@ -1,6 +1,6 @@
 import type { Dispatch } from "react";
 import { OverflowMenu, OverflowMenuItem } from "@carbon/react";
-import { Delete } from "@carbon/icons-react";
+import { Delete, ErrorFilled } from "@carbon/icons-react";
 import type { AppAction } from "./types";
 import type { SharedTableAction } from "@/components/Table/types";
 import {
@@ -8,6 +8,7 @@ import {
   NameCell as SharedNameCell,
 } from "@/components/Table/components/CellRenderers";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
+import styles from "./WorkerResourcesTable.module.scss";
 export { StatusCell };
 
 interface CellRendererProps {
@@ -25,8 +26,17 @@ export const RuntimeTypeCell = ({
 
 export const MessageCell = ({
   value,
+  rowData,
 }: CellRendererProps): React.ReactElement => {
-  return <span>{String(value ?? "")}</span>;
+  const isDisconnected = rowData?.status === "disconnected";
+  return (
+    <span className={isDisconnected ? styles.messageCellError : undefined}>
+      {isDisconnected && (
+        <ErrorFilled size={16} className={styles.messageErrorIcon} />
+      )}
+      {String(value ?? "")}
+    </span>
+  );
 };
 
 export const NameCell = ({ value, rowId }: CellRendererProps) => (

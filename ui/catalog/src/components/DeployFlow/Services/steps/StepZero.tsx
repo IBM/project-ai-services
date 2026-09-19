@@ -1,11 +1,12 @@
 import {
   Grid,
   Column,
-  InlineLoading,
   InlineNotification,
   ClickableTile,
+  SkeletonText,
+  SkeletonPlaceholder,
 } from "@carbon/react";
-import { Badge, Checkmark } from "@carbon/icons-react";
+import { Badge, CheckmarkFilled } from "@carbon/icons-react";
 import { useServices } from "@/hooks/useServices";
 import styles from "../ServicesDeployFlow.module.scss";
 
@@ -39,9 +40,22 @@ export const StepZero: React.FC<StepZeroProps> = ({
 
       <div className={styles.formSection}>
         {isLoading ? (
-          <div className={styles.loadingContainer}>
-            <InlineLoading description="Loading services..." />
-          </div>
+          <Grid narrow fullWidth className={styles.serviceSelectionGrid}>
+            {[0, 1, 2, 3].map((i) => (
+              <Column
+                key={i}
+                sm={4}
+                md={4}
+                lg={8}
+                className={styles.tileColumn}
+              >
+                <div className={styles.serviceTile}>
+                  <SkeletonText width="60%" />
+                  <SkeletonPlaceholder className={styles.serviceTileSkeleton} />
+                </div>
+              </Column>
+            ))}
+          </Grid>
         ) : error ? (
           <InlineNotification
             kind="error"
@@ -51,9 +65,15 @@ export const StepZero: React.FC<StepZeroProps> = ({
             hideCloseButton
           />
         ) : (
-          <Grid narrow className={styles.serviceSelectionGrid}>
+          <Grid narrow fullWidth className={styles.serviceSelectionGrid}>
             {standaloneServices.map((service) => (
-              <Column key={service.id} sm={4} md={4} lg={7}>
+              <Column
+                key={service.id}
+                sm={4}
+                md={4}
+                lg={8}
+                className={styles.tileColumn}
+              >
                 <ClickableTile
                   id={`service-tile-${service.id}`}
                   className={`${styles.serviceTile} ${
@@ -62,9 +82,10 @@ export const StepZero: React.FC<StepZeroProps> = ({
                   onClick={() => onServiceSelect(service.id)}
                 >
                   {selectedServiceId === service.id && (
-                    <div className={styles.selectedIndicator}>
-                      <Checkmark size={20} />
-                    </div>
+                    <CheckmarkFilled
+                      size={16}
+                      className={styles.selectedIndicator}
+                    />
                   )}
                   <div className={styles.serviceTileContent}>
                     <h3 className={styles.serviceTileName}>{service.name}</h3>
