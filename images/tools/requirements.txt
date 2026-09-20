@@ -3,7 +3,7 @@ huggingface_hub[cli]==1.18.0
 click==8.4.1
 typer==0.25.1
 annotated_doc==0.0.4
-anyio==4.13.0
+anyio==4.14.2
 certifi==2026.5.20
 filelock==3.29.1
 fsspec==2026.4.0
