@@ -1229,14 +1229,19 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 	// before the pod finishes its async teardown. Drop any such stale entries so they
 	// do not reappear in the list response. allConnectorIDs is the authoritative set of
 	// connectors that are still linked to this application in the DB.
-	filterServiceDeletionPendingDatasources(servicePage.ByID, allConnectorIDs)
+	dropped := filterServiceDeletionPendingDatasources(servicePage.ByID, allConnectorIDs)
 
 	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID)
 	if err != nil {
 		return nil, err
 	}
 
-	total := servicePage.Total
+	// Adjust the authoritative total downward by however many stale "delete pending"
+	// entries were removed from this page, so pagination counts stay consistent.
+	total := servicePage.Total - dropped
+	if total < 0 {
+		total = 0
+	}
 	totalPages := 0
 	if total > 0 {
 		totalPages = (total + req.PageSize - 1) / req.PageSize
@@ -1306,17 +1311,22 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy ht
 // removing the service_dependencies row (DB) and the downstream service pod completing its
 // async teardown: during that window the pod still returns the connector with status=
 // "delete pending", and without this filter it would reappear in the list response.
-func filterServiceDeletionPendingDatasources(serviceItems map[string]apimodels.ConnectorItem, ownedIDs []uuid.UUID) {
+// Returns the number of entries removed.
+func filterServiceDeletionPendingDatasources(serviceItems map[string]apimodels.ConnectorItem, ownedIDs []uuid.UUID) int {
 	owned := make(map[string]struct{}, len(ownedIDs))
 	for _, id := range ownedIDs {
 		owned[id.String()] = struct{}{}
 	}
 
+	dropped := 0
 	for idStr := range serviceItems {
 		if _, ok := owned[idStr]; !ok {
 			delete(serviceItems, idStr)
+			dropped++
 		}
 	}
+
+	return dropped
 }
 
 // buildDatasourcePage bulk-fetches the DB connector rows for the IDs in serviceItems and
