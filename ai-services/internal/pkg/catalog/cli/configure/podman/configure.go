@@ -119,9 +119,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		slices.Contains(existingResources, catalogconstants.CatalogCertSecretName)
 
 	if !isDeployed {
-		certPath, keyPath := resolveCertPaths(opts.SSLCertPath, opts.SSLKeyPath, useExistingCert)
-
-		if err = loadCatalogParamValues(deployCtx, passwordHash, certPath, keyPath, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
+		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, useExistingCert, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
 			s.Fail("failed to load param values")
 
 			return nil, false, err
@@ -224,24 +222,12 @@ func recoverDomainFromCaddy(ctx context.Context, caddyCtx *caddy.Context) error 
 	return nil
 }
 
-// resolveCertPaths returns the cert and key paths to use for template rendering.
-// When useExistingCert is true (the cert secret was preserved by --skip-cleanup
-// and no new paths were supplied), a non-empty sentinel is returned so the caddy
-// template renders the volume mount; the existing secret provides the actual bytes.
-func resolveCertPaths(certPath, keyPath string, useExistingCert bool) (string, string) {
-	if useExistingCert {
-		return existingCertSentinel, existingCertSentinel
-	}
-
-	return certPath, keyPath
-}
-
 // loadCatalogParamValues prepares all necessary data for deployment.
-func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) error {
+func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, workerGatewayPort int, skipLocalWorker bool) error {
 	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
-	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, httpsPort, workerGatewayPort, skipLocalWorker)
+	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, useExistingCert, httpsPort, workerGatewayPort, skipLocalWorker)
 	if err != nil {
 		return fmt.Errorf("failed to generate arg params: %w", err)
 	}
@@ -255,7 +241,7 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCe
 }
 
 // generateArgParams generates the argument parameters for template rendering.
-func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
+func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate database password: %w", err)
@@ -279,7 +265,7 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 		return nil, fmt.Errorf("failed to generate caddy file: %w", err)
 	}
 
-	sslCertContent, sslKeyContent, err := readSSLContents(sslCertPath, sslKeyPath)
+	sslCertContent, sslKeyContent, err := readSSLContents(sslCertPath, sslKeyPath, useExistingCert)
 	if err != nil {
 		return nil, err
 	}
@@ -301,18 +287,18 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 }
 
 // readSSLContents reads and returns the PEM contents of the cert and key files.
-// Returns the sentinel unchanged when useExistingCert is true — the caddy pod
-// template needs a non-empty sslCertContent value to render the /etc/secret/ssl
-// volume mount (the cert secret itself is already preserved and skipped by
-// existingResources, so the sentinel bytes never land in the secret).
-// Returns empty strings when either path is truly empty (no cert configured).
-func readSSLContents(certPath, keyPath string) (string, string, error) {
-	if certPath == "" || keyPath == "" {
-		return "", "", nil
+// When useExistingCert is true the caddy pod template needs a non-empty
+// sslCertContent value to render the /etc/secret/ssl volume mount; the cert
+// secret is already preserved and skipped by existingResources, so the sentinel
+// bytes never land in the secret.
+// Returns empty strings when no cert is configured.
+func readSSLContents(certPath, keyPath string, useExistingCert bool) (string, string, error) {
+	if useExistingCert {
+		return existingCertSentinel, existingCertSentinel, nil
 	}
 
-	if certPath == existingCertSentinel {
-		return existingCertSentinel, existingCertSentinel, nil
+	if certPath == "" || keyPath == "" {
+		return "", "", nil
 	}
 
 	certBytes, keyBytes, _, err := utils.ReadAndParseCertificates(certPath, keyPath)
