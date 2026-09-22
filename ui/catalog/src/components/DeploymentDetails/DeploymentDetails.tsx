@@ -764,7 +764,7 @@ const DeploymentDetails = ({
 
                       <div className={styles.serviceDetailRow}>
                         <span className={styles.serviceDetailLabel}>
-                          Inference backend
+                          LLM inference backend
                         </span>
                         <span className={styles.serviceDetailValue}>
                           {deploymentServiceData.inferenceBackend}

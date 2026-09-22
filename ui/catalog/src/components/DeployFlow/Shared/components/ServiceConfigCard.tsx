@@ -250,7 +250,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       }));
 
     return {
-      label: "Inference backend",
+      label: "LLM inference backend",
       options: inferenceBackendOptions,
     };
   }, [
@@ -381,7 +381,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   className={styles.serviceConfigItem}
                 >
                   <span className={styles.serviceConfigItemLabel}>
-                    Inference backend
+                    LLM inference backend
                   </span>
                   <span className={styles.serviceConfigItemValue}>
                     {provider.name}
@@ -916,7 +916,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     className={`${styles.modelDescriptionSection} ${styles.fullWidth}`}
                   >
                     <Accordion>
-                      <AccordionItem title="What is this model good at?">
+                      <AccordionItem title="What is this LLM good at?">
                         <div className={styles.modelDescriptionContent}>
                           {sections.introduction && (
                             <div className={styles.modelDescriptionFullWidth}>
