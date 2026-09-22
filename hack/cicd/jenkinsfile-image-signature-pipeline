@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'onprem-ai-services-stelar-machine' }
+    agent { label 'onprem-ai-services-machine' }
     
     parameters {
         string(
@@ -22,13 +22,16 @@ pipeline {
             description: '''List of images to skip building (one per line). Available image names:
   chatbot-service
   digitize-service
+  extract-service
   summarize-service
   similarity-service
+  translate-service
   caddy
   litellm
   postgres
   tools
   ai-services
+  ai-services-mcp
   catalog-ui
   digitize-ui
   chatbot-ui'''
@@ -196,11 +199,38 @@ pipeline {
                 }
             }
         }
+        stage('Build extract service') {
+            when { expression { !isImageSkipped('extract-service') } }
+            steps {
+                script {
+                    env.ICR_SERVICES_EXTRACT_IMAGE = buildAndPublishImage('services/extract/', 'extract-service')
+                }
+            }
+        }
+
+        stage('Build translate service') {
+            when { expression { !isImageSkipped('translate-service') } }
+            steps {
+                script {
+                    env.ICR_SERVICES_TRANSLATE_IMAGE = buildAndPublishImage('services/translate/', 'translate-service')
+                }
+            }
+        }
+
         stage('Build UI Chatbot') {
             when { expression { !isImageSkipped('chatbot-ui') } }
             steps {
                 script {
                     env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'chatbot-ui')
+                }
+            }
+        }
+
+        stage('Build AI Services MCP') {
+            when { expression { !isImageSkipped('ai-services-mcp') } }
+            steps {
+                script {
+                    env.ICR_AI_SERVICES_MCP_IMAGE = buildAndPublishImage('mcp/', 'ai-services-mcp')
                 }
             }
         }
@@ -482,8 +512,10 @@ def generateImageList() {
     def images = [
         env.ICR_SERVICES_CHATBOT_IMAGE,
         env.ICR_SERVICES_DIGITIZE_IMAGE,
+        env.ICR_SERVICES_EXTRACT_IMAGE,
         env.ICR_SERVICES_SUMMARIZE_IMAGE,
         env.ICR_SERVICES_SIMILARITY_IMAGE,
+        env.ICR_SERVICES_TRANSLATE_IMAGE,
         env.ICR_UI_CATALOG_IMAGE,
         env.ICR_UI_DIGITIZE_IMAGE,
         env.ICR_UI_CHATBOT_IMAGE,
@@ -491,7 +523,8 @@ def generateImageList() {
         env.ICR_LITELLM_IMAGE,
         env.ICR_POSTGRES_IMAGE,
         env.ICR_TOOL_IMAGE,
-        env.ICR_AI_SERVICES_IMAGE
+        env.ICR_AI_SERVICES_IMAGE,
+        env.ICR_AI_SERVICES_MCP_IMAGE
     ].findAll { it != null }
 
     def imageList = images.join('\n') + '\n'
