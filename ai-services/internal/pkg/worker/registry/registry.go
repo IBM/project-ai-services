@@ -144,6 +144,7 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 			Name:        workerName,
 			RuntimeType: models.WorkerRuntimeType(runtimeType),
 			Status:      models.WorkerStatusReady,
+			Message:     "",
 			Metadata:    metadataToAny(metadata),
 		}
 		if err := r.repo.Upsert(ctx, w); err != nil {
@@ -244,6 +245,7 @@ func (r *Registry) Preregister(ctx context.Context, workerName string) (string, 
 		Name:        workerName,
 		RuntimeType: models.WorkerRuntimeTypeUnknown,
 		Status:      models.WorkerStatusPending,
+		Message:     MsgPendingRegistration,
 	}
 	if err := r.repo.Upsert(ctx, w); err != nil {
 		return "", fmt.Errorf("worker registry: DB upsert failed for %s: %w", workerName, err)
