@@ -8,7 +8,7 @@ podTemplateExecutions:
 # Resource requirements
 resources:
   cpu: 1 # 500m rounded up
-  memory: 1073741824 # 1Gi in bytes
+  memory: 4294967296 # 4Gi in bytes
   storage: 10737418240 # 10Gi for PostgreSQL database storage in bytes
 
 # Made with Bob

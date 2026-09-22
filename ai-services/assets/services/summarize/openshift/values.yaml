@@ -5,10 +5,10 @@ summarize:
   resources:
     requests:
       cpu: "500m"
-      memory: "512Mi"
+      memory: "2Gi"
     limits:
-      cpu: "500m"
-      memory: "512Mi"
+      cpu: "2000m"
+      memory: "4Gi"
 
 postgres:
   image: icr.io/ai-services-cicd/postgres:18-6
