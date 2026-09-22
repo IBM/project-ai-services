@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Query, Request, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from starlette.concurrency import iterate_in_threadpool
@@ -33,9 +33,8 @@ from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream, 
 from common.misc_utils import get_llm_endpoint, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 
-from common.error_utils import http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from summarize.summ_utils import (
-    SummarizeException,
     word_count,
     build_success_response,
     build_messages,
@@ -171,22 +170,11 @@ def swagger_root():
 
 ALLOWED_FILE_EXTENSIONS = {".txt", ".pdf"}
 
-@app.exception_handler(SummarizeException)
-async def summarize_exception_handler(request: Request, exc: SummarizeException):
-    """Global exception handler for SummarizeException.
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """Delegate to the shared handler from common.error_utils."""
+    return await http_exception_handler(request, exc)
 
-    Formats summarization-related errors into standard API JSON error responses.
-    """
-    return JSONResponse(
-        status_code=exc.code,
-        content={
-            "error": {
-                "code": exc.code,
-                "message": exc.message,
-                "status": exc.status,
-            }
-        },
-    )
 
 def initialize_models():
     """Initialize endpoint configurations for the LLM model.
@@ -226,10 +214,8 @@ async def handle_summarize(
     
     # Validate that both parameters are not provided simultaneously
     if summary_level is not None and summary_length is not None:
-        raise SummarizeException(
-            400, "INVALID_PARAMETER",
-            "Cannot specify both 'level' and 'length'. Please use only one."
-        )
+        APIError.raise_error(ErrorCode.INVALID_PARAMETER,
+                             "Cannot specify both 'level' and 'length'. Please use only one.")
     
     # Unified validation and computation
     available_output_tokens = validate_input_and_get_available_tokens(
@@ -274,8 +260,8 @@ async def handle_summarize(
         except Exception as e:
             logger.error(f"LLM call failed with error: {e}")
             concurrency_limiter.release()
-            raise SummarizeException(500, "LLM_ERROR",
-                                     f"Failed to generate summary, error: {e} Please try again later")
+            APIError.raise_error(ErrorCode.LLM_ERROR,
+                                     "Failed to generate summary. Please try again later")
         return StreamingResponse(
             locked_stream(vllm_stream),
             media_type="text/event-stream",
@@ -301,7 +287,7 @@ async def handle_summarize(
         elapsed_ms = int((time.time() - start) * 1000)
 
     if isinstance(result, dict) and "error" in result:
-        raise SummarizeException(500, "LLM_ERROR",
+        APIError.raise_error(ErrorCode.LLM_ERROR,
                                  "Failed to generate summary. Please try again later")
 
     summary = trim_to_last_sentence(result) if isinstance(result, str) else ""
@@ -402,8 +388,8 @@ async def summarize(
     """Accept plain text via JSON or text/file via multipart/form-data."""
     try:
         if concurrency_limiter.locked():
-            raise SummarizeException(429, "SERVER_BUSY",
-                                     "Server is busy. Please try again later.")
+            APIError.raise_error(ErrorCode.SERVER_BUSY,
+                                 "Server is busy. Please try again later.")
         content_type = request.headers.get("content-type", "")
 
         # ----- JSON path -----
@@ -412,13 +398,13 @@ async def summarize(
                 body = await request.json()
             except Exception as e:
                 logger.error(f"error: {e}")
-                raise SummarizeException(400, "INVALID_JSON",
-                                         "Request body is not valid JSON")
+                APIError.raise_error(ErrorCode.INVALID_REQUEST,
+                                     "Request body is not valid JSON")
 
             text = body.get("text", "").strip()
             if not text:
-                raise SummarizeException(400, "MISSING_INPUT",
-                                         "Either 'text' or 'file' parameter is required")
+                APIError.raise_error(ErrorCode.MISSING_INPUT,
+                                     "Either 'text' or 'file' parameter is required")
 
             summary_level = validate_summary_level(level)
             summary_length = validate_summary_length(length)
@@ -439,8 +425,8 @@ async def summarize(
                 filename = file.filename or ""
                 ext = os.path.splitext(filename)[1].lower()
                 if ext not in ALLOWED_FILE_EXTENSIONS:
-                    raise SummarizeException(400, "UNSUPPORTED_FILE_TYPE",
-                                             "Only .txt and .pdf files are allowed.")
+                    APIError.raise_error(ErrorCode.UNSUPPORTED_FILE_TYPE,
+                                         "Only .txt and .pdf files are allowed.")
                 raw = await file.read()
                 if ext == ".pdf":
                     try:
@@ -449,30 +435,30 @@ async def summarize(
                         logger.debug(f"PDF extraction took {(time.time() - start) * 1000:.0f}ms")
                     except Exception as e:
                         logger.error(f"PDF extraction failed: {e}")
-                        raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
-                                                 "File is not a valid txt/pdf file.")
+                        APIError.raise_error(ErrorCode.UNSUPPORTED_CONTENT_TYPE,
+                                             "File is not a valid txt/pdf file.")
                 else:
                     try:
                         content_text = raw.decode("utf-8", errors="strict")
                     except UnicodeDecodeError as e:
                         logger.error(f"Failed to decode text file as UTF-8: {e}")
-                        raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
-                                                 "File is not a valid txt/pdf file.")
+                        APIError.raise_error(ErrorCode.UNSUPPORTED_CONTENT_TYPE,
+                                             "File is not a valid txt/pdf file.")
             else:
-                raise SummarizeException(400, "MISSING_INPUT",
-                                         "Either 'text' or 'file' parameter is required")
+                APIError.raise_error(ErrorCode.MISSING_INPUT,
+                                     "Either 'text' or 'file' parameter is required")
 
             if not content_text or not content_text.strip():
-                raise SummarizeException(400, "EMPTY_INPUT",
-                                         "The provided input contains no extractable text.")
+                APIError.raise_error(ErrorCode.EMPTY_INPUT,
+                                     "The provided input contains no extractable text.")
             return await handle_summarize(content_text.strip(), "file", summary_length, summary_level, stream)
 
         else:
-            raise SummarizeException(415, "UNSUPPORTED_CONTENT_TYPE",
-                                     "Content-Type must be application/json or multipart/form-data")
+            APIError.raise_error(ErrorCode.UNSUPPORTED_CONTENT_TYPE,
+                                 "Content-Type must be application/json or multipart/form-data")
 
-    except SummarizeException as se:
-        raise se
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Got exception while generating summary: {e}")
 
@@ -988,46 +974,37 @@ async def create_summarization_job(
     try:
         # Check semaphore availability before processing
         if concurrency_limiter.locked():
-            raise SummarizeException(
-                429,
-                "RATE_LIMIT_EXCEEDED",
-                "Server is at capacity processing summarization jobs. Please try again later."
-            )
-        
+            APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED,
+                                 "Server is at capacity processing summarization jobs. Please try again later.")
+
         # Validate file extension
         filename = file.filename or ""
         is_valid, ext = validate_file_extension(filename)
-        
+
         if not is_valid:
-            raise SummarizeException(
-                415,
-                "UNSUPPORTED_FILE_TYPE",
-                f"Only .txt and .pdf files are allowed. Received: {ext or 'unknown'}"
-            )
-        
+            APIError.raise_error(ErrorCode.UNSUPPORTED_FILE_TYPE,
+                                 f"Only .txt and .pdf files are allowed. Received: {ext or 'unknown'}")
+
         # Validate level parameter
         if level is not None:
             level = validate_summary_level(level)
         else:
             level = 'standard'  # Default level
-        
+
         # Generate job ID
         job_id = str(uuid.uuid4())
-        
+
         logger.info(f"Creating summarization job {job_id} for file: {filename}")
-        
+
         # Stage the uploaded file
         try:
             staged_path = stage_uploaded_file(job_id, file)
             logger.debug(f"File staged at: {staged_path}")
         except IOError as e:
             logger.error(f"Failed to stage file for job {job_id}: {e}")
-            raise SummarizeException(
-                500,
-                "FILE_STAGING_ERROR",
-                "Failed to save uploaded file"
-            )
-        
+            APIError.raise_error(ErrorCode.FILE_STAGING_ERROR,
+                                 "Failed to save uploaded file")
+
         # Create job record in database
         try:
             create_job_with_db(job_id,
@@ -1042,27 +1019,21 @@ async def create_summarization_job(
             logger.error(f"Failed to create job record for {job_id}: {e}")
             # Clean up staged file
             cleanup_staging_directory(job_id, settings.summarize.staging_dir)
-            raise SummarizeException(
-                500,
-                "DATABASE_ERROR",
-                "Failed to create job record"
-            )
-        
+            APIError.raise_error(ErrorCode.DATABASE_ERROR,
+                                 "Failed to create job record")
+
         # Launch background processing (stub for now)
         background_tasks.add_task(process_summarization_job, job_id, level)
-        
+
         # Return 202 Accepted with job_id using JobCreatedResponse
         return JobCreatedResponse(job_id=job_id)
-        
-    except SummarizeException as se:
-        raise se
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Unexpected error creating summarization job: {e}", exc_info=True)
-        raise SummarizeException(
-            500,
-            "INTERNAL_SERVER_ERROR",
-            f"Failed to create summarization job: {str(e)}"
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Failed to create summarization job. Please try again later.")
 
 
 @app.get(
@@ -1095,31 +1066,22 @@ async def list_jobs(
     try:
         # Validate limit parameter
         if limit < 1 or limit > 100:
-            raise SummarizeException(
-                400,
-                "INVALID_PARAMETER",
-                "Limit must be between 1 and 100"
-            )
-        
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER,
+                                 "Limit must be between 1 and 100")
+
         # Validate offset parameter
         if offset < 0:
-            raise SummarizeException(
-                400,
-                "INVALID_PARAMETER",
-                "Offset must be non-negative"
-            )
-        
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER,
+                                 "Offset must be non-negative")
+
         # Validate and parse status parameter
         status_filter = None
         if status:
             try:
                 status_filter = JobStatus(status.lower())
             except ValueError:
-                raise SummarizeException(
-                    400,
-                    "INVALID_PARAMETER",
-                    f"Invalid status value. Must be one of: accepted, in_progress, completed, failed"
-                )
+                APIError.raise_error(ErrorCode.INVALID_PARAMETER,
+                                     "Invalid status value. Must be one of: accepted, in_progress, completed, failed")
         
         # Handle latest flag
         if latest:
@@ -1162,15 +1124,12 @@ async def list_jobs(
             data=job_list
         )
         
-    except SummarizeException as se:
-        raise se
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error listing jobs: {e}", exc_info=True)
-        raise SummarizeException(
-            500,
-            "INTERNAL_SERVER_ERROR",
-            "Failed to retrieve jobs"
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Failed to retrieve jobs")
 
 
 @app.get(
@@ -1193,13 +1152,10 @@ async def get_job_details(job_id: str):
         # Get job from database
         from summarize.db.manager import db_repo
         job = db_repo.get_job_by_id(job_id)
-        
+
         if not job:
-            raise SummarizeException(
-                404,
-                "RESOURCE_NOT_FOUND",
-                f"Job {job_id} not found"
-            )
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                                 f"Job {job_id} not found")
         
         # Format response using JobDetailResponse
         document = DocumentInfo(
@@ -1221,15 +1177,12 @@ async def get_job_details(job_id: str):
             metadata=job.job_metadata if job.job_metadata else None
         )
         
-    except SummarizeException as se:
-        raise se
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving job {job_id}: {e}", exc_info=True)
-        raise SummarizeException(
-            500,
-            "INTERNAL_SERVER_ERROR",
-            f"Failed to retrieve job details"
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Failed to retrieve job details")
 
 
 @app.get(
@@ -1239,13 +1192,15 @@ async def get_job_details(job_id: str):
         200: {"description": "Summary result"},
         202: {"description": "Job still in progress"},
         404: http_error_responses[404],
+        422: http_error_responses[422],
         500: http_error_responses[500],
     },
     summary="Get summarization result",
     description=(
         "Retrieve the completed summary and result metadata for a job.\n\n"
         "Returns 202 Accepted if the job is still in progress.\n"
-        "Returns 404 if the job doesn't exist or result is not available."
+        "Returns 422 Unprocessable Entity if the job failed.\n"
+        "Returns 404 if the job doesn't exist."
     ),
     response_description="Summarization result with usage statistics",
     tags=["jobs", "MCP"],
@@ -1259,12 +1214,9 @@ async def get_job_result(job_id: str):
         job = db_repo.get_job_by_id(job_id)
         
         if not job:
-            raise SummarizeException(
-                404,
-                "RESOURCE_NOT_FOUND",
-                f"Job {job_id} not found"
-            )
-        
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                                 f"Job {job_id} not found")
+
         # Check job status
         if job.status in ['accepted', 'in_progress']:
             return JSONResponse(
@@ -1275,24 +1227,20 @@ async def get_job_result(job_id: str):
                     "status": job.status
                 }
             )
-        
+
         if job.status == 'failed':
-            raise SummarizeException(
-                404,
-                "RESOURCE_NOT_FOUND",
-                f"Job failed: {job.error or 'Unknown error'}"
-            )
-        
+            # Use JOB_FAILED (422) so callers can distinguish "job found but
+            # failed" from "job does not exist" (404 RESOURCE_NOT_FOUND).
+            APIError.raise_error(ErrorCode.JOB_FAILED,
+                                 f"Job failed: {job.error or 'Unknown error'}")
+
         # Read result file
         result_data = read_result_file(job_id)
-        
+
         if not result_data:
             logger.error(f"Result file missing for completed job {job_id}")
-            raise SummarizeException(
-                500,
-                "INTERNAL_SERVER_ERROR",
-                "Result file not found"
-            )
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                                 "Result file not found")
         
         # Use JobResultResponse to structure the response
         return JobResultResponse(
@@ -1301,15 +1249,12 @@ async def get_job_result(job_id: str):
             usage=result_data.get("usage", {})
         )
         
-    except SummarizeException as se:
-        raise se
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error retrieving result for job {job_id}: {e}", exc_info=True)
-        raise SummarizeException(
-            500,
-            "INTERNAL_SERVER_ERROR",
-            "Failed to retrieve job result"
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Failed to retrieve job result")
 
 
 @app.delete(
@@ -1318,7 +1263,7 @@ async def get_job_result(job_id: str):
     responses={
         204: {"description": "Job and associated data deleted"},
         404: http_error_responses[404],
-        409: {"description": "Job is still active (accepted or in_progress)"},
+        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Delete a job",
@@ -1338,45 +1283,33 @@ async def delete_job(job_id: str):
         job = db_repo.get_job_by_id(job_id)
         
         if not job:
-            raise SummarizeException(
-                404,
-                "RESOURCE_NOT_FOUND",
-                f"Job {job_id} not found"
-            )
-        
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                                 f"Job {job_id} not found")
+
         # Check if job is active
         if job.status in ['accepted', 'in_progress']:
-            raise SummarizeException(
-                409,
-                "RESOURCE_LOCKED",
-                f"Cannot delete active job. Current status: {job.status}"
-            )
-        
+            APIError.raise_error(ErrorCode.RESOURCE_LOCKED,
+                                 f"Cannot delete active job. Current status: {job.status}")
+
         # Delete files (result and staging)
         delete_job_files(job_id)
-        
+
         # Delete from database
         success = db_repo.delete_job(job_id)
-        
+
         if not success:
-            raise SummarizeException(
-                500,
-                "INTERNAL_SERVER_ERROR",
-                "Failed to delete job from database"
-            )
-        
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                                 "Failed to delete job from database")
+
         logger.info(f"Deleted job {job_id}")
         return Response(status_code=204)
-        
-    except SummarizeException as se:
-        raise se
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting job {job_id}: {e}", exc_info=True)
-        raise SummarizeException(
-            500,
-            "INTERNAL_SERVER_ERROR",
-            "Failed to delete job"
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Failed to delete job")
 
 
 @app.delete(
@@ -1385,7 +1318,7 @@ async def delete_job(job_id: str):
     responses={
         204: {"description": "All jobs and data deleted"},
         400: http_error_responses[400],
-        409: {"description": "Active jobs exist"},
+        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Bulk delete all jobs",
@@ -1403,48 +1336,36 @@ async def bulk_delete_jobs(confirm: Optional[bool] = None):
     try:
         # Validate confirm parameter
         if confirm is not True:
-            raise SummarizeException(
-                400,
-                "INVALID_REQUEST",
-                "Bulk delete requires confirm=true query parameter"
-            )
-        
+            APIError.raise_error(ErrorCode.INVALID_REQUEST,
+                                 "Bulk delete requires confirm=true query parameter")
+
         # Check for active jobs
         from summarize.db.manager import db_repo
         active_jobs = db_repo.get_active_jobs()
-        
+
         if active_jobs:
-            raise SummarizeException(
-                409,
-                "RESOURCE_LOCKED",
-                f"Cannot delete: {len(active_jobs)} active job(s) exist"
-            )
-        
+            APIError.raise_error(ErrorCode.RESOURCE_LOCKED,
+                                 f"Cannot delete: {len(active_jobs)} active job(s) exist")
+
         # Delete all files
         delete_all_job_files()
-        
+
         # Delete all jobs from database
         success = db_repo.delete_all_jobs()
-        
+
         if not success:
-            raise SummarizeException(
-                500,
-                "INTERNAL_SERVER_ERROR",
-                "Failed to delete jobs from database"
-            )
-        
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                                 "Failed to delete jobs from database")
+
         logger.info("Bulk deleted all jobs")
         return Response(status_code=204)
-        
-    except SummarizeException as se:
-        raise se
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in bulk delete: {e}", exc_info=True)
-        raise SummarizeException(
-            500,
-            "INTERNAL_SERVER_ERROR",
-            "Failed to delete all jobs"
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Failed to delete all jobs")
 
 
 @app.get(

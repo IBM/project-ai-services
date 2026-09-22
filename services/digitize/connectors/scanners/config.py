@@ -282,14 +282,16 @@ class SSHConnectorConfig(BaseModel):
     @classmethod
     def _check_private_key(cls, v: SecretStr) -> SecretStr:
         secret_value = v.get_secret_value()
-        if not secret_value.strip():
+        stripped = secret_value.strip()
+        if not stripped:
             raise ValueError("private_key must not be empty.")
-        if "PRIVATE KEY" not in secret_value:
+        if "PRIVATE KEY" not in stripped:
             raise ValueError(
                 "private_key does not look like a PEM private key "
                 "(expected 'PRIVATE KEY' in the value)."
             )
-        return v
+        # Re-wrap the stripped value so consumers receive a clean PEM string.
+        return SecretStr(stripped)
 
     @field_validator("allowed_extensions")
     @classmethod

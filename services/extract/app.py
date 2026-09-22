@@ -7,15 +7,14 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse
+from common.error_utils import APIError, ErrorCode, http_exception_handler
 from common.misc_utils import configure_uvicorn_logging, create_llm_session, get_llm_endpoint, get_logger, set_log_level, set_request_id
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 from extract.db.connection import check_db_connection, close_db_connections, engine
 from extract.db.models import Base
-from extract.utils.schema import SchemaValidationError, calculate_prompt_overhead_tokens
-from extract.utils.exceptions import ExtractException
+from extract.utils.schema import calculate_prompt_overhead_tokens
 from extract.utils.job import recover_zombie_jobs
 from extract.settings import settings
 
@@ -157,32 +156,10 @@ def health():
     return {"status": "ok"}
 
 
-# ---------------------------------------------------------------------------
-# Error handler for SchemaValidationError
-# ---------------------------------------------------------------------------
-
-@app.exception_handler(SchemaValidationError)
-async def schema_validation_error_handler(request: Request, exc: SchemaValidationError):
-    """Global exception handler for SchemaValidationError.
-
-    Formats schema validation errors into standard API JSON error responses.
-    """
-    body: dict = {"error": {"code": exc.code, "message": exc.message, "status": exc.status}}
-    if exc.details:
-        body["error"]["details"] = exc.details
-    return JSONResponse(status_code=exc.status, content=body)
-
-
-@app.exception_handler(ExtractException)
-async def extract_exception_handler(request: Request, exc: ExtractException):
-    """Global exception handler for ExtractException.
-
-    Formats extraction-related errors into standard API JSON error responses.
-    """
-    body: dict = {"error": {"code": exc.code, "message": exc.message, "status": exc.status_code}}
-    if exc.details:
-        body["error"]["details"] = exc.details
-    return JSONResponse(status_code=exc.status_code, content=body)
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """Delegate to the shared handler from common.error_utils."""
+    return await http_exception_handler(request, exc)
 
 
 

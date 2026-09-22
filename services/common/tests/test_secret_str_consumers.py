@@ -114,6 +114,17 @@ class TestSSHConnectorConfigPrivateKey:
         )
         assert cfg.private_key.get_secret_value() == _FAKE_PEM
 
+    def test_whitespace_is_stripped_from_private_key(self):
+        """Validator must strip surrounding whitespace so paramiko doesn't reject the key."""
+        from digitize.connectors.scanners.config import SSHConnectorConfig
+        padded = f"  \n{_FAKE_PEM}\n  "
+        cfg = SSHConnectorConfig(
+            host="sftp.example.com",
+            username="user",
+            private_key=padded,
+        )
+        assert cfg.private_key.get_secret_value() == _FAKE_PEM
+
     def test_repr_does_not_leak_pem(self):
         from digitize.connectors.scanners.config import SSHConnectorConfig
         cfg = SSHConnectorConfig(

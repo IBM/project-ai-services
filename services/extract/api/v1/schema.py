@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, Query
 from fastapi.responses import  Response
 from sqlalchemy.exc import IntegrityError
 from common.misc_utils import get_logger, get_llm_endpoint
-from common.error_utils import  http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses
 
 from extract.settings import settings
 
@@ -52,7 +52,7 @@ logger = get_logger("schema_router")
     response_model=SchemaCreatedResponse,
     responses={
         400: http_error_responses[400],
-        409: {"description": "Schema name already exists"},
+        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Register extraction schema",
@@ -95,35 +95,32 @@ async def register_schema(body: Annotated[SchemaRegisterRequest, Body(
     """Register and validate a new schema for data extraction."""
     # --- Conflict check (name uniqueness) ---
     if db_repo.schema_name_exists(body.name):
-        raise SchemaValidationError(
-            "CONFLICT",
-            f"A schema with name {body.name!r} already exists.",
-            status=409,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_CONFLICT,
+                             f"A schema with name {body.name!r} already exists.")
 
     examples_raw = [ex.model_dump() for ex in body.examples] if body.examples else None
 
     if body.json_schema is None and not examples_raw:
-        raise SchemaValidationError(
-            "MISSING_SCHEMA",
-            "Either json_schema or at least one example must be provided.",
-            status=400,
-        )
+        APIError.raise_error(ErrorCode.MISSING_INPUT,
+                             "Either json_schema or at least one example must be provided.")
 
-    if body.json_schema is None:
-        # --- Infer schema from examples when no explicit schema is provided ---
-        normalized = infer_schema_from_examples(examples_raw or [])
-        is_inferred = True
-    else:
-        # --- Normalize per-property "required": true convention FIRST ---
-        normalized = normalize_schema(body.json_schema)
-        is_inferred = False
+    try:
+        if body.json_schema is None:
+            # --- Infer schema from examples when no explicit schema is provided ---
+            normalized = infer_schema_from_examples(examples_raw or [])
+            is_inferred = True
+        else:
+            # --- Normalize per-property "required": true convention FIRST ---
+            normalized = normalize_schema(body.json_schema)
+            is_inferred = False
 
-    # --- JSON Schema structural validation (against the normalized form) ---
-    validate_json_schema_structure(normalized)
+        # --- JSON Schema structural validation (against the normalized form) ---
+        validate_json_schema_structure(normalized)
 
-    # --- Validate example outputs against normalized schema ---
-    validate_examples(examples_raw, normalized)
+        # --- Validate example outputs against normalized schema ---
+        validate_examples(examples_raw, normalized)
+    except SchemaValidationError as exc:
+        APIError.raise_error(ErrorCode.INVALID_SCHEMA, str(exc))
 
 
     # --- Token-count caching ---
@@ -139,16 +136,16 @@ async def register_schema(body: Annotated[SchemaRegisterRequest, Body(
         )
     except Exception as exc:
         logger.error(f"Token counting failed: {exc}", exc_info=True)
-        raise SchemaValidationError(
-            "TOKENIZATION_ERROR",
-            "Failed to compute token counts for the schema. "
-            "Ensure the LLM tokenize endpoint is reachable.",
-            status=500,
-        )
+        APIError.raise_error(ErrorCode.LLM_UNAVAILABLE,
+                             "Failed to compute token counts for the schema. "
+                             "Ensure the LLM tokenize endpoint is reachable.")
 
     # --- Registration budget check ---
     max_model_len = settings.common.llm.max_model_len
-    check_schema_share_in_context(schema_tokens, examples_tokens, custom_prompt_tokens, max_model_len)
+    try:
+        check_schema_share_in_context(schema_tokens, examples_tokens, custom_prompt_tokens, max_model_len)
+    except SchemaValidationError as exc:
+        APIError.raise_error(ErrorCode.INVALID_SCHEMA, str(exc))
 
     # ---  Persist ---
     schema_id = str(uuid.uuid4())
@@ -165,11 +162,8 @@ async def register_schema(body: Annotated[SchemaRegisterRequest, Body(
         is_schema_inferred=is_inferred,
     )
     if row is None:
-        raise SchemaValidationError(
-            "DATABASE_ERROR",
-            "Failed to persist the schema. Please try again.",
-            status=500,
-        )
+        APIError.raise_error(ErrorCode.DATABASE_ERROR,
+                             "Failed to persist the schema. Please try again.")
 
     logger.info(f"Registered schema {schema_id!r} ({body.name!r})")
     return SchemaCreatedResponse(
@@ -247,11 +241,8 @@ async def get_schema(schema_id: str) -> SchemaDetailResponse:
     """Retrieve detailed information and definition for a specific schema by ID."""
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
-        raise SchemaValidationError(
-            "SCHEMA_NOT_FOUND",
-            f"No schema with id {schema_id!r}.",
-            status=404,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                             f"No schema with id {schema_id!r}.")
     return SchemaDetailResponse(
         schema_id=row.schema_id,
         name=row.name,
@@ -277,7 +268,7 @@ async def get_schema(schema_id: str) -> SchemaDetailResponse:
     responses={
         204: {"description": "Schema deleted"},
         404: http_error_responses[404],
-        409: {"description": "Schema is referenced by one or more jobs"},
+        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Delete schema",
@@ -292,41 +283,33 @@ async def delete_schema(schema_id: str) -> Response:
     # Check existence first for a clear 404.
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
-        raise SchemaValidationError(
-            "SCHEMA_NOT_FOUND",
-            f"No schema with id {schema_id!r}.",
-            status=404,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                             f"No schema with id {schema_id!r}.")
 
     # Check for referencing jobs before attempting delete (avoids ambiguous DB errors).
     referencing = db_repo.get_referencing_job_ids(schema_id, limit=10)
     if referencing:
-        raise SchemaValidationError(
-            "SCHEMA_IN_USE",
+        APIError.raise_error(
+            ErrorCode.RESOURCE_LOCKED,
             f"Schema {schema_id!r} is referenced by {len(referencing)} job(s). "
             "Delete the referencing jobs first.",
-            status=409,
             details={"referencing_job_ids": referencing},
         )
 
     try:
         deleted = db_repo.delete_schema(schema_id)
     except IntegrityError:
-        # FK RESTRICT fired — another job was created concurrently.
-        referencing = db_repo.get_referencing_job_ids(schema_id, limit=10)
-        raise SchemaValidationError(
-            "SCHEMA_IN_USE",
+        # FK RESTRICT fired — a job was created concurrently; re-query for IDs.
+        concurrent_refs = db_repo.get_referencing_job_ids(schema_id, limit=10)
+        APIError.raise_error(
+            ErrorCode.RESOURCE_LOCKED,
             f"Schema {schema_id!r} is referenced by job(s) and cannot be deleted.",
-            status=409,
-            details={"referencing_job_ids": referencing},
+            details={"referencing_job_ids": concurrent_refs},
         )
 
     if not deleted:
-        raise SchemaValidationError(
-            "SCHEMA_NOT_FOUND",
-            f"No schema with id {schema_id!r}.",
-            status=404,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                             f"No schema with id {schema_id!r}.")
 
     logger.info(f"Deleted schema {schema_id!r}")
     return Response(status_code=204)
@@ -342,7 +325,7 @@ async def delete_schema(schema_id: str) -> Response:
     responses={
         204: {"description": "All schemas deleted"},
         400: http_error_responses[400],
-        409: {"description": "One or more schemas are referenced by jobs"},
+        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Bulk delete all schemas",
@@ -361,28 +344,19 @@ async def bulk_delete_schemas(
 ) -> Response:
     """Bulk delete all schemas from the system once explicit confirmation is provided."""
     if confirm != "true":
-        raise SchemaValidationError(
-            "CONFIRMATION_REQUIRED",
-            "Bulk delete requires ?confirm=true.",
-            status=400,
-        )
+        APIError.raise_error(ErrorCode.INVALID_REQUEST,
+                             "Bulk delete requires ?confirm=true.")
 
     if db_repo.any_schema_has_jobs():
-        raise SchemaValidationError(
-            "SCHEMAS_IN_USE",
-            "One or more schemas are referenced by extract jobs. "
-            "Delete all jobs (DELETE /v1/extract/jobs?confirm=true) before bulk-deleting schemas.",
-            status=409,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_LOCKED,
+                             "One or more schemas are referenced by extract jobs. "
+                             "Delete all jobs (DELETE /v1/extract/jobs?confirm=true) before bulk-deleting schemas.")
 
     try:
         db_repo.delete_all_schemas()
     except IntegrityError:
-        raise SchemaValidationError(
-            "SCHEMAS_IN_USE",
-            "One or more schemas are referenced by extract jobs.",
-            status=409,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_LOCKED,
+                             "One or more schemas are referenced by extract jobs.")
 
     logger.info("Bulk deleted all schemas")
     return Response(status_code=204)

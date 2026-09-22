@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 import threading
 from typing import Optional
 
+from common.error_utils import APIError, ErrorCode
 from common.misc_utils import set_log_level, get_logger, resolve_model_max_len
 from summarize.settings import settings
 
@@ -77,28 +78,30 @@ def validate_input_and_get_available_tokens(
     Returns:
         available_output_tokens: Maximum tokens available for summary generation
     
-    Raises:
-        SummarizeException: If input exceeds hard limit or summary_length > input_word_count
     """
     
     # Validate summary_length if provided
     if summary_length is not None and summary_length > input_word_count:
-        raise SummarizeException(
-            400, "INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH",
-            "Input text is smaller than summary length",
-        )
-    
+        APIError.raise_error(ErrorCode.INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH,
+                             "Input text is smaller than summary length")
+
     max_allowed_input_tokens = get_max_allowed_input_tokens()
 
     # Hard limit check
     if input_tokens > max_allowed_input_tokens:
         # Convert to words for user-friendly error message
         max_allowed_input_words = int(max_allowed_input_tokens * settings.common.llm.token_to_word_ratio_en)
-        raise SummarizeException(
-            413, "CONTEXT_LIMIT_EXCEEDED",
+        excess_tokens = input_tokens - max_allowed_input_tokens
+        APIError.raise_error(
+            ErrorCode.CONTEXT_LIMIT_EXCEEDED,
             f"Input size ({input_word_count} words, {input_tokens} tokens) exceeds maximum allowed. "
             f"Maximum input: ~{max_allowed_input_words} words ({max_allowed_input_tokens} tokens) "
             f"to ensure at least {settings.summarize.minimum_summary_words} words for summary.",
+            details={
+                "input_tokens": input_tokens,
+                "max_allowed_input_tokens": max_allowed_input_tokens,
+                "excess_tokens": excess_tokens,
+            },
         )
     
     # Calculate available output tokens
@@ -284,11 +287,6 @@ def build_success_response(
         },
     }
 
-class SummarizeException(Exception):
-    def __init__(self, code: int, status: str, message: str):
-        self.code = code
-        self.message = message
-        self.status = status
 
 
 def build_messages(text: str, target_words: Optional[int], min_words: Optional[int], max_words: Optional[int], has_length_spec: bool) -> list:
@@ -370,20 +368,16 @@ class SummarizeSuccessResponse(BaseModel):
     }
 
 def validate_summary_length(summary_length) -> Optional[int]:
-    """Validate and normalize the summary length parameter.
-
-    Raises:
-        SummarizeException: If the length is not a valid integer or is out of bounds.
-    """
+    """Validate and normalize the summary length parameter."""
     if summary_length:
         try:
             summary_length = int(summary_length)
         except (TypeError, ValueError):
-            raise SummarizeException(400, "INVALID_PARAMETER",
-                                     "Length must be an integer")
-        if summary_length <=0 or summary_length > MAX_INPUT_WORDS:
-            raise SummarizeException(400, "INVALID_PARAMETER",
-                                     "Length is out of bounds")
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER,
+                                 "Length must be an integer")
+        if summary_length <= 0 or summary_length > MAX_INPUT_WORDS:
+            APIError.raise_error(ErrorCode.INVALID_PARAMETER,
+                                 "Length is out of bounds")
         return summary_length
     return None
 
@@ -400,11 +394,9 @@ def validate_summary_level(summary_level: Optional[str]) -> Optional[str]:
     """
     if summary_level is None:
         return None
-    
+
     valid_levels = ["brief", "standard", "detailed"]
     if summary_level not in valid_levels:
-        raise SummarizeException(
-            400, "INVALID_PARAMETER",
-            f"level must be one of: {', '.join(valid_levels)}"
-        )
+        APIError.raise_error(ErrorCode.INVALID_PARAMETER,
+                             f"level must be one of: {', '.join(valid_levels)}")
     return summary_level

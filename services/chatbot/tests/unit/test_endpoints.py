@@ -321,6 +321,56 @@ class TestChatCompletionNonStreaming:
         
         assert response.status_code == 500
 
+    def test_http_error_propagates_upstream_status_code(
+        self, test_client, valid_chat_request,
+        mock_search_only, mock_validate_query_length,
+        mock_detect_language, monkeypatch
+    ):
+        """HTTPError from upstream should keep the upstream status code, not force 503."""
+        import requests
+
+        mock_limiter = Mock()
+        mock_limiter.locked = Mock(return_value=False)
+        mock_limiter.acquire = AsyncMock()
+        mock_limiter.release = Mock()
+        monkeypatch.setattr("chatbot.app.concurrency_limiter", mock_limiter)
+
+        # Simulate a 401 Unauthorized from the LLM upstream
+        mock_resp = Mock()
+        mock_resp.status_code = 401
+        http_err = requests.exceptions.HTTPError("401 Unauthorized", response=mock_resp)
+        mock_vllm = Mock(side_effect=http_err)
+        monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
+
+        response = test_client.post("/v1/chat/completions", json=valid_chat_request)
+
+        # Must propagate 401, not collapse to 503
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "LLM_UNAVAILABLE"
+
+    def test_http_error_no_response_object_becomes_502(
+        self, test_client, valid_chat_request,
+        mock_search_only, mock_validate_query_length,
+        mock_detect_language, monkeypatch
+    ):
+        """HTTPError with no response object defaults to 502."""
+        import requests
+
+        mock_limiter = Mock()
+        mock_limiter.locked = Mock(return_value=False)
+        mock_limiter.acquire = AsyncMock()
+        mock_limiter.release = Mock()
+        monkeypatch.setattr("chatbot.app.concurrency_limiter", mock_limiter)
+
+        http_err = requests.exceptions.HTTPError("No response")
+        mock_vllm = Mock(side_effect=http_err)
+        monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
+
+        response = test_client.post("/v1/chat/completions", json=valid_chat_request)
+
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "LLM_UNAVAILABLE"
+
 
 @pytest.mark.unit
 class TestChatCompletionStreaming:

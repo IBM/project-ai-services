@@ -20,7 +20,7 @@ import pytest
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
 
-from summarize.summ_utils import SummarizeException
+from fastapi import HTTPException
 
 
 @pytest.fixture
@@ -232,7 +232,7 @@ class TestGetJobResultEndpoint:
             assert response.status_code == 202
     
     def test_get_result_failed_job(self, summarize_test_client, mock_job):
-        """Test getting result for failed job returns 404."""
+        """Test getting result for failed job returns 422 (JOB_FAILED, distinct from 404)."""
         mock_job.status = "failed"
         mock_job.error = "Processing failed"
         
@@ -241,7 +241,8 @@ class TestGetJobResultEndpoint:
             
             response = summarize_test_client.get("/v1/summarize/jobs/test-job-123/result")
             
-            assert response.status_code == 404
+            assert response.status_code == 422
+            assert response.json()["error"]["code"] == "JOB_FAILED"
             assert "failed" in response.json()["error"]["message"].lower()
     
     def test_get_result_missing_file(self, summarize_test_client, mock_job):
@@ -546,8 +547,9 @@ class TestCreateSummarizationJobEndpoint:
         """Test job creation with invalid level parameter."""
         with patch("summarize.app.concurrency_limiter.locked", return_value=False), \
              patch("summarize.app.validate_file_extension", return_value=(True, ".txt")), \
-             patch("summarize.app.validate_summary_level", side_effect=SummarizeException(
-                 400, "INVALID_LEVEL", "Invalid level value"
+             patch("summarize.app.validate_summary_level", side_effect=HTTPException(
+                 status_code=400,
+                 detail={"error": {"code": "INVALID_LEVEL", "message": "Invalid level value", "status": 400}},
              )):
             
             response = summarize_test_client.post(
@@ -700,11 +702,12 @@ class TestCreateSummarizationJobEndpoint:
             assert response.status_code == 202
     
     def test_create_job_summarize_exception_propagated(self, summarize_test_client, mock_upload_file):
-        """Test that SummarizeException is properly propagated."""
+        """Test that HTTPException is properly propagated."""
         with patch("summarize.app.concurrency_limiter.locked", return_value=False), \
              patch("summarize.app.validate_file_extension", return_value=(True, ".txt")), \
-             patch("summarize.app.validate_summary_level", side_effect=SummarizeException(
-                 400, "TEST_ERROR", "Test error message"
+             patch("summarize.app.validate_summary_level", side_effect=HTTPException(
+                 status_code=400,
+                 detail={"error": {"code": "TEST_ERROR", "message": "Test error message", "status": 400}},
              )):
             
             response = summarize_test_client.post(

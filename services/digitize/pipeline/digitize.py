@@ -17,7 +17,7 @@ from digitize.db.models import ConversionTaskStatus
 from digitize.models import JobStatus, DocStatus
 from digitize.settings import settings
 from digitize.utils.db import get_status_manager
-from digitize.exceptions import JobCancelledError
+from digitize.exceptions import DeadlineExceededError, JobCancelledError
 
 logger = get_logger("digitize")
 
@@ -36,7 +36,7 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
     or the deadline expires.
 
     Returns the task object (possibly in a terminal state) or ``None`` if the
-    row disappeared.  Raises ``_DeadlineExceeded`` when the deadline is hit so
+    row disappeared.  Raises ``DeadlineExceededError`` when the deadline is hit so
     the caller can apply a consistent failure path.  Raises ``JobCancelledError``
     immediately if the job row is found to be ``cancel_pending`` or ``cancelled``
     during polling (the task is also marked cancelled before raising).
@@ -52,7 +52,7 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
     while task is not None and task.status not in terminal_statuses:
         if time.monotonic() >= deadline:
             doc_name = Path(task.cached_file).name if task.cached_file else "unknown"
-            raise _DeadlineExceeded(
+            raise DeadlineExceededError(
                 f"Conversion task for job {job_id} ({doc_name}) did not {phase_label} within "
                 f"{timeout_s:.0f}s — dispatcher may be stalled"
             )
@@ -70,8 +70,6 @@ def _poll_until(job_id, terminal_statuses, deadline, timeout_s, phase_label):
     return task
 
 
-class _DeadlineExceeded(Exception):
-    """Raised by ``_poll_until`` when the conversion deadline is exceeded."""
 
 
 def digitize(
@@ -143,7 +141,7 @@ def digitize(
             deadline, timeout_s, "complete",
         )
 
-    except _DeadlineExceeded as exc:
+    except DeadlineExceededError as exc:
         _fail(str(exc))
         return
 

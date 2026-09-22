@@ -5,6 +5,7 @@ This module provides comprehensive DB mocking to ensure tests run without
 requiring an actual PostgreSQL database connection.
 """
 
+import os
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -29,20 +30,27 @@ def _stub_module(name: str) -> types.ModuleType:
 
 
 # ---------------------------------------------------------------------------
-# Stub out StderrMonitor before digitize.app is imported.
+# Disable the crash handler before any app module is imported.
 #
 # StderrMonitor.start() calls os.dup2() on stderr's file descriptor, replacing
 # it with a pipe.  pytest's capture backend holds a tmpfile open on that same
 # fd; after dup2 the tmpfile points to a pipe and seek() raises
 # OSError: [Errno 29] Illegal seek, crashing the entire collection phase.
 #
-# We patch common.diagnostic_logger.setup_comprehensive_crash_handler so it
-# returns harmless stubs instead of wiring up the real stderr monitor.
+# Setting DISABLE_CRASH_HANDLER=1 *before* importing diagnostic_logger is
+# sufficient: setup_comprehensive_crash_handler checks the env var and returns
+# a no-op monitor on the first real call.
 # ---------------------------------------------------------------------------
-import common.diagnostic_logger as _diag_logger  # noqa: E402
+os.environ['DISABLE_CRASH_HANDLER'] = '1'
 
-_real_noop_crash_handler = lambda logger: (MagicMock(), MagicMock(), MagicMock())
-_diag_logger.setup_comprehensive_crash_handler = _real_noop_crash_handler
+import common.diagnostic_logger
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_diagnostic_crash_handler():
+    """Keep DISABLE_CRASH_HANDLER set for any late-bound code paths."""
+    with patch.dict(os.environ, {"DISABLE_CRASH_HANDLER": "1"}):
+        yield
 
 
 # Ensure all package levels exist first.

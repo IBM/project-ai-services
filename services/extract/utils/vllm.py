@@ -11,9 +11,9 @@ from common.llm_utils import get_vllm_headers
 from jsonschema import Draft202012Validator
 
 from common.misc_utils import get_logger
+from common.error_utils import APIError, ErrorCode
 from extract.settings import settings
 from extract.state import concurrency_limiter
-from extract.utils.exceptions import ExtractException
 
 logger = get_logger("vllm_utils")
 
@@ -144,8 +144,8 @@ async def call_vllm_safe(
         The raw vLLM response dict.
 
     Raises:
-        ExtractException(503) on connection failure.
-        ExtractException(500) on HTTP error or any other unexpected failure.
+        HTTPException(503) on connection failure.
+        HTTPException(500) on HTTP error or any other unexpected failure.
     """
     label = " on retry" if is_retry else ""
     try:
@@ -154,16 +154,14 @@ async def call_vllm_safe(
         )
     except requests.exceptions.ConnectionError as exc:
         logger.error(f"vLLM unreachable{label}: {exc}")
-        raise ExtractException(503, "LLM_UNAVAILABLE", "The AI service is unreachable.")
+        APIError.raise_error(ErrorCode.LLM_UNAVAILABLE, "The AI service is unreachable.")
     except requests.exceptions.HTTPError as exc:
         logger.error(f"vLLM HTTP error{label}: {exc}")
-        raise ExtractException(
-            500, "LLM_ERROR",
-            f"The AI service returned an error{label}: {exc.response.status_code}",
-        )
+        APIError.raise_error(ErrorCode.LLM_ERROR,
+                             f"The AI service returned an error{label}: {exc.response.status_code}")
     except Exception as exc:
         logger.error(f"Unexpected error calling vLLM{label}: {exc}", exc_info=True)
-        raise ExtractException(500, "LLM_ERROR", f"Unexpected error during LLM call{label}.")
+        APIError.raise_error(ErrorCode.LLM_ERROR, f"Unexpected error during LLM call{label}.")
 
 
 async def validate_with_retry(
@@ -196,9 +194,9 @@ async def validate_with_retry(
         - ``extra_completion_tokens``: Completion tokens consumed by the retry call (``0`` if none).
 
     Raises:
-        ExtractException(413) if the retry output is truncated (``finish_reason == "length"``).
-        ExtractException(422) if the retry output also fails schema validation.
-        ExtractException(503/500) propagated from :func:`call_vllm_safe` on LLM failure.
+        HTTPException(413) if the retry output is truncated (``finish_reason == "length"``).
+        HTTPException(422) if the retry output also fails schema validation.
+        HTTPException(503/500) propagated from :func:`call_vllm_safe` on LLM failure.
     """
     first_val_err: Optional[ValueError] = None
     try:
@@ -230,17 +228,13 @@ async def validate_with_retry(
     if not retry_choices:
         msg = "vLLM returned an empty choices list on retry."
         logger.error(msg)
-        raise ExtractException(500, "LLM_ERROR", msg)
+        APIError.raise_error(ErrorCode.LLM_ERROR, msg)
 
     retry_choice = retry_choices[0]
     if retry_choice.get("finish_reason") == "length":
         msg = "The model output was truncated on the validation retry."
         logger.error(f"{msg} (reserved_output_tokens={reserved_output})")
-        raise ExtractException(
-            413, "OUTPUT_BUDGET_EXCEEDED",
-            msg,
-            details={"reserved_output_tokens": reserved_output, "finish_reason": "length"},
-        )
+        APIError.raise_error(ErrorCode.CONTEXT_LIMIT_EXCEEDED, msg)
 
     raw_retry_output: str = retry_choice.get("message", {}).get("content", "") or ""
     retry_usage = retry_resp.get("usage", {})
@@ -252,16 +246,10 @@ async def validate_with_retry(
     except ValueError as retry_err:
         msg = f"Model output failed schema validation after one retry: {retry_err}"
         logger.error(msg)
-        raise ExtractException(
-            422, "EXTRACTION_VALIDATION_FAILED",
-            "Model output failed schema validation after one retry.",
-            details={"validation_errors": str(retry_err), "raw_output": raw_retry_output},
-        )
+        APIError.raise_error(ErrorCode.EXTRACTION_VALIDATION_FAILED, msg)
     except Exception as e:
         logger.error(e)
-        raise ExtractException(500,
-            "INTERNAL_SERVER_ERROR",
-            "Something went wrong. Please try again later."
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Something went wrong. Please try again later.")
 
     return parsed_output, 2, extra_prompt_tokens, extra_completion_tokens

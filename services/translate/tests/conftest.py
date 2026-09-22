@@ -5,6 +5,7 @@ Provides comprehensive mocking to ensure tests run without a real database,
 vLLM endpoint, or file-system dependency.
 """
 
+import os
 import sys
 import types
 from datetime import datetime, timezone
@@ -12,17 +13,26 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Patch the crash-handler BEFORE any app module is imported so that
-# StderrMonitor.start() never replaces pytest's captured stderr fd.
-# ---------------------------------------------------------------------------
-import common.diagnostic_logger as _diag_logger  # noqa: E402
+# CRITICAL: Set environment variable BEFORE any imports that might use diagnostic_logger
+# This prevents stderr monitoring from starting during test collection
+os.environ['DISABLE_CRASH_HANDLER'] = '1'
 
-_diag_logger.setup_comprehensive_crash_handler = lambda logger: (
-    MagicMock(),
-    MagicMock(),
-    MagicMock(),
-)
+# DISABLE_CRASH_HANDLER is already set above; importing diagnostic_logger here
+# ensures the module is loaded before any app code so the env-var guard inside
+# setup_comprehensive_crash_handler fires on the first real call.
+import common.diagnostic_logger
+
+
+# ---------------------------------------------------------------------------
+# Session-scoped crash handler fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_diagnostic_crash_handler():
+    """Keep DISABLE_CRASH_HANDLER set for any late-bound code paths."""
+    with patch.dict(os.environ, {"DISABLE_CRASH_HANDLER": "1"}):
+        yield
 
 
 # ---------------------------------------------------------------------------

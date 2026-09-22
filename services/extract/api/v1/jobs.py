@@ -14,9 +14,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
-from common.error_utils import http_error_responses
+from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
 
 from extract.db.manager import db_repo
@@ -33,7 +33,6 @@ from extract.models import (
 )
 from extract.state import concurrency_limiter
 from extract.settings import settings
-from extract.utils.exceptions import ExtractException
 from extract.utils.request import check_request_body_size
 from extract.utils.vllm import (
     build_messages,
@@ -80,7 +79,7 @@ def _resolve_schema_id(schema_id: str):
     if row is None:
         msg = f"No schema with id {schema_id!r}."
         logger.error(msg)
-        raise ExtractException(404, "SCHEMA_NOT_FOUND", msg)
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
     return row
 
 
@@ -90,7 +89,7 @@ def _resolve_schema_name(schema_name: str):
     if row is None:
         msg = f"No schema with name {schema_name!r}."
         logger.error(msg)
-        raise ExtractException(404, "SCHEMA_NOT_FOUND", msg)
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
     return row
 
 
@@ -112,7 +111,7 @@ def _resolve_schema_name(schema_name: str):
         400: http_error_responses[400],
         404: http_error_responses[404],
         413: http_error_responses[413],
-        422: {"description": "Extraction output failed schema validation after retry"},
+        422: http_error_responses[422],
         429: http_error_responses[429],
         500: http_error_responses[500],
         503: http_error_responses[503],
@@ -132,7 +131,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
     # 1. Basic field validation
     # ------------------------------------------------------------------
     if not body.text.strip():
-        raise ExtractException(400, "INVALID_REQUEST", "text field is empty")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, "text field is empty")
 
     llm_model_dict = get_llm_endpoint()
     llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
@@ -148,9 +147,8 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
             llm_endpoint=llm_endpoint,
         )
     except SchemaValidationError as exc:
-        msg = "text field is empty"
-        logger.error(msg)
-        raise ExtractException(400, "INVALID_REQUEST", msg)
+        logger.error("Schema validation error: %s", exc)
+        APIError.raise_error(ErrorCode.INVALID_SCHEMA, str(exc))
 
     # ------------------------------------------------------------------
     # 2. Semaphore check (non-blocking — reject immediately if saturated)
@@ -158,10 +156,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
     if concurrency_limiter.locked():
         msg = "Server is at maximum vLLM concurrency. Please retry later."
         logger.error(msg)
-        raise ExtractException(
-            429, "RATE_LIMIT_EXCEEDED",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, msg)
 
 
     # ------------------------------------------------------------------
@@ -178,14 +173,12 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         )
     except Exception as exc:
         logger.error(f"Tokenization failed: {exc}", exc_info=True)
-        raise ExtractException(
-            503, "TOKENIZATION_ERROR",
-            "Failed to tokenise the input text. "
-            "Ensure the vLLM /tokenize endpoint is reachable.",
-        )
+        APIError.raise_error(ErrorCode.LLM_UNAVAILABLE,
+                             "Failed to tokenise the input text. "
+                             "Ensure the vLLM /tokenize endpoint is reachable.")
 
     # ── 4. Hard context-window guard ─────────────────────────────────
-    #       check_extraction_budget raises ExtractException.
+    #       check_extraction_budget raises HTTPException via APIError.raise_error.
     try:
         reserved_output = check_extraction_budget(
             input_tokens=input_tokens,
@@ -194,14 +187,9 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
             custom_prompt_tokens=schema_row.custom_prompt_tokens,
             max_model_len=max_model_len,
         )
-    except ExtractException as ext_exc:
-        raise ext_exc
     except Exception as e:
         logger.error(e)
-        raise ExtractException(500,
-            "INTERNAL_SERVER_ERROR",
-            "Something went wrong. Please try again later."
-        )
+        raise
 
     # ── 5. Prompt assembly ────────────────────────────────────────────
     few_shot_block = render_few_shot_block(schema_row.examples)
@@ -223,7 +211,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         if not choices:
             msg = "vLLM returned an empty choices list."
             logger.error(msg)
-            raise ExtractException(500, "LLM_ERROR", msg)
+            APIError.raise_error(ErrorCode.LLM_ERROR, msg)
 
         choice = choices[0]
         finish_reason: str = choice.get("finish_reason", "")
@@ -247,7 +235,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
             if not choices:
                 msg = "vLLM returned an empty choices list."
                 logger.error(msg)
-                raise ExtractException(500, "LLM_ERROR", msg)
+                APIError.raise_error(ErrorCode.LLM_ERROR, msg)
             choice = choices[0]
             finish_reason = choice.get("finish_reason", "")
             if finish_reason == "length":
@@ -256,8 +244,8 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
                     "output token limit."
                 )
                 logger.error(f"{msg} (boosted_reserved_output={boosted_reserved_output})")
-                raise ExtractException(
-                    413, "OUTPUT_BUDGET_EXCEEDED",
+                APIError.raise_error(
+                    ErrorCode.CONTEXT_LIMIT_EXCEEDED,
                     msg,
                     details={
                         "reserved_output_tokens": boosted_reserved_output,
@@ -326,6 +314,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         415: http_error_responses[415],
         429: http_error_responses[429],
         500: http_error_responses[500],
+        503: http_error_responses[503],
     },
     summary="Create async extraction job",
     description=(
@@ -359,7 +348,7 @@ async def create_extract_job(
     if not files:
         msg = "At least one file is required."
         logger.error(msg)
-        raise ExtractException(400, "INVALID_REQUEST", msg)
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, msg)
 
     if len(files) > settings.extract.max_files_per_job:
         msg = (
@@ -367,8 +356,8 @@ async def create_extract_job(
             f"{settings.extract.max_files_per_job}."
         )
         logger.error(msg)
-        raise ExtractException(
-            413, "TOO_MANY_FILES",
+        APIError.raise_error(
+            ErrorCode.REQUEST_TOO_LARGE,
             msg,
             details={"submitted": len(files), "limit": settings.extract.max_files_per_job},
         )
@@ -389,10 +378,7 @@ async def create_extract_job(
                 f"File at index {idx} ({filename!r}) has extension: {raw_ext}"
             )
             logger.error(msg)
-            raise ExtractException(
-                415, "UNSUPPORTED_FILE_TYPE",
-                msg,
-            )
+            APIError.raise_error(ErrorCode.UNSUPPORTED_FILE_TYPE, msg)
         source_type = (ext or "").lstrip(".")
         validated.append((file.filename, source_type))
 
@@ -405,28 +391,26 @@ async def create_extract_job(
                 "All file names must be unique within a batch."
             )
             logger.error(msg)
-            raise ExtractException(
-                400, "DUPLICATE_FILE",
-                msg,
-            )
+            APIError.raise_error(ErrorCode.DUPLICATE_FILE, msg)
         filenames_seen.add(filename)
 
     # Content validation — collect all failures before rejecting
     for idx, file in enumerate(files):
         try:
             await validate_file_content(file)
-        except ExtractException as exc:
+        except HTTPException as exc:
+            reason = (exc.detail.get("error", {}).get("message", str(exc.detail))
+                      if isinstance(exc.detail, dict) else str(exc.detail))
             content_errors.append({
                 "index": idx,
                 "filename": validated[idx][0],
-                "reason": exc.message,
+                "reason": reason,
             })
 
     if content_errors:
-        msg = f"One or more files failed content validation: {content_errors}"
-        logger.error(msg)
-        raise ExtractException(
-            415, "INVALID_FILE_CONTENT",
+        logger.error(f"One or more files failed content validation: {content_errors}")
+        APIError.raise_error(
+            ErrorCode.INVALID_FILE_CONTENT,
             "One or more files failed content validation.",
             details=content_errors,
         )
@@ -439,18 +423,14 @@ async def create_extract_job(
         try:
             json_schema_dict = json.loads(json_schema)
         except json.JSONDecodeError as exc:
-            raise ExtractException(
-                400, "INVALID_REQUEST", f"json_schema is not valid JSON: {exc}"
-            )
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, f"json_schema is not valid JSON: {exc}")
 
     json_example_dict: Optional[dict] = None
     if json_example is not None:
         try:
             json_example_dict = json.loads(json_example)
         except json.JSONDecodeError as exc:
-            raise ExtractException(
-                400, "INVALID_REQUEST", f"json_example is not valid JSON: {exc}"
-            )
+            APIError.raise_error(ErrorCode.INVALID_REQUEST, f"json_example is not valid JSON: {exc}")
 
     llm_model_dict = get_llm_endpoint()
     llm_endpoint: str = llm_model_dict.get("llm_endpoint", "")
@@ -464,7 +444,7 @@ async def create_extract_job(
             llm_endpoint=llm_endpoint,
         )
     except SchemaValidationError as exc:
-        raise ExtractException(exc.status, exc.code, exc.message)
+        APIError.raise_error(ErrorCode.INVALID_SCHEMA, str(exc))
 
     if schema_row.schema_id is None:
         # Ephemeral schema, register it to satisfy DB foreign key constraint
@@ -482,12 +462,13 @@ async def create_extract_job(
             is_schema_inferred=True if json_example_dict is not None else False,
         )
         if db_row is None:
-            raise ExtractException(500, "DATABASE_ERROR", "Failed to register ephemeral schema for batch job.")
+            APIError.raise_error(ErrorCode.DATABASE_ERROR,
+                                 "Failed to register ephemeral schema for batch job.")
         schema_row = db_row
 
     resolved_schema_id = schema_row.schema_id
     if resolved_schema_id is None:
-        raise ExtractException(500, "DATABASE_ERROR", "Resolved schema ID is missing.")
+        APIError.raise_error(ErrorCode.DATABASE_ERROR, "Resolved schema ID is missing.")
 
     # ------------------------------------------------------------------
     # 4. Stage all files, create job + document rows
@@ -497,7 +478,7 @@ async def create_extract_job(
         stage_multiple_files(job_id, files)
     except IOError as exc:
         logger.error(f"Failed to stage files for job {job_id}: {exc}")
-        raise ExtractException(500, "FILE_STAGING_ERROR", "Failed to save uploaded files.")
+        APIError.raise_error(ErrorCode.FILE_STAGING_ERROR, "Failed to save uploaded files.")
 
     _success = False
     try:
@@ -512,11 +493,11 @@ async def create_extract_job(
             )
         except Exception as exc:
             logger.error(f"Unexpected DB error creating job {job_id}: {exc}")
-            raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
+            APIError.raise_error(ErrorCode.DATABASE_ERROR, "Failed to create job record.")
 
         if row is None:
             logger.error(f"Unable to create row in db for {job_id}")
-            raise ExtractException(500, "DATABASE_ERROR", "Failed to create job record.")
+            APIError.raise_error(ErrorCode.DATABASE_ERROR, "Failed to create job record.")
 
         # Insert one document row per file
         doc_entries = [
@@ -531,7 +512,7 @@ async def create_extract_job(
         if not ok:
             logger.error(f"Unable to create row for documents in db for {job_id}, {doc_entries}")
             db_repo.delete_job(job_id)
-            raise ExtractException(500, "DATABASE_ERROR", "Failed to create document records.")
+            APIError.raise_error(ErrorCode.DATABASE_ERROR, "Failed to create document records.")
 
         _success = True
         asyncio.create_task(process_batch_job(job_id))
@@ -584,10 +565,7 @@ async def list_extract_jobs(
     if status is not None and status not in _VALID_STATUSES:
         msg = f"Invalid status value. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
         logger.error(msg)
-        raise ExtractException(
-            400, "INVALID_PARAMETER",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.INVALID_PARAMETER, msg)
 
     rows, total = db_repo.list_jobs(
         status=status,
@@ -642,7 +620,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
     if row is None:
         msg = f"Job {job_id!r} not found."
         logger.error(msg)
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     doc_rows = db_repo.get_documents_by_job(job_id)
 
@@ -726,16 +704,13 @@ async def get_document_result(job_id: str, doc_id: str):
     if job_row is None:
         msg = f"Job {job_id!r} not found."
         logger.error(msg)
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     doc_row = db_repo.get_document_by_id(doc_id)
     if doc_row is None or doc_row.job_id != job_id:
         msg = f"Document {doc_id!r} not found in job {job_id!r}."
         logger.error(msg)
-        raise ExtractException(
-            404, "RESOURCE_NOT_FOUND",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     if doc_row.status in (DocumentStatus.PENDING, DocumentStatus.IN_PROGRESS):
         return JSONResponse(
@@ -769,10 +744,8 @@ async def get_document_result(job_id: str, doc_id: str):
     result_data = read_doc_result_file(job_id, doc_id)
     if result_data is None:
         logger.error(f"Result file missing for completed doc {doc_id} in job {job_id}")
-        raise ExtractException(
-            500, "INTERNAL_SERVER_ERROR",
-            "Result file not found for completed document.",
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                             "Result file not found for completed document.")
 
     payload = build_result_payload(job_row, doc_row, result_data)
     return JobResultResponse(
@@ -809,16 +782,13 @@ async def download_document_result(job_id: str, doc_id: str):
     if job_row is None:
         msg = f"Job {job_id!r} not found."
         logger.error(msg)
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     doc_row = db_repo.get_document_by_id(doc_id)
     if doc_row is None or doc_row.job_id != job_id:
         msg = f"Document {doc_id!r} not found in job {job_id!r}."
         logger.error(msg)
-        raise ExtractException(
-            404, "RESOURCE_NOT_FOUND",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     if doc_row.status == DocumentStatus.FAILED:
         return JSONResponse(
@@ -838,19 +808,13 @@ async def download_document_result(job_id: str, doc_id: str):
     if doc_row.status != DocumentStatus.COMPLETED:
         msg = f"No result available for document {doc_id!r} (status={doc_row.status!r})."
         logger.error(msg)
-        raise ExtractException(
-            404, "RESOURCE_NOT_FOUND",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     result_data = read_doc_result_file(job_id, doc_id)
     if result_data is None:
         msg = f"Result file not found for document {doc_id!r}."
         logger.error(msg)
-        raise ExtractException(
-            404, "RESOURCE_NOT_FOUND",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     filename_stem = os.path.splitext(doc_row.filename)[0]
     download_filename = f"{filename_stem}_result.json"
@@ -874,7 +838,7 @@ async def download_document_result(job_id: str, doc_id: str):
     responses={
         204: {"description": "Job and result deleted"},
         404: http_error_responses[404],
-        409: {"description": "Job is still active (accepted or in_progress)"},
+        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Delete extraction job",
@@ -890,15 +854,12 @@ async def delete_extract_job(job_id: str) -> Response:
     if row is None:
         msg = f"Job {job_id!r} not found."
         logger.error(msg)
-        raise ExtractException(404, "RESOURCE_NOT_FOUND", msg)
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
 
     if row.status not in (JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED):
         msg = f"Cannot delete active job {job_id!r}. Current status: {row.status}."
         logger.error(msg)
-        raise ExtractException(
-            409, "RESOURCE_LOCKED",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_LOCKED, msg)
 
     delete_job_files(job_id)
 
@@ -906,9 +867,7 @@ async def delete_extract_job(job_id: str) -> Response:
     if not success:
         msg = "Failed to delete job from database."
         logger.error(f"Failed to delete job {job_id} from database.")
-        raise ExtractException(
-            500, "INTERNAL_SERVER_ERROR", msg
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, msg)
 
     logger.info(f"Deleted job {job_id!r}")
     return Response(status_code=204)
@@ -924,7 +883,7 @@ async def delete_extract_job(job_id: str) -> Response:
     responses={
         204: {"description": "All jobs and results deleted"},
         400: http_error_responses[400],
-        409: {"description": "Active jobs exist"},
+        409: http_error_responses[409],
         500: http_error_responses[500],
     },
     summary="Bulk delete all extraction jobs",
@@ -946,7 +905,7 @@ async def bulk_delete_extract_jobs(
     if confirm != "true":
         msg = "Bulk delete requires ?confirm=true."
         logger.error(msg)
-        raise ExtractException(400, "CONFIRMATION_REQUIRED", msg)
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, msg)
 
     if db_repo.has_active_jobs():
         msg = (
@@ -954,10 +913,7 @@ async def bulk_delete_extract_jobs(
             "Wait for them to complete or cancel them individually."
         )
         logger.error(msg)
-        raise ExtractException(
-            409, "RESOURCE_LOCKED",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_LOCKED, msg)
 
     delete_all_job_files()
 
@@ -965,9 +921,7 @@ async def bulk_delete_extract_jobs(
     if not success:
         msg = "Failed to delete jobs from database."
         logger.error(msg)
-        raise ExtractException(
-            500, "INTERNAL_SERVER_ERROR", msg
-        )
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, msg)
 
     logger.info("Bulk deleted all extraction jobs")
     return Response(status_code=204)
