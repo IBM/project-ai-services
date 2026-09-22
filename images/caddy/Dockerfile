@@ -1,9 +1,11 @@
 FROM registry.access.redhat.com/ubi9/ubi:9.8 AS builder
 
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 ARG CADDY_VERSION=v2.11.4
 ARG GO_VERSION=1.26.6
 
-RUN dnf install -y git ca-certificates wget && \
+RUN dnf update ${DNF_FLAGS} -y && \
+    dnf install ${DNF_FLAGS} -y git ca-certificates wget && \
     dnf clean all
 
 RUN curl -fsSL https://go.dev/dl/go${GO_VERSION}.linux-ppc64le.tar.gz -o go.tar.gz && \
@@ -29,9 +31,11 @@ RUN set -eux; \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 ARG CADDY_VERSION=v2.11.4
 
-RUN microdnf install -y ca-certificates libcap && \
+RUN microdnf update ${DNF_FLAGS} -y && \
+    microdnf install ${DNF_FLAGS} -y ca-certificates libcap && \
     microdnf clean all
 
 COPY --from=builder /out/ /
