@@ -41,7 +41,9 @@ const (
 
 	// WorkerCaddyPodName is the name of the Caddy reverse-proxy pod.
 	WorkerCaddyPodName = "ai-services--caddy"
-	WorkerPodName      = "ai-services--worker"
+
+	// WorkerPodName is the name of the Pod running the worker gRPC stream service.
+	WorkerPodName = "ai-services--worker"
 
 	// BaseDirEnvVar is injected into the Caddy container at deploy time; read back by uninstall.
 	BaseDirEnvVar = "AI_SERVICES_BASE_DIR"

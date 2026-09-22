@@ -105,7 +105,9 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 
 	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
 		logger.InfolnCtx(ctx, "Worker startup failed, cleaning up worker pod...")
-		cleanupFailedWorkerPods(ctx, rt)
+		if cleanUpErr := cleanupFailedWorkerPods(ctx, rt); cleanUpErr != nil {
+			logger.ErrorfCtx(ctx, "failed to cleanup worker pods: %v\n", cleanUpErr)
+		}
 
 		return err
 	}
@@ -116,19 +118,17 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 }
 
 // cleanupFailedWorkerPods deletes all worker pods after a failed join attempt.
-func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
+func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) error {
 	pods, listErr := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
 	if listErr != nil {
-		logger.ErrorfCtx(ctx, "failed to list worker pods for cleanup: %v\n", listErr)
-
-		return
+		return listErr
 	}
 
 	if err := workercommon.PerformCleanup(ctx, rt, pods, false); err != nil {
-		logger.ErrorfCtx(ctx, "failed to cleanup worker pods: %v\n", err)
-
-		return
+		return err
 	}
+
+	return nil
 }
 
 // CheckStatus checks whether the worker node is already deployed by listing
