@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
@@ -76,6 +76,9 @@ func PerformCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to retrieve BaseDir from worker pod: %v. Using default BaseDir.\n", err)
 		baseDir = utils.GetBaseDir()
+	} else if config.BaseDir == "" {
+		logger.WarningfCtx(ctx, "Failed to retrieve BaseDir from worker pod: env var not set. Using default BaseDir.\n")
+		baseDir = utils.GetBaseDir()
 	} else {
 		baseDir = config.BaseDir
 	}
@@ -107,7 +110,7 @@ func PerformCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 		return err
 	}
 
-	logger.Infoln("Worker service removed successfully")
+	logger.InfolnCtx(ctx, "Worker service removed successfully")
 
 	return nil
 }
@@ -120,6 +123,8 @@ func getWorkerPodConfig(ctx context.Context, rt runtime.Runtime, pods []types.Po
 	for _, pod := range pods {
 		if pod.Name == workerconstants.WorkerPodName {
 			podID = pod.ID
+
+			break
 		}
 	}
 	if podID == "" {

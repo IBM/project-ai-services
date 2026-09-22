@@ -21,10 +21,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
-	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -104,6 +104,7 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	}
 
 	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
+		logger.InfolnCtx(ctx, "Worker startup failed, cleaning up worker pod...")
 		cleanupFailedWorkerPods(ctx, rt)
 
 		return err
