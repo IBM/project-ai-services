@@ -1,88 +1,29 @@
-# Bring Your Own Service (BYOS) — Developer Guide
+# BYOS — Bundle Structure and Templates
 
-This guide walks you through creating, packaging, uploading, and managing custom catalog assets using the **Bring Your Own Service (BYOS)** feature. BYOS lets you onboard proprietary AI services and component providers into a live deployment without modifying the platform binary or restarting any pods.
+This guide covers how to structure and package a custom catalog bundle. For background on services, components, and reserved IDs, see [01 — Overview](01-overview.md). Once your `.tar.gz` is ready, see [03 — Integrating Bundles into AI-Services](03-integrating-bundles.md).
 
 ---
 
 ## Table of Contents
 
-1. [Overview](#1-overview)
-2. [Bundle Structure](#2-bundle-structure)
-   - 2.1 [Top-level `metadata.yaml` (shared by both runtimes)](#21-top-level-metadatayaml-shared-by-both-runtimes)
-   - 2.2 [Podman Bundle Structure](#22-podman-bundle-structure)
-   - 2.3 [OpenShift Bundle Structure](#23-openshift-bundle-structure)
-   - 2.4 [Steps Folder (Optional)](#24-steps-folder-optional)
-   - 2.5 [Packaging as `.tar.gz`](#25-packaging-as-targz)
-3. [Supported Services and Components](#3-supported-services-and-components)
-   - 3.1 [Built-in Services](#31-built-in-services)
-   - 3.2 [Built-in Components by Runtime](#32-built-in-components-by-runtime)
-4. [Template Reference (Podman)](#4-template-reference-podman)
-   - 4.1 [Built-in Template Context Variables](#41-built-in-template-context-variables)
-   - 4.2 [Lifecycle Labels](#42-lifecycle-labels)
-   - 4.3 [Routing Annotations (Services)](#43-routing-annotations-services)
-   - 4.4 [Injected Dependency Values (Services)](#44-injected-dependency-values-services)
-   - 4.5 [`podTemplateExecutions` Execution Order](#45-podtemplateexecutions-execution-order)
-   - 4.6 [`@generate` Directive](#46-generate-directive)
-   - 4.7 [`values.schema.json` — User-Configurable Parameters](#47-valuesschemajson--user-configurable-parameters)
-5. [Managing Bundles with the CLI](#5-managing-bundles-with-the-cli)
-   - 5.1 [Prerequisites](#51-prerequisites)
-   - 5.2 [Create a Bundle](#52-create-a-bundle)
-   - 5.3 [Validate a Bundle Before Creating](#53-validate-a-bundle-before-creating)
-   - 5.4 [Update a Bundle](#54-update-a-bundle)
-   - 5.5 [List Bundles](#55-list-bundles)
-   - 5.6 [Get Bundle Details](#56-get-bundle-details)
-   - 5.7 [Delete a Bundle](#57-delete-a-bundle)
-6. [Viewing Custom Services in the Catalog UI](#6-viewing-custom-services-in-the-catalog-ui)
-7. [Reserved IDs](#7-reserved-ids)
-8. [Tips and Troubleshooting](#8-tips-and-troubleshooting)
+1. [Bundle Structure](#1-bundle-structure)
+   - 1.1 [Top-level `metadata.yaml`](#11-top-level-metadatayaml-shared-by-both-runtimes)
+   - 1.2 [Podman Bundle Structure](#12-podman-bundle-structure)
+   - 1.3 [OpenShift Bundle Structure](#13-openshift-bundle-structure)
+   - 1.4 [Steps Folder (Optional)](#14-steps-folder-optional)
+   - 1.5 [Packaging as `.tar.gz`](#15-packaging-as-targz)
+2. [Template Reference (Podman)](#2-template-reference-podman)
+   - 2.1 [Built-in Template Context Variables](#21-built-in-template-context-variables)
+   - 2.2 [Lifecycle Labels](#22-lifecycle-labels)
+   - 2.3 [Routing Annotations (Services)](#23-routing-annotations-services)
+   - 2.4 [Injected Dependency Values (Services)](#24-injected-dependency-values-services)
+   - 2.5 [`podTemplateExecutions` Execution Order](#25-podtemplateexecutions-execution-order)
+   - 2.6 [`@generate` Directive](#26-generate-directive)
+   - 2.7 [`values.schema.json` — User-Configurable Parameters](#27-valuesschemajson--user-configurable-parameters)
 
 ---
 
-## 1. Overview
-
-### What is a Service?
-
-A **service** is a deployable AI workload — the top-level thing a user launches from the catalog. It represents a complete functional unit such as a chatbot, a document summarizer, or a similarity-search API. A service can declare **dependencies** on one or more components (e.g. an LLM, an embedding model, a vector store) that the platform resolves and wires up automatically at deploy time.
-
-### What is a Component?
-
-A **component** is a reusable infrastructure provider that a service depends on. Components are not deployed standalone — they are always launched as part of a service deployment. There are four component types:
-
-| Type | Role |
-|---|---|
-| `llm` | Large language model inference endpoint (e.g. vLLM on CPU, vLLM on Spyre, watsonx.ai) |
-| `embedding` | Text embedding model endpoint used for vector indexing and retrieval |
-| `reranker` | Reranking model endpoint used to re-score retrieved passages |
-| `vector_db` | Vector database for storing and searching embeddings (e.g. OpenSearch) |
-
-When a service declares `dependencies: [{id: llm}]`, the platform asks the user to choose an LLM component provider at deploy time and injects its connection details into the service's template automatically.
-
-### How BYOS fits in
-
-The platform's built-in catalog is compiled into the binary at build time. BYOS introduces a **bundle** mechanism: you package your service or component definition as a `.tar.gz` archive and upload it to the running catalog backend over HTTPS. The platform validates, registers, and hot-reloads the new asset immediately — no pod restart or platform rebuild required.
-
-```
-You (author)                  Catalog Backend             Catalog Provider
-     │                              │                            │
-     │  POST /api/v1/catalog/bundles│                            │
-     │  (my-bundle.tar.gz)          │                            │
-     │─────────────────────────────>│                            │
-     │                              │── validate + extract ──>   │
-     │                              │── insert DB row ────────>  │
-     │                              │── CatalogProvider.Reload() │
-     │                              │<── hot-reload complete ─── │
-     │<── 201 Created ──────────────│                            │
-```
-
-**Key facts:**
-- Both Podman and OpenShift deployments are supported.
-- Bundles are stored on a dedicated named volume (`catalog-bundles`) so they survive pod restarts.
-- At most one bundle per `(catalog_type, catalog_id)` pair is active at any time — use `bundle update` to upgrade a version.
-- Built-in platform service IDs are protected; uploading a bundle with a reserved ID is rejected with `422`.
-
----
-
-## 2. Bundle Structure
+## 1. Bundle Structure
 
 A bundle contains exactly **one** catalog item. The archive format is `.tar.gz`. The top-level directory name inside the archive is **irrelevant** — the server strips it during extraction. All identity information is read from `metadata.yaml` inside the archive.
 
@@ -101,7 +42,7 @@ The structure of a bundle **diverges between Podman and OpenShift** once past th
 
 ---
 
-### 2.1 Top-level `metadata.yaml` (shared by both runtimes)
+### 1.1 Top-level `metadata.yaml` (shared by both runtimes)
 
 The top-level `metadata.yaml` sits at the archive root and is **identical regardless of runtime**. It is always required and declares the identity of the catalog item.
 
@@ -112,13 +53,15 @@ id: my-service                   # unique; must not conflict with built-in IDs
 name: "My Custom Service"        # human-readable display name
 description: "A custom AI service for internal workloads"
 type: service                    # must be "service"
-certified_by: "Custom"
+certified_by: "ISV"
 dependencies:
   - id: llm                      # component types this service requires
 standalone: true
 ```
 
 > **Note:** Custom services cannot be attached to the built-in Digital Assistant (`rag`) architecture. The `architectures` field is omitted intentionally — only platform-built services are wired into named architectures.
+
+> **Note:** `certified_by: "IBM"` is not supported for ISV bundles.
 
 **Component:**
 
@@ -147,7 +90,7 @@ Two bundles with the same bare `id` but different `component_type` values are st
 
 ---
 
-### 2.2 Podman Bundle Structure
+### 1.2 Podman Bundle Structure
 
 Under `podman/`, templates are **Go template files** (`.yaml.tmpl`) that render directly to Podman pod specs. The runtime `metadata.yaml` must include a `podTemplateExecutions` list naming **every template file** and controlling deployment order.
 
@@ -155,12 +98,12 @@ Under `podman/`, templates are **Go template files** (`.yaml.tmpl`) that render 
 
 ```
 my-service/
-├── metadata.yaml                    ← shared top-level (see §2.1)
+├── metadata.yaml                    ← shared top-level (see §1.1)
 └── podman/
     ├── metadata.yaml                ← required: name, version, resources, podTemplateExecutions
     ├── values.yaml                  ← required: default parameter values
     ├── values.schema.json           ← optional: user-configurable parameters for the UI
-    ├── steps/                       ← optional: post-deploy messaging (see §2.4)
+    ├── steps/                       ← optional: post-deploy messaging (see §1.4)
     │   ├── next.md                  ← shown after deploy
     │   ├── info.md                  ← shown by the info command
     │   └── vars_file.yaml           ← variable bindings for the templates above
@@ -172,7 +115,7 @@ my-service/
 
 ```
 my-provider/
-├── metadata.yaml                    ← shared top-level with component_type (see §2.1)
+├── metadata.yaml                    ← shared top-level with component_type (see §1.1)
 └── podman/
     ├── metadata.yaml                ← required
     ├── values.yaml                  ← required
@@ -218,7 +161,7 @@ myservice:
 
 ---
 
-### 2.3 OpenShift Bundle Structure
+### 1.3 OpenShift Bundle Structure
 
 Under `openshift/`, templates are a **Helm chart** — standard Kubernetes YAML files rendered by Helm. A `Chart.yaml` is required. There is **no `podTemplateExecutions`** in the runtime `metadata.yaml`; Helm manages all templates as a single release.
 
@@ -226,13 +169,13 @@ Under `openshift/`, templates are a **Helm chart** — standard Kubernetes YAML 
 
 ```
 my-service/
-├── metadata.yaml                    ← shared top-level (see §2.1)
+├── metadata.yaml                    ← shared top-level (see §1.1)
 └── openshift/
     ├── Chart.yaml                   ← required: Helm chart descriptor (no Podman equivalent)
     ├── metadata.yaml                ← required: name, version, resources — no podTemplateExecutions
     ├── values.yaml                  ← required: default Helm values
     ├── values.schema.json           ← optional: user-configurable parameters for the UI
-    ├── steps/                       ← optional: post-deploy messaging (see §2.4)
+    ├── steps/                       ← optional: post-deploy messaging (see §1.4)
     │   ├── next.md                  ← shown after deploy
     │   ├── info.md                  ← shown by the info command
     │   └── vars_file.yaml           ← variable bindings for the templates above
@@ -246,7 +189,7 @@ my-service/
 
 ```
 my-provider/
-├── metadata.yaml                    ← shared top-level with component_type (see §2.1)
+├── metadata.yaml                    ← shared top-level with component_type (see §1.1)
 └── openshift/
     ├── Chart.yaml                   ← required
     ├── metadata.yaml                ← required
@@ -317,7 +260,7 @@ myservice:
 
 ---
 
-### 2.4 Steps Folder (Optional)
+### 1.4 Steps Folder (Optional)
 
 A `steps/` directory can be placed under `podman/` or `openshift/` (or both) to display contextual messages to users immediately after deployment and when they run `ai-services application info`. If the directory is absent the platform skips this feature gracefully — no error is produced.
 
@@ -440,7 +383,7 @@ hosts:
 
 > When `type: route` is used, the platform fetches every OpenShift Route in the namespace and exposes them as `<ROUTE_NAME_UPPERCASED>_ROUTE`. For example a Route named `my-service-api` becomes `{{ .MY_SERVICE_API_ROUTE }}`. See [`assets/catalog/openshift/steps/vars_file.yaml`](assets/catalog/openshift/steps/vars_file.yaml) for a real example.
 
-**Complete `vars_file.yaml` — Podman service with two pods:**
+**Complete `vars_file.yaml` — Podman service:**
 
 ```yaml
 pods:
@@ -474,13 +417,13 @@ hosts:
 ```
 
 > **Reference — full steps trees:**
-> Podman service: [`assets/services/chat/podman/steps/`](assets/services/chat/podman/steps/) · [`assets/services/summarize/podman/steps/`](assets/services/summarize/podman/steps/)
-> OpenShift service: [`assets/services/chat/openshift/steps/`](assets/services/chat/openshift/steps/) · [`assets/services/summarize/openshift/steps/`](assets/services/summarize/openshift/steps/)
+> Podman: [`assets/services/chat/podman/steps/`](assets/services/chat/podman/steps/) · [`assets/services/summarize/podman/steps/`](assets/services/summarize/podman/steps/)
+> OpenShift: [`assets/services/chat/openshift/steps/`](assets/services/chat/openshift/steps/) · [`assets/services/summarize/openshift/steps/`](assets/services/summarize/openshift/steps/)
 > Application (multi-service): [`assets/applications/rag/podman/steps/`](assets/applications/rag/podman/steps/) · [`assets/applications/rag/openshift/steps/`](assets/applications/rag/openshift/steps/)
 
 ---
 
-### 2.5 Packaging as `.tar.gz`
+### 1.5 Packaging as `.tar.gz`
 
 Pack the service or component directory into a `.tar.gz` archive. The archive must contain **exactly one top-level directory** — the top-level directory name does not matter.
 
@@ -494,75 +437,11 @@ tar -czf my-bundle.tar.gz my-service/
 
 ---
 
-## 3. Supported Services and Components
-
-### 3.1 Built-in Services
-
-The following services ship with the platform and are loaded from the embedded catalog. You cannot create a bundle with any of these IDs (they are reserved — see [§7](#7-reserved-ids)).
-
-| Service ID   | Description                             | Assets |
-|--------------|-----------------------------------------|--------|
-| `chat`       | Question and answer chatbot             | [`assets/services/chat/`](assets/services/chat/) |
-| `digitize`   | Document digitization and indexing      | [`assets/services/digitize/`](assets/services/digitize/) |
-| `similarity` | Semantic similarity search              | [`assets/services/similarity/`](assets/services/similarity/) |
-| `summarize`  | Document summarization                  | [`assets/services/summarize/`](assets/services/summarize/) |
-| `extract`    | Information extraction                  | [`assets/services/extract/`](assets/services/extract/) |
-| `translate`  | Language translation                    | [`assets/services/translate/`](assets/services/translate/) |
-
-Custom services can reference built-in architectures (e.g. `rag`) and declare dependencies on any of the four supported component types: `llm`, `embedding`, `reranker`, `vector_db`.
-
-### 3.2 Built-in Components by Runtime
-
-The platform ships the following component providers. These IDs are reserved and cannot be overwritten by a bundle.
-
-#### LLM providers (`component_type: llm`)
-
-| Provider ID  | Runtime  | Default Port | Description                                         | Assets |
-|--------------|----------|--------------|-----------------------------------------------------|--------|
-| `vllm-cpu`   | Podman / OpenShift | `8000` | vLLM inference on CPU / ppc64le                | [`assets/components/llm/vllm-cpu/`](assets/components/llm/vllm-cpu/) |
-| `vllm-spyre` | Podman / OpenShift | `8000` | vLLM inference on IBM Spyre accelerator cards  | [`assets/components/llm/vllm-spyre/`](assets/components/llm/vllm-spyre/) |
-| `watsonx`    | Podman / OpenShift | `8000` | LiteLLM proxy forwarding to IBM watsonx.ai     | [`assets/components/llm/watsonx/`](assets/components/llm/watsonx/) |
-
-**Key `values.yaml` fields for LLM providers:**
-
-| Provider     | Configurable values | Reference `values.yaml` |
-|--------------|---------------------|-------------------------|
-| `vllm-cpu`   | `image`, `model`, `apiKey`, `maxNumBatchedTokens`, `maxModelLen`, `maxBatchSize`   | [`assets/components/llm/vllm-cpu/podman/values.yaml`](assets/components/llm/vllm-cpu/podman/values.yaml) |
-| `vllm-spyre` | `image`, `model`, `apiKey`, `maxModelLen`, `maxBatchSize`                           | [`assets/components/llm/vllm-spyre/podman/values.yaml`](assets/components/llm/vllm-spyre/podman/values.yaml) |
-| `watsonx`    | `image`, `model`, `watsonxApiKey`, `watsonxProjectId`, `watsonxUrl`, `maxModelLen`, `maxBatchSize` | [`assets/components/llm/watsonx/podman/values.yaml`](assets/components/llm/watsonx/podman/values.yaml) |
-
-#### Embedding providers (`component_type: embedding`)
-
-| Provider ID | Runtime  | Default Port | Description                    | Assets |
-|-------------|----------|--------------|--------------------------------|--------|
-| `vllm-cpu`  | Podman / OpenShift | `8001` | vLLM embedding on CPU | [`assets/components/embedding/vllm-cpu/`](assets/components/embedding/vllm-cpu/) |
-
-**Key `values.yaml` fields:** `image`, `model`, `maxModelLen` — see [`assets/components/embedding/vllm-cpu/podman/values.yaml`](assets/components/embedding/vllm-cpu/podman/values.yaml)
-
-#### Reranker providers (`component_type: reranker`)
-
-| Provider ID  | Runtime  | Default Port | Description                               | Assets |
-|--------------|----------|--------------|-------------------------------------------|--------|
-| `vllm-cpu`   | Podman / OpenShift | `8002` | vLLM reranker on CPU             | [`assets/components/reranker/vllm-cpu/`](assets/components/reranker/vllm-cpu/) |
-| `vllm-spyre` | Podman / OpenShift | `8002` | vLLM reranker on Spyre cards     | [`assets/components/reranker/vllm-spyre/`](assets/components/reranker/vllm-spyre/) |
-
-**Key `values.yaml` fields:** `image`, `model` — see [`assets/components/reranker/vllm-cpu/podman/values.yaml`](assets/components/reranker/vllm-cpu/podman/values.yaml)
-
-#### Vector-store providers (`component_type: vector_db`)
-
-| Provider ID  | Runtime  | Default Port | Description                         | Assets |
-|--------------|----------|--------------|-------------------------------------|--------|
-| `opensearch` | Podman / OpenShift | `9200` | OpenSearch vector database  | [`assets/components/vector_db/opensearch/`](assets/components/vector_db/opensearch/) |
-
-**Key `values.yaml` fields:** `image`, `memoryLimit`, `auth.username`, `auth.password` (auto-generated) — see [`assets/components/vector_db/opensearch/podman/values.yaml`](assets/components/vector_db/opensearch/podman/values.yaml)
-
----
-
-## 4. Template Reference (Podman)
+## 2. Template Reference (Podman)
 
 > **Scope: Podman only.** The template values, labels, and annotations in this section apply to the Podman runtime, which uses Go-template `.yaml.tmpl` files. OpenShift custom service templates use Helm charts with a different rendering pipeline.
 
-### 4.1 Built-in Template Context Variables
+### 2.1 Built-in Template Context Variables
 
 These variables are injected into every `.yaml.tmpl` file by the template engine. They are **not** defined in `values.yaml` and cannot be overridden.
 
@@ -573,7 +452,7 @@ These variables are injected into every `.yaml.tmpl` file by the template engine
 | `{{ .BaseDir }}` | string | Host filesystem base directory (e.g. `/opt/ai-services`). Use to resolve host-path mounts such as `models/`. |
 | `{{ .Values }}` | object | Root values object populated from `values.yaml` and user overrides. Access with `{{ .Values.<key> }}`. |
 
-### 4.2 Lifecycle Labels
+### 2.2 Lifecycle Labels
 
 Place these labels on every Pod and Secret `metadata.labels`. They are read by the runtime to manage the resource lifecycle.
 
@@ -605,9 +484,9 @@ labels:
   ai-services.io/template: "{{ .TemplateID }}"
 ```
 
-> The `summarize` main service pod (`summarize-api`) creates no secrets or volumes of its own, so only the required `ai-services.io/template` label is present — no `secret` or `volume` label needed. See [`assets/services/summarize/podman/templates/summarize-api.yaml.tmpl`](assets/services/summarize/podman/templates/summarize-api.yaml.tmpl).
+> The `summarize` main service pod (`summarize-api`) creates no secrets or volumes of its own, so only the required `ai-services.io/template` label is present. See [`assets/services/summarize/podman/templates/summarize-api.yaml.tmpl`](assets/services/summarize/podman/templates/summarize-api.yaml.tmpl).
 
-### 4.3 Routing Annotations (Services)
+### 2.3 Routing Annotations (Services)
 
 Only service pods carry routing annotations. The Caddy reverse-proxy reads these to wire up UI and API endpoints.
 
@@ -641,11 +520,11 @@ annotations:
 
 > The `summarize` service is API-only and routes port `6000` to the `summarize-api` upstream. See the `annotations` block in [`assets/services/summarize/podman/templates/summarize-api.yaml.tmpl`](assets/services/summarize/podman/templates/summarize-api.yaml.tmpl).
 
-### 4.4 Injected Dependency Values (Services)
+### 2.4 Injected Dependency Values (Services)
 
 When a service declares dependencies in its top-level `metadata.yaml`, the engine injects connection details for each resolved component under well-known keys inside `.Values`. These keys are **read-only** — do not define them in `values.yaml`.
 
-This mechanism works identically whether the resolved component is a **built-in provider** (e.g. `vllm-cpu`) or a **custom bundle component** (e.g. your own `llm--my-provider`). The injection key is always the **component type**, not the specific provider ID. So if a user selects your custom LLM provider, the service template still accesses it via `.Values.llm.host`, `.Values.llm.port`, etc. — the same paths as for any other LLM provider.
+This mechanism works identically whether the resolved component is a **built-in provider** (e.g. `vllm-cpu`) or a **custom bundle component** (e.g. your own `llm--my-provider`). The injection key is always the **component type**, not the specific provider ID.
 
 **LLM** (`dependencies: [{id: llm}]`)
 
@@ -684,9 +563,9 @@ This mechanism works identically whether the resolved component is a **built-in 
 | `.Values.vector_store.port` | string | Container port (default `9200` for OpenSearch). |
 | `.Values.vector_store.instanceSlug` | string | Instance slug of the resolved vector-store component. |
 
-> **Custom components work the same way.** If a user deploys a service backed by a custom `llm--my-provider` bundle, the service template still accesses it via `.Values.llm.host`, `.Values.llm.port`, etc. The injection key is always the component **type** (`llm`, `embedding`, `reranker`, `vector_store`), never the provider ID. Your service template needs no changes to work with built-in or custom components interchangeably.
+> **Custom components work the same way.** The injection key is always the component **type** (`llm`, `embedding`, `reranker`, `vector_store`), never the provider ID. Your service template needs no changes to work with built-in or custom components interchangeably.
 
-### 4.5 `podTemplateExecutions` Execution Order
+### 2.5 `podTemplateExecutions` Execution Order
 
 `podTemplateExecutions` in the runtime `metadata.yaml` tells the engine **which template files to apply and in what order** when a service or component is deployed. It is a list of layers, where each layer is itself a list of template filenames:
 
@@ -709,7 +588,6 @@ podTemplateExecutions:
 >   - [postgres.yaml.tmpl]          # layer 2
 >   - [summarize-api.yaml.tmpl]     # layer 3
 > ```
-> All three files under [`assets/services/summarize/podman/templates/`](assets/services/summarize/podman/templates/) are listed — none are omitted.
 
 Templates in the same layer run concurrently:
 
@@ -729,7 +607,7 @@ podTemplateExecutions:
   - [my-service.yaml.tmpl]
 ```
 
-### 4.6 `@generate` Directive
+### 2.6 `@generate` Directive
 
 A `# @generate` comment immediately before a `values.yaml` field instructs the engine to produce a value at deploy time.
 
@@ -747,7 +625,7 @@ postgres:
 
 > The `summarize` service uses `@generate:password` on its postgres `password` field. See [`assets/services/summarize/podman/values.yaml`](assets/services/summarize/podman/values.yaml).
 
-### 4.7 `values.schema.json` — User-Configurable Parameters
+### 2.7 `values.schema.json` — User-Configurable Parameters
 
 An optional `values.schema.json` (JSON Schema draft-07) declares which fields the user can configure through the catalog UI. Fields absent from the schema are treated as internal defaults and are not surfaced in the UI.
 
@@ -787,334 +665,4 @@ Three custom `x-ui-*` extensions control form rendering:
     }
   }
 }
-```
-
----
-
-## 5. Managing Bundles with the CLI
-
-The `ai-services catalog bundle` subcommand group handles all bundle lifecycle operations. All subcommands require an active catalog session (see Step 1 below).
-
-### 5.1 Prerequisites
-
-**Step 1 — Log in to the catalog backend (once per session):**
-
-```bash
-./bin/ai-services catalog login \
-  --server https://<catalog-backend-endpoint> \
-  --username admin \
-  --runtime podman \
-  --insecure
-```
-
-Credentials are stored locally; subsequent `bundle` commands pick them up automatically — no `--server` or `--username` flags needed.
-
-**Step 2 — Package your bundle:**
-
-```bash
-tar -czf my-bundle.tar.gz my-service/
-```
-
-### 5.2 Create a Bundle
-
-Creates a new bundle from a `.tar.gz` archive. The command is synchronous — it blocks until the server returns `201 Created` and the bundle is `active`. All metadata (`id`, `type`, `version`) is read from `metadata.yaml` inside the archive; no extra flags are needed.
-
-```bash
-./bin/ai-services catalog bundle create --file my-bundle.tar.gz
-```
-
-**Example output (service bundle):**
-
-```
-Creating bundle from my-bundle.tar.gz...
-✓ Bundle created successfully
-  ID:           550e8400-e29b-41d4-a716-446655440000
-  Catalog type: service
-  Catalog ID:   my-service
-  Dir name:     my-service-1.0.0
-  Version:      1.0.0
-  Status:       active
-  Size:         280 KB
-```
-
-**Example output (component bundle with `component_type: llm`):**
-
-```
-Creating bundle from my-provider-bundle.tar.gz...
-✓ Bundle created successfully
-  ID:             c3d4e5f6-...
-  Catalog type:   component
-  Component type: llm
-  Catalog ID:     llm--my-provider
-  Version:        1.0.0
-  Status:         active
-  Size:           192 KB
-```
-
-**Common errors:**
-
-| Condition | Error |
-|---|---|
-| Bundle with same `catalog_id` already exists | `409 Conflict` — use `bundle update` instead |
-| `metadata.yaml` missing, malformed, or ID is reserved | `422 Unprocessable Entity` |
-| File not found or not a `.tar.gz` | Exit `1` immediately |
-
-### 5.3 Validate a Bundle Before Creating
-
-Validates the archive structure and `metadata.yaml` without writing anything to disk or the database. Use this in CI/CD pipelines before promoting to a live deployment.
-
-```bash
-./bin/ai-services catalog bundle validate --file my-bundle.tar.gz
-```
-
-**Example output (valid service bundle):**
-
-```
-Validating bundle from my-bundle.tar.gz...
-✓ Bundle is valid
-  Catalog type: service
-  Catalog ID:   my-service
-  Dir name:     my-service-1.0.0
-  Version:      1.0.0
-  Name:         My Custom Service
-```
-
-**Example output (valid component bundle):**
-
-```
-Validating bundle from my-provider-bundle.tar.gz...
-✓ Bundle is valid
-  Catalog type:   component
-  Component type: llm
-  Catalog ID:     llm--my-provider
-  Version:        1.0.0
-  Name:           My Custom LLM Provider
-```
-
-**Example output (invalid bundle):**
-
-```
-Validating bundle from broken-bundle.tar.gz...
-✗ Bundle validation failed: metadata.yaml is missing required field "component_type"
-```
-
-### 5.4 Update a Bundle
-
-Replaces an existing bundle by its internal UUID. The `bundle_id` is the UUID shown in `bundle list` or the `bundle create` output. The replacement `metadata.yaml` inside the archive must carry the same `id`, `type`, and (for components) `component_type` as the existing record — mismatches are rejected with `422`.
-
-> **Important:** If any service or component is currently running that was deployed from this bundle, the update is rejected with `409 Conflict`. Stop or delete those running instances first, then retry.
-
-```bash
-./bin/ai-services catalog bundle update <bundle_id> --file my-bundle-v2.tar.gz
-```
-
-**Example:**
-
-```bash
-./bin/ai-services catalog bundle update 550e8400-e29b-41d4-a716-446655440000 \
-  --file my-bundle-v2.tar.gz
-```
-
-**Example output:**
-
-```
-Updating bundle 550e8400-e29b-41d4-a716-446655440000 from my-bundle-v2.tar.gz...
-  Catalog type: service  |  Catalog ID: my-service  |  Version: 2.0.0
-  Dir name:     my-service-2.0.0
-✓ Bundle updated successfully (status: active)
-```
-
-### 5.5 List Bundles
-
-Prints a table of all registered bundles, ordered by creation time (most recent first).
-
-```bash
-./bin/ai-services catalog bundle list
-```
-
-**Example output:**
-
-```
-ID                                     CATALOG TYPE  CATALOG ID        VERSION  STATUS  CREATED AT
-550e8400-e29b-41d4-a716-446655440000   service       my-service        1.0.0    active  2026-05-12 09:14:02
-a1b2c3d4-e5f6-7890-abcd-ef1234567890   component     llm--my-provider  1.0.0    active  2026-05-13 11:30:00
-```
-
-### 5.6 Get Bundle Details
-
-Prints full details for a single bundle by its UUID.
-
-```bash
-./bin/ai-services catalog bundle get <bundle_id>
-```
-
-**Example output:**
-
-```
-ID:           550e8400-e29b-41d4-a716-446655440000
-Name:         My Custom Service
-Dir name:     my-service-1.0.0
-Catalog type: service
-Catalog ID:   my-service
-Version:      1.0.0
-Status:       active
-Size:         280 KB
-Created by:   admin
-Created at:   2026-05-12 09:14:02
-```
-
-### 5.7 Delete a Bundle
-
-Permanently removes a bundle: deletes the on-disk directory, triggers a `CatalogProvider` reload so the item is no longer served, and removes the database record.
-
-> **Important:** If any service or component is currently running from this bundle, the delete is rejected with `409 Conflict`. Stop or delete those running instances first.
-
-```bash
-./bin/ai-services catalog bundle delete <bundle_id>
-```
-
-Use `--yes` to skip the confirmation prompt (useful in scripts):
-
-```bash
-./bin/ai-services catalog bundle delete 550e8400-e29b-41d4-a716-446655440000 --yes
-```
-
-**Example output:**
-
-```
-Delete bundle 550e8400-e29b-41d4-a716-446655440000 (my-service-1.0.0)? [y/N] y
-✓ Bundle deleted.
-```
-
-> Deleting a bundle does **not** affect any applications that were already deployed from it — existing running pods are independent of the catalog once launched.
-
----
-
-## 6. Viewing Custom Services in the Catalog UI
-
-Once a bundle is successfully created and its status is `active`, the custom service or component is immediately available in the platform — no restart is needed.
-
-**Step 1 — Open the Catalog UI.**
-
-Navigate to the Catalog UI endpoint (output when you ran `catalog configure`):
-
-```bash
-./bin/ai-services catalog info --runtime podman
-```
-
-This prints the Catalog UI URL.
-
-**Step 2 — Go to the Services Catalog page.**
-
-In the Catalog UI, click **Services Catalog** in the left navigation. Custom services appear alongside the built-in ones, each showing the `name` from your `metadata.yaml`.
-
-**Step 3 — Deploy an application from the custom service.**
-
-Select your custom service from the catalog, configure any parameters exposed by `values.schema.json`, and deploy. You can also use the CLI:
-
-```bash
-# List all available service templates, including custom ones
-./bin/ai-services application templates --runtime podman
-
-# View parameters for your custom service
-./bin/ai-services application templates parameters \
-  --template my-service \
-  --runtime podman
-
-# Create an application
-./bin/ai-services application create my-deployment \
-  --template my-service \
-  --runtime podman
-```
-
-**Verifying the bundle is loaded via the API:**
-
-```bash
-# List all services — custom ones appear alongside built-in services
-curl -s https://<catalog-backend-endpoint>/api/v1/services \
-  -H "Authorization: Bearer $(cat token.txt)" | jq '.[].id'
-# "chat"
-# "digitize"
-# "similarity"
-# "summarize"
-# "my-service"   ← your custom service
-```
-
----
-
-## 7. Reserved IDs
-
-A bundle whose `catalog_id` matches a built-in catalog item is rejected with `422 Unprocessable Entity`. Choose a unique `id` that does not appear in the following lists.
-
-**Reserved service IDs:** `chat`, `digitize`, `similarity`, `summarize`, `extract`, `translate`, `rag`
-
-**Reserved component IDs** (composite `<component_type>--<id>` format):
-
-| `component_type` | Reserved IDs |
-|---|---|
-| `llm` | `llm--vllm-cpu`, `llm--vllm-spyre`, `llm--watsonx` |
-| `embedding` | `embedding--vllm-cpu` |
-| `reranker` | `reranker--vllm-cpu`, `reranker--vllm-spyre` |
-| `vector_db` | `vector_db--opensearch` |
-
----
-
-## 8. Tips and Troubleshooting
-
-**Bundle rejected with `409 Conflict` on `bundle create`**
-
-A bundle with the same `catalog_id` already exists. Use `bundle list` to find its ID and `bundle update` to replace it:
-
-```bash
-./bin/ai-services catalog bundle list
-./bin/ai-services catalog bundle update <bundle_id> --file my-bundle-v2.tar.gz
-```
-
-**Bundle rejected with `422 Unprocessable Entity`**
-
-Common causes:
-- `metadata.yaml` is missing from the archive root.
-- A required field (`id`, `type`, `version`, or `component_type` for components) is missing.
-- The `catalog_id` matches a reserved built-in ID (see [§7](#7-reserved-ids)).
-- The `podman/metadata.yaml` or `values.yaml` is missing.
-- A template file has a syntax error.
-
-Run `bundle validate` first to catch errors before uploading:
-
-```bash
-./bin/ai-services catalog bundle validate --file my-bundle.tar.gz
-```
-
-**Bundle rejected with `409 Conflict` on `bundle update` or `bundle delete`**
-
-A running service or component is using this bundle's `catalog_id`. Stop or delete the running application first:
-
-```bash
-./bin/ai-services application ps --runtime podman
-./bin/ai-services application delete <app-name> --runtime podman
-# Then retry the update or delete
-```
-
-**Custom service does not appear in the UI after upload**
-
-Check that the bundle status is `active`:
-
-```bash
-./bin/ai-services catalog bundle list
-```
-
-If the status is `failed`, get more details:
-
-```bash
-./bin/ai-services catalog bundle get <bundle_id>
-```
-
-A `failed` status means an error occurred during extraction or reload after the archive was accepted. Fix the issue and re-upload using `bundle update`.
-
-**Getting help**
-
-```bash
-./bin/ai-services catalog bundle --help
-./bin/ai-services catalog bundle create --help
-./bin/ai-services catalog bundle validate --help
 ```
