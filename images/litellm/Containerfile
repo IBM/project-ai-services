@@ -13,8 +13,6 @@ RUN dnf -y update && \
         python3.12-devel \
         gcc \
         gcc-c++ \
-        rust \
-        cargo \
         openssl-devel \
         zlib-devel && \
     dnf clean all
@@ -51,6 +49,8 @@ WORKDIR /build/litellm-${VERSION}
 
 # 6. Compile all dependencies into .whl files
 RUN --mount=type=cache,target=/root/.cache/pip \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | /usr/bin/sh -s -- -y && \
+    source "$HOME/.cargo/env" && rustup install 1.94.1 && rustup default 1.94.1 && \
     python3.12 -m pip wheel -r requirements.txt \
 	-w /wheels \
 	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \

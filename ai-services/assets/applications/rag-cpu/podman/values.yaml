@@ -8,7 +8,7 @@ backend:
   # @description Host port for the OpenAI-compatible RAG service. Defaults to unexposed; assign a port to enable external access.
   port: "0"
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.30
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.31
   # @hidden
   log_level: "INFO"
   # @description Custom initial system prompt for conversational RAG. Leave empty to use default. Must be at least 10 characters.
@@ -18,7 +18,7 @@ digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.68
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.69
   # @hidden
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
@@ -87,7 +87,7 @@ summarize:
   # @description Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.20
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.21
   # @hidden
   log_level: "INFO"
   database: "summarize_metadata"
@@ -96,7 +96,7 @@ similarity:
   # @description Host port for the Similarity Search API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
   port: ""
   # @hidden
-  image: icr.io/ai-services-cicd/similarity-service:v0.0.17
+  image: icr.io/ai-services-cicd/similarity-service:v0.0.18
   # @hidden
   log_level: "INFO"
 
@@ -104,7 +104,7 @@ litellm:
   # @description Enable LiteLLM proxy for remote LLM service. When true, uses LiteLLM with WatsonX; when false, uses local vLLM server. Default: false
   enable: false
   # @hidden
-  image: icr.io/ai-services-cicd/litellm:v1.89.3-1
+  image: icr.io/ai-services-cicd/litellm:v1.101.0-0
   # @description WatsonX API Key for LiteLLM integration. Required when litellm.enable is true.
   watsonxApiKey: ""
   # @description WatsonX Project ID for LiteLLM integration. Required when litellm.enable is true.

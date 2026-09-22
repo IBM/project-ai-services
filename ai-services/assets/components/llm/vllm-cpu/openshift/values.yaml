@@ -2,8 +2,6 @@ model: ""
 apiKey: ""
 resources:
   requests:
-    cpu: "12"
     memory: "150Gi"
   limits:
-    cpu: "12"
     memory: "150Gi"

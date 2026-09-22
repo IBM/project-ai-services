@@ -22,7 +22,7 @@ spec:
         name: vLLM
       args:
         - --served-model-name={{ .Values.model }}
-        - --max-model-len=32768
+        - --max-model-len=8096
         - --max-num-seqs=32
       env:
         - name: VLLM_CPU_OMP_THREADS_BIND
@@ -38,10 +38,8 @@ spec:
       {{- end }}
       resources:
         requests:
-          cpu: {{ .Values.resources.requests.cpu | quote }}
           memory: {{ .Values.resources.requests.memory | quote }}
         limits:
-          cpu: {{ .Values.resources.limits.cpu | quote }}
           memory: {{ .Values.resources.limits.memory | quote }}
       runtime: cpu-temp
       storageUri: hf://{{ .Values.model }}

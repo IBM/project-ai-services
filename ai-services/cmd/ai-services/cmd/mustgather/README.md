@@ -61,20 +61,21 @@ The CLI invokes `podman` directly. If the Podman socket is not reachable
 (e.g. `podman machine` is stopped on macOS), must-gather **fails immediately**
 — this is the only hard failure.
 
-#### 2. Catalog must be installed for application-level data
+#### 2. Worker & Application Pod Collection Behavior
 
-The catalog infrastructure pods (backend, database, Caddy) carry the label
-`ai-services.io/application=ai-services`. If none of those pods are found,
-the following sections are **skipped entirely**:
+Application pods are collected based on the worker topology and `LOCAL_WORKER` environment variable:
 
-- Application pods (inspect, logs)
-- Catalog pods (inspect, logs)
-- Caddyfile / caddy-autosave.json
-- Catalog credentials file
-- Models directory listing
+- **When Catalog is installed locally**:
+  - `must-gather` inspects the catalog pod for the `LOCAL_WORKER` environment variable.
+  - If `LOCAL_WORKER=true` (co-located worker), application pods are collected alongside catalog artifacts.
+  - If `LOCAL_WORKER=false` (remote worker node setup), application pod collection is skipped on the catalog node since applications run on remote workers.
+  - If `LOCAL_WORKER` cannot be resolved or is not set, a warning is logged and execution continues with the remaining collection steps.
+- **When Catalog is NOT installed locally (Worker node)**:
+  - Catalog artifacts (catalog pods, models) are skipped.
+  - Worker infrastructure pods (`ai-services--worker`, `ai-services--caddy`) are collected into `worker/pods/`.
+  - Must-gather connects to the remote Catalog API using the user's logged-in session credentials and collects the application pods running on this worker node into `pods/`.
 
-System info, network, volumes, and secrets are **always collected** regardless
-of catalog state.
+System info, network, volumes, and secrets are **always collected** regardless of catalog state.
 
 #### 3. You must be logged in to the catalog for application data
 
@@ -92,8 +93,6 @@ The base directory (`AI_SERVICES_BASE_DIR`) is read from the running catalog
 backend container's environment. If the backend pod is stopped, must-gather
 falls back to the default base directory. This affects:
 
-- Caddyfile path
-- Caddy autosave.json path
 - Models directory path
 
 ### OpenShift
@@ -128,19 +127,20 @@ The authenticated user or service account must have at minimum:
 Missing permissions cause per-step warnings — collection continues for all
 other sections.
 
-#### 3. Catalog must be installed for application-level data
+#### 3. Worker & Application Pod Collection Behavior
 
-The catalog backend Deployment and its pods carry the label
-`ai-services.io/application=ai-services`. If no pods matching that label are
-found in the catalog namespace (`ai-services`), the following sections are
-**skipped entirely**:
+Application pods are collected based on the worker topology and `LOCAL_WORKER` environment variable:
 
-- Application pods (inspect, logs)
-- Catalog pods (inspect, logs)
-- Catalog credentials file
+- **When Catalog is installed in the cluster/namespace**:
+  - `must-gather` inspects the catalog backend pod spec for the `LOCAL_WORKER` environment variable.
+  - If `LOCAL_WORKER=true` (co-located worker), application pods are collected alongside catalog artifacts.
+  - If `LOCAL_WORKER=false` (remote worker cluster setup), application pod collection is skipped on the catalog cluster since applications run on remote workers.
+  - If `LOCAL_WORKER` cannot be resolved or is not set, a warning is logged and execution continues with the remaining collection steps.
+- **When Catalog is NOT installed in the cluster/namespace (Worker cluster)**:
+  - Catalog artifacts (catalog pods, catalog secrets/PVCs) are skipped.
+  - Must-gather connects to the remote Catalog API using the user's logged-in session credentials and collects the application pods and application namespace resources.
 
-System info, secrets, and volumes are **always collected** regardless of
-catalog state.
+System info, secrets, and volumes are **always collected** regardless of catalog state.
 
 #### 4. You must be logged in to the catalog for application data
 
@@ -169,9 +169,16 @@ must-gather.local.<timestamp>/
 │   │   │       └── <container>.log   # last 1000 lines (sanitized)
 │   │   ├── ai-services--db/
 │   │   └── ai-services--caddy/
-│   ├── Caddyfile                     # reverse-proxy config (sanitized)
-│   ├── caddy-autosave.json           # Caddy live config snapshot (sanitized)
 │   └── catalog-credentials.json     # tokens redacted
+├── worker/
+│   └── pods/
+│       ├── ai-services--worker/
+│       │   ├── inspect.json
+│       │   ├── inspect/
+│       │   │   └── <container>.json
+│       │   └── logs/
+│       │       └── <container>.log
+│       └── ai-services--caddy/
 ├── pods/
 │   └── <app-pod-name>/
 │       ├── inspect.json
@@ -209,8 +216,22 @@ must-gather.local.<timestamp>/
 │   │       └── logs/
 │   │           └── <container>.log   # last 1000 lines (sanitized)
 │   ├── catalog-credentials.json     # tokens redacted
-│   ├── secrets.json                  # K8s Secrets from catalog ns (metadata only)
-│   └── pvcs.json                     # PVCs from catalog ns
+│   ├── secrets/
+│   │   └── secrets.json              # K8s Secrets from catalog ns (metadata only)
+│   └── volumes/
+│       └── pvcs.json                 # PVCs from catalog ns
+├── worker/
+│   ├── pods/
+│   │   └── <worker-pod-name>/
+│   │       ├── inspect.json
+│   │       ├── inspect/
+│   │       │   └── <container>.json
+│   │       └── logs/
+│   │           └── <container>.log
+│   ├── secrets/
+│   │   └── secrets.json              # K8s Secrets from worker ns (metadata only)
+│   └── volumes/
+│       └── pvcs.json                 # PVCs from worker ns
 ├── applications/
 │   └── <app-namespace>/              # one directory per app namespace
 │       ├── pods/
@@ -256,20 +277,22 @@ must-gather --runtime podman
   │     │
   │     ├─ YES ─► Collect catalog artifacts
   │     │           ├─ Catalog pods (backend + db + caddy): inspect + logs
-  │     │           ├─ Caddyfile
-  │     │           ├─ caddy-autosave.json
   │     │           └─ catalog-credentials.json (tokens redacted)
   │     │
-  │     ├─ YES ─► Collect application pods          [requires catalog login]
-  │     │           ├─ List apps via catalog API
-  │     │           │   ├─ --application given → warn if not found, skip
-  │     │           │   └─ no --application    → collect all apps
-  │     │           └─ Per app: pod inspect + container inspect + logs
+  │     ├─ YES ─► Check LOCAL_WORKER env in catalog pod
+  │     │           ├─ LOCAL_WORKER == true:
+  │     │           │    Collect application pods      [requires catalog login]
+  │     │           │      ├─ List apps via catalog API
+  │     │           │      │   ├─ --application given → warn if not found, skip
+  │     │           │      │   └─ no --application    → collect all apps
+  │     │           │      └─ Per app: pod inspect + container inspect + logs
+  │     │           └─ LOCAL_WORKER == false / not set:
+  │     │                Skip application pod collection
   │     │
   │     ├─ YES ─► Collect models info
   │     │           └─ Directory listing + sizes from <BaseDir>/models/
   │     │
-  │     └─ NO  ─► Skip all catalog-dependent steps (warning logged)
+  │     └─ NO (Worker node) ─► Collect worker pods (worker/pods/) & application pods (pods/) via catalog API
   │
   ├─► Collect system info           (always)
   │     ├─ podman version
@@ -302,14 +325,18 @@ must-gather --runtime openshift
   │     │           ├─ Catalog pods (backend + db + ui): inspect + container inspect + logs
   │     │           └─ catalog-credentials.json (tokens redacted)
   │     │
-  │     ├─ YES ─► Collect application pods   [requires catalog login]
-  │     │           ├─ List apps via catalog API
-  │     │           │   ├─ --application given → warn if not found, skip
-  │     │           │   └─ no --application    → collect all apps
-  │     │           ├─ Derive app namespace from UUID (ai-services-<8 chars>)
-  │     │           └─ Per app → applications/<ns>/pods/: inspect + container inspect + logs
+  │     ├─ YES ─► Check LOCAL_WORKER env in catalog-backend pod
+  │     │           ├─ LOCAL_WORKER == true:
+  │     │           │    Collect application pods   [requires catalog login]
+  │     │           │      ├─ List apps via catalog API
+  │     │           │      │   ├─ --application given → warn if not found, skip
+  │     │           │      │   └─ no --application    → collect all apps
+  │     │           │      ├─ Derive app namespace from UUID (ai-services-<8 chars>)
+  │     │           │      └─ Per app → applications/<ns>/pods/: inspect + container inspect + logs
+  │     │           └─ LOCAL_WORKER == false / not set:
+  │     │                Skip application pod collection
   │     │
-  │     └─ NO  ─► Skip catalog-dependent steps (warning logged)
+  │     └─ NO (Worker cluster) ─► Collect application pods via catalog API [requires catalog login]
   │
   ├─► Collect system info           (always) → system/
   │     ├─ cluster server version
@@ -367,16 +394,18 @@ Redacted values are replaced with `[REDACTED]`. Sanitization applies to:
 
 | Situation | Behaviour |
 |---|---|
-| Catalog not installed (no catalog pods) | Catalog artifacts, application pods, and models are all skipped with a single warning. System/network/secrets/volumes are still collected. |
+| Catalog not installed (Worker node) | Catalog artifacts and models are skipped. Application pods are collected via the Catalog API (requires login). System/network/secrets/volumes are still collected. |
+| Catalog installed with `LOCAL_WORKER=true` | Both catalog artifacts and application pods are collected. |
+| Catalog installed with `LOCAL_WORKER=false` | Catalog artifacts are collected; application pods are skipped (they reside on worker nodes). |
+| `LOCAL_WORKER` env not found/errored | Warning logged; skips application pods and proceeds with next steps. |
 | Not logged in to catalog | Catalog client creation fails; application pod collection is skipped with a warning. Catalog pods and other sections are still collected. |
-| Catalog backend pod stopped | Base directory falls back to default. Caddyfile and models paths may be wrong if a custom base dir was used at install time. |
+| Catalog backend pod stopped | Base directory falls back to default. Models path may be wrong if a custom base dir was used at install time. |
 | `--application` given, app not found | Warning is printed; gather continues and collects everything else. |
 | `--application` given, catalog API error | Warning is printed with the HTTP error; other sections still run. |
 | Output directory not writable | Hard fail — `createOutputDir` returns an error and the command exits non-zero. |
 | Individual file write failure | Warning only; collection of remaining files continues. |
 | Infra/pause containers | Automatically skipped — any container whose name ends in `-infra` is excluded from log and inspect collection. |
 | Models directory missing | Warning logged; rest of collection continues. |
-| Caddy config files missing | Per-file warning; collection continues. |
 
 ### OpenShift
 
@@ -384,7 +413,10 @@ Redacted values are replaced with `[REDACTED]`. Sanitization applies to:
 |---|---|
 | Cluster unreachable / no kubeconfig | Hard fail — command exits non-zero immediately. |
 | Insufficient RBAC (e.g. cannot list pods) | Per-step warning; all other sections continue. |
-| Catalog not installed (no catalog pods in `ai-services` namespace) | Catalog artifacts and application pods are skipped with a single warning. System/secrets/volumes are still collected from the catalog namespace. |
+| Catalog not installed (Worker cluster) | Catalog artifacts are skipped. Application pods and app namespace resources are collected via the Catalog API (requires login). System/secrets/volumes are still collected. |
+| Catalog installed with `LOCAL_WORKER=true` | Both catalog artifacts and application pods are collected. |
+| Catalog installed with `LOCAL_WORKER=false` | Catalog artifacts are collected; application pods are skipped (they reside on worker nodes). |
+| `LOCAL_WORKER` env not found/errored | Warning logged; skips application pods and proceeds with next steps. |
 | Not logged in to catalog | Application pod collection is skipped with a warning. Catalog pods and other sections are still collected. |
 | `--application` given, app not found | Warning is printed; gather continues and collects everything else. |
 | No applications found in catalog | Application pods skipped with a warning; all other collection continues. |
