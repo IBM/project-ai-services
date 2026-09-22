@@ -32,7 +32,7 @@ db:
       memory: "1Gi"
 
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.4-3
+  image: icr.io/ai-services-cicd/caddy:v2.11.4-4
   adminPort: ""
   httpsPort: ""
   # caddyFileContent: Generated from the 'Caddyfile.tmpl' template
