@@ -22,6 +22,7 @@ import re
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic.types import SecretStr
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +83,9 @@ class S3ConnectorConfig(BaseModel):
             "IAM key ID (AWS) or HMAC key ID (IBM COS)."
         ),
     )
-    secret_access_key: str = Field(
-        default="",
+    secret_access_key: SecretStr = Field(
+        default=SecretStr(""),
+        repr=False,
         description=(
             "IAM secret (AWS) or HMAC secret (IBM COS)."
         ),
@@ -214,7 +216,7 @@ class S3ConnectorConfig(BaseModel):
                 raise ValueError(
                     "access_key_id is required for IBM COS connectors."
                 )
-            if not self.secret_access_key.strip():
+            if not self.secret_access_key.get_secret_value().strip():
                 raise ValueError(
                     "secret_access_key is required for IBM COS connectors."
                 )
@@ -252,7 +254,10 @@ class SSHConnectorConfig(BaseModel):
     host: str = Field(description="SFTP server hostname or IP address.")
     port: int = Field(default=22, ge=1, le=65535, description="SFTP port.")
     username: str = Field(description="SSH login username.")
-    private_key: str = Field(description="PEM-encoded RSA/ECDSA/Ed25519 private key (decrypted).")
+    private_key: SecretStr = Field(
+        repr=False,
+        description="PEM-encoded RSA/ECDSA/Ed25519 private key (decrypted).",
+    )
     remote_path: str = Field(default="/", description="Absolute remote directory to scan recursively.")
     allowed_extensions: list[str] = Field(
         default_factory=lambda: [".pdf", ".docx"],
@@ -275,15 +280,16 @@ class SSHConnectorConfig(BaseModel):
 
     @field_validator("private_key")
     @classmethod
-    def _check_private_key(cls, v: str) -> str:
-        if not v.strip():
+    def _check_private_key(cls, v: SecretStr) -> SecretStr:
+        secret_value = v.get_secret_value()
+        if not secret_value.strip():
             raise ValueError("private_key must not be empty.")
-        if "PRIVATE KEY" not in v:
+        if "PRIVATE KEY" not in secret_value:
             raise ValueError(
                 "private_key does not look like a PEM private key "
                 "(expected 'PRIVATE KEY' in the value)."
             )
-        return v.strip()
+        return v
 
     @field_validator("allowed_extensions")
     @classmethod

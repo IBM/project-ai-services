@@ -230,7 +230,7 @@ async def run_translation_job(
             start_translating = time.perf_counter()
 
             # Build one httpx.AsyncClient for all chunk calls in this job.
-            api_key = settings.common.llm.api_key
+            api_key = settings.common.llm.api_key.get_secret_value()
             headers = {"Content-Type": "application/json"}
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"

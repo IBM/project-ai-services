@@ -88,7 +88,7 @@ def call_vllm(
     if settings.extract.guided_decoding_enabled:
         payload["extra_body"] = {"guided_json": normalized_schema}
 
-    headers = get_vllm_headers(settings.common.llm.api_key)
+    headers = get_vllm_headers(settings.common.llm.api_key.get_secret_value())
     response = misc_utils.SESSION.post(
         f"{llm_endpoint}/v1/chat/completions",
         json=payload,
