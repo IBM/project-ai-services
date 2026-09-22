@@ -24,6 +24,7 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -122,11 +123,10 @@ func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
 		return
 	}
 
-	for _, pod := range pods {
-		logger.InfofCtx(ctx, "Deleting '%s' pod, as worker failed to join", pod.Name)
-		if delErr := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); delErr != nil {
-			logger.ErrorfCtx(ctx, "failed to delete worker pod %s: %v\n", pod.Name, delErr)
-		}
+	if err := workercommon.PerformCleanup(ctx, rt, pods, false); err != nil {
+		logger.ErrorfCtx(ctx, "failed to cleanup worker pods: %v\n", err)
+
+		return
 	}
 }
 
