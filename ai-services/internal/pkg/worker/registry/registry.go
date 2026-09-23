@@ -36,6 +36,11 @@ var ErrWorkerNotFound = fmt.Errorf("worker not found")
 // recognised value (podman or openshift).
 var ErrUnsupportedRuntimeType = fmt.Errorf("unsupported runtime_type")
 
+// ErrWorkerHasApplications is returned by Deregister when the worker still has
+// one or more applications assigned to it. The caller should surface this as a
+// 409 Conflict so the operator knows they must delete those applications first.
+var ErrWorkerHasApplications = fmt.Errorf("worker still has applications deployed on it")
+
 // validRuntimeTypes is the list of runtime type strings accepted by Register.
 var validRuntimeTypes = []models.WorkerRuntimeType{
 	models.WorkerRuntimeTypePodman,
@@ -367,6 +372,17 @@ func (r *Registry) UpdateHeartbeat(ctx context.Context, workerName string) {
 // Use this when a worker is permanently decommissioned, not just temporarily offline.
 // Returns (true, nil) if a row was deleted, (false, nil) if not found.
 func (r *Registry) Deregister(ctx context.Context, id uuid.UUID) (bool, error) {
+	if r.repo != nil {
+		appIDMap, err := r.repo.GetApplicationIDsByWorkerIDs(ctx, []uuid.UUID{id})
+		if err != nil {
+			return false, fmt.Errorf("worker registry: failed to check applications for %s: %w", id, err)
+		}
+
+		if appIDs := appIDMap[id]; len(appIDs) > 0 {
+			return false, ErrWorkerHasApplications
+		}
+	}
+
 	var found *WorkerEntry
 
 	r.mu.Lock()
