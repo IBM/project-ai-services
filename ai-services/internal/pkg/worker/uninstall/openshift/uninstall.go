@@ -41,10 +41,21 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	return performCleanup(ctx, rt, namespace, opts.SkipCleanup)
+	return PerformCleanup(ctx, rt, namespace, opts.SkipCleanup)
 }
 
-func performCleanup(ctx context.Context, rt runtime.Runtime, namespace string, skipCleanup bool) error {
+// PerformCleanup uninstalls the worker Helm release from the given OpenShift namespace
+// and, unless skipCleanup is true, removes the associated PersistentVolumeClaims and the mTLS
+// secret that were created during deployment.
+//
+// Parameters:
+//   - ctx:         context used for logging and cancellation propagation.
+//   - rt:          runtime client used to delete Kubernetes resources (PVCs and secrets).
+//   - namespace:   the OpenShift namespace from which the release is uninstalled.
+//   - skipCleanup: when true, only the Helm release is removed; PVCs and secrets are left intact.
+//
+// Returns an error if the Helm uninstall or any resource deletion fails.
+func PerformCleanup(ctx context.Context, rt runtime.Runtime, namespace string, skipCleanup bool) error {
 	release := workerconstants.WorkerHelmReleaseName
 
 	logger.InfolnCtx(ctx, "Proceeding with uninstall...")
@@ -63,6 +74,14 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, namespace string, s
 			s.Fail("failed to delete worker pvc")
 
 			return fmt.Errorf("failed to delete PVCs: %w", err)
+		}
+
+		logger.DebugfCtx(ctx, "Deleting worker secrets...")
+
+		if err := rt.DeleteSecret(ctx, workerconstants.WorkerMTLSSecretName); err != nil {
+			s.Fail("failed to delete worker secret")
+
+			return fmt.Errorf("failed to delete secret %s: %w", workerconstants.WorkerMTLSSecretName, err)
 		}
 	}
 

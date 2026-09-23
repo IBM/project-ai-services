@@ -2841,6 +2841,11 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "409":
+          description: Worker is already registered and ready
+          schema:
+            additionalProperties: true
+            type: object
         "500":
           description: Internal error
           schema:
