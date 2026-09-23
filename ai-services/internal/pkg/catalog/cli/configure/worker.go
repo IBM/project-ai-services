@@ -55,7 +55,7 @@ func findLocalWorker(workers []catalogtypes.Worker, requireReady bool) bool {
 	return false
 }
 
-// CheckLocalWorkerSkip determines whether local-worker registration can be
+// CheckLocalWorkerRegistrationSkip determines whether local-worker registration can be
 // skipped because valid on-disk TLS credentials already exist.
 //
 // It returns skip=true when BOTH conditions hold:
@@ -63,7 +63,7 @@ func findLocalWorker(workers []catalogtypes.Worker, requireReady bool) bool {
 //     hasValidTLSCredentials will succeed inside the worker container.
 //  2. The catalog DB has a completed (non-pending) registration row for "Local"
 //     — Restore will find it on the next CommandStream attempt.
-func CheckLocalWorkerSkip(ctx context.Context, mtlsSecretExists bool, c *catalogclient.Client) (skip bool, err error) {
+func CheckLocalWorkerRegistrationSkip(ctx context.Context, mtlsSecretExists bool, c *catalogclient.Client) (skip bool, err error) {
 	if !mtlsSecretExists {
 		return false, nil
 	}
@@ -81,7 +81,7 @@ func CheckLocalWorkerSkip(ctx context.Context, mtlsSecretExists bool, c *catalog
 // exist, registration is skipped and an empty token is returned — signalling to
 // the caller that the worker will reconnect without re-registering.
 func RegisterLocalWorkerIfNeeded(ctx context.Context, mtlsSecretExists bool, c *catalogclient.Client) (string, error) {
-	skip, err := CheckLocalWorkerSkip(ctx, mtlsSecretExists, c)
+	skip, err := CheckLocalWorkerRegistrationSkip(ctx, mtlsSecretExists, c)
 	if err != nil {
 		return "", err
 	}
