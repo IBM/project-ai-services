@@ -37,7 +37,7 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	return workercommon.PerformCleanup(ctx, rt, pods, opts.SkipCleanup)
+	return workercommon.PerformPodmanCleanup(ctx, rt, pods, opts.SkipCleanup)
 }
 
 // ─── internal ─────────────────────────────────────────────────────────────────

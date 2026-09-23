@@ -124,7 +124,7 @@ func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) error {
 		return listErr
 	}
 
-	if err := workercommon.PerformCleanup(ctx, rt, pods, false); err != nil {
+	if err := workercommon.PerformPodmanCleanup(ctx, rt, pods, false); err != nil {
 		return err
 	}
 

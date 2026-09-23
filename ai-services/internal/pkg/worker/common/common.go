@@ -3,12 +3,16 @@ package common
 import (
 	"context"
 	"fmt"
+	"log"
 	"path/filepath"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
@@ -64,10 +68,19 @@ type WorkerPodConfig struct {
 	BaseDir string
 }
 
-// PerformCleanup executes all cleanup operations after confirmation:
-// retrieves the worker pod config, deletes the pods, and removes the worker
-// data directory.
-func PerformCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, skipCleanup bool) error {
+// PerformPodmanCleanup removes a Podman-based worker deployment by deleting its pods, secrets,
+// volumes, and on-disk data directory. Resources that were preserved by a previous
+// --skip-cleanup run are also reconciled according to the current skipCleanup flag.
+//
+// Parameters:
+//   - ctx:         context used for logging and cancellation propagation.
+//   - rt:          runtime client used to delete Podman resources (pods, secrets, volumes).
+//   - pods:        list of running pods belonging to the worker deployment.
+//   - skipCleanup: when true, secrets and volumes tagged for deferred deletion are left intact;
+//     when false, those previously skipped resources are also removed.
+//
+// Returns an error if any deletion step (pods, secrets, volumes, or data directory) fails.
+func PerformPodmanCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, skipCleanup bool) error {
 	logger.InfolnCtx(ctx, "Proceeding with deletion...")
 
 	var baseDir string
@@ -154,4 +167,50 @@ func extractConfigFromEnv(env map[string]string, config *WorkerPodConfig) {
 	if value, ok := env[workerconstants.BaseDirEnvVar]; ok {
 		config.BaseDir = value
 	}
+}
+
+// PerformOpenshiftCleanup uninstalls the worker Helm release from the given OpenShift namespace
+// and, unless skipCleanup is true, removes the associated PersistentVolumeClaims and the mTLS
+// secret that were created during deployment.
+//
+// Parameters:
+//   - ctx:         context used for logging and cancellation propagation.
+//   - rt:          runtime client used to delete Kubernetes resources (PVCs and secrets).
+//   - namespace:   the OpenShift namespace from which the release is uninstalled.
+//   - skipCleanup: when true, only the Helm release is removed; PVCs and secrets are left intact.
+//
+// Returns an error if the Helm uninstall or any resource deletion fails.
+func PerformOpenshiftCleanup(ctx context.Context, rt runtime.Runtime, namespace string, skipCleanup bool) error {
+	release := workerconstants.WorkerHelmReleaseName
+
+	logger.InfolnCtx(ctx, "Proceeding with uninstall...")
+
+	s := spinner.New("Uninstalling worker service...")
+	s.Start(ctx)
+
+	if err := helm.UninstallRelease(ctx, release, namespace); err != nil {
+		return err
+	}
+
+	if !skipCleanup {
+		logger.DebuglnCtx(ctx, "Delete worker PVCs...")
+
+		if err := rt.DeletePVCs(ctx, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, workerconstants.WorkerHelmReleaseName)); err != nil {
+			s.Fail("failed to delete worker pvc")
+
+			return fmt.Errorf("failed to delete PVCs: %w", err)
+		}
+
+		logger.DebugfCtx(ctx, "Deleting worker secrets...")
+
+		if err := rt.DeleteSecret(ctx, workerconstants.WorkerMTLSSecretName); err != nil {
+			s.Fail("failed to delete worker secret")
+
+			return fmt.Errorf("failed to delete secret %s: %w", workerconstants.WorkerMTLSSecretName, err)
+		}
+	}
+
+	s.Stop("Worker service uninstalled successfully")
+
+	return nil
 }

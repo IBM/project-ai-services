@@ -5,13 +5,11 @@ import (
 	"fmt"
 
 	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 )
 
 // Uninstall removes all worker components deployed by `worker join`.
@@ -41,32 +39,5 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	return performCleanup(ctx, rt, namespace, opts.SkipCleanup)
-}
-
-func performCleanup(ctx context.Context, rt runtime.Runtime, namespace string, skipCleanup bool) error {
-	release := workerconstants.WorkerHelmReleaseName
-
-	logger.InfolnCtx(ctx, "Proceeding with uninstall...")
-
-	s := spinner.New("Uninstalling worker service...")
-	s.Start(ctx)
-
-	if err := helm.UninstallRelease(ctx, release, namespace); err != nil {
-		return err
-	}
-
-	if !skipCleanup {
-		logger.DebuglnCtx(ctx, "Delete worker PVCs...")
-
-		if err := rt.DeletePVCs(ctx, fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, workerconstants.WorkerHelmReleaseName)); err != nil {
-			s.Fail("failed to delete worker pvc")
-
-			return fmt.Errorf("failed to delete PVCs: %w", err)
-		}
-	}
-
-	s.Stop("Worker service uninstalled successfully")
-
-	return nil
+	return workercommon.PerformOpenshiftCleanup(ctx, rt, namespace, opts.SkipCleanup)
 }
