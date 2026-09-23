@@ -1101,7 +1101,7 @@ func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *
 	}
 
 	if plan.SpyreCardPool == nil {
-		return env, fmt.Errorf("Spyre cards required but pool was not populated during planning;")
+		return env, fmt.Errorf("spyre cards required but pool was not populated during planning")
 	}
 
 	// Allocate PCI addresses to containers that need them
