@@ -7,6 +7,7 @@ import (
 
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
@@ -40,6 +41,30 @@ func RegisterLocalWorker(ctx context.Context, c *catalogclient.Client) (string, 
 	return resp.Token, nil
 }
 
+// localWorkerRegistered reports whether a worker named "Local" appears in the
+// provided list with a non-pending status.
+func localWorkerRegistered(workers []catalogtypes.Worker) bool {
+	for _, w := range workers {
+		if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) && w.Status != "pending" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// localWorkerExists reports whether any worker named "Local" appears in the
+// provided list, regardless of status.
+func localWorkerExists(workers []catalogtypes.Worker) bool {
+	for _, w := range workers {
+		if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // CheckLocalWorkerSkip determines whether local-worker registration can be
 // skipped because valid on-disk TLS credentials already exist.
 //
@@ -65,22 +90,16 @@ func CheckLocalWorkerSkip(ctx context.Context, secretExists func(context.Context
 		return false, fmt.Errorf("list workers: %w", err)
 	}
 
-	for _, w := range workers {
-		if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) && w.Status != "pending" {
-			return true, nil
-		}
-	}
-
-	return false, nil
+	return localWorkerRegistered(workers), nil
 }
 
-// ResolveLocalWorkerToken decides whether to issue a new bootstrap token or
-// reuse existing credentials. It returns an empty token when skip conditions
-// are met (valid on-disk credentials + a completed catalog registration),
-// signalling to the caller that the worker will reconnect without re-registering.
+// RegisterLocalWorkerIfNeeded registers the local worker and returns a bootstrap
+// token. If valid on-disk credentials and a completed catalog registration already
+// exist, registration is skipped and an empty token is returned — signalling to
+// the caller that the worker will reconnect without re-registering.
 //
-// secretExists is runtime specific method to check if the worker-mtls-encryption-secret exists.
-func ResolveLocalWorkerToken(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (string, error) {
+// secretExists is a runtime-specific method to check if the worker-mtls-encryption-secret exists.
+func RegisterLocalWorkerIfNeeded(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (string, error) {
 	skip, err := CheckLocalWorkerSkip(ctx, secretExists, c)
 	if err != nil {
 		return "", err
@@ -99,8 +118,8 @@ func ResolveLocalWorkerToken(ctx context.Context, secretExists func(context.Cont
 // ValidateSkipLocalWorker enforces that --skip-local-worker cannot be
 // changed on a re-run. It infers what the original run used from the catalog DB:
 //
-//   - workers registered (len > 0)  → original run had --skip-local-worker=false
-//   - no workers registered (len == 0) → original run had --skip-local-worker=true
+//   - local worker registered → original run had --skip-local-worker=false
+//   - local worker absent     → original run had --skip-local-worker=true
 //
 // An error is returned when the current flag value contradicts that state.
 // This function is a no-op on a fresh install (isReinstall=false).
@@ -114,11 +133,13 @@ func ValidateSkipLocalWorker(ctx context.Context, c *catalogclient.Client, isRei
 		return fmt.Errorf("skip-local-worker validation: list workers: %w", err)
 	}
 
-	workersExist := len(workers) > 0
+	// Only check for the Local worker — remote workers may exist in the DB
+	// from a previous run and must not influence this decision.
+	exists := localWorkerExists(workers)
 
-	// workersExist == true  → original flag was false (local worker was joined)
-	// workersExist == false → original flag was true  (local worker was skipped)
-	if skipLocalWorker == workersExist {
+	// exists == true  → original flag was false (local worker was joined)
+	// exists == false → original flag was true  (local worker was skipped)
+	if skipLocalWorker == exists {
 		return fmt.Errorf("--skip-local-worker flag cannot be changed on re-run; to change this setting, uninstall and re-run catalog configure")
 	}
 
