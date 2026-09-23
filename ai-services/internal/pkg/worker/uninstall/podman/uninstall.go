@@ -43,29 +43,6 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 
 // ─── internal ─────────────────────────────────────────────────────────────────
 
-func getWorkerPodList(ctx context.Context, rt runtime.Runtime) ([]types.Pod, error) {
-	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
-
-	var podList []types.Pod
-	for _, label := range labels {
-		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
-		if err != nil {
-			return nil, err
-		}
-
-		podList = append(podList, pods...)
-	}
-
-	return podList, nil
-}
-
-// WorkerPodConfig holds configuration recovered from the running worker pod.
-type WorkerPodConfig struct {
-	// BaseDir is the base directory recovered from the AI_SERVICES_BASE_DIR
-	// env var injected by worker.yaml.tmpl at deploy time.
-	BaseDir string
-}
-
 // PerformCleanup removes a Podman-based worker deployment by deleting its pods, secrets,
 // volumes, and on-disk data directory. Resources that were preserved by a previous
 // --skip-cleanup run are also reconciled according to the current skipCleanup flag.
@@ -124,4 +101,20 @@ func PerformCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 	logger.InfolnCtx(ctx, "Worker service removed successfully")
 
 	return nil
+}
+
+func getWorkerPodList(ctx context.Context, rt runtime.Runtime) ([]types.Pod, error) {
+	labels := []string{workerconstants.WorkerProxyLabel, workerconstants.WorkerPodLabel}
+
+	var podList []types.Pod
+	for _, label := range labels {
+		pods, err := rt.ListPods(ctx, map[string][]string{"label": {label}})
+		if err != nil {
+			return nil, err
+		}
+
+		podList = append(podList, pods...)
+	}
+
+	return podList, nil
 }
