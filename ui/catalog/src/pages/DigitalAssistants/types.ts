@@ -38,6 +38,15 @@ export interface AppState extends BaseTableState<DigitalAssistantRow> {
   // DA-specific: deployment details panel
   selectedDeployment: DeploymentDetails | null;
   showDeploymentDetails: boolean;
+  /** Section to open in DeploymentDetails when navigating from the overflow menu */
+  deploymentDefaultSection:
+    | "details"
+    | "services"
+    | "integration"
+    | "datasources";
+  // DA-specific: launch endpoint error toast
+  launchErrorToastOpen: boolean;
+  launchErrorToastMessage: string;
 }
 
 export const ACTION_TYPES = {
@@ -49,6 +58,9 @@ export const ACTION_TYPES = {
   SHOW_DEPLOYMENT_DETAILS: "SHOW_DEPLOYMENT_DETAILS",
   HIDE_DEPLOYMENT_DETAILS: "HIDE_DEPLOYMENT_DETAILS",
   UPDATE_DEPLOYMENT_NAME: "UPDATE_DEPLOYMENT_NAME",
+  // Launch endpoint toast
+  SHOW_LAUNCH_ERROR_TOAST: "SHOW_LAUNCH_ERROR_TOAST",
+  HIDE_LAUNCH_ERROR_TOAST: "HIDE_LAUNCH_ERROR_TOAST",
 } as const;
 
 // DA-specific actions only. Shared actions (search, pagination, export, columns,
@@ -67,9 +79,12 @@ export type AppAction =
   | {
       type: typeof ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS;
       payload: DeploymentDetails;
+      defaultSection?: "details" | "services" | "integration" | "datasources";
     }
   | { type: typeof ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS }
-  | { type: typeof ACTION_TYPES.UPDATE_DEPLOYMENT_NAME; payload: string };
+  | { type: typeof ACTION_TYPES.UPDATE_DEPLOYMENT_NAME; payload: string }
+  | { type: typeof ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST; payload: string }
+  | { type: typeof ACTION_TYPES.HIDE_LAUNCH_ERROR_TOAST };
 
 // Table headers
 export const HEADERS: DataTableHeader[] = [
@@ -122,6 +137,9 @@ export const INITIAL_STATE: AppState = {
   pagination: null,
   selectedDeployment: null,
   showDeploymentDetails: false,
+  deploymentDefaultSection: "details",
+  launchErrorToastOpen: false,
+  launchErrorToastMessage: "",
 };
 
 // DA-specific cases only. All shared cases are handled by handleSharedTableAction.
@@ -145,12 +163,14 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ...state,
         selectedDeployment: action.payload,
         showDeploymentDetails: true,
+        deploymentDefaultSection: action.defaultSection ?? "details",
       };
     case ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS:
       return {
         ...state,
         selectedDeployment: null,
         showDeploymentDetails: false,
+        deploymentDefaultSection: "details",
       };
     case ACTION_TYPES.UPDATE_DEPLOYMENT_NAME:
       return {
@@ -158,6 +178,18 @@ function ownCases(state: AppState, action: AppAction): AppState {
         selectedDeployment: state.selectedDeployment
           ? { ...state.selectedDeployment, name: action.payload }
           : null,
+      };
+    case ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST:
+      return {
+        ...state,
+        launchErrorToastOpen: true,
+        launchErrorToastMessage: action.payload,
+      };
+    case ACTION_TYPES.HIDE_LAUNCH_ERROR_TOAST:
+      return {
+        ...state,
+        launchErrorToastOpen: false,
+        launchErrorToastMessage: "",
       };
     default:
       return state;

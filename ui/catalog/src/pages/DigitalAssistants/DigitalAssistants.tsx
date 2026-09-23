@@ -1,4 +1,7 @@
 import { Fragment, useReducer, useCallback, useRef } from "react";
+import { api } from "@/api/axios";
+import { APPLICATION_ENDPOINTS } from "@/constants/api-endpoints.constants";
+import type { ApplicationDetailsApiResponse } from "@/types/api.types";
 import { useDeployStore } from "@/store/deploy.store";
 import { PageHeader } from "@carbon/ibm-products";
 import {
@@ -22,6 +25,7 @@ import {
   Tab,
   TabPanels,
   TabPanel,
+  ToastNotification,
 } from "@carbon/react";
 import { Deploy } from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
@@ -57,6 +61,7 @@ import {
   filterRowsBySearch,
   getVisibleHeaders,
 } from "@/components/Table/utils/tableUtils";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 // Generic cell renderer wrapper
 interface RenderCellProps {
@@ -67,6 +72,8 @@ interface RenderCellProps {
   cellKey: string;
   cellProps: Record<string, unknown>;
   rowData?: DigitalAssistantRow;
+  onViewIntegration?: (rowId: string) => void;
+  onLaunchEndpoint?: (rowId: string) => void;
 }
 
 const renderCell = ({
@@ -77,6 +84,8 @@ const renderCell = ({
   cellKey,
   cellProps,
   rowData,
+  onViewIntegration,
+  onLaunchEndpoint,
 }: RenderCellProps) => {
   const CellRenderer = CELL_RENDERERS[header as keyof typeof CELL_RENDERERS];
 
@@ -88,6 +97,8 @@ const renderCell = ({
           rowId={rowId}
           dispatch={dispatch}
           rowData={rowData}
+          onViewIntegration={onViewIntegration}
+          onLaunchEndpoint={onLaunchEndpoint}
         />
       ) : (
         String(value || "")
@@ -288,6 +299,53 @@ const DigitalAssistantsPage = () => {
   // Visible headers for the DataTable (shared utility)
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
+  // Navigate to DeploymentDetails with integration section pre-selected
+  const handleViewIntegration = (rowId: string) => {
+    const row = state.rowsData.find((r) => r.id === rowId);
+    if (!row) return;
+    dispatch({
+      type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
+      payload: {
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        type: row.type || "Digital assistant",
+      },
+      defaultSection: "integration",
+    } as AppAction);
+  };
+
+  // Fetch the detail for the row and open the chatbot UI endpoint in a new tab.
+  // The chatbot service is identified by catalog_id "chat"; its UI endpoint has type "ui".
+  const handleLaunchEndpoint = async (rowId: string) => {
+    try {
+      const response = await api.get<ApplicationDetailsApiResponse>(
+        APPLICATION_ENDPOINTS.GET_APPLICATION_DETAILS(rowId),
+      );
+      const chatService = response.data.services?.find(
+        (s) => s.catalog_id === "chat",
+      );
+      const uiEndpoint = chatService?.endpoints.find(
+        (e) => e.type === "ui",
+      )?.url;
+      if (uiEndpoint) {
+        window.open(uiEndpoint, "_blank", "noopener,noreferrer");
+      } else {
+        // API responded but no chatbot UI endpoint exists for this deployment
+        dispatch({
+          type: ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST,
+          payload: "No chatbot UI endpoint is available for this deployment.",
+        } as AppAction);
+      }
+    } catch {
+      // API call itself failed (network error, 4xx/5xx)
+      dispatch({
+        type: ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST,
+        payload: "Could not retrieve the chatbot endpoint. Please try again.",
+      } as AppAction);
+    }
+  };
+
   // Show DeploymentDetails if a deployment is selected
   if (state.showDeploymentDetails && state.selectedDeployment) {
     return (
@@ -298,6 +356,7 @@ const DigitalAssistantsPage = () => {
           loadApplications();
         }}
         deploymentSource="Digital assistants"
+        defaultSection={state.deploymentDefaultSection}
         onNameUpdate={(newName) =>
           dispatch({
             type: ACTION_TYPES.UPDATE_DEPLOYMENT_NAME,
@@ -334,6 +393,21 @@ const DigitalAssistantsPage = () => {
           dispatch({ type: "SHARED_HIDE_EXPORT_TOAST" })
         }
       />
+      {state.launchErrorToastOpen && (
+        <ToastNotification
+          aria-label="close notification"
+          kind="error"
+          title="Launch service endpoint failed"
+          subtitle={state.launchErrorToastMessage}
+          onCloseButtonClick={() =>
+            dispatch({
+              type: ACTION_TYPES.HIDE_LAUNCH_ERROR_TOAST,
+            } as AppAction)
+          }
+          className={sharedStyles.customToast}
+          hideCloseButton={false}
+        />
+      )}
 
       <Tabs>
         <PageHeader
@@ -475,6 +549,10 @@ const DigitalAssistantsPage = () => {
                                                 cellKey,
                                                 cellProps,
                                                 rowData: originalRow,
+                                                onViewIntegration:
+                                                  handleViewIntegration,
+                                                onLaunchEndpoint:
+                                                  handleLaunchEndpoint,
                                               });
                                             })}
                                           </TableExpandRow>

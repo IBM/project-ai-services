@@ -32,6 +32,7 @@ import type {
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
   ApplicationWorker,
+  ResourceAllocation,
 } from "@/types/api.types";
 import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
@@ -49,6 +50,8 @@ interface DeploymentDetailsProps {
   onBack: () => void;
   deploymentSource: string;
   onNameUpdate?: (newName: string) => void;
+  /** Pre-select a side-nav section when the panel opens */
+  defaultSection?: "details" | "services" | "integration" | "datasources";
 }
 
 const DeploymentDetails = ({
@@ -56,16 +59,18 @@ const DeploymentDetails = ({
   onBack,
   deploymentSource,
   onNameUpdate,
+  defaultSection = "details",
 }: DeploymentDetailsProps) => {
-  const [activeSection, setActiveSection] = useState("details");
-  const [resources, setResources] = useState<
-    DeploymentDetailsType["resources"]
-  >([]);
+  const [activeSection, setActiveSection] = useState(defaultSection);
+  const [resources, setResources] = useState<ResourceAllocation[]>([]);
   const [isLoadingResources, setIsLoadingResources] = useState(false);
   const [serviceData, setServiceData] = useState<DeploymentServiceData[]>([]);
   const [integrationEndpoints, setIntegrationEndpoints] = useState<
     DeployIntegrationEndpoints[]
   >([]);
+  const [integrationFetchError, setIntegrationFetchError] = useState<
+    string | null
+  >(null);
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
@@ -147,6 +152,7 @@ const DeploymentDetails = ({
   }, [deployment.id]);
 
   useEffect(() => {
+    setIntegrationFetchError(null);
     const fetchServiceDetails = async () => {
       try {
         const [applicationDetailsResponse, servicesResponse] =
@@ -267,6 +273,9 @@ const DeploymentDetails = ({
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
+        setIntegrationFetchError(
+          "Could not retrieve integration endpoints. Please try again.",
+        );
         setCertifiedBy(null);
         setWorkerInfo(null);
       }
@@ -807,6 +816,18 @@ const DeploymentDetails = ({
                   className={styles.detailsCard}
                 ></ProductiveCard>
               </Column>
+              {integrationFetchError && (
+                <Column sm={4} md={8} lg={16}>
+                  <ToastNotification
+                    aria-label="close notification"
+                    kind="error"
+                    title="Failed to load integration endpoints"
+                    subtitle={integrationFetchError}
+                    hideCloseButton
+                    className={styles.toastNotification}
+                  />
+                </Column>
+              )}
               {integrationEndpoints.map((integrationEndpointsData) => (
                 <Column key={integrationEndpointsData.id} sm={4} md={8} lg={16}>
                   <ProductiveCard

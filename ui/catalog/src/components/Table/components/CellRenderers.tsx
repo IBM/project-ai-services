@@ -120,6 +120,10 @@ export interface ActionCellProps {
   onDelete: (rowId: string) => void;
   // Each table has its own delete eligibility rule and passes it explicitly.
   isDeleteEnabled: (status: string | undefined) => boolean;
+  /** Called when the user clicks "View integration endpoints" — only enabled when Running */
+  onViewIntegration?: (rowId: string) => void;
+  /** Called when the user clicks "Launch service endpoint" — only enabled when Running */
+  onLaunchEndpoint?: (rowId: string) => void;
 }
 
 export interface NameCellProps {
@@ -208,11 +212,28 @@ export const ActionCell = ({
   rowData,
   onDelete,
   isDeleteEnabled,
+  onViewIntegration,
+  onLaunchEndpoint,
 }: ActionCellProps) => {
   const deleteEnabled = isDeleteEnabled(rowData?.status);
+  const isRunning = rowData?.status === "Running";
 
   return (
     <OverflowMenu size="lg" flipped aria-label="Actions">
+      {onViewIntegration ? (
+        <OverflowMenuItem
+          itemText="View integration endpoints"
+          disabled={!isRunning}
+          onClick={() => onViewIntegration(rowId)}
+        />
+      ) : null}
+      {onLaunchEndpoint ? (
+        <OverflowMenuItem
+          itemText="Launch service endpoint"
+          disabled={!isRunning}
+          onClick={() => onLaunchEndpoint(rowId)}
+        />
+      ) : null}
       <OverflowMenuItem
         itemText={
           <div className={sharedStyles.deleteMenuItem}>

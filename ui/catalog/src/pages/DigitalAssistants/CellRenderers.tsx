@@ -12,15 +12,20 @@ import {
 export { StatusCell, MessageCell };
 
 interface ActionCellWrapperProps {
+  value: unknown;
   rowId: string;
   dispatch: Dispatch<AppAction | SharedTableAction>;
   rowData?: { status?: string };
+  onViewIntegration?: (rowId: string) => void;
+  onLaunchEndpoint?: (rowId: string) => void;
 }
 
 export const ActionCell = ({
   rowId,
   dispatch,
   rowData,
+  onViewIntegration,
+  onLaunchEndpoint,
 }: ActionCellWrapperProps) => (
   <SharedActionCell
     rowId={rowId}
@@ -29,6 +34,8 @@ export const ActionCell = ({
       dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: id })
     }
     isDeleteEnabled={(status) => status !== "Deleting"}
+    onViewIntegration={onViewIntegration}
+    onLaunchEndpoint={onLaunchEndpoint}
   />
 );
 
@@ -58,8 +65,8 @@ export const NameCell = ({
           name,
           status,
           type: type || "Digital assistant",
-          resources: [],
         },
+        defaultSection: "details",
       })
     }
   />
@@ -70,6 +77,8 @@ interface CellRendererProps {
   rowId: string;
   dispatch: Dispatch<AppAction | SharedTableAction>;
   rowData?: { status?: string; type?: string };
+  onViewIntegration?: (rowId: string) => void;
+  onLaunchEndpoint?: (rowId: string) => void;
 }
 
 type CellRendererComponent = (props: CellRendererProps) => ReactElement | null;
