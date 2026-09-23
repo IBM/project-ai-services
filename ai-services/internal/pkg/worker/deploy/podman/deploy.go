@@ -21,10 +21,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
+	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/podman"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -124,7 +124,7 @@ func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) error {
 		return listErr
 	}
 
-	if err := workercommon.PerformPodmanCleanup(ctx, rt, pods, false); err != nil {
+	if err := workerpodman.PerformCleanup(ctx, rt, pods, false); err != nil {
 		return err
 	}
 
