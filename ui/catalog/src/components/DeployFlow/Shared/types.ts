@@ -43,11 +43,24 @@ export interface BaseStepProps {
 export interface ServiceConfigField {
   key: keyof ServiceConfig;
   label: string;
-  options: Array<{ id: string; text: string }>;
+  /**
+   * For isCustomComponent fields each entry also carries an optional providerId
+   * so the backend dropdown can be filtered by the selected model (same pattern
+   * as llmModelsWithProviders for LLM).
+   */
+  options: Array<{ id: string; text: string; providerId?: string }>;
   readonly?: boolean;
   globalValue?: string;
   /** Options are model names; provider is resolved via llmModelsWithProviders. */
   isModelFirst?: boolean;
+  /**
+   * Custom component type (e.g. custom_llm): model-first then backend, matching
+   * the LLM pattern. options = flat model list across all providers with providerId.
+   * providerOptions = full provider list for the backend dropdown.
+   */
+  isCustomComponent?: boolean;
+  /** Provider options for the backend dropdown of a custom component. */
+  providerOptions?: Array<{ id: string; text: string }>;
 }
 
 export interface ResourceItem {

@@ -110,17 +110,37 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   const componentModelsError = useServiceDeployStore(
     (state) => state.componentModelsError,
   );
+  const componentModelsLoading = useServiceDeployStore(
+    (state) => state.componentModelsLoading,
+  );
   const providerSchemas = useServiceDeployStore(
     (state) => state.providerSchemas,
   );
 
-  const inferenceComponentType = deployOptions.components.some(
-    (c) => c.type === COMPONENT_TYPES.LLM,
-  )
-    ? COMPONENT_TYPES.LLM
-    : deployOptions.components.some((c) => c.type === COMPONENT_TYPES.RERANKER)
-      ? COMPONENT_TYPES.RERANKER
-      : null;
+  // Step 1 component types are the known selector types (embedding, vector store).
+  // Everything else is a Step 2 / inference component, including unknown custom types.
+  const isStep1ComponentType = (type: string) =>
+    type === COMPONENT_TYPES.EMBEDDING || type === COMPONENT_TYPES.VECTOR_STORE;
+
+  // Known inference types that have their own dedicated rendering paths.
+  const isKnownInferenceType = (type: string) =>
+    type === COMPONENT_TYPES.LLM || type === COMPONENT_TYPES.RERANKER;
+
+  // Resolve the primary inference component type for error reporting / loading state.
+  // Prefer the known LLM type; fall back to reranker; finally pick the first non-Step-1 type.
+  const inferenceComponentType = (() => {
+    if (deployOptions.components.some((c) => c.type === COMPONENT_TYPES.LLM))
+      return COMPONENT_TYPES.LLM;
+    if (
+      deployOptions.components.some((c) => c.type === COMPONENT_TYPES.RERANKER)
+    )
+      return COMPONENT_TYPES.RERANKER;
+    // Pick the first unknown/custom component type as the representative inference type.
+    return (
+      deployOptions.components.find((c) => !isStep1ComponentType(c.type))
+        ?.type ?? null
+    );
+  })();
 
   const inferenceModelsError =
     selectedServiceId && inferenceComponentType
@@ -177,6 +197,68 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     runtime,
   ]);
 
+  // Seed default model for custom component types from componentModels.
+  // Custom types are now model-first (same as LLM): pick the model whose
+  // providerId matches the initialised default provider, falling back to
+  // the first model in the list. Idempotent — skips when model is already set.
+  useEffect(() => {
+    if (!selectedServiceId) return;
+
+    const serviceConfig = formData.services[selectedServiceId];
+    if (!serviceConfig) return;
+
+    const customComponents = deployOptions.components.filter(
+      (c) =>
+        c.type !== COMPONENT_TYPES.LLM &&
+        c.type !== COMPONENT_TYPES.RERANKER &&
+        c.type !== COMPONENT_TYPES.EMBEDDING &&
+        c.type !== COMPONENT_TYPES.VECTOR_STORE,
+    );
+    if (customComponents.length === 0) return;
+
+    let hasUpdates = false;
+    const updatedComponents = { ...serviceConfig.components };
+
+    customComponents.forEach((component) => {
+      const componentConfig = serviceConfig.components[component.type];
+      if (!componentConfig || componentConfig.params?.model) return;
+
+      const models =
+        componentModels[`${selectedServiceId}:${component.type}:${runtime}`] ??
+        [];
+      // Match by default provider first; fall back to first model in list.
+      const matchingModel =
+        models.find((m) => m.providerId === componentConfig.providerId) ??
+        models[0];
+      if (!matchingModel) return;
+
+      updatedComponents[component.type] = {
+        ...componentConfig,
+        params: { ...componentConfig.params, model: matchingModel.id },
+      };
+      hasUpdates = true;
+    });
+
+    if (!hasUpdates) return;
+
+    onChange({
+      services: {
+        ...formData.services,
+        [selectedServiceId]: {
+          ...serviceConfig,
+          components: updatedComponents,
+        },
+      },
+    });
+  }, [
+    selectedServiceId,
+    formData.services,
+    deployOptions.components,
+    componentModels,
+    onChange,
+    runtime,
+  ]);
+
   const selectedServiceConfig = selectedServiceId
     ? formData.services[selectedServiceId]
     : null;
@@ -219,9 +301,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     deployOptions.components.forEach((component) => {
       const componentKey = `${selectedServiceId}:${component.type}:${runtime}`;
       const modelOptions = componentModels[componentKey] || [];
-      const isStep1Component =
-        component.type !== COMPONENT_TYPES.LLM &&
-        component.type !== COMPONENT_TYPES.RERANKER;
+      const isStep1Component = isStep1ComponentType(component.type);
 
       if (isStep1Component) {
         // Step 1 components (embedding, vector store) are readonly in step 2.
@@ -256,7 +336,23 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
             isModelFirst: true,
           });
         }
+      } else if (!isKnownInferenceType(component.type)) {
+        // Custom component type (e.g. custom_llm): model-first, then backend —
+        // matching the LLM pattern. options = flat model list across all providers.
+        // providerOptions is kept for the backend dropdown filtered by selected model.
+        fields.push({
+          key: component.type as keyof ServiceConfig,
+          label: component.name || component.type,
+          options: modelOptions,
+          isModelFirst: true,
+          isCustomComponent: true,
+          providerOptions: component.providers.map((p) => ({
+            id: p.id,
+            text: p.name,
+          })),
+        });
       } else if (modelOptions.length > 0) {
+        // Known inference types other than LLM (e.g. reranker) with model options
         fields.push({
           key: component.type as keyof ServiceConfig,
           label: component.name || component.type,
@@ -284,6 +380,10 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   ]);
 
   const inferenceComponent = useMemo((): DeployOptionsComponent | null => {
+    // Only LLM and reranker use the inference-backend/model-first flow.
+    // Custom component types have their own provider-first two-dropdown path
+    // and must NOT be assigned as the inferenceComponent — doing so would cause
+    // ServiceConfigCard to render a spurious "LLM inference backend" dropdown.
     return (deployOptions.components.find(
       (c) => c.type === COMPONENT_TYPES.LLM,
     ) ??
@@ -300,11 +400,12 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
       (inferenceComponentType === COMPONENT_TYPES.LLM
         ? llmModelsWithProviders.length === 0 && llmOptions.length === 0
         : !selectedServiceId ||
-          (
-            componentModels[
-              `${selectedServiceId}:${inferenceComponentType}:${runtime}`
-            ] ?? []
-          ).length === 0));
+          // For non-LLM types (reranker, custom), rely on the explicit loading flag
+          // rather than an empty model list — custom types may legitimately have no
+          // model (no schema) and should still render their dropdowns when loaded.
+          !!componentModelsLoading[
+            `${selectedServiceId}:${inferenceComponentType}:${runtime}`
+          ]));
 
   const providerParamsByType = useMemo(() => {
     if (!selectedServiceId) return {};

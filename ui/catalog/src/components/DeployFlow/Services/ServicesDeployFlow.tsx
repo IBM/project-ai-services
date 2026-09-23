@@ -165,12 +165,15 @@ export const ServicesDeployFlow = ({
   );
 
   // Check if any Step 1 components are still loading or have errored
+  // Step 1 components are only the known selector types (embedding, vector store).
+  // All other types — including custom ones — belong in Step 2.
   const step1Components = useMemo(() => {
     if (!deployOptions) return [];
     return (
       deployOptions.components?.filter(
         (c) =>
-          c.type !== COMPONENT_TYPES.LLM && c.type !== COMPONENT_TYPES.RERANKER,
+          c.type === COMPONENT_TYPES.EMBEDDING ||
+          c.type === COMPONENT_TYPES.VECTOR_STORE,
       ) || []
     );
   }, [deployOptions]);
