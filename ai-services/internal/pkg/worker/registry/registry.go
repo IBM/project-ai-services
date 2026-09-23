@@ -24,6 +24,10 @@ import (
 // has an active in-memory entry (i.e. a live CommandStream is open).
 var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
 
+// ErrWorkerAlreadyReady is returned by Preregister when the named worker is
+// already registered and in ready status.
+var ErrWorkerAlreadyReady = fmt.Errorf("worker is already registered and ready")
+
 // ErrWorkerNotFound is returned by Restore when the named worker has no DB row,
 // or its status is pending (never completed bootstrap).
 var ErrWorkerNotFound = fmt.Errorf("worker not found")
@@ -226,8 +230,9 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 
 // Preregister creates a pending DB row for a named worker and returns a single-use
 // bootstrap token the operator passes to the worker daemon at startup.
-// If a row already exists (re-registration), it is reset to pending and a new token
-// supersedes the old one.
+// If a worker is already registered and in ready status, ErrWorkerAlreadyReady is returned.
+// For workers with statuses other than ready (or if no row exists), it is set to pending
+// and a new token is issued.
 //
 // If the worker is currently active in the in-memory map (i.e. its stream is still
 // open), it is evicted first so that the stale connection can no longer update the
@@ -235,6 +240,14 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
+	}
+
+	existing, err := r.repo.GetByName(ctx, workerName)
+	if err != nil {
+		return "", fmt.Errorf("worker registry: DB lookup for %s: %w", workerName, err)
+	}
+	if existing != nil && existing.Status == models.WorkerStatusReady {
+		return "", ErrWorkerAlreadyReady
 	}
 
 	// Evict any live in-memory entry so UpdateHeartbeat stops updating the row
