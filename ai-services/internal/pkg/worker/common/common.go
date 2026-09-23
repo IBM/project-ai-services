@@ -3,7 +3,6 @@ package common
 import (
 	"context"
 	"fmt"
-	"log"
 	"path/filepath"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
