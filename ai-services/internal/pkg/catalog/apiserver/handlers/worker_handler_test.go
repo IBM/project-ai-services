@@ -109,78 +109,125 @@ func setupWorkerRouter(handler *WorkerHandler) *gin.Engine {
 	return router
 }
 
-func TestWorkerHandler_CreateWorker_Success(t *testing.T) {
+func TestWorkerHandler_CreateWorker(t *testing.T) {
 	t.Setenv("DOMAIN_SUFFIX", "example.com")
-	repo := newMockWorkerRepo()
-	reg := registry.New(repo)
-	handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9090)
-	router := setupWorkerRouter(handler)
 
-	reqBody := `{"worker_name": "worker-1"}`
-	req, err := http.NewRequest(http.MethodPost, "/api/v1/workers", bytes.NewBufferString(reqBody))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
+	tests := []struct {
+		name           string
+		setup          func(reg *registry.Registry, repo *mockWorkerRepo)
+		body           string
+		wantStatusCode int
+		checkBody      func(t *testing.T, w *httptest.ResponseRecorder)
+	}{
+		{
+			name: "success - new worker registered",
+			body: `{"worker_name": "worker-1"}`,
+			wantStatusCode: http.StatusCreated,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp createWorkerResp
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Equal(t, "worker-1", resp.WorkerName)
+				assert.NotEmpty(t, resp.Token)
+			},
+		},
+		{
+			name: "409 conflict - worker is already registered and ready",
+			setup: func(reg *registry.Registry, repo *mockWorkerRepo) {
+				_, err := reg.Preregister(context.Background(), "worker-ready")
+				require.NoError(t, err)
+				_, err = reg.Register(context.Background(), "worker-ready", "podman", nil)
+				require.NoError(t, err)
+			},
+			body: `{"worker_name": "worker-ready"}`,
+			wantStatusCode: http.StatusConflict,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Contains(t, resp["error"], "already registered and ready")
+			},
+		},
+		{
+			name: "success - re-registration allowed for disconnected worker",
+			setup: func(reg *registry.Registry, repo *mockWorkerRepo) {
+				_, err := reg.Preregister(context.Background(), "worker-disc")
+				require.NoError(t, err)
+				_, err = reg.Register(context.Background(), "worker-disc", "podman", nil)
+				require.NoError(t, err)
+				reg.Disconnect(context.Background(), "worker-disc")
+			},
+			body: `{"worker_name": "worker-disc"}`,
+			wantStatusCode: http.StatusCreated,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp createWorkerResp
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Equal(t, "worker-disc", resp.WorkerName)
+				assert.NotEmpty(t, resp.Token)
+			},
+		},
+		{
+			name: "success - re-registration allowed for pending worker",
+			setup: func(reg *registry.Registry, repo *mockWorkerRepo) {
+				_, err := reg.Preregister(context.Background(), "worker-pending")
+				require.NoError(t, err)
+			},
+			body: `{"worker_name": "worker-pending"}`,
+			wantStatusCode: http.StatusCreated,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp createWorkerResp
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Equal(t, "worker-pending", resp.WorkerName)
+				assert.NotEmpty(t, resp.Token)
+			},
+		},
+		{
+			name:           "400 bad request - invalid payload",
+			body:           `invalid json`,
+			wantStatusCode: http.StatusBadRequest,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Equal(t, "invalid payload", resp["error"])
+			},
+		},
+		{
+			name:           "400 bad request - name too short",
+			body:           `{"worker_name": "ab"}`,
+			wantStatusCode: http.StatusBadRequest,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Contains(t, resp["error"], "worker name must be between 3 and 64 characters")
+			},
+		},
+	}
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockWorkerRepo()
+			reg := registry.New(repo)
+			if tt.setup != nil {
+				tt.setup(reg, repo)
+			}
+			handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9090)
+			router := setupWorkerRouter(handler)
 
-	assert.Equal(t, http.StatusCreated, w.Code)
-	var resp createWorkerResp
-	err = json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
-	assert.Equal(t, "worker-1", resp.WorkerName)
-	assert.NotEmpty(t, resp.Token)
-}
+			req, err := http.NewRequest(http.MethodPost, "/api/v1/workers", bytes.NewBufferString(tt.body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
 
-func TestWorkerHandler_CreateWorker_AlreadyReadyConflict(t *testing.T) {
-	t.Setenv("DOMAIN_SUFFIX", "example.com")
-	repo := newMockWorkerRepo()
-	reg := registry.New(repo)
-	handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9090)
-	router := setupWorkerRouter(handler)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
-	// Pre-register and register to make worker ready
-	_, err := reg.Preregister(context.Background(), "worker-ready")
-	require.NoError(t, err)
-	_, err = reg.Register(context.Background(), "worker-ready", "podman", nil)
-	require.NoError(t, err)
-
-	reqBody := `{"worker_name": "worker-ready"}`
-	req, err := http.NewRequest(http.MethodPost, "/api/v1/workers", bytes.NewBufferString(reqBody))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusConflict, w.Code)
-	var resp map[string]string
-	err = json.Unmarshal(w.Body.Bytes(), &resp)
-	require.NoError(t, err)
-	assert.Contains(t, resp["error"], "already registered and ready")
-}
-
-func TestWorkerHandler_CreateWorker_NonReadyAllowed(t *testing.T) {
-	t.Setenv("DOMAIN_SUFFIX", "example.com")
-	repo := newMockWorkerRepo()
-	reg := registry.New(repo)
-	handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9090)
-	router := setupWorkerRouter(handler)
-
-	// 1. Worker is in disconnected status
-	_, err := reg.Preregister(context.Background(), "worker-disc")
-	require.NoError(t, err)
-	_, err = reg.Register(context.Background(), "worker-disc", "podman", nil)
-	require.NoError(t, err)
-	reg.Disconnect(context.Background(), "worker-disc")
-
-	reqBody := `{"worker_name": "worker-disc"}`
-	req, err := http.NewRequest(http.MethodPost, "/api/v1/workers", bytes.NewBufferString(reqBody))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
+			assert.Equal(t, tt.wantStatusCode, w.Code)
+			if tt.checkBody != nil {
+				tt.checkBody(t, w)
+			}
+		})
+	}
 }
