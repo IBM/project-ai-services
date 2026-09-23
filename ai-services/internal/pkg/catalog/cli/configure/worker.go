@@ -41,24 +41,14 @@ func RegisterLocalWorker(ctx context.Context, c *catalogclient.Client) (string, 
 	return resp.Token, nil
 }
 
-// localWorkerRegistered reports whether a worker named "Local" appears in the
-// provided list with a non-pending status.
-func localWorkerRegistered(workers []catalogtypes.Worker) bool {
-	for _, w := range workers {
-		if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) && w.Status != "pending" {
-			return true
-		}
-	}
-
-	return false
-}
-
-// localWorkerExists reports whether any worker named "Local" appears in the
-// provided list, regardless of status.
-func localWorkerExists(workers []catalogtypes.Worker) bool {
+// findLocalWorker reports whether a worker named "Local" appears in the
+// provided list. When requireReady is true, only a non-pending entry matches.
+func findLocalWorker(workers []catalogtypes.Worker, requireReady bool) bool {
 	for _, w := range workers {
 		if strings.EqualFold(w.Name, workerconstants.LocalWorkerName) {
-			return true
+			if !requireReady || w.Status != "pending" {
+				return true
+			}
 		}
 	}
 
@@ -69,19 +59,12 @@ func localWorkerExists(workers []catalogtypes.Worker) bool {
 // skipped because valid on-disk TLS credentials already exist.
 //
 // It returns skip=true when BOTH conditions hold:
-//  1. The worker-mtls-encryption-secret is present — the TLS encryption key is
-//     on disk, so hasValidTLSCredentials will succeed inside the worker container.
+//  1. mtlsSecretExists is true — the TLS encryption key is on disk, so
+//     hasValidTLSCredentials will succeed inside the worker container.
 //  2. The catalog DB has a completed (non-pending) registration row for "Local"
 //     — Restore will find it on the next CommandStream attempt.
-//
-// secretExists is runtime specific method to check if the worker-mtls-encryption-secret exists.
-func CheckLocalWorkerSkip(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (skip bool, err error) {
-	exists, err := secretExists(ctx, workerconstants.WorkerMTLSSecretName)
-	if err != nil {
-		return false, fmt.Errorf("check worker mTLS secret: %w", err)
-	}
-
-	if !exists {
+func CheckLocalWorkerSkip(ctx context.Context, mtlsSecretExists bool, c *catalogclient.Client) (skip bool, err error) {
+	if !mtlsSecretExists {
 		return false, nil
 	}
 
@@ -90,17 +73,15 @@ func CheckLocalWorkerSkip(ctx context.Context, secretExists func(context.Context
 		return false, fmt.Errorf("list workers: %w", err)
 	}
 
-	return localWorkerRegistered(workers), nil
+	return findLocalWorker(workers, true), nil
 }
 
 // RegisterLocalWorkerIfNeeded registers the local worker and returns a bootstrap
 // token. If valid on-disk credentials and a completed catalog registration already
 // exist, registration is skipped and an empty token is returned — signalling to
 // the caller that the worker will reconnect without re-registering.
-//
-// secretExists is a runtime-specific method to check if the worker-mtls-encryption-secret exists.
-func RegisterLocalWorkerIfNeeded(ctx context.Context, secretExists func(context.Context, string) (bool, error), c *catalogclient.Client) (string, error) {
-	skip, err := CheckLocalWorkerSkip(ctx, secretExists, c)
+func RegisterLocalWorkerIfNeeded(ctx context.Context, mtlsSecretExists bool, c *catalogclient.Client) (string, error) {
+	skip, err := CheckLocalWorkerSkip(ctx, mtlsSecretExists, c)
 	if err != nil {
 		return "", err
 	}
@@ -135,7 +116,7 @@ func ValidateSkipLocalWorker(ctx context.Context, c *catalogclient.Client, isRei
 
 	// Only check for the Local worker — remote workers may exist in the DB
 	// from a previous run and must not influence this decision.
-	exists := localWorkerExists(workers)
+	exists := findLocalWorker(workers, false)
 
 	// exists == true  → original flag was false (local worker was joined)
 	// exists == false → original flag was true  (local worker was skipped)

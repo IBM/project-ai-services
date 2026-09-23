@@ -34,7 +34,12 @@ const (
 func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient, c *catalogclient.Client) error {
 	logger.InfolnCtx(ctx, "Joining this machine as the Local worker...")
 
-	token, err := configure.RegisterLocalWorkerIfNeeded(ctx, rt.SecretExists, c)
+	mtlsSecretExists, err := rt.SecretExists(ctx, workerconstants.WorkerMTLSSecretName)
+	if err != nil {
+		return fmt.Errorf("worker join: check mTLS secret: %w", err)
+	}
+
+	token, err := configure.RegisterLocalWorkerIfNeeded(ctx, mtlsSecretExists, c)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
 	}
