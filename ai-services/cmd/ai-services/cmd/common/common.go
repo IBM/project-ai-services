@@ -36,7 +36,7 @@ func InitAndValidateRuntimeFlag(runtimeType string) error {
 		return err
 	}
 
-	return validateRuntimeType(rt)
+	return nil
 }
 
 // ConfigureRuntimeFlag registers the --runtime / -r flag on cmd and marks it
@@ -54,15 +54,6 @@ func ConfigurePersistentRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
 	cmd.PersistentFlags().StringVarP(runtimeType, constants.RuntimeFlag, "r", "",
 		fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkPersistentFlagRequired(constants.RuntimeFlag)
-}
-
-func validateRuntimeType(runtimeType types.RuntimeType) error {
-	switch runtimeType {
-	case types.RuntimeTypePodman, types.RuntimeTypeOpenShift:
-		return nil
-	default:
-		return fmt.Errorf("unsupported runtime type: %s", runtimeType)
-	}
 }
 
 // ValidateSkipChecksFlag validates the skip-validation flag for the current runtime.
