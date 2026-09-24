@@ -316,7 +316,6 @@ const getStatusIcon = (status: string) => {
   switch (status) {
     case JOB_STATUS.COMPLETED:
     case DISPLAY_STATUS.INGESTED:
-    case DISPLAY_STATUS.DIGITIZED:
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
     case JOB_STATUS.COMPLETED_WITH_ERRORS:
     case DISPLAY_STATUS.COMPLETED_WITH_ERRORS:
@@ -328,6 +327,7 @@ const getStatusIcon = (status: string) => {
     case JOB_STATUS.ACCEPTED:
     case JOB_STATUS.IN_PROGRESS:
     case DISPLAY_STATUS.ACCEPTED:
+    case DISPLAY_STATUS.DIGITIZED:
     case DISPLAY_STATUS.INGESTING:
     case DISPLAY_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
