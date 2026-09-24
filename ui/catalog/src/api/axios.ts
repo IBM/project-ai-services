@@ -69,6 +69,16 @@ api.interceptors.response.use(
         refreshPromise = null;
       }
     }
+    const serverMessage =
+      error.response?.data?.error ??
+      error.response?.data?.message ??
+      error.response?.data?.detail;
+
+    if (serverMessage && typeof serverMessage === "string") {
+      const enhanced = new Error(serverMessage, { cause: error });
+      return Promise.reject(enhanced);
+    }
+
     return Promise.reject(error);
   },
 );
