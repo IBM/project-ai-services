@@ -24,6 +24,7 @@ import {
   PauseOutline,
   ErrorFilled,
   InProgress,
+  DiamondFill,
 } from "@carbon/icons-react";
 import type {
   DeploymentDetails as DeploymentDetailsType,
@@ -59,6 +60,7 @@ const DeploymentDetails = ({
   onNameUpdate,
 }: DeploymentDetailsProps) => {
   const [activeSection, setActiveSection] = useState("details");
+  const [datasourceCount, setDatasourceCount] = useState<number | null>(null);
   const [deployedCatalogIds, setDeployedCatalogIds] = useState<
     string[] | undefined
   >(undefined);
@@ -456,7 +458,13 @@ const DeploymentDetails = ({
           title={deployment.name}
           subtitle={
             <div className={styles.headerSubtitle}>
-              {getStatusTag(deployment.status)}
+              {activeSection === "datasources" && datasourceCount === 0 ? (
+                <Tag type="purple" size="md" renderIcon={DiamondFill}>
+                  No data
+                </Tag>
+              ) : (
+                getStatusTag(deployment.status)
+              )}
               <Tag type="gray">{deployment.type}</Tag>
               {certifiedBy && (
                 <span className={styles.headerCertifiedBadge}>
@@ -802,7 +810,10 @@ const DeploymentDetails = ({
           )}
 
           {activeSection === "datasources" && acceptsDatasource && (
-            <ApplicationDatasourcesTable applicationId={deployment.id} />
+            <ApplicationDatasourcesTable
+              applicationId={deployment.id}
+              onDatasourceCountChange={(count) => setDatasourceCount(count)}
+            />
           )}
 
           {activeSection === "integration" && (
