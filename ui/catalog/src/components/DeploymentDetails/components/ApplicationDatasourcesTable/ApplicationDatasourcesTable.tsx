@@ -86,18 +86,23 @@ const renderCell = ({
 
 export interface ApplicationDatasourcesTableProps {
   applicationId: string;
+  /** Called after each successful load with the total number of connected datasources */
+  onDatasourceCountChange?: (count: number) => void;
 }
 
 const ApplicationDatasourcesTable = ({
   applicationId,
+  onDatasourceCountChange,
 }: ApplicationDatasourcesTableProps) => {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
 
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
+  const onDatasourceCountChangeRef = useRef(onDatasourceCountChange);
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
+  onDatasourceCountChangeRef.current = onDatasourceCountChange;
 
   const loadDatasources = useCallback(
     async (page = pageRef.current, pageSize = pageSizeRef.current) => {
@@ -123,6 +128,7 @@ const ApplicationDatasourcesTable = ({
           type: ACTION_TYPES.FETCH_DATASOURCES_SUCCESS,
           payload: { rows, total: pagination.total_items },
         });
+        onDatasourceCountChangeRef.current?.(pagination.total_items);
       } catch (error) {
         const errorMessage =
           error instanceof Error
