@@ -55,42 +55,27 @@ func findLocalWorker(workers []catalogtypes.Worker, requireReady bool) bool {
 	return false
 }
 
-// CheckLocalWorkerRegistrationSkip determines whether local-worker registration can be
-// skipped because valid on-disk TLS credentials already exist.
-//
-// It returns skip=true when BOTH conditions hold:
+// RegisterLocalWorkerIfNeeded registers the local worker and returns a bootstrap
+// token. Registration is skipped and an empty token is returned when BOTH
+// conditions hold — signalling to the caller that the worker will reconnect
+// without re-registering:
 //  1. mtlsSecretExists is true — the TLS encryption key is on disk, so
 //     hasValidTLSCredentials will succeed inside the worker container.
 //  2. The catalog DB has a completed (non-pending) registration row for "Local"
 //     — Restore will find it on the next CommandStream attempt.
-func CheckLocalWorkerRegistrationSkip(ctx context.Context, mtlsSecretExists bool, c *catalogclient.Client) (skip bool, err error) {
-	if !mtlsSecretExists {
-		return false, nil
-	}
-
-	workers, err := catalogclient.NewWorkerClientFromClient(c).ListWorkers(ctx)
-	if err != nil {
-		return false, fmt.Errorf("list workers: %w", err)
-	}
-
-	return findLocalWorker(workers, true), nil
-}
-
-// RegisterLocalWorkerIfNeeded registers the local worker and returns a bootstrap
-// token. If valid on-disk credentials and a completed catalog registration already
-// exist, registration is skipped and an empty token is returned — signalling to
-// the caller that the worker will reconnect without re-registering.
 func RegisterLocalWorkerIfNeeded(ctx context.Context, mtlsSecretExists bool, c *catalogclient.Client) (string, error) {
-	skip, err := CheckLocalWorkerRegistrationSkip(ctx, mtlsSecretExists, c)
-	if err != nil {
-		return "", err
-	}
+	if mtlsSecretExists {
+		workers, err := catalogclient.NewWorkerClientFromClient(c).ListWorkers(ctx)
+		if err != nil {
+			return "", fmt.Errorf("list workers: %w", err)
+		}
 
-	if skip {
-		// Both conditions met — skip registration, reuse existing credentials.
-		logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
+		if findLocalWorker(workers, true) {
+			// Both conditions met — skip registration, reuse existing credentials.
+			logger.InfolnCtx(ctx, "Local worker credentials already present — skipping registration.")
 
-		return "", nil
+			return "", nil
+		}
 	}
 
 	return RegisterLocalWorker(ctx, c)
