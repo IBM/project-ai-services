@@ -17,7 +17,9 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 RUN set -eux; \
     mkdir -p /out/etc/caddy /out/usr/share/caddy /out/config/caddy /out/data/caddy; \
     wget -O /out/etc/caddy/Caddyfile "https://github.com/caddyserver/dist/raw/${CADDY_VERSION}/config/Caddyfile"; \
-    wget -O /out/usr/share/caddy/index.html "https://github.com/caddyserver/dist/raw/${CADDY_VERSION}/welcome/index.html"
+    wget -O /out/usr/share/caddy/index.html "https://github.com/caddyserver/dist/raw/${CADDY_VERSION}/welcome/index.html"; \
+    echo "caddy:x:1000:1000:caddy:/srv:/sbin/nologin" > /out/etc/passwd; \
+    echo "caddy:x:1000:" > /out/etc/group
 
 COPY patches/ /tmp/patches/
 
@@ -43,6 +45,7 @@ COPY --from=builder /out/ /
 RUN set -eux; \
     setcap cap_net_bind_service=+ep /usr/bin/caddy; \
     chmod +x /usr/bin/caddy; \
+    chown -R caddy:caddy /config /data; \
     caddy version
 
 ENV XDG_CONFIG_HOME=/config
@@ -59,5 +62,7 @@ EXPOSE 443/udp
 EXPOSE 2019/tcp
 
 WORKDIR /srv
+
+USER caddy
 
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
