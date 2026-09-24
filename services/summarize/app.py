@@ -330,50 +330,33 @@ description=(
       "Accepts **either** `application/json` or `multipart/form-data` based on "
       "the `Content-Type` header.\n\n"
       "---\n\n"
+      "### Query parameters\n\n"
+      "| Parameter | Type | Required | Description |\n"
+      "|-----------|------|----------|-------------|\n"
+      "| `level` | string | No | Abstraction level: `brief`, `standard` (default), or `detailed` |\n"
+      "| `length` | integer | No | (Legacy) Desired summary length in words |\n"
+      "| `stream` | boolean | No | Stream the response as it is generated. Default: `false` |\n\n"
+      "**Note:** Use either `level` (recommended) or `length` (legacy), not both.\n\n"
+      "---\n\n"
       "### Option 1: JSON body (`Content-Type: application/json`)\n\n"
       "| Field | Type | Required | Description |\n"
       "|-------|------|----------|-------------|\n"
-      "| `text` | string | Yes | Plain text content to summarize |\n"
-      "| `level` | string | No | Abstraction level: 'brief', 'standard' (default), or 'detailed' |\n"
-      "| `length` | integer | No | (Legacy) Desired summary length in words |\n"
-      "| `stream` | boolean | No | Stream the summary as it is generated, default False |\n\n"
-      "**Note:** Use either `level` (recommended) or `length` (legacy), not both.\n\n"
-      "**Example with level:**\n"
+      "| `text` | string | Yes | Plain text content to summarize |\n\n"
+      "**Example:**\n"
       "```bash\n"
-      'curl -X POST /v1/summarize -H "Content-Type: application/json" -d '
-      '{\n'
-      '  "text": "Artificial intelligence has made significant progress...",\n'
-      '  "level": "brief"\n'
-      '}\n'
-      "```\n\n"
-      "**Example with length (legacy):**\n"
-      "```bash\n"
-      'curl -X POST /v1/summarize -H "Content-Type: application/json" -d '
-      '{\n'
-      '  "text": "Artificial intelligence has made significant progress...",\n'
-      '  "length": 25\n'
-      '}\n'
+      'curl -X POST "/v1/summarize?level=brief" \\\n'
+      '  -H "Content-Type: application/json" \\\n'
+      '  -d \'{"text": "Artificial intelligence has made significant progress..."}\'\n'
       "```\n\n"
       "---\n\n"
       "### Option 2: Form data (`Content-Type: multipart/form-data`)\n\n"
       "| Field | Type | Required | Description |\n"
       "|-------|------|----------|-------------|\n"
-      "| `file` | file | Conditional | `.txt` or `.pdf` file to summarize |\n"
-      "| `level` | string | No | Abstraction level: 'brief', 'standard' (default), or 'detailed' |\n"
-      "| `length` | integer | No | (Legacy) Desired summary length in words |\n"
-      "| `stream` | boolean | No | Stream the summary as it is generated, default False |\n\n"
-      "**Note:** Use either `level` (recommended) or `length` (legacy), not both.\n\n"
-      "**Example with level:**\n"
+      "| `file` | file | Yes | `.txt` or `.pdf` file to summarize |\n\n"
+      "**Example:**\n"
       "```bash\n"
-      'curl -X POST /v1/summarize -F "file=@report.pdf" -F "level=detailed"\n'
-      "```\n\n"
-      "**Example with length (legacy):**\n"
-      "```bash\n"
-      'curl -X POST /v1/summarize -F "file=@report.pdf" -F "length=100"\n'
-      "```\n\n"
-      "---\n\n"
-      "**Note:** Swagger UI cannot render interactive input fields for this endpoint "
-      "because it accepts two different content types. Use curl or Postman to test."
+      'curl -X POST "/v1/summarize?level=detailed" -F "file=@report.pdf"\n'
+      "```\n"
 ),
 response_description="Summarization result with metadata and token usage.",
 tags=["Summarization"],
@@ -414,7 +397,7 @@ async def summarize(
     request: Request,
     level: Optional[str] = Query(None, description="Abstraction level: brief, standard, or detailed. Default: 'standard'"),
     length: Optional[int] = Query(None, description="(Legacy) Desired summary length in words"),
-    stream: bool = Query(False, description="Stream the summary as it is generated. Default: false"),
+    stream: Optional[bool] = Query(None, description="Stream the summary as it is generated. Default: false"),
 ):
     """Accept plain text via JSON or text/file via multipart/form-data."""
     try:
@@ -437,10 +420,9 @@ async def summarize(
                 raise SummarizeException(400, "MISSING_INPUT",
                                          "Either 'text' or 'file' parameter is required")
 
-            # Query params take precedence; fall back to body fields
-            summary_level = validate_summary_level(level or body.get("level"))
-            summary_length = validate_summary_length(length or body.get("length"))
-            stream = stream or bool(body.get("stream", False))
+            summary_level = validate_summary_level(level)
+            summary_length = validate_summary_length(length)
+            stream = stream or False
 
             return await handle_summarize(text, "text", summary_length, summary_level, stream)
 
@@ -449,10 +431,9 @@ async def summarize(
             form = await request.form()
             file: Optional[UploadFile] = form.get("file")  # type: ignore[assignment]
 
-            # Query params take precedence; fall back to form fields
-            summary_level = validate_summary_level(level or form.get("level"))
-            summary_length = validate_summary_length(length or form.get("length"))
-            stream = stream or (str(form.get("stream", "false")).lower() == "true")
+            summary_level = validate_summary_level(level)
+            summary_length = validate_summary_length(length)
+            stream = stream or False
 
             if file and hasattr(file, "filename"):
                 filename = file.filename or ""
