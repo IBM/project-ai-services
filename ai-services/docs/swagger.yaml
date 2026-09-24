@@ -2887,6 +2887,11 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "409":
+          description: Worker still has applications deployed on it
+          schema:
+            additionalProperties: true
+            type: object
         "500":
           description: Internal error
           schema:
