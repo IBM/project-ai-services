@@ -71,6 +71,7 @@ information. All sensitive values are automatically redacted.`,
 
 func mustGatherPreRun(cmd *cobra.Command, _ []string) error {
 	cmd.SilenceUsage = true
+
 	return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
 }
 

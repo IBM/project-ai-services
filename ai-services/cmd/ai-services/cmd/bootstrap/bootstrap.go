@@ -47,6 +47,7 @@ func BootstrapCmd() *cobra.Command {
 
 func bootstrapPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
+
 	return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
 }
 
