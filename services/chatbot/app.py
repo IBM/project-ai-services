@@ -148,7 +148,7 @@ app = FastAPI(
 - **Conversational RAG**: Multi-turn conversations with automatic context management and query rephrasing
 - **Semantic Search**: Vector-based document retrieval with reranking for improved relevance
 - **Streaming Support**: Real-time token generation for responsive user experience
-- **Multi-language**: Automatic language detection (English, German, French, Italian supported)
+- **Multi-language**: Automatic language detection (English, German, French, Italian, Japanese supported)
 - **Performance Metrics**: Detailed timing and token usage tracking
 
 **Authentication**: Optional vLLM API key authentication via Bearer token in Authorization header.
@@ -378,7 +378,7 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
 - Single-turn queries: Pass one message for standalone questions
 - Multi-turn conversations: Pass message array with history for context-aware responses
 - Streaming: Set `stream=true` for real-time token generation
-- Language detection: Automatically detects query language (English, German, French, Italian supported)
+- Language detection: Automatically detects query language (English, German, French, Italian, Japanese supported)
 - Query rephrasing: Automatically rephrases follow-up questions using conversation context
 
 **Authentication**: Requires API key in Authorization header (Bearer token) if vLLM authentication is enabled.
