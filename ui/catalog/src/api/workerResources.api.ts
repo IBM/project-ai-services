@@ -22,6 +22,7 @@ export function transformWorkerToRow(
     runtime_type: worker.runtime_type,
     runtime_label:
       WORKER_RUNTIME_LABELS[worker.runtime_type]?.short ?? worker.runtime_type,
+    services_count: worker.application_ids?.length ?? 0,
     message: worker.message ?? "",
     actions: "actions",
   };

@@ -23,6 +23,7 @@ export interface WorkerResourceRow {
   status: WorkerStatus;
   runtime_type: WorkerRuntimeType;
   runtime_label: string;
+  services_count: number;
   message: string;
   actions: string;
 }
@@ -51,6 +52,7 @@ export const HEADERS: DataTableHeader[] = [
   { header: "Name", key: "name" },
   { header: "Status", key: "status" },
   { header: "Type", key: "runtime_label" },
+  { header: "Services", key: "services_count" },
   { header: "Message", key: "message" },
   { header: "", key: "actions" },
 ];
@@ -66,6 +68,7 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
   runtime_label: true,
+  services_count: true,
   message: true,
 };
 
