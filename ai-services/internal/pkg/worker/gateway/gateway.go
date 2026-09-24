@@ -1,6 +1,6 @@
 // Package gateway implements the WorkerGateway gRPC server.
 // It is co-located with the Catalog API Server (control plane) and listens
-// on a separate port (default :9090) for bidirectional streams from worker
+// on a separate port (default :9191) for bidirectional streams from worker
 // daemons.
 package gateway
 
@@ -64,7 +64,7 @@ func New(ctx context.Context, reg *registry.Registry, runtimeType types.RuntimeT
 	}, nil
 }
 
-// Start begins listening on addr (e.g. ":9090") and serves gRPC in a background goroutine.
+// Start begins listening on addr (e.g. ":9191") and serves gRPC in a background goroutine.
 // It also starts the heartbeat sweeper. Both stop when ctx is cancelled.
 // cancel is a CancelCauseFunc for the server's root context; it is called with the
 // Serve error if the gRPC listener fails unexpectedly, so the whole process shuts down cleanly.

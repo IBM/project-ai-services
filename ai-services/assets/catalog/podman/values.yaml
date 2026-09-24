@@ -11,8 +11,8 @@ backend:
   dbEncryptionKey: ""
   # @generate:password length=32, special=false
   mtlsEncryptionKey: ""
-  # workerGatewayPort: port for the gRPC worker gateway. Always active; default is 9090.
-  workerGatewayPort: "9090"
+  # workerGatewayPort: port for the gRPC worker gateway. Always active; default is 9191.
+  workerGatewayPort: "9191"
   # localWorker: when "true" the catalog-backend self-preregisters as the Local worker on startup.
   localWorker: "true"
   podman:

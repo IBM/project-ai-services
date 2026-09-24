@@ -32,7 +32,13 @@ func DeployPodAndReadinessCheck(ctx context.Context, rt runtime.Runtime, podSpec
 	podTemplateName string, body io.Reader, opts map[string]string) error {
 	pods, err := rt.CreatePod(ctx, body, opts)
 	if err != nil {
-		return fmt.Errorf("failed pod creation: %w", err)
+		// podman kube play swallows the real start error into a generic
+		// "internal libpod error". Attempt to recover a richer diagnostic by
+		// finding any pod that was left in "Created" state with the expected
+		// name and calling StartPod on it — that surfaces the true cause
+		// (e.g. "bind: address already in use") without actually starting it
+		// (the call will fail for the same reason).
+		return fmt.Errorf("failed pod creation: %w; start probe: %w", err, probeCreatedPodError(ctx, rt, podTemplateName))
 	}
 
 	logger.DebugfCtx(ctx, "'%s': Successfully ran podman kube play\n", podTemplateName)
@@ -251,6 +257,29 @@ func fetchHostPortMappingFromAnnotation(podAnnotations map[string]string) map[st
 	}
 
 	return hostPortMapping
+}
+
+// probeCreatedPodError finds a pod with the given name that is stuck in the
+// "Created" state after a failed kube play, then calls StartPod on it.
+// StartPod will fail for the same underlying reason that kube play failed, but
+// returns a richer error message (e.g. "bind: address already in use") that
+// podman kube play swallows into a generic "internal libpod error".
+// The probe is best-effort: any error from ListPods or StartPod is returned as-is
+// and folded into the original creation error by the caller.
+func probeCreatedPodError(ctx context.Context, rt runtime.Runtime, podName string) error {
+	podList, err := rt.ListPods(ctx, map[string][]string{"name": {podName}})
+	if err != nil {
+		return fmt.Errorf("could not list pods to probe start error: %w", err)
+	}
+
+	for _, p := range podList {
+		if p.Name == podName {
+			// StartPod will fail with the real reason (port conflict, etc.).
+			return rt.StartPod(ctx, p.ID)
+		}
+	}
+
+	return fmt.Errorf("could not probe start error during kube play — pod '%s' was not found", podName)
 }
 
 // Made with Bob
