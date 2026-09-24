@@ -8,6 +8,7 @@ import (
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -38,7 +39,16 @@ func UninstallCatalog(ctx context.Context, opts cliutils.UninstallOptions) error
 		return err
 	}
 
-	return performCleanup(ctx, rt, pods, opts.SkipCleanup)
+	if err := performCleanup(ctx, rt, pods, opts.SkipCleanup); err != nil {
+		return err
+	}
+
+	// Remove local credentials
+	if err := config.Delete(); err != nil {
+		logger.Warningf("Failed to remove local catalog credentials: %v\n", err)
+	}
+
+	return nil
 }
 
 // performCleanup executes all cleanup operations.
