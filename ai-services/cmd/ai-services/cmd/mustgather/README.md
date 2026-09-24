@@ -67,13 +67,14 @@ Application pods are collected based on the worker topology and `LOCAL_WORKER` e
 
 - **When Catalog is installed locally**:
   - `must-gather` inspects the catalog pod for the `LOCAL_WORKER` environment variable.
-  - If `LOCAL_WORKER=true` (co-located worker), application pods are collected alongside catalog artifacts.
-  - If `LOCAL_WORKER=false` (remote worker node setup), application pod collection is skipped on the catalog node since applications run on remote workers.
+  - If `LOCAL_WORKER=true` (co-located worker), application pods assigned to the local worker (`"Local"`) are collected alongside catalog artifacts.
+  - If `LOCAL_WORKER=false` (remote-worker-only setup), application pod collection is skipped on the catalog node since no applications are deployed locally.
   - If `LOCAL_WORKER` cannot be resolved or is not set, a warning is logged and execution continues with the remaining collection steps.
 - **When Catalog is NOT installed locally (Worker node)**:
   - Catalog artifacts (catalog pods, models) are skipped.
   - Worker infrastructure pods (`ai-services--worker`, `ai-services--caddy`) are collected into `worker/pods/`.
-  - Must-gather connects to the remote Catalog API using the user's logged-in session credentials and collects the application pods running on this worker node into `pods/`.
+  - Must-gather connects to the remote Catalog API using the user's logged-in session credentials and resolves this node's registered worker name from its mTLS certificate (`worker-tls` volume).
+  - Only application pods assigned to this worker are collected into `pods/` — pods belonging to other workers are silently skipped.
 
 System info, network, volumes, and secrets are **always collected** regardless of catalog state.
 
@@ -133,12 +134,13 @@ Application pods are collected based on the worker topology and `LOCAL_WORKER` e
 
 - **When Catalog is installed in the cluster/namespace**:
   - `must-gather` inspects the catalog backend pod spec for the `LOCAL_WORKER` environment variable.
-  - If `LOCAL_WORKER=true` (co-located worker), application pods are collected alongside catalog artifacts.
-  - If `LOCAL_WORKER=false` (remote worker cluster setup), application pod collection is skipped on the catalog cluster since applications run on remote workers.
+  - If `LOCAL_WORKER=true` (co-located worker), application pods assigned to the local worker (`"Local"`) are collected alongside catalog artifacts.
+  - If `LOCAL_WORKER=false` (remote-worker-only setup), application pod collection is skipped on the catalog cluster since no applications are deployed locally.
   - If `LOCAL_WORKER` cannot be resolved or is not set, a warning is logged and execution continues with the remaining collection steps.
 - **When Catalog is NOT installed in the cluster/namespace (Worker cluster)**:
   - Catalog artifacts (catalog pods, catalog secrets/PVCs) are skipped.
-  - Must-gather connects to the remote Catalog API using the user's logged-in session credentials and collects the application pods and application namespace resources.
+  - Must-gather connects to the remote Catalog API using the user's logged-in session credentials and resolves this cluster's registered worker name from its mTLS certificate (`worker-tls` PVC).
+  - Only application pods assigned to this worker are collected — pods belonging to other workers are silently skipped.
 
 System info, secrets, and volumes are **always collected** regardless of catalog state.
 
@@ -394,7 +396,7 @@ Redacted values are replaced with `[REDACTED]`. Sanitization applies to:
 
 | Situation | Behaviour |
 |---|---|
-| Catalog not installed (Worker node) | Catalog artifacts and models are skipped. Application pods are collected via the Catalog API (requires login). System/network/secrets/volumes are still collected. |
+| Catalog not installed (Worker node) | Catalog artifacts and models are skipped. Worker name is resolved from the `worker-tls` volume mTLS cert. Only application pods assigned to this worker are collected via the Catalog API (requires login). System/network/secrets/volumes are still collected. |
 | Catalog installed with `LOCAL_WORKER=true` | Both catalog artifacts and application pods are collected. |
 | Catalog installed with `LOCAL_WORKER=false` | Catalog artifacts are collected; application pods are skipped (they reside on worker nodes). |
 | `LOCAL_WORKER` env not found/errored | Warning logged; skips application pods and proceeds with next steps. |
@@ -413,7 +415,7 @@ Redacted values are replaced with `[REDACTED]`. Sanitization applies to:
 |---|---|
 | Cluster unreachable / no kubeconfig | Hard fail — command exits non-zero immediately. |
 | Insufficient RBAC (e.g. cannot list pods) | Per-step warning; all other sections continue. |
-| Catalog not installed (Worker cluster) | Catalog artifacts are skipped. Application pods and app namespace resources are collected via the Catalog API (requires login). System/secrets/volumes are still collected. |
+| Catalog not installed (Worker cluster) | Catalog artifacts are skipped. Worker name is resolved from the `worker-tls` PVC mTLS cert. Only application pods assigned to this worker cluster are collected via the Catalog API (requires login). System/secrets/volumes are still collected. |
 | Catalog installed with `LOCAL_WORKER=true` | Both catalog artifacts and application pods are collected. |
 | Catalog installed with `LOCAL_WORKER=false` | Catalog artifacts are collected; application pods are skipped (they reside on worker nodes). |
 | `LOCAL_WORKER` env not found/errored | Warning logged; skips application pods and proceeds with next steps. |

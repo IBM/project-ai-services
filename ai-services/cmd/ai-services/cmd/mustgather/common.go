@@ -117,12 +117,11 @@ type podCollector interface {
 
 // collectApplicationPods uses the catalog API to discover pod names for every
 // application (or a single named one) and delegates per-pod collection to pc.
-// Only applications assigned to localWorkerName are collected; pods owned by
-// other workers are skipped so must-gather never attempts to inspect pods that
-// do not exist on the local node.
-// On OpenShift, pods for each app are written into namespaces/<ns>/pods/.
+// Only applications assigned to workerName are collected — pods owned by other
+// workers are skipped to avoid inspecting pods that do not exist on this node.
+// On OpenShift, pods for each app are written into applications/<ns>/pods/.
 // On Podman, pods are written into a shared pods/ directory (no namespaces).
-func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName, localWorkerName string) []string {
+func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName, workerName string) []string {
 	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
@@ -135,7 +134,7 @@ func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appNam
 		return nil
 	}
 
-	return collectPodsForApps(ctx, pc, appClient, outDir, apps, localWorkerName)
+	return collectPodsForApps(ctx, pc, appClient, outDir, apps, workerName)
 }
 
 // fetchApplicationsForGather fetches the application list from the catalog API
@@ -167,13 +166,11 @@ func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.Ap
 }
 
 // collectPodsForApps iterates over apps, fetches their PS data from the catalog
-// API, and calls pc.collectPod for each pod name returned.
-//
-// Apps whose PS response reports a worker name other than localWorkerName are skipped
-// On OpenShift, pods are written into outDir/namespaces/<ns>/pods/ so each
-// application's pods are grouped under their namespace directory.
+// API, and calls pc.collectPod for each pod returned.
+// Apps assigned to a different worker than workerName are skipped.
+// On OpenShift, pods are written into outDir/applications/<ns>/pods/ grouped by namespace.
 // On Podman, appNamespace is always empty so pods fall back to outDir/pods/.
-func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalogClient.ApplicationClient, outDir string, apps []catalogTypes.Application, localWorkerName string) []string {
+func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalogClient.ApplicationClient, outDir string, apps []catalogTypes.Application, workerName string) []string {
 	seen := make(map[string]struct{})
 	var namespaces []string
 
@@ -185,10 +182,10 @@ func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalog
 			continue
 		}
 
-		// Skip apps whose pods live on a different worker node.
-		if !strings.EqualFold(psResp.WorkerName, localWorkerName) {
-			logger.DebugfCtx(ctx, "Skipping application %q: assigned to worker %q, not local worker %q\n",
-				app.Name, psResp.WorkerName, localWorkerName)
+		// Skip apps whose pods live on a different worker.
+		if !strings.EqualFold(psResp.WorkerName, workerName) {
+			logger.DebugfCtx(ctx, "Skipping application %q: assigned to worker %q, not %q\n",
+				app.Name, psResp.WorkerName, workerName)
 
 			continue
 		}
