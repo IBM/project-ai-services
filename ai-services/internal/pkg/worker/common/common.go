@@ -2,7 +2,12 @@ package common
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -32,6 +37,65 @@ func IsPodmanLocalWorker(ctx context.Context, rt runtime.Runtime) (bool, error) 
 	}
 
 	return false, nil
+}
+
+// WorkerNameFromCert reads the CN from the worker's client certificate in tlsDir.
+// This recovers the registered worker name without any extra state file,
+// because the gateway embeds the token-bound worker name as the cert CN at registration time.
+// tls.crt is public material and stored in plaintext — no decryption needed here.
+func WorkerNameFromCert(tlsDir string) (string, error) {
+	certPEM, err := os.ReadFile(filepath.Join(tlsDir, "tls.crt"))
+	if err != nil {
+		return "", fmt.Errorf("read tls.crt: %w", err)
+	}
+
+	return workerNameFromCertPEM([]byte(certPEM))
+}
+
+// ResolveWorkerName returns the name this node is registered under in the
+// catalog by exec-ing into the running worker pod and reading the CN from its
+// mTLS certificate. Falls back to workerconstants.LocalWorkerName when the
+// worker pod is not running or the cert cannot be read.
+// Works on both Podman and OpenShift runtimes.
+func ResolveWorkerName(ctx context.Context, rt runtime.Runtime) string {
+	pods, err := rt.ListPods(ctx, map[string][]string{
+		"label": {workerconstants.WorkerPodLabel},
+	})
+	if err != nil || len(pods) == 0 {
+		return workerconstants.LocalWorkerName
+	}
+
+	certPEM, err := rt.ExecInContainerWithCmd(ctx, pods[0].Name, "worker",
+		[]string{"cat", workerconstants.WorkerTLSDir + "/tls.crt"})
+	if err != nil {
+		return workerconstants.LocalWorkerName
+	}
+
+	name, err := workerNameFromCertPEM([]byte(strings.TrimSpace(certPEM)))
+	if err != nil {
+		return workerconstants.LocalWorkerName
+	}
+
+	return name
+}
+
+// workerNameFromCertPEM parses a PEM-encoded certificate and returns the CN.
+func workerNameFromCertPEM(certPEM []byte) (string, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return "", fmt.Errorf("tls.crt: not valid PEM")
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("parse tls.crt: %w", err)
+	}
+
+	if cert.Subject.CommonName == "" {
+		return "", fmt.Errorf("tls.crt: CN is empty")
+	}
+
+	return cert.Subject.CommonName, nil
 }
 
 // IsOpenShiftLocalWorker returns true when any catalog-backend pod in the

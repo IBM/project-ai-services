@@ -80,12 +80,12 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 			logger.WarningfCtx(ctx, "Failed to check local worker: %v\n", err)
 		} else if isLocalWorker {
 			g.collectWorkerArtifacts(ctx, catalogCl, outDir)
-			appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+			appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName, workerConstants.LocalWorkerName)
 		}
 	} else {
 		logger.InfolnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+". Collecting worker and application pods...")
 		g.collectWorkerArtifacts(ctx, catalogCl, outDir)
-		appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName, workercommon.ResolveWorkerName(ctx, catalogCl))
 	}
 
 	// System info is collected from the cluster.

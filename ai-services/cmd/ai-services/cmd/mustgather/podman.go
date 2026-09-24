@@ -80,13 +80,13 @@ func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string
 			logger.WarningfCtx(ctx, "Failed to check local worker: %v\n", err)
 		} else if isLocalWorker {
 			g.collectWorkerArtifacts(ctx, outDir)
-			_ = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+			_ = collectApplicationPods(ctx, g, outDir, opts.applicationName, workerConstants.LocalWorkerName)
 		}
 		g.collectModelsInfo(ctx, outDir)
 	} else {
 		logger.InfolnCtx(ctx, "No catalog pods found on this node. Collecting worker and application pods...")
 		g.collectWorkerArtifacts(ctx, outDir)
-		_ = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		_ = collectApplicationPods(ctx, g, outDir, opts.applicationName, workercommon.ResolveWorkerName(ctx, rt))
 	}
 
 	// Always collected — independent of catalog state.
