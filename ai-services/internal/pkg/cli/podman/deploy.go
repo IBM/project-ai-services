@@ -38,7 +38,7 @@ func DeployPodAndReadinessCheck(ctx context.Context, rt runtime.Runtime, podSpec
 		// name and calling StartPod on it — that surfaces the true cause
 		// (e.g. "bind: address already in use") without actually starting it
 		// (the call will fail for the same reason).
-		return fmt.Errorf("failed pod creation: %w; start probe: %w", err, probeCreatedPodError(ctx, rt, podTemplateName))
+		return fmt.Errorf("failed pod creation: %w; start probe: %w", err, probeCreatedPodError(ctx, rt, podSpec.Name))
 	}
 
 	logger.DebugfCtx(ctx, "'%s': Successfully ran podman kube play\n", podTemplateName)
