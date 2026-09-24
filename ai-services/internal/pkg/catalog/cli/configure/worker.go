@@ -28,9 +28,9 @@ func LoginToCatalog(ctx context.Context, catalogAPIURL, adminPassword string) (*
 	return c, nil
 }
 
-// RegisterLocalWorker pre-registers the Local worker using the already-authenticated
+// registerLocalWorker pre-registers the Local worker using the already-authenticated
 // client and returns the bootstrap token.
-func RegisterLocalWorker(ctx context.Context, c *catalogclient.Client) (string, error) {
+func registerLocalWorker(ctx context.Context, c *catalogclient.Client) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker via catalog API...")
 
 	resp, err := catalogclient.NewWorkerClientFromClient(c).CreateWorker(ctx, workerconstants.LocalWorkerName)
@@ -78,7 +78,7 @@ func RegisterLocalWorkerIfNeeded(ctx context.Context, mtlsSecretExists bool, c *
 		}
 	}
 
-	return RegisterLocalWorker(ctx, c)
+	return registerLocalWorker(ctx, c)
 }
 
 // ValidateSkipLocalWorker enforces that --skip-local-worker cannot be
