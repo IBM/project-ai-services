@@ -161,6 +161,8 @@ spec:
       - {{ .Values.reranker.model.name }}
       - --port=8002
       - --gpu-memory-utilization=0.5
+      - --dtype=bfloat16
+      - --max-model-len=1024
       livenessProbe:
         httpGet:
           path: /health
