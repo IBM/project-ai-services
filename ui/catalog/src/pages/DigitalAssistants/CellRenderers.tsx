@@ -16,6 +16,7 @@ interface ActionCellWrapperProps {
   rowId: string;
   dispatch: Dispatch<AppAction | SharedTableAction>;
   rowData?: { status?: string };
+  onMenuOpen?: (rowId: string) => Promise<void>;
   onViewIntegration?: (rowId: string) => void;
   onLaunchEndpoint?: (rowId: string) => void;
 }
@@ -24,6 +25,7 @@ export const ActionCell = ({
   rowId,
   dispatch,
   rowData,
+  onMenuOpen,
   onViewIntegration,
   onLaunchEndpoint,
 }: ActionCellWrapperProps) => (
@@ -34,6 +36,7 @@ export const ActionCell = ({
       dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: id })
     }
     isDeleteEnabled={(status) => status !== "Deleting"}
+    onMenuOpen={onMenuOpen}
     onViewIntegration={onViewIntegration}
     onLaunchEndpoint={onLaunchEndpoint}
   />
@@ -77,6 +80,7 @@ interface CellRendererProps {
   rowId: string;
   dispatch: Dispatch<AppAction | SharedTableAction>;
   rowData?: { status?: string; type?: string };
+  onMenuOpen?: (rowId: string) => Promise<void>;
   onViewIntegration?: (rowId: string) => void;
   onLaunchEndpoint?: (rowId: string) => void;
 }

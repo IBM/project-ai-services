@@ -72,6 +72,7 @@ interface RenderCellProps {
   cellKey: string;
   cellProps: Record<string, unknown>;
   rowData?: DigitalAssistantRow;
+  onMenuOpen?: (rowId: string) => Promise<void>;
   onViewIntegration?: (rowId: string) => void;
   onLaunchEndpoint?: (rowId: string) => void;
 }
@@ -84,6 +85,7 @@ const renderCell = ({
   cellKey,
   cellProps,
   rowData,
+  onMenuOpen,
   onViewIntegration,
   onLaunchEndpoint,
 }: RenderCellProps) => {
@@ -97,6 +99,7 @@ const renderCell = ({
           rowId={rowId}
           dispatch={dispatch}
           rowData={rowData}
+          onMenuOpen={onMenuOpen}
           onViewIntegration={onViewIntegration}
           onLaunchEndpoint={onLaunchEndpoint}
         />
@@ -315,36 +318,49 @@ const DigitalAssistantsPage = () => {
     } as AppAction);
   };
 
-  // Fetch the detail for the row and open the chatbot UI endpoint in a new tab.
-  // The chatbot service is identified by catalog_id "chat"; its UI endpoint has type "ui".
-  const handleLaunchEndpoint = async (rowId: string) => {
+  // url cache: rowId → resolved URL, error message string, or undefined (not yet fetched)
+  const endpointCacheRef = useRef<
+    Record<string, { url: string } | { error: string } | undefined>
+  >({});
+
+  const handleMenuOpen = useCallback(async (rowId: string) => {
+    const cached = endpointCacheRef.current[rowId];
+    if (cached && "url" in cached) return;
     try {
       const response = await api.get<ApplicationDetailsApiResponse>(
         APPLICATION_ENDPOINTS.GET_APPLICATION_DETAILS(rowId),
       );
-      const chatService = response.data.services?.find(
-        (s) => s.catalog_id === "chat",
-      );
-      const uiEndpoint = chatService?.endpoints.find(
-        (e) => e.type === "ui",
-      )?.url;
-      if (uiEndpoint) {
-        window.open(uiEndpoint, "_blank", "noopener,noreferrer");
-      } else {
-        // API responded but no chatbot UI endpoint exists for this deployment
-        dispatch({
-          type: ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST,
-          payload: "No chatbot UI endpoint is available for this deployment.",
-        } as AppAction);
-      }
+      const uiEndpoint = response.data.services
+        ?.find((s) => s.catalog_id === "chat")
+        ?.endpoints?.find((e) => e.type === "ui")?.url;
+      endpointCacheRef.current[rowId] = uiEndpoint
+        ? { url: uiEndpoint }
+        : { error: "No chatbot UI endpoint is available for this deployment." };
     } catch {
-      // API call itself failed (network error, 4xx/5xx)
+      endpointCacheRef.current[rowId] = {
+        error: "Could not retrieve the chatbot endpoint. Please try again.",
+      };
+    }
+  }, []);
+
+  const handleLaunchEndpointForRow = useCallback((rowId: string) => {
+    const cached = endpointCacheRef.current[rowId];
+    if (cached && "url" in cached) {
+      window.open(cached.url, "_blank", "noopener,noreferrer");
+    } else if (cached && "error" in cached) {
+      dispatch({
+        type: ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST,
+        payload: cached.error,
+      } as AppAction);
+    } else {
+      // Prefetch not yet complete — should not be reachable since the item is
+      // disabled while isPrefetching, but guard defensively.
       dispatch({
         type: ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST,
         payload: "Could not retrieve the chatbot endpoint. Please try again.",
       } as AppAction);
     }
-  };
+  }, []);
 
   // Show DeploymentDetails if a deployment is selected
   if (state.showDeploymentDetails && state.selectedDeployment) {
@@ -549,10 +565,11 @@ const DigitalAssistantsPage = () => {
                                                 cellKey,
                                                 cellProps,
                                                 rowData: originalRow,
+                                                onMenuOpen: handleMenuOpen,
                                                 onViewIntegration:
                                                   handleViewIntegration,
                                                 onLaunchEndpoint:
-                                                  handleLaunchEndpoint,
+                                                  handleLaunchEndpointForRow,
                                               });
                                             })}
                                           </TableExpandRow>

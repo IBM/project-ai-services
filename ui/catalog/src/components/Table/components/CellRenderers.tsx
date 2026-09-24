@@ -120,6 +120,8 @@ export interface ActionCellProps {
   onDelete: (rowId: string) => void;
   // Each table has its own delete eligibility rule and passes it explicitly.
   isDeleteEnabled: (status: string | undefined) => boolean;
+  /** Called when the overflow menu opens — use to prefetch data keyed by rowId */
+  onMenuOpen?: (rowId: string) => Promise<void>;
   /** Called when the user clicks "View integration endpoints" — only enabled when Running */
   onViewIntegration?: (rowId: string) => void;
   /** Called when the user clicks "Launch service endpoint" — only enabled when Running */
@@ -212,14 +214,28 @@ export const ActionCell = ({
   rowData,
   onDelete,
   isDeleteEnabled,
+  onMenuOpen,
   onViewIntegration,
   onLaunchEndpoint,
 }: ActionCellProps) => {
+  const [isPrefetching, setIsPrefetching] = React.useState(false);
   const deleteEnabled = isDeleteEnabled(rowData?.status);
   const isRunning = rowData?.status === "Running";
 
+  const handleOpen = React.useCallback(async () => {
+    if (!onMenuOpen) return;
+    setIsPrefetching(true);
+    await onMenuOpen(rowId);
+    setIsPrefetching(false);
+  }, [onMenuOpen, rowId]);
+
   return (
-    <OverflowMenu size="lg" flipped aria-label="Actions">
+    <OverflowMenu
+      size="lg"
+      flipped
+      aria-label="Actions"
+      onOpen={onMenuOpen ? handleOpen : undefined}
+    >
       {onViewIntegration ? (
         <OverflowMenuItem
           itemText="View integration endpoints"
@@ -230,7 +246,7 @@ export const ActionCell = ({
       {onLaunchEndpoint ? (
         <OverflowMenuItem
           itemText="Launch service endpoint"
-          disabled={!isRunning}
+          disabled={!isRunning || isPrefetching}
           onClick={() => onLaunchEndpoint(rowId)}
         />
       ) : null}
