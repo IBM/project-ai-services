@@ -4,7 +4,7 @@ package types
 // shared by all worker join variants.
 type WorkerConnectionOptions struct {
 	// GatewayAddr is the host:port of the catalog gRPC worker-gateway,
-	// e.g. "catalog.example.com:9090".
+	// e.g. "catalog.example.com:9191".
 	GatewayAddr string
 
 	// Token is the single-use bootstrap token issued by
