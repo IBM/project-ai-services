@@ -19,6 +19,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerConstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // Variables for flags placeholder.
@@ -53,8 +54,7 @@ var (
 )
 
 const (
-	defaultHTTPSPort         = 443
-	defaultWorkerGatewayPort = 9191
+	defaultHTTPSPort = 443
 )
 
 var configureCmd = &cobra.Command{
@@ -240,7 +240,7 @@ func initConfigurePodmanFlags() {
 	configureCmd.Flags().IntVar(
 		&workerGatewayPort,
 		constants.WorkerGatewayPortFlag,
-		defaultWorkerGatewayPort,
+		workerConstants.WorkerGatewayPort,
 		"Port for the gRPC worker gateway that workers connect to.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --workergateway-port 9191\n",

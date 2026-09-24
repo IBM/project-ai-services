@@ -42,6 +42,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerConstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
@@ -91,7 +92,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		options.Port = 8080
 	}
 	if options.WorkerGatewayPort == 0 {
-		options.WorkerGatewayPort = 9191
+		options.WorkerGatewayPort = workerConstants.WorkerGatewayPort
 	}
 
 	return &APIserver{
