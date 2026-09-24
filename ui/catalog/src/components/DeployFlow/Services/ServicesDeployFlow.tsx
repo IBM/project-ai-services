@@ -256,7 +256,8 @@ export const ServicesDeployFlow = ({
   );
 
   // Helper function to check if all required fields are filled for the selected service.
-  // Covers both LLM provider credential fields and service-level schema required fields.
+  // Covers LLM provider credential fields, custom component provider fields, and
+  // service-level schema required fields.
   const areAllRequiredFieldsFilled = useMemo(() => {
     if (
       !state.selectedServiceId ||
@@ -289,7 +290,45 @@ export const ServicesDeployFlow = ({
       }
     }
 
-    // --- 2. Service-level schema required fields (new) ---
+    // --- 2. Custom component provider required fields ---
+    // For each non-Step-1, non-LLM, non-reranker component, validate the required
+    // (non-model) fields of the selected provider schema.  Credentials for custom
+    // components are stored in componentConfig.params (not serviceConfig.params).
+    if (deployOptions) {
+      const isStep1Type = (type: string) =>
+        type === COMPONENT_TYPES.EMBEDDING ||
+        type === COMPONENT_TYPES.VECTOR_STORE;
+      const isKnownInferenceType = (type: string) =>
+        type === COMPONENT_TYPES.LLM || type === COMPONENT_TYPES.RERANKER;
+
+      for (const component of deployOptions.components) {
+        if (isStep1Type(component.type) || isKnownInferenceType(component.type))
+          continue;
+
+        const componentConfig = serviceConfig?.components?.[component.type];
+        if (!componentConfig?.providerId) continue;
+
+        const schemaKey = `${state.selectedServiceId}:${component.type}:${componentConfig.providerId}:${runtime}`;
+        const providerSchema = providerSchemas[schemaKey];
+
+        if (!providerSchema?.required) continue;
+
+        const schemaHasModel = !!providerSchema.properties?.model;
+        const allFilled = providerSchema.required
+          .filter((fieldKey) => schemaHasModel || fieldKey !== "model")
+          .every((fieldKey) => {
+            const value = componentConfig.params?.[fieldKey];
+            return (
+              value !== undefined &&
+              value !== null &&
+              String(value).trim() !== ""
+            );
+          });
+        if (!allFilled) return false;
+      }
+    }
+
+    // --- 3. Service-level schema required fields ---
     if (serviceSchema) {
       const requiredFields = getRequiredFieldKeys(serviceSchema);
       if (requiredFields.length > 0) {
@@ -310,6 +349,7 @@ export const ServicesDeployFlow = ({
     state.formData.services,
     providerSchemas,
     serviceSchema,
+    deployOptions,
     runtime,
   ]);
 

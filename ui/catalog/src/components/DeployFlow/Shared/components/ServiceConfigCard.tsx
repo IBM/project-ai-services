@@ -249,10 +249,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
   // support the currently selected model — consistent with handleLlmModelChange.
   const inferenceBackendField = useMemo(() => {
     if (!inferenceComponent || !inferenceComponentType) return null;
-    // Hide "Inference backend" when the inference component has no model enumeration.
-    // In that case the provider is already shown as the primary field — a separate
-    // "Inference backend" row would be a redundant duplicate.
-    if (llmModelsWithProviders.length === 0) return null;
 
     const selectedModel =
       currentConfig?.components?.[inferenceComponentType]?.params?.model;
@@ -406,21 +402,40 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                       {providerName}
                     </span>
                   </div>
-                  {/* Credential params for the selected custom component backend (read-only) */}
+                  {/* Credential params for the selected custom component backend (read-only).
+                      Iterate schema properties (not componentParams) so required fields
+                      that are still empty show "Required — Click Edit to add" instead of
+                      being silently invisible. */}
                   {customProviderSchema?.properties &&
-                    Object.entries(componentParams)
-                      .filter(([key, value]) =>
-                        shouldShowParam(key, value, customProviderSchema),
-                      )
-                      .map(([key, value]) => {
-                        const property = (
-                          customProviderSchema.properties as Record<
-                            string,
-                            { title?: string; format?: string }
-                          >
-                        )[key];
+                    Object.entries(
+                      customProviderSchema.properties as Record<
+                        string,
+                        { title?: string; format?: string; default?: unknown }
+                      >,
+                    )
+                      .filter(([key]) => key !== "model")
+                      .map(([key, property]) => {
+                        const value = componentParams[key];
                         const label = property?.title || key;
                         const isPassword = property?.format === "password";
+                        const isValueEmpty =
+                          value === undefined ||
+                          value === null ||
+                          String(value).trim() === "";
+                        const isRequired = Array.isArray(
+                          customProviderSchema.required,
+                        )
+                          ? customProviderSchema.required.includes(key)
+                          : false;
+                        if (
+                          !isValueEmpty &&
+                          property?.default !== undefined &&
+                          value === property.default
+                        ) {
+                          return null;
+                        }
+                        if (isValueEmpty && !isRequired) return null;
+
                         return (
                           <div
                             key={`${String(field.key)}-cred-${key}`}
@@ -430,7 +445,11 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                               {label}
                             </span>
                             <span className={styles.serviceConfigItemValue}>
-                              {isPassword ? (
+                              {isValueEmpty ? (
+                                <span className={styles.requiredMessage}>
+                                  Required — Click Edit to add
+                                </span>
+                              ) : isPassword ? (
                                 <>
                                   <span className={styles.apiKeyValue}>
                                     {showPasswords[
@@ -506,11 +525,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             );
           })}
 
-          {/* Inference backend row — only shown when the inference component is model-first.
-              When there is no model enumeration the provider is already the primary field. */}
+          {/* Inference backend row (read-only view) */}
           {inferenceComponent &&
             inferenceComponentType &&
-            llmModelsWithProviders.length > 0 &&
             (() => {
               const providerId =
                 config.components?.[inferenceComponentType]?.providerId;
@@ -816,10 +833,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     })
                     .map((p) => p.id);
 
-                // No model options and no schema → show only the backend/provider
-                // dropdown (same single-dropdown pattern as vector store).
+                // No model options → show only the backend/provider dropdown
+                // (same single-dropdown pattern as vector store).
                 const hasModelOptions = field.options.length > 0;
-
                 return (
                   <Fragment key={`${String(field.key)}-custom`}>
                     {/* Model dropdown — only when model options exist */}

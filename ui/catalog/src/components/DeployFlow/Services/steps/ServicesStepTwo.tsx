@@ -337,14 +337,15 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
           });
         }
       } else if (!isKnownInferenceType(component.type)) {
-        // Custom component type (e.g. custom_llm): model-first, then backend —
-        // matching the LLM pattern. options = flat model list across all providers.
-        // providerOptions is kept for the backend dropdown filtered by selected model.
+        // Custom component type (e.g. custom_llm, custom_embedding): model-first when
+        // the schema defines model options, provider-only when it does not.
+        // isModelFirst=true only when there are actual model options — a schema without
+        // a model property returns an empty list and must not pretend to be model-first.
         fields.push({
           key: component.type as keyof ServiceConfig,
           label: component.name || component.type,
           options: modelOptions,
-          isModelFirst: true,
+          isModelFirst: modelOptions.length > 0,
           isCustomComponent: true,
           providerOptions: component.providers.map((p) => ({
             id: p.id,
@@ -393,19 +394,19 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
       null) as DeployOptionsComponent | null;
   }, [deployOptions.components]);
 
+  // isLoadingLlmModels covers LLM model fetching (and deploy-options/schema loading).
+  // For non-LLM inference types (reranker, custom), use the per-component loading flag.
+  // Never use an empty model list as a proxy for "still loading" — a schema that has
+  // no model property legitimately returns zero model options and is fully loaded.
   const isLoadingInferenceOptions =
     !!inferenceComponentType &&
     !inferenceModelsError &&
     (isLoadingLlmModels ||
-      (inferenceComponentType === COMPONENT_TYPES.LLM
-        ? llmModelsWithProviders.length === 0 && llmOptions.length === 0
-        : !selectedServiceId ||
-          // For non-LLM types (reranker, custom), rely on the explicit loading flag
-          // rather than an empty model list — custom types may legitimately have no
-          // model (no schema) and should still render their dropdowns when loaded.
+      (inferenceComponentType !== COMPONENT_TYPES.LLM &&
+        (!selectedServiceId ||
           !!componentModelsLoading[
             `${selectedServiceId}:${inferenceComponentType}:${runtime}`
-          ]));
+          ])));
 
   const providerParamsByType = useMemo(() => {
     if (!selectedServiceId) return {};
