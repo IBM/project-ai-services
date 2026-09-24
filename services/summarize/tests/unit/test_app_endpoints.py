@@ -66,8 +66,8 @@ class TestSummarizeJsonRoute:
 
         with patch("summarize.app.handle_summarize", new=AsyncMock(return_value=mocked_response)) as mock_handle:
             response = summarize_test_client.post(
-                "/v1/summarize",
-                json={"text": "some content", "level": "brief"},
+                "/v1/summarize?level=brief",
+                json={"text": "some content"},
             )
 
         assert response.status_code == 200
@@ -82,8 +82,8 @@ class TestSummarizeJsonRoute:
 
         with patch("summarize.app.handle_summarize", new=AsyncMock(return_value=mocked_response)) as mock_handle:
             response = summarize_test_client.post(
-                "/v1/summarize",
-                json={"text": "some content", "length": 25},
+                "/v1/summarize?length=25",
+                json={"text": "some content"},
             )
 
         assert response.status_code == 200
@@ -109,21 +109,22 @@ class TestSummarizeJsonRoute:
 
     def test_invalid_level_returns_400(self, summarize_test_client):
         response = summarize_test_client.post(
-            "/v1/summarize",
-            json={"text": "some content", "level": "bad-level"},
+            "/v1/summarize?level=bad-level",
+            json={"text": "some content"},
         )
 
         assert response.status_code == 400
         assert response.json()["error"]["status"] == "INVALID_PARAMETER"
 
-    def test_invalid_length_returns_400(self, summarize_test_client):
+    def test_invalid_length_returns_422(self, summarize_test_client):
+        # `length` is a typed int Query param — FastAPI rejects non-integer
+        # values before the handler runs, so the response is 422 (not 400).
         response = summarize_test_client.post(
-            "/v1/summarize",
-            json={"text": "some content", "length": "bad"},
+            "/v1/summarize?length=bad",
+            json={"text": "some content"},
         )
 
-        assert response.status_code == 400
-        assert response.json()["error"]["status"] == "INVALID_PARAMETER"
+        assert response.status_code == 422
 
     def test_unsupported_content_type_returns_415(self, summarize_test_client):
         response = summarize_test_client.post(
