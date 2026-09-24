@@ -51,7 +51,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	caddyCtx, useExistingCert, err := executeCatalogDeployment(ctx, deployCtx, opts, passwordHash)
+	caddyCtx, useExistingCert, catalogAlreadyDeployed, err := executeCatalogDeployment(ctx, deployCtx, opts, passwordHash)
 	if err != nil {
 		return err
 	}
@@ -78,13 +78,20 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		}
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, secretExists)
+	// When the catalog pod was already deployed before this run, --skip-local-worker
+	// was validated against LOCAL_WORKER in validateReconfigureParameters above.
+	// Only run the DB-based ValidateSkipLocalWorker when the pod was freshly
+	// deployed this run (catalogAlreadyDeployed=false) and a previous secret exists,
+	// meaning a prior partial run created the secret but not the pod.
+	isReinstall := secretExists && !catalogAlreadyDeployed
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, isReinstall)
 }
 
 // executeCatalogDeployment deploys (or validates) the catalog pods and returns
-// the Caddy context together with a flag indicating whether the preserved cert
-// secret should be loaded into Caddy without host-path validation.
-func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, bool, error) {
+// the Caddy context, a flag indicating whether the preserved cert secret should
+// be loaded into Caddy without host-path validation, and whether the catalog
+// was already deployed before this run (catalogAlreadyDeployed).
+func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, bool, bool, error) {
 	logger.Debugln("started configuring catalog service...")
 
 	s := spinner.New("Configuring catalog service...")
@@ -97,7 +104,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	if err != nil {
 		s.Fail("failed while setting up caddy context")
 
-		return nil, false, err
+		return nil, false, false, err
 	}
 
 	logger.Debugln("checking for existing resources...")
@@ -107,7 +114,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	if err != nil {
 		s.Fail("failed to check existing resources")
 
-		return nil, false, fmt.Errorf("failed to check existing resources: %w", err)
+		return nil, false, false, fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
 	// useExistingCert is true when the cert secret was preserved by a previous
@@ -122,14 +129,14 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, useExistingCert, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
 			s.Fail("failed to load param values")
 
-			return nil, false, err
+			return nil, false, false, err
 		}
 
 		// Execute pod templates
 		if err := deployCtx.ExecutePodLayers(ctx, opts.BaseDir, caddyCtx, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
-			return nil, false, err
+			return nil, false, false, err
 		}
 
 		s.Stop("Catalog service deployed successfully")
@@ -137,15 +144,15 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	} else {
 		s.Stop("Catalog service already deployed")
 		logger.Infof("Existing resources: %v\n", existingResources)
-		// Validate domain, HTTPS port, base directory, and certificates haven't changed
+		// Validate domain, HTTPS port, base directory, --skip-local-worker, and certificates haven't changed
 		if err := validateReconfigureParameters(ctx, deployCtx.Runtime, &opts, caddyCtx); err != nil {
 			s.Fail("validation failed during reconfigure")
 
-			return nil, false, fmt.Errorf("reconfigure validation failed: %w", err)
+			return nil, false, false, fmt.Errorf("reconfigure validation failed: %w", err)
 		}
 	}
 
-	return caddyCtx, useExistingCert, nil
+	return caddyCtx, useExistingCert, isDeployed, nil
 }
 
 // handlePostDeployment handles route registration, login verification,

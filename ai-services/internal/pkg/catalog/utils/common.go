@@ -34,6 +34,7 @@ type PodmanConfigureOptions struct {
 	HttpsPort         int
 	WorkerGatewayPort int  // gRPC worker gateway port; always active, default 9090
 	SkipLocalWorker   bool // When true, skip joining this machine as the Local worker
+	LocalWorker       bool // LOCAL_WORKER value read from the running catalog container; only valid on re-run
 }
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
@@ -56,6 +57,7 @@ func GetCatalogPodConfig(ctx context.Context, rt runtime.Runtime, podLabel strin
 		DomainName:        podmanOpts.DomainName,
 		HttpsPort:         podmanOpts.HTTPSPort,
 		WorkerGatewayPort: podmanOpts.WorkerGatewayPort,
+		LocalWorker:       podmanOpts.LocalWorker,
 	}, podID, nil
 }
 

@@ -65,7 +65,15 @@ func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newO
 	return validateCertificateChanges(ctx, newOpts, caddyCtx)
 }
 
-// validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
+// validateConfigParameters validates domain, HTTPS port, base directory, and
+// --skip-local-worker haven't changed since the original deployment.
+//
+// The LOCAL_WORKER env var baked into the running catalog container is the
+// authoritative record of what the original run configured. Checking it here
+// (rather than the catalog DB) correctly handles the case where a first run
+// failed after the catalog pod was deployed but before local-worker
+// registration completed — the pod already has the correct LOCAL_WORKER value,
+// so a retry with the same --skip-local-worker flag is allowed through.
 func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
 	if existingOpts.DomainName != domainSuffix {
 		return fmt.Errorf("domain change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change domain", existingOpts.DomainName, domainSuffix)
@@ -77,6 +85,13 @@ func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions,
 
 	if existingOpts.BaseDir != newOpts.BaseDir {
 		return fmt.Errorf("base directory change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change base directory", existingOpts.BaseDir, newOpts.BaseDir)
+	}
+
+	// existingOpts.LocalWorker reflects LOCAL_WORKER from the running container.
+	// newOpts.SkipLocalWorker is the flag on the current run.
+	// They are consistent when: LocalWorker == !SkipLocalWorker.
+	if existingOpts.LocalWorker == newOpts.SkipLocalWorker {
+		return fmt.Errorf("--skip-local-worker flag cannot be changed on re-run; to change this setting, uninstall and re-run catalog configure")
 	}
 
 	return nil
