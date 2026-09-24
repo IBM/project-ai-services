@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -58,14 +58,12 @@ information. All sensitive values are automatically redacted.`,
 		RunE:              mustGatherRun,
 	}
 
-	cmd.PersistentFlags().StringVar(&runtimeType, "runtime", "",
-		fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = cmd.MarkPersistentFlagRequired("runtime")
+	cmdcommon.ConfigureRuntimeFlag(cmd, &runtimeType)
 
-	cmd.PersistentFlags().StringVarP(&outputDir, "output-dir", "o", ".",
+	cmd.Flags().StringVarP(&outputDir, "output-dir", "o", ".",
 		"Base directory for output (a must-gather.local.<id> sub-directory is created inside)")
 
-	cmd.PersistentFlags().StringVarP(&applicationName, "application", "a", "",
+	cmd.Flags().StringVarP(&applicationName, "application", "a", "",
 		"Limit collection to this application name (default: all applications)")
 
 	return cmd
@@ -73,19 +71,7 @@ information. All sensitive values are automatically redacted.`,
 
 func mustGatherPreRun(cmd *cobra.Command, _ []string) error {
 	cmd.SilenceUsage = true
-
-	rt := types.RuntimeType(runtimeType)
-	if !rt.Valid() {
-		return fmt.Errorf(
-			"invalid runtime type: %s (must be 'podman' or 'openshift'). "+
-				"Please specify runtime using --runtime flag", runtimeType,
-		)
-	}
-
-	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Debugf("Using runtime: %s\n", rt)
-
-	return nil
+	return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
 }
 
 func mustGatherRun(cmd *cobra.Command, _ []string) error {

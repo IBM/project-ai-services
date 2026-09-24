@@ -41,11 +41,19 @@ func InitAndValidateRuntimeFlag(runtimeType string) error {
 
 // ConfigureRuntimeFlag registers the --runtime / -r flag on cmd and marks it
 // required. Use this in every command that must know the runtime up-front
-// (bootstrap, catalog configure, catalog apiserver, worker join, worker uninstall).
+// (must-gather, catalog configure/apiserver/info/uninstall, worker join/reset/uninstall).
 func ConfigureRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
 	cmd.Flags().StringVarP(runtimeType, constants.RuntimeFlag, "r", "",
 		fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkFlagRequired(constants.RuntimeFlag)
+}
+
+// ConfigurePersistentRuntimeFlag registers the persistent --runtime / -r flag on cmd and marks it required.
+// Use this on parent commands whose subcommands inherit the runtime flag (e.g., bootstrap).
+func ConfigurePersistentRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
+	cmd.PersistentFlags().StringVarP(runtimeType, constants.RuntimeFlag, "r", "",
+		fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	_ = cmd.MarkPersistentFlagRequired(constants.RuntimeFlag)
 }
 
 func validateRuntimeType(runtimeType types.RuntimeType) error {
