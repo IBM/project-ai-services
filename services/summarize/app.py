@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, Request, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, Query, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from starlette.concurrency import iterate_in_threadpool
@@ -377,8 +377,45 @@ description=(
 ),
 response_description="Summarization result with metadata and token usage.",
 tags=["Summarization"],
+openapi_extra={
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "required": ["text"],
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Plain text content to summarize",
+                        },
+                    },
+                }
+            },
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["file"],
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "format": "binary",
+                            "description": ".txt or .pdf file to summarize",
+                        },
+                    },
+                }
+            },
+        },
+    }
+},
 )
-async def summarize(request: Request):
+async def summarize(
+    request: Request,
+    level: Optional[str] = Query(None, description="Abstraction level: brief, standard, or detailed. Default: 'standard'"),
+    length: Optional[int] = Query(None, description="(Legacy) Desired summary length in words"),
+    stream: bool = Query(False, description="Stream the summary as it is generated. Default: false"),
+):
     """Accept plain text via JSON or text/file via multipart/form-data."""
     try:
         if concurrency_limiter.locked():
@@ -399,11 +436,11 @@ async def summarize(request: Request):
             if not text:
                 raise SummarizeException(400, "MISSING_INPUT",
                                          "Either 'text' or 'file' parameter is required")
-            
-            # Support both level (new) and length (legacy)
-            summary_level = validate_summary_level(body.get("level"))
-            summary_length = validate_summary_length(body.get("length"))
-            stream = bool(body.get("stream", False))
+
+            # Query params take precedence; fall back to body fields
+            summary_level = validate_summary_level(level or body.get("level"))
+            summary_length = validate_summary_length(length or body.get("length"))
+            stream = stream or bool(body.get("stream", False))
 
             return await handle_summarize(text, "text", summary_length, summary_level, stream)
 
@@ -412,10 +449,10 @@ async def summarize(request: Request):
             form = await request.form()
             file: Optional[UploadFile] = form.get("file")  # type: ignore[assignment]
 
-            # Support both level (new) and length (legacy)
-            summary_level = validate_summary_level(form.get("level"))
-            summary_length = validate_summary_length(form.get("length"))
-            stream = str(form.get("stream", "false")).lower() == "true"
+            # Query params take precedence; fall back to form fields
+            summary_level = validate_summary_level(level or form.get("level"))
+            summary_length = validate_summary_length(length or form.get("length"))
+            stream = stream or (str(form.get("stream", "false")).lower() == "true")
 
             if file and hasattr(file, "filename"):
                 filename = file.filename or ""
