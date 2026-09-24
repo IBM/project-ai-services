@@ -24,7 +24,7 @@ PLATFORMS := \
 
 .PHONY: build build-binary build-optimized build-container push clean clean-coverage \
         test test-coverage test-coverage-html lint run install \
-        cross-compile binary image-tag help
+        binaries binary image-tag help
 
 # Build container image (used by CI via build-and-publish-image.yml)
 build:
@@ -56,8 +56,8 @@ binary:
 	$(GO) build -ldflags="-s -w" -o $(BIN)/$(BINARY)-$(GOOS)-$(GOARCH) $(CMD)
 	@echo "Binary built: $(BIN)/$(BINARY)-$(GOOS)-$(GOARCH)"
 
-# Cross-compile for all supported platforms
-cross-compile: clean
+# Build binaries for all supported platforms
+binaries: clean
 	@echo "Building $(BINARY) for all platforms..."
 	@mkdir -p $(BIN)
 	@$(foreach platform,$(PLATFORMS), \
@@ -125,7 +125,7 @@ help:
 	@echo "  build-container    - Build container image"
 	@echo "  push               - Push container image to registry"
 	@echo "  binary             - Build for specific GOOS/GOARCH"
-	@echo "  cross-compile      - Build for all supported platforms"
+	@echo "  binaries           - Build for all supported platforms"
 	@echo "  test               - Run tests"
 	@echo "  test-coverage      - Run tests with coverage report"
 	@echo "  test-coverage-html - Generate HTML coverage report"

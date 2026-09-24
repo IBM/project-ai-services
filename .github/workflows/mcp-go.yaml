@@ -1,0 +1,79 @@
+name: MCP Go
+
+on:
+  pull_request:
+    paths:
+      - 'mcp/**'
+      - .github/workflows/mcp-go.yaml
+    branches:
+      - main
+      - 'release-*'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'mcp/go.mod'
+
+      - run: go version
+
+      - name: Go mod tidy
+        working-directory: mcp
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+          working-directory: mcp
+
+      - name: Build Go binary
+        working-directory: mcp
+        run: |
+          GOOS=linux GOARCH=ppc64le make binary
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'mcp/go.mod'
+          cache-dependency-path: 'mcp/go.sum'
+
+      - name: Run unit tests with coverage
+        working-directory: mcp
+        run: |
+          go test \
+            -v \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            $(go list ./... | grep -v '/tests/e2e')
+
+      - name: Print coverage summary
+        working-directory: mcp
+        run: go tool cover -func=coverage.out
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      skip-cves-scan: true
+      skip-image-build: true
+      skip-code-license-scan: false
