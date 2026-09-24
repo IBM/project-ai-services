@@ -84,6 +84,7 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 	// deployed this run (catalogAlreadyDeployed=false) and a previous secret exists,
 	// meaning a prior partial run created the secret but not the pod.
 	isReinstall := secretExists && !catalogAlreadyDeployed
+
 	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, isReinstall)
 }
 
