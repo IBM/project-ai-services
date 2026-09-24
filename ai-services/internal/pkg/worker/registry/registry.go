@@ -372,6 +372,8 @@ func (r *Registry) UpdateHeartbeat(ctx context.Context, workerName string) {
 // Use this when a worker is permanently decommissioned, not just temporarily offline.
 // Returns (true, nil) if a row was deleted, (false, nil) if not found.
 func (r *Registry) Deregister(ctx context.Context, id uuid.UUID) (bool, error) {
+	// Check for deployed applications before any mutation so that a rejected
+	// deregister leaves the registry in its original state.
 	if r.repo != nil {
 		appIDMap, err := r.repo.GetApplicationIDsByWorkerIDs(ctx, []uuid.UUID{id})
 		if err != nil {

@@ -415,7 +415,7 @@ func TestRegistry_Deregister_WorkerHasApplications(t *testing.T) {
 		t.Fatalf("expected ErrWorkerHasApplications, got %T: %v", err, err)
 	}
 
-	// Worker must still be in the registry — we should not have evicted it.
+	// The guard returns before any mutation, so the worker must remain registered.
 	if _, ok := reg.Get("worker-1"); !ok {
 		t.Error("worker should still be registered after failed deregister")
 	}
