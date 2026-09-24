@@ -853,9 +853,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     setHasValidationError(false);
                     setFieldErrors({});
                     const serviceKeys = new Set(
-                      serviceSchema?.properties
-                        ? Object.keys(serviceSchema.properties)
-                        : [],
+                      serviceFields.map((f) => f.key),
                     );
 
                     const mergedParams: Record<string, unknown> = {};

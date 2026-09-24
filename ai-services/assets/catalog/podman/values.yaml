@@ -1,6 +1,6 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.83
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.84
 
 backend:
   port: ""
