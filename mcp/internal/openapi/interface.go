@@ -150,17 +150,20 @@ func (intf *Interface) collectOperations() {
 				var schema *base.SchemaProxy
 
 				if rb.Content != nil {
-					// Prefer merge-patch+json, then any JSON content type
+					// Prefer merge-patch+json, then any JSON content type, then multipart/form-data
 					for pair := rb.Content.First(); pair != nil; pair = pair.Next() {
 						ct := pair.Key()
 						mediaType := pair.Value()
-
+	
 						if strings.Contains(strings.ToLower(ct), "merge-patch+json") {
 							contentType = ct
 							schema = mediaType.Schema
-
+	
 							break
 						} else if strings.Contains(strings.ToLower(ct), "json") && contentType == "" {
+							contentType = ct
+							schema = mediaType.Schema
+						} else if strings.Contains(strings.ToLower(ct), "multipart/form-data") && contentType == "" {
 							contentType = ct
 							schema = mediaType.Schema
 						}

@@ -427,6 +427,7 @@ export interface WorkerApiResponse {
   updated_at: string;
   metadata?: Record<string, unknown>;
   message?: string;
+  application_ids?: string[];
 }
 
 export interface WorkerListResponse {

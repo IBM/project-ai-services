@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.84
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.85
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.396
+  image: icr.io/ai-services-cicd/ai-services:v0.0.397
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false

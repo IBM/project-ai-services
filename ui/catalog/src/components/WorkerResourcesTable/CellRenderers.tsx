@@ -18,6 +18,13 @@ interface CellRendererProps {
   rowData?: { status?: string; name?: string };
 }
 
+export const ServicesCell = ({
+  value,
+}: CellRendererProps): React.ReactElement => {
+  const count = typeof value === "number" ? value : 0;
+  return <span>{count === 0 ? "--" : count}</span>;
+};
+
 export const RuntimeTypeCell = ({
   value,
 }: CellRendererProps): React.ReactElement => {
@@ -66,6 +73,7 @@ export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
   runtime_label: RuntimeTypeCell as RendererFn,
+  services_count: ServicesCell as RendererFn,
   message: MessageCell as RendererFn,
   actions: ActionCell,
 };
