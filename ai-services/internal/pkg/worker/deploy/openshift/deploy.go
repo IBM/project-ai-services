@@ -14,6 +14,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
+	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/openshift"
+
 	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
 	"helm.sh/helm/v4/pkg/chart"
@@ -121,7 +123,7 @@ func deployWorkerHelm(ctx context.Context, chartData chart.Charter, values map[s
 // returning the error so the namespace is left clean for a retry.
 func checkAndUninstallOnWorkerErr(ctx context.Context, rt runtime.Runtime, namespace string) error {
 	if workerErr := deployutils.CheckWorkerContainerLogs(ctx, rt); workerErr != nil {
-		uninstallErr := helm.UninstallRelease(ctx, workerconstants.WorkerHelmReleaseName, namespace)
+		uninstallErr := workeropenshift.PerformCleanup(ctx, rt, namespace, false)
 		if uninstallErr != nil {
 			logger.ErrorfCtx(ctx, "failed to delete '%s' release: %v\n", workerconstants.WorkerHelmReleaseName, uninstallErr)
 		}

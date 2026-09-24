@@ -915,7 +915,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the complete list of container images required to deploy an architecture and all its services and component dependencies.\nThe response always includes catalog asset images (the tool image used for housekeeping tasks\nand the catalog infrastructure images for the catalog service itself).\nBoth embedded (built-in) and custom bundle architectures are supported.",
+                "description": "Returns the complete list of container images required to deploy an architecture and all its services and component dependencies.\nThe response always includes catalog asset images (the tool image used for housekeeping tasks\nand the catalog infrastructure images for the catalog service itself).\nBoth embedded (built-in) and custom bundle architectures are supported.\nNot supported on OpenShift deployments.",
                 "produces": [
                     "application/json"
                 ],
@@ -950,6 +950,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Architecture not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Not supported on OpenShift deployments",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -2381,7 +2387,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the complete list of container images required to deploy a service and all its component dependencies.\nThe response always includes catalog asset images (the tool image used for housekeeping tasks\nand the catalog infrastructure images for the catalog service itself).\nBoth embedded (built-in) and custom bundle services are supported.",
+                "description": "Returns the complete list of container images required to deploy a service and all its component dependencies.\nThe response always includes catalog asset images (the tool image used for housekeeping tasks\nand the catalog infrastructure images for the catalog service itself).\nBoth embedded (built-in) and custom bundle services are supported.\nNot supported on OpenShift deployments.",
                 "produces": [
                     "application/json"
                 ],
@@ -2416,6 +2422,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Service not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Not supported on OpenShift deployments",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -2687,6 +2699,13 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid payload",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Worker is already registered and ready",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

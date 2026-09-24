@@ -7,7 +7,7 @@ import {
   AccordionItem,
 } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
-import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
+import { Edit, View, ViewOff } from "@carbon/icons-react";
 import styles from "../DeployFlow.shared.module.scss";
 import type { ServiceConfig, ServiceConfigField } from "../types";
 import { getDisplayName } from "../utils/displayHelpers";
@@ -250,7 +250,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       }));
 
     return {
-      label: "Inference backend",
+      label: "LLM inference backend",
       options: inferenceBackendOptions,
     };
   }, [
@@ -315,7 +315,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       {isEditing && (
         <div className={styles.cardEditAction}>
           <Button
-            kind="ghost"
+            kind="secondary"
             size="sm"
             onClick={() => {
               setHasValidationError(false);
@@ -325,13 +325,8 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           >
             Cancel
           </Button>
-          <Button
-            kind="tertiary"
-            size="sm"
-            onClick={handleApplyWithValidation}
-            renderIcon={Checkmark}
-          >
-            Apply
+          <Button kind="primary" size="sm" onClick={handleApplyWithValidation}>
+            Save
           </Button>
         </div>
       )}
@@ -386,7 +381,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   className={styles.serviceConfigItem}
                 >
                   <span className={styles.serviceConfigItemLabel}>
-                    Inference backend
+                    LLM inference backend
                   </span>
                   <span className={styles.serviceConfigItemValue}>
                     {provider.name}
@@ -538,7 +533,8 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                 });
             })()}
 
-          {/* Render service-level schema fields (only non-UI-only fields with non-default values) */}
+          {/* Render service-level schema fields (non-UI-only fields with non-default values,
+              plus any required fields that are missing so they can show an error message) */}
           {serviceFields
             .filter((field) => {
               if (field.uiOnly) return false;
@@ -550,11 +546,21 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   hasValue && currentValue !== field.defaultValue;
                 return isDifferentFromDefault;
               }
+              // Always show required fields so the "Required — Click Edit to add"
+              // message is visible even when the value is absent.
+              if (field.validation?.required) return true;
               return config.params?.[field.key] !== undefined;
             })
             .map((field) => {
               const value = config.params?.[field.key];
               const isPassword = field.type === "password";
+
+              const isValueEmpty =
+                value === undefined ||
+                value === null ||
+                String(value).trim() === "";
+              const isRequiredMissing =
+                field.validation?.required && isValueEmpty;
 
               return (
                 <div
@@ -565,7 +571,11 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     {field.label}
                   </span>
                   <span className={styles.serviceConfigItemValue}>
-                    {isPassword ? (
+                    {isRequiredMissing ? (
+                      <span className={styles.requiredMessage}>
+                        Required — Click Edit to add
+                      </span>
+                    ) : isPassword ? (
                       <>
                         <span className={styles.apiKeyValue}>
                           {showPasswords[`service-field-${field.key}`]
@@ -906,7 +916,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     className={`${styles.modelDescriptionSection} ${styles.fullWidth}`}
                   >
                     <Accordion>
-                      <AccordionItem title="What is this model good at?">
+                      <AccordionItem title="What is this LLM good at?">
                         <div className={styles.modelDescriptionContent}>
                           {sections.introduction && (
                             <div className={styles.modelDescriptionFullWidth}>

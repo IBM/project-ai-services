@@ -13,6 +13,15 @@ RUN microdnf install -y python3.12-devel \
     ln -s /usr/bin/python3.12 /usr/bin/python && ln -s /usr/bin/python3.12 /usr/bin/python3
 
 ENV DOCLING_MODELS_PATH=/var/docling-models
+# Disable hf-xet (Rust/Tokio Xet transfer extension) during the model download
+# build step. hf-xet 1.x initialises a global Tokio multi-thread runtime on
+# import; when huggingface_hub calls into it from within a Tokio worker thread
+# the Rust runtime tries to re-enter Python's import machinery from a thread
+# that already owns the GIL bootstrap lock, producing:
+#   Fatal Python error: _PyImport_Init: global import state already initialized
+# The docling models are served from standard HuggingFace Hub storage, not xet,
+# so disabling xet has no effect on download behaviour or speed.
+ENV HF_HUB_DISABLE_XET=1
 
 COPY requirements.txt .
 COPY download_docling_models.py .

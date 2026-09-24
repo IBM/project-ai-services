@@ -1,5 +1,5 @@
 summarize:
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.19
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.22
   log_level: "INFO"
   database: "summarize_metadata"
   resources:
@@ -11,7 +11,7 @@ summarize:
       memory: "512Mi"
 
 postgres:
-  image: icr.io/ai-services-cicd/postgres:18-5
+  image: icr.io/ai-services-cicd/postgres:18-6
   storage: 5Gi
   # @generate:password
   password: ""

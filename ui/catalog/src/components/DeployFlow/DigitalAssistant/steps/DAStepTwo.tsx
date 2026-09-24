@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useCallback } from "react";
 import { formatVersion } from "@/utils/string";
 import { InlineNotification } from "@carbon/react";
 import styles from "../../Shared/DeployFlow.shared.module.scss";
@@ -14,6 +14,7 @@ import { useResources } from "../../Shared/hooks/useResources";
 import { getResourceSharingKey } from "../utils/resourceSharing";
 import { sumProviderResources } from "../../Shared/utils/resources";
 import { useDeployStore, type ServiceParamsCache } from "@/store/deploy.store";
+import { parseSchema, getFieldDefault } from "@/utils/schemaParser";
 import type {
   DeployOptionsResponse,
   DeployOptionsComponent as Component,
@@ -263,6 +264,56 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
     ],
     [deployOptions.version],
   );
+
+  // Idempotently seed service-level params from schema defaults when schemas
+  // arrive asynchronously after form initialization. Only seeds fields that are
+  // not yet set — preserves any user edits already made.
+  const seedNoComponentServiceParams = useCallback(() => {
+    const serviceUpdates: Record<string, ServiceConfig> = {};
+
+    deployOptions.services.forEach((service) => {
+      const schemaCacheEntry = serviceParamsMap[`${runtime}:${service.id}`] as
+        | ServiceParamsCache
+        | undefined;
+      if (!schemaCacheEntry?.data) return;
+
+      const serviceConfig = formData.services[service.id];
+      if (!serviceConfig) return;
+
+      const fields = parseSchema(schemaCacheEntry.data);
+      const updates: Record<string, unknown> = {};
+
+      fields.forEach((field) => {
+        if (field.uiOnly) return;
+        // Only seed fields not yet set — preserves user edits
+        if (serviceConfig.params?.[field.key] !== undefined) return;
+        updates[field.key] = getFieldDefault(field);
+      });
+
+      if (Object.keys(updates).length > 0) {
+        serviceUpdates[service.id] = {
+          ...serviceConfig,
+          params: { ...serviceConfig.params, ...updates },
+        };
+      }
+    });
+
+    if (Object.keys(serviceUpdates).length > 0) {
+      onChange({
+        services: { ...formData.services, ...serviceUpdates },
+      });
+    }
+  }, [
+    deployOptions.services,
+    formData.services,
+    serviceParamsMap,
+    onChange,
+    runtime,
+  ]);
+
+  useEffect(() => {
+    seedNoComponentServiceParams();
+  }, [seedNoComponentServiceParams]);
 
   // Populate default model params once provider schemas are loaded.
   // Guarded by `if (config.params?.model) return` so this is idempotent —

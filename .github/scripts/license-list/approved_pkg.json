@@ -1,6 +1,7 @@
 {
   "approvesd_pkg_licenses": {
     "bash": "GPL-3.0-or-later",
+    "ja_core_news_sm": "CC-BY-SA-4.0",
     "coreutils-single": "GPL-3.0-or-later",
     "glibc-common": "LGPL-2.0-or-later AND LGPL-2.0-or-later WITH exceptions AND GPL-2.0-or-later AND GPL-2.0-or-later WITH exceptions AND BSD-3-Clause AND Inner-Net AND ISC AND Public-Domain AND GFDL-1.3-or-later",
     "glibc-minimal-langpack": "LGPL-2.0-or-later AND LGPL-2.0-or-later WITH exceptions AND GPL-2.0-or-later AND GPL-2.0-or-later WITH exceptions AND BSD-3-Clause AND Inner-Net AND ISC AND Public-Domain AND GFDL-1.3-or-later",

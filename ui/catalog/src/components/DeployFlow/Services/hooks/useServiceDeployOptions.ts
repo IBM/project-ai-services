@@ -4,6 +4,7 @@ import {
   fetchServiceDeployOptions,
   fetchLLMOptionsWithModels,
   fetchComponentModelsWithSchemas,
+  fetchServiceSchemaParams,
 } from "@/api/applications.api";
 import { COMPONENT_TYPES } from "@/constants";
 
@@ -27,6 +28,10 @@ export const useServiceDeployOptions = (
     setComponentModelsLoading,
     setComponentModelsError,
     setProviderSchema,
+    getServiceSchema,
+    setServiceSchema,
+    setServiceSchemaLoading,
+    setServiceSchemaError,
   } = useServiceDeployStore();
 
   // Keyed by "serviceId:runtime" to prevent stale cache hits across runtime switches
@@ -36,6 +41,7 @@ export const useServiceDeployOptions = (
   const deployOptions = serviceId
     ? getServiceDeployOptions(serviceId, runtime)
     : null;
+  const serviceSchema = serviceId ? getServiceSchema(serviceId, runtime) : null;
   const llmModels = serviceId
     ? getComponentModels(serviceId, COMPONENT_TYPES.LLM, runtime)
     : [];
@@ -49,6 +55,16 @@ export const useServiceDeployOptions = (
   const deployOptionsError = useServiceDeployStore((state) =>
     serviceId
       ? state.serviceDeployOptionsError[`${serviceId}:${runtime}`] || null
+      : null,
+  );
+  const serviceSchemaLoading = useServiceDeployStore((state) =>
+    serviceId
+      ? state.serviceSchemasLoading[`${serviceId}:${runtime}`] || false
+      : false,
+  );
+  const serviceSchemaError = useServiceDeployStore((state) =>
+    serviceId
+      ? state.serviceSchemasError[`${serviceId}:${runtime}`] || null
       : null,
   );
   const llmModelsLoading = useServiceDeployStore((state) =>
@@ -94,6 +110,26 @@ export const useServiceDeployOptions = (
       fetchServiceDeployOptions(serviceId, runtime)
         .then(async (deployData) => {
           setServiceDeployOptions(serviceId, runtime, deployData);
+
+          const hasComponents = (deployData.components?.length ?? 0) > 0;
+
+          // Fetch service-level schema when the deploy options declare a schema URL.
+          // This is non-blocking — form initialization is guarded in ServicesDeployFlow.
+          if (deployData.schema) {
+            setServiceSchemaLoading(serviceId, runtime, true);
+            fetchServiceSchemaParams(deployData.schema)
+              .then((schema) => setServiceSchema(serviceId, runtime, schema))
+              .catch((err) => {
+                const msg =
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to load service schema";
+                setServiceSchemaError(serviceId, runtime, msg);
+              });
+          }
+
+          // Short-circuit if no components (Scenario B / D) — skip all model fetches.
+          if (!hasComponents) return;
 
           // Identify Step 1 components (exclude llm and reranker)
           const step1Components =
@@ -231,6 +267,25 @@ export const useServiceDeployOptions = (
     // --- Path B: deploy options cached — retry only errored models on reopen ---
     if (!deployOptions) return;
 
+    // Fetch schema if deployOptions declares a schema URL but no schema is cached yet,
+    // or retry if a previous fetch errored (e.g. on rehydrate from persisted storage or after network error).
+    const cachedSchema = getServiceSchema(serviceId, runtime);
+    const schemaLoading =
+      storeState.serviceSchemasLoading[`${serviceId}:${runtime}`];
+    if (deployOptions.schema && !cachedSchema && !schemaLoading) {
+      setServiceSchemaError(serviceId, runtime, null);
+      setServiceSchemaLoading(serviceId, runtime, true);
+      fetchServiceSchemaParams(deployOptions.schema)
+        .then((schema) => setServiceSchema(serviceId, runtime, schema))
+        .catch((err) => {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : "Failed to load service schema";
+          setServiceSchemaError(serviceId, runtime, msg);
+        });
+    }
+
     const llmError =
       storeState.componentModelsError[
         `${serviceId}:${COMPONENT_TYPES.LLM}:${runtime}`
@@ -308,12 +363,22 @@ export const useServiceDeployOptions = (
     setComponentModelsLoading,
     setComponentModelsError,
     setProviderSchema,
+    getServiceSchema,
+    setServiceSchema,
+    setServiceSchemaLoading,
+    setServiceSchemaError,
   ]);
 
   return {
     deployOptions,
+    serviceSchema,
+    serviceSchemaError,
     llmModels,
-    isLoading: deployOptionsLoading || llmModelsLoading || shouldBeLoading,
+    isLoading:
+      deployOptionsLoading ||
+      llmModelsLoading ||
+      shouldBeLoading ||
+      serviceSchemaLoading,
     error: deployOptionsError,
     llmError: llmModelsError,
   };
