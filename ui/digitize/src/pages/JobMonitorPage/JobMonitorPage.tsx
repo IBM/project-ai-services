@@ -328,6 +328,8 @@ const getStatusIcon = (status: string) => {
     case JOB_STATUS.IN_PROGRESS:
     case DISPLAY_STATUS.ACCEPTED:
     case DISPLAY_STATUS.DIGITIZED:
+    case DISPLAY_STATUS.PROCESSED:
+    case DISPLAY_STATUS.CHUNKED:
     case DISPLAY_STATUS.INGESTING:
     case DISPLAY_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
