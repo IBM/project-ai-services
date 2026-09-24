@@ -2,6 +2,7 @@ package mustgather
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils/sanitize"
@@ -121,7 +123,12 @@ type podCollector interface {
 func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName string) []string {
 	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
-		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
+		if errors.Is(err, config.ErrNotLoggedIn) {
+			logger.WarninglnCtx(ctx, "Skipping application pod collection: not logged in to the catalog. "+
+				"Run 'ai-services catalog login' first.")
+		} else {
+			logger.WarningfCtx(ctx, "Skipping application pod collection: catalog client unavailable (%v)\n", err)
+		}
 
 		return nil
 	}
