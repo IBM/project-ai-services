@@ -1866,7 +1866,7 @@ maxBatchSize: 32
 
 ```yaml
 # components/llm/watsonx/podman/values.yaml
-image: "icr.io/ai-services-cicd/litellm:v1.89.3-1"
+image: "icr.io/ai-services-cicd/litellm:v1.101.0-0"
 model: "ibm/granite-4-h-small"
 watsonxApiKey: ""
 watsonxProjectId: ""

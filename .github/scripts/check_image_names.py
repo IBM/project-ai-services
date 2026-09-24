@@ -108,7 +108,13 @@ COMPONENTS = {
     ],
     "images/caddy/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "caddy"),
-    ]
+    ],
+    "mcp/Makefile": [
+        ("ai-services/assets/services/chat/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/digitize/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/similarity/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/summarize/podman/values.yaml", "mcp"),
+    ],
 }
 
 

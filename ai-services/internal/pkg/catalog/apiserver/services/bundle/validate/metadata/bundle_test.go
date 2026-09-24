@@ -186,3 +186,47 @@ func TestParseRootMetadata_UnknownType(t *testing.T) {
 	_, err := bundlemetadata.ParseRootMetadata([]byte("id: x\ntype: architecture\nname: n\ndescription: d\nversion: 1.0.0\n"))
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "unsupported type")
 }
+
+// -----------------------------------------------------------------------
+// certified_by "IBM" rejection (case-insensitive)
+// -----------------------------------------------------------------------
+
+func TestParseRootMetadata_CertifiedBy(t *testing.T) {
+	const (
+		svcBase  = "id: svc\ntype: service\nname: n\ndescription: d\nversion: 1.0.0\nstandalone: true\nabout:\n  - s\n"
+		compBase = "id: prov\ntype: component\nname: n\ndescription: d\nversion: 1.0.0\ncomponent_type: llm\n"
+	)
+
+	tests := []struct {
+		name        string
+		yaml        string
+		wantErrCode int    // 0 = no error expected
+		wantErrMsg  string // substring; empty = not checked
+	}{
+		// service — rejected
+		{name: "service/IBM upper", yaml: svcBase + "certified_by: IBM\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		{name: "service/ibm lower", yaml: svcBase + "certified_by: ibm\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		{name: "service/Ibm mixed", yaml: svcBase + "certified_by: Ibm\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		// service — allowed
+		{name: "service/empty (absent)", yaml: svcBase},
+		{name: "service/Acme Corp", yaml: svcBase + "certified_by: Acme Corp\n"},
+		// component — rejected
+		{name: "component/IBM upper", yaml: compBase + "certified_by: IBM\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		{name: "component/ibm lower", yaml: compBase + "certified_by: ibm\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		{name: "component/IBM mixed", yaml: compBase + "certified_by: iBM\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		// component — allowed
+		{name: "component/empty (absent)", yaml: compBase},
+		{name: "component/Acme Corp", yaml: compBase + "certified_by: Acme Corp\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := bundlemetadata.ParseRootMetadata([]byte(tc.yaml))
+			if tc.wantErrCode == 0 {
+				require.NoError(t, err)
+			} else {
+				assertValidationError(t, err, tc.wantErrCode, tc.wantErrMsg)
+			}
+		})
+	}
+}

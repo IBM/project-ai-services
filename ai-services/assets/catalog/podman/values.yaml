@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.82
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.83
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.378
+  image: icr.io/ai-services-cicd/ai-services:v0.0.389
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false
@@ -21,7 +21,7 @@ backend:
 
 db:
   port: ""
-  image: icr.io/ai-services-cicd/postgres:18-5
+  image: icr.io/ai-services-cicd/postgres:18-6
   user: "postgres"
   database: "ai_services"
   password: ""
@@ -32,7 +32,7 @@ db:
       memory: "1Gi"
 
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.4-2
+  image: icr.io/ai-services-cicd/caddy:v2.11.4-4
   adminPort: ""
   httpsPort: ""
   # caddyFileContent: Generated from the 'Caddyfile.tmpl' template

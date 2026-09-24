@@ -1634,6 +1634,7 @@ paths:
         The response always includes catalog asset images (the tool image used for housekeeping tasks
         and the catalog infrastructure images for the catalog service itself).
         Both embedded (built-in) and custom bundle architectures are supported.
+        Not supported on OpenShift deployments.
       parameters:
       - description: Architecture ID (e.g., 'rag')
         in: path
@@ -1655,6 +1656,10 @@ paths:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Architecture not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Not supported on OpenShift deployments
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "500":
@@ -2622,6 +2627,7 @@ paths:
         The response always includes catalog asset images (the tool image used for housekeeping tasks
         and the catalog infrastructure images for the catalog service itself).
         Both embedded (built-in) and custom bundle services are supported.
+        Not supported on OpenShift deployments.
       parameters:
       - description: Service ID (e.g., 'chat', 'digitize', 'summarize')
         in: path
@@ -2643,6 +2649,10 @@ paths:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Service not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Not supported on OpenShift deployments
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "500":

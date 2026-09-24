@@ -56,3 +56,14 @@
 .tableColumn {
   margin: 0;
 }
+
+.messageCellError {
+  display: inline-flex;
+  align-items: center;
+  gap: spacing.$spacing-02;
+}
+
+.messageErrorIcon {
+  flex-shrink: 0;
+  fill: var(--cds-support-error);
+}

@@ -401,6 +401,7 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 //	@Description	The response always includes catalog asset images (the tool image used for housekeeping tasks
 //	@Description	and the catalog infrastructure images for the catalog service itself).
 //	@Description	Both embedded (built-in) and custom bundle services are supported.
+//	@Description	Not supported on OpenShift deployments.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
@@ -408,9 +409,18 @@ func (h *CatalogHandler) GetServiceParams(c *gin.Context) {
 //	@Success		200	{array}		string			"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Service not found"
+//	@Failure		422	{object}	ErrorResponse	"Not supported on OpenShift deployments"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/services/{id}/images [get]
 func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
+	if vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
+		c.JSON(http.StatusUnprocessableEntity, ErrorResponse{
+			Error: "this endpoint is not supported on OpenShift deployments",
+		})
+
+		return
+	}
+
 	id := c.Param("id")
 
 	images, err := h.provider.GetServiceImages(c.Request.Context(), id)
@@ -437,6 +447,7 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 //	@Description	The response always includes catalog asset images (the tool image used for housekeeping tasks
 //	@Description	and the catalog infrastructure images for the catalog service itself).
 //	@Description	Both embedded (built-in) and custom bundle architectures are supported.
+//	@Description	Not supported on OpenShift deployments.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
@@ -444,9 +455,18 @@ func (h *CatalogHandler) GetServiceImages(c *gin.Context) {
 //	@Success		200	{array}		string			"List of container image references"
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Architecture not found"
+//	@Failure		422	{object}	ErrorResponse	"Not supported on OpenShift deployments"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/architectures/{id}/images [get]
 func (h *CatalogHandler) GetArchitectureImages(c *gin.Context) {
+	if vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
+		c.JSON(http.StatusUnprocessableEntity, ErrorResponse{
+			Error: "this endpoint is not supported on OpenShift deployments",
+		})
+
+		return
+	}
+
 	id := c.Param("id")
 
 	images, err := h.provider.GetArchitectureImages(c.Request.Context(), id)

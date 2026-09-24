@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/service-base:v0.0.39
+FROM icr.io/ai-services-cicd/service-base:v0.0.41
 
 WORKDIR /opt/services/extract
 
