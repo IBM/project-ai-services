@@ -17,8 +17,9 @@ import (
 // ──────────────────────────────────────────────────────────────────────────────
 
 type fakeWorkerRepo struct {
-	workers map[string]*models.Worker
-	byID    map[uuid.UUID]*models.Worker
+	workers        map[string]*models.Worker
+	byID           map[uuid.UUID]*models.Worker
+	appsByWorkerID map[uuid.UUID][]uuid.UUID
 }
 
 func newFakeWorkerRepo() *fakeWorkerRepo {
@@ -92,8 +93,19 @@ func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Work
 	return &cp, nil
 }
 
-func (r *fakeWorkerRepo) GetApplicationIDsByWorkerIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
-	return map[uuid.UUID][]uuid.UUID{}, nil
+func (r *fakeWorkerRepo) GetApplicationIDsByWorkerIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	if r.appsByWorkerID == nil {
+		return map[uuid.UUID][]uuid.UUID{}, nil
+	}
+
+	result := make(map[uuid.UUID][]uuid.UUID)
+	for _, id := range ids {
+		if apps, ok := r.appsByWorkerID[id]; ok {
+			result[id] = apps
+		}
+	}
+
+	return result, nil
 }
 
 var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
@@ -377,7 +389,37 @@ func TestRegistry_Deregister_ClosesCommandChannel(t *testing.T) {
 	}
 }
 
+func TestRegistry_Deregister_WorkerHasApplications(t *testing.T) {
+	appID := uuid.New()
 
+	repo := newFakeWorkerRepo()
+	repo.appsByWorkerID = map[uuid.UUID][]uuid.UUID{}
+
+	reg := New(repo)
+
+	entry, err := reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	testID := uuid.New()
+	entry.DBID = testID
+	repo.appsByWorkerID[testID] = []uuid.UUID{appID}
+
+	_, err = reg.Deregister(context.Background(), testID)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, ErrWorkerHasApplications) {
+		t.Fatalf("expected ErrWorkerHasApplications, got %T: %v", err, err)
+	}
+
+	// The guard returns before any mutation, so the worker must remain registered.
+	if _, ok := reg.Get("worker-1"); !ok {
+		t.Error("worker should still be registered after failed deregister")
+	}
+}
 
 func TestRegistry_WaitForResult_WorkerNotConnected(t *testing.T) {
 	reg := New(nil)
