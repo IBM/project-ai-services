@@ -27,6 +27,7 @@ type ServiceMetadataYAML struct {
 	Name         string        `yaml:"name"`
 	Description  string        `yaml:"description"`
 	Version      string        `yaml:"version"`
+	CertifiedBy  string        `yaml:"certified_by"`
 	Standalone   *bool         `yaml:"standalone"` // pointer — distinguishes absent from false
 	Dependencies []MetadataDep `yaml:"dependencies"`
 	About        []any         `yaml:"about"`
@@ -40,6 +41,7 @@ type ComponentMetadataYAML struct {
 	Name          string `yaml:"name"`
 	Description   string `yaml:"description"`
 	Version       string `yaml:"version"`
+	CertifiedBy   string `yaml:"certified_by"`
 	ComponentType string `yaml:"component_type"`
 }
 
@@ -99,6 +101,9 @@ func parseServiceMetadataYAML(data []byte) (*ServiceMetadataYAML, error) {
 	if err := validateCommonFields(m.ID, m.Type, m.Version, m.Name, m.Description); err != nil {
 		return nil, err
 	}
+	if err := validateCertifiedBy(m.CertifiedBy); err != nil {
+		return nil, err
+	}
 	if m.Standalone == nil {
 		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'standalone' is required for type=service"}
 	}
@@ -120,11 +125,27 @@ func parseComponentMetadataYAML(data []byte) (*ComponentMetadataYAML, error) {
 	if err := validateCommonFields(m.ID, m.Type, m.Version, m.Name, m.Description); err != nil {
 		return nil, err
 	}
+	if err := validateCertifiedBy(m.CertifiedBy); err != nil {
+		return nil, err
+	}
 	if m.ComponentType == "" {
 		return nil, &validators.ValidationError{Code: http.StatusUnprocessableEntity, Message: "metadata.yaml: 'component_type' is required for type=component"}
 	}
 
 	return &m, nil
+}
+
+// validateCertifiedBy returns a ValidationError when certified_by is set to "IBM"
+// (case-insensitive). IBM is a reserved value that must not be used by external bundles.
+func validateCertifiedBy(certifiedBy string) error {
+	if strings.EqualFold(certifiedBy, "IBM") {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "metadata.yaml: 'certified_by' must not be \"IBM\"",
+		}
+	}
+
+	return nil
 }
 
 // validateCommonFields checks the fields required for every bundle type.

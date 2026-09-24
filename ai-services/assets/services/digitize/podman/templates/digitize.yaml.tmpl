@@ -6,7 +6,7 @@ metadata:
     ai-services.io/template: "{{ .TemplateID }}"
     ai-services.io/secret: "digitize-db-encryption-secret-{{ .InstanceSlug }}"
     ai-services.io/secret-skip-cleanup: "true"
-    ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }}"
+    ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }},digitize-db-encryption-secret-{{ .InstanceSlug }}"
   annotations:
     ai-services.io/routes: "4001:digitize-ui-{{ .InstanceSlug }}:ui,4000:digitize-backend-{{ .InstanceSlug }}:api,4002:digitize-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"  # Uncomment to expose ports directly (bypasses Caddy)

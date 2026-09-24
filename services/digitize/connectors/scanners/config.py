@@ -66,9 +66,12 @@ class S3ConnectorConfig(BaseModel):
 
     Works for both AWS S3 and IBM COS — provider is auto-detected from
     ``endpoint_url``.
+
+    extra="forbid" ensures that unrecognised fields (e.g. a stray 'password')
+    are rejected at the API boundary rather than silently ignored.
     """
 
-    model_config = {"extra": "ignore"}
+    model_config = {"extra": "forbid"}
 
     bucket_name: str = Field(
         description="S3 / COS bucket to sync documents from.",
@@ -236,7 +239,15 @@ class S3ConnectorConfig(BaseModel):
 
 
 class SSHConnectorConfig(BaseModel):
-    model_config = {"extra": "ignore"}
+    """
+    Configuration for an SSH/SFTP data-source connector.
+
+    Authentication is exclusively via ``private_key`` (PEM-encoded).
+    Only the fields declared on this model are accepted; any extra fields
+    are rejected by the model configuration.
+    """
+
+    model_config = {"extra": "forbid"}
 
     host: str = Field(description="SFTP server hostname or IP address.")
     port: int = Field(default=22, ge=1, le=65535, description="SFTP port.")

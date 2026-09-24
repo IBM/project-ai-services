@@ -1,5 +1,5 @@
 digitize:
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.66
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.70
   log_level: "INFO"
   database: "digitize_metadata"
   # @generate:password length=32, special=false
@@ -9,7 +9,7 @@ digitizeUi:
   image: icr.io/ai-services-cicd/digitize-ui:v0.0.34
 
 postgres:
-  image: icr.io/ai-services-cicd/postgres:18-5
+  image: icr.io/ai-services-cicd/postgres:18-6
   username: "postgres"
   # @generate:password
   password: ""

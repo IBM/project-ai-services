@@ -4,7 +4,7 @@ ui:
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.29
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.32
   # @hidden
   log_level: "INFO"
   # @description Custom initial system prompt for conversational RAG. Leave empty to use default. Must be at least 10 characters.
@@ -12,7 +12,7 @@ backend:
 
 summarize:
   # @hidden
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.19
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.22
   # @hidden
   log_level: "INFO"
   # @description Database name for the SUMMARIZE service. Default is "summarize_metadata".
@@ -20,13 +20,13 @@ summarize:
 
 similarity:
   # @hidden
-  image: icr.io/ai-services-cicd/similarity-service:v0.0.16
+  image: icr.io/ai-services-cicd/similarity-service:v0.0.19
   # @hidden
   log_level: "INFO"
 
 digitize:
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.66
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.70
   # @hidden
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
@@ -95,7 +95,7 @@ opensearch:
 
 postgres:
   # @hidden
-  image: icr.io/ai-services-cicd/postgres:18-5
+  image: icr.io/ai-services-cicd/postgres:18-6
   # @description Sets the storage limit for the PostgreSQL service (Default: 5Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   storage: 5Gi
   # @description Password for PostgreSQL default 'postgres' user authentication. Must be at least 8 characters. Use this to override the default password.

@@ -5,6 +5,7 @@ import {
   fetchDeployOptions,
   fetchProviderSchema,
   fetchServiceParams,
+  fetchServiceSchemaParams,
 } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
 import { WORKER_RUNTIME_LABELS } from "@/constants";
@@ -193,16 +194,21 @@ export const useDeployOptions = (open: boolean, runtime: string) => {
       },
     );
 
-    // Collect service IDs that need their service-level schema fetched
-    const serviceIds = deployOptions.services.map((s) => s.id);
-    const serviceIdsToFetch = serviceIds.filter((serviceId) => {
-      const cached = getServiceParams(serviceId, runtime);
+    // Collect services that need their service-level schema fetched.
+    // Services with no components and no schema declaration are zero-config — skip them.
+    const servicesToFetch = deployOptions.services.filter((service) => {
+      const hasComponents = service.components.length > 0;
+      const hasSchema = !!service.schema;
+      if (!hasComponents && !hasSchema) return false;
+      const cached = getServiceParams(service.id, runtime);
       const hasError =
         !!useDeployStore.getState().serviceParamsError[
-          `${runtime}:${serviceId}`
+          `${runtime}:${service.id}`
         ];
-      return !cached || isServiceParamsStale(serviceId, runtime) || hasError;
+      return !cached || isServiceParamsStale(service.id, runtime) || hasError;
     });
+    // Keep name consistent with the early-exit length check below
+    const serviceIdsToFetch = servicesToFetch.map((s) => s.id);
 
     // No fetches needed — build model lists from cache; no .finally callbacks will fire.
     if (globalPairsToFetch.length === 0) {
@@ -330,23 +336,53 @@ export const useDeployOptions = (open: boolean, runtime: string) => {
             );
           });
       }),
-      ...serviceIdsToFetch.map((serviceId) => {
-        clearServiceParamsError(serviceId, runtime);
-        return dedupe(`serviceParams:${runtime}:${serviceId}`, () =>
-          fetchServiceParams(serviceId, runtime),
-        )
-          .then((data) => {
-            setServiceParams(serviceId, runtime, data);
-          })
-          .catch((err) => {
-            setServiceParamsError(
-              serviceId,
-              runtime,
-              err instanceof Error
-                ? err.message
-                : "Failed to load service schema",
-            );
-          });
+      ...servicesToFetch.flatMap((service) => {
+        clearServiceParamsError(service.id, runtime);
+        const fetches: Promise<void>[] = [];
+
+        // Use the direct schema URL when declared (may coexist with components — Scenario C).
+        if (service.schema) {
+          fetches.push(
+            dedupe(`serviceParams:${runtime}:${service.id}:schema`, () =>
+              fetchServiceSchemaParams(service.schema!),
+            )
+              .then((data) => {
+                setServiceParams(service.id, runtime, data);
+              })
+              .catch((err) => {
+                setServiceParamsError(
+                  service.id,
+                  runtime,
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to load service schema",
+                );
+              }),
+          );
+        }
+
+        // For services with components but no schema URL, fall back to legacy endpoint.
+        if (!service.schema) {
+          fetches.push(
+            dedupe(`serviceParams:${runtime}:${service.id}`, () =>
+              fetchServiceParams(service.id, runtime),
+            )
+              .then((data) => {
+                setServiceParams(service.id, runtime, data);
+              })
+              .catch((err) => {
+                setServiceParamsError(
+                  service.id,
+                  runtime,
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to load service schema",
+                );
+              }),
+          );
+        }
+
+        return fetches;
       }),
     ]);
   }, [

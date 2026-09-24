@@ -38,29 +38,34 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	return performCleanup(ctx, rt, pods, opts.SkipCleanup)
+	return PerformCleanup(ctx, rt, pods, opts.SkipCleanup)
 }
 
 // ─── internal ─────────────────────────────────────────────────────────────────
 
-// WorkerCaddyConfig holds configuration recovered from the running Caddy pod.
-type WorkerCaddyConfig struct {
-	// BaseDir is the base directory recovered from the AI_SERVICES_BASE_DIR
-	// env var injected by caddy.yaml.tmpl at deploy time.
-	BaseDir string
-}
-
-// performCleanup executes all cleanup operations after confirmation:
-// retrieves the Caddy pod config, deletes the pods, and removes the worker
-// data directory.
-func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, skipCleanup bool) error {
+// PerformCleanup removes a Podman-based worker deployment by deleting its pods, secrets,
+// volumes, and on-disk data directory. Resources that were preserved by a previous
+// --skip-cleanup run are also reconciled according to the current skipCleanup flag.
+//
+// Parameters:
+//   - ctx:         context used for logging and cancellation propagation.
+//   - rt:          runtime client used to delete Podman resources (pods, secrets, volumes).
+//   - pods:        list of running pods belonging to the worker deployment.
+//   - skipCleanup: when true, secrets and volumes tagged for deferred deletion are left intact;
+//     when false, those previously skipped resources are also removed.
+//
+// Returns an error if any deletion step (pods, secrets, volumes, or data directory) fails.
+func PerformCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, skipCleanup bool) error {
 	logger.InfolnCtx(ctx, "Proceeding with deletion...")
 
 	var baseDir string
 
-	config, err := getWorkerCaddyPodConfig(ctx, rt, pods)
+	config, _, err := podmanutils.GetPodConfig(ctx, rt, workerconstants.WorkerPodLabel)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Failed to retrieve BaseDir from worker pod: %v. Using default BaseDir.\n", err)
+		baseDir = utils.GetBaseDir()
+	} else if config.BaseDir == "" {
+		logger.WarningfCtx(ctx, "Failed to retrieve BaseDir from worker pod: env var not set. Using default BaseDir.\n")
 		baseDir = utils.GetBaseDir()
 	} else {
 		baseDir = config.BaseDir
@@ -93,48 +98,9 @@ func performCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 		return err
 	}
 
-	logger.Infoln("Worker service removed successfully")
+	logger.InfolnCtx(ctx, "Worker service removed successfully")
 
 	return nil
-}
-
-// getWorkerCaddyPodConfig retrieves worker Caddy pod configuration by inspecting
-// the running pod and its containers. It extracts the AI_SERVICES_BASE_DIR
-// environment variable injected by caddy.yaml.tmpl at deploy time.
-func getWorkerCaddyPodConfig(ctx context.Context, rt runtime.Runtime, pods []types.Pod) (*WorkerCaddyConfig, error) {
-	podID := ""
-	for _, pod := range pods {
-		if pod.Name == workerconstants.WorkerCaddyPodName {
-			podID = pod.ID
-		}
-	}
-	if podID == "" {
-		return nil, fmt.Errorf("no pod found with name '%s'", workerconstants.WorkerCaddyPodName)
-	}
-	pInfo, err := rt.InspectPod(ctx, podID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect pod %s: %w", podID, err)
-	}
-
-	config := &WorkerCaddyConfig{}
-
-	for _, container := range pInfo.Containers {
-		cInfo, err := rt.InspectContainer(ctx, container.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to inspect container %s: %w", container.Name, err)
-		}
-
-		extractConfigFromEnv(cInfo.Env, config)
-	}
-
-	return config, nil
-}
-
-// extractConfigFromEnv populates config from Caddy container environment variables.
-func extractConfigFromEnv(env map[string]string, config *WorkerCaddyConfig) {
-	if value, ok := env[workerconstants.BaseDirEnvVar]; ok {
-		config.BaseDir = value
-	}
 }
 
 func getWorkerPodList(ctx context.Context, rt runtime.Runtime) ([]types.Pod, error) {

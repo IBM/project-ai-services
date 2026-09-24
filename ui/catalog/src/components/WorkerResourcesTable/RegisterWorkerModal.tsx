@@ -43,8 +43,8 @@ const RegisterWorkerModal = ({
     const gateway = gatewayAddress || "<catalog-host>:9090";
     return [
       `ai-services worker join ${gateway} \\`,
-      '  --runtime "<podman|openshift>" \\',
-      `  --token "${token}"`,
+      `  --token "${token}" \\`,
+      '  --runtime "<podman|openshift>"',
     ].join("\n");
   }, [isSuccess, token, gatewayAddress]);
 
@@ -55,6 +55,7 @@ const RegisterWorkerModal = ({
       modalHeading="Register worker resource"
       passiveModal
       preventCloseOnClickOutside
+      className={styles.registerModal}
       onRequestClose={() => {
         if (!isLoading) onClose();
       }}
@@ -77,6 +78,7 @@ const RegisterWorkerModal = ({
           invalid={phase === "invalid"}
           invalidText="Enter a valid worker resource name"
           onChange={(e) => onWorkerNameChange(e.target.value)}
+          className={styles.textInput}
         />
 
         {isError && (
