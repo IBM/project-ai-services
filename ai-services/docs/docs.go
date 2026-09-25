@@ -2704,6 +2704,13 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     },
+                    "409": {
+                        "description": "Worker is already registered and ready",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "500": {
                         "description": "Internal error",
                         "schema": {
@@ -2811,6 +2818,13 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Worker not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Worker still has applications deployed on it",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

@@ -82,6 +82,29 @@ async def _validate_files(
     response_description="Job accepted. `job_id` can be used to poll status.",
     tags=["MCP"],
     operation_id="create_digitize_job",
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["files"],
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary",
+                                },
+                                "description": "Document files (PDF or DOCX) to process",
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 async def create_job(
     files: List[UploadFile] = File(

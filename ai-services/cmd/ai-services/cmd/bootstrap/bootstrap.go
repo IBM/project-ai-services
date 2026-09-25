@@ -6,12 +6,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
@@ -36,8 +35,7 @@ func BootstrapCmd() *cobra.Command {
 
 	skipCheckDesc := BuildSkipFlagDescription()
 	// Add runtime flag as required
-	bootstrapCmd.PersistentFlags().StringVar(&runtimeType, "runtime", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
-	_ = bootstrapCmd.MarkPersistentFlagRequired("runtime")
+	cmdcommon.ConfigurePersistentRuntimeFlag(bootstrapCmd, &runtimeType)
 	bootstrapCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
 
 	// subcommands
@@ -49,17 +47,8 @@ func BootstrapCmd() *cobra.Command {
 
 func bootstrapPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
-	// Initialize runtime factory based on flag
-	rt := types.RuntimeType(runtimeType)
-	if !rt.Valid() {
-		return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
-	}
 
-	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
-	logger.Debugf("Using runtime: %s\n", rt)
-
-	// Check if podman runtime is being used on unsupported platform
-	return utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType())
+	return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
 }
 
 func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {

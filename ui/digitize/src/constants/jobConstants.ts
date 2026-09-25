@@ -14,6 +14,8 @@ export const DISPLAY_STATUS = {
   ACCEPTED: 'accepted',
   INGESTED: 'ingested',
   DIGITIZED: 'digitized',
+  PROCESSED: 'processed',
+  CHUNKED: 'chunked',
   COMPLETED_WITH_ERRORS: 'completed_with_errors',
   INGESTION_ERROR: 'ingestion error',
   DIGITIZATION_ERROR: 'digitization error',
