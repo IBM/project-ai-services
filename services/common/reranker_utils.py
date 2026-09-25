@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple
 
 from cohere import ClientV2
+from cohere.core import RequestOptions
 
 from common.misc_utils import get_logger
 from common.retry_utils import retry_on_transient_error
@@ -27,6 +28,7 @@ def rerank_helper(co2_client: ClientV2, query: str, document: dict, model: str) 
         query=query,
         documents=[page_content],
         max_tokens_per_doc=512,
+        request_options=RequestOptions(timeout_in_seconds=60),
     )
     score = result.results[0].relevance_score
     return document, score
