@@ -24,6 +24,10 @@ import (
 // has an active in-memory entry (i.e. a live CommandStream is open).
 var ErrWorkerAlreadyActive = fmt.Errorf("worker already active")
 
+// ErrWorkerAlreadyReady is returned by Preregister when the named worker is
+// already registered and in ready status.
+var ErrWorkerAlreadyReady = fmt.Errorf("worker is already registered and ready")
+
 // ErrWorkerNotFound is returned by Restore when the named worker has no DB row,
 // or its status is pending (never completed bootstrap).
 var ErrWorkerNotFound = fmt.Errorf("worker not found")
@@ -31,6 +35,11 @@ var ErrWorkerNotFound = fmt.Errorf("worker not found")
 // ErrUnsupportedRuntimeType is returned by Register when runtimeType is not a
 // recognised value (podman or openshift).
 var ErrUnsupportedRuntimeType = fmt.Errorf("unsupported runtime_type")
+
+// ErrWorkerHasApplications is returned by Deregister when the worker still has
+// one or more applications assigned to it. The caller should surface this as a
+// 409 Conflict so the operator knows they must delete those applications first.
+var ErrWorkerHasApplications = fmt.Errorf("worker still has applications deployed on it")
 
 // validRuntimeTypes is the list of runtime type strings accepted by Register.
 var validRuntimeTypes = []models.WorkerRuntimeType{
@@ -226,8 +235,9 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 
 // Preregister creates a pending DB row for a named worker and returns a single-use
 // bootstrap token the operator passes to the worker daemon at startup.
-// If a row already exists (re-registration), it is reset to pending and a new token
-// supersedes the old one.
+// If a worker is already registered and in ready status, ErrWorkerAlreadyReady is returned.
+// For workers with statuses other than ready (or if no row exists), it is set to pending
+// and a new token is issued.
 //
 // If the worker is currently active in the in-memory map (i.e. its stream is still
 // open), it is evicted first so that the stale connection can no longer update the
@@ -235,6 +245,14 @@ func (r *Registry) Restore(ctx context.Context, workerName string) (*WorkerEntry
 func (r *Registry) Preregister(ctx context.Context, workerName string) (string, error) {
 	if r.repo == nil {
 		return "", fmt.Errorf("worker registry: no repository configured")
+	}
+
+	existing, err := r.repo.GetByName(ctx, workerName)
+	if err != nil {
+		return "", fmt.Errorf("worker registry: DB lookup for %s: %w", workerName, err)
+	}
+	if existing != nil && existing.Status == models.WorkerStatusReady {
+		return "", ErrWorkerAlreadyReady
 	}
 
 	// Evict any live in-memory entry so UpdateHeartbeat stops updating the row
@@ -354,6 +372,19 @@ func (r *Registry) UpdateHeartbeat(ctx context.Context, workerName string) {
 // Use this when a worker is permanently decommissioned, not just temporarily offline.
 // Returns (true, nil) if a row was deleted, (false, nil) if not found.
 func (r *Registry) Deregister(ctx context.Context, id uuid.UUID) (bool, error) {
+	// Check for deployed applications before any mutation so that a rejected
+	// deregister leaves the registry in its original state.
+	if r.repo != nil {
+		appIDMap, err := r.repo.GetApplicationIDsByWorkerIDs(ctx, []uuid.UUID{id})
+		if err != nil {
+			return false, fmt.Errorf("worker registry: failed to check applications for %s: %w", id, err)
+		}
+
+		if appIDs := appIDMap[id]; len(appIDs) > 0 {
+			return false, ErrWorkerHasApplications
+		}
+	}
+
 	var found *WorkerEntry
 
 	r.mu.Lock()

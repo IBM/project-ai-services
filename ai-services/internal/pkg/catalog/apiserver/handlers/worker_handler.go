@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -62,6 +63,7 @@ type createWorkerResp struct {
 //	@Param			worker	body		createWorkerReq			true	"Worker registration request"
 //	@Success		201		{object}	createWorkerResp		"Worker registered; token valid for 24 hours"
 //	@Failure		400		{object}	map[string]interface{}	"Invalid payload"
+//	@Failure		409		{object}	map[string]interface{}	"Worker is already registered and ready"
 //	@Failure		500		{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers [post]
@@ -111,6 +113,11 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 
 	token, err := h.reg.Preregister(ctx, req.WorkerName)
 	if err != nil {
+		if errors.Is(err, registry.ErrWorkerAlreadyReady) {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("worker %q is already registered and ready", req.WorkerName)})
+
+			return
+		}
 		logger.ErrorfCtx(ctx, "worker handler: failed to register worker %q: %v", req.WorkerName, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register worker"})
 
@@ -240,6 +247,7 @@ func (h *WorkerHandler) GetWorker(c *gin.Context) {
 //	@Failure		400	{object}	map[string]interface{}	"Invalid worker ID"
 //	@Failure		403	{object}	map[string]interface{}	"Local worker cannot be deleted"
 //	@Failure		404	{object}	map[string]interface{}	"Worker not found"
+//	@Failure		409	{object}	map[string]interface{}	"Worker still has applications deployed on it"
 //	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers/{id} [delete]
@@ -276,6 +284,14 @@ func (h *WorkerHandler) DeleteWorker(c *gin.Context) {
 
 	deleted, err := h.reg.Deregister(ctx, workerID)
 	if err != nil {
+		if errors.Is(err, registry.ErrWorkerHasApplications) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": fmt.Sprintf("worker %q cannot be deleted while it has applications deployed on it", w.Name),
+			})
+
+			return
+		}
+
 		logger.ErrorfCtx(ctx, "worker handler: failed to deregister worker %s: %v", workerID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete worker"})
 

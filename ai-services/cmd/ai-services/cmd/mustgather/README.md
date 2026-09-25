@@ -14,7 +14,7 @@ ai-services must-gather --runtime <podman|openshift> [flags]
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--runtime` | — | *(required)* | Runtime to target: `podman` or `openshift`. |
+| `--runtime` | `-r` | *(required)* | Runtime to target: `podman` or `openshift`. |
 | `--output-dir` | `-o` | `.` | Parent directory; a `must-gather.local.<timestamp>` sub-directory is created inside. |
 | `--application` | `-a` | *(all)* | Limit application pod collection to this application name. |
 

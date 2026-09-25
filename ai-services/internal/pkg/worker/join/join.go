@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -51,16 +52,26 @@ const (
 
 	// retryBackoffFactor is the exponential multiplier applied to the backoff duration.
 	retryBackoffFactor = 2
+
+	// grpcKeepaliveTime is how often the gRPC transport sends an HTTP/2 PING to
+	// the server when the connection is idle. This fires independently of the
+	// application-level heartbeat and is the primary mechanism for detecting a
+	// dead control-plane TCP connection quickly.
+	grpcKeepaliveTime = 20 * time.Second
+
+	// grpcKeepaliveTimeout is how long the transport waits for a PING ACK before
+	// treating the connection as dead and surfacing an error to stream.Recv.
+	grpcKeepaliveTimeout = 10 * time.Second
 )
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
 // bootstrap token, and holds the CommandStream open.
 func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
 	if opts.GatewayAddr == "" {
-		return fmt.Errorf("worker join: gateway address is required (e.g. gateway.10.0.0.1.nip.io:9090)")
+		return fmt.Errorf("worker join: gateway address is required (e.g. gateway.10.0.0.1.nip.io:9191)")
 	}
 	if _, _, err := net.SplitHostPort(opts.GatewayAddr); err != nil {
-		return fmt.Errorf("worker join: invalid gateway address %q — must be host:port (e.g. gateway.10.0.0.1.nip.io:9090)", opts.GatewayAddr)
+		return fmt.Errorf("worker join: invalid gateway address %q — must be host:port (e.g. gateway.10.0.0.1.nip.io:9191)", opts.GatewayAddr)
 	}
 
 	tlsDir := workerconstants.WorkerTLSDir
@@ -171,7 +182,14 @@ func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.P
 		return fmt.Errorf("worker join: build TLS config for stream: %w", err)
 	}
 
-	conn, err := grpc.NewClient(gatewayAddr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+	conn, err := grpc.NewClient(gatewayAddr,
+		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                grpcKeepaliveTime,
+			Timeout:             grpcKeepaliveTimeout,
+			PermitWithoutStream: true,
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("worker join: dial %s: %w", gatewayAddr, err)
 	}

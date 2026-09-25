@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"regexp"
 	"strings"
@@ -61,6 +64,37 @@ func getBodyName(operation types.OperationInfo) string {
 
 	return "data"
 }
+
+// detectFilename returns a filename with the correct extension based on file magic bytes.
+// Falls back to "<fieldname>-<index>.bin" if the type is unrecognised.
+func detectFilename(data []byte, fieldName string, index int) string {
+	if len(data) >= 4 {
+		// PDF: %PDF
+		if data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46 {
+			return fmt.Sprintf("%s-%d.pdf", fieldName, index)
+		}
+		// DOCX / ZIP-based: PK\x03\x04
+		if data[0] == 0x50 && data[1] == 0x4B && data[2] == 0x03 && data[3] == 0x04 {
+			return fmt.Sprintf("%s-%d.docx", fieldName, index)
+		}
+	}
+	return fmt.Sprintf("%s-%d.bin", fieldName, index)
+}
+
+// detectMIMEType returns the MIME type based on file magic bytes.
+func detectMIMEType(data []byte) string {
+	if len(data) >= 4 {
+		if data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46 {
+			return "application/pdf"
+		}
+		if data[0] == 0x50 && data[1] == 0x4B && data[2] == 0x03 && data[3] == 0x04 {
+			return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		}
+	}
+	return "application/octet-stream"
+}
+
+
 
 // schemaBuilder helps build JSON schemas incrementally
 type schemaBuilder struct {
@@ -299,12 +333,59 @@ func (p *Provider) Execute(ctx context.Context, params *mcp.CallToolParamsRaw) (
 		}
 
 		if bodyData, exists := args[p.bodyName]; exists {
-			bodyBytes, err := json.Marshal(bodyData)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal request body: %w", err)
+			if strings.Contains(strings.ToLower(p.operation.RequestBody.ContentType), "multipart/form-data") {
+				var buf bytes.Buffer
+				w := multipart.NewWriter(&buf)
+				if fields, ok := bodyData.(map[string]interface{}); ok {
+					for k, v := range fields {
+						// Handle arrays (e.g. files: [base64str, ...])
+						var values []interface{}
+						if arr, ok := v.([]interface{}); ok {
+							values = arr
+						} else {
+							values = []interface{}{v}
+						}
+						for i, item := range values {
+							str := fmt.Sprintf("%v", item)
+							// Try to decode as base64 binary — if successful treat as file part
+							if decoded, err := base64.StdEncoding.DecodeString(str); err == nil {
+								filename := detectFilename(decoded, k, i)
+								mimeType := detectMIMEType(decoded)
+								h := make(textproto.MIMEHeader)
+								h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, k, filename))
+								h.Set("Content-Type", mimeType)
+								fw, err := w.CreatePart(h)
+								if err != nil {
+									return nil, fmt.Errorf("failed to create file part %q: %w", k, err)
+								}
+								if _, err := fw.Write(decoded); err != nil {
+									return nil, fmt.Errorf("failed to write file part %q: %w", k, err)
+								}
+							} else {
+								fw, err := w.CreateFormField(k)
+								if err != nil {
+									return nil, fmt.Errorf("failed to create form field %q: %w", k, err)
+								}
+								if _, err := fmt.Fprintf(fw, "%s", str); err != nil {
+									return nil, fmt.Errorf("failed to write form field %q: %w", k, err)
+								}
+							}
+						}
+					}
+				}
+				if err := w.Close(); err != nil {
+					return nil, fmt.Errorf("failed to close multipart writer: %w", err)
+				}
+				body = &buf
+				headers["content-type"] = w.FormDataContentType()
+			} else {
+				bodyBytes, err := json.Marshal(bodyData)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal request body: %w", err)
+				}
+				body = bytes.NewReader(bodyBytes)
+				headers["content-type"] = p.operation.RequestBody.ContentType
 			}
-			body = bytes.NewReader(bodyBytes)
-			headers["content-type"] = p.operation.RequestBody.ContentType
 		}
 	}
 

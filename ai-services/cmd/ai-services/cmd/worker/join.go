@@ -63,22 +63,22 @@ Obtain a token first by running on the catalog node:
 
   ai-services catalog worker register <name>`,
 	Example: `  # Minimal — required argument + flag only
-  ai-services worker join catalog.example.com:9090 --token <bootstrap-token>
+  ai-services worker join catalog.example.com:9191 --token <bootstrap-token>
 
   # Custom base directory and HTTPS port
-  ai-services worker join catalog.example.com:9090 \
+  ai-services worker join catalog.example.com:9191 \
       --token      <bootstrap-token> \
       --basedir    /data/ai-services \
       --https-port 8443
 
   # Custom SSL certificate
-  ai-services worker join catalog.example.com:9090 \
+  ai-services worker join catalog.example.com:9191 \
       --token    <bootstrap-token> \
       --ssl-cert /path/to/cert.pem \
       --ssl-key  /path/to/key.pem
 
   # Skip specific bootstrap validation checks
-  ai-services worker join catalog.example.com:9090 \
+  ai-services worker join catalog.example.com:9191 \
       --token           <bootstrap-token> \
       --skip-validation rhn,power`,
 	Args:    cobra.ExactArgs(1),

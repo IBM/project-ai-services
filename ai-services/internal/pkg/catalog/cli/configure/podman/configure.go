@@ -3,6 +3,7 @@ package podman
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,17 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+)
+
+// existingCertSentinel is a non-empty placeholder passed into sslCertContent/sslKeyContent
+// when the cert secret already exists from a previous run. It triggers the template
+// volume-mount guard without embedding real cert bytes (the secret is already stored).
+const (
+	existingCertSentinel = "_existing_"
+
+	// catalogAPIRouteID is the Caddy route ID for the catalog backend API,
+	// matching the subdomain registered by RegisterCatalogRoutes.
+	catalogAPIRouteID = "catalog-api"
 )
 
 // DeployCatalog deploys the catalog service using the assets/catalog template for podman runtime.
@@ -39,20 +51,40 @@ func DeployCatalog(ctx context.Context, opts catalogUtils.PodmanConfigureOptions
 		return err
 	}
 
-	caddyCtx, err := executeCatalogDeployment(ctx, deployCtx, opts, passwordHash)
+	caddyCtx, useExistingCert, err := executeCatalogDeployment(ctx, deployCtx, opts, passwordHash)
 	if err != nil {
 		return err
 	}
 
-	// Load SSL certificates if provided
-	if err := caddyCtx.LoadSSLCertificates(ctx, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
-		return err
+	// Load SSL certificates into Caddy when user-supplied paths are given.
+	// When useExistingCert is true the preserved caddy-data PVC already has an
+	// autosave that includes the load_files entry — Caddy resumes with the custom
+	// cert active, so no Admin API call is needed and triggering an unnecessary
+	// PATCH reload is avoided.
+	if !useExistingCert {
+		if err := caddyCtx.LoadSSLCertificates(ctx, opts.SSLCertPath, opts.SSLKeyPath); err != nil {
+			return err
+		}
 	}
 
-	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword)
+	// When reusing the preserved cert (--skip-cleanup re-configure), the
+	// autosave routes carry the correct domain from the previous install.
+	// Query the live catalog-api route to recover it before RegisterCatalogRoutes
+	// sets DOMAIN_SUFFIX — otherwise ComputeDomainSuffix would have fallen back
+	// to the host IP and routes/WaitForTLSReady would use the wrong domain.
+	if useExistingCert {
+		if err := recoverDomainFromCaddy(ctx, caddyCtx); err != nil {
+			logger.Debugf("Could not recover domain from Caddy autosave routes: %v\n", err)
+		}
+	}
+
+	return handlePostDeployment(ctx, caddyCtx, deployCtx, opts, adminPassword, secretExists)
 }
 
-func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, error) {
+// executeCatalogDeployment deploys (or validates) the catalog pods and returns
+// the Caddy context together with a flag indicating whether the preserved cert
+// secret should be loaded into Caddy without host-path validation.
+func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, passwordHash string) (*caddy.Context, bool, error) {
 	logger.Debugln("started configuring catalog service...")
 
 	s := spinner.New("Configuring catalog service...")
@@ -65,7 +97,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	if err != nil {
 		s.Fail("failed while setting up caddy context")
 
-		return nil, err
+		return nil, false, err
 	}
 
 	logger.Debugln("checking for existing resources...")
@@ -75,22 +107,29 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 	if err != nil {
 		s.Fail("failed to check existing resources")
 
-		return nil, fmt.Errorf("failed to check existing resources: %w", err)
+		return nil, false, fmt.Errorf("failed to check existing resources: %w", err)
 	}
 
+	// useExistingCert is true when the cert secret was preserved by a previous
+	// --skip-cleanup uninstall and no cert paths were supplied on this run.
+	// CheckStatus already queried SecretExists for CatalogCertSecretName and
+	// appended it to existingResources when found, so slices.Contains is the
+	// single source of truth — no extra runtime call needed.
+	useExistingCert := opts.SSLCertPath == "" && opts.SSLKeyPath == "" &&
+		slices.Contains(existingResources, catalogconstants.CatalogCertSecretName)
+
 	if !isDeployed {
-		// Prepare deployment with domain suffix computation and create Caddy context
-		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
+		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, useExistingCert, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
 			s.Fail("failed to load param values")
 
-			return nil, err
+			return nil, false, err
 		}
 
 		// Execute pod templates
 		if err := deployCtx.ExecutePodLayers(ctx, opts.BaseDir, caddyCtx, existingResources); err != nil {
 			s.Fail("failed to deploy catalog pod")
 
-			return nil, err
+			return nil, false, err
 		}
 
 		s.Stop("Catalog service deployed successfully")
@@ -102,16 +141,16 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		if err := validateReconfigureParameters(ctx, deployCtx.Runtime, &opts, caddyCtx); err != nil {
 			s.Fail("validation failed during reconfigure")
 
-			return nil, fmt.Errorf("reconfigure validation failed: %w", err)
+			return nil, false, fmt.Errorf("reconfigure validation failed: %w", err)
 		}
 	}
 
-	return caddyCtx, nil
+	return caddyCtx, useExistingCert, nil
 }
 
 // handlePostDeployment handles route registration, login verification,
 // local worker join, and next steps display after catalog deployment.
-func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, adminPassword string) error {
+func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCtx *deploy.DeployContext, opts catalogUtils.PodmanConfigureOptions, adminPassword string, isReinstall bool) error {
 	logger.Debugln("handling post deployment steps...")
 
 	// Extract route infos from deployment context
@@ -141,6 +180,11 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("admin password verification failed: %w", err)
 	}
 
+	// Validate --skip-local-worker has not changed since the original install.
+	if err := configure.ValidateSkipLocalWorker(ctx, catalogClient, isReinstall, opts.SkipLocalWorker); err != nil {
+		return err
+	}
+
 	if !opts.SkipLocalWorker {
 		if err := JoinAsLocalWorker(ctx, deployCtx.Runtime, opts, catalogClient); err != nil {
 			return fmt.Errorf("worker join failed: %v", err)
@@ -156,12 +200,39 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	return nil
 }
 
+// recoverDomainFromCaddy queries the live Caddy Admin API for the catalog-api
+// route and extracts its domain suffix, then updates caddyCtx. This is used
+// after --skip-cleanup re-configure when the autosave already has the correct
+// domain from the previous install but ComputeDomainSuffix had no cert paths
+// to work with and would have fallen back to the host IP.
+// Errors are non-fatal — the caller logs and continues with the host-IP domain.
+func recoverDomainFromCaddy(ctx context.Context, caddyCtx *caddy.Context) error {
+	proxyManager, err := caddyCtx.CreateProxyManager(ctx)
+	if err != nil {
+		return err
+	}
+
+	route, err := proxyManager.GetRouteByID(ctx, catalogAPIRouteID)
+	if err != nil {
+		return err
+	}
+
+	// route.Domain is the full host (e.g. "catalog-api.powervm-spyre-pok.cis.ibm.net").
+	// Strip the "catalog-api." prefix to get the domain suffix.
+	const prefix = catalogAPIRouteID + "."
+	if strings.HasPrefix(route.Domain, prefix) {
+		caddyCtx.SetDomainSuffix(strings.TrimPrefix(route.Domain, prefix))
+	}
+
+	return nil
+}
+
 // loadCatalogParamValues prepares all necessary data for deployment.
-func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) error {
+func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, workerGatewayPort int, skipLocalWorker bool) error {
 	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
-	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, httpsPort, workerGatewayPort, skipLocalWorker)
+	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, useExistingCert, httpsPort, workerGatewayPort, skipLocalWorker)
 	if err != nil {
 		return fmt.Errorf("failed to generate arg params: %w", err)
 	}
@@ -175,7 +246,7 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCe
 }
 
 // generateArgParams generates the argument parameters for template rendering.
-func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
+func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate database password: %w", err)
@@ -199,7 +270,7 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 		return nil, fmt.Errorf("failed to generate caddy file: %w", err)
 	}
 
-	sslCertContent, sslKeyContent, err := readSSLContents(sslCertPath, sslKeyPath)
+	sslCertContent, sslKeyContent, err := readSSLContents(sslCertPath, sslKeyPath, useExistingCert)
 	if err != nil {
 		return nil, err
 	}
@@ -221,8 +292,16 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, httpsPort, 
 }
 
 // readSSLContents reads and returns the PEM contents of the cert and key files.
-// Returns empty strings when either path is empty.
-func readSSLContents(certPath, keyPath string) (string, string, error) {
+// When useExistingCert is true the caddy pod template needs a non-empty
+// sslCertContent value to render the /etc/secret/ssl volume mount; the cert
+// secret is already preserved and skipped by existingResources, so the sentinel
+// bytes never land in the secret.
+// Returns empty strings when no cert is configured.
+func readSSLContents(certPath, keyPath string, useExistingCert bool) (string, string, error) {
+	if useExistingCert {
+		return existingCertSentinel, existingCertSentinel, nil
+	}
+
 	if certPath == "" || keyPath == "" {
 		return "", "", nil
 	}
