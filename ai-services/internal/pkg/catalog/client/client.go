@@ -22,6 +22,18 @@ const (
 	tokenRefreshSkew = 30 * time.Second
 )
 
+// httpErrorMessage returns a concise description of an HTTP error response.
+// A 503 from an OpenShift route means HAProxy could not reach the backing pod
+// (catalog server is down or not yet started); in that case the raw body
+// (which is an HTML error page) is suppressed in favour of an actionable message.
+func httpErrorMessage(resp *resty.Response) string {
+	if resp.StatusCode() == 503 {
+		return "catalog server is unreachable (HTTP 503)"
+	}
+
+	return fmt.Sprintf("server returned HTTP %d: %s", resp.StatusCode(), resp.String())
+}
+
 // Client is an authenticated HTTP client for the catalog API server.
 type Client struct {
 	serverURL  string
@@ -160,7 +172,7 @@ func (c *Client) Login(ctx context.Context, username, password string) (LoginRes
 	}
 
 	if httpResp.IsError() {
-		return LoginResponse{}, fmt.Errorf("login failed: server returned HTTP %d: %s", httpResp.StatusCode(), httpResp.String())
+		return LoginResponse{}, fmt.Errorf("login failed: %s", httpErrorMessage(httpResp))
 	}
 
 	return resp, nil
@@ -180,7 +192,7 @@ func (c *Client) LoginWithMIQToken(ctx context.Context, miqToken string) (LoginR
 	}
 
 	if httpResp.IsError() {
-		return LoginResponse{}, fmt.Errorf("token login failed: server returned HTTP %d: %s", httpResp.StatusCode(), httpResp.String())
+		return LoginResponse{}, fmt.Errorf("token login failed: %s", httpErrorMessage(httpResp))
 	}
 
 	return resp, nil
@@ -238,7 +250,7 @@ func (c *Client) RefreshToken(ctx context.Context) error {
 	}
 
 	if httpResp.IsError() {
-		return fmt.Errorf("refresh token failed: server returned HTTP %d: %s", httpResp.StatusCode(), httpResp.String())
+		return fmt.Errorf("refresh token failed: %s", httpErrorMessage(httpResp))
 	}
 
 	c.creds.AccessToken = resp.AccessToken
