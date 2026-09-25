@@ -402,55 +402,226 @@ class TestDeleteConnector:
 class TestRunTeardown:
     """Unit tests for the _run_teardown background coroutine."""
 
-    async def test_deletes_document_when_last_owner(self, monkeypatch):
-        """remaining_owner_count == 0 → document is deleted."""
-        doc_delete_mock = Mock()
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    def _patch_common(
+        self, monkeypatch, *, checksums, remove_return, delete_connector=True, job_wait_error=None
+    ):
+        """Apply the DB patches shared by most tests in this class."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_sync_logs",
-            Mock(return_value=([], 0)),
+            "digitize.api.v1.connectors._cancel_connector_jobs_and_wait",
+            AsyncMock(return_value=job_wait_error),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.list_connector_checksums",
-            Mock(return_value=["abc123"]),
+            Mock(return_value=checksums),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.remove_connector_checksum_entry",
-            Mock(return_value=(0, "doc-0001")),
+            Mock(return_value=remove_return),
         )
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.delete_active_connector",
-            Mock(return_value=True),
+            Mock(return_value=delete_connector),
         )
+
+    # ------------------------------------------------------------------
+    # Registered-checksum tests (existing behaviour)
+    # ------------------------------------------------------------------
+
+    async def test_deletes_document_when_last_owner(self, monkeypatch):
+        """remaining_owner_count == 0 → document is deleted."""
+        doc_delete_mock = Mock(return_value=True)
+        self._patch_common(monkeypatch, checksums=["abc123"], remove_return=(0, "doc-0001"))
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir"):
-                from digitize.api.v1.connectors import _run_teardown
-                await _run_teardown(CONNECTOR_ID)
+                with patch("digitize.api.v1.connectors._get_unregistered_connector_docs", return_value=[]):
+                    from digitize.api.v1.connectors import _run_teardown
+                    await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_called_once_with("doc-0001")
 
     async def test_does_not_delete_doc_when_other_owners_remain(self, monkeypatch):
         """remaining_owner_count > 0 → doc must NOT be deleted."""
-        doc_delete_mock = Mock()
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_sync_logs",
-            Mock(return_value=([], 0)),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.list_connector_checksums",
-            Mock(return_value=["abc123"]),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.remove_connector_checksum_entry",
-            Mock(return_value=(2, "doc-0001")),
-        )
-        monkeypatch.setattr(
-            "digitize.api.v1.connectors.db_ops.delete_active_connector",
-            Mock(return_value=True),
-        )
+        doc_delete_mock = Mock(return_value=True)
+        self._patch_common(monkeypatch, checksums=["abc123"], remove_return=(2, "doc-0001"))
         with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir"):
-                from digitize.api.v1.connectors import _run_teardown
-                await _run_teardown(CONNECTOR_ID)
+                with patch("digitize.api.v1.connectors._get_unregistered_connector_docs", return_value=[]):
+                    from digitize.api.v1.connectors import _run_teardown
+                    await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Unregistered document tests (Step 5)
+    # ------------------------------------------------------------------
+
+    async def test_deletes_unregistered_inflight_docs(self, monkeypatch):
+        """Unregistered docs returned by _get_unregistered_connector_docs must be deleted."""
+        doc_delete_mock = Mock(return_value=True)
+        self._patch_common(monkeypatch, checksums=[], remove_return=(0, None))
+        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+            with patch("digitize.api.v1.connectors._sweep_staging_dir"):
+                with patch(
+                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    return_value=["inflight-doc-1", "inflight-doc-2"],
+                ):
+                    from digitize.api.v1.connectors import _run_teardown
+                    await _run_teardown(CONNECTOR_ID)
+        assert doc_delete_mock.call_count == 2
+        doc_delete_mock.assert_any_call("inflight-doc-1")
+        doc_delete_mock.assert_any_call("inflight-doc-2")
+
+    async def test_no_unregistered_docs_skips_step5(self, monkeypatch):
+        """Empty unregistered list → _best_effort_delete_document not called via step 5."""
+        doc_delete_mock = Mock(return_value=True)
+        self._patch_common(monkeypatch, checksums=[], remove_return=(0, None))
+        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+            with patch("digitize.api.v1.connectors._sweep_staging_dir"):
+                with patch(
+                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    return_value=[],
+                ):
+                    from digitize.api.v1.connectors import _run_teardown
+                    await _run_teardown(CONNECTOR_ID)
+        doc_delete_mock.assert_not_called()
+
+    async def test_unregistered_doc_deletion_failure_recorded_but_continues(self, monkeypatch):
+        """
+        If _best_effort_delete_document returns False for an unregistered doc,
+        the error is recorded and connector row deletion is skipped (no crash).
+        """
+        doc_delete_mock = Mock(return_value=False)
+        set_msg_mock = Mock()
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.set_connector_message", set_msg_mock
+        )
+        self._patch_common(monkeypatch, checksums=[], remove_return=(0, None))
+        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+            with patch("digitize.api.v1.connectors._sweep_staging_dir", return_value=True):
+                with patch(
+                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    return_value=["bad-doc-1"],
+                ):
+                    from digitize.api.v1.connectors import _run_teardown
+                    await _run_teardown(CONNECTOR_ID)
+        # Connector row must NOT be deleted — there were deletion_errors
+        set_msg_mock.assert_called_once()
+        assert "bad-doc-1" in set_msg_mock.call_args[0][1]
+
+    async def test_both_registered_and_unregistered_docs_deleted(self, monkeypatch):
+        """
+        Registered docs (via checksum) and unregistered docs (in-flight) are
+        both deleted in the same teardown call.
+        """
+        doc_delete_mock = Mock(return_value=True)
+        self._patch_common(monkeypatch, checksums=["cs1"], remove_return=(0, "reg-doc-1"))
+        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+            with patch("digitize.api.v1.connectors._sweep_staging_dir"):
+                with patch(
+                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    return_value=["inflight-doc-1"],
+                ):
+                    from digitize.api.v1.connectors import _run_teardown
+                    await _run_teardown(CONNECTOR_ID)
+        assert doc_delete_mock.call_count == 2
+        doc_delete_mock.assert_any_call("reg-doc-1")
+        doc_delete_mock.assert_any_call("inflight-doc-1")
+
+    # ------------------------------------------------------------------
+    # Job cancellation gate (Step 2)
+    # ------------------------------------------------------------------
+
+    async def test_job_cancellation_not_terminal_keeps_connector(self, monkeypatch):
+        """If jobs never reach a terminal state, no doc/connector row is touched
+        and the failure is surfaced via the connector message."""
+        doc_delete_mock = Mock(return_value=True)
+        delete_connector_mock = Mock(return_value=True)
+        set_msg_mock = Mock()
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.set_connector_message", set_msg_mock
+        )
+        self._patch_common(
+            monkeypatch, checksums=["cs1"], remove_return=(0, "reg-doc-1"),
+            job_wait_error="job cancellation did not complete in 300s for job(s): job-1",
+        )
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.delete_active_connector", delete_connector_mock
+        )
+        remove_checksum_mock = Mock(return_value=(0, "reg-doc-1"))
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.remove_connector_checksum_entry", remove_checksum_mock
+        )
+        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+            with patch("digitize.api.v1.connectors._sweep_staging_dir") as sweep_mock:
+                with patch(
+                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    return_value=["inflight-doc-1"],
+                ):
+                    from digitize.api.v1.connectors import _run_teardown
+                    await _run_teardown(CONNECTOR_ID)
+        set_msg_mock.assert_called_once()
+        assert "job-1" in set_msg_mock.call_args[0][1]
+        remove_checksum_mock.assert_not_called()
+        doc_delete_mock.assert_not_called()
+        sweep_mock.assert_not_called()
+        delete_connector_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+class TestCancelConnectorJobsAndWait:
+    """Unit tests for _cancel_connector_jobs_and_wait."""
+
+    @staticmethod
+    def _job(status):
+        return SimpleNamespace(status=status)
+
+    async def test_no_active_jobs_returns_none(self):
+        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+        mock_db = Mock()
+        mock_db.get_active_job_ids_for_connector = Mock(return_value=[])
+        with patch("digitize.db.manager.db_manager", mock_db), \
+             patch("digitize.utils.jobs.request_job_cancellation") as cancel_mock:
+            assert await _cancel_connector_jobs_and_wait(CONNECTOR_ID) is None
+        cancel_mock.assert_not_called()
+
+    async def test_requests_cancel_with_clean_files_and_waits_until_terminal(self):
+        """Active jobs get clean_files=True; CANCEL_PENDING jobs are only awaited."""
+        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+        mock_db = Mock()
+        # initial snapshot, then still-active on first poll, then terminal
+        mock_db.get_active_job_ids_for_connector = Mock(
+            side_effect=[["job-a", "job-b"], ["job-a", "job-b"], []]
+        )
+        mock_db.get_job_by_id = Mock(
+            side_effect=lambda jid: self._job("in_progress" if jid == "job-a" else "cancel_pending")
+        )
+        with patch("digitize.db.manager.db_manager", mock_db), \
+             patch("digitize.utils.jobs.request_job_cancellation") as cancel_mock, \
+             patch("digitize.api.v1.connectors._TEARDOWN_JOB_POLL_INTERVAL_S", 0):
+            assert await _cancel_connector_jobs_and_wait(CONNECTOR_ID) is None
+        cancel_mock.assert_called_once_with("job-a", clean_files=True)
+
+    async def test_times_out_when_jobs_never_terminal(self):
+        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+        mock_db = Mock()
+        mock_db.get_active_job_ids_for_connector = Mock(return_value=["job-stuck"])
+        mock_db.get_job_by_id = Mock(return_value=self._job("cancel_pending"))
+        with patch("digitize.db.manager.db_manager", mock_db), \
+             patch("digitize.utils.jobs.request_job_cancellation"), \
+             patch("digitize.api.v1.connectors._TEARDOWN_JOB_POLL_INTERVAL_S", 0), \
+             patch("digitize.api.v1.connectors._TEARDOWN_JOB_WAIT_TIMEOUT_S", 0):
+            result = await _cancel_connector_jobs_and_wait(CONNECTOR_ID)
+        assert result is not None and "job-stuck" in result
+
+    async def test_db_error_is_not_treated_as_terminal(self):
+        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+        mock_db = Mock()
+        mock_db.get_active_job_ids_for_connector = Mock(return_value=None)
+        with patch("digitize.db.manager.db_manager", mock_db):
+            result = await _cancel_connector_jobs_and_wait(CONNECTOR_ID)
+        assert result is not None
 
 
 # ===========================================================================

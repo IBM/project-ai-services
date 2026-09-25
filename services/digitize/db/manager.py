@@ -7,7 +7,7 @@ Provides CRUD operations with proper error handling and transaction management.
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, cast
-from sqlalchemy import select, update, delete, func, or_, and_
+from sqlalchemy import select, update, delete, func, or_, and_, exists
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -629,6 +629,7 @@ class DatabaseManager:
         - Any 'already_exists' shadow documents whose metadata points to this
           doc_id as their existing_doc_id, since those placeholder rows have
           no meaning once the original document is gone.
+        - Any conversion_tasks rows that reference this doc_id.
 
         Args:
             doc_id: Unique identifier for the document
@@ -652,6 +653,12 @@ class DatabaseManager:
                     delete(Document).where(
                         Document.doc_metadata["existing_doc_id"].as_string() == doc_id
                     )
+                )
+
+                # Drop conversion_tasks rows for this document so the table doesn't
+                # accumulate orphaned entries after the document is deleted.
+                session.execute(
+                    delete(ConversionTask).where(ConversionTask.doc_id == doc_id)
                 )
 
                 stmt = delete(Document).where(Document.doc_id == doc_id)
@@ -738,6 +745,12 @@ class DatabaseManager:
                     delete(Document).where(
                         Document.doc_metadata["existing_doc_id"].as_string().in_(doc_ids)
                     )
+                )
+
+                # Drop conversion_tasks rows so the table doesn't accumulate
+                # orphaned entries after the document rows are gone.
+                session.execute(
+                    delete(ConversionTask).where(ConversionTask.doc_id.in_(doc_ids))
                 )
 
                 result = cast(
@@ -2380,6 +2393,72 @@ class DatabaseManager:
         except SQLAlchemyError as e:
             logger.error(f"DB error in get_connector_ids_with_queued_tasks: {e}", exc_info=True)
             return []
+
+    @staticmethod
+    def get_unregistered_connector_doc_ids(connector_id: str) -> List[str]:
+        """
+        Return doc_ids created for ``connector_id`` that no connector owns in
+        ``connector_document_checksum`` (e.g. docs of a batch that was
+        cancelled before ``add_connector_checksum_entry`` ran).
+
+        A doc co-owned by another connector is *not* returned: it must survive
+        this connector's deletion.  Callers must ensure the connector's jobs
+        have reached a terminal state first (see
+        ``get_active_job_ids_for_connector``).
+        """
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask.doc_id)
+                    .where(
+                        ConversionTask.connector_id == connector_id,
+                        ConversionTask.doc_id.is_not(None),
+                        ~exists().where(
+                            ConnectorDocumentChecksum.doc_id == ConversionTask.doc_id
+                        ),
+                    )
+                    .distinct()
+                )
+                return list(session.scalars(stmt).all())
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_unregistered_connector_doc_ids({connector_id!r}): {e}",
+                exc_info=True,
+            )
+            return []
+
+    @staticmethod
+    def get_active_job_ids_for_connector(connector_id: str) -> Optional[List[str]]:
+        """
+        Return ids of jobs owned by ``connector_id`` that have not reached a
+        terminal state (accepted / in_progress / cancel_pending).
+
+        Returns ``None`` on a DB error so callers can tell "unknown" apart
+        from "no active jobs" and never treat a failed query as a clean state.
+        """
+        active_statuses = (
+            JobStatus.ACCEPTED.value,
+            JobStatus.IN_PROGRESS.value,
+            JobStatus.CANCEL_PENDING.value,
+        )
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(Job.job_id)
+                    .join(ConversionTask, ConversionTask.job_id == Job.job_id)
+                    .where(
+                        ConversionTask.connector_id == connector_id,
+                        Job.status.in_(active_statuses),
+                    )
+                    .distinct()
+                )
+                return list(session.scalars(stmt).all())
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_active_job_ids_for_connector({connector_id!r}): {e}",
+                exc_info=True,
+            )
+            return None
 
     @staticmethod
     def delete_conversion_tasks_for_connector(connector_id: str) -> int:
