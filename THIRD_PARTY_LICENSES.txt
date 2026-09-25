@@ -22,10 +22,18 @@ paramiko 5.0.0
 Source: https://github.com/paramiko/paramiko/tree/5.0 
 License text: https://github.com/paramiko/paramiko/blob/5.0/LICENSE
 
+psycopg2 2.9.11+ppc64le1
+Source: https://github.com/psycopg/psycopg2/tree/2.9.11
+License text: https://github.com/psycopg/psycopg2/blob/2.9.11/LICENSE
+
 The following component is separately licensed under the LGPL-3.0 (https://www.gnu.org/licenses/lgpl-3.0.html) license:
 sentence-splitter 1.4 
 Source: https://github.com/mediacloud/sentence-splitter/tree/1.4  
 License text: https://github.com/mediacloud/sentence-splitter/blob/1.4/LICENSE
+
+autocommand 2.2.2
+Source: https://github.com/nicowillis/autocommand/tree/v2.2.2
+License text: https://github.com/nicowillis/autocommand/blob/v2.2.2/LICENSE
 
 The following components are separately licensed under the MPL-2.0 (https://www.mozilla.org/en-US/MPL/2.0/) license:
 github.com/hashicorp/errwrap v1.1.0 
@@ -73,6 +81,10 @@ License text: https://github.com/tqdm/tqdm/blob/v4.67.3/LICENCE
 tqdm 4.68.2 
 Source: https://github.com/tqdm/tqdm/tree/v4.68.2 
 License text: https://github.com/tqdm/tqdm/blob/v4.68.2/LICENCE
+
+tqdm 4.70.1
+Source: https://github.com/tqdm/tqdm/tree/v4.70.1
+License text: https://github.com/tqdm/tqdm/blob/v4.70.1/LICENCE
 
 The following component is separately licensed under the MPL-2.0 (https://www.mozilla.org/en-US/MPL/2.0/) or Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0) license (dual-licensed):
 dompurify 3.4.11
