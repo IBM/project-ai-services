@@ -3,6 +3,7 @@ Configuration settings for RAG system.
 These values can be overridden via environment variables.
 """
 from pydantic import Field, field_validator
+from pydantic.types import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from common.misc_utils import get_logger
@@ -44,8 +45,9 @@ class LLMConfig(BaseSettings):
         description="Maximum batch size for LLM service (used for connection pool size)",
     )
 
-    api_key: str = Field(
-        default="",
+    api_key: SecretStr = Field(
+        default=SecretStr(""),
+        repr=False,
         description="API key for vLLM authentication (optional, read from LLM_API_KEY env var)",
     )
 
@@ -169,8 +171,9 @@ class VectorStoreConfig(BaseSettings):
         description="OpenSearch username",
     )
 
-    opensearch_password: str = Field(
-        default="",
+    opensearch_password: SecretStr = Field(
+        default=SecretStr(""),
+        repr=False,
         description="OpenSearch password",
     )
 

@@ -11,3 +11,19 @@ class JobCancelledError(Exception):
     as an error.
     """
     pass
+
+
+class SyncNotFound(Exception):
+    """Raised by dispatch_sync when the connector does not exist."""
+    pass
+
+
+class SyncLocked(Exception):
+    """Raised by dispatch_sync when the connector cannot accept a new sync
+    (DELETE_PENDING or a cancellation already in progress)."""
+    pass
+
+
+class DeadlineExceededError(Exception):
+    """Raised by ``_poll_until`` when the conversion deadline is exceeded."""
+    pass

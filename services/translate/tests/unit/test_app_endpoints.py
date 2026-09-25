@@ -78,7 +78,7 @@ def translate_test_client(monkeypatch, tmp_path):
             llm=SimpleNamespace(
                 endpoint="http://vllm:8000",
                 model="granite",
-                api_key=None,
+                api_key=SimpleNamespace(get_secret_value=lambda: ""),
                 max_model_len=32768,
                 max_batch_size=32,
             ),

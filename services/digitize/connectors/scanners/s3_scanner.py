@@ -235,7 +235,7 @@ class S3Scanner(BaseScanner):
         """
         session = boto3.Session(
             aws_access_key_id=self._cfg.access_key_id or None,
-            aws_secret_access_key=self._cfg.secret_access_key or None,
+            aws_secret_access_key=self._cfg.secret_access_key.get_secret_value() or None,
             region_name=self._cfg.effective_region,
         )
 

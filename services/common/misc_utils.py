@@ -271,7 +271,7 @@ def get_llm_endpoint():
             settings.llm.endpoint,
             settings.llm.model,
             settings.llm.max_model_len,
-            settings.llm.api_key,
+            settings.llm.api_key.get_secret_value() or None,
         ),
     }
 

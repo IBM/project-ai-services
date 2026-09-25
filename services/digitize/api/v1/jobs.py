@@ -64,9 +64,7 @@ async def _validate_files(
     response_model=models.JobCreatedResponse,
     responses={
         **http_error_responses,
-        409: {
-            "description": "All submitted files have already been processed.",
-        },
+        409: http_error_responses[409],
     },
     summary="Create async jobs to upload and process documents",
     description=(

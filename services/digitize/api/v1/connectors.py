@@ -46,6 +46,7 @@ from digitize.connectors.encryption import (
     safe_connection_details,
 )
 import digitize.utils.db as db_ops
+from digitize.exceptions import SyncLocked, SyncNotFound
 from digitize.settings import settings
 
 router = APIRouter()
@@ -616,13 +617,6 @@ async def get_connector(connector_id: str):
 # ---------------------------------------------------------------------------
 
 
-class SyncNotFound(Exception):
-    """Raised by dispatch_sync when the connector does not exist."""
-
-
-class SyncLocked(Exception):
-    """Raised by dispatch_sync when the connector cannot accept a new sync
-    (DELETE_PENDING or a cancellation already in progress)."""
 
 
 async def dispatch_sync(connector_id: str) -> int:
