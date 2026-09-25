@@ -70,14 +70,6 @@ Additional license text: https://github.com/ijl/orjson/blob/3.11.7/LICENSE-APACH
 Additional license text: https://github.com/ijl/orjson/blob/3.11.7/LICENSE-MIT
 
 The following components are separately licensed under the MPL-2.0 (https://www.mozilla.org/en-US/MPL/2.0/) and MIT (https://opensource.org/licenses/MIT) licenses:
-tqdm 4.67.3
-Source: https://github.com/tqdm/tqdm/tree/v4.67.3  
-License text: https://github.com/tqdm/tqdm/blob/v4.67.3/LICENCE
-
-tqdm 4.68.2 
-Source: https://github.com/tqdm/tqdm/tree/v4.68.2 
-License text: https://github.com/tqdm/tqdm/blob/v4.68.2/LICENCE
-
 tqdm 4.70.1
 Source: https://github.com/tqdm/tqdm/tree/v4.70.1
 License text: https://github.com/tqdm/tqdm/blob/v4.70.1/LICENCE
