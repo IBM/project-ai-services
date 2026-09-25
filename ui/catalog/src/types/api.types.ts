@@ -230,10 +230,15 @@ export interface DeploymentServiceData {
   description: string;
   serviceVersion: string;
   largeLanguageModel?: string;
-  inferenceBackend: string;
+  inferenceBackend?: string;
   embeddingModel?: string;
   vectorStore?: string;
   rankerModel?: string;
+  customComponents?: Array<{
+    label: string;
+    model?: string;
+    providerName?: string;
+  }>;
 }
 
 export interface DeployIntegrationEndpoints {

@@ -203,6 +203,29 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       }
     }
 
+    // Validate credential fields for custom component providers.
+    // Credentials are stored in componentConfig.params (not serviceConfig.params).
+    for (const field of fields) {
+      if (!field.isCustomComponent) continue;
+      const componentType = String(field.key);
+      const selectedProviderId =
+        currentConfig.components?.[componentType]?.providerId ?? "";
+      if (!selectedProviderId) continue;
+      const customSchema =
+        providerParamsByType[componentType]?.[selectedProviderId];
+      if (!customSchema?.properties) continue;
+      const customFields = parseSchema(customSchema);
+      for (const f of customFields) {
+        if (f.key === "model") continue;
+        const value =
+          currentConfig.components?.[componentType]?.params?.[f.key];
+        const error = validateField(value, f);
+        if (error) {
+          errors[f.key] = error;
+        }
+      }
+    }
+
     return errors;
   };
 
@@ -351,6 +374,144 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       {!isEditing ? (
         <div className={styles.serviceConfigContent}>
           {fields.map((field) => {
+            // Custom component: model row first, then backend row (matches LLM pattern)
+            if (field.isCustomComponent) {
+              const modelId = config.components?.[field.key]?.params?.model as
+                | string
+                | undefined;
+              const modelName =
+                field.options.find((m) => m.id === modelId)?.text ??
+                modelId ??
+                "";
+              const providerId = config.components?.[field.key]?.providerId;
+              const providerName =
+                field.providerOptions?.find((p) => p.id === providerId)?.text ??
+                providerId ??
+                "";
+              const componentParams =
+                config.components?.[field.key]?.params ?? {};
+              const customComponentSchemas =
+                providerParamsByType[String(field.key)] ?? {};
+              const customProviderSchema = providerId
+                ? customComponentSchemas[providerId]
+                : undefined;
+
+              // No model options and no schema → show only the backend/provider row
+              // (same pattern as vector store).
+              const hasModelOptions = field.options.length > 0;
+              return (
+                <Fragment key={field.key}>
+                  {hasModelOptions && (
+                    <div className={styles.serviceConfigItem}>
+                      <span className={styles.serviceConfigItemLabel}>
+                        {field.label}
+                      </span>
+                      <span className={styles.serviceConfigItemValue}>
+                        {modelName}
+                      </span>
+                    </div>
+                  )}
+                  <div className={styles.serviceConfigItem}>
+                    <span className={styles.serviceConfigItemLabel}>
+                      {hasModelOptions ? `${field.label} Backend` : field.label}
+                    </span>
+                    <span className={styles.serviceConfigItemValue}>
+                      {providerName}
+                    </span>
+                  </div>
+                  {/* Credential params for the selected custom component backend (read-only).
+                      Iterate schema properties (not componentParams) so required fields
+                      that are still empty show "Required — Click Edit to add" instead of
+                      being silently invisible. */}
+                  {customProviderSchema?.properties &&
+                    Object.entries(
+                      customProviderSchema.properties as Record<
+                        string,
+                        { title?: string; format?: string; default?: unknown }
+                      >,
+                    )
+                      .filter(([key]) => key !== "model")
+                      .map(([key, property]) => {
+                        const value = componentParams[key];
+                        const label = property?.title || key;
+                        const isPassword = property?.format === "password";
+                        const isValueEmpty =
+                          value === undefined ||
+                          value === null ||
+                          String(value).trim() === "";
+                        const isRequired = Array.isArray(
+                          customProviderSchema.required,
+                        )
+                          ? customProviderSchema.required.includes(key)
+                          : false;
+                        if (
+                          !isValueEmpty &&
+                          property?.default !== undefined &&
+                          value === property.default
+                        ) {
+                          return null;
+                        }
+                        if (isValueEmpty && !isRequired) return null;
+
+                        return (
+                          <div
+                            key={`${String(field.key)}-cred-${key}`}
+                            className={styles.serviceConfigItem}
+                          >
+                            <span className={styles.serviceConfigItemLabel}>
+                              {label}
+                            </span>
+                            <span className={styles.serviceConfigItemValue}>
+                              {isValueEmpty ? (
+                                <span className={styles.requiredMessage}>
+                                  Required — Click Edit to add
+                                </span>
+                              ) : isPassword ? (
+                                <>
+                                  <span className={styles.apiKeyValue}>
+                                    {showPasswords[
+                                      `${String(field.key)}-cred-${key}`
+                                    ]
+                                      ? String(value)
+                                      : "•".repeat(20)}
+                                  </span>
+                                  <Button
+                                    kind="ghost"
+                                    size="sm"
+                                    hasIconOnly
+                                    renderIcon={
+                                      showPasswords[
+                                        `${String(field.key)}-cred-${key}`
+                                      ]
+                                        ? ViewOff
+                                        : View
+                                    }
+                                    iconDescription={
+                                      showPasswords[
+                                        `${String(field.key)}-cred-${key}`
+                                      ]
+                                        ? "Hide"
+                                        : "Show"
+                                    }
+                                    onClick={() =>
+                                      togglePasswordVisibility(
+                                        `${String(field.key)}-cred-${key}`,
+                                      )
+                                    }
+                                    className={styles.apiKeyToggle}
+                                  />
+                                </>
+                              ) : (
+                                String(value)
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                </Fragment>
+              );
+            }
+
             let value: string | undefined;
 
             if (field.globalValue !== undefined) {
@@ -381,7 +542,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             );
           })}
 
-          {/* Inference backend row — shown when an isModelFirst inference component is selected */}
+          {/* Inference backend row (read-only view) */}
           {inferenceComponent &&
             inferenceComponentType &&
             (() => {
@@ -410,6 +571,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           {/* Render component configuration parameters */}
           {fields.map((field) => {
             if (field.key === "version" || field.readonly) return null;
+            // Custom components render their own credential rows inside the isCustomComponent
+            // Fragment above — skip them here to avoid showing params twice.
+            if (field.isCustomComponent) return null;
 
             const componentConfig = config.components?.[field.key];
             if (!componentConfig?.params) return null;
@@ -635,6 +799,206 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
         <>
           <div className={styles.serviceConfigFieldRow}>
             {fields.map((field, index) => {
+              // Custom component: model-first then backend — exactly mirrors LLM flow.
+              // field.options = flat model list across all providers (LLMOption[]).
+              // field.providerOptions = all providers for the backend dropdown.
+              if (field.isCustomComponent) {
+                const selectedModelId = currentConfig?.components?.[field.key]
+                  ?.params?.model as string | undefined;
+                const selectedModelItem =
+                  field.options.find((m) => m.id === selectedModelId) ?? null;
+
+                const selectedProviderId =
+                  currentConfig?.components?.[field.key]?.providerId ?? "";
+
+                // Find providers that carry the selected model by checking each
+                // provider's schema in providerParamsByType. This correctly handles
+                // the case where the same model const appears in multiple providers —
+                // unlike field.options which is deduplicated by fetchComponentModelsWithSchemas.
+                const componentSchemas =
+                  providerParamsByType[String(field.key)] ?? {};
+                const supportingProviderIds = selectedModelId
+                  ? new Set(
+                      (field.providerOptions ?? [])
+                        .filter((p) => {
+                          const schema = componentSchemas[p.id];
+                          return schema?.properties?.model?.oneOf?.some(
+                            (entry) => entry.const === selectedModelId,
+                          );
+                        })
+                        .map((p) => p.id),
+                    )
+                  : null;
+
+                const backendOptions = (field.providerOptions ?? []).filter(
+                  (p) =>
+                    supportingProviderIds
+                      ? supportingProviderIds.has(p.id)
+                      : true,
+                );
+
+                const selectedBackendItem =
+                  backendOptions.find((p) => p.id === selectedProviderId) ??
+                  null;
+
+                // Helper: find supporting providers for a given model using schemas.
+                const getSupportingProviders = (modelId: string): string[] =>
+                  (field.providerOptions ?? [])
+                    .filter((p) => {
+                      const schema = componentSchemas[p.id];
+                      return schema?.properties?.model?.oneOf?.some(
+                        (entry) => entry.const === modelId,
+                      );
+                    })
+                    .map((p) => p.id);
+
+                // No model options → show only the backend/provider dropdown
+                // (same single-dropdown pattern as vector store).
+                const hasModelOptions = field.options.length > 0;
+                return (
+                  <Fragment key={`${String(field.key)}-custom`}>
+                    {/* Model dropdown — only when model options exist */}
+                    {hasModelOptions && (
+                      <div>
+                        <Dropdown
+                          id={`${serviceName}-${String(field.key)}-model`}
+                          titleText={field.label}
+                          label="Choose an option"
+                          invalid={!selectedModelItem}
+                          invalidText={`Provide a valid ${field.label}`}
+                          items={field.options}
+                          itemToString={(item) => (item ? item.text : "")}
+                          selectedItem={selectedModelItem}
+                          onChange={({ selectedItem }) => {
+                            const newModelId = selectedItem?.id ?? "";
+                            const supporting =
+                              getSupportingProviders(newModelId);
+                            // Keep current provider if compatible, else switch to first
+                            const newProviderId = supporting.includes(
+                              selectedProviderId,
+                            )
+                              ? selectedProviderId
+                              : (supporting[0] ?? "");
+                            onUpdateConfig({
+                              components: {
+                                ...currentConfig?.components,
+                                [field.key]: {
+                                  providerId: newProviderId,
+                                  params: { model: newModelId },
+                                },
+                              },
+                            });
+                          }}
+                        />
+                      </div>
+                    )}
+                    {/* Backend/provider dropdown — always shown; label adjusts when no model */}
+                    <div>
+                      <Dropdown
+                        id={`${serviceName}-${String(field.key)}-backend`}
+                        titleText={
+                          hasModelOptions
+                            ? `${field.label} Backend`
+                            : field.label
+                        }
+                        label="Choose an option"
+                        invalid={!selectedBackendItem}
+                        invalidText={`Provide a valid ${field.label} Backend`}
+                        items={backendOptions}
+                        itemToString={(item) => (item ? item.text : "")}
+                        selectedItem={selectedBackendItem}
+                        onChange={({ selectedItem }) => {
+                          onUpdateConfig({
+                            components: {
+                              ...currentConfig?.components,
+                              [field.key]: {
+                                providerId: selectedItem?.id ?? "",
+                                params: {
+                                  model: selectedModelId ?? "",
+                                },
+                              },
+                            },
+                          });
+                        }}
+                      />
+                    </div>
+                    {/* Credential fields for the selected custom component backend */}
+                    {(() => {
+                      const customProviderSchema =
+                        componentSchemas[selectedProviderId];
+                      const credentialKeys = customProviderSchema?.properties
+                        ? Object.keys(customProviderSchema.properties).filter(
+                            (key) => key !== "model",
+                          )
+                        : [];
+
+                      return credentialKeys.length > 0 ? (
+                        <>
+                          <div />
+                          <div className={styles.fullWidth}>
+                            <h4 className={styles.cloudCredentialsTitle}>
+                              {selectedBackendItem?.text
+                                ? `${selectedBackendItem.text} credentials`
+                                : "Backend credentials"}
+                            </h4>
+                            <DynamicSchemaFields
+                              componentType={String(field.key)}
+                              providerId={selectedProviderId}
+                              values={
+                                currentConfig?.components?.[field.key]
+                                  ?.params ?? {}
+                              }
+                              onChange={(params) => {
+                                setHasValidationError(false);
+                                setFieldErrors({});
+                                const customKeys = new Set(
+                                  customProviderSchema?.properties
+                                    ? Object.keys(
+                                        customProviderSchema.properties,
+                                      )
+                                    : [],
+                                );
+                                // Keep model and any non-schema params; overwrite
+                                // only keys belonging to this provider's schema.
+                                const mergedParams: Record<string, unknown> =
+                                  {};
+                                Object.entries(
+                                  currentConfig?.components?.[field.key]
+                                    ?.params ?? {},
+                                ).forEach(([key, value]) => {
+                                  if (!customKeys.has(key)) {
+                                    mergedParams[key] = value;
+                                  }
+                                });
+                                Object.entries(params).forEach(
+                                  ([key, value]) => {
+                                    mergedParams[key] = value;
+                                  },
+                                );
+                                onUpdateConfig({
+                                  components: {
+                                    ...currentConfig?.components,
+                                    [field.key]: {
+                                      providerId: selectedProviderId,
+                                      params: mergedParams,
+                                    },
+                                  },
+                                });
+                              }}
+                              providerParamsMap={
+                                componentSchemas as Record<string, JSONSchema>
+                              }
+                              hasValidationError={hasValidationError}
+                              fieldErrors={fieldErrors}
+                            />
+                          </div>
+                        </>
+                      ) : null;
+                    })()}
+                  </Fragment>
+                );
+              }
+
               let fieldValue: string | undefined;
 
               if (field.globalValue !== undefined) {
