@@ -4,11 +4,11 @@ translate:
   database: "translate_metadata"
   resources:
     requests:
-      cpu: "500m"
+      cpu: "250m"
       memory: "512Mi"
     limits:
-      cpu: "500m"
-      memory: "1Gi"
+      cpu: "1000m"
+      memory: "2Gi"
 
 postgres:
   image: icr.io/ai-services-cicd/postgres:18-4
