@@ -1,4 +1,7 @@
 import { Fragment, useReducer, useCallback, useRef } from "react";
+import { api } from "@/api/axios";
+import { APPLICATION_ENDPOINTS } from "@/constants/api-endpoints.constants";
+import type { ApplicationDetailsApiResponse } from "@/types/api.types";
 import { useDeployStore } from "@/store/deploy.store";
 import { PageHeader } from "@carbon/ibm-products";
 import {
@@ -22,6 +25,7 @@ import {
   Tab,
   TabPanels,
   TabPanel,
+  ToastNotification,
 } from "@carbon/react";
 import { Deploy } from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
@@ -57,6 +61,7 @@ import {
   filterRowsBySearch,
   getVisibleHeaders,
 } from "@/components/Table/utils/tableUtils";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 // Generic cell renderer wrapper
 interface RenderCellProps {
@@ -67,6 +72,9 @@ interface RenderCellProps {
   cellKey: string;
   cellProps: Record<string, unknown>;
   rowData?: DigitalAssistantRow;
+  onMenuOpen?: (rowId: string) => Promise<void>;
+  onViewIntegration?: (rowId: string) => void;
+  onLaunchEndpoint?: (rowId: string) => void;
 }
 
 const renderCell = ({
@@ -77,6 +85,9 @@ const renderCell = ({
   cellKey,
   cellProps,
   rowData,
+  onMenuOpen,
+  onViewIntegration,
+  onLaunchEndpoint,
 }: RenderCellProps) => {
   const CellRenderer = CELL_RENDERERS[header as keyof typeof CELL_RENDERERS];
 
@@ -88,6 +99,9 @@ const renderCell = ({
           rowId={rowId}
           dispatch={dispatch}
           rowData={rowData}
+          onMenuOpen={onMenuOpen}
+          onViewIntegration={onViewIntegration}
+          onLaunchEndpoint={onLaunchEndpoint}
         />
       ) : (
         String(value || "")
@@ -288,6 +302,66 @@ const DigitalAssistantsPage = () => {
   // Visible headers for the DataTable (shared utility)
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
+  // Navigate to DeploymentDetails with integration section pre-selected
+  const handleViewIntegration = (rowId: string) => {
+    const row = state.rowsData.find((r) => r.id === rowId);
+    if (!row) return;
+    dispatch({
+      type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,
+      payload: {
+        id: row.id,
+        name: row.name,
+        status: row.status,
+        type: row.type || "Digital assistant",
+      },
+      defaultSection: "integration",
+    } as AppAction);
+  };
+
+  // url cache: rowId → resolved URL, error message string, or undefined (not yet fetched)
+  const endpointCacheRef = useRef<
+    Record<string, { url: string } | { error: string } | undefined>
+  >({});
+
+  const handleMenuOpen = useCallback(async (rowId: string) => {
+    const cached = endpointCacheRef.current[rowId];
+    if (cached && "url" in cached) return;
+    try {
+      const response = await api.get<ApplicationDetailsApiResponse>(
+        APPLICATION_ENDPOINTS.GET_APPLICATION_DETAILS(rowId),
+      );
+      const uiEndpoint = response.data.services
+        ?.find((s) => s.catalog_id === "chat")
+        ?.endpoints?.find((e) => e.type === "ui")?.url;
+      endpointCacheRef.current[rowId] = uiEndpoint
+        ? { url: uiEndpoint }
+        : { error: "No chatbot UI endpoint is available for this deployment." };
+    } catch {
+      endpointCacheRef.current[rowId] = {
+        error: "Could not retrieve the chatbot endpoint. Please try again.",
+      };
+    }
+  }, []);
+
+  const handleLaunchEndpointForRow = useCallback((rowId: string) => {
+    const cached = endpointCacheRef.current[rowId];
+    if (cached && "url" in cached) {
+      window.open(cached.url, "_blank", "noopener,noreferrer");
+    } else if (cached && "error" in cached) {
+      dispatch({
+        type: ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST,
+        payload: cached.error,
+      } as AppAction);
+    } else {
+      // Prefetch not yet complete — should not be reachable since the item is
+      // disabled while isPrefetching, but guard defensively.
+      dispatch({
+        type: ACTION_TYPES.SHOW_LAUNCH_ERROR_TOAST,
+        payload: "Could not retrieve the chatbot endpoint. Please try again.",
+      } as AppAction);
+    }
+  }, []);
+
   // Show DeploymentDetails if a deployment is selected
   if (state.showDeploymentDetails && state.selectedDeployment) {
     return (
@@ -298,6 +372,7 @@ const DigitalAssistantsPage = () => {
           loadApplications();
         }}
         deploymentSource="Digital assistants"
+        defaultSection={state.deploymentDefaultSection}
         onNameUpdate={(newName) =>
           dispatch({
             type: ACTION_TYPES.UPDATE_DEPLOYMENT_NAME,
@@ -334,6 +409,21 @@ const DigitalAssistantsPage = () => {
           dispatch({ type: "SHARED_HIDE_EXPORT_TOAST" })
         }
       />
+      {state.launchErrorToastOpen && (
+        <ToastNotification
+          aria-label="close notification"
+          kind="error"
+          title="Launch service endpoint failed"
+          subtitle={state.launchErrorToastMessage}
+          onCloseButtonClick={() =>
+            dispatch({
+              type: ACTION_TYPES.HIDE_LAUNCH_ERROR_TOAST,
+            } as AppAction)
+          }
+          className={sharedStyles.customToast}
+          hideCloseButton={false}
+        />
+      )}
 
       <Tabs>
         <PageHeader
@@ -475,6 +565,11 @@ const DigitalAssistantsPage = () => {
                                                 cellKey,
                                                 cellProps,
                                                 rowData: originalRow,
+                                                onMenuOpen: handleMenuOpen,
+                                                onViewIntegration:
+                                                  handleViewIntegration,
+                                                onLaunchEndpoint:
+                                                  handleLaunchEndpointForRow,
                                               });
                                             })}
                                           </TableExpandRow>

@@ -12,5 +12,5 @@ backend:
     rerank: true
     systemPrompt: ""
 mcp:
-  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.2
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.3
   port: "5001"

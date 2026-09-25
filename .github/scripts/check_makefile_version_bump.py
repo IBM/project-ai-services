@@ -34,6 +34,7 @@ COMPONENTS = [
     ("ui/catalog", "catalog-ui"),
     # Ai Services
     ("ai-services", "ai-services"),
+    ("mcp", "ai-services-mcp"),
 ]
 
 # Paths that don't require version bumps when modified
