@@ -54,29 +54,31 @@ func WorkerNameFromCert(tlsDir string) (string, error) {
 
 // ResolveWorkerName returns the name this node is registered under in the
 // catalog by exec-ing into the running worker pod and reading the CN from its
-// mTLS certificate. Falls back to workerconstants.LocalWorkerName when the
-// worker pod is not running or the cert cannot be read.
+// mTLS certificate.
 // Works on both Podman and OpenShift runtimes.
-func ResolveWorkerName(ctx context.Context, rt runtime.Runtime) string {
+func ResolveWorkerName(ctx context.Context, rt runtime.Runtime) (string, error) {
 	pods, err := rt.ListPods(ctx, map[string][]string{
 		"label": {workerconstants.WorkerPodLabel},
 	})
-	if err != nil || len(pods) == 0 {
-		return workerconstants.LocalWorkerName
+	if err != nil {
+		return "", fmt.Errorf("list worker pods: %w", err)
+	}
+	if len(pods) == 0 {
+		return "", fmt.Errorf("no worker pods found")
 	}
 
 	certPEM, err := rt.ExecInContainerWithCmd(ctx, pods[0].Name, "worker",
 		[]string{"cat", workerconstants.WorkerTLSDir + "/tls.crt"})
 	if err != nil {
-		return workerconstants.LocalWorkerName
+		return "", fmt.Errorf("read worker tls.crt from container: %w", err)
 	}
 
 	name, err := workerNameFromCertPEM([]byte(strings.TrimSpace(certPEM)))
 	if err != nil {
-		return workerconstants.LocalWorkerName
+		return "", fmt.Errorf("extract worker name from tls.crt: %w", err)
 	}
 
-	return name
+	return name, nil
 }
 
 // workerNameFromCertPEM parses a PEM-encoded certificate and returns the CN.

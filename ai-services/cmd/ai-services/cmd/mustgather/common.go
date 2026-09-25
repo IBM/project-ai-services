@@ -184,7 +184,7 @@ func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalog
 
 		// Skip apps whose pods live on a different worker.
 		if !strings.EqualFold(psResp.WorkerName, workerName) {
-			logger.DebugfCtx(ctx, "Skipping application %q: assigned to worker %q, not %q\n",
+			logger.InfofCtx(ctx, "Skipping application %q: assigned to worker %q, not %q. If this application is needed then please run the command on that worker itself.\n",
 				app.Name, psResp.WorkerName, workerName)
 
 			continue
