@@ -51,7 +51,7 @@ func newOpenshiftGatherer() *openshiftGatherer {
 func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (string, error) {
 	logger.InfolnCtx(ctx, "Starting must-gather for OpenShift runtime…")
 
-	// catalogClient is scoped to the fixed catalog namespace ("ai-services").
+	// catalogCl is scoped to the fixed catalog namespace ("ai-services").
 	catalogCl, err := openshiftRuntime.NewOpenshiftClientWithNamespace(catalogConstants.CatalogAppName)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to OpenShift cluster: %w", err)
@@ -70,28 +70,55 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 		logger.WarningfCtx(ctx, "Failed to check catalog installation: %v\n", err)
 	}
 
-	// appNamespaces holds the derived namespace for every application that will
-	// be collected. Populated from the catalog API below.
 	var appNamespaces []string
-
 	if catalogInstalled {
-		g.collectCatalogArtifacts(ctx, catalogCl, outDir)
-		if isLocalWorker, err := workercommon.IsOpenShiftLocalWorker(ctx, catalogCl); err != nil {
-			logger.WarningfCtx(ctx, "Failed to check local worker: %v\n", err)
-		} else if isLocalWorker {
-			g.collectWorkerArtifacts(ctx, catalogCl, outDir)
-			appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
-		}
+		appNamespaces = g.collectCatalogInstalled(ctx, catalogCl, outDir, opts.applicationName)
 	} else {
-		logger.InfolnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+". Collecting worker and application pods...")
-		g.collectWorkerArtifacts(ctx, catalogCl, outDir)
-		appNamespaces = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		appNamespaces = g.collectWorkerOnly(ctx, catalogCl, outDir, opts.applicationName)
 	}
 
 	// System info is collected from the cluster.
 	g.collectSystemInfo(ctx, catalogCl, outDir)
 
 	// Always collected from every application namespace — each written into applications/<ns>/.
+	g.collectAppNamespaceArtifacts(ctx, outDir, appNamespaces)
+
+	return outDir, nil
+}
+
+func (g *openshiftGatherer) collectCatalogInstalled(ctx context.Context, catalogCl *openshiftRuntime.OpenshiftClient, outDir, appName string) []string {
+	g.collectCatalogArtifacts(ctx, catalogCl, outDir)
+
+	isLocalWorker, err := workercommon.IsOpenShiftLocalWorker(ctx, catalogCl)
+	if err != nil {
+		logger.WarningfCtx(ctx, "Failed to check local worker: %v\n", err)
+
+		return nil
+	}
+	if isLocalWorker {
+		g.collectWorkerArtifacts(ctx, catalogCl, outDir)
+
+		return collectApplicationPods(ctx, g, outDir, appName, workerConstants.LocalWorkerName)
+	}
+
+	return nil
+}
+
+func (g *openshiftGatherer) collectWorkerOnly(ctx context.Context, catalogCl *openshiftRuntime.OpenshiftClient, outDir, appName string) []string {
+	logger.InfolnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+". Collecting worker and application pods...")
+	g.collectWorkerArtifacts(ctx, catalogCl, outDir)
+
+	workerName, err := workercommon.ResolveWorkerName(ctx, catalogCl)
+	if err != nil {
+		logger.WarningfCtx(ctx, "Failed to resolve worker name: %v\n", err)
+
+		return nil
+	}
+
+	return collectApplicationPods(ctx, g, outDir, appName, workerName)
+}
+
+func (g *openshiftGatherer) collectAppNamespaceArtifacts(ctx context.Context, outDir string, appNamespaces []string) {
 	for _, ns := range appNamespaces {
 		appCl, err := openshiftRuntime.NewOpenshiftClientWithNamespace(ns)
 		if err != nil {
@@ -107,8 +134,6 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 		g.collectVolumeInfo(ctx, appCl, "pvcs.json", appNSDir)
 		g.collectInferenceServiceInfo(ctx, appCl, appNSDir)
 	}
-
-	return outDir, nil
 }
 
 // ── catalog artifact collection ───────────────────────────────────────────────

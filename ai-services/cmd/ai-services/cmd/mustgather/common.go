@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,9 +117,11 @@ type podCollector interface {
 
 // collectApplicationPods uses the catalog API to discover pod names for every
 // application (or a single named one) and delegates per-pod collection to pc.
-// On OpenShift, pods for each app are written into namespaces/<ns>/pods/.
+// Only applications assigned to workerName are collected — pods owned by other
+// workers are skipped to avoid inspecting pods that do not exist on this node.
+// On OpenShift, pods for each app are written into applications/<ns>/pods/.
 // On Podman, pods are written into a shared pods/ directory (no namespaces).
-func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName string) []string {
+func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appName, workerName string) []string {
 	appClient, err := catalogClient.NewApplicationClient(ctx)
 	if err != nil {
 		logger.WarningfCtx(ctx, "Catalog client unavailable, skipping application pod collection: %v\n", err)
@@ -131,7 +134,7 @@ func collectApplicationPods(ctx context.Context, pc podCollector, outDir, appNam
 		return nil
 	}
 
-	return collectPodsForApps(ctx, pc, appClient, outDir, apps)
+	return collectPodsForApps(ctx, pc, appClient, outDir, apps, workerName)
 }
 
 // fetchApplicationsForGather fetches the application list from the catalog API
@@ -163,16 +166,30 @@ func fetchApplicationsForGather(ctx context.Context, appClient *catalogClient.Ap
 }
 
 // collectPodsForApps iterates over apps, fetches their PS data from the catalog
-// API, and calls pc.collectPod for each pod name returned.
-//
-// On OpenShift, pods are written into outDir/namespaces/<ns>/pods/ so each
-// application's pods are grouped under their namespace directory.
+// API, and calls pc.collectPod for each pod returned.
+// Apps assigned to a different worker than workerName are skipped.
+// On OpenShift, pods are written into outDir/applications/<ns>/pods/ grouped by namespace.
 // On Podman, appNamespace is always empty so pods fall back to outDir/pods/.
-func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalogClient.ApplicationClient, outDir string, apps []catalogTypes.Application) []string {
+func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalogClient.ApplicationClient, outDir string, apps []catalogTypes.Application, workerName string) []string {
 	seen := make(map[string]struct{})
 	var namespaces []string
 
 	for _, app := range apps {
+		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
+		if err != nil {
+			logger.WarningfCtx(ctx, "Failed to get PS for application %q: %v\n", app.Name, err)
+
+			continue
+		}
+
+		// Skip apps whose pods live on a different worker.
+		if !strings.EqualFold(psResp.WorkerName, workerName) {
+			logger.InfofCtx(ctx, "Skipping application %q: assigned to worker %q, not %q. If this application is needed then please run the command on that worker itself.\n",
+				app.Name, psResp.WorkerName, workerName)
+
+			continue
+		}
+
 		// Derive the app-scoped namespace (OpenShift only; Podman ignores it).
 		appNamespace := appNamespaceForID(ctx, app)
 
@@ -187,13 +204,6 @@ func collectPodsForApps(ctx context.Context, pc podCollector, appClient *catalog
 
 		if err := os.MkdirAll(podsDir, dirPerm); err != nil {
 			logger.WarningfCtx(ctx, "Failed to create pods directory for app %q: %v\n", app.Name, err)
-
-			continue
-		}
-
-		psResp, err := appClient.GetApplicationPS(ctx, app.ID)
-		if err != nil {
-			logger.WarningfCtx(ctx, "Failed to get PS for application %q: %v\n", app.Name, err)
 
 			continue
 		}

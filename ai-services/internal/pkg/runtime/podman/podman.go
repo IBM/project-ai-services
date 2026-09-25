@@ -946,11 +946,11 @@ func (pc *PodmanClient) ManageSidecarLifecycle(podID, sidecarName, image string,
 	return executor(pc.Context, containerID)
 }
 
-// ExecInContainerWithCmd is not implemented for the Podman runtime.
-func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, _, _ string, _ []string) (string, error) {
-	logger.Errorf("unsupported method called!")
-
-	return "", fmt.Errorf("unsupported method")
+// ExecInContainerWithCmd executes a command in the named container inside the
+// given pod and returns stdout. On Podman, the container is addressed as
+// "<podName>-<containerName>" (the naming convention Podman uses for pod members).
+func (pc *PodmanClient) ExecInContainerWithCmd(_ context.Context, podName, containerName string, cmd []string) (string, error) {
+	return pc.ExecInContainerWithOutput(podName+"-"+containerName, cmd)
 }
 
 // WaitForInferenceServiceReady is a no-op for Podman — KServe InferenceServices
