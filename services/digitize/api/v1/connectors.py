@@ -338,22 +338,68 @@ async def delete_connector(connector_id: str):
         )
 
 
+# How long teardown waits for the connector's jobs to reach a terminal state
+# after requesting cancellation, and how often it polls.
+_TEARDOWN_JOB_WAIT_TIMEOUT_S = 300
+_TEARDOWN_JOB_POLL_INTERVAL_S = 2
+
+
+async def _cancel_connector_jobs_and_wait(connector_id: str) -> Optional[str]:
+    """
+    Request cancellation of every non-terminal job owned by *connector_id* and
+    wait until all of them have reached a terminal state.
+
+    Returns ``None`` once no active job remains, or an error message if the
+    jobs could not be verified as terminal within the timeout (stuck/crashed
+    cancellation) so the caller can refuse to finish the teardown.
+    """
+    from digitize.db.manager import db_manager
+    from digitize.models import JobStatus
+    from digitize.utils.jobs import request_job_cancellation
+
+    job_ids = db_manager.get_active_job_ids_for_connector(connector_id)
+    if job_ids is None:
+        return "could not determine active jobs"
+
+    for job_id in job_ids:
+        job = db_manager.get_job_by_id(job_id)
+        # CANCEL_PENDING: cancellation already requested — just wait for it.
+        if job is not None and job.status != JobStatus.CANCEL_PENDING.value:
+            request_job_cancellation(job_id, clean_files=True)
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _TEARDOWN_JOB_WAIT_TIMEOUT_S
+    while True:
+        job_ids = db_manager.get_active_job_ids_for_connector(connector_id)
+        if job_ids is not None and not job_ids:
+            return None
+        if loop.time() >= deadline:
+            return (
+                "job cancellation did not complete in "
+                f"{_TEARDOWN_JOB_WAIT_TIMEOUT_S}s"
+                + (f" for job(s): {', '.join(job_ids)}" if job_ids else "")
+            )
+        await asyncio.sleep(_TEARDOWN_JOB_POLL_INTERVAL_S)
+
+
 async def _run_teardown(connector_id: str) -> None:
     """
     Teardown for connector deletion.
 
     Scheduled via asyncio.create_task from the delete endpoint (Case B — no
     tick running). Awaited directly from _handle_interrupt in sync_tick
-    (Case A — tick interrupted). In Case A the caller is responsible for
-    purging in-flight conversion tasks *before* calling this function, since
-    no tick is running when _run_teardown executes in Case B.
+    (Case A — tick interrupted).
 
     Steps:
       1. Remove the scheduled job so no new ticks fire
-      2. Snapshot checksums owned by this connector
-      3. Remove ownership rows; delete documents when last owner
-      4. Sweep residual batch staging directories
-      5. Delete the connector row (cascades to connector_sync_logs)
+      2. Cancel the connector's active jobs and wait for them to reach a
+         terminal state; if they don't, the connector is NOT deleted
+      3. Snapshot checksums owned by this connector
+      4. Remove ownership rows; delete documents when last owner
+      5. Delete docs created for this connector that no connector owns
+         (never registered in connector_document_checksum)
+      6. Sweep residual batch staging directories
+      7. Delete the connector row (cascades to connector_sync_logs)
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
     deletion_errors: list[str] = []
@@ -368,7 +414,20 @@ async def _run_teardown(connector_id: str) -> None:
                 f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
             )
 
-        # Steps 2+3: remove checksum ownership; delete orphaned documents
+        # Step 2: cancel active jobs and make sure they actually reached a
+        # terminal state before any document is touched.  If cancellation is
+        # stuck, keep the connector (DELETE_PENDING) rather than deleting it
+        # silently and orphaning mid-flight documents.
+        job_wait_error = await _cancel_connector_jobs_and_wait(connector_id)
+        if job_wait_error:
+            error_msg = f"Failed to delete connector, error: {job_wait_error}"
+            db_ops.set_connector_message(connector_id, error_msg)
+            logger.warning(
+                f"Skipping teardown for {connector_id!r}: {error_msg}"
+            )
+            return
+
+        # Steps 3+4: remove checksum ownership; delete orphaned documents
         owned_checksums = db_ops.list_connector_checksums(connector_id)
         checksum_removal_failures, doc_deletion_failures = _remove_checksums(
             connector_id, owned_checksums
@@ -382,7 +441,22 @@ async def _run_teardown(connector_id: str) -> None:
                 f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
             )
 
-        # Step 4: sweep any residual batch staging directories
+        # Step 5: delete docs created for this connector's batches that no
+        # connector owns, e.g. mid-flight or cancelled docs that never reached
+        # add_connector_checksum_entry.  Safe now that all jobs are terminal.
+        unregistered_doc_ids = _get_unregistered_connector_docs(connector_id)
+        if unregistered_doc_ids:
+            logger.info(
+                f"Connector {connector_id!r}: cleaning up {len(unregistered_doc_ids)} "
+                f"unregistered document(s)"
+            )
+        for doc_id in unregistered_doc_ids:
+            if not _best_effort_delete_document(doc_id):
+                deletion_errors.append(
+                    f"unregistered document deletion failed for doc_id={doc_id!r}"
+                )
+
+        # Step 6: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
             deletion_errors.append("staging directory sweep failed")
 
@@ -392,7 +466,7 @@ async def _run_teardown(connector_id: str) -> None:
             logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
-        # Step 5: delete the connector row (cascades to connector_sync_logs)
+        # Step 7: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
@@ -443,6 +517,19 @@ def _remove_checksums(
                 exc_info=True,
             )
     return checksum_removal_failures, doc_deletion_failures
+
+
+def _get_unregistered_connector_docs(connector_id: str) -> list[str]:
+    """
+    Return doc_ids created for *connector_id* that were never registered in
+    ``connector_document_checksum``.
+
+    These are documents from in-flight batches that were cancelled before
+    ``add_connector_checksum_entry`` ran. Delegates to the DB manager query
+    so the JOIN logic stays in one place.
+    """
+    from digitize.db.manager import db_manager
+    return db_manager.get_unregistered_connector_doc_ids(connector_id)
 
 
 def _best_effort_delete_document(doc_id: str) -> bool:
