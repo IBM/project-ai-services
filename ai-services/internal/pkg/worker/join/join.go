@@ -68,10 +68,10 @@ const (
 // bootstrap token, and holds the CommandStream open.
 func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, opts workertypes.GrpcStreamOptions) error {
 	if opts.GatewayAddr == "" {
-		return fmt.Errorf("worker join: gateway address is required (e.g. gateway.10.0.0.1.nip.io:9090)")
+		return fmt.Errorf("worker join: gateway address is required (e.g. gateway.10.0.0.1.nip.io:9191)")
 	}
 	if _, _, err := net.SplitHostPort(opts.GatewayAddr); err != nil {
-		return fmt.Errorf("worker join: invalid gateway address %q — must be host:port (e.g. gateway.10.0.0.1.nip.io:9090)", opts.GatewayAddr)
+		return fmt.Errorf("worker join: invalid gateway address %q — must be host:port (e.g. gateway.10.0.0.1.nip.io:9191)", opts.GatewayAddr)
 	}
 
 	tlsDir := workerconstants.WorkerTLSDir

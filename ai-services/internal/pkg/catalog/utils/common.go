@@ -32,7 +32,7 @@ type PodmanConfigureOptions struct {
 	SSLCertPath       string // Path to user-provided SSL certificate
 	SSLKeyPath        string // Path to user-provided SSL private key
 	HttpsPort         int
-	WorkerGatewayPort int  // gRPC worker gateway port; always active, default 9090
+	WorkerGatewayPort int  // gRPC worker gateway port; always active, default 9191
 	SkipLocalWorker   bool // When true, skip joining this machine as the Local worker
 }
 

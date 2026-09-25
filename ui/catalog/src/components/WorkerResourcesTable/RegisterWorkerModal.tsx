@@ -40,7 +40,7 @@ const RegisterWorkerModal = ({
 
   const runCommand = useMemo(() => {
     if (!isSuccess) return "";
-    const gateway = gatewayAddress || "<catalog-host>:9090";
+    const gateway = gatewayAddress || "<catalog-host>:9191";
     return [
       `ai-services worker join ${gateway} \\`,
       `  --token "${token}" \\`,

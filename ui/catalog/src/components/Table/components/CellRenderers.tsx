@@ -88,7 +88,8 @@ export const STATUS_CONFIG = {
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
-  // Transient state while the connector record is being deleted on the service pod
+  // The backend API filters out "delete pending" rows before they reach the UI.
+  // Kept as a fallback.
   "delete pending": {
     tagType: "blue" as const,
     icon: InProgress,
