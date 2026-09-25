@@ -17,7 +17,7 @@ const ConnectorFieldLabel = ({
   <div className={styles.labelWithInfo}>
     <span>{text}</span>
     {description && (
-      <Toggletip align="top">
+      <Toggletip align="top-start" autoAlign>
         <ToggletipButton label="Additional information">
           <Information />
         </ToggletipButton>

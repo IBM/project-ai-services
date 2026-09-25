@@ -47,7 +47,7 @@ const DeleteConfirmNameModal = ({
   onClose,
 }: DeleteConfirmNameModalProps) => {
   const inputId = useId();
-  const nameMatches = confirmValue === itemName;
+  const nameMatches = Boolean(itemName) && confirmValue === itemName;
 
   return (
     <Modal
@@ -56,7 +56,7 @@ const DeleteConfirmNameModal = ({
       modalHeading={heading}
       primaryButtonText={isDeleting ? "Removing..." : "Remove"}
       secondaryButtonText="Cancel"
-      danger
+      danger={nameMatches}
       primaryButtonDisabled={!nameMatches || isDeleting}
       onRequestClose={() => {
         if (!isDeleting) {
@@ -95,7 +95,7 @@ const DeleteConfirmNameModal = ({
 
         <TextInput
           id={inputId}
-          labelText={`Type [${itemName}] to confirm`}
+          labelText={`Type ${itemName} to confirm`}
           value={confirmValue}
           onChange={(e) => onConfirmValueChange(e.target.value)}
           disabled={isDeleting}
