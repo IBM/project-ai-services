@@ -19,4 +19,30 @@ jobs:
     with:
       working-directory: 'ai-services'
       test-tags: 'exclude_graphdriver_btrfs containers_image_openpgp remote'
-      run-swagger-check: true
+
+  swagger-check:
+    name: Verify Swagger Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: 'ai-services/go.mod'
+
+      - name: Install swag CLI
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Check Swagger format and docs are up to date
+        working-directory: ai-services
+        run: |
+          make swagger-fmt
+          make swagger
+          if ! git diff --exit-code; then
+            echo "❌ Swagger comments or docs are out of date. Run 'make swagger-fmt && make swagger' and commit the changes."
+            git diff
+            exit 1
+          fi
+          echo "✅ Swagger comments and documentation are up to date!"

@@ -12,12 +12,6 @@ on:
         required: false
         type: string
         default: ''
-      run-swagger-check:
-        description: 'Whether to run the Swagger documentation check'
-        required: false
-        type: boolean
-        default: false
-
 jobs:
   build:
     name: Build
@@ -49,34 +43,6 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: |
           GOOS=linux GOARCH=ppc64le make binary
-
-  swagger-check:
-    name: Verify Swagger Documentation
-    runs-on: ubuntu-latest
-    if: ${{ inputs.run-swagger-check }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Setup Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: '${{ inputs.working-directory }}/go.mod'
-
-      - name: Install swag CLI
-        run: go install github.com/swaggo/swag/cmd/swag@latest
-
-      - name: Check Swagger format and docs are up to date
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          make swagger-fmt
-          make swagger
-          if ! git diff --exit-code; then
-            echo "❌ Swagger comments or docs are out of date. Run 'make swagger-fmt && make swagger' and commit the changes."
-            git diff
-            exit 1
-          fi
-          echo "✅ Swagger comments and documentation are up to date!"
 
   unit-tests:
     name: Unit Tests
