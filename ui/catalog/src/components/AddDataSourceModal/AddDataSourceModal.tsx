@@ -213,11 +213,11 @@ const AddDataSourceModal = ({
       }
 
       // B: word scan — only within the prefix section to avoid cross-section hits.
-      if (
-        !matched &&
-        (!prefixSection || field.sectionTitle === prefixSection)
-      ) {
-        matched = new RegExp(`\\b${field.key}\\b`).test(message);
+      // Separators in field.key are made flexible ([\s_-]*) so that a key like
+      // "private_key" matches both "private_key" and "private key" in Go messages.
+      if (!matched && prefixSection && field.sectionTitle === prefixSection) {
+        const keyPattern = field.key.split("_").join("[\\s_-]*");
+        matched = new RegExp(`\\b${keyPattern}\\b`).test(message);
       }
 
       if (matched) {
