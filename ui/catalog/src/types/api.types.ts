@@ -221,7 +221,6 @@ export interface DeploymentDetails {
   name: string;
   status: string;
   type: string;
-  resources: ResourceAllocation[];
   acceleratorCards?: AcceleratorCards[];
 }
 
