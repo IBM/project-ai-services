@@ -531,12 +531,24 @@ async def launch_ingest_pipeline(
     except JobCancelledError:
         logger.info(f"Ingestion job {job_id} was cancelled")
 
-        # Clean vector DB before marking docs CANCELLED so the filter on
-        # CHUNKED/COMPLETED statuses still reflects pre-cancellation state.
-        vdb_cleaned = False
+        # Resolve the job row once — used for clean_files flag and source check.
+        job_row = None
         try:
             job_row = db_manager.get_job_by_id(job_id)
-            if job_row and job_row.stats.get("clean_files"):
+        except Exception as jr_exc:
+            logger.warning(f"Could not fetch job row for cancelled job {job_id}: {jr_exc}")
+
+        clean_files: bool = bool(job_row and job_row.stats and job_row.stats.get("clean_files"))
+        is_connector_job: bool = bool(
+            job_row and job_row.source == JobSource.CONNECTOR.value
+        )
+
+        # Step A: Remove already-indexed VDB chunks when clean_files=True.
+        # Done before marking docs CANCELLED so the CHUNKED/COMPLETED filter
+        # still reflects pre-cancellation state.
+        vdb_cleaned = False
+        if clean_files:
+            try:
                 import common.db_utils as db_utils
                 indexed_statuses = {
                     models.DocStatus.CHUNKED.value,
@@ -550,13 +562,45 @@ async def launch_ingest_pipeline(
                 if doc_ids_to_clean:
                     vector_store = db_utils.get_vector_store()
                     deleted = vector_store.remove_docs_from_index(doc_ids_to_clean)
-                    logger.info(f"Cancelled job {job_id}: removed {deleted} vector chunks (clean_files=true)")
+                    logger.info(
+                        f"Cancelled job {job_id}: removed {deleted} vector chunks "
+                        f"(clean_files=true)"
+                    )
                     vdb_cleaned = True
-        except Exception as vdb_exc:
-            logger.warning(f"Vector DB cleanup failed for cancelled job {job_id}: {vdb_exc}")
+            except Exception as vdb_exc:
+                logger.warning(f"Vector DB cleanup failed for cancelled job {job_id}: {vdb_exc}")
 
-        # If VDB cleanup ran, force-cancel all docs (including COMPLETED ones
-        # whose vectors were just removed).  Otherwise respect terminal statuses.
+        # Step B: For connector jobs with clean_files=True, delete every document
+        # row and its output files — the connector is being torn down so these
+        # docs will never be queried again.  We do this AFTER VDB cleanup (Step A)
+        # so that delete_document_data's own VDB call is a safe no-op for any
+        # doc whose chunks were already removed above.
+        if is_connector_job and clean_files:
+            try:
+                from digitize.api.v1.documents import delete_document_data
+                all_docs = db_manager.get_documents_by_job_id(job_id)
+                for doc in all_docs:
+                    try:
+                        delete_document_data(doc.doc_id)
+                        logger.debug(
+                            f"Connector teardown: deleted doc row {doc.doc_id!r} "
+                            f"(job {job_id})"
+                        )
+                    except Exception as del_exc:
+                        logger.warning(
+                            f"Connector teardown: could not delete doc {doc.doc_id!r}: {del_exc}"
+                        )
+                # Document rows are gone — nothing left to mark CANCELLED.
+                return
+            except Exception as bulk_exc:
+                logger.warning(
+                    f"Connector teardown: bulk doc deletion failed for job {job_id}: {bulk_exc}"
+                )
+                # Fall through to _cancel_job_docs so status is at least updated.
+
+        # Step C: For user jobs (or connector jobs where bulk deletion failed),
+        # mark docs as CANCELLED.  force=True when VDB was cleaned so that
+        # COMPLETED docs (whose chunks are now gone) are also cancelled.
         _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
     except Exception as exc:
         logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
