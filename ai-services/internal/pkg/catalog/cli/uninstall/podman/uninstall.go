@@ -7,8 +7,8 @@ import (
 
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
-	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"

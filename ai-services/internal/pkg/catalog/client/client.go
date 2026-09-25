@@ -22,18 +22,16 @@ const (
 	tokenRefreshSkew = 30 * time.Second
 )
 
-// httpErrorBody returns a concise description of an HTTP error response body.
-// When the server returns HTML (e.g. a 503 proxy error page from an OpenShift
-// route with no backing pod) the raw markup is replaced with a short message
-// so callers don't embed hundreds of lines of HTML in their error strings.
-func httpErrorBody(resp *resty.Response) string {
-	body := resp.String()
-	contentType := resp.Header().Get("Content-Type")
-	if strings.Contains(contentType, "text/html") || strings.HasPrefix(strings.TrimSpace(body), "<") {
-		return "Run 'ai-services catalog login' to re-authenticate to the catalog"
+// httpErrorMessage returns a concise description of an HTTP error response.
+// A 503 from an OpenShift route means HAProxy could not reach the backing pod
+// (catalog server is down or not yet started); in that case the raw body
+// (which is an HTML error page) is suppressed in favour of an actionable message.
+func httpErrorMessage(resp *resty.Response) string {
+	if resp.StatusCode() == 503 {
+		return "catalog server is unreachable (HTTP 503)"
 	}
 
-	return fmt.Sprintf("server returned HTTP %d: %s", resp.StatusCode(), body)
+	return fmt.Sprintf("server returned HTTP %d: %s", resp.StatusCode(), resp.String())
 }
 
 // Client is an authenticated HTTP client for the catalog API server.
@@ -174,7 +172,7 @@ func (c *Client) Login(ctx context.Context, username, password string) (LoginRes
 	}
 
 	if httpResp.IsError() {
-		return LoginResponse{}, fmt.Errorf("login failed: %s", httpErrorBody(httpResp))
+		return LoginResponse{}, fmt.Errorf("login failed: %s", httpErrorMessage(httpResp))
 	}
 
 	return resp, nil
@@ -194,7 +192,7 @@ func (c *Client) LoginWithMIQToken(ctx context.Context, miqToken string) (LoginR
 	}
 
 	if httpResp.IsError() {
-		return LoginResponse{}, fmt.Errorf("token login failed: %s", httpErrorBody(httpResp))
+		return LoginResponse{}, fmt.Errorf("token login failed: %s", httpErrorMessage(httpResp))
 	}
 
 	return resp, nil
@@ -252,7 +250,7 @@ func (c *Client) RefreshToken(ctx context.Context) error {
 	}
 
 	if httpResp.IsError() {
-		return fmt.Errorf("refresh token failed: %s", httpErrorBody(httpResp))
+		return fmt.Errorf("refresh token failed: %s", httpErrorMessage(httpResp))
 	}
 
 	c.creds.AccessToken = resp.AccessToken
