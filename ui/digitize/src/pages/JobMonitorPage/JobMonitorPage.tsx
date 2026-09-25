@@ -330,7 +330,7 @@ const getStatusIcon = (status: string) => {
     case JOB_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
     case JOB_STATUS.CANCEL_PENDING:
-    case JOB_STATUS.CANCEL_PENDING:
+    case JOB_STATUS.CANCELLING:
       return <InProgress size={16} className={styles.statusIconCancelling} />;
     case JOB_STATUS.CANCELLED:
       return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
