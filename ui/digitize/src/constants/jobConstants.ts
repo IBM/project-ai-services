@@ -16,7 +16,7 @@ export const JOB_STATUS = {
   DIGITIZATION_ERROR: 'digitization error',
   INGESTING: 'ingesting...',
   DIGITIZING: 'digitizing...',
-  CANCEL_PENDING: 'cancelling...',
+  CANCELLING: 'cancelling...',
 } as const;
 
 // Document status constants — mirrors backend DocStatus enum wire values
