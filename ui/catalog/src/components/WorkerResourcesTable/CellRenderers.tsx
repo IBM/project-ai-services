@@ -9,6 +9,7 @@ import {
 } from "@/components/Table/components/CellRenderers";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 import styles from "./WorkerResourcesTable.module.scss";
+import { LOCAL_WORKER_NAME } from "@/constants/app.constants";
 export { StatusCell };
 
 interface CellRendererProps {
@@ -50,22 +51,26 @@ export const NameCell = ({ value, rowId }: CellRendererProps) => (
   <SharedNameCell value={value} rowId={rowId} isLinkEnabled={false} />
 );
 
-export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
-  <OverflowMenu size="lg" flipped aria-label="Actions">
-    <OverflowMenuItem
-      itemText={
-        <div className={sharedStyles.deleteMenuItem}>
-          <span>Deregister</span>
-          <Delete size={16} />
-        </div>
-      }
-      isDelete
-      onClick={() =>
-        dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
-      }
-    />
-  </OverflowMenu>
-);
+export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
+  const isLocal = rowData?.name === LOCAL_WORKER_NAME;
+  return (
+    <OverflowMenu size="lg" flipped aria-label="Actions">
+      <OverflowMenuItem
+        itemText={
+          <div className={sharedStyles.deleteMenuItem}>
+            <span>Deregister</span>
+            <Delete size={16} />
+          </div>
+        }
+        isDelete
+        disabled={isLocal}
+        onClick={() =>
+          dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
+        }
+      />
+    </OverflowMenu>
+  );
+};
 
 type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 
