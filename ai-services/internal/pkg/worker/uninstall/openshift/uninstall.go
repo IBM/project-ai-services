@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -41,7 +42,16 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	return PerformCleanup(ctx, rt, namespace, opts.SkipCleanup)
+	if err := PerformCleanup(ctx, rt, namespace, opts.SkipCleanup); err != nil {
+		return err
+	}
+
+	// Remove local credentials
+	if err := config.Delete(); err != nil {
+		logger.WarningfCtx(ctx, "Failed to remove local catalog credentials: %v\n", err)
+	}
+
+	return nil
 }
 
 // PerformCleanup uninstalls the worker Helm release from the given OpenShift namespace

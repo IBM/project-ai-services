@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -38,7 +39,16 @@ func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
 		return err
 	}
 
-	return PerformCleanup(ctx, rt, pods, opts.SkipCleanup)
+	if err := PerformCleanup(ctx, rt, pods, opts.SkipCleanup); err != nil {
+		return err
+	}
+
+	// Remove local credentials
+	if err := config.Delete(); err != nil {
+		logger.Warningf("Failed to remove local catalog credentials: %v\n", err)
+	}
+
+	return nil
 }
 
 // ─── internal ─────────────────────────────────────────────────────────────────
