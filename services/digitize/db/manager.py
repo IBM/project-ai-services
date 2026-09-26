@@ -2382,6 +2382,63 @@ class DatabaseManager:
             return []
 
     @staticmethod
+    def get_unregistered_connector_doc_ids(connector_id: str) -> List[str]:
+        """
+        Return doc_ids that were created for a connector job but were never
+        registered in ``connector_document_checksum``, AND whose parent job has
+        already reached a terminal state.
+
+        These are the docs that the safety-net step in ``_run_teardown`` needs
+        to clean up.  Docs whose job is still active (accepted / in_progress /
+        cancel_pending) are excluded because they are owned by a running
+        ``launch_ingest_pipeline`` task that will delete them itself when it
+        catches ``JobCancelledError`` with ``clean_files=True``.
+
+        The query is:
+            SELECT DISTINCT ct.doc_id
+            FROM conversion_tasks ct
+            JOIN jobs j ON j.job_id = ct.job_id
+            LEFT JOIN connector_document_checksum cdc
+                ON cdc.doc_id = ct.doc_id AND cdc.connector_id = :connector_id
+            WHERE ct.connector_id = :connector_id
+              AND cdc.doc_id IS NULL          -- not in checksum table
+              AND ct.doc_id IS NOT NULL
+              AND j.status NOT IN ('accepted', 'in_progress', 'cancel_pending')
+        """
+        _active_statuses = (
+            JobStatus.ACCEPTED.value,
+            JobStatus.IN_PROGRESS.value,
+            JobStatus.CANCEL_PENDING.value,
+        )
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask.doc_id)
+                    .join(Job, Job.job_id == ConversionTask.job_id)
+                    .outerjoin(
+                        ConnectorDocumentChecksum,
+                        and_(
+                            ConnectorDocumentChecksum.doc_id == ConversionTask.doc_id,
+                            ConnectorDocumentChecksum.connector_id == connector_id,
+                        ),
+                    )
+                    .where(
+                        ConversionTask.connector_id == connector_id,
+                        ConnectorDocumentChecksum.doc_id.is_(None),
+                        ConversionTask.doc_id.is_not(None),
+                        Job.status.not_in(_active_statuses),
+                    )
+                    .distinct()
+                )
+                return list(session.scalars(stmt).all())
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_unregistered_connector_doc_ids({connector_id!r}): {e}",
+                exc_info=True,
+            )
+            return []
+
+    @staticmethod
     def delete_conversion_tasks_for_connector(connector_id: str) -> int:
         """
         Delete all queued conversion_tasks rows owned by ``connector_id``.

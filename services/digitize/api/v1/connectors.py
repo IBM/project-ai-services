@@ -344,16 +344,20 @@ async def _run_teardown(connector_id: str) -> None:
 
     Scheduled via asyncio.create_task from the delete endpoint (Case B — no
     tick running). Awaited directly from _handle_interrupt in sync_tick
-    (Case A — tick interrupted). In Case A the caller is responsible for
-    purging in-flight conversion tasks *before* calling this function, since
-    no tick is running when _run_teardown executes in Case B.
+    (Case A — tick interrupted).
 
     Steps:
       1. Remove the scheduled job so no new ticks fire
       2. Snapshot checksums owned by this connector
       3. Remove ownership rows; delete documents when last owner
-      4. Sweep residual batch staging directories
-      5. Delete the connector row (cascades to connector_sync_logs)
+      4. Safety-net: delete any unregistered (in-flight) docs whose job has
+         already reached a terminal state but were never registered in
+         connector_document_checksum.  Docs whose job is still running are
+         handled by launch_ingest_pipeline's JobCancelledError path
+         (clean_files=True), which deletes both VDB chunks and the document
+         rows directly.
+      5. Sweep residual batch staging directories
+      6. Delete the connector row (cascades to connector_sync_logs)
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
     deletion_errors: list[str] = []
@@ -382,7 +386,29 @@ async def _run_teardown(connector_id: str) -> None:
                 f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
             )
 
-        # Step 4: sweep any residual batch staging directories
+        # Step 4 (safety net): delete unregistered docs whose job has already
+        # reached a terminal state.  These are docs created for a connector
+        # batch that finished (completed, failed, or cancelled) before the
+        # connector was deleted but were never registered in
+        # connector_document_checksum (e.g. the batch was cancelled without
+        # completing enough to call add_connector_checksum_entry).
+        # Docs still being processed by a running launch_ingest_pipeline task
+        # are excluded here because their job is non-terminal; they are cleaned
+        # up directly by that task's JobCancelledError handler (clean_files=True
+        # deletes VDB chunks then document rows in launch_ingest_pipeline).
+        unregistered_doc_ids = _get_unregistered_connector_docs(connector_id)
+        if unregistered_doc_ids:
+            logger.info(
+                f"Connector {connector_id!r}: cleaning up {len(unregistered_doc_ids)} "
+                f"unregistered in-flight document(s)"
+            )
+        for doc_id in unregistered_doc_ids:
+            if not _best_effort_delete_document(doc_id):
+                deletion_errors.append(
+                    f"unregistered document deletion failed for doc_id={doc_id!r}"
+                )
+
+        # Step 5: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
             deletion_errors.append("staging directory sweep failed")
 
@@ -392,7 +418,7 @@ async def _run_teardown(connector_id: str) -> None:
             logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
-        # Step 5: delete the connector row (cascades to connector_sync_logs)
+        # Step 6: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
@@ -443,6 +469,19 @@ def _remove_checksums(
                 exc_info=True,
             )
     return checksum_removal_failures, doc_deletion_failures
+
+
+def _get_unregistered_connector_docs(connector_id: str) -> list[str]:
+    """
+    Return doc_ids created for *connector_id* that were never registered in
+    ``connector_document_checksum``.
+
+    These are documents from in-flight batches that were cancelled before
+    ``add_connector_checksum_entry`` ran. Delegates to the DB manager query
+    so the JOIN logic stays in one place.
+    """
+    from digitize.db.manager import db_manager
+    return db_manager.get_unregistered_connector_doc_ids(connector_id)
 
 
 def _best_effort_delete_document(doc_id: str) -> bool:

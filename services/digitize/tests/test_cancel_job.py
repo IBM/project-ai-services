@@ -599,6 +599,243 @@ class TestRunIngest:
 
         mock_cleanup.assert_called_once()
 
+    # ------------------------------------------------------------------
+    # Connector job clean_files=True — doc rows deleted, not just cancelled
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_connector_job_clean_files_deletes_doc_rows(self, tmp_path):
+        """
+        For a connector job with clean_files=True, launch_ingest_pipeline must
+        call delete_document_data for every document and return early (no
+        _cancel_job_docs call).
+        """
+        from digitize.db.models import JobSource
+
+        job_id = "job-connector-del"
+        doc_a = _make_doc("doc-a", DocStatus.CHUNKED.value)
+        doc_b = _make_doc("doc-b", DocStatus.ACCEPTED.value)
+
+        mock_db = Mock()
+        mock_db.get_documents_by_job_id = Mock(return_value=[doc_a, doc_b])
+        mock_db.update_document = Mock()
+        mock_db.update_job = Mock()
+        mock_db.get_job_by_id = Mock(
+            return_value=Mock(
+                stats={"clean_files": True},
+                source=JobSource.CONNECTOR.value,
+            )
+        )
+
+        mock_delete_doc_data = Mock()
+        mock_status_mgr = Mock()
+
+        with (
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("common.db_utils.get_vector_store", return_value=Mock(remove_docs_from_index=Mock(return_value=0))),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_doc_data),
+        ):
+            await dg_utils_module.launch_ingest_pipeline(job_id, {})
+
+        # Every doc must be deleted via the full teardown path
+        deleted_ids = {c.args[0] for c in mock_delete_doc_data.call_args_list}
+        assert deleted_ids == {"doc-a", "doc-b"}
+        # _cancel_job_docs must NOT have been called (we returned early)
+        mock_status_mgr.update_doc_metadata.assert_not_called()
+        mock_status_mgr.update_job_progress.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_connector_job_clean_files_false_marks_cancelled_not_deleted(self, tmp_path):
+        """
+        Connector job with clean_files=False → docs are NOT deleted; they are
+        marked CANCELLED instead (same as a user job).
+        """
+        from digitize.db.models import JobSource
+
+        job_id = "job-connector-no-del"
+        doc_a = _make_doc("doc-a", DocStatus.ACCEPTED.value)
+
+        mock_db = Mock()
+        mock_db.get_documents_by_job_id = Mock(return_value=[doc_a])
+        mock_db.update_document = Mock()
+        mock_db.update_job = Mock()
+        mock_db.get_job_by_id = Mock(
+            return_value=Mock(
+                stats={"clean_files": False},
+                source=JobSource.CONNECTOR.value,
+            )
+        )
+
+        mock_delete_doc_data = Mock()
+        mock_status_mgr = Mock()
+
+        with (
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_doc_data),
+        ):
+            await dg_utils_module.launch_ingest_pipeline(job_id, {})
+
+        mock_delete_doc_data.assert_not_called()
+        mock_status_mgr.update_job_progress.assert_called_once_with(
+            "", DocStatus.CANCELLED, JobStatus.CANCELLED
+        )
+
+    @pytest.mark.asyncio
+    async def test_user_job_clean_files_true_marks_cancelled_not_deleted(self, tmp_path):
+        """
+        User job with clean_files=True → VDB chunks removed, docs marked
+        CANCELLED.  delete_document_data must NOT be called (user docs are
+        not deleted on cancellation).
+        """
+        from digitize.db.models import JobSource
+
+        job_id = "job-user-clean"
+        doc_a = _make_doc("doc-a", DocStatus.CHUNKED.value)
+
+        mock_db = Mock()
+        mock_db.get_documents_by_job_id = Mock(return_value=[doc_a])
+        mock_db.update_document = Mock()
+        mock_db.update_job = Mock()
+        mock_db.get_job_by_id = Mock(
+            return_value=Mock(
+                stats={"clean_files": True},
+                source=JobSource.USER.value,
+            )
+        )
+
+        mock_delete_doc_data = Mock()
+        mock_status_mgr = Mock()
+        mock_vector_store = Mock(remove_docs_from_index=Mock(return_value=1))
+
+        with (
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("common.db_utils.get_vector_store", return_value=mock_vector_store),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_doc_data),
+        ):
+            await dg_utils_module.launch_ingest_pipeline(job_id, {})
+
+        mock_delete_doc_data.assert_not_called()
+        mock_status_mgr.update_job_progress.assert_called_once_with(
+            "", DocStatus.CANCELLED, JobStatus.CANCELLED
+        )
+
+    @pytest.mark.asyncio
+    async def test_connector_job_doc_deletion_failure_is_best_effort(self, tmp_path):
+        """
+        Per-doc delete_document_data failures are swallowed (best-effort);
+        the pipeline still returns early without calling _cancel_job_docs.
+        Docs that failed to delete are just warned about — the connector row
+        will still be cleaned up by _run_teardown.
+        """
+        from digitize.db.models import JobSource
+
+        job_id = "job-connector-del-fail"
+        doc_a = _make_doc("doc-a", DocStatus.ACCEPTED.value)
+        doc_b = _make_doc("doc-b", DocStatus.ACCEPTED.value)
+
+        mock_db = Mock()
+        mock_db.get_documents_by_job_id = Mock(return_value=[doc_a, doc_b])
+        mock_db.update_document = Mock()
+        mock_db.update_job = Mock()
+        mock_db.get_job_by_id = Mock(
+            return_value=Mock(
+                stats={"clean_files": True},
+                source=JobSource.CONNECTOR.value,
+            )
+        )
+
+        mock_status_mgr = Mock()
+        # doc-a fails, doc-b succeeds
+        delete_call_count = {"n": 0}
+        def fake_delete(doc_id):
+            delete_call_count["n"] += 1
+            if doc_id == "doc-a":
+                raise RuntimeError("db down")
+        mock_delete = Mock(side_effect=fake_delete)
+
+        with (
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("common.db_utils.get_vector_store", return_value=Mock(remove_docs_from_index=Mock(return_value=0))),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete),
+        ):
+            await dg_utils_module.launch_ingest_pipeline(job_id, {})
+
+        # Both docs were attempted (best-effort)
+        assert delete_call_count["n"] == 2
+        # _cancel_job_docs was NOT called — we still returned early
+        mock_status_mgr.update_job_progress.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_connector_job_import_failure_falls_back_to_cancel(self, tmp_path):
+        """
+        If the delete_document_data import itself fails (e.g. circular import
+        or missing module — anything that raises inside the outer try of Step B
+        before we enter the per-doc loop), the except block falls through to
+        _cancel_job_docs so the job is at least marked CANCELLED.
+        """
+        from digitize.db.models import JobSource
+
+        job_id = "job-connector-import-fail"
+        doc_a = _make_doc("doc-a", DocStatus.ACCEPTED.value)
+
+        mock_db = Mock()
+        mock_db.get_job_by_id = Mock(
+            return_value=Mock(
+                stats={"clean_files": True},
+                source=JobSource.CONNECTOR.value,
+            )
+        )
+        # Step A needs get_documents_by_job_id to succeed (returns chunked doc)
+        mock_db.get_documents_by_job_id = Mock(return_value=[doc_a])
+        mock_db.update_document = Mock()
+        mock_db.update_job = Mock()
+
+        mock_status_mgr = Mock()
+
+        # Simulate a failure that happens inside the outer Step B try block,
+        # before the per-doc loop, by making get_documents_by_job_id raise only
+        # on the second call (which is the Step B call).  The first call is
+        # consumed by Step A (VDB cleanup) and the third by _cancel_job_docs.
+        call_count = {"n": 0}
+        def docs_side_effect(jid):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("Step B db error")
+            return [doc_a]
+
+        mock_db.get_documents_by_job_id = Mock(side_effect=docs_side_effect)
+
+        with (
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=mock_status_mgr),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("common.db_utils.get_vector_store", return_value=Mock(remove_docs_from_index=Mock(return_value=0))),
+        ):
+            await dg_utils_module.launch_ingest_pipeline(job_id, {})
+
+        # Falls back to _cancel_job_docs
+        mock_status_mgr.update_job_progress.assert_called_once_with(
+            "", DocStatus.CANCELLED, JobStatus.CANCELLED
+        )
+
 
 # ===========================================================================
 # 4. orchestrator.process_documents — DB-polled conversion stage
