@@ -86,6 +86,26 @@ func (w *WorkerEntry) waitForResult(commandID string) chan *workerpb.CommandResu
 	return ch
 }
 
+// cancelWait removes the result channel for commandID without delivering a
+// result. Called when the control-plane side times out or cancels so the
+// channel does not leak inside the WorkerEntry.
+func (w *WorkerEntry) cancelWait(commandID string) {
+	w.resultsMu.Lock()
+	delete(w.results, commandID)
+	w.resultsMu.Unlock()
+}
+
+// drainResults closes all pending result channels so any goroutine blocking on
+// them unblocks immediately. Called when a worker disconnects.
+func (w *WorkerEntry) drainResults() {
+	w.resultsMu.Lock()
+	for id, ch := range w.results {
+		delete(w.results, id)
+		close(ch)
+	}
+	w.resultsMu.Unlock()
+}
+
 // deliverResult routes an incoming result to the waiting caller.
 func (w *WorkerEntry) deliverResult(res *workerpb.CommandResult) {
 	id := res.GetCommandId()
@@ -148,6 +168,10 @@ func (r *Registry) Register(ctx context.Context, workerName, runtimeType string,
 	r.workers[k] = entry
 	r.mu.Unlock()
 
+	// DB upsert happens after the entry is in the map so the write lock is not
+	// held across a potentially slow network call. DBID is written back to the
+	// already-visible entry; callers that use DBID (heartbeat, WorkerID) guard
+	// against uuid.Nil so the brief window before the write-back is safe.
 	if r.repo != nil {
 		w := &models.Worker{
 			Name:        workerName,
@@ -292,6 +316,8 @@ func (r *Registry) Get(workerName string) (*WorkerEntry, bool) {
 
 // Disconnect removes the worker from the in-memory map and marks it disconnected in the DB.
 // The DB row is kept so the worker can reconnect and its history is preserved.
+// Any goroutine blocking on a pending result channel is unblocked immediately
+// so callers do not hang for up to CommandTimeout waiting for a dead worker.
 func (r *Registry) Disconnect(ctx context.Context, workerName string) {
 	k := workerKey(workerName)
 	r.mu.Lock()
@@ -301,7 +327,16 @@ func (r *Registry) Disconnect(ctx context.Context, workerName string) {
 	}
 	r.mu.Unlock()
 
-	if ok && r.repo != nil && entry.DBID != uuid.Nil {
+	if !ok {
+		return
+	}
+
+	// Unblock all pending result waiters immediately — the worker is gone and
+	// will never deliver their results. Each closed channel causes waitForResult
+	// to return a nil result which Sender treats as a disconnect error.
+	entry.drainResults()
+
+	if r.repo != nil && entry.DBID != uuid.Nil {
 		msg := MsgDisconnected
 		if err := r.repo.Update(ctx, entry.DBID, repository.WorkerUpdate{
 			Status:  utils.Ptr(models.WorkerStatusDisconnected),
@@ -399,7 +434,13 @@ func (r *Registry) Deregister(ctx context.Context, id uuid.UUID) (bool, error) {
 	r.mu.Unlock()
 
 	if found != nil {
-		close(found.CommandCh)
+		// Drain result waiters so callers unblock immediately. Do NOT close
+		// CommandCh here — the gateway's CommandStream goroutine holds a
+		// reference to the same channel and a concurrent Sender.Send could
+		// panic with "send on closed channel" between WorkerCommandChannel
+		// returning the channel and the send executing. The gateway will notice
+		// the entry is gone from the map on its next loop iteration and exit.
+		found.drainResults()
 	}
 
 	if r.repo == nil {
@@ -434,6 +475,17 @@ func (r *Registry) WaitForResult(workerName, commandID string) (chan *workerpb.C
 	}
 
 	return entry.waitForResult(commandID), nil
+}
+
+// CancelWait removes the pending result channel for commandID so it does not
+// leak when the caller times out or cancels before the worker responds.
+func (r *Registry) CancelWait(workerName, commandID string) {
+	r.mu.RLock()
+	entry, ok := r.workers[workerKey(workerName)]
+	r.mu.RUnlock()
+	if ok {
+		entry.cancelWait(commandID)
+	}
 }
 
 // WorkerCommandChannel returns the command channel for the named worker.
