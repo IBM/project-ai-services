@@ -462,6 +462,123 @@ async def summarize(
     except Exception as e:
         logger.error(f"Got exception while generating summary: {e}")
 
+
+# ---------------------------------------------------------------------------
+# Token-bounded chunking for the CHUNKED strategy
+# ---------------------------------------------------------------------------
+
+# Smallest word limit we will re-split down to before giving up.
+MIN_CHUNK_WORDS = 50
+# Safety factor applied whenever words are converted to a token budget, to absorb
+# local density variation (a section can be denser than its surrounding text).
+CHUNK_DENSITY_HEADROOM = 0.9
+# Mirrors the 10% max_tokens buffer added in compute_target_and_max_tokens.
+_OUTPUT_BUFFER_FACTOR = 1.1
+
+
+def compute_chunk_token_budget(level: Optional[str]) -> int:
+    """
+    Maximum input tokens a single chunk may have so that
+    chunk_tokens + prompt_tokens + max_tokens <= max_model_len
+    WITHOUT max_tokens being squeezed below its intended target.
+
+    compute_target_and_max_tokens asks for roughly
+    input * coefficient * level_multiplier * 1.1 output tokens, so:
+        budget * (1 + 1.1 * coefficient * multiplier) <= max_model_len - prompt_tokens
+    """
+    max_model_len = get_llm_max_model_len()
+    prompt_tokens = settings.summarize.summarization_prompt_token_count
+    output_ratio = settings.summarize.summarization_coefficient
+    if level is not None:
+        output_ratio *= getattr(settings.summarize.summarization_levels, level).multiplier
+    return int((max_model_len - prompt_tokens) / (1 + _OUTPUT_BUFFER_FACTOR * output_ratio))
+
+
+def _hard_split_words(text: str, max_words: int) -> list[str]:
+    """Last-resort split on word boundaries, for text with no usable sentence breaks
+    (e.g. a huge table or command dump the sentence splitter returns as one piece)."""
+    words = text.split()
+    return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
+
+
+async def build_token_bounded_chunks(
+        text: str,
+        input_word_count: int,
+        input_tokens: int,
+        level: Optional[str],
+        llm_endpoint: str,
+        overlap_sentences: int,
+) -> list[tuple[str, int]]:
+    """
+    Split text into chunks whose REAL token count fits the per-chunk budget.
+
+    1. Derive an initial word limit from the document's own measured
+       words-per-token ratio (instead of the global token_to_word_ratio_en,
+       which under-counts tokens for technical documents).
+    2. Tokenize every chunk. Any chunk still over budget (a locally denser
+       section) is re-split with a word limit scaled by its own density.
+       If the sentence splitter cannot break it, fall back to word boundaries.
+
+    Returns:
+        List of (chunk_text, chunk_token_count) in document order.
+    """
+    from summarize.chunk_utils import split_text_into_chunks
+
+    token_budget = compute_chunk_token_budget(level)
+    if token_budget <= 0:
+        raise Exception(
+            f"FILE_SIZE_OVER_LIMIT: context window of {get_llm_max_model_len()} tokens "
+            f"leaves no room for chunk input."
+        )
+
+    words_per_token = input_word_count / max(1, input_tokens)
+    initial_max_words = int(token_budget * words_per_token * CHUNK_DENSITY_HEADROOM)
+    initial_max_words = max(MIN_CHUNK_WORDS, min(MAX_INPUT_WORDS, initial_max_words))
+
+    logger.info(
+        f"Chunk token budget: {token_budget} tokens; document density "
+        f"{input_tokens / max(1, input_word_count):.2f} tokens/word -> "
+        f"initial max {initial_max_words} words per chunk"
+    )
+
+    async def fit(chunk: str) -> list[tuple[str, int]]:
+        n_tokens = len(await asyncio.to_thread(tokenize_with_llm, chunk, llm_endpoint))
+        if n_tokens <= token_budget:
+            return [(chunk, n_tokens)]
+
+        chunk_words = word_count(chunk)
+        smaller_max_words = int(chunk_words * token_budget / n_tokens * CHUNK_DENSITY_HEADROOM)
+        if smaller_max_words < MIN_CHUNK_WORDS:
+            raise Exception(
+                f"FILE_SIZE_OVER_LIMIT: a {chunk_words}-word section has {n_tokens} tokens and "
+                f"cannot be split under the per-chunk budget of {token_budget} tokens."
+            )
+
+        logger.info(
+            f"Re-splitting dense chunk: {n_tokens} tokens / {chunk_words} words exceeds "
+            f"budget {token_budget}; new max {smaller_max_words} words"
+        )
+        pieces = await asyncio.to_thread(
+            split_text_into_chunks, chunk, smaller_max_words, overlap_sentences
+        )
+        if len(pieces) <= 1:
+            # Sentence splitter made no progress (e.g. one giant "sentence")
+            pieces = _hard_split_words(chunk, smaller_max_words)
+
+        fitted: list[tuple[str, int]] = []
+        for piece in pieces:
+            fitted.extend(await fit(piece))
+        return fitted
+
+    initial_chunks = await asyncio.to_thread(
+        split_text_into_chunks, text, initial_max_words, overlap_sentences
+    )
+    result: list[tuple[str, int]] = []
+    for chunk in initial_chunks:
+        result.extend(await fit(chunk))
+    return result
+
+
 # Background task for async job processing
 async def process_summarization_job(job_id: str, level):
     """
@@ -623,35 +740,35 @@ async def process_summarization_job(job_id: str, level):
                 job_type=SummarizationType.CHUNKED
             )
             logger.info(f"Updated job {job_id} type to CHUNKED in database")
-            
-            # Split into chunks
-            chunks = await asyncio.to_thread(
-                split_text_into_chunks,
+
+            # Split into chunks bounded by an actual TOKEN budget (not a fixed
+            # word count), so token-dense sections (tables, CLI output, paths,
+            # URLs) cannot overflow the context window.
+            chunk_pairs = await build_token_bounded_chunks(
                 content_text,
-                MAX_INPUT_WORDS,
-                settings.summarize.chunk_overlap_sentences
+                input_word_count,
+                input_tokens,
+                level,
+                llm_endpoint,
+                settings.summarize.chunk_overlap_sentences,
             )
-            
+            chunks = [chunk for chunk, _ in chunk_pairs]
+
             num_chunks = len(chunks)
             logger.info(f"Split into {num_chunks} chunks")
             
             # Calculate token values for each chunk individually
+            # (token counts were already measured while fitting the chunks)
             chunk_token_info = []
             total_estimated_summary_tokens = 0
-            
-            for i, chunk in enumerate(chunks):
-                chunk_tokens = await asyncio.to_thread(
-                    tokenize_with_llm,
-                    chunk,
-                    llm_endpoint
-                )
-                chunk_input_tokens = len(chunk_tokens)
+
+            for i, (chunk, chunk_input_tokens) in enumerate(chunk_pairs):
                 chunk_available_output_tokens = (
-                    get_llm_max_model_len()
-                    - chunk_input_tokens
-                    - settings.summarize.summarization_prompt_token_count
+                        get_llm_max_model_len()
+                        - chunk_input_tokens
+                        - settings.summarize.summarization_prompt_token_count
                 )
-                
+
                 # Compute chunk-level target and max tokens
                 chunk_target_words, chunk_min_words, chunk_max_words, chunk_max_tokens = compute_target_and_max_tokens(
                     chunk_input_tokens,
@@ -659,7 +776,18 @@ async def process_summarization_job(job_id: str, level):
                     level,
                     None
                 )
-                
+
+                # Hard guard: never send a request with no room for output.
+                # (compute_target_and_max_tokens caps max_tokens at the available
+                # space, so a non-positive value means the input alone fills or
+                # overflows the context window -> vLLM would return 400.)
+                if chunk_max_tokens <= 0:
+                    raise Exception(
+                        f"FILE_SIZE_OVER_LIMIT: chunk {i + 1}/{num_chunks} has {chunk_input_tokens} tokens, "
+                        f"leaving no room for output within the context window of "
+                        f"{get_llm_max_model_len()} tokens."
+                    )
+
                 chunk_token_info.append({
                     'input_tokens': chunk_input_tokens,
                     'available_output_tokens': chunk_available_output_tokens,
@@ -668,19 +796,19 @@ async def process_summarization_job(job_id: str, level):
                     'max_words': chunk_max_words,
                     'max_tokens': chunk_max_tokens
                 })
-                
+
                 total_estimated_summary_tokens += chunk_max_tokens
-                
-                logger.debug(
-                    f"Chunk {i+1}/{num_chunks} tokens: input={chunk_input_tokens}, "
+
+                logger.info(
+                    f"Chunk {i + 1}/{num_chunks} tokens: input={chunk_input_tokens}, "
                     f"available_output={chunk_available_output_tokens}, "
                     f"max_tokens={chunk_max_tokens}"
                 )
-            
-            logger.debug(
+
+            logger.info(
                 f"Total estimated summary tokens from all chunks: {total_estimated_summary_tokens}"
             )
-            logger.debug(f"Chunk token info: {chunk_token_info}")
+            logger.info(f"Chunk token info: {chunk_token_info}")
             # Pre-check: Estimate if combined summaries will fit in merge step
             # Calculate merge max_tokens based on estimated combined summary size
             merge_input_estimate = total_estimated_summary_tokens
@@ -700,7 +828,7 @@ async def process_summarization_job(job_id: str, level):
             
             merge_required_tokens = merge_input_estimate + settings.summarize.summarization_prompt_token_count + merge_max_tokens_estimate
             
-            logger.debug(
+            logger.info(
                 f"Merge pre-check: estimated_input={merge_input_estimate}, "
                 f"estimated_max_tokens={merge_max_tokens_estimate}, "
                 f"total_required={merge_required_tokens}, "
