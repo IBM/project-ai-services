@@ -12,7 +12,7 @@ Exposes one router:
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from common.misc_utils import get_logger
@@ -185,8 +185,7 @@ class ConversionTaskResponse(BaseModel):
     started_at: Optional[str]
     completed_at: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ------------------------------------------------------------------ #

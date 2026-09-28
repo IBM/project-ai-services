@@ -214,7 +214,7 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(reg, repo)
 			}
-			handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9090)
+			handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9191)
 			router := setupWorkerRouter(handler)
 
 			req, err := http.NewRequest(http.MethodPost, "/api/v1/workers", bytes.NewBufferString(tt.body))

@@ -27,7 +27,7 @@ spec:
       - {{ .Values.model }}
       - --port=8002
       - --gpu-memory-utilization=0.5
-      - --enforce-eager
+      - --dtype=bfloat16
       - --max-model-len=1024
       livenessProbe:
         httpGet:
@@ -36,7 +36,7 @@ spec:
         initialDelaySeconds: 120
         periodSeconds: 30
         timeoutSeconds: 5
-        failureThreshold: 3
+        failureThreshold: 12
       resources:
         requests:
           memory: "5Gi"

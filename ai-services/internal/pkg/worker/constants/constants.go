@@ -56,7 +56,7 @@ const (
 	MetaKeyBaseDir = "baseDir"
 
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
-	WorkerGatewayPort = 9090
+	WorkerGatewayPort = 9191
 
 	// OpenShiftRoutePort is the port used by OpenShift passthrough routes.
 	// All OpenShift routes (including the worker-gateway passthrough route) are
