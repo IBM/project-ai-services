@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 )
 
@@ -84,6 +85,10 @@ func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, add
 
 	g.grpcServer = grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             30 * time.Second,
+			PermitWithoutStream: true,
+		}),
 		grpc.UnaryInterceptor(g.authUnaryInterceptor),
 		grpc.StreamInterceptor(g.authStreamInterceptor),
 	)
