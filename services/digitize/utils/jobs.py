@@ -569,21 +569,26 @@ async def launch_ingest_pipeline(
         # whose vectors were just removed).  Otherwise respect terminal statuses.
         _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
 
-        # For connector jobs, mid-flight docs were never registered in
-        # connector_document_checksum and have no value once cancelled —
-        # remove them from the documents table entirely, just as chunks are
-        # removed from the vector store.
-        if is_connector_job and mid_flight_doc_ids:
-            logger.info(
-                f"Cancelled connector job {job_id}: removing "
-                f"{len(mid_flight_doc_ids)} mid-flight document row(s) from DB"
+        # For connector jobs, remove document rows from the DB.
+        # When clean_files=True (connector delete path) every doc in this job
+        # must be removed — including ones that had already COMPLETED, whose
+        # VDB chunks were just wiped above.  When clean_files=False (sync
+        # cancel) vdb_cleaned is False, so only mid-flight docs are removed.
+        if is_connector_job:
+            connector_doc_ids_to_delete = (
+                [d.doc_id for d in all_docs] if vdb_cleaned else mid_flight_doc_ids
             )
-            for doc_id in mid_flight_doc_ids:
+            if connector_doc_ids_to_delete:
+                logger.info(
+                    f"Cancelled connector job {job_id}: removing "
+                    f"{len(connector_doc_ids_to_delete)} document row(s) from DB"
+                )
+            for doc_id in connector_doc_ids_to_delete:
                 try:
                     db_manager.delete_document(doc_id)
                 except Exception as del_exc:
                     logger.warning(
-                        f"Failed to delete mid-flight doc {doc_id!r} "
+                        f"Failed to delete doc {doc_id!r} "
                         f"from documents table: {del_exc}"
                     )
     except Exception as exc:
