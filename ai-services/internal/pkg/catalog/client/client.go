@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -27,7 +28,7 @@ const (
 // (catalog server is down or not yet started); in that case the raw body
 // (which is an HTML error page) is suppressed in favour of an actionable message.
 func httpErrorMessage(resp *resty.Response) string {
-	if resp.StatusCode() == 503 {
+	if resp.StatusCode() == http.StatusServiceUnavailable {
 		return "catalog server is unreachable (HTTP 503)"
 	}
 
