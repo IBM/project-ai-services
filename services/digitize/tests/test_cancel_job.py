@@ -608,8 +608,8 @@ class TestRunIngest:
 
     @pytest.mark.asyncio
     async def test_connector_job_clean_files_deletes_all_doc_rows(self, tmp_path):
-        """When clean_files=True (connector delete), ALL doc rows — including
-        already-COMPLETED ones — must be removed from the DB."""
+        """When clean_files=True (connector delete), ALL docs — including
+        already-COMPLETED ones — are fully torn down (VDB + files + DB)."""
         job_id = "job-connector-delete"
 
         mid_flight_doc = _make_doc("doc-pending", DocStatus.ACCEPTED.value, source="connector")
@@ -620,10 +620,11 @@ class TestRunIngest:
         mock_db.update_document = Mock()
         mock_db.update_job = Mock()
         mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": True}))
-        mock_db.delete_document = Mock(return_value=True)
 
         mock_vector_store = Mock()
         mock_vector_store.remove_docs_from_index = Mock(return_value=5)
+
+        mock_delete_data = Mock()
 
         with (
             patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
@@ -632,17 +633,18 @@ class TestRunIngest:
             patch("digitize.utils.jobs.cleanup_staging_directory"),
             patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
             patch("common.db_utils.get_vector_store", return_value=mock_vector_store),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_data),
         ):
             await dg_utils_module.launch_ingest_pipeline(job_id, {"file.pdf": "doc-pending"})
 
-        # Both the mid-flight and the completed doc rows must be deleted.
-        deleted_ids = {call.args[0] for call in mock_db.delete_document.call_args_list}
+        # Both docs must go through the full teardown path.
+        deleted_ids = {call.args[0] for call in mock_delete_data.call_args_list}
         assert deleted_ids == {"doc-pending", "doc-done"}
-
 
     @pytest.mark.asyncio
     async def test_connector_job_cancellation_deletes_mid_flight_doc_rows(self, tmp_path):
-        """Cancelled connector jobs must remove mid-flight doc rows from the DB."""
+        """Cancelled connector job (clean_files=False): only mid-flight doc is
+        fully torn down (VDB + files + DB); already-terminal doc is left alone."""
         job_id = "job-connector-cancel"
 
         mid_flight_doc = _make_doc("doc-pending", DocStatus.ACCEPTED.value, source="connector")
@@ -653,7 +655,8 @@ class TestRunIngest:
         mock_db.update_document = Mock()
         mock_db.update_job = Mock()
         mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": False}))
-        mock_db.delete_document = Mock(return_value=True)
+
+        mock_delete_data = Mock()
 
         with (
             patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
@@ -661,15 +664,17 @@ class TestRunIngest:
             patch("digitize.utils.db.get_status_manager", return_value=Mock()),
             patch("digitize.utils.jobs.cleanup_staging_directory"),
             patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_data),
         ):
             await dg_utils_module.launch_ingest_pipeline(job_id, {"file.pdf": "doc-pending"})
 
-        # Only the mid-flight doc must be deleted; the terminal one must not.
-        mock_db.delete_document.assert_called_once_with("doc-pending")
+        # Only the mid-flight doc is torn down; the terminal one is untouched.
+        mock_delete_data.assert_called_once_with("doc-pending")
 
     @pytest.mark.asyncio
     async def test_connector_job_cancellation_does_not_delete_terminal_docs(self, tmp_path):
-        """Already-terminal connector docs must NOT be deleted on cancellation."""
+        """Already-terminal connector docs must NOT be deleted on cancellation
+        when clean_files=False."""
         job_id = "job-connector-cancel-terminal"
 
         terminal_docs = [
@@ -683,7 +688,8 @@ class TestRunIngest:
         mock_db.update_document = Mock()
         mock_db.update_job = Mock()
         mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": False}))
-        mock_db.delete_document = Mock()
+
+        mock_delete_data = Mock()
 
         with (
             patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
@@ -691,10 +697,11 @@ class TestRunIngest:
             patch("digitize.utils.db.get_status_manager", return_value=Mock()),
             patch("digitize.utils.jobs.cleanup_staging_directory"),
             patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_data),
         ):
             await dg_utils_module.launch_ingest_pipeline(job_id, {})
 
-        mock_db.delete_document.assert_not_called()
+        mock_delete_data.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_user_job_cancellation_does_not_delete_doc_rows(self, tmp_path):
@@ -708,7 +715,8 @@ class TestRunIngest:
         mock_db.update_document = Mock()
         mock_db.update_job = Mock()
         mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": False}))
-        mock_db.delete_document = Mock()
+
+        mock_delete_data = Mock()
 
         with (
             patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
@@ -716,14 +724,15 @@ class TestRunIngest:
             patch("digitize.utils.db.get_status_manager", return_value=Mock()),
             patch("digitize.utils.jobs.cleanup_staging_directory"),
             patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_data),
         ):
             await dg_utils_module.launch_ingest_pipeline(job_id, {"file.pdf": "doc-pending"})
 
-        mock_db.delete_document.assert_not_called()
+        mock_delete_data.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_connector_job_doc_deletion_failure_is_swallowed(self, tmp_path):
-        """A failure during doc row deletion must not propagate — only a warning."""
+        """A failure during full doc teardown must not propagate — only a warning."""
         job_id = "job-connector-cancel-delfail"
 
         mid_flight_doc = _make_doc("doc-x", DocStatus.ACCEPTED.value, source="connector")
@@ -733,7 +742,8 @@ class TestRunIngest:
         mock_db.update_document = Mock()
         mock_db.update_job = Mock()
         mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": False}))
-        mock_db.delete_document = Mock(side_effect=RuntimeError("db gone"))
+
+        mock_delete_data = Mock(side_effect=RuntimeError("teardown failed"))
 
         with (
             patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
@@ -741,11 +751,12 @@ class TestRunIngest:
             patch("digitize.utils.db.get_status_manager", return_value=Mock()),
             patch("digitize.utils.jobs.cleanup_staging_directory"),
             patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("digitize.api.v1.documents.delete_document_data", mock_delete_data),
         ):
             # Must not raise
             await dg_utils_module.launch_ingest_pipeline(job_id, {"file.pdf": "doc-x"})
 
-        mock_db.delete_document.assert_called_once_with("doc-x")
+        mock_delete_data.assert_called_once_with("doc-x")
 
 
 
