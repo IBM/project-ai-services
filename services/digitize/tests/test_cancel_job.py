@@ -605,6 +605,41 @@ class TestRunIngest:
         mock_cleanup.assert_called_once()
 
 
+
+    @pytest.mark.asyncio
+    async def test_connector_job_clean_files_deletes_all_doc_rows(self, tmp_path):
+        """When clean_files=True (connector delete), ALL doc rows — including
+        already-COMPLETED ones — must be removed from the DB."""
+        job_id = "job-connector-delete"
+
+        mid_flight_doc = _make_doc("doc-pending", DocStatus.ACCEPTED.value, source="connector")
+        completed_doc = _make_doc("doc-done", DocStatus.COMPLETED.value, source="connector")
+
+        mock_db = Mock()
+        mock_db.get_documents_by_job_id = Mock(return_value=[mid_flight_doc, completed_doc])
+        mock_db.update_document = Mock()
+        mock_db.update_job = Mock()
+        mock_db.get_job_by_id = Mock(return_value=Mock(stats={"clean_files": True}))
+        mock_db.delete_document = Mock(return_value=True)
+
+        mock_vector_store = Mock()
+        mock_vector_store.remove_docs_from_index = Mock(return_value=5)
+
+        with (
+            patch("digitize.utils.jobs.asyncio.to_thread", new=AsyncMock(side_effect=JobCancelledError("c"))),
+            patch("digitize.utils.jobs.db_manager", mock_db),
+            patch("digitize.utils.db.get_status_manager", return_value=Mock()),
+            patch("digitize.utils.jobs.cleanup_staging_directory"),
+            patch("digitize.utils.jobs.settings", SimpleNamespace(digitize=SimpleNamespace(staging_dir=tmp_path))),
+            patch("common.db_utils.get_vector_store", return_value=mock_vector_store),
+        ):
+            await dg_utils_module.launch_ingest_pipeline(job_id, {"file.pdf": "doc-pending"})
+
+        # Both the mid-flight and the completed doc rows must be deleted.
+        deleted_ids = {call.args[0] for call in mock_db.delete_document.call_args_list}
+        assert deleted_ids == {"doc-pending", "doc-done"}
+
+
     @pytest.mark.asyncio
     async def test_connector_job_cancellation_deletes_mid_flight_doc_rows(self, tmp_path):
         """Cancelled connector jobs must remove mid-flight doc rows from the DB."""
