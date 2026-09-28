@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/containers/podman/v5/pkg/specgen"
@@ -77,6 +78,11 @@ func DownloadModel(ctx context.Context, model, targetDir string) error {
 }
 
 func DownloadModelContainer(ctx context.Context, model, targetDir string) error {
+	absTargetDir, err := filepath.Abs(targetDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve absolute path for %s: %w", targetDir, err)
+	}
+
 	logger.InfofCtx(ctx, "Downloading model %s to %s\n", model, targetDir)
 
 	// Get Podman client
@@ -99,7 +105,7 @@ func DownloadModelContainer(ctx context.Context, model, targetDir string) error 
 	s.Mounts = []spec.Mount{
 		{
 			Type:        "bind",
-			Source:      targetDir,
+			Source:      absTargetDir,
 			Destination: "/models",
 			Options:     []string{"Z"},
 		},
