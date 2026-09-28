@@ -248,11 +248,15 @@ def extract_text_from_pdf(content: bytes) -> str:
         for page_index in range(len(pdf)):
             page = pdf[page_index]
             textpage = page.get_textpage()
-            text_parts.append(textpage.get_text_range())
+            # pdfium returns "\r\n" line endings and never emits blank lines,
+            # so normalize endings and drop empty/blank pages.
+            page_text = textpage.get_text_range().replace("\r\n", "\n").replace("\r", "\n").strip()
+            if page_text:
+                text_parts.append(page_text)
             textpage.close()
             page.close()
         pdf.close()
-        return "\n".join(text_parts)
+        return "\n\n".join(text_parts)
 
 def trim_to_last_sentence(text: str) -> str:
     """Remove any trailing incomplete sentence."""

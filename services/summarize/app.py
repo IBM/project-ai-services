@@ -856,7 +856,7 @@ async def process_summarization_job(job_id: str, level):
             
             # Build merge messages
             merge_messages = build_merge_messages(merged_text, merge_target_words, merge_min_words, merge_max_words)
-            logger.info(f"Merge messages: {merge_messages}")
+            logger.debug(f"Merge messages: {merge_messages}")
             # Final merge call
             async with concurrency_limiter:
                 merge_result, merge_in_tokens, merge_out_tokens = await asyncio.to_thread(
