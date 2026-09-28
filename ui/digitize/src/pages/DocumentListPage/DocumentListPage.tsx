@@ -645,7 +645,7 @@ const DocumentListPage = () => {
       name: doc.name || doc.filename || 'N/A',
       status: (
         <div className={styles.statusCell}>
-          {getStatusIcon(doc.status)}
+          {!hasError && getStatusIcon(doc.status)}
           <span className={styles.statusText}>{doc.status}</span>
           {hasError && (
             <Tooltip
