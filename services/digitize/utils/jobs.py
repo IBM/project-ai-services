@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from common.misc_utils import get_logger
-from digitize.db.models import ConversionTaskStatus, JobSource
+from digitize.db.models import ConversionTaskStatus, DocumentSource, JobSource
 from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
@@ -531,6 +531,17 @@ async def launch_ingest_pipeline(
     except JobCancelledError:
         logger.info(f"Ingestion job {job_id} was cancelled")
 
+        # Fetch all docs once so we can identify mid-flight docs before
+        # _cancel_job_docs overwrites their statuses.
+        all_docs = db_manager.get_documents_by_job_id(job_id)
+        mid_flight_doc_ids = [
+            d.doc_id for d in all_docs
+            if d.status not in _TERMINAL_DOC_STATUSES
+        ]
+        is_connector_job = any(
+            d.source == DocumentSource.CONNECTOR.value for d in all_docs
+        )
+
         # Clean vector DB before marking docs CANCELLED so the filter on
         # CHUNKED/COMPLETED statuses still reflects pre-cancellation state.
         vdb_cleaned = False
@@ -542,7 +553,6 @@ async def launch_ingest_pipeline(
                     models.DocStatus.CHUNKED.value,
                     models.DocStatus.COMPLETED.value,
                 }
-                all_docs = db_manager.get_documents_by_job_id(job_id)
                 doc_ids_to_clean = [
                     d.doc_id for d in all_docs
                     if d.status in indexed_statuses
@@ -558,6 +568,24 @@ async def launch_ingest_pipeline(
         # If VDB cleanup ran, force-cancel all docs (including COMPLETED ones
         # whose vectors were just removed).  Otherwise respect terminal statuses.
         _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
+
+        # For connector jobs, mid-flight docs were never registered in
+        # connector_document_checksum and have no value once cancelled —
+        # remove them from the documents table entirely, just as chunks are
+        # removed from the vector store.
+        if is_connector_job and mid_flight_doc_ids:
+            logger.info(
+                f"Cancelled connector job {job_id}: removing "
+                f"{len(mid_flight_doc_ids)} mid-flight document row(s) from DB"
+            )
+            for doc_id in mid_flight_doc_ids:
+                try:
+                    db_manager.delete_document(doc_id)
+                except Exception as del_exc:
+                    logger.warning(
+                        f"Failed to delete mid-flight doc {doc_id!r} "
+                        f"from documents table: {del_exc}"
+                    )
     except Exception as exc:
         logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
