@@ -55,7 +55,18 @@ def split_text_into_chunks(
         actual_ratio = document_words / document_tokens
         configured_ratio = settings.common.llm.token_to_word_ratio_en
         if actual_ratio < configured_ratio:
+            original_max_words = max_words
             max_words = int(max_words * actual_ratio / configured_ratio)
+            logger.info(
+                f"Token density adjustment: actual_ratio={actual_ratio:.4f}, "
+                f"configured_ratio={configured_ratio}, "
+                f"max_words reduced from {original_max_words} to {max_words}"
+            )
+        else:
+            logger.info(
+                f"No token density adjustment needed: actual_ratio={actual_ratio:.4f} "
+                f">= configured_ratio={configured_ratio}, max_words={max_words}"
+            )
     
     # Split into paragraphs
     paragraphs = re.split(r'\n\n+', text.strip())
@@ -115,6 +126,10 @@ def split_text_into_chunks(
                     current_chunk = [overlap_text, paragraph]
                     current_word_count = overlap_wc + para_word_count
                 else:
+                    logger.info(
+                        f"Overlap skipped (overflow branch): overlap_words={overlap_wc} + "
+                        f"para_words={para_word_count} = {overlap_wc + para_word_count} > max_words={max_words}"
+                    )
                     current_chunk = [paragraph]
                     current_word_count = para_word_count
             else:
@@ -130,6 +145,10 @@ def split_text_into_chunks(
                     current_chunk = [overlap_text, paragraph]
                     current_word_count = overlap_wc + para_word_count
                 else:
+                    logger.info(
+                        f"Overlap skipped (empty-chunk branch): overlap_words={overlap_wc} + "
+                        f"para_words={para_word_count} = {overlap_wc + para_word_count} > max_words={max_words}"
+                    )
                     current_chunk = [paragraph]
                     current_word_count = para_word_count
             else:
@@ -141,7 +160,11 @@ def split_text_into_chunks(
         chunk_text = '\n\n'.join(current_chunk)
         chunks.append(chunk_text)
     
-    logger.info(f"Split text into {len(chunks)} chunks (max {max_words} words per chunk)")
+    chunk_word_counts = [word_count(c) for c in chunks]
+    logger.info(
+        f"Split text into {len(chunks)} chunks (max {max_words} words per chunk), "
+        f"chunk word counts: {chunk_word_counts}"
+    )
     return chunks
 
 
