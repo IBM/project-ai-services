@@ -24,7 +24,7 @@ Per-file pipeline (tested via _process_file directly):
   Step 2  – UTF-8 decode error → doc failed(FILE_READ_ERROR)
   Step 3  – Tokenization failure, context-window budget breach
   Step 4  – vLLM call failure, empty choices list
-  Step 5  – finish_reason=length retry (success + still length → OUTPUT_BUDGET_EXCEEDED)
+  Step 5  – finish_reason=length retry (success + still length → CONTEXT_LIMIT_EXCEEDED)
   Step 6  – validate_with_retry failure → EXTRACTION_VALIDATION_FAILED
   Step 7  – Result-file write failure → RESULT_WRITE_ERROR
   Step 8  – Happy path: doc completed, result file written with correct structure
@@ -38,6 +38,15 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
 import pytest
+from fastapi import HTTPException
+
+
+def _http_exc(code: str, message: str, status: int) -> HTTPException:
+    """Build a structured HTTPException the same way APIError.raise_error does."""
+    return HTTPException(
+        status_code=status,
+        detail={"error": {"code": code, "message": message, "status": status}},
+    )
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -344,10 +353,9 @@ class TestStep1BatchOrchestrator:
         assert p["extract.utils.job.db_repo.update_job"].call_count == 1
 
     def test_schema_not_found_marks_job_failed(self):
-        from extract.utils.exceptions import ExtractException
         p = _standard_batch_patches()
         p["extract.utils.job.resolve_schema"] = Mock(
-            side_effect=ExtractException(404, "SCHEMA_NOT_FOUND", "No schema")
+            side_effect=_http_exc("RESOURCE_NOT_FOUND", "No schema", 404)
         )
 
         with _apply_patches(p)[0]:
@@ -355,7 +363,7 @@ class TestStep1BatchOrchestrator:
 
         calls = p["extract.utils.job.db_repo.update_job"].call_args_list
         failed_call = next(c for c in calls if c.kwargs.get("status") == "failed")
-        assert failed_call.kwargs["error"] == "SCHEMA_NOT_FOUND"
+        assert failed_call.kwargs["error"] == "RESOURCE_NOT_FOUND"
         p["extract.utils.job.cleanup_staging_directory"].assert_called_once()
 
     def test_no_document_rows_marks_job_failed(self):
@@ -413,10 +421,9 @@ class TestStep1BatchOrchestrator:
 
     def test_staging_cleanup_always_called(self):
         """cleanup_staging_directory is called even when job fails early."""
-        from extract.utils.exceptions import ExtractException
         p = _standard_batch_patches()
         p["extract.utils.job.resolve_schema"] = Mock(
-            side_effect=ExtractException(404, "SCHEMA_NOT_FOUND", "No schema")
+            side_effect=_http_exc("RESOURCE_NOT_FOUND", "No schema", 404)
         )
         with _apply_patches(p)[0]:
             _run(process_batch_job("job-001"))
@@ -491,13 +498,9 @@ class TestStep3TokenGuard:
         assert "tokenise" in failed.kwargs.get("error", "")
 
     def test_context_limit_exceeded_marks_doc_failed(self):
-        from extract.utils.exceptions import ExtractException
         p = _standard_file_patches()
         p["extract.utils.job.check_extraction_budget"] = Mock(
-            side_effect=ExtractException(
-                413, "CONTEXT_LIMIT_EXCEEDED", "Too large",
-                details={"excess_tokens": 500},
-            )
+            side_effect=_http_exc("CONTEXT_LIMIT_EXCEEDED", "Too large", 413)
         )
         _run_process_file(p, b"text content")
 
@@ -506,17 +509,20 @@ class TestStep3TokenGuard:
         assert failed.kwargs.get("status") == "failed"
 
     def test_context_guard_diagnostics_in_metadata(self):
-        from extract.utils.exceptions import ExtractException
-        details = {"excess_tokens": 200, "total_required_tokens": 33000}
         p = _standard_file_patches()
         p["extract.utils.job.check_extraction_budget"] = Mock(
-            side_effect=ExtractException(413, "CONTEXT_LIMIT_EXCEEDED", "x", details=details)
+            side_effect=_http_exc("CONTEXT_LIMIT_EXCEEDED", "x", 413)
         )
         _run_process_file(p, b"text content")
 
         calls = p["extract.utils.job.db_repo.update_document"].call_args_list
         failed = next(c for c in calls if c.kwargs.get("status") == "failed")
-        assert failed.kwargs.get("metadata", {}).get("token_diagnostics") == details
+        diag = failed.kwargs.get("metadata", {}).get("token_diagnostics", {})
+        assert diag.get("context_limit_exceeded") is True, (
+            "token_diagnostics.context_limit_exceeded must be True when budget is exceeded"
+        )
+        assert "input_tokens" in diag, "token_diagnostics must include input_tokens"
+        assert "schema_tokens" in diag, "token_diagnostics must include schema_tokens"
 
 
 
@@ -526,10 +532,9 @@ class TestStep3TokenGuard:
 
 class TestStep4VllmCall:
     def test_vllm_connection_error_marks_doc_failed(self):
-        from extract.utils.exceptions import ExtractException
         p = _standard_file_patches()
         p["extract.utils.job.call_vllm_safe"] = AsyncMock(
-            side_effect=ExtractException(503, "LLM_UNAVAILABLE", "unreachable")
+            side_effect=Exception("unreachable")
         )
         _run_process_file(p, b"text content")
 
@@ -585,12 +590,11 @@ class TestStep5LengthRetry:
         assert "truncated" in failed.kwargs.get("error", "")
 
     def test_vllm_error_on_length_retry_marks_doc_failed(self):
-        from extract.utils.exceptions import ExtractException
         length_resp = _vllm_response("", finish_reason="length")
 
         p = _standard_file_patches()
         p["extract.utils.job.call_vllm_safe"] = AsyncMock(
-            side_effect=[length_resp, ExtractException(500, "LLM_ERROR", "crash on retry")]
+            side_effect=[length_resp, _http_exc("LLM_ERROR", "crash on retry", 500)]
         )
         _run_process_file(p, b"text content")
 
@@ -628,13 +632,9 @@ class TestStep5LengthRetry:
 
 class TestStep6Validation:
     def test_validation_failure_marks_doc_failed(self):
-        from extract.utils.exceptions import ExtractException
         p = _standard_file_patches()
         p["extract.utils.job.validate_with_retry"] = AsyncMock(
-            side_effect=ExtractException(
-                422, "EXTRACTION_VALIDATION_FAILED", "schema mismatch",
-                details={"validation_errors": "missing field", "raw_output": "{}"},
-            )
+            side_effect=Exception("schema mismatch")
         )
         _run_process_file(p, b"text content")
 

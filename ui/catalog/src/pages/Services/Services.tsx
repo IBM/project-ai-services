@@ -100,6 +100,16 @@ const Services = () => {
     dispatch({ type: "SHOW_DEPLOYMENT_DETAILS", payload: deployment });
   };
 
+  // Navigate to DeploymentDetails with integration section pre-selected.
+  // DeployedServicesTable resolves the real row data before calling this callback.
+  const handleViewIntegration = (deployment: DeploymentDetailsType) => {
+    dispatch({
+      type: "SHOW_DEPLOYMENT_DETAILS",
+      payload: deployment,
+      defaultSection: "integration",
+    });
+  };
+
   const handleBackFromDetails = () => {
     dispatch({ type: "HIDE_DEPLOYMENT_DETAILS" });
   };
@@ -128,6 +138,7 @@ const Services = () => {
           handleBackFromDetails();
         }}
         deploymentSource="Services"
+        defaultSection={state.deploymentDefaultSection}
         onNameUpdate={(newName) =>
           dispatch({
             type: "UPDATE_DEPLOYMENT_NAME",
@@ -160,6 +171,7 @@ const Services = () => {
               onDeploy={handleDeployFromTable}
               refreshTrigger={state.tableRefreshTrigger}
               onRowClick={handleShowDeploymentDetails}
+              onViewIntegration={handleViewIntegration}
             />
           </TabPanel>
           <TabPanel>

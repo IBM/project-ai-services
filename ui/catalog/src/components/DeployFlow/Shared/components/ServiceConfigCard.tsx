@@ -7,7 +7,7 @@ import {
   AccordionItem,
 } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
-import { Checkmark, Edit, View, ViewOff } from "@carbon/icons-react";
+import { Edit, View, ViewOff } from "@carbon/icons-react";
 import styles from "../DeployFlow.shared.module.scss";
 import type { ServiceConfig, ServiceConfigField } from "../types";
 import { getDisplayName } from "../utils/displayHelpers";
@@ -250,7 +250,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       }));
 
     return {
-      label: "Inference backend",
+      label: "LLM inference backend",
       options: inferenceBackendOptions,
     };
   }, [
@@ -282,6 +282,22 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       ? currentProviderId
       : (supportingProviders[0] ?? "");
 
+    const providerChanged = newProviderId !== currentProviderId;
+
+    // When the auto-selected provider changes, clear stale credential params
+    // that belonged to the old provider (same logic as the backend dropdown onChange).
+    let updatedParams = currentConfig?.params;
+    if (providerChanged) {
+      const serviceFieldKeys = new Set(serviceFields.map((f) => f.key));
+      const preservedParams: Record<string, unknown> = {};
+      Object.entries(currentConfig?.params || {}).forEach(([key, value]) => {
+        if (serviceFieldKeys.has(key)) {
+          preservedParams[key] = value;
+        }
+      });
+      updatedParams = preservedParams;
+    }
+
     onUpdateConfig({
       components: {
         ...currentConfig?.components,
@@ -290,6 +306,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           params: { model: newModelId },
         },
       },
+      ...(providerChanged ? { params: updatedParams } : {}),
     });
   };
 
@@ -315,7 +332,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       {isEditing && (
         <div className={styles.cardEditAction}>
           <Button
-            kind="ghost"
+            kind="secondary"
             size="sm"
             onClick={() => {
               setHasValidationError(false);
@@ -325,13 +342,8 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           >
             Cancel
           </Button>
-          <Button
-            kind="tertiary"
-            size="sm"
-            onClick={handleApplyWithValidation}
-            renderIcon={Checkmark}
-          >
-            Apply
+          <Button kind="primary" size="sm" onClick={handleApplyWithValidation}>
+            Save
           </Button>
         </div>
       )}
@@ -386,7 +398,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   className={styles.serviceConfigItem}
                 >
                   <span className={styles.serviceConfigItemLabel}>
-                    Inference backend
+                    LLM inference backend
                   </span>
                   <span className={styles.serviceConfigItemValue}>
                     {provider.name}
@@ -482,8 +494,10 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
               const excludeKeys = new Set(["model", ...serviceFieldKeys]);
 
               return Object.entries(config.params)
-                .filter(([key, value]) =>
-                  shouldShowParam(key, value, schema, excludeKeys),
+                .filter(
+                  ([key, value]) =>
+                    key in (schema.properties ?? {}) &&
+                    shouldShowParam(key, value, schema, excludeKeys),
                 )
                 .map(([key, value]) => {
                   const property = (
@@ -858,9 +872,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     setHasValidationError(false);
                     setFieldErrors({});
                     const serviceKeys = new Set(
-                      serviceSchema?.properties
-                        ? Object.keys(serviceSchema.properties)
-                        : [],
+                      serviceFields.map((f) => f.key),
                     );
 
                     const mergedParams: Record<string, unknown> = {};
@@ -921,7 +933,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     className={`${styles.modelDescriptionSection} ${styles.fullWidth}`}
                   >
                     <Accordion>
-                      <AccordionItem title="What is this model good at?">
+                      <AccordionItem title="What is this LLM good at?">
                         <div className={styles.modelDescriptionContent}>
                           {sections.introduction && (
                             <div className={styles.modelDescriptionFullWidth}>

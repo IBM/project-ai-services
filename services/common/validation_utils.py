@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
+from common.error_utils import APIError, ErrorCode
 from common.llm_utils import tokenize_with_llm
 from common.misc_utils import get_logger
 
@@ -40,14 +41,15 @@ async def validate_file_content(file: UploadFile) -> None:
     the full content.
 
     Raises:
-        ValueError: on an empty file, invalid UTF-8, null bytes, excessive
-                    control characters, or PDF magic bytes.
+        HTTPException (415 INVALID_FILE_CONTENT): on an empty file.
+        ValueError: on invalid UTF-8, null bytes, excessive control characters,
+                    or PDF magic bytes.
     """
     probe = await file.read(_MAX_PROBE_BYTES)
     await file.seek(0)
 
     if not probe:
-        raise ValueError("File is empty.")
+        APIError.raise_error(ErrorCode.INVALID_FILE_CONTENT, "File is empty.")
 
     try:
         decoded = probe.decode("utf-8")

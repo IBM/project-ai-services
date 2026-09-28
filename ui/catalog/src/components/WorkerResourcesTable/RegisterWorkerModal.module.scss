@@ -1,6 +1,7 @@
 @use "@carbon/react/scss/spacing" as *;
 @use "@carbon/react/scss/type" as *;
 @use "@carbon/react/scss/theme" as *;
+@use "@carbon/react/scss/themes" as carbon-themes;
 
 .modalBody {
   display: flex;
@@ -48,4 +49,17 @@
   @include type-style("label-01");
   color: $text-secondary;
   margin: 0;
+}
+
+// Modal portals outside the app theme context — pin to white theme values.
+// @include theme() emits the white theme CSS custom properties on this selector,
+// so $background and $field-01 resolve correctly regardless of runtime context.
+.registerModal :global(.cds--modal-container) {
+  @include theme(carbon-themes.$white);
+  background-color: $background;
+}
+
+.textInput :global(.cds--text-input) {
+  @include theme(carbon-themes.$white);
+  background-color: $field-01 !important;
 }

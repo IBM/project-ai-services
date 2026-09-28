@@ -4,9 +4,9 @@ import {
   Toggletip,
   ToggletipButton,
   ToggletipContent,
-  InlineLoading,
   InlineNotification,
   Tooltip,
+  SkeletonText,
 } from "@carbon/react";
 import { Help, CheckmarkFilled, WarningFilled } from "@carbon/icons-react";
 import { bytesToGB, getResourceStatus } from "../utils/resources";
@@ -140,8 +140,13 @@ export const ResourceRequirementsPanel: React.FC<
 
       {/* Loading */}
       {resourcesLoading && (
-        <div className={styles.resourceLoading}>
-          <InlineLoading description="Loading resource information..." />
+        <div className={styles.resourceGrid}>
+          {[0, 1, 2, 3].map((i) => (
+            <Tile key={i} className={styles.resourceItem}>
+              <SkeletonText width="60%" />
+              <SkeletonText heading width="40%" />
+            </Tile>
+          ))}
         </div>
       )}
 

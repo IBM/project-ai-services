@@ -174,30 +174,6 @@ func writeTLSMaterial(dir string, certPEM, keyPEM, caCertPEM []byte) error {
 	return nil
 }
 
-// workerNameFromCert reads the CN from the worker's client certificate in tlsDir.
-// This recovers the registered worker name on reconnect without any extra state file,
-// because the gateway embeds the token-bound worker name as the cert CN at registration time.
-// tls.crt is public material and stored in plaintext — no decryption needed here.
-func workerNameFromCert(tlsDir string) (string, error) {
-	certPEM, err := os.ReadFile(filepath.Join(tlsDir, tlsCertFile))
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", tlsCertFile, err)
-	}
-	block, _ := pem.Decode(certPEM)
-	if block == nil {
-		return "", fmt.Errorf("tls.crt: not valid PEM")
-	}
-	cert, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return "", fmt.Errorf("parse tls.crt: %w", err)
-	}
-	if cert.Subject.CommonName == "" {
-		return "", fmt.Errorf("tls.crt: CN is empty")
-	}
-
-	return cert.Subject.CommonName, nil
-}
-
 // hasValidTLSCredentials returns true when the on-disk credentials in tlsDir
 // are structurally valid and not expired:
 //  1. tls.crt + tls.key load without error (tls.key is decrypted in memory).

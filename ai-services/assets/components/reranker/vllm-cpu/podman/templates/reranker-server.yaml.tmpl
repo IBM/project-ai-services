@@ -27,7 +27,7 @@ spec:
       - {{ .Values.model }}
       - --port=8002
       - --gpu-memory-utilization=0.5
-      - --enforce-eager
+      - --dtype=bfloat16
       - --max-model-len=1024
       livenessProbe:
         httpGet:

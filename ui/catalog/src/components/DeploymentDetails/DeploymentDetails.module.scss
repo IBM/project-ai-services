@@ -2,42 +2,6 @@
 @use "@carbon/react/scss/theme" as *;
 @use "@carbon/react/scss/type" as *;
 
-.deploymentDetails {
-  min-height: 100vh;
-  background-color: $layer;
-}
-
-.headerGrid {
-  row-gap: 0;
-  background-color: $layer;
-  padding-top: $spacing-06;
-}
-
-.pageHeader {
-  padding: 0 0 $spacing-03 0;
-}
-
-.pageTitle {
-  @include type-style("heading-05");
-  margin-top: $spacing-03;
-  margin-bottom: 0;
-  color: $text-primary;
-}
-
-.statusGrid {
-  row-gap: 0;
-  background-color: $layer;
-  padding-bottom: $spacing-05;
-  border-bottom: 1px solid $border-subtle;
-  margin-bottom: $spacing-06;
-}
-
-.statusRow {
-  display: flex;
-  gap: $spacing-03;
-  align-items: center;
-}
-
 .breadcrumbDivider {
   border: none;
   border-bottom: 1px solid $border-subtle;
@@ -111,34 +75,18 @@
   line-height: var(--cds-heading-03-line-height);
 }
 
-.detailsContent {
-  padding: $spacing-05 0;
-}
-
-.detailRow {
+.headerSubtitle {
   display: flex;
-  justify-content: space-between;
+  gap: $spacing-03;
   align-items: center;
-  padding: $spacing-03 0;
-  border-bottom: 1px solid $border-subtle;
+  flex-wrap: wrap;
 }
 
-.detailLabel {
-  @include type-style("label-01");
-  color: $text-secondary;
-}
-
-.detailValue {
-  @include type-style("body-short-01");
-  color: $text-primary;
-}
-
-.certifiedBadge {
+.headerCertifiedBadge {
   @include type-style("label-01");
   display: inline-flex;
   align-items: center;
   gap: $spacing-02;
-  margin-bottom: 0;
 }
 
 .badgeIcon {
@@ -155,72 +103,33 @@
   row-gap: 0;
 }
 
-.sectionTitle {
-  @include type-style("heading-03");
-  margin-bottom: $spacing-05;
-}
-
-.cardsGrid {
-  margin-top: $spacing-05;
-  row-gap: $spacing-05;
-}
-
 .resourceCard :global(.c4p--card__title) {
   @include type-style("heading-compact-01");
   width: 100%;
   height: 100%;
 }
 
-.resourceContent {
-  padding: $spacing-05 0;
-}
-
-.resourcesInnerGrid {
-  margin: 0;
-  padding: 0;
-  row-gap: $spacing-07;
-}
-
-.resourceColumn {
-  padding-top: 0;
-  padding-bottom: 0;
+.resourcesRow {
+  display: flex;
 }
 
 .resourceItem {
   display: flex;
   flex-direction: column;
   gap: $spacing-03;
+  flex: 0 0 50%;
+  min-width: 0;
+  padding-right: $spacing-07;
+
+  &:last-child {
+    padding-right: 0;
+  }
 }
 
 .resourceName {
   @include type-style("heading-03");
   margin: 0 0 $spacing-03 0;
   color: $text-primary;
-}
-
-.progressBar {
-  margin-bottom: $spacing-03;
-}
-
-// Color for yellow warning state (80-89%)
-.progressBar
-  :global(.cds--progress-bar--active)
-  :global(.cds--progress-bar__bar) {
-  background-color: $support-warning !important;
-}
-
-// Color for red error state (90%+)
-.progressBar
-  :global(.cds--progress-bar--error)
-  :global(.cds--progress-bar__bar) {
-  background-color: $support-error !important;
-}
-
-// Color for green success state (<80%)
-.progressBar
-  :global(.cds--progress-bar--finished)
-  :global(.cds--progress-bar__bar) {
-  background-color: $support-success !important;
 }
 
 .resourceStats {
@@ -259,25 +168,9 @@
   z-index: 9999;
 }
 
-.placeholderContent {
-  padding: $spacing-07;
-  text-align: center;
-  color: $text-secondary;
-
-  p {
-    @include type-style("body-long-01");
-  }
-}
-
 .servicesGrid {
   margin-top: $spacing-05;
   row-gap: $spacing-05;
-}
-
-.servicesTitle {
-  @include type-style("heading-03");
-  margin: 0 0 $spacing-05 0;
-  color: $text-primary;
 }
 
 .serviceCard {
@@ -294,12 +187,6 @@
   margin-bottom: $spacing-03;
 }
 
-.serviceDescription {
-  @include type-style("body-compact-01");
-  color: $text-secondary;
-  margin: 0 0 $spacing-06 0;
-}
-
 .integrationEndpointGrid {
   margin: 0;
   padding: 0;
@@ -311,12 +198,6 @@
   flex-direction: column;
   gap: $spacing-05;
   margin-left: calc(-1 * $spacing-05);
-}
-
-.integrationEndpointRightColumn {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-03;
 }
 
 .integrationEndpointField {
@@ -381,15 +262,6 @@
   text-align: left;
   word-break: break-word;
   flex: 1;
-}
-
-.intergationEndpointList {
-  list-style-type: disc;
-  padding-left: $spacing-06;
-
-  :global(.cds--list__item) {
-    list-style-type: disc;
-  }
 }
 
 // Responsive adjustments

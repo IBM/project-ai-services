@@ -224,10 +224,6 @@
   gap: $spacing-03;
 }
 
-.resourceLoading {
-  padding: $spacing-05 0;
-}
-
 .iconButton {
   background: none;
   border: none;
@@ -256,10 +252,9 @@
 .resourceItem {
   display: flex;
   flex-direction: column;
-  gap: $spacing-08;
+  gap: $spacing-03;
   flex: 1;
   min-width: 200px;
-  min-height: 120px;
   background-color: transparent;
   border: 1px solid $border-subtle;
 }
@@ -413,6 +408,7 @@
 
 .cloudCredentialsTitle {
   @include type-style("heading-compact-01");
+  margin-top: $spacing-05;
   margin-bottom: $spacing-05;
 }
 
@@ -468,6 +464,17 @@
   min-height: 400px;
 }
 
+.skeletonContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+  padding-top: $spacing-03;
+}
+
+.skeletonHeading {
+  margin-bottom: $spacing-03;
+}
+
 .errorContainer {
   display: flex;
   justify-content: center;
@@ -487,10 +494,8 @@
   width: 100%;
 
   // Credentials block spans both columns.
-  // Negative margin cancels the grid row-gap so spacing matches Services.
   .fullWidth:has(> h4) {
     grid-column: 1 / -1;
-    margin-top: -$spacing-06;
   }
 
   :global {

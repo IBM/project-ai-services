@@ -123,7 +123,7 @@ spec:
       image: "{{ .Values.reranker.image }}"
       command: ["/bin/sh", "-c"]
       args: [
-          "vllm serve /models/{{ .Values.reranker.model.name }} --served-model-name {{ .Values.reranker.model.name }} --port 8002 --gpu-memory-utilization=0.5"
+          "vllm serve /models/{{ .Values.reranker.model.name }} --served-model-name {{ .Values.reranker.model.name }} --port 8002 --gpu-memory-utilization=0.5 --max-model-len=1024 --dtype=bfloat16"
       ]
       livenessProbe:
         httpGet:

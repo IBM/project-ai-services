@@ -77,21 +77,24 @@ async def register_connector_job(
     from digitize.api.v1.connectors import dispatch_sync
 
     now = datetime.now(timezone.utc)
-    # APScheduler v3: IntervalTrigger always schedules the first run at
-    # start_date + N*interval.
-    # Passing next_run_time=now overrides the trigger's first computed fire time
-    # so the job executes immediately, then repeats on the normal interval.
+    # APScheduler v3: passing next_run_time=None puts the job in a paused state
+    # so it never fires.  To fire immediately we pass next_run_time=now; to let
+    # the trigger schedule the first run normally we omit next_run_time entirely.
+    # start_date anchors the interval rhythm in both cases.
     start_date = now if fire_immediately else now + timedelta(seconds=interval_seconds)
 
-    sched = _get_scheduler()
-    sched.add_job(
+    job_kwargs: dict = dict(
         func=dispatch_sync,
         trigger=IntervalTrigger(seconds=interval_seconds, start_date=start_date),
         args=[connector_id],
         id=connector_id,
         replace_existing=True,
-        next_run_time=now if fire_immediately else None,
     )
+    if fire_immediately:
+        job_kwargs["next_run_time"] = now
+
+    sched = _get_scheduler()
+    sched.add_job(**job_kwargs)
     logger.info(
         f"Registered scheduler job for connector {connector_id!r} "
         f"(interval={interval_seconds}s, fire_immediately={fire_immediately})"

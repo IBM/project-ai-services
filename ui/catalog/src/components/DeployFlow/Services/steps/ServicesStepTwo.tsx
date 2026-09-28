@@ -1,6 +1,6 @@
 import { useMemo, useEffect } from "react";
 import { formatVersion } from "@/utils/string";
-import { InlineLoading, InlineNotification } from "@carbon/react";
+import { InlineNotification, SkeletonText } from "@carbon/react";
 import { sumProviderResources } from "../../Shared/utils/resources";
 import { COMPONENT_TYPES, DEFAULT_RUNTIME } from "@/constants";
 import type {
@@ -394,8 +394,11 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
       )}
 
       {isLoadingInferenceOptions ? (
-        <div className={styles.loadingContainer}>
-          <InlineLoading description="Loading configuration options..." />
+        <div className={styles.skeletonContent}>
+          <SkeletonText width="50%" className={styles.skeletonHeading} />
+          <SkeletonText lineCount={3} />
+          <SkeletonText width="50%" className={styles.skeletonHeading} />
+          <SkeletonText lineCount={3} />
         </div>
       ) : (
         <div className={styles.formSection}>

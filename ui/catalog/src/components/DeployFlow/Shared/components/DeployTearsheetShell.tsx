@@ -2,9 +2,10 @@ import { Tearsheet } from "@carbon/ibm-products";
 import {
   ProgressIndicator,
   ProgressStep,
-  InlineLoading,
   ActionableNotification,
   InlineNotification,
+  SkeletonText,
+  TextInputSkeleton,
 } from "@carbon/react";
 import styles from "../DeployFlow.shared.module.scss";
 
@@ -118,8 +119,11 @@ export const DeployTearsheetShell = ({
       >
         <div className={styles.stepContent}>
           {isLoading ? (
-            <div className={styles.loadingContainer}>
-              <InlineLoading description="Loading deploy options..." />
+            <div className={styles.skeletonContent}>
+              <SkeletonText width="40%" className={styles.skeletonHeading} />
+              <TextInputSkeleton />
+              <TextInputSkeleton />
+              <SkeletonText lineCount={2} width="80%" />
             </div>
           ) : error ? (
             <InlineNotification

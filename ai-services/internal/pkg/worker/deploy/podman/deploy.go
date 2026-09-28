@@ -24,6 +24,7 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	deployutils "github.com/project-ai-services/ai-services/internal/pkg/worker/deploy/utils"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
+	workerpodman "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/podman"
 
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -103,7 +104,10 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 	}
 
 	if err := deployutils.CheckWorkerContainerLogs(ctx, rt); err != nil {
-		cleanupFailedWorkerPods(ctx, rt)
+		logger.InfolnCtx(ctx, "Worker startup failed, cleaning up worker pod...")
+		if cleanUpErr := cleanupFailedWorkerPods(ctx, rt); cleanUpErr != nil {
+			logger.ErrorfCtx(ctx, "failed to cleanup worker pods: %v\n", cleanUpErr)
+		}
 
 		return err
 	}
@@ -114,20 +118,17 @@ func DeployWorker(ctx context.Context, opts workertypes.PodmanWorkerOptions) err
 }
 
 // cleanupFailedWorkerPods deletes all worker pods after a failed join attempt.
-func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) {
+func cleanupFailedWorkerPods(ctx context.Context, rt runtime.Runtime) error {
 	pods, listErr := rt.ListPods(ctx, map[string][]string{"label": {workerconstants.WorkerPodLabel}})
 	if listErr != nil {
-		logger.ErrorfCtx(ctx, "failed to list worker pods for cleanup: %v\n", listErr)
-
-		return
+		return listErr
 	}
 
-	for _, pod := range pods {
-		logger.InfofCtx(ctx, "Deleting '%s' pod, as worker failed to join", pod.Name)
-		if delErr := rt.DeletePod(ctx, pod.ID, utils.BoolPtr(true)); delErr != nil {
-			logger.ErrorfCtx(ctx, "failed to delete worker pod %s: %v\n", pod.Name, delErr)
-		}
+	if err := workerpodman.PerformCleanup(ctx, rt, pods, false); err != nil {
+		return err
 	}
+
+	return nil
 }
 
 // CheckStatus checks whether the worker node is already deployed by listing

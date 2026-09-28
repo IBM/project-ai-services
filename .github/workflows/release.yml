@@ -11,15 +11,18 @@ concurrency:
 
 jobs:
   build:
-    name: Build all platforms
+    name: Build ${{ matrix.service }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [ai-services, mcp]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      
+
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
@@ -28,15 +31,15 @@ jobs:
       - run: go version
 
       - name: Build Go binaries for all platforms (cross-compilation)
-        working-directory: ai-services
+        working-directory: ${{ matrix.service }}
         run: |
           make binaries
 
       - name: Archive all binaries
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: ai-services-binaries
-          path: ai-services/bin/ai-services-*
+          name: ${{ matrix.service }}-binaries
+          path: ${{ matrix.service }}/bin/*
 
   release:
     needs: build
@@ -46,7 +49,8 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
-          name: ai-services-binaries
+          pattern: '*-binaries'
+          merge-multiple: true
           path: ./release-assets
 
       - name: Get the target release version
@@ -77,10 +81,14 @@ jobs:
             **macOS:**
             - `ai-services-darwin-amd64` - Intel-based Macs
             - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3/M4 and later)
-            
+            - `ai-services-mcp-darwin-amd64` - MCP Sidecar, Intel-based Macs
+            - `ai-services-mcp-darwin-arm64` - MCP Sidecar, Apple Silicon Macs (M1/M2/M3/M4 and later)
+
             **Linux:**
             - `ai-services-linux-amd64` - x86_64 Linux
             - `ai-services-linux-ppc64le` - PowerPC 64-bit Little Endian Linux (Podman runtime supported)
+            - `ai-services-mcp-linux-amd64` - MCP Sidecar, x86_64 Linux
+            - `ai-services-mcp-linux-ppc64le` - MCP Sidecar, PowerPC 64-bit Little Endian Linux
             
             ### Platform Support
             - **Podman runtime**: Only supported on `linux/ppc64le`

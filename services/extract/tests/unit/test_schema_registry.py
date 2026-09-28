@@ -163,14 +163,14 @@ class TestRegisterSchema:
             resp = extract_test_client.post("/v1/schemas", json=_VALID_SCHEMA_BODY)
 
         assert resp.status_code == 409
-        assert resp.json()["error"]["code"] == "CONFLICT"
+        assert resp.json()["error"]["code"] == "RESOURCE_CONFLICT"
 
     def test_invalid_json_schema_returns_400(self, extract_test_client):
         with patch("extract.utils.schema.normalize_schema", return_value=_VALID_SCHEMA_BODY["json_schema"]), \
              patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
              patch(
                  "extract.api.v1.schema.validate_json_schema_structure",
-                 side_effect=SchemaValidationError("INVALID_SCHEMA", "Root must be type:object", 400),
+                 side_effect=SchemaValidationError("Root must be type:object"),
              ):
             resp = extract_test_client.post(
                 "/v1/schemas",
@@ -189,17 +189,12 @@ class TestRegisterSchema:
              patch("extract.api.v1.schema.validate_json_schema_structure"), \
              patch(
                  "extract.api.v1.schema.validate_examples",
-                 side_effect=SchemaValidationError(
-                     "INVALID_EXAMPLE",
-                     "examples[0].output does not validate",
-                     400,
-                     {"example_index": 0},
-                 ),
+                 side_effect=SchemaValidationError("examples[0].output does not validate"),
              ):
             resp = extract_test_client.post("/v1/schemas", json=_VALID_SCHEMA_BODY_WITH_EXAMPLE)
 
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "INVALID_EXAMPLE"
+        assert resp.json()["error"]["code"] == "INVALID_SCHEMA"
 
     def test_budget_exceeded_returns_400(self, extract_test_client, monkeypatch):
         monkeypatch.setattr(
@@ -212,17 +207,12 @@ class TestRegisterSchema:
              patch("extract.api.v1.schema.db_repo.schema_name_exists", return_value=False), \
              patch(
                  "extract.api.v1.schema.check_schema_share_in_context",
-                 side_effect=SchemaValidationError(
-                     "SCHEMA_BUDGET_EXCEEDED",
-                     "Schema overhead exceeds budget",
-                     400,
-                     {"fixed_tokens": 20000, "budget_tokens": 16384},
-                 ),
+                 side_effect=SchemaValidationError("Schema overhead exceeds budget"),
              ):
             resp = extract_test_client.post("/v1/schemas", json=_VALID_SCHEMA_BODY)
 
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "SCHEMA_BUDGET_EXCEEDED"
+        assert resp.json()["error"]["code"] == "INVALID_SCHEMA"
 
     def test_missing_name_returns_422(self, extract_test_client):
         """FastAPI validation (not schema_utils) catches missing required fields."""
@@ -247,7 +237,7 @@ class TestRegisterSchema:
                 json={"name": "no-schema-no-examples"},
             )
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "MISSING_SCHEMA"
+        assert resp.json()["error"]["code"] == "MISSING_INPUT"
 
     def test_inferred_schema_from_examples_returns_201(self, extract_test_client, monkeypatch):
         """When json_schema is absent, schema is inferred from examples and registered."""
@@ -288,15 +278,13 @@ class TestRegisterSchema:
              patch(
                  "extract.api.v1.schema.infer_schema_from_examples",
                  side_effect=SchemaValidationError(
-                     "SCHEMA_INFERENCE_CONFLICT",
-                     "Cannot infer schema: field 'amount' has conflicting types",
-                     400,
+                     "Cannot infer schema: field 'amount' has conflicting types"
                  ),
              ):
             resp = extract_test_client.post("/v1/schemas", json=body)
 
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "SCHEMA_INFERENCE_CONFLICT"
+        assert resp.json()["error"]["code"] == "INVALID_SCHEMA"
 
     def test_inferred_schema_no_examples_returns_400(self, extract_test_client):
         """Sending an explicit empty examples list with no json_schema must return 400."""
@@ -304,9 +292,7 @@ class TestRegisterSchema:
              patch(
                  "extract.api.v1.schema.infer_schema_from_examples",
                  side_effect=SchemaValidationError(
-                     "INFERENCE_NO_EXAMPLES",
-                     "Cannot infer schema: no examples provided.",
-                     400,
+                     "Cannot infer schema: no examples provided."
                  ),
              ):
             resp = extract_test_client.post(
@@ -384,7 +370,7 @@ class TestGetSchema:
             resp = extract_test_client.get("/v1/schemas/nonexistent")
 
         assert resp.status_code == 404
-        assert resp.json()["error"]["code"] == "SCHEMA_NOT_FOUND"
+        assert resp.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
 
     def test_normalized_schema_returned(self, extract_test_client):
         """The GET endpoint returns whatever is stored in the DB (already normalized)."""
@@ -427,10 +413,8 @@ class TestDeleteSchema:
             resp = extract_test_client.delete(f"/v1/schemas/{row.schema_id}")
 
         assert resp.status_code == 409
-        body = resp.json()
-        assert body["error"]["code"] == "SCHEMA_IN_USE"
-        assert "referencing_job_ids" in body["error"]["details"]
-        assert "job-1" in body["error"]["details"]["referencing_job_ids"]
+        assert resp.json()["error"]["code"] == "RESOURCE_LOCKED"
+        assert resp.json()["error"]["details"]["referencing_job_ids"] == ["job-1", "job-2"]
 
     def test_concurrent_job_creation_returns_409(self, extract_test_client):
         """If FK RESTRICT fires in DB, endpoint returns 409."""
@@ -462,24 +446,24 @@ class TestBulkDeleteSchemas:
     def test_missing_confirm_returns_400(self, extract_test_client):
         resp = extract_test_client.delete("/v1/schemas")
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "CONFIRMATION_REQUIRED"
+        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
 
     def test_confirm_false_returns_400(self, extract_test_client):
         resp = extract_test_client.delete("/v1/schemas?confirm=false")
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "CONFIRMATION_REQUIRED"
+        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
 
     def test_jobs_exist_returns_409(self, extract_test_client):
         with patch("extract.api.v1.schema.db_repo.any_schema_has_jobs", return_value=True):
             resp = extract_test_client.delete("/v1/schemas?confirm=true")
 
         assert resp.status_code == 409
-        assert resp.json()["error"]["code"] == "SCHEMAS_IN_USE"
+        assert resp.json()["error"]["code"] == "RESOURCE_LOCKED"
 
     def test_confirm_wrong_value_returns_400(self, extract_test_client):
         resp = extract_test_client.delete("/v1/schemas?confirm=yes")
         assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == "CONFIRMATION_REQUIRED"
+        assert resp.json()["error"]["code"] == "INVALID_REQUEST"
 
 
 # =========================================================================

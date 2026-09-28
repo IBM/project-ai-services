@@ -148,7 +148,7 @@ app = FastAPI(
 - **Conversational RAG**: Multi-turn conversations with automatic context management and query rephrasing
 - **Semantic Search**: Vector-based document retrieval with reranking for improved relevance
 - **Streaming Support**: Real-time token generation for responsive user experience
-- **Multi-language**: Automatic language detection (English, German, French, Italian supported)
+- **Multi-language**: Automatic language detection (English, German, French, Italian, Japanese supported)
 - **Performance Metrics**: Detailed timing and token usage tracking
 
 **Authentication**: Optional vLLM API key authentication via Bearer token in Authorization header.
@@ -378,7 +378,7 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
 - Single-turn queries: Pass one message for standalone questions
 - Multi-turn conversations: Pass message array with history for context-aware responses
 - Streaming: Set `stream=true` for real-time token generation
-- Language detection: Automatically detects query language (English, German, French, Italian supported)
+- Language detection: Automatically detects query language (English, German, French, Italian, Japanese supported)
 - Query rephrasing: Automatically rephrases follow-up questions using conversation context
 
 **Authentication**: Requires API key in Authorization header (Bearer token) if vLLM authentication is enabled.
@@ -670,30 +670,17 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
 
             APIError.raise_error(ErrorCode.LLM_ERROR, "Unexpected response format from LLM")
         except requests.exceptions.HTTPError as e:
-            status_code = e.response.status_code if e.response is not None else 502
+            upstream_status = e.response.status_code if e.response is not None else 502
             logger.error(f"Error in non-streaming response: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=status_code,
-                detail={
-                    "error": {
-                        "code": ErrorCode.LLM_ERROR.value,
-                        "message": f"Upstream service error: {e}",
-                        "status": status_code,
-                    }
-                },
+            APIError.raise_error(
+                ErrorCode.LLM_UNAVAILABLE,
+                f"Upstream service error: {e}",
+                status_code=upstream_status,
             )
         except Exception as e:
             logger.error(f"Error in non-streaming response: {e}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": {
-                        "code": ErrorCode.LLM_ERROR.value,
-                        "message": str(e),
-                        "status": 500,
-                    }
-                },
-            )
+            APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR,
+                                 "An unexpected error occurred")
         finally:
             # Release semaphore for non-streaming requests
             # For streaming requests, release is handled in locked_stream's finally block
