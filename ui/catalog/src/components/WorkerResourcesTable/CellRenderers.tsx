@@ -64,9 +64,10 @@ export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
         }
         isDelete
         disabled={isLocal}
-        onClick={() =>
-          dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
-        }
+        onClick={() => {
+          if (!isLocal)
+            dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId });
+        }}
       />
     </OverflowMenu>
   );
