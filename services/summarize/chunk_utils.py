@@ -22,30 +22,40 @@ sentence_splitter = SentenceSplitter(language='en')
 def split_text_into_chunks(
     text: str,
     max_words: int | None = None,
-    overlap_sentences: int | None = None
+    overlap_sentences: int | None = None,
+    document_tokens: int | None = None,
+    document_words: int | None = None,
 ) -> List[str]:
     """
     Split text into chunks using paragraph-first, sentence-fallback strategy.
-    
+
     Strategy:
     1. Split on paragraph boundaries (double newlines)
     2. Greedily pack paragraphs into chunks
     3. If a single paragraph exceeds max_words, fall back to sentence-level splitting
     4. Add overlap between chunks (last N sentences of previous chunk)
-    
+
     Args:
         text: Input text to split
         max_words: Maximum words per chunk (defaults to MAX_INPUT_WORDS)
         overlap_sentences: Number of sentences to overlap (defaults to config)
-        
+        document_tokens: Actual token count of the full document (for ratio adjustment)
+        document_words: Actual word count of the full document (for ratio adjustment)
+
     Returns:
         List of text chunks
     """
     if max_words is None:
         max_words = MAX_INPUT_WORDS
-    
+
     if overlap_sentences is None:
         overlap_sentences = settings.summarize.chunk_overlap_sentences
+
+    if document_tokens and document_words and document_tokens > 0:
+        actual_ratio = document_words / document_tokens
+        configured_ratio = settings.common.llm.token_to_word_ratio_en
+        if actual_ratio < configured_ratio:
+            max_words = int(max_words * actual_ratio / configured_ratio)
     
     # Split into paragraphs
     paragraphs = re.split(r'\n\n+', text.strip())
@@ -97,21 +107,31 @@ def split_text_into_chunks(
             # Extract last N sentences for overlap
             previous_sentences = _extract_last_sentences(chunk_text, overlap_sentences)
             
-            # Start new chunk with overlap
+            # Start new chunk with overlap (only if it fits)
             if previous_sentences:
                 overlap_text = ' '.join(previous_sentences)
-                current_chunk = [overlap_text, paragraph]
-                current_word_count = word_count(overlap_text) + para_word_count
+                overlap_wc = word_count(overlap_text)
+                if overlap_wc + para_word_count <= max_words:
+                    current_chunk = [overlap_text, paragraph]
+                    current_word_count = overlap_wc + para_word_count
+                else:
+                    current_chunk = [paragraph]
+                    current_word_count = para_word_count
             else:
                 current_chunk = [paragraph]
                 current_word_count = para_word_count
         else:
             # Add paragraph to current chunk
             if not current_chunk and previous_sentences:
-                # First paragraph of new chunk - add overlap
+                # First paragraph of new chunk - add overlap (only if it fits)
                 overlap_text = ' '.join(previous_sentences)
-                current_chunk = [overlap_text, paragraph]
-                current_word_count = word_count(overlap_text) + para_word_count
+                overlap_wc = word_count(overlap_text)
+                if overlap_wc + para_word_count <= max_words:
+                    current_chunk = [overlap_text, paragraph]
+                    current_word_count = overlap_wc + para_word_count
+                else:
+                    current_chunk = [paragraph]
+                    current_word_count = para_word_count
             else:
                 current_chunk.append(paragraph)
                 current_word_count += para_word_count

@@ -629,7 +629,9 @@ async def process_summarization_job(job_id: str, level):
                 split_text_into_chunks,
                 content_text,
                 MAX_INPUT_WORDS,
-                settings.summarize.chunk_overlap_sentences
+                settings.summarize.chunk_overlap_sentences,
+                document_tokens=input_tokens,
+                document_words=input_word_count,
             )
             
             num_chunks = len(chunks)
