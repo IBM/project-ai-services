@@ -97,8 +97,6 @@ spec:
               value: http://llm-predictor:8000
             - name: LLM_MODEL
               value: {{ .Values.llm.model | quote }}
-            - name: LLM_MAX_MODEL_LEN
-              value: "4096"
             - name: LLM_MAX_BATCH_SIZE
               value: "32"
             - name: LOG_LEVEL
