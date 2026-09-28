@@ -21,9 +21,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import jsonschema
 from jsonschema import Draft202012Validator
 
+from common.error_utils import APIError, ErrorCode
 from common.misc_utils import get_logger
 from extract.settings import settings
-from extract.utils.exceptions import ExtractException
+from extract.exceptions import SchemaValidationError
 
 logger = get_logger("schema_utils")
 
@@ -56,19 +57,6 @@ def calculate_prompt_overhead_tokens(llm_endpoint: str) -> None:
     logger.info(f"Computed prompt_overhead_tokens={prompt_overhead_tokens}")
 
 
-# ---------------------------------------------------------------------------
-# Public exception
-# ---------------------------------------------------------------------------
-
-class SchemaValidationError(Exception):
-    """Raised when a submitted schema fails any validation check."""
-
-    def __init__(self, code: str, message: str, status: int = 400, details: Optional[dict] = None):
-        self.code = code
-        self.message = message
-        self.status = status
-        self.details = details or {}
-        super().__init__(message)
 
 
 
@@ -179,17 +167,13 @@ def validate_json_schema_structure(json_schema: Dict[str, Any]) -> None:
         Draft202012Validator.check_schema(json_schema)
     except jsonschema.exceptions.SchemaError as exc:
         raise SchemaValidationError(
-            "INVALID_SCHEMA",
-            f"The submitted json_schema is not a valid JSON Schema draft 2020-12: {exc.message}",
-            status=400,
+            f"The submitted json_schema is not a valid JSON Schema draft 2020-12: {exc.message}"
         ) from exc
 
     root_type = json_schema.get("type")
     if root_type != "object":
         raise SchemaValidationError(
-            "INVALID_SCHEMA",
-            f"The root of json_schema must be 'type: object'; got {root_type!r}.",
-            status=400,
+            f"The root of json_schema must be 'type: object'; got {root_type!r}."
         )
 
 
@@ -369,12 +353,8 @@ def _merge_type_nodes(
     # --- irreconcilable conflict ---
     if existing_type != incoming_type:
         raise SchemaValidationError(
-            "SCHEMA_INFERENCE_CONFLICT",
-            (
-                f"Cannot infer schema: field {field_path!r} has conflicting types "
-                f"across examples ({existing_type!r} vs {incoming_type!r})."
-            ),
-            status=400,
+            f"Cannot infer schema: field {field_path!r} has conflicting types "
+            f"across examples ({existing_type!r} vs {incoming_type!r})."
         )
 
     return existing
@@ -402,10 +382,8 @@ def infer_schema_from_examples(examples: List[Dict[str, Any]]) -> Dict[str, Any]
     """
     if not examples:
         raise SchemaValidationError(
-            "INFERENCE_NO_EXAMPLES",
             "Cannot infer schema: no examples provided. "
-            "Supply at least one example or provide json_schema explicitly.",
-            status=400,
+            "Supply at least one example or provide json_schema explicitly."
         )
 
     field_schemas: Dict[str, Any] = {}
@@ -416,16 +394,11 @@ def infer_schema_from_examples(examples: List[Dict[str, Any]]) -> Dict[str, Any]
         output = example.get("output", {})
         if not isinstance(output, dict):
             raise SchemaValidationError(
-                "INFERENCE_INVALID_EXAMPLE",
-                f"examples[{idx}].output must be an object for schema inference.",
-                status=400,
+                f"examples[{idx}].output must be an object for schema inference."
             )
         if not output:
             raise SchemaValidationError(
-                "INFERENCE_EMPTY_EXAMPLE",
-                f"examples[{idx}].output must be a non-empty object for schema "
-                f"inference.",
-                status=400,
+                f"examples[{idx}].output must be a non-empty object for schema inference."
             )
         for key, value in output.items():
             incoming_node = _python_type_to_json_schema(value)
@@ -474,10 +447,7 @@ def validate_examples(
         if errors:
             error_messages = "; ".join(e.message for e in errors[:5])
             raise SchemaValidationError(
-                "INVALID_EXAMPLE",
-                f"examples[{idx}].output does not validate against the schema: {error_messages}",
-                status=400,
-                details={"example_index": idx, "validation_errors": [e.message for e in errors]},
+                f"examples[{idx}].output does not validate against the schema: {error_messages}"
             )
 
 
@@ -567,24 +537,10 @@ def check_schema_share_in_context(
 
     if fixed_tokens > budget:
         raise SchemaValidationError(
-            "SCHEMA_BUDGET_EXCEEDED",
-            (
-                f"Schema fixed overhead ({fixed_tokens} tokens) exceeds "
-                f"{share * 100:.0f}% of MAX_MODEL_LEN={max_model_len} "
-                f"(budget={budget} tokens).  Reduce the schema, shorten or "
-                f"remove examples, or trim the custom_prompt."
-            ),
-            status=400,
-            details={
-                "schema_tokens": schema_tokens,
-                "examples_tokens": examples_tokens,
-                "custom_prompt_tokens": custom_prompt_tokens,
-                "prompt_overhead_tokens": overhead,
-                "fixed_tokens": fixed_tokens,
-                "budget_tokens": budget,
-                "max_model_len": max_model_len,
-                "context_schema_share": share,
-            },
+            f"Schema fixed overhead ({fixed_tokens} tokens) exceeds "
+            f"{share * 100:.0f}% of MAX_MODEL_LEN={max_model_len} "
+            f"(budget={budget} tokens).  Reduce the schema, shorten or "
+            f"remove examples, or trim the custom_prompt."
         )
 
 
@@ -630,9 +586,8 @@ def check_extraction_budget(
     Returns the reserved_output token count (== max_tokens for the LLM call)
     if the budget is within limits.
 
-    Raises ExtractException with code CONTEXT_LIMIT_EXCEEDED and full
-    diagnostics on failure.  The caller is responsible for converting this
-    into the appropriate HTTP 413 response.
+    Raises an API error with code CONTEXT_LIMIT_EXCEEDED and full
+    diagnostics on failure.
     """
     overhead = prompt_overhead_tokens
     reserved_output = compute_reserved_output(schema_tokens)
@@ -647,7 +602,7 @@ def check_extraction_budget(
     )
 
     if total > max_model_len:
-        details = {
+        diagnostics = {
             "max_model_len": max_model_len,
             "input_tokens": input_tokens,
             "schema_tokens": schema_tokens,
@@ -662,11 +617,9 @@ def check_extraction_budget(
             "Input does not fit in the model context window. "
             "Reduce input size or use the async job path with a smaller document."
         )
-        logger.error(f"{msg} (details={details})")
-        raise ExtractException(413,
-            "CONTEXT_LIMIT_EXCEEDED",
-            msg,
-            details=details,
+        logger.error(f"{msg} (diagnostics={diagnostics})")
+        APIError.raise_error(
+            ErrorCode.CONTEXT_LIMIT_EXCEEDED, msg, details=diagnostics
         )
 
     return reserved_output
@@ -746,9 +699,9 @@ def resolve_schema_input(
         ``examples_tokens``, and ``custom_prompt_tokens`` are all populated.
 
     Raises:
-        :class:`ExtractException` (404) when a registered schema cannot be found.
-        :class:`SchemaValidationError` (400) when an ephemeral schema fails
-        structural validation.
+        HTTPException (404) when a registered schema cannot be found.
+        :class:`SchemaValidationError` when an ephemeral schema fails
+        structural validation (re-raised; caller maps to APIError).
     """
     from extract.db.manager import db_repo  # local import to avoid circular deps
 
@@ -757,17 +710,15 @@ def resolve_schema_input(
         row = db_repo.get_schema_by_id(schema_id)
         if row is None:
             logger.error("Schema not found for schema_id=%r", schema_id)
-            raise ExtractException(
-                404, "SCHEMA_NOT_FOUND", f"No schema with id {schema_id!r}."
-            )
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                                 f"No schema with id {schema_id!r}.")
         if schema_name is not None and row.name != schema_name:
             logger.error(
                 "Schema name mismatch: schema_id=%r resolved to name %r, but request specified schema_name=%r",
                 schema_id, row.name, schema_name
             )
-            raise ExtractException(
-                400, "INVALID_REQUEST", "Schema name and id are not for the same record"
-            )
+            APIError.raise_error(ErrorCode.INVALID_REQUEST,
+                                 "Schema name and id are not for the same record")
         return row
 
     # ── Priority 2: schema_name ───────────────────────────────────────────
@@ -775,9 +726,8 @@ def resolve_schema_input(
         row = db_repo.get_schema_by_name(schema_name)
         if row is None:
             logger.error("Schema not found for schema_name=%r", schema_name)
-            raise ExtractException(
-                404, "SCHEMA_NOT_FOUND", f"No schema with name {schema_name!r}."
-            )
+            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND,
+                                 f"No schema with name {schema_name!r}.")
         return row
 
     # ── Priority 3: raw JSON Schema ───────────────────────────────────────
@@ -786,9 +736,7 @@ def resolve_schema_input(
             normalized = normalize_schema(json_schema)
             validate_json_schema_structure(normalized)
         except SchemaValidationError as exc:
-            logger.error(
-                "Ephemeral json_schema failed validation: [%s] %s", exc.code, exc.message
-            )
+            logger.error("Ephemeral json_schema failed validation: %s", exc)
             raise
         schema_tokens, _, _ = compute_token_counts(normalized, None, None, llm_endpoint)
         return _EphemeralSchemaRow(
@@ -800,19 +748,14 @@ def resolve_schema_input(
     if json_example is not None:
         if not isinstance(json_example, dict) or not json_example:
             logger.error("json_example is not a non-empty object: %r", type(json_example).__name__)
-            raise SchemaValidationError(
-                "INVALID_EXAMPLE",
-                "json_example must be a non-empty JSON object.",
-                status=400,
-            )
+            APIError.raise_error(ErrorCode.INVALID_REQUEST,
+                                 "json_example must be a non-empty JSON object.")
         # Wrap as an example record so infer_schema_from_examples can process it.
         examples_raw = [{"text": "", "output": json_example}]
         try:
             normalized = infer_schema_from_examples(examples_raw)
         except SchemaValidationError as exc:
-            logger.error(
-                "Schema inference from json_example failed: [%s] %s", exc.code, exc.message
-            )
+            logger.error("Schema inference from json_example failed: %s", exc)
             raise
         schema_tokens, _, _ = compute_token_counts(normalized, None, None, llm_endpoint)
         return _EphemeralSchemaRow(
@@ -822,10 +765,8 @@ def resolve_schema_input(
 
     # Guard: ExtractionRequest.model_post_init ensures we never reach here at runtime.
     logger.error("resolve_schema_input called with all schema inputs None")
-    raise ExtractException(
-        400, "INVALID_REQUEST",
-        "One of schema_id, schema_name, json_schema, or json_example must be provided.",
-    )
+    APIError.raise_error(ErrorCode.INVALID_REQUEST,
+                         "One of schema_id, schema_name, json_schema, or json_example must be provided.")
 
 
 # Made with Bob

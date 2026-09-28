@@ -47,7 +47,7 @@ class OpensearchVectorStore(VectorStore):
             use_ssl=True,
             http_auth=(
                 settings.vector_store.opensearch_username,
-                settings.vector_store.opensearch_password,
+                settings.vector_store.opensearch_password.get_secret_value(),
             ),
             verify_certs=False,
             ssl_show_warn=False

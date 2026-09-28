@@ -273,7 +273,7 @@ class TestCallLLMForValidation:
         # Setup mocks
         mock_settings.llm.endpoint = "http://localhost:8000"
         mock_settings.llm.model = "test-model"
-        mock_settings.llm.api_key = "test-key"
+        mock_settings.llm.api_key.get_secret_value.return_value = "test-key"
         
         mock_response = Mock()
         mock_response.json.return_value = {
@@ -310,7 +310,7 @@ class TestCallLLMForValidation:
         """Test LLM call when response has no choices."""
         mock_settings.llm.endpoint = "http://localhost:8000"
         mock_settings.llm.model = "test-model"
-        mock_settings.llm.api_key = None
+        mock_settings.llm.api_key.get_secret_value.return_value = ""
         
         mock_response = Mock()
         mock_response.json.return_value = {"choices": []}
@@ -325,7 +325,7 @@ class TestCallLLMForValidation:
         """Test LLM call exception handling."""
         mock_settings.llm.endpoint = "http://localhost:8000"
         mock_settings.llm.model = "test-model"
-        mock_settings.llm.api_key = None
+        mock_settings.llm.api_key.get_secret_value.return_value = ""
         
         mock_session.post.side_effect = Exception("Connection error")
         
