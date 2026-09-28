@@ -21,6 +21,9 @@ import (
 	"github.com/project-ai-services/mcp/internal/authenticator"
 	"github.com/project-ai-services/mcp/internal/types"
 )
+// magicBytesLen is the number of leading bytes required to identify a file type by its magic bytes signature.
+const magicBytesLen = 4
+
 
 // Provider provides a single tool based on an OpenAPI operation
 type Provider struct {
@@ -68,7 +71,7 @@ func getBodyName(operation types.OperationInfo) string {
 // detectFilename returns a filename with the correct extension based on file magic bytes.
 // Falls back to "<fieldname>-<index>.bin" if the type is unrecognised.
 func detectFilename(data []byte, fieldName string, index int) string {
-	if len(data) >= 4 {
+	if len(data) >= magicBytesLen {
 		// PDF: %PDF
 		if data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46 {
 			return fmt.Sprintf("%s-%d.pdf", fieldName, index)
@@ -78,12 +81,13 @@ func detectFilename(data []byte, fieldName string, index int) string {
 			return fmt.Sprintf("%s-%d.docx", fieldName, index)
 		}
 	}
+	
 	return fmt.Sprintf("%s-%d.bin", fieldName, index)
 }
 
 // detectMIMEType returns the MIME type based on file magic bytes.
 func detectMIMEType(data []byte) string {
-	if len(data) >= 4 {
+	if len(data) >= magicBytesLen {
 		if data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46 {
 			return "application/pdf"
 		}
@@ -91,6 +95,7 @@ func detectMIMEType(data []byte) string {
 			return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 		}
 	}
+	
 	return "application/octet-stream"
 }
 

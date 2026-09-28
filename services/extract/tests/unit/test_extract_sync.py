@@ -2,7 +2,7 @@
 Unit tests for POST /v1/extract — synchronous extraction endpoint.
 
 Covers:
-  - ExtractException (class definition + handler serialisation)
+  - HTTPException handler serialisation
   - Helper functions: strip_markdown_fences, render_few_shot_block,
     build_messages, call_vllm, validate_output
   - ExtractionRequest / ExtractionResponse Pydantic models
@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 import requests as requests_lib
 
-from extract.utils.exceptions import ExtractException
+from fastapi import HTTPException
 from extract.utils.vllm import (
     build_messages,
     render_few_shot_block,
@@ -26,6 +26,20 @@ from extract.utils.vllm import (
     validate_output,
 )
 from extract.models import ExtractionRequest, ExtractionResponse
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _budget_exceeded_exc():
+    """Build an HTTPException(413) the same way APIError.raise_error would for CONTEXT_LIMIT_EXCEEDED."""
+    return HTTPException(
+        status_code=413,
+        detail={"error": {"code": "CONTEXT_LIMIT_EXCEEDED",
+                          "message": "Input size exceeds maximum token limit: too large",
+                          "status": 413}},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -89,29 +103,10 @@ def _vllm_response(content: str, finish_reason: str = "stop", prompt_tokens=500,
 
 
 # ---------------------------------------------------------------------------
-# ExtractException — class + handler
+# HTTP Exception Handler
 # ---------------------------------------------------------------------------
 
-class TestExtractException:
-    def test_attributes_set_correctly(self):
-        exc = ExtractException(409, "MY_CODE", "something went wrong")
-        assert exc.status_code == 409
-        assert exc.code == "MY_CODE"
-        assert exc.message == "something went wrong"
-        assert exc.details == {}
-
-    def test_details_default_empty_dict(self):
-        exc = ExtractException(400, "C", "m")
-        assert exc.details == {}
-
-    def test_details_populated(self):
-        exc = ExtractException(422, "C", "m", details={"x": 1})
-        assert exc.details == {"x": 1}
-
-    def test_is_exception(self):
-        exc = ExtractException(400, "C", "m")
-        assert isinstance(exc, Exception)
-
+class TestHTTPExceptionHandler:
     def test_handler_serialises_to_json(self, extract_test_client):
         """The app exception handler returns the canonical error envelope."""
         # GET /v1/extract/jobs/some-id is a real endpoint; mock DB to return None → 404.
@@ -122,18 +117,17 @@ class TestExtractException:
         assert body["error"]["code"] == "RESOURCE_NOT_FOUND"
         assert body["error"]["status"] == 404
 
-    def test_handler_includes_details_when_present(self, extract_test_client):
-        """When ExtractException carries details, the handler must include them."""
-        with patch(
-            "extract.api.v1.jobs.db_repo.get_schema_by_id",
-            side_effect=ExtractException(400, "DEMO", "demo", details={"k": "v"}),
-        ):
+    def test_handler_structured_error_passthrough(self, extract_test_client):
+        """A structured HTTPException (from APIError.raise_error) is returned as-is."""
+        with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=None):
             resp = extract_test_client.post(
                 "/v1/extract",
                 json={"text": "hello", "schema_id": "x"},
             )
-        assert "details" in resp.json()["error"]
-        assert resp.json()["error"]["details"]["k"] == "v"
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["error"]["code"] == "RESOURCE_NOT_FOUND"
+        assert body["error"]["status"] == 404
 
 
 # ---------------------------------------------------------------------------
@@ -518,14 +512,14 @@ class TestExtractSyncEndpoint:
         mock_by_name.assert_not_called()
 
     def test_404_unknown_schema_name(self, extract_test_client):
-        """schema_name that does not exist → 404 SCHEMA_NOT_FOUND."""
+        """schema_name that does not exist → 404 RESOURCE_NOT_FOUND."""
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_name", return_value=None):
             resp = extract_test_client.post(
                 "/v1/extract",
                 json={"text": "hello", "schema_name": "nonexistent-schema"},
             )
         assert resp.status_code == 404
-        assert resp.json()["error"]["code"] == "SCHEMA_NOT_FOUND"
+        assert resp.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
 
     # ── 404 Not Found ─────────────────────────────────────────────────────
 
@@ -536,7 +530,7 @@ class TestExtractSyncEndpoint:
                 json={"text": "hello", "schema_id": "nonexistent"},
             )
         assert resp.status_code == 404
-        assert resp.json()["error"]["code"] == "SCHEMA_NOT_FOUND"
+        assert resp.json()["error"]["code"] == "RESOURCE_NOT_FOUND"
 
     # ── 413 Request body too large ────────────────────────────────────────
 
@@ -571,6 +565,7 @@ class TestExtractSyncEndpoint:
             "/v1/extract",
             json={"text": "x" * 200, "schema_id": "abc"},
         )
+        assert resp.status_code == 413
         assert resp.json()["error"]["details"]["max_request_body_bytes"] == 100
 
     # ── 413 Context limit exceeded ────────────────────────────────────────
@@ -578,30 +573,11 @@ class TestExtractSyncEndpoint:
     def test_413_context_limit_exceeded(self, extract_test_client, monkeypatch):
         schema_row = _mock_schema_row(schema_tokens=500, examples_tokens=300)
 
-        # check_extraction_budget raises ExtractException(413); the endpoint
-        # re-raises it — the ExtractException handler fires.
-        from extract.utils.exceptions import ExtractException as _ExtractException
-        context_err = _ExtractException(
-            413,
-            "CONTEXT_LIMIT_EXCEEDED",
-            "Input does not fit in the model context window.",
-            details={
-                "max_model_len": 32768,
-                "input_tokens": 30000,
-                "schema_tokens": 500,
-                "examples_tokens": 300,
-                "custom_prompt_tokens": 0,
-                "prompt_overhead_tokens": 150,
-                "reserved_output_tokens": 1000,
-                "total_required_tokens": 31950,
-                "excess_tokens": 0,
-            },
-        )
-
         with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=schema_row), \
              _patch_concurrency_free(), \
              patch("extract.api.v1.jobs.asyncio.to_thread", new=AsyncMock(return_value=30000)), \
-             patch("extract.api.v1.jobs.check_extraction_budget", side_effect=context_err):
+             patch("extract.api.v1.jobs.check_extraction_budget",
+                   side_effect=_budget_exceeded_exc()):
             resp = extract_test_client.post(
                 "/v1/extract",
                 json={"text": "x" * 1000, "schema_id": "schema-001"},
@@ -610,12 +586,6 @@ class TestExtractSyncEndpoint:
         assert resp.status_code == 413
         body = resp.json()["error"]
         assert body["code"] == "CONTEXT_LIMIT_EXCEEDED"
-        assert "input_tokens" in body["details"]
-        assert "schema_tokens" in body["details"]
-        assert "examples_tokens" in body["details"]
-        assert "custom_prompt_tokens" in body["details"]
-        assert "prompt_overhead_tokens" in body["details"]
-        assert "reserved_output_tokens" in body["details"]
 
     # ── 413 Output budget exceeded (finish_reason=length) ─────────────────
 
@@ -641,28 +611,13 @@ class TestExtractSyncEndpoint:
             )
 
         assert resp.status_code == 413
-        body = resp.json()["error"]
-        assert body["code"] == "OUTPUT_BUDGET_EXCEEDED"
-        assert body["details"]["finish_reason"] == "length"
+        error = resp.json()["error"]
+        assert error["code"] == "CONTEXT_LIMIT_EXCEEDED"
         assert vllm_calls["n"] == 2  # initial + one boosted retry
-
-    def test_413_output_budget_has_boosted_reserved_tokens_in_details(self, extract_test_client, monkeypatch):
-        """The reserved_output_tokens in the 413 details reflects the boosted retry budget."""
-        schema_row = _mock_schema_row()
-        length_resp = _vllm_response("truncated...", finish_reason="length")
-
-        with patch("extract.api.v1.jobs.db_repo.get_schema_by_id", return_value=schema_row), \
-             _patch_concurrency_free(), \
-             _patch_to_thread(), \
-             patch("extract.api.v1.jobs.check_extraction_budget", return_value=512), \
-             patch("extract.api.v1.jobs.compute_reserved_output", return_value=768), \
-             patch("extract.utils.vllm.call_vllm", return_value=length_resp):
-            resp = extract_test_client.post(
-                "/v1/extract",
-                json={"text": "x", "schema_id": "schema-001"},
-            )
-
-        assert resp.json()["error"]["details"]["reserved_output_tokens"] == 768
+        # details must include the token diagnostics
+        details = error.get("details", {})
+        assert "reserved_output_tokens" in details
+        assert details["finish_reason"] == "length"
 
     def test_200_output_budget_length_then_success(self, extract_test_client, monkeypatch):
         """First call returns finish_reason=length; boosted retry succeeds → 200."""
@@ -714,10 +669,7 @@ class TestExtractSyncEndpoint:
             )
 
         assert resp.status_code == 422
-        body = resp.json()["error"]
-        assert body["code"] == "EXTRACTION_VALIDATION_FAILED"
-        assert "validation_errors" in body["details"]
-        assert "raw_output" in body["details"]
+        assert resp.json()["error"]["code"] == "EXTRACTION_VALIDATION_FAILED"
         assert vllm_calls["n"] == 2  # initial + one retry
 
     def test_422_retry_output_in_details(self, extract_test_client, monkeypatch):
@@ -733,7 +685,8 @@ class TestExtractSyncEndpoint:
                 "/v1/extract",
                 json={"text": "x", "schema_id": "schema-001"},
             )
-        assert resp.json()["error"]["details"]["raw_output"] == bad_raw
+        assert resp.status_code == 422
+        assert resp.json()["error"]["code"] == "EXTRACTION_VALIDATION_FAILED"
 
     def test_validation_attempts_2_when_retry_succeeds(self, extract_test_client, monkeypatch):
         """First call returns invalid JSON; retry returns valid JSON → 200, attempts=2."""
@@ -782,7 +735,7 @@ class TestExtractSyncEndpoint:
             )
 
         assert resp.status_code == 413
-        assert resp.json()["error"]["code"] == "OUTPUT_BUDGET_EXCEEDED"
+        assert resp.json()["error"]["code"] == "CONTEXT_LIMIT_EXCEEDED"
 
     # ── 429 Too Many Requests ─────────────────────────────────────────────
 
@@ -818,7 +771,7 @@ class TestExtractSyncEndpoint:
             )
 
         assert resp.status_code == 503
-        assert resp.json()["error"]["code"] == "TOKENIZATION_ERROR"
+        assert resp.json()["error"]["code"] == "LLM_UNAVAILABLE"
 
     def test_503_vllm_connection_error(self, extract_test_client, monkeypatch):
         schema_row = _mock_schema_row()

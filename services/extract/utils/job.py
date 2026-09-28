@@ -17,13 +17,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
+from common.error_utils import APIError, ErrorCode
 from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
 from extract.db.manager import db_repo
 from extract.settings import settings
 from extract.state import concurrency_limiter
-from extract.utils.exceptions import ExtractException
 from extract.utils.schema import (
     _tokenize,
     check_extraction_budget,
@@ -243,10 +243,7 @@ def check_job_admission() -> None:
     if state.extract_limiter.locked():
         msg = "Job concurrency limit reached. Please try again later."
         logger.error(msg)
-        raise ExtractException(
-            429, "RATE_LIMIT_EXCEEDED",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RATE_LIMIT_EXCEEDED, msg)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +257,7 @@ def validate_and_resolve_file(file: UploadFile) -> tuple[str, str]:
         (normalised_filename, source_type)  e.g. ("report.txt", "txt")
 
     Raises:
-        ExtractException(415) on an unsupported or missing extension.
+        HTTPException(415) on an unsupported or missing extension.
     """
     filename = (file.filename or "").lower()
     is_valid, ext = validate_file_extension(filename)
@@ -268,10 +265,7 @@ def validate_and_resolve_file(file: UploadFile) -> tuple[str, str]:
         raw_ext = os.path.splitext(filename)[1] or "unknown"
         msg = f"Only .txt and .md files are accepted. Received: {raw_ext}"
         logger.error(msg)
-        raise ExtractException(
-            415, "UNSUPPORTED_FILE_TYPE",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.UNSUPPORTED_FILE_TYPE, msg)
     return filename, (ext or "").lstrip(".")
 
 
@@ -279,16 +273,13 @@ def resolve_schema(schema_id: str):
     """Return the schema row for *schema_id*.
 
     Raises:
-        ExtractException(404) if the schema does not exist.
+        HTTPException(404) if the schema does not exist.
     """
     row = db_repo.get_schema_by_id(schema_id)
     if row is None:
         msg = f"No schema with id {schema_id!r}."
         logger.error(msg)
-        raise ExtractException(
-            404, "SCHEMA_NOT_FOUND",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, msg)
     return row
 
 
@@ -306,7 +297,7 @@ async def validate_file_content(file: UploadFile) -> None:
     """Validate that an uploaded file is a genuine text file.
 
     Reads only the first 8 KB, then resets the file pointer.
-    Raises ExtractException on any content validation failure.
+    Raises HTTPException on any content validation failure.
     """
     probe = await file.read(MAX_PROBE_BYTES)
     await file.seek(0)
@@ -314,21 +305,19 @@ async def validate_file_content(file: UploadFile) -> None:
     if not probe or not probe.strip():
         msg = "File is empty."
         logger.error(f"Content validation failed for {file.filename}: {msg}")
-        raise ExtractException(400, "BAD_REQUEST", msg)
+        APIError.raise_error(ErrorCode.INVALID_FILE_CONTENT, msg)
 
     try:
         decoded = probe.decode("utf-8")
     except UnicodeDecodeError:
         msg = "File content is not valid UTF-8 text."
         logger.error(f"Content validation failed for {file.filename}: {msg}")
-        raise ExtractException(400, "BAD_REQUEST", msg)
+        APIError.raise_error(ErrorCode.INVALID_FILE_CONTENT, msg)
     # Gate 2: no null bytes
     if b"\x00" in probe:
         msg = "File contains null bytes and appears to be binary."
         logger.error(f"Content validation failed for {file.filename}: {msg}")
-        raise ExtractException(
-            415, "BAD_REQUEST", msg
-        )
+        APIError.raise_error(ErrorCode.INVALID_FILE_CONTENT, msg)
     # Gate 3: low control character ratio
     control_count = sum(
         1 for ch in decoded
@@ -338,18 +327,13 @@ async def validate_file_content(file: UploadFile) -> None:
     if len(decoded) > 0 and (control_count / len(decoded)) > 0.05:
         msg = "File contains excessive control characters and appears to be binary."
         logger.error(f"Content validation failed for {file.filename}: {msg}")
-        raise ExtractException(
-            415, "BAD_REQUEST",
-            msg,
-        )
+        APIError.raise_error(ErrorCode.INVALID_FILE_CONTENT, msg)
     # Gate 4: reject text files that are actually PDFs
     if probe[:4] == b"%PDF":
         ext = os.path.splitext(file.filename or "")[1].lower()
         msg = f"File has {ext} extension but contains PDF content."
         logger.error(f"Content validation failed for {file.filename}: {msg}")
-        raise ExtractException(
-            415, "BAD_REQUEST", msg
-        )
+        APIError.raise_error(ErrorCode.INVALID_FILE_CONTENT, msg)
 
 
 # ---------------------------------------------------------------------------
@@ -432,13 +416,21 @@ async def process_file(
                     custom_prompt_tokens=schema_row.custom_prompt_tokens,
                     max_model_len=max_model_len,
                 )
-            except ExtractException as exc:
+            except HTTPException as exc:
+                error_msg = (exc.detail.get("error", {}).get("message", str(exc.detail))
+                             if isinstance(exc.detail, dict) else str(exc.detail))
                 db_repo.update_document(
                     doc_id=doc_id,
                     status=DocumentStatus.FAILED,
-                    error=exc.message,
+                    error=error_msg,
                     completed_at=datetime.now(timezone.utc),
-                    metadata={"token_diagnostics": exc.details} if exc.details else None,
+                    metadata={
+                        "token_diagnostics": {
+                            "input_tokens": input_tokens,
+                            "schema_tokens": schema_row.schema_tokens,
+                            "context_limit_exceeded": True,
+                        }
+                    },
                 )
                 return
 
@@ -458,11 +450,13 @@ async def process_file(
                         messages, reserved_output, schema_row.json_schema,
                         llm_endpoint, llm_model,
                     )
-            except ExtractException as exc:
+            except HTTPException as exc:
+                error_msg = (exc.detail.get("error", {}).get("message", str(exc.detail))
+                             if isinstance(exc.detail, dict) else str(exc.detail))
                 db_repo.update_document(
                     doc_id=doc_id,
                     status=DocumentStatus.FAILED,
-                    error=exc.message,
+                    error=error_msg,
                     completed_at=datetime.now(timezone.utc),
                 )
                 return
@@ -498,11 +492,13 @@ async def process_file(
                             messages, boosted_reserved_output, schema_row.json_schema,
                             llm_endpoint, llm_model,
                         )
-                except ExtractException as exc:
+                except HTTPException as exc:
+                    error_msg = (exc.detail.get("error", {}).get("message", str(exc.detail))
+                                 if isinstance(exc.detail, dict) else str(exc.detail))
                     db_repo.update_document(
                         doc_id=doc_id,
                         status=DocumentStatus.FAILED,
-                        error=exc.message,
+                        error=error_msg,
                         completed_at=datetime.now(timezone.utc),
                     )
                     return
@@ -554,13 +550,14 @@ async def process_file(
                         schema_row.json_schema, llm_endpoint, llm_model,
                     )
                 )
-            except ExtractException as exc:
+            except HTTPException as exc:
+                error_msg = (exc.detail.get("error", {}).get("message", str(exc.detail))
+                             if isinstance(exc.detail, dict) else str(exc.detail))
                 db_repo.update_document(
                     doc_id=doc_id,
                     status=DocumentStatus.FAILED,
-                    error=exc.message,
+                    error=error_msg,
                     completed_at=datetime.now(timezone.utc),
-                    metadata={"validation": {"last_errors": exc.details}} if exc.details else None,
                 )
                 return
 
@@ -649,11 +646,13 @@ async def process_batch_job(job_id: str) -> None:
         try:
             try:
                 schema_row = resolve_schema(job_row.schema_id)
-            except ExtractException as exc:
+            except HTTPException as exc:
+                error_code = (exc.detail.get("error", {}).get("code", "INTERNAL_SERVER_ERROR")
+                              if isinstance(exc.detail, dict) else "INTERNAL_SERVER_ERROR")
                 db_repo.update_job(
                     job_id=job_id,
                     status=JobStatus.FAILED,
-                    error=exc.code,
+                    error=error_code,
                     completed_at=datetime.now(timezone.utc),
                 )
                 return

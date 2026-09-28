@@ -1,0 +1,20 @@
+name: MCP Go
+
+on:
+  pull_request:
+    paths:
+      - 'mcp/**'
+      - .github/workflows/mcp-go.yaml
+    branches:
+      - main
+      - 'release-*'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  go-checks:
+    uses: ./.github/workflows/go-checks.yml
+    with:
+      working-directory: 'mcp'
