@@ -569,11 +569,19 @@ async def launch_ingest_pipeline(
         # whose vectors were just removed).  Otherwise respect terminal statuses.
         _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
 
-        # For connector jobs, remove document rows from the DB.
-        # When clean_files=True (connector delete path) every doc in this job
-        # must be removed — including ones that had already COMPLETED, whose
-        # VDB chunks were just wiped above.  When clean_files=False (sync
-        # cancel) vdb_cleaned is False, so only mid-flight docs are removed.
+        # For connector jobs, remove document rows (and their VDB chunks /
+        # output files) via the full delete_document_data teardown path.
+        #
+        # When clean_files=True (connector delete): every doc in this job is
+        # removed — including ones that had already COMPLETED.  Their VDB
+        # chunks were already wiped in the block above, so delete_document_data
+        # will find nothing to remove from the VDB for those docs (idempotent),
+        # but it still cleans up output files and the DB row.
+        #
+        # When clean_files=False (sync cancel / plain API cancel):
+        # vdb_cleaned=False, so only mid-flight docs are deleted.  Mid-flight
+        # docs may have reached CHUNKED status, meaning chunks are already in
+        # the VDB — delete_document_data removes them before dropping the row.
         if is_connector_job:
             connector_doc_ids_to_delete = (
                 [d.doc_id for d in all_docs] if vdb_cleaned else mid_flight_doc_ids
@@ -581,15 +589,16 @@ async def launch_ingest_pipeline(
             if connector_doc_ids_to_delete:
                 logger.info(
                     f"Cancelled connector job {job_id}: removing "
-                    f"{len(connector_doc_ids_to_delete)} document row(s) from DB"
+                    f"{len(connector_doc_ids_to_delete)} document row(s) "
+                    f"(VDB + files + DB)"
                 )
+            from digitize.api.v1.documents import delete_document_data
             for doc_id in connector_doc_ids_to_delete:
                 try:
-                    db_manager.delete_document(doc_id)
+                    delete_document_data(doc_id)
                 except Exception as del_exc:
                     logger.warning(
-                        f"Failed to delete doc {doc_id!r} "
-                        f"from documents table: {del_exc}"
+                        f"Failed to fully delete doc {doc_id!r}: {del_exc}"
                     )
     except Exception as exc:
         logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
