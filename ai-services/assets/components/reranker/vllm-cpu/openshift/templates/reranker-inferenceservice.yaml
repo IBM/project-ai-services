@@ -31,4 +31,4 @@ spec:
         - --served-model-name={{ .Values.model }}
         - --max-model-len={{ .Values.maxModelLen }}
         - --dtype=bfloat16
-        - --kv-cache-memory-bytes={{ .Values.kvCacheMemoryBytes }}
+        - --kv-cache-memory-bytes=0

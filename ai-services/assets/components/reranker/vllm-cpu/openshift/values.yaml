@@ -1,6 +1,5 @@
 model: ""
 maxModelLen: 1024
-kvCacheMemoryBytes: 0
 resources:
   requests:
     memory: "5Gi"
