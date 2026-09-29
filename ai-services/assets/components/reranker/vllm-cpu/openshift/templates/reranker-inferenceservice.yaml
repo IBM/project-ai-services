@@ -29,5 +29,5 @@ spec:
       storageUri: hf://{{ .Values.model }}
       args:
         - --served-model-name={{ .Values.model }}
-        - --max-model-len=1024
+        - --max-model-len={{ .Values.maxModelLen }}
         - --dtype=bfloat16
