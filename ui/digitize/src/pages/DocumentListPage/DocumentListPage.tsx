@@ -27,6 +27,7 @@ import {
   Tooltip,
 } from '@carbon/react';
 import { Renew, TrashCan, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
+import { DOC_STATUS } from '../../constants/jobConstants';
 import { useTheme } from '../../contexts/useTheme';
 import { listDocuments, getDocumentContent, deleteDocument, getDocumentMetadata, Document } from '../../services/api';
 import { exportToCSV, validateFilename } from '../../utils/csvExport';
@@ -317,21 +318,20 @@ const headers = [
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case 'completed':
+    case DOC_STATUS.COMPLETED:
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
-    case 'failed':
+    case DOC_STATUS.FAILED:
       return <ErrorFilled size={16} className={styles.statusIconError} />;
-    case 'accepted':
-    case 'in_progress':
-    case 'digitized':
-    case 'processed':
-    case 'chunked':
+    case DOC_STATUS.ACCEPTED:
+    case DOC_STATUS.IN_PROGRESS:
+    case DOC_STATUS.DIGITIZED:
+    case DOC_STATUS.PROCESSED:
+    case DOC_STATUS.CHUNKED:
       return <InProgress size={16} className={styles.statusIconProgress} />;
-    case 'already_exists':
+    case DOC_STATUS.ALREADY_EXISTS:
+    case DOC_STATUS.COMPLETED_WITH_ERRORS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
-    case 'completed_with_errors':
-      return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
-    case 'cancelled':
+    case DOC_STATUS.CANCELLED:
       return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
     default:
       return null;
@@ -645,7 +645,7 @@ const DocumentListPage = () => {
       name: doc.name || doc.filename || 'N/A',
       status: (
         <div className={styles.statusCell}>
-          {getStatusIcon(doc.status)}
+          {!hasError && getStatusIcon(doc.status)}
           <span className={styles.statusText}>{doc.status}</span>
           {hasError && (
             <Tooltip
