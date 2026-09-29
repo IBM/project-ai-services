@@ -169,14 +169,10 @@ const AddDataSourceModal = ({
       handleClose();
       onSuccess?.();
     } catch (err: unknown) {
-      const serverMessage = (
-        err as { response?: { data?: { error?: string } } }
-      )?.response?.data?.error;
       dispatch({
         type: ACTION_TYPES.SUBMIT_FAILURE,
         payload:
-          serverMessage ??
-          (err instanceof Error ? err.message : "Failed to add data source"),
+          err instanceof Error ? err.message : "Failed to add data source",
       });
     } finally {
       dispatch({ type: ACTION_TYPES.SUBMIT_END });

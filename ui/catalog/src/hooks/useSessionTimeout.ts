@@ -180,10 +180,13 @@ export const useSessionTimeout = (): UseSessionTimeoutReturn => {
           console.error("Failed to refresh token:", error);
           tokenRefreshAttemptsRef.current += 1;
 
-          const errorResponse = error as { response?: { status?: number } };
-          const isPermanentFailure =
-            errorResponse?.response?.status === 401 ||
-            errorResponse?.response?.status === 403;
+          const originalAxiosError = (
+            error as { cause?: { response?: { status?: number } } }
+          )?.cause;
+          const status =
+            (error as { response?: { status?: number } })?.response?.status ??
+            originalAxiosError?.response?.status;
+          const isPermanentFailure = status === 401 || status === 403;
 
           if (
             tokenRefreshAttemptsRef.current >= MAX_REFRESH_ATTEMPTS ||
