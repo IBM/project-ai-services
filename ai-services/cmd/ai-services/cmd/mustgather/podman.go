@@ -71,22 +71,9 @@ func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string
 	}
 
 	if catalogInstalled {
-		g.resolveBaseDir(ctx, rt)
-	}
-
-	if catalogInstalled {
-		g.collectCatalogArtifacts(ctx, outDir)
-		if isLocalWorker, err := workercommon.IsPodmanLocalWorker(ctx, rt); err != nil {
-			logger.WarningfCtx(ctx, "Failed to check local worker: %v\n", err)
-		} else if isLocalWorker {
-			g.collectWorkerArtifacts(ctx, outDir)
-			_ = collectApplicationPods(ctx, g, outDir, opts.applicationName)
-		}
-		g.collectModelsInfo(ctx, outDir)
+		g.collectCatalogInstalled(ctx, rt, outDir, opts.applicationName)
 	} else {
-		logger.InfolnCtx(ctx, "No catalog pods found on this node. Collecting worker and application pods...")
-		g.collectWorkerArtifacts(ctx, outDir)
-		_ = collectApplicationPods(ctx, g, outDir, opts.applicationName)
+		g.collectWorkerOnly(ctx, rt, outDir, opts.applicationName)
 	}
 
 	// Always collected — independent of catalog state.
@@ -96,6 +83,35 @@ func (g *podmanGatherer) gather(ctx context.Context, opts gatherOptions) (string
 	g.collectVolumeInfo(ctx, outDir)
 
 	return outDir, nil
+}
+
+func (g *podmanGatherer) collectCatalogInstalled(ctx context.Context, rt *podmanRuntime.PodmanClient, outDir, appName string) {
+	g.resolveBaseDir(ctx, rt)
+	g.collectCatalogArtifacts(ctx, outDir)
+
+	isLocalWorker, err := workercommon.IsPodmanLocalWorker(ctx, rt)
+	if err != nil {
+		logger.WarningfCtx(ctx, "Failed to check local worker: %v\n", err)
+	} else if isLocalWorker {
+		g.collectWorkerArtifacts(ctx, outDir)
+		_ = collectApplicationPods(ctx, g, outDir, appName, workerConstants.LocalWorkerName)
+	}
+
+	g.collectModelsInfo(ctx, outDir)
+}
+
+func (g *podmanGatherer) collectWorkerOnly(ctx context.Context, rt *podmanRuntime.PodmanClient, outDir, appName string) {
+	logger.InfolnCtx(ctx, "No catalog pods found on this node. Collecting worker and application pods...")
+	g.collectWorkerArtifacts(ctx, outDir)
+
+	workerName, err := workercommon.ResolveWorkerName(ctx, rt)
+	if err != nil {
+		logger.WarningfCtx(ctx, "Failed to resolve worker name: %v\n", err)
+
+		return
+	}
+
+	_ = collectApplicationPods(ctx, g, outDir, appName, workerName)
 }
 
 // resolveBaseDir attempts to read AI_SERVICES_BASE_DIR from the running

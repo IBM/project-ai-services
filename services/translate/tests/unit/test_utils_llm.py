@@ -27,7 +27,7 @@ class TestGetLlmMaxModelLen:
             mock_settings.common.llm.endpoint = "http://vllm:8000"
             mock_settings.common.llm.model = "granite"
             mock_settings.common.llm.max_model_len = 4096
-            mock_settings.common.llm.api_key = None
+            mock_settings.common.llm.api_key.get_secret_value.return_value = ""
             get_llm_max_model_len()
         mock_resolve.assert_called_once_with("http://vllm:8000", "granite", 4096, None)
 

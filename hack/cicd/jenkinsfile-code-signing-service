@@ -236,18 +236,17 @@ def checkoutRepository() {
 def buildBinaries() {
     echo "Building binaries..."
     
-    sh """
-        cd ${env.REPO_DIR}/ai-services
-        make binaries
-        ls -lrt bin
-    """
+    sh "make -C ${env.REPO_DIR}/ai-services binaries"
+    sh "ls -lrt ${env.REPO_DIR}/ai-services/bin"
+    sh "make -C ${env.REPO_DIR}/mcp binaries"
+    sh "ls -lrt ${env.REPO_DIR}/mcp/bin"
 }
 
 def signAndVerifyBinaries() {
     echo "Signing and verifying binaries..."
     
     sh '''
-        find "./project-ai-services/ai-services/bin" -type f -executable | while read -r BINARY_PATH; do
+        find "./project-ai-services/ai-services/bin" "./project-ai-services/mcp/bin" -type f -executable | while read -r BINARY_PATH; do
             BINARY_NAME=$(basename "$BINARY_PATH")
             echo "Processing $BINARY_NAME..."
             

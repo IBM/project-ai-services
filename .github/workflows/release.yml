@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [ai-services, mcp]
+        service: [ai-services]
 
     steps:
       - name: Checkout code
@@ -81,14 +81,10 @@ jobs:
             **macOS:**
             - `ai-services-darwin-amd64` - Intel-based Macs
             - `ai-services-darwin-arm64` - Apple Silicon Macs (M1/M2/M3/M4 and later)
-            - `ai-services-mcp-darwin-amd64` - MCP Sidecar, Intel-based Macs
-            - `ai-services-mcp-darwin-arm64` - MCP Sidecar, Apple Silicon Macs (M1/M2/M3/M4 and later)
 
             **Linux:**
             - `ai-services-linux-amd64` - x86_64 Linux
             - `ai-services-linux-ppc64le` - PowerPC 64-bit Little Endian Linux (Podman runtime supported)
-            - `ai-services-mcp-linux-amd64` - MCP Sidecar, x86_64 Linux
-            - `ai-services-mcp-linux-ppc64le` - MCP Sidecar, PowerPC 64-bit Little Endian Linux
             
             ### Platform Support
             - **Podman runtime**: Only supported on `linux/ppc64le`

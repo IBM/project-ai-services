@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 )
 
@@ -32,6 +33,10 @@ const (
 
 	// sweepInterval is how often the background sweeper checks for stale workers.
 	sweepInterval = 30 * time.Second
+
+	// minKeepalivePingInterval is the minimum interval between pings the server accepts
+	// from clients before treating them as abusive and terminating the connection.
+	minKeepalivePingInterval = 30 * time.Second
 )
 
 // Gateway is the gRPC server that accepts connections from workers.
@@ -84,6 +89,10 @@ func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, add
 
 	g.grpcServer = grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             minKeepalivePingInterval,
+			PermitWithoutStream: true,
+		}),
 		grpc.UnaryInterceptor(g.authUnaryInterceptor),
 		grpc.StreamInterceptor(g.authStreamInterceptor),
 	)

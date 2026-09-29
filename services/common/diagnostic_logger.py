@@ -774,6 +774,13 @@ def setup_comprehensive_crash_handler(logger: logging.Logger) -> tuple:
         # In lifespan shutdown:
         stderr_monitor.stop()
     """
+    if os.environ.get("DISABLE_CRASH_HANDLER") == "1":
+        logger.info("Crash handler disabled via DISABLE_CRASH_HANDLER environment variable")
+        class _NoOpStderrMonitor:
+            def start(self): pass
+            def stop(self): pass
+        return None, _NoOpStderrMonitor(), None
+
     # Layer 1: Python exception handler
     diagnostic_logger = setup_crash_handler(logger)
     

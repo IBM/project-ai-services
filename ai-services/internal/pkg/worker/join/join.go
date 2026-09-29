@@ -34,6 +34,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
+	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
@@ -57,11 +58,11 @@ const (
 	// the server when the connection is idle. This fires independently of the
 	// application-level heartbeat and is the primary mechanism for detecting a
 	// dead control-plane TCP connection quickly.
-	grpcKeepaliveTime = 20 * time.Second
+	grpcKeepaliveTime = 45 * time.Second
 
 	// grpcKeepaliveTimeout is how long the transport waits for a PING ACK before
 	// treating the connection as dead and surfacing an error to stream.Recv.
-	grpcKeepaliveTimeout = 10 * time.Second
+	grpcKeepaliveTimeout = 20 * time.Second
 )
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the
@@ -79,7 +80,7 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 	if hasValidTLSCredentials(ctx, tlsDir) {
 		logger.InfofCtx(ctx, "worker join: valid mTLS credentials found in %s, skipping registration", tlsDir)
 
-		workerName, err := workerNameFromCert(tlsDir)
+		workerName, err := workercommon.WorkerNameFromCert(tlsDir)
 		if err != nil {
 			return fmt.Errorf("worker join: recover worker name from cert: %w", err)
 		}
@@ -161,7 +162,7 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 
 	// Recover the worker name from the signed cert — the gateway embeds the
 	// token-bound worker name as the cert CN, so no separate response field is needed.
-	return workerNameFromCert(tlsDir)
+	return workercommon.WorkerNameFromCert(tlsDir)
 }
 
 // ─── command-stream loop ──────────────────────────────────────────────────────
