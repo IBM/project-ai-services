@@ -26,7 +26,7 @@ spec:
       - --served-model-name
       - {{ .Values.model }}
       - --port=8001
-      - --gpu-memory-utilization=0.5
+      - --kv-cache-memory-bytes={{ .Values.kvCacheMemoryBytes }}
       livenessProbe:
         httpGet:
           path: /health
