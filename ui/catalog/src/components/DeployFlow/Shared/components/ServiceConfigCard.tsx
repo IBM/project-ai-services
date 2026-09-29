@@ -879,12 +879,23 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                             )
                               ? selectedProviderId
                               : (supporting[0] ?? "");
+                            const providerChanged =
+                              newProviderId !== selectedProviderId;
+                            // Mirror handleLlmModelChange: preserve existing credential
+                            // params when the provider hasn't changed; clear them when
+                            // it has (stale credentials for the old provider are invalid).
+                            const existingParams =
+                              currentConfig?.components?.[field.key]?.params ??
+                              {};
+                            const updatedParams = providerChanged
+                              ? { model: newModelId }
+                              : { ...existingParams, model: newModelId };
                             onUpdateConfig({
                               components: {
                                 ...currentConfig?.components,
                                 [field.key]: {
                                   providerId: newProviderId,
-                                  params: { model: newModelId },
+                                  params: updatedParams,
                                 },
                               },
                             });
@@ -952,9 +963,9 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                                 setHasValidationError(false);
                                 setFieldErrors({});
                                 const customKeys = new Set(
-                                  customProviderSchema?.properties
-                                    ? Object.keys(
-                                        customProviderSchema.properties,
+                                  customProviderSchema
+                                    ? parseSchema(customProviderSchema).map(
+                                        (f) => f.key,
                                       )
                                     : [],
                                 );
