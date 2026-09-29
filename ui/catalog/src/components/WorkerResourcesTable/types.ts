@@ -53,7 +53,7 @@ export const HEADERS: DataTableHeader[] = [
   { header: "Status", key: "status" },
   { header: "Type", key: "runtime_label" },
   { header: "Deployments", key: "services_count" },
-  { header: "Message", key: "message" },
+  { header: "Messages", key: "message" },
   { header: "", key: "actions" },
 ];
 

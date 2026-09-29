@@ -544,7 +544,7 @@ const AddDataSourceModal = ({
                     <InlineNotification
                       kind="info"
                       title="Need more precise control?"
-                      subtitle="The AI service will use all files in this data source. If you need finer control, set up a separate data source with just the files you want."
+                      subtitle="The connector will use all files in this data source. If you need finer control, set up a separate data source with just the files you want."
                       lowContrast
                       hideCloseButton
                     />
