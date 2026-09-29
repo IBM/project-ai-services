@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from common.misc_utils import get_logger
-from digitize.db.models import ConversionTaskStatus, JobSource
+from digitize.db.models import ConversionTaskStatus, DocumentSource, JobSource
 from digitize.models import (
     OutputFormat,
     DocumentContentResponse,
@@ -531,6 +531,17 @@ async def launch_ingest_pipeline(
     except JobCancelledError:
         logger.info(f"Ingestion job {job_id} was cancelled")
 
+        # Fetch all docs once so we can identify mid-flight docs before
+        # _cancel_job_docs overwrites their statuses.
+        all_docs = db_manager.get_documents_by_job_id(job_id)
+        mid_flight_doc_ids = [
+            d.doc_id for d in all_docs
+            if d.status not in _TERMINAL_DOC_STATUSES
+        ]
+        is_connector_job = any(
+            d.source == DocumentSource.CONNECTOR.value for d in all_docs
+        )
+
         # Clean vector DB before marking docs CANCELLED so the filter on
         # CHUNKED/COMPLETED statuses still reflects pre-cancellation state.
         vdb_cleaned = False
@@ -542,7 +553,6 @@ async def launch_ingest_pipeline(
                     models.DocStatus.CHUNKED.value,
                     models.DocStatus.COMPLETED.value,
                 }
-                all_docs = db_manager.get_documents_by_job_id(job_id)
                 doc_ids_to_clean = [
                     d.doc_id for d in all_docs
                     if d.status in indexed_statuses
@@ -558,6 +568,38 @@ async def launch_ingest_pipeline(
         # If VDB cleanup ran, force-cancel all docs (including COMPLETED ones
         # whose vectors were just removed).  Otherwise respect terminal statuses.
         _cancel_job_docs(job_id, status_mgr, force=vdb_cleaned)
+
+        # For connector jobs, remove document rows (and their VDB chunks /
+        # output files) via the full delete_document_data teardown path.
+        #
+        # When clean_files=True (connector delete): every doc in this job is
+        # removed — including ones that had already COMPLETED.  Their VDB
+        # chunks were already wiped in the block above, so delete_document_data
+        # will find nothing to remove from the VDB for those docs (idempotent),
+        # but it still cleans up output files and the DB row.
+        #
+        # When clean_files=False (sync cancel / plain API cancel):
+        # vdb_cleaned=False, so only mid-flight docs are deleted.  Mid-flight
+        # docs may have reached CHUNKED status, meaning chunks are already in
+        # the VDB — delete_document_data removes them before dropping the row.
+        if is_connector_job:
+            connector_doc_ids_to_delete = (
+                [d.doc_id for d in all_docs] if vdb_cleaned else mid_flight_doc_ids
+            )
+            if connector_doc_ids_to_delete:
+                logger.info(
+                    f"Cancelled connector job {job_id}: removing "
+                    f"{len(connector_doc_ids_to_delete)} document row(s) "
+                    f"(VDB + files + DB)"
+                )
+            from digitize.api.v1.documents import delete_document_data
+            for doc_id in connector_doc_ids_to_delete:
+                try:
+                    delete_document_data(doc_id)
+                except Exception as del_exc:
+                    logger.warning(
+                        f"Failed to fully delete doc {doc_id!r}: {del_exc}"
+                    )
     except Exception as exc:
         logger.error(f"Error in ingestion pipeline for job {job_id}: {exc}", exc_info=True)
         status_mgr = get_status_manager(job_id)
