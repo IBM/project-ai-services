@@ -80,4 +80,10 @@ func (c *Context) GetDomainSuffix() string {
 	return c.domainSuffix
 }
 
+// SetDomainSuffix overrides the domain suffix. Used when the correct domain
+// is recovered from a live Caddy config (e.g. autosave routes after --skip-cleanup).
+func (c *Context) SetDomainSuffix(domain string) {
+	c.domainSuffix = domain
+}
+
 // Made with Bob

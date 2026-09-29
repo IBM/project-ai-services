@@ -25,7 +25,7 @@ class SSHScanner(BaseScanner):
 
     def connect(self) -> None:
         try:
-            pkey = self._load_private_key(self._cfg.private_key)
+            pkey = self._load_private_key(self._cfg.private_key.get_secret_value())
         except (paramiko.SSHException, ValueError) as exc:
             raise ConnectionError(
                 f"[ssh_scanner] Failed to load private key for {self._cfg.host}: {exc}"

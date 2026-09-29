@@ -6,20 +6,21 @@
 .panelBody {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-06;
+  gap: spacing.$spacing-09;
   padding: spacing.$spacing-05;
 }
 
 .detailsSection {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-05;
+  gap: spacing.$spacing-06;
 }
 
 .sectionHeading {
   @include type.type-style("heading-03");
   color: theme.$text-primary;
-  margin: 0 0 spacing.$spacing-05;
+  // gap is $spacing-06 (24px); add $spacing-03 (8px) to reach $spacing-07 (32px) total
+  margin: 0 0 spacing.$spacing-03;
 }
 
 .sectionDivider {
@@ -31,13 +32,14 @@
 .paramSection {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-05;
+  gap: spacing.$spacing-06;
 }
 
 .sectionTitle {
   @include type.type-style("heading-02");
   color: theme.$text-primary;
-  margin: 0;
+  // gap is $spacing-06 (24px); pull back 8px to reach $spacing-05 (16px) total
+  margin: 0 0 calc(spacing.$spacing-05 - spacing.$spacing-06);
 }
 
 .connectorDescription {
@@ -77,6 +79,11 @@
   :global(.cds--inline-notification) {
     max-width: 100%;
   }
+}
+
+// Section-level error banner (validation + server connection errors)
+.sectionErrorNotification {
+  max-width: 100%;
 }
 
 // ── FieldLabel — label text + optional Toggletip info icon ──────────────────

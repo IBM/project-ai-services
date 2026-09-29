@@ -9,6 +9,7 @@ import {
 } from "@/components/Table/components/CellRenderers";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 import styles from "./WorkerResourcesTable.module.scss";
+import { LOCAL_WORKER_NAME } from "@/constants/app.constants";
 export { StatusCell };
 
 interface CellRendererProps {
@@ -17,6 +18,13 @@ interface CellRendererProps {
   dispatch: Dispatch<AppAction | SharedTableAction>;
   rowData?: { status?: string; name?: string };
 }
+
+export const ServicesCell = ({
+  value,
+}: CellRendererProps): React.ReactElement => {
+  const count = typeof value === "number" ? value : 0;
+  return <span>{count === 0 ? "--" : count}</span>;
+};
 
 export const RuntimeTypeCell = ({
   value,
@@ -43,22 +51,27 @@ export const NameCell = ({ value, rowId }: CellRendererProps) => (
   <SharedNameCell value={value} rowId={rowId} isLinkEnabled={false} />
 );
 
-export const ActionCell = ({ rowId, dispatch }: CellRendererProps) => (
-  <OverflowMenu size="lg" flipped aria-label="Actions">
-    <OverflowMenuItem
-      itemText={
-        <div className={sharedStyles.deleteMenuItem}>
-          <span>Deregister</span>
-          <Delete size={16} />
-        </div>
-      }
-      isDelete
-      onClick={() =>
-        dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId })
-      }
-    />
-  </OverflowMenu>
-);
+export const ActionCell = ({ rowId, dispatch, rowData }: CellRendererProps) => {
+  const isLocal = rowData?.name === LOCAL_WORKER_NAME;
+  return (
+    <OverflowMenu size="lg" flipped aria-label="Actions">
+      <OverflowMenuItem
+        itemText={
+          <div className={sharedStyles.deleteMenuItem}>
+            <span>Deregister</span>
+            <Delete size={16} />
+          </div>
+        }
+        isDelete
+        disabled={isLocal}
+        onClick={() => {
+          if (!isLocal)
+            dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: rowId });
+        }}
+      />
+    </OverflowMenu>
+  );
+};
 
 type RendererFn = (props: CellRendererProps) => React.ReactElement | null;
 
@@ -66,6 +79,7 @@ export const CELL_RENDERERS: Record<string, RendererFn> = {
   name: NameCell as RendererFn,
   status: StatusCell as RendererFn,
   runtime_label: RuntimeTypeCell as RendererFn,
+  services_count: ServicesCell as RendererFn,
   message: MessageCell as RendererFn,
   actions: ActionCell,
 };

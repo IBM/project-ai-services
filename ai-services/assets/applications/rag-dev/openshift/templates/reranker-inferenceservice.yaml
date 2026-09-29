@@ -31,3 +31,5 @@ spec:
       storageUri: {{ .Values.reranker.storageUri }}
       args:
       - --served-model-name=BAAI/bge-reranker-v2-m3
+      - --max-model-len=1024
+      - --dtype=bfloat16

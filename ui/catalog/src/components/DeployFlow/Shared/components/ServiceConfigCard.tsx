@@ -305,6 +305,22 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       ? currentProviderId
       : (supportingProviders[0] ?? "");
 
+    const providerChanged = newProviderId !== currentProviderId;
+
+    // When the auto-selected provider changes, clear stale credential params
+    // that belonged to the old provider (same logic as the backend dropdown onChange).
+    let updatedParams = currentConfig?.params;
+    if (providerChanged) {
+      const serviceFieldKeys = new Set(serviceFields.map((f) => f.key));
+      const preservedParams: Record<string, unknown> = {};
+      Object.entries(currentConfig?.params || {}).forEach(([key, value]) => {
+        if (serviceFieldKeys.has(key)) {
+          preservedParams[key] = value;
+        }
+      });
+      updatedParams = preservedParams;
+    }
+
     onUpdateConfig({
       components: {
         ...currentConfig?.components,
@@ -313,6 +329,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
           params: { model: newModelId },
         },
       },
+      ...(providerChanged ? { params: updatedParams } : {}),
     });
   };
 
@@ -641,8 +658,10 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
               const excludeKeys = new Set(["model", ...serviceFieldKeys]);
 
               return Object.entries(config.params)
-                .filter(([key, value]) =>
-                  shouldShowParam(key, value, schema, excludeKeys),
+                .filter(
+                  ([key, value]) =>
+                    key in (schema.properties ?? {}) &&
+                    shouldShowParam(key, value, schema, excludeKeys),
                 )
                 .map(([key, value]) => {
                   const property = (
@@ -1217,9 +1236,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                     setHasValidationError(false);
                     setFieldErrors({});
                     const serviceKeys = new Set(
-                      serviceSchema?.properties
-                        ? Object.keys(serviceSchema.properties)
-                        : [],
+                      serviceFields.map((f) => f.key),
                     );
 
                     const mergedParams: Record<string, unknown> = {};

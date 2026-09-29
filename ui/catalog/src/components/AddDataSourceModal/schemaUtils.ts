@@ -69,14 +69,15 @@ export function groupFieldsBySections(
 
 /**
  * Builds the initial form values object from a list of ConnectorFields,
- * setting checkboxArray fields to [] and all others to "".
+ * pre-selecting all options for checkboxArray fields and setting all others to "".
  */
 export function buildInitialValues(
   fields: ConnectorField[],
 ): Record<string, string | string[]> {
   const values: Record<string, string | string[]> = {};
   for (const field of fields) {
-    values[field.key] = field.type === "checkboxArray" ? [] : "";
+    values[field.key] =
+      field.type === "checkboxArray" ? [...(field.checkboxOptions ?? [])] : "";
   }
   return values;
 }

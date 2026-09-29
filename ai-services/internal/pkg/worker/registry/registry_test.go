@@ -17,8 +17,9 @@ import (
 // ──────────────────────────────────────────────────────────────────────────────
 
 type fakeWorkerRepo struct {
-	workers map[string]*models.Worker
-	byID    map[uuid.UUID]*models.Worker
+	workers        map[string]*models.Worker
+	byID           map[uuid.UUID]*models.Worker
+	appsByWorkerID map[uuid.UUID][]uuid.UUID
 }
 
 func newFakeWorkerRepo() *fakeWorkerRepo {
@@ -92,8 +93,19 @@ func (r *fakeWorkerRepo) GetByName(_ context.Context, name string) (*models.Work
 	return &cp, nil
 }
 
-func (r *fakeWorkerRepo) GetApplicationIDsByWorkerIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
-	return map[uuid.UUID][]uuid.UUID{}, nil
+func (r *fakeWorkerRepo) GetApplicationIDsByWorkerIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+	if r.appsByWorkerID == nil {
+		return map[uuid.UUID][]uuid.UUID{}, nil
+	}
+
+	result := make(map[uuid.UUID][]uuid.UUID)
+	for _, id := range ids {
+		if apps, ok := r.appsByWorkerID[id]; ok {
+			result[id] = apps
+		}
+	}
+
+	return result, nil
 }
 
 var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
@@ -102,74 +114,144 @@ var _ repository.WorkerRepository = (*fakeWorkerRepo)(nil)
 // Preregister tests
 // ──────────────────────────────────────────────────────────────────────────────
 
-func TestRegistry_Preregister_IssuesToken(t *testing.T) {
-	reg := New(newFakeWorkerRepo())
-
-	token, err := reg.Preregister(context.Background(), "worker-a")
-	if err != nil {
-		t.Fatalf("Preregister: unexpected error: %v", err)
+func TestRegistry_Preregister(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(repo *fakeWorkerRepo, reg *Registry)
+		noRepo    bool
+		worker    string
+		wantErr   error
+		checkPost func(t *testing.T, repo *fakeWorkerRepo, reg *Registry, token string)
+	}{
+		{
+			name:   "issues non-empty token and creates pending row",
+			worker: "worker-a",
+			checkPost: func(t *testing.T, repo *fakeWorkerRepo, reg *Registry, token string) {
+				if token == "" {
+					t.Fatal("expected non-empty token")
+				}
+				w, ok := repo.workers["worker-a"]
+				if !ok {
+					t.Fatal("expected a DB row for worker-a")
+				}
+				if w.Status != models.WorkerStatusPending {
+					t.Errorf("expected status %q, got %q", models.WorkerStatusPending, w.Status)
+				}
+				name, err := reg.ValidateToken(token)
+				if err != nil {
+					t.Fatalf("ValidateToken: %v", err)
+				}
+				if name != "worker-a" {
+					t.Errorf("expected %q, got %q", "worker-a", name)
+				}
+				if _, err := reg.ValidateToken(token); err == nil {
+					t.Fatal("expected error for already-used token")
+				}
+			},
+		},
+		{
+			name:    "fails when no repository is configured",
+			noRepo:  true,
+			worker:  "worker-a",
+			wantErr: errors.New("no repository configured"),
+		},
+		{
+			name: "already ready worker fails with ErrWorkerAlreadyReady",
+			setup: func(repo *fakeWorkerRepo, reg *Registry) {
+				if _, err := reg.Preregister(context.Background(), "worker-ready"); err != nil {
+					t.Fatalf("Preregister setup: %v", err)
+				}
+				if _, err := reg.Register(context.Background(), "worker-ready", "podman", nil); err != nil {
+					t.Fatalf("Register setup: %v", err)
+				}
+			},
+			worker:  "worker-ready",
+			wantErr: ErrWorkerAlreadyReady,
+			checkPost: func(t *testing.T, repo *fakeWorkerRepo, reg *Registry, _ string) {
+				w, ok := repo.workers["worker-ready"]
+				if !ok {
+					t.Fatal("expected worker row to exist")
+				}
+				if w.Status != models.WorkerStatusReady {
+					t.Errorf("expected status %q, got %q", models.WorkerStatusReady, w.Status)
+				}
+			},
+		},
+		{
+			name: "pending worker can be re-registered",
+			setup: func(repo *fakeWorkerRepo, reg *Registry) {
+				if _, err := reg.Preregister(context.Background(), "worker-pending"); err != nil {
+					t.Fatalf("first Preregister: %v", err)
+				}
+			},
+			worker: "worker-pending",
+			checkPost: func(t *testing.T, repo *fakeWorkerRepo, reg *Registry, token string) {
+				if token == "" {
+					t.Fatal("expected non-empty token")
+				}
+				if repo.workers["worker-pending"].Status != models.WorkerStatusPending {
+					t.Errorf("expected status pending, got %v", repo.workers["worker-pending"].Status)
+				}
+			},
+		},
+		{
+			name: "disconnected worker can be re-registered",
+			setup: func(repo *fakeWorkerRepo, reg *Registry) {
+				if _, err := reg.Preregister(context.Background(), "worker-disc"); err != nil {
+					t.Fatalf("Preregister: %v", err)
+				}
+				if _, err := reg.Register(context.Background(), "worker-disc", "podman", nil); err != nil {
+					t.Fatalf("Register: %v", err)
+				}
+				reg.Disconnect(context.Background(), "worker-disc")
+			},
+			worker: "worker-disc",
+			checkPost: func(t *testing.T, repo *fakeWorkerRepo, reg *Registry, token string) {
+				if token == "" {
+					t.Fatal("expected non-empty token")
+				}
+				if repo.workers["worker-disc"].Status != models.WorkerStatusPending {
+					t.Errorf("expected status reset to pending, got %v", repo.workers["worker-disc"].Status)
+				}
+			},
+		},
 	}
-	if token == "" {
-		t.Fatal("expected non-empty token")
-	}
-}
 
-func TestRegistry_Preregister_CreatesPendingRow(t *testing.T) {
-	repo := newFakeWorkerRepo()
-	reg := New(repo)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var repo *fakeWorkerRepo
+			var reg *Registry
+			if !tt.noRepo {
+				repo = newFakeWorkerRepo()
+				reg = New(repo)
+			} else {
+				reg = New(nil)
+			}
 
-	if _, err := reg.Preregister(context.Background(), "worker-a"); err != nil {
-		t.Fatalf("Preregister: %v", err)
-	}
+			if tt.setup != nil {
+				tt.setup(repo, reg)
+			}
 
-	w, ok := repo.workers["worker-a"]
-	if !ok {
-		t.Fatal("expected a DB row for worker-a")
-	}
-	if w.Status != models.WorkerStatusPending {
-		t.Errorf("expected status %q, got %q", models.WorkerStatusPending, w.Status)
-	}
-}
+			token, err := reg.Preregister(context.Background(), tt.worker)
+			if tt.wantErr != nil {
+				if err == nil {
+					t.Fatalf("expected error %v, got nil", tt.wantErr)
+				}
+				if errors.Is(tt.wantErr, ErrWorkerAlreadyReady) {
+					if !errors.Is(err, ErrWorkerAlreadyReady) {
+						t.Fatalf("expected ErrWorkerAlreadyReady, got %v", err)
+					}
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
 
-func TestRegistry_Preregister_NoRepo(t *testing.T) {
-	reg := New(nil)
-
-	if _, err := reg.Preregister(context.Background(), "worker-a"); err == nil {
-		t.Fatal("expected error when no repository is configured")
-	}
-}
-
-func TestRegistry_Preregister_TokenIsValidatable(t *testing.T) {
-	reg := New(newFakeWorkerRepo())
-
-	token, err := reg.Preregister(context.Background(), "worker-a")
-	if err != nil {
-		t.Fatalf("Preregister: %v", err)
-	}
-
-	name, err := reg.ValidateToken(token)
-	if err != nil {
-		t.Fatalf("ValidateToken: %v", err)
-	}
-	if name != "worker-a" {
-		t.Errorf("expected %q, got %q", "worker-a", name)
-	}
-}
-
-func TestRegistry_Preregister_TokenNotReusable(t *testing.T) {
-	reg := New(newFakeWorkerRepo())
-
-	token, err := reg.Preregister(context.Background(), "worker-a")
-	if err != nil {
-		t.Fatalf("Preregister: %v", err)
-	}
-
-	if _, err := reg.ValidateToken(token); err != nil {
-		t.Fatalf("first ValidateToken: %v", err)
-	}
-
-	if _, err := reg.ValidateToken(token); err == nil {
-		t.Fatal("second ValidateToken: expected error for already-used token")
+			if tt.checkPost != nil {
+				tt.checkPost(t, repo, reg, token)
+			}
+		})
 	}
 }
 
@@ -307,7 +389,37 @@ func TestRegistry_Deregister_ClosesCommandChannel(t *testing.T) {
 	}
 }
 
+func TestRegistry_Deregister_WorkerHasApplications(t *testing.T) {
+	appID := uuid.New()
 
+	repo := newFakeWorkerRepo()
+	repo.appsByWorkerID = map[uuid.UUID][]uuid.UUID{}
+
+	reg := New(repo)
+
+	entry, err := reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	testID := uuid.New()
+	entry.DBID = testID
+	repo.appsByWorkerID[testID] = []uuid.UUID{appID}
+
+	_, err = reg.Deregister(context.Background(), testID)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, ErrWorkerHasApplications) {
+		t.Fatalf("expected ErrWorkerHasApplications, got %T: %v", err, err)
+	}
+
+	// The guard returns before any mutation, so the worker must remain registered.
+	if _, ok := reg.Get("worker-1"); !ok {
+		t.Error("worker should still be registered after failed deregister")
+	}
+}
 
 func TestRegistry_WaitForResult_WorkerNotConnected(t *testing.T) {
 	reg := New(nil)

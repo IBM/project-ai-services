@@ -1,6 +1,6 @@
 // Package gateway implements the WorkerGateway gRPC server.
 // It is co-located with the Catalog API Server (control plane) and listens
-// on a separate port (default :9090) for bidirectional streams from worker
+// on a separate port (default :9191) for bidirectional streams from worker
 // daemons.
 package gateway
 
@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 )
 
@@ -32,6 +33,10 @@ const (
 
 	// sweepInterval is how often the background sweeper checks for stale workers.
 	sweepInterval = 30 * time.Second
+
+	// minKeepalivePingInterval is the minimum interval between pings the server accepts
+	// from clients before treating them as abusive and terminating the connection.
+	minKeepalivePingInterval = 30 * time.Second
 )
 
 // Gateway is the gRPC server that accepts connections from workers.
@@ -64,7 +69,7 @@ func New(ctx context.Context, reg *registry.Registry, runtimeType types.RuntimeT
 	}, nil
 }
 
-// Start begins listening on addr (e.g. ":9090") and serves gRPC in a background goroutine.
+// Start begins listening on addr (e.g. ":9191") and serves gRPC in a background goroutine.
 // It also starts the heartbeat sweeper. Both stop when ctx is cancelled.
 // cancel is a CancelCauseFunc for the server's root context; it is called with the
 // Serve error if the gRPC listener fails unexpectedly, so the whole process shuts down cleanly.
@@ -84,6 +89,10 @@ func (g *Gateway) Start(ctx context.Context, cancel context.CancelCauseFunc, add
 
 	g.grpcServer = grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             minKeepalivePingInterval,
+			PermitWithoutStream: true,
+		}),
 		grpc.UnaryInterceptor(g.authUnaryInterceptor),
 		grpc.StreamInterceptor(g.authStreamInterceptor),
 	)

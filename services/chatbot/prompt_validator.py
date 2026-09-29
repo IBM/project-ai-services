@@ -422,7 +422,7 @@ def _call_llm_for_validation(prompt: str, validation_type: str) -> str:
     
     llm_endpoint = settings.llm.endpoint
     llm_model = settings.llm.model
-    api_key = settings.llm.api_key
+    api_key = settings.llm.api_key.get_secret_value()
     
     if not llm_endpoint or not llm_model:
         logger.warning("LLM endpoint or model not configured. Skipping LLM-based validation.")

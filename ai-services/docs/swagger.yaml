@@ -2841,6 +2841,11 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "409":
+          description: Worker is already registered and ready
+          schema:
+            additionalProperties: true
+            type: object
         "500":
           description: Internal error
           schema:
@@ -2879,6 +2884,11 @@ paths:
             type: object
         "404":
           description: Worker not found
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Worker still has applications deployed on it
           schema:
             additionalProperties: true
             type: object

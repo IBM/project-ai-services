@@ -30,3 +30,4 @@ spec:
       args:
         - --served-model-name={{ .Values.model }}
         - --max-model-len=1024
+        - --dtype=bfloat16

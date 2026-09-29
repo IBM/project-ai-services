@@ -2,8 +2,7 @@ import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-
-from summarize.summ_utils import SummarizeException
+from fastapi import HTTPException
 
 
 @pytest.mark.unit
@@ -66,8 +65,8 @@ class TestSummarizeJsonRoute:
 
         with patch("summarize.app.handle_summarize", new=AsyncMock(return_value=mocked_response)) as mock_handle:
             response = summarize_test_client.post(
-                "/v1/summarize",
-                json={"text": "some content", "level": "brief"},
+                "/v1/summarize?level=brief",
+                json={"text": "some content"},
             )
 
         assert response.status_code == 200
@@ -82,8 +81,8 @@ class TestSummarizeJsonRoute:
 
         with patch("summarize.app.handle_summarize", new=AsyncMock(return_value=mocked_response)) as mock_handle:
             response = summarize_test_client.post(
-                "/v1/summarize",
-                json={"text": "some content", "length": 25},
+                "/v1/summarize?length=25",
+                json={"text": "some content"},
             )
 
         assert response.status_code == 200
@@ -98,32 +97,35 @@ class TestSummarizeJsonRoute:
 
         assert response.status_code == 400
         body = response.json()
-        assert body["error"]["code"] == 400
-        assert body["error"]["status"] == "INVALID_JSON"
+        assert body["error"]["code"] == "INVALID_REQUEST"
+        assert body["error"]["status"] == 400
 
     def test_blank_text_returns_missing_input(self, summarize_test_client):
         response = summarize_test_client.post("/v1/summarize", json={"text": "   "})
 
         assert response.status_code == 400
-        assert response.json()["error"]["status"] == "MISSING_INPUT"
+        assert response.json()["error"]["code"] == "MISSING_INPUT"
+        assert response.json()["error"]["status"] == 400
 
     def test_invalid_level_returns_400(self, summarize_test_client):
         response = summarize_test_client.post(
-            "/v1/summarize",
-            json={"text": "some content", "level": "bad-level"},
+            "/v1/summarize?level=bad-level",
+            json={"text": "some content"},
         )
 
         assert response.status_code == 400
-        assert response.json()["error"]["status"] == "INVALID_PARAMETER"
+        assert response.json()["error"]["code"] == "INVALID_PARAMETER"
+        assert response.json()["error"]["status"] == 400
 
-    def test_invalid_length_returns_400(self, summarize_test_client):
+    def test_invalid_length_returns_422(self, summarize_test_client):
+        # `length` is a typed int Query param — FastAPI rejects non-integer
+        # values before the handler runs, so the response is 422 (not 400).
         response = summarize_test_client.post(
-            "/v1/summarize",
-            json={"text": "some content", "length": "bad"},
+            "/v1/summarize?length=bad",
+            json={"text": "some content"},
         )
 
-        assert response.status_code == 400
-        assert response.json()["error"]["status"] == "INVALID_PARAMETER"
+        assert response.status_code == 422
 
     def test_unsupported_content_type_returns_415(self, summarize_test_client):
         response = summarize_test_client.post(
@@ -133,7 +135,8 @@ class TestSummarizeJsonRoute:
         )
 
         assert response.status_code == 415
-        assert response.json()["error"]["status"] == "UNSUPPORTED_CONTENT_TYPE"
+        assert response.json()["error"]["code"] == "UNSUPPORTED_CONTENT_TYPE"
+        assert response.json()["error"]["status"] == 415
 
 
 @pytest.mark.unit
@@ -180,7 +183,8 @@ class TestSummarizeMultipartRoute:
         )
 
         assert response.status_code == 400
-        assert response.json()["error"]["status"] == "MISSING_INPUT"
+        assert response.json()["error"]["code"] == "MISSING_INPUT"
+        assert response.json()["error"]["status"] == 400
 
     def test_unsupported_extension_returns_400(self, summarize_test_client):
         response = summarize_test_client.post(
@@ -188,8 +192,9 @@ class TestSummarizeMultipartRoute:
             files={"file": ("sample.docx", b"fake", "application/octet-stream")},
         )
 
-        assert response.status_code == 400
-        assert response.json()["error"]["status"] == "UNSUPPORTED_FILE_TYPE"
+        assert response.status_code == 415
+        assert response.json()["error"]["code"] == "UNSUPPORTED_FILE_TYPE"
+        assert response.json()["error"]["status"] == 415
 
     def test_invalid_utf8_text_file_returns_415(self, summarize_test_client):
         response = summarize_test_client.post(
@@ -198,7 +203,8 @@ class TestSummarizeMultipartRoute:
         )
 
         assert response.status_code == 415
-        assert response.json()["error"]["status"] == "UNSUPPORTED_CONTENT_TYPE"
+        assert response.json()["error"]["code"] == "UNSUPPORTED_CONTENT_TYPE"
+        assert response.json()["error"]["status"] == 415
 
     def test_pdf_extraction_failure_returns_415(self, summarize_test_client):
         with patch("summarize.app.extract_text_from_pdf", side_effect=Exception("bad pdf")):
@@ -208,7 +214,8 @@ class TestSummarizeMultipartRoute:
             )
 
         assert response.status_code == 415
-        assert response.json()["error"]["status"] == "UNSUPPORTED_CONTENT_TYPE"
+        assert response.json()["error"]["code"] == "UNSUPPORTED_CONTENT_TYPE"
+        assert response.json()["error"]["status"] == 415
 
     def test_empty_extracted_text_returns_400(self, summarize_test_client):
         with patch("summarize.app.handle_summarize", new=AsyncMock()) as mock_handle:
@@ -218,7 +225,8 @@ class TestSummarizeMultipartRoute:
             )
 
         assert response.status_code == 400
-        assert response.json()["error"]["status"] == "EMPTY_INPUT"
+        assert response.json()["error"]["code"] == "EMPTY_INPUT"
+        assert response.json()["error"]["status"] == 400
         mock_handle.assert_not_called()
 
 
@@ -232,21 +240,25 @@ class TestServerBusyAndExceptionHandling:
             response = summarize_test_client.post("/v1/summarize", json={"text": "some content"})
 
         assert response.status_code == 429
-        assert response.json()["error"]["status"] == "SERVER_BUSY"
+        assert response.json()["error"]["code"] == "SERVER_BUSY"
+        assert response.json()["error"]["status"] == 429
 
     def test_summarize_exception_handler_returns_expected_json(self, summarize_test_client):
         with patch(
             "summarize.app.handle_summarize",
-            new=AsyncMock(side_effect=SummarizeException(400, "INVALID_PARAMETER", "bad input")),
+            new=AsyncMock(side_effect=HTTPException(
+                status_code=400,
+                detail={"error": {"code": "INVALID_PARAMETER", "message": "bad input", "status": 400}},
+            )),
         ):
             response = summarize_test_client.post("/v1/summarize", json={"text": "some content"})
 
         assert response.status_code == 400
         assert response.json() == {
             "error": {
-                "code": 400,
+                "code": "INVALID_PARAMETER",
                 "message": "bad input",
-                "status": "INVALID_PARAMETER",
+                "status": 400,
             }
         }
 
@@ -291,7 +303,7 @@ class TestHandleSummarize:
                  create=True,
              ), \
              patch("summarize.app.tokenize_with_llm", return_value=list(range(10))):
-            with pytest.raises(SummarizeException) as exc:
+            with pytest.raises(HTTPException) as exc:
                 await handle_summarize(
                     content_text=summarize_sample_text,
                     input_type="text",
@@ -300,8 +312,8 @@ class TestHandleSummarize:
                     stream=False,
                 )
 
-        assert exc.value.code == 400
-        assert exc.value.status == "INVALID_PARAMETER"
+        assert exc.value.status_code == 400
+        assert exc.value.detail["error"]["code"] == "INVALID_PARAMETER"
 
     @pytest.mark.asyncio
     async def test_handle_summarize_dict_error_raises_llm_error(self, summarize_sample_text):
@@ -317,7 +329,7 @@ class TestHandleSummarize:
              patch("summarize.app.compute_target_and_max_tokens", return_value=(60, 51, 69, 80)), \
              patch("summarize.app.build_messages", return_value=[{"role": "user", "content": "prompt"}]), \
              patch("summarize.app.query_vllm_summarize", return_value=({"error": "failure"}, 40, 0)):
-            with pytest.raises(SummarizeException) as exc:
+            with pytest.raises(HTTPException) as exc:
                 await handle_summarize(
                     content_text=summarize_sample_text,
                     input_type="text",
@@ -326,8 +338,8 @@ class TestHandleSummarize:
                     stream=False,
                 )
 
-        assert exc.value.code == 500
-        assert exc.value.status == "LLM_ERROR"
+        assert exc.value.status_code == 500
+        assert exc.value.detail["error"]["code"] == "LLM_ERROR"
 
     @pytest.mark.asyncio
     async def test_handle_summarize_stream_failure_releases_limiter(self, summarize_sample_text):
@@ -353,7 +365,7 @@ class TestHandleSummarize:
              patch("summarize.app.compute_target_and_max_tokens", return_value=(60, 51, 69, 80)), \
              patch("summarize.app.build_messages", return_value=[{"role": "user", "content": "prompt"}]), \
              patch("summarize.app.query_vllm_summarize_stream", side_effect=Exception("llm down")):
-            with pytest.raises(SummarizeException) as exc:
+            with pytest.raises(HTTPException) as exc:
                 await handle_summarize(
                     content_text=summarize_sample_text,
                     input_type="text",
@@ -362,8 +374,8 @@ class TestHandleSummarize:
                     stream=True,
                 )
 
-        assert exc.value.code == 500
-        assert exc.value.status == "LLM_ERROR"
+        assert exc.value.status_code == 500
+        assert exc.value.detail["error"]["code"] == "LLM_ERROR"
         limiter.release.assert_called_once()
 
     @pytest.mark.asyncio

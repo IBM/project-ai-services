@@ -6,8 +6,8 @@ import copy
 import json
 
 import pytest
+from fastapi import HTTPException
 
-from extract.utils.exceptions import ExtractException
 from extract.utils.schema import (
     SchemaValidationError,
     check_extraction_budget,
@@ -175,17 +175,17 @@ class TestValidateJsonSchemaStructure:
     def test_root_array_type_raises(self):
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_json_schema_structure({"type": "array", "items": {"type": "string"}})
-        assert exc_info.value.code == "INVALID_SCHEMA"
+        assert "type: object" in str(exc_info.value)
 
     def test_root_type_missing_raises(self):
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_json_schema_structure({"properties": {"x": {"type": "string"}}})
-        assert exc_info.value.code == "INVALID_SCHEMA"
+        assert "type: object" in str(exc_info.value)
 
     def test_invalid_meta_schema_raises(self):
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_json_schema_structure({"type": "object", "properties": {"x": "not-a-schema"}})
-        assert exc_info.value.code == "INVALID_SCHEMA"
+        assert "not a valid JSON Schema" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
@@ -221,8 +221,7 @@ class TestValidateExamples:
                 [{"text": "...", "output": {"amount": 10.0}}],  # "name" missing
                 self._schema(),
             )
-        assert exc_info.value.code == "INVALID_EXAMPLE"
-        assert exc_info.value.details["example_index"] == 0
+        assert "examples[0].output does not validate" in str(exc_info.value)
 
     def test_wrong_type_raises(self):
         with pytest.raises(SchemaValidationError) as exc_info:
@@ -230,7 +229,7 @@ class TestValidateExamples:
                 [{"text": "...", "output": {"name": 99, "amount": 10.0}}],  # name should be str
                 self._schema(),
             )
-        assert exc_info.value.code == "INVALID_EXAMPLE"
+        assert "examples[0].output does not validate" in str(exc_info.value)
 
     def test_second_example_fails_reports_correct_index(self):
         with pytest.raises(SchemaValidationError) as exc_info:
@@ -241,7 +240,7 @@ class TestValidateExamples:
                 ],
                 self._schema(),
             )
-        assert exc_info.value.details["example_index"] == 1
+        assert "examples[1].output does not validate" in str(exc_info.value)
 
 
 
@@ -354,10 +353,8 @@ class TestInferSchemaFromExamples:
         ]
         with pytest.raises(SchemaValidationError) as exc_info:
             infer_schema_from_examples(examples)
-        err = exc_info.value
-        assert err.code == "SCHEMA_INFERENCE_CONFLICT"
-        assert err.status == 400
-        assert "amount" in err.message
+        assert "amount" in str(exc_info.value)
+        assert "conflicting types" in str(exc_info.value)
 
     def test_conflicting_nested_types_raises(self):
         examples = [
@@ -366,8 +363,8 @@ class TestInferSchemaFromExamples:
         ]
         with pytest.raises(SchemaValidationError) as exc_info:
             infer_schema_from_examples(examples)
-        assert exc_info.value.code == "SCHEMA_INFERENCE_CONFLICT"
-        assert "meta.val" in exc_info.value.message
+        assert "meta.val" in str(exc_info.value)
+        assert "conflicting types" in str(exc_info.value)
 
     def test_conflicting_top_level_vs_nested_type_raises(self):
         """A string in one example and an object in another must raise a conflict."""
@@ -377,7 +374,8 @@ class TestInferSchemaFromExamples:
         ]
         with pytest.raises(SchemaValidationError) as exc_info:
             infer_schema_from_examples(examples)
-        assert exc_info.value.code == "SCHEMA_INFERENCE_CONFLICT"
+        assert "field" in str(exc_info.value)
+        assert "conflicting types" in str(exc_info.value)
 
     # ------------------------------------------------------------------
     # Error cases
@@ -386,14 +384,12 @@ class TestInferSchemaFromExamples:
     def test_no_examples_raises(self):
         with pytest.raises(SchemaValidationError) as exc_info:
             infer_schema_from_examples([])
-        assert exc_info.value.code == "INFERENCE_NO_EXAMPLES"
-        assert exc_info.value.status == 400
+        assert "no examples provided" in str(exc_info.value)
 
     def test_non_dict_output_raises(self):
         with pytest.raises(SchemaValidationError) as exc_info:
             infer_schema_from_examples([{"text": "t", "output": ["not", "a", "dict"]}])
-        assert exc_info.value.code == "INFERENCE_INVALID_EXAMPLE"
-        assert exc_info.value.status == 400
+        assert "must be an object" in str(exc_info.value)
 
     def test_non_dict_output_reports_correct_index(self):
         examples = [
@@ -402,7 +398,7 @@ class TestInferSchemaFromExamples:
         ]
         with pytest.raises(SchemaValidationError) as exc_info:
             infer_schema_from_examples(examples)
-        assert "examples[1]" in exc_info.value.message
+        assert "examples[1]" in str(exc_info.value)
 
     # ------------------------------------------------------------------
     # Empty output dict
@@ -412,7 +408,7 @@ class TestInferSchemaFromExamples:
         examples = [{"text": "t", "output": {}}]
         with pytest.raises(SchemaValidationError) as exc_info:
             infer_schema_from_examples(examples)
-        assert exc_info.value.code == "INFERENCE_EMPTY_EXAMPLE"
+        assert "must be a non-empty object" in str(exc_info.value)
 
     # ------------------------------------------------------------------
     # Schema structure is valid draft 2020-12
@@ -473,9 +469,7 @@ class TestCheckRegistrationBudget:
         # budget = 0.5 * 100 = 50; total = 40 + 30 + 0 + 150 = 220 > 50
         with pytest.raises(SchemaValidationError) as exc_info:
             check_schema_share_in_context(40, 30, 0, 100)
-        assert exc_info.value.code == "SCHEMA_BUDGET_EXCEEDED"
-        assert exc_info.value.status == 400
-        assert "fixed_tokens" in exc_info.value.details
+        assert "exceeds" in str(exc_info.value)
 
     def test_exactly_at_budget_passes(self, monkeypatch):
         self._patch_settings(monkeypatch)
@@ -504,11 +498,9 @@ class TestCheckExtractionBudget:
     def test_exceeds_budget_raises(self, monkeypatch):
         self._patch_settings(monkeypatch)
         # total = 30000 + 1000 + 500 + 100 + 150 + 2000 = 33750 > 32768
-        with pytest.raises(ExtractException) as exc_info:
+        with pytest.raises(HTTPException) as exc_info:
             check_extraction_budget(30000, 1000, 500, 100, 32768)
-        assert exc_info.value.code == "CONTEXT_LIMIT_EXCEEDED"
         assert exc_info.value.status_code == 413
-        assert "excess_tokens" in exc_info.value.details
-        assert exc_info.value.details["input_tokens"] == 30000
+        assert exc_info.value.detail["error"]["code"] == "CONTEXT_LIMIT_EXCEEDED"
 
 # Made with Bob
