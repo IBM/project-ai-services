@@ -277,36 +277,31 @@ const AddDataSourceModal = ({
       handleClose();
       onSuccess?.();
     } catch (err: unknown) {
-      const serverMessage = (
-        err as { response?: { data?: { error?: string } } }
-      )?.response?.data?.error;
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to add data source";
 
-      if (serverMessage) {
-        // [NETWORK] has no matching section — top-level banner.
-        const inner = serverMessage.replace(/^Connection test failed:\s*/i, "");
-        const { checkType, strippedMessage } = parseMessageCheckType(inner);
-        if (checkType === "network") {
-          dispatch({
-            type: ACTION_TYPES.SUBMIT_FAILURE,
-            payload: strippedMessage,
-          });
-          return;
-        }
+      // [NETWORK] has no matching section — top-level banner.
+      const inner = errorMessage.replace(/^Connection test failed:\s*/i, "");
+      const { checkType, strippedMessage } = parseMessageCheckType(inner);
+      if (checkType === "network") {
+        dispatch({
+          type: ACTION_TYPES.SUBMIT_FAILURE,
+          payload: strippedMessage,
+        });
+        return;
+      }
 
-        // Route to field/section errors if possible.
-        const parsed = parseServerError(serverMessage);
-        if (parsed) {
-          dispatch({ type: ACTION_TYPES.SET_FIELD_ERRORS, payload: parsed });
-          return;
-        }
+      // Route to field/section errors if possible.
+      const parsed = parseServerError(errorMessage);
+      if (parsed) {
+        dispatch({ type: ACTION_TYPES.SET_FIELD_ERRORS, payload: parsed });
+        return;
       }
 
       // Unclassified error (name conflict, 500, etc.) — top-level banner.
       dispatch({
         type: ACTION_TYPES.SUBMIT_FAILURE,
-        payload:
-          serverMessage ??
-          (err instanceof Error ? err.message : "Failed to add data source"),
+        payload: errorMessage,
       });
     } finally {
       dispatch({ type: ACTION_TYPES.SUBMIT_END });

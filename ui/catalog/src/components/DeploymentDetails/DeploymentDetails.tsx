@@ -38,7 +38,6 @@ import type {
 import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
-import axios from "axios";
 import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
@@ -412,15 +411,10 @@ const DeploymentDetails = ({
       onNameUpdate?.(editedName);
       setSaveSuccess(true);
     } catch (error) {
-      const rawError: string =
-        axios.isAxiosError(error) && error.response?.data?.error
-          ? error.response.data.error
-          : "Failed to update deployment name";
-      const errorIndex = rawError.indexOf("Error:");
       const errorMessage =
-        errorIndex !== -1
-          ? rawError.slice(errorIndex + "Error:".length).trim()
-          : rawError;
+        error instanceof Error
+          ? error.message
+          : "Failed to update deployment name";
       setSaveError(errorMessage);
     } finally {
       setIsSaving(false);
