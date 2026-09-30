@@ -32,3 +32,4 @@ spec:
       args:
         - --served-model-name={{ .Values.model }}
         - --max-model-len={{ .Values.maxModelLen }}
+        - --kv-cache-memory-bytes=0
