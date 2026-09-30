@@ -206,14 +206,6 @@ type UpdateSecret struct {
 	Data           map[string][]byte `json:"data"`
 }
 
-// WaitInferenceService is the wire payload for COMMAND_TYPE_WAIT_INFERENCE_SERVICE.
-// The worker polls the named KServe InferenceService in Namespace until its
-// Ready condition is True, or until the caller's context deadline is exceeded.
-type WaitInferenceService struct {
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
-}
-
 // CancelCommand is the wire payload for COMMAND_TYPE_CANCEL.
 // CommandID is the ID of the previously-dispatched command to abort.
 type CancelCommand struct {

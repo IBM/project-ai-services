@@ -35,7 +35,7 @@ func WaitForInferenceServiceReady(ctx context.Context, rt runtime.Runtime, fsys 
 	waitCtx, cancel := context.WithTimeout(ctx, constants.PredictorWaitTimeout)
 	defer cancel()
 
-	if err := rt.WaitForInferenceServiceReady(waitCtx, isvcName); err != nil {
+	if err := catalogutils.WaitForInferenceServiceReady(waitCtx, rt, isvcName); err != nil {
 		return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
 	}
 

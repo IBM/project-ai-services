@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 // DeployFunc is the work function for a single item: receives its ID and returns an error.
@@ -78,6 +82,57 @@ func RunConcurrently(
 	}
 
 	return nil
+}
+
+// WaitForInferenceServiceReady polls the predictor pods of the named KServe InferenceService
+// (label "serving.kserve.io/inferenceservice=<isvcName>") until at least one pod exists and
+// all of its containers report healthy, mirroring the Podman container readiness wait.
+// It returns an error when ctx is done first. Each poll is a short ListPods call, so it
+// works the same for local and remote (worker) runtimes.
+func WaitForInferenceServiceReady(ctx context.Context, rt runtime.Runtime, isvcName string) error {
+	filters := map[string][]string{"label": {"serving.kserve.io/inferenceservice=" + isvcName}}
+
+	for {
+		pods, err := rt.ListPods(ctx, filters)
+		if err != nil {
+			return fmt.Errorf("failed to list pods for InferenceService %q: %w", isvcName, err)
+		}
+
+		if predictorPodsReady(pods) {
+			logger.InfofCtx(ctx, "InferenceService %q is ready\n", isvcName)
+
+			return nil
+		}
+
+		logger.InfofCtx(ctx, "InferenceService %q not ready yet, retrying in %s\n", isvcName, constants.IsvcPollInterval)
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for InferenceService %q to become ready: %w", isvcName, ctx.Err())
+		case <-time.After(constants.IsvcPollInterval):
+		}
+	}
+}
+
+// predictorPodsReady reports whether pods is non-empty and every container in every pod is healthy.
+func predictorPodsReady(pods []runtimeTypes.Pod) bool {
+	if len(pods) == 0 {
+		return false
+	}
+
+	for _, pod := range pods {
+		if len(pod.Containers) == 0 {
+			return false
+		}
+
+		for _, c := range pod.Containers {
+			if c.Health != string(constants.Ready) {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 // ChartHasInferenceService reports whether any template file under catalogPath

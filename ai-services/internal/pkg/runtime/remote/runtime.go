@@ -329,21 +329,6 @@ func (r *RemoteRuntime) ListRoutes(ctx context.Context, labelSelector string) ([
 	return routes, nil
 }
 
-// ─── OpenShift-specific operations ───────────────────────────────────────────
-
-// WaitForInferenceServiceReady forwards a KServe InferenceService readiness wait
-// to the remote OpenShift worker. The worker polls the InferenceService until
-// Ready=True or the context deadline is exceeded. The context timeout is
-// authoritative — the worker respects ctx.Done() via the gRPC deadline.
-func (r *RemoteRuntime) WaitForInferenceServiceReady(ctx context.Context, isvcName string) error {
-	_, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE, payload.WaitInferenceService{
-		Namespace: r.namespace,
-		Name:      isvcName,
-	})
-
-	return err
-}
-
 // ─── CRD / namespace / PVC / system operations ────────────────────────────────
 
 // ListCRD forwards a CRD list query to the remote OpenShift worker.

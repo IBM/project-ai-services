@@ -15,8 +15,7 @@ import (
 const mockBaseDir = "/tmp/ai-services-mock"
 
 // handleMock serves the commands that bypass the runtime.Runtime interface
-// (Helm, Spyre discovery, model download, HTTP tunnel, base dir, OpenShift
-// InferenceService wait) when rt is the in-memory mock. Nothing real is run.
+// (Helm, Spyre discovery, model download, HTTP tunnel, base dir) when rt is the in-memory mock. Nothing real is run.
 // handled is false for every other command, which then follows the normal path.
 func handleMock(rt runtime.Runtime, cmd *workerpb.Command) (data []byte, handled bool, err error) {
 	mc, ok := rt.(*mock.Client)
@@ -29,8 +28,7 @@ func handleMock(rt runtime.Runtime, cmd *workerpb.Command) (data []byte, handled
 	}
 
 	switch cmd.GetType() {
-	case workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE,
-		workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL:
+	case workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL:
 		return nil, true, nil
 
 	case workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS:
