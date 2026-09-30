@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
@@ -92,7 +93,12 @@ func (s *Sender) Send(ctx context.Context, cmdType workerpb.CommandType, payload
 // context is cancelled, or CommandTimeout elapses. On cancellation or timeout
 // it fires a best-effort COMMAND_TYPE_CANCEL to the worker.
 func (s *Sender) waitForResult(ctx context.Context, cmdType workerpb.CommandType, commandID string, resultCh <-chan *workerpb.CommandResult) (*workerpb.CommandResult, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, CommandTimeout)
+	timeout := CommandTimeout
+	if cmdType == workerpb.CommandType_COMMAND_TYPE_WAIT_INFERENCE_SERVICE {
+		timeout = constants.PredictorWaitTimeout
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	select {
@@ -116,7 +122,7 @@ func (s *Sender) waitForResult(ctx context.Context, cmdType workerpb.CommandType
 		}
 
 		return nil, fmt.Errorf("stream: worker %s: command %s timed out after %s",
-			s.workerName, cmdType, CommandTimeout)
+			s.workerName, cmdType, timeout)
 	}
 }
 
