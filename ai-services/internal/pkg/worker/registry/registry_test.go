@@ -344,6 +344,50 @@ func TestRegistry_Disconnect(t *testing.T) {
 	}
 }
 
+func TestRegistry_Disconnect_DrainsResultWaiters(t *testing.T) {
+	reg := New(nil)
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
+
+	resultCh, err := reg.WaitForResult("worker-1", "cmd-pending")
+	if err != nil {
+		t.Fatalf("WaitForResult: %v", err)
+	}
+
+	reg.Disconnect(context.Background(), "worker-1")
+
+	// The result channel must be closed immediately so the caller
+	// unblocks with a disconnect error instead of hanging for CommandTimeout.
+	select {
+	case _, ok := <-resultCh:
+		if ok {
+			t.Error("expected closed channel, got a value")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out: Disconnect did not close pending result channel")
+	}
+}
+
+func TestRegistry_CancelWait_RemovesChannel(t *testing.T) {
+	reg := New(nil)
+	reg.Register(context.Background(), "worker-1", "podman", nil) //nolint:errcheck
+
+	if _, err := reg.WaitForResult("worker-1", "cmd-1"); err != nil {
+		t.Fatalf("WaitForResult: %v", err)
+	}
+
+	reg.CancelWait("worker-1", "cmd-1")
+
+	// After CancelWait the entry's results map must be empty —
+	// the channel must not leak.
+	r, _ := reg.Get("worker-1")
+	r.resultsMu.Lock()
+	n := len(r.results)
+	r.resultsMu.Unlock()
+	if n != 0 {
+		t.Errorf("expected 0 pending result channels after CancelWait, got %d", n)
+	}
+}
+
 func TestRegistry_DisconnectUnknownIsNoop(t *testing.T) {
 	reg := New(nil)
 	// Must not panic.
@@ -362,7 +406,7 @@ func TestRegistry_DeregisterUnknown(t *testing.T) {
 	}
 }
 
-func TestRegistry_Deregister_ClosesCommandChannel(t *testing.T) {
+func TestRegistry_Deregister_DrainsResultWaiters(t *testing.T) {
 	reg := New(nil)
 
 	entry, err := reg.Register(context.Background(), "worker-1", "podman", nil)
@@ -374,18 +418,35 @@ func TestRegistry_Deregister_ClosesCommandChannel(t *testing.T) {
 	testID := uuid.New()
 	entry.DBID = testID
 
+	// Register a result waiter that should be unblocked by Deregister.
+	resultCh, err := reg.WaitForResult("worker-1", "cmd-pending")
+	if err != nil {
+		t.Fatalf("WaitForResult: %v", err)
+	}
+
 	if _, err := reg.Deregister(context.Background(), testID); err != nil {
 		t.Fatalf("Deregister: %v", err)
 	}
 
-	// CommandCh must be closed so that a waiting CommandStream goroutine exits.
+	// CommandCh must NOT be closed — closing it would race with any Sender
+	// that holds a reference obtained via WorkerCommandChannel.
 	select {
-	case _, ok := <-entry.CommandCh:
-		if ok {
-			t.Error("expected CommandCh to be closed, but received a value")
-		}
+	case <-entry.CommandCh:
+		t.Error("CommandCh should NOT be closed by Deregister (race with Sender.sendCancel)")
 	default:
-		t.Error("expected CommandCh to be closed, but it is still open")
+		// correct: channel is still open
+	}
+
+	// The pending result channel must be closed so the Sender unblocks
+	// immediately and gets a disconnect error instead of waiting for CommandTimeout.
+	select {
+	case res, ok := <-resultCh:
+		if ok && res != nil {
+			t.Errorf("expected closed channel (nil), got a result: %v", res)
+		}
+		// ok==false means channel was closed — correct behaviour.
+	case <-time.After(time.Second):
+		t.Fatal("timed out: result channel was not closed by Deregister")
 	}
 }
 
