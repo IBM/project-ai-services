@@ -13,6 +13,10 @@ RUN npm run build
 # runtime stage
 FROM registry.access.redhat.com/ubi9/nginx-126:9.8
 
+USER root
+RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && dnf clean all
+USER 1001
+
 COPY nginx.conf.tmpl /etc/nginx/nginx.conf.tmpl
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 

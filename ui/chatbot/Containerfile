@@ -11,6 +11,10 @@ RUN npm run build
 
 FROM registry.access.redhat.com/ubi9/nginx-126:9.8
 
+USER root
+RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && dnf clean all
+USER 1001
+
 COPY nginx.conf.tmpl /etc
 
 COPY --from=build /app/build /usr/share/nginx/html
