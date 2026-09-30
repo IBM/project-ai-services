@@ -61,8 +61,8 @@ const SUCCESS_DISPLAY_MS = 2000;
 // Order in which sections are rendered in the panel
 const SECTION_ORDER = [
   "Connection",
-  "Location",
   "Authentication",
+  "Location",
   "Services",
 ] as const;
 
