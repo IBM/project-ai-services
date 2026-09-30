@@ -16,6 +16,11 @@ pipeline {
             defaultValue: '',
             description: 'IAM api key to push image to icr registry (overrides icr-iam-creds credential when set)'
         )
+        string(
+            name: 'ADDITIONAL_IMAGE',
+            defaultValue: '',
+            description: 'Comma-separated list of additional fully-qualified image references to sign (e.g. icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le). These images are signed only — they are not built or pushed by this pipeline.'
+        )
         text(
             name: 'SKIP_IMAGE_LIST',
             defaultValue: '',
@@ -526,6 +531,14 @@ def generateImageList() {
         env.ICR_AI_SERVICES_IMAGE,
         env.ICR_AI_SERVICES_MCP_IMAGE
     ].findAll { it != null }
+
+    // Append any additional images supplied via the ADDITIONAL_IMAGE parameter
+    def additionalImages = params.ADDITIONAL_IMAGE?.toString()?.trim()
+    if (additionalImages) {
+        def extras = additionalImages.tokenize(',').collect { it.trim() }.findAll { it }
+        images.addAll(extras)
+        echo "Adding ${extras.size()} additional image(s) for signing: ${extras}"
+    }
 
     def imageList = images.join('\n') + '\n'
 
