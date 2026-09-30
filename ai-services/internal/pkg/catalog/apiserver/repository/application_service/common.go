@@ -780,7 +780,7 @@ func (s *ApplicationServiceBase) validateCreateApplicationRequest(
 		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeType, err)
 	}
 
-	requestValidator := validators.NewApplicationValidator(scopedProvider)
+	requestValidator := validators.NewApplicationValidator(scopedProvider).WithConnectorRepo(s.Validator.ConnectorRepo())
 	if err := requestValidator.ValidateDeploymentRequest(ctx, req); err != nil {
 		return err
 	}
