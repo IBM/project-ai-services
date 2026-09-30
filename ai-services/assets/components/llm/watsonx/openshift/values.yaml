@@ -1,4 +1,4 @@
-image: "icr.io/ai-services-cicd/litellm:v1.101.0-0"
+image: "icr.io/ai-services-cicd/litellm:v1.101.2-0"
 model: "ibm/granite-4-h-small"
 watsonxApiKey: ""
 watsonxProjectId: ""

@@ -45,7 +45,7 @@ bootstrap token.
 
 Pass the token to the worker node and run:
 
-  ai-services worker join <catalog-host>:9090 --token <token>`,
+  ai-services worker join <catalog-host>:9191 --token <token>`,
 		Example: `  ai-services catalog worker register node-1`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

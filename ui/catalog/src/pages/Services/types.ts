@@ -11,6 +11,12 @@ export interface ServicesState {
   // DeploymentDetails state
   selectedDeployment: DeploymentDetails | null;
   showDeploymentDetails: boolean;
+  /** Section to open in DeploymentDetails when navigating from the overflow menu */
+  deploymentDefaultSection:
+    | "details"
+    | "services"
+    | "integration"
+    | "datasources";
 }
 
 // Action types
@@ -23,7 +29,11 @@ export type ServicesAction =
   | { type: "CLEAR_DEPLOY_SERVICE_ID" }
   | { type: "DEPLOY_SUBMIT" }
   | { type: "CLEAR_SELECTED_SERVICE_ID" }
-  | { type: "SHOW_DEPLOYMENT_DETAILS"; payload: DeploymentDetails }
+  | {
+      type: "SHOW_DEPLOYMENT_DETAILS";
+      payload: DeploymentDetails;
+      defaultSection?: "details" | "services" | "integration" | "datasources";
+    }
   | { type: "HIDE_DEPLOYMENT_DETAILS" }
   | { type: "UPDATE_DEPLOYMENT_NAME"; payload: string }
   | { type: "REFRESH_DEPLOYMENTS_TABLE" };
@@ -39,6 +49,7 @@ export const initialState: ServicesState = {
   // DeploymentDetails state
   selectedDeployment: null,
   showDeploymentDetails: false,
+  deploymentDefaultSection: "details",
 };
 
 // Reducer function
@@ -76,12 +87,14 @@ export const servicesReducer = (
         ...state,
         selectedDeployment: action.payload,
         showDeploymentDetails: true,
+        deploymentDefaultSection: action.defaultSection ?? "details",
       };
     case "HIDE_DEPLOYMENT_DETAILS":
       return {
         ...state,
         selectedDeployment: null,
         showDeploymentDetails: false,
+        deploymentDefaultSection: "details",
       };
     case "UPDATE_DEPLOYMENT_NAME":
       return {

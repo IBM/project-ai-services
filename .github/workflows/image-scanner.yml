@@ -61,7 +61,7 @@ jobs:
            image: extract-service
            service: extract
          - path: mcp
-           image: mcp
+           image: ai-services-mcp
          - path: ai-services
            image: ai-services
     uses: ./.github/workflows/scanner.yml

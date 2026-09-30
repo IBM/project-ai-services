@@ -36,7 +36,9 @@ Available Commands:
   catalog     Manage the AI Services catalog
   completion  Generate the autocompletion script for the specified shell
   help        Help about any command
+  must-gather Collect debugging information from an AI Services deployment
   version     Prints CLI version with more info
+  worker      Manage this node as a worker
 
 Flags:
   -h, --help      help for ai-services
@@ -55,8 +57,10 @@ project-ai-services/
 │   ├── common/        # Shared library
 │   ├── chatbot/       # RAG chatbot service
 │   ├── digitize/      # Document ingestion
+│   ├── extract/       # Document extraction service
 │   ├── summarize/     # Summarization service
-│   └── similarity/    # Similarity search
+│   ├── similarity/    # Similarity search
+│   └── translate/     # Translation service
 ├── ui/                # Frontend applications
 │   ├── chatbot/       # Chatbot UI
 │   ├── digitize/      # Digitize UI
@@ -67,6 +71,7 @@ project-ai-services/
 │   ├── litellm/       # LiteLLM proxy
 │   ├── caddy/         # Caddy proxy
 │   └── tools/         # Utility tools
+├── mcp/               # MCP server
 └── ai-services/       # CLI tool
 ```
 
@@ -82,8 +87,10 @@ The repository follows a microservices architecture with:
 **Service Images:**
 - `chatbot-service` - RAG chatbot backend
 - `digitize-service` - Document ingestion and processing
+- `extract-service` - Document extraction
 - `summarize-service` - Text summarization
 - `similarity-service` - Semantic similarity search
+- `translate-service` - Text translation
 
 **UI Images:**
 - `chatbot-ui` - Chatbot web interface

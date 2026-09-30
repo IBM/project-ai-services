@@ -652,6 +652,13 @@ def process_documents(
                         # Start the deadline clock the first time we see this task.
                         if task_id not in task_deadlines:
                             task_deadlines[task_id] = time.monotonic() + timeout_s
+                        # Mark the doc IN_PROGRESS when the task is seen RUNNING.
+                        if task.status == ConversionTaskStatus.RUNNING:
+                            path = task_id_to_path[task_id]
+                            doc_id = doc_id_dict.get(Path(path).name)
+                            if doc_id is not None:
+                                status_mgr.update_doc_metadata(doc_id, {"status": DocStatus.IN_PROGRESS})
+                                status_mgr.update_job_progress(doc_id, DocStatus.IN_PROGRESS, JobStatus.IN_PROGRESS)
                         if time.monotonic() >= task_deadlines[task_id]:
                             path = task_id_to_path[task_id]
                             doc_id = doc_id_dict.get(Path(path).name)

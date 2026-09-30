@@ -187,7 +187,7 @@ const ConnectDatasourceModal = ({
       open={open}
       size="sm"
       modalHeading="Connect data source"
-      primaryButtonText={isSubmitting ? "Adding..." : "Add"}
+      primaryButtonText={isSubmitting ? "Connecting..." : "Connect"}
       secondaryButtonText="Cancel"
       primaryButtonDisabled={isSubmitting || hasNoConnectors || !!loadError}
       onRequestClose={() => {
@@ -278,7 +278,7 @@ const ConnectDatasourceModal = ({
             <FilterableMultiSelect
               id={multiSelectId}
               titleText="Data source"
-              placeholder="Select data sources"
+              placeholder="Choose an option"
               items={dropdownItems}
               itemToString={(item) => (item ? item.label : "")}
               selectedItems={selectedItems}

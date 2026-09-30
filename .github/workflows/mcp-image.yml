@@ -7,6 +7,13 @@ on:
     branches:
       - main
       - 'release-*'
+  pull_request:
+    paths:
+      - 'mcp/**'
+      - .github/workflows/mcp-image.yml
+    branches:
+      - main
+      - 'release-*'
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"

@@ -117,7 +117,7 @@ async def sync_translate(body: SyncTranslateRequest) -> SyncTranslateResponse:
 
     # 6. Call vLLM, gated by the shared concurrency semaphore.
     model = settings.common.llm.model
-    api_key = settings.common.llm.api_key
+    api_key = settings.common.llm.api_key.get_secret_value()
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

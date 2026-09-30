@@ -57,7 +57,12 @@ class TestRegisterConnectorJob:
 
     @pytest.mark.asyncio
     async def test_add_job_deferred_when_not_fire_immediately(self):
-        """fire_immediately=False → trigger.start_date is ~now + interval_seconds."""
+        """fire_immediately=False → trigger.start_date is ~now + interval_seconds.
+
+        next_run_time must NOT be passed at all (omitting it lets APScheduler
+        compute the first run from the trigger).  Passing next_run_time=None
+        puts the job in a paused state and it never fires.
+        """
         mock_sched = MagicMock()
         import digitize.connectors.scheduler as sched_mod
         original = sched_mod._scheduler
@@ -76,6 +81,8 @@ class TestRegisterConnectorJob:
             expected_lo = before + timedelta(seconds=600)
             expected_hi = after + timedelta(seconds=600)
             assert expected_lo <= trigger.start_date <= expected_hi
+            # next_run_time must be absent — None would pause the job permanently
+            assert "next_run_time" not in kwargs
         finally:
             sched_mod._scheduler = original
 

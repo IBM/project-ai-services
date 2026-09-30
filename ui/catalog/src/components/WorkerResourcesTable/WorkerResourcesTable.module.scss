@@ -7,23 +7,15 @@
   :global(.cds--data-table) {
     width: 100%;
 
-    // Name column - compact (sized to content)
+    // Name, Status, Type, Services columns - compact (sized to content)
     :global(th:nth-child(1)),
-    :global(td:nth-child(1)) {
-      width: 1%;
-      white-space: nowrap;
-    }
-
-    // Status column - compact
+    :global(td:nth-child(1)),
     :global(th:nth-child(2)),
-    :global(td:nth-child(2)) {
-      width: 1%;
-      white-space: nowrap;
-    }
-
-    // Type column - compact
+    :global(td:nth-child(2)),
     :global(th:nth-child(3)),
-    :global(td:nth-child(3)) {
+    :global(td:nth-child(3)),
+    :global(th:nth-child(4)),
+    :global(td:nth-child(4)) {
       width: 1%;
       white-space: nowrap;
     }

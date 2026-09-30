@@ -130,7 +130,7 @@ func validateRagArchitecture(t *testing.T, body []byte) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "rag", arch.ID)
-	assert.Equal(t, "Digital Assistants", arch.Name)
+	assert.Equal(t, "Digital assistants", arch.Name)
 	assert.NotEmpty(t, arch.Description)
 	assert.Equal(t, "1.0.0", arch.Version)
 	assert.Equal(t, "architecture", arch.Type)

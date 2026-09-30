@@ -11,6 +11,7 @@ on:
       - 'images/**'
       - 'ui/**'
       - 'ai-services/**'
+      - 'mcp/**'
       - '.github/workflows/bump-image-version.yml'
       - '.github/scripts/check_make_version_tag.py'
       - .github/scripts/check_image_names.py

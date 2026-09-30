@@ -87,10 +87,9 @@ export function useDeploymentDatasourceSupport(
         .catch((err) => {
           set(false);
           setErr(
-            err?.response?.data?.error ||
-              err?.response?.data?.message ||
-              err?.message ||
-              "Failed to fetch deployment options.",
+            err instanceof Error
+              ? err.message
+              : "Failed to fetch deployment options.",
           );
         });
     } else {
@@ -119,10 +118,9 @@ export function useDeploymentDatasourceSupport(
         .catch((err) => {
           set(false);
           setErr(
-            err?.response?.data?.error ||
-              err?.response?.data?.message ||
-              err?.message ||
-              "Failed to fetch service deployment options.",
+            err instanceof Error
+              ? err.message
+              : "Failed to fetch service deployment options.",
           );
         });
     }

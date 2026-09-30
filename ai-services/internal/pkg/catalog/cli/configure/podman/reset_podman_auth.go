@@ -53,7 +53,7 @@ func ResetPodmanAuth(ctx context.Context) error {
 		return fmt.Errorf("failed to delete existing catalog pod: %w", err)
 	}
 
-	_, err = executeCatalogDeployment(ctx, deployCtx, *opts, "")
+	_, _, err = executeCatalogDeployment(ctx, deployCtx, *opts, "")
 	if err != nil {
 		return fmt.Errorf("failed to deploy catalog pod: %w", err)
 	}

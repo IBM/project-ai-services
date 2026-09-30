@@ -78,12 +78,12 @@ func DeployCatalog(ctx context.Context, opts catalogutils.OpenShiftConfigureOpti
 	logger.Infoln("-------")
 
 	// Step 7: Login to catalog API, join as local worker, print next steps
-	return handlePostDeployment(ctx, tp, runtime, opts, adminPassword)
+	return handlePostDeployment(ctx, tp, runtime, opts, adminPassword, secretExists)
 }
 
 // handlePostDeployment logs in to the catalog API (verifying the admin password),
 // optionally joins the local worker, and prints next steps.
-func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *runtimeOpenshift.OpenshiftClient, opts catalogutils.OpenShiftConfigureOptions, adminPassword string) error {
+func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *runtimeOpenshift.OpenshiftClient, opts catalogutils.OpenShiftConfigureOptions, adminPassword string, isReinstall bool) error {
 	// Login to the catalog API — this both verifies the admin password and gives
 	// us a client to reuse for local worker registration without a second login.
 	catalogAPIURL, err := getCatalogAPIURL(ctx, runtime)
@@ -94,6 +94,11 @@ func handlePostDeployment(ctx context.Context, tp templates.Template, runtime *r
 	catalogClient, err := configure.LoginToCatalog(ctx, catalogAPIURL, adminPassword)
 	if err != nil {
 		return fmt.Errorf("admin password verification failed: %w", err)
+	}
+
+	// Validate --skip-local-worker has not changed since the original install.
+	if err := configure.ValidateSkipLocalWorker(ctx, catalogClient, isReinstall, opts.SkipLocalWorker); err != nil {
+		return err
 	}
 
 	// Step 8: Join as local worker

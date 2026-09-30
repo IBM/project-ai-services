@@ -34,11 +34,11 @@ import type {
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
   ApplicationWorker,
+  ResourceAllocation,
 } from "@/types/api.types";
 import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
-import axios from "axios";
 import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
@@ -51,6 +51,8 @@ interface DeploymentDetailsProps {
   onBack: () => void;
   deploymentSource: string;
   onNameUpdate?: (newName: string) => void;
+  /** Pre-select a side-nav section when the panel opens */
+  defaultSection?: "details" | "services" | "integration" | "datasources";
 }
 
 const DeploymentDetails = ({
@@ -58,9 +60,11 @@ const DeploymentDetails = ({
   onBack,
   deploymentSource,
   onNameUpdate,
+  defaultSection = "details",
 }: DeploymentDetailsProps) => {
-  const [activeSection, setActiveSection] = useState("details");
+  const [activeSection, setActiveSection] = useState(defaultSection);
   const [datasourceCount, setDatasourceCount] = useState<number | null>(null);
+  const [resources, setResources] = useState<ResourceAllocation[]>([]);
   const [deployedCatalogIds, setDeployedCatalogIds] = useState<
     string[] | undefined
   >(undefined);
@@ -69,14 +73,14 @@ const DeploymentDetails = ({
     error: datasourceSupportError,
     clearError: clearDatasourceSupportError,
   } = useDeploymentDatasourceSupport(deploymentSource, deployedCatalogIds);
-  const [resources, setResources] = useState<
-    DeploymentDetailsType["resources"]
-  >([]);
   const [isLoadingResources, setIsLoadingResources] = useState(false);
   const [serviceData, setServiceData] = useState<DeploymentServiceData[]>([]);
   const [integrationEndpoints, setIntegrationEndpoints] = useState<
     DeployIntegrationEndpoints[]
   >([]);
+  const [integrationFetchError, setIntegrationFetchError] = useState<
+    string | null
+  >(null);
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
@@ -158,6 +162,7 @@ const DeploymentDetails = ({
   }, [deployment.id]);
 
   useEffect(() => {
+    setIntegrationFetchError(null);
     const fetchServiceDetails = async () => {
       try {
         const [applicationDetailsResponse, servicesResponse] =
@@ -216,6 +221,10 @@ const DeploymentDetails = ({
             : deploymentServices.length > 0 &&
               serviceMetadataById[deploymentServices[0].catalog_id]
                 ?.certifiedBy === "IBM";
+        const knownComponentTypes = new Set<string>(
+          Object.values(COMPONENT_TYPES),
+        );
+
         const transformedServices: DeploymentServiceData[] =
           deploymentServices.map((service) => {
             const llmComponent = service.components.find(
@@ -230,9 +239,34 @@ const DeploymentDetails = ({
             const rerankerComponent = service.components.find(
               (c) => c.type === COMPONENT_TYPES.RERANKER,
             );
+
+            // Collect custom/unknown component types not handled by the known set.
+            const customComponents = service.components
+              .filter((c) => !knownComponentTypes.has(c.type))
+              .map((c) => ({
+                label: c.type
+                  .split("_")
+                  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                  .join(" "),
+                model: c.metadata?.model,
+                providerName: c.provider?.name,
+              }));
+
             const serviceDescription =
               serviceMetadataById[service.catalog_id]?.description ??
               `${service.type} service`;
+
+            // For inference backend: prefer known components first, then fall back
+            // to any custom component's provider name.
+            const customInferenceComponent = customComponents.find(
+              (c) => c.providerName,
+            );
+            const inferenceBackend =
+              llmComponent?.provider?.name ||
+              embeddingComponent?.provider?.name ||
+              rerankerComponent?.provider?.name ||
+              customInferenceComponent?.providerName ||
+              undefined;
 
             return {
               id: service.id,
@@ -241,14 +275,12 @@ const DeploymentDetails = ({
               description: serviceDescription,
               serviceVersion: service.version,
               largeLanguageModel: llmComponent?.metadata?.model,
-              inferenceBackend:
-                llmComponent?.provider?.name ||
-                embeddingComponent?.provider?.name ||
-                rerankerComponent?.provider?.name ||
-                "Unknown",
+              inferenceBackend,
               embeddingModel: embeddingComponent?.metadata?.model,
               vectorStore: vectorStoreComponent?.provider?.name,
               rankerModel: rerankerComponent?.metadata?.model,
+              customComponents:
+                customComponents.length > 0 ? customComponents : undefined,
             };
           });
 
@@ -283,6 +315,9 @@ const DeploymentDetails = ({
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
+        setIntegrationFetchError(
+          "Could not retrieve integration endpoints. Please try again.",
+        );
         setCertifiedBy(null);
         setWorkerInfo(null);
       }
@@ -378,15 +413,10 @@ const DeploymentDetails = ({
       onNameUpdate?.(editedName);
       setSaveSuccess(true);
     } catch (error) {
-      const rawError: string =
-        axios.isAxiosError(error) && error.response?.data?.error
-          ? error.response.data.error
-          : "Failed to update deployment name";
-      const errorIndex = rawError.indexOf("Error:");
       const errorMessage =
-        errorIndex !== -1
-          ? rawError.slice(errorIndex + "Error:".length).trim()
-          : rawError;
+        error instanceof Error
+          ? error.message
+          : "Failed to update deployment name";
       setSaveError(errorMessage);
     } finally {
       setIsSaving(false);
@@ -794,14 +824,34 @@ const DeploymentDetails = ({
                         </div>
                       )}
 
-                      <div className={styles.serviceDetailRow}>
-                        <span className={styles.serviceDetailLabel}>
-                          LLM inference backend
-                        </span>
-                        <span className={styles.serviceDetailValue}>
-                          {deploymentServiceData.inferenceBackend}
-                        </span>
-                      </div>
+                      {deploymentServiceData.customComponents?.map(
+                        (customComponent) => (
+                          <div
+                            key={customComponent.label}
+                            className={styles.serviceDetailRow}
+                          >
+                            <span className={styles.serviceDetailLabel}>
+                              {customComponent.label}
+                            </span>
+                            <span className={styles.serviceDetailValue}>
+                              {customComponent.model ??
+                                customComponent.providerName ??
+                                "Unknown"}
+                            </span>
+                          </div>
+                        ),
+                      )}
+
+                      {deploymentServiceData.inferenceBackend && (
+                        <div className={styles.serviceDetailRow}>
+                          <span className={styles.serviceDetailLabel}>
+                            Inference backend
+                          </span>
+                          <span className={styles.serviceDetailValue}>
+                            {deploymentServiceData.inferenceBackend}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </ProductiveCard>
                 </Column>
@@ -824,6 +874,18 @@ const DeploymentDetails = ({
                   className={styles.detailsCard}
                 ></ProductiveCard>
               </Column>
+              {integrationFetchError && (
+                <Column sm={4} md={8} lg={16}>
+                  <ToastNotification
+                    aria-label="close notification"
+                    kind="error"
+                    title="Failed to load integration endpoints"
+                    subtitle={integrationFetchError}
+                    hideCloseButton
+                    className={styles.toastNotification}
+                  />
+                </Column>
+              )}
               {integrationEndpoints.map((integrationEndpointsData) => (
                 <Column key={integrationEndpointsData.id} sm={4} md={8} lg={16}>
                   <ProductiveCard

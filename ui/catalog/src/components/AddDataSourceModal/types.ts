@@ -25,9 +25,13 @@ export interface AddDataSourceModalState {
   formValues: FormValues;
   nameInvalid: boolean;
   fieldErrors: Record<string, string>;
+  sectionErrors: Record<string, string>;
   isSubmitting: boolean;
   submitError: string | null;
 }
+
+export const VALIDATED_SECTIONS = ["Location", "Authentication"] as const;
+export type ValidatedSection = (typeof VALIDATED_SECTIONS)[number];
 
 export const ACTION_TYPES = {
   SET_SELECTED_TYPE: "SET_SELECTED_TYPE",
@@ -54,15 +58,18 @@ export type AddDataSourceModalAction =
   | { type: typeof ACTION_TYPES.SET_FORM_VALUES; payload: FormValues }
   | {
       type: typeof ACTION_TYPES.SET_TEXT_VALUE;
-      payload: { key: string; value: string };
+      payload: { key: string; value: string; sectionTitle: string };
     }
   | {
       type: typeof ACTION_TYPES.TOGGLE_CHECKBOX_VALUE;
-      payload: { key: string; option: string };
+      payload: { key: string; option: string; sectionTitle: string };
     }
   | {
       type: typeof ACTION_TYPES.SET_FIELD_ERRORS;
-      payload: Record<string, string>;
+      payload: {
+        fieldErrors: Record<string, string>;
+        sectionErrors: Record<string, string>;
+      };
     }
   | { type: typeof ACTION_TYPES.CLEAR_SUBMIT_ERROR }
   | { type: typeof ACTION_TYPES.SUBMIT_START }
@@ -77,6 +84,7 @@ export const INITIAL_STATE: AddDataSourceModalState = {
   formValues: {},
   nameInvalid: false,
   fieldErrors: {},
+  sectionErrors: {},
   isSubmitting: false,
   submitError: null,
 };
@@ -87,7 +95,14 @@ export const addDataSourceModalReducer = (
 ): AddDataSourceModalState => {
   switch (action.type) {
     case ACTION_TYPES.SET_SELECTED_TYPE:
-      return { ...state, selectedType: action.payload };
+      return {
+        ...state,
+        selectedType: action.payload,
+        fieldErrors: {},
+        sectionErrors: {},
+        nameInvalid: false,
+        submitError: null,
+      };
     case ACTION_TYPES.SHOW_LOCATION_OPTIONALS:
       return { ...state, showLocationOptionals: true };
     case ACTION_TYPES.SET_DATA_SOURCE_NAME:
@@ -104,6 +119,9 @@ export const addDataSourceModalReducer = (
     case ACTION_TYPES.SET_TEXT_VALUE: {
       const nextFieldErrors = { ...state.fieldErrors };
       delete nextFieldErrors[action.payload.key];
+      // Clear only the section banner that belongs to the field being edited.
+      const nextSectionErrors = { ...state.sectionErrors };
+      delete nextSectionErrors[action.payload.sectionTitle];
       return {
         ...state,
         formValues: {
@@ -111,6 +129,7 @@ export const addDataSourceModalReducer = (
           [action.payload.key]: action.payload.value,
         },
         fieldErrors: nextFieldErrors,
+        sectionErrors: nextSectionErrors,
       };
     }
     case ACTION_TYPES.TOGGLE_CHECKBOX_VALUE: {
@@ -119,19 +138,25 @@ export const addDataSourceModalReducer = (
         ? current.filter((value) => value !== action.payload.option)
         : [...current, action.payload.option];
       const nextFieldErrors = { ...state.fieldErrors };
+      let nextSectionErrors = state.sectionErrors;
       if (next.length > 0) {
         delete nextFieldErrors[action.payload.key];
+        // Clear only the section banner that belongs to the field being edited.
+        nextSectionErrors = { ...state.sectionErrors };
+        delete nextSectionErrors[action.payload.sectionTitle];
       }
       return {
         ...state,
         formValues: { ...state.formValues, [action.payload.key]: next },
         fieldErrors: nextFieldErrors,
+        sectionErrors: nextSectionErrors,
       };
     }
     case ACTION_TYPES.SET_FIELD_ERRORS:
       return {
         ...state,
-        fieldErrors: action.payload,
+        fieldErrors: action.payload.fieldErrors,
+        sectionErrors: action.payload.sectionErrors,
         nameInvalid: !state.dataSourceName.trim(),
       };
     case ACTION_TYPES.CLEAR_SUBMIT_ERROR:

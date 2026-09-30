@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	shutdownTimeout        = 10 * time.Second
-	defaultRateLimit       = 20.0
-	defaultRateLimitWindow = 60.0
+	shutdownTimeout           = 10 * time.Second
+	defaultRateLimit          = 20.0
+	defaultRateLimitWindow    = 60.0
+	defaultMaxRequestBodyBytes = 50 << 20 // 50 MiB limit (overrides SDK default 4 MiB)
 )
 
 type Logger interface {
@@ -148,7 +149,9 @@ func (s *HTTPServer) Start() error {
 
 	streamHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return mcpServer
-	}, &mcp.StreamableHTTPOptions{})
+	}, &mcp.StreamableHTTPOptions{
+		MaxRequestBodyBytes: defaultMaxRequestBodyBytes,
+	})
 
 	mux := http.NewServeMux()
 

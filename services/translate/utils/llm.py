@@ -30,7 +30,7 @@ def get_llm_max_model_len() -> int:
         settings.common.llm.endpoint,
         settings.common.llm.model,
         settings.common.llm.max_model_len,
-        settings.common.llm.api_key or None,
+        settings.common.llm.api_key.get_secret_value() or None,
     )
 
 

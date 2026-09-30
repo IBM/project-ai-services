@@ -218,10 +218,6 @@ const ConnectorDetailsPanel = ({
       await updateDataSourceAuth(connectorId, { params });
       dispatch({ type: PANEL_ACTION_TYPES.SAVE_SUCCESS });
     } catch (err: unknown) {
-      const serverMessage = (
-        err as { response?: { data?: { error?: string } } }
-      )?.response?.data?.error;
-
       // Mark every auth field as invalid and surface the banner error atomically.
       const fieldErrors: Record<string, string> = {};
       for (const field of authFields) {
@@ -230,10 +226,9 @@ const ConnectorDetailsPanel = ({
       dispatch({
         type: PANEL_ACTION_TYPES.SAVE_FAILURE,
         payload:
-          serverMessage ??
-          (err instanceof Error
+          err instanceof Error
             ? err.message
-            : "Failed to update authentication key"),
+            : "Failed to update authentication key",
         fieldErrors,
       });
     }

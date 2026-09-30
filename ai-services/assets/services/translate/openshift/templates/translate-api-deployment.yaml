@@ -98,9 +98,9 @@ spec:
             - name: LLM_MODEL
               value: {{ .Values.llm.model | quote }}
             - name: LLM_MAX_MODEL_LEN
-              value: "4096"
+              value: {{ .Values.llm.maxModelLen | quote }}
             - name: LLM_MAX_BATCH_SIZE
-              value: "32"
+              value: {{ .Values.llm.maxBatchSize | quote }}
             - name: LOG_LEVEL
               value: "{{ .Values.translate.log_level }}"
           {{- if .Values.llm.apiKey }}

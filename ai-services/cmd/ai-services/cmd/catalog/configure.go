@@ -19,6 +19,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerConstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // Variables for flags placeholder.
@@ -39,7 +40,7 @@ var (
 	sslKeyPath  string
 	// HTTPS port flag for catalog configure command.
 	httpsPort int
-	// WorkerGateway port — always active, defaults to 9090.
+	// WorkerGateway port — always active, defaults to 9191.
 	workerGatewayPort int
 	// Reset podman auth secret for catalog configure command.
 	resetPodmanAuthFlag bool
@@ -53,8 +54,7 @@ var (
 )
 
 const (
-	defaultHTTPSPort         = 443
-	defaultWorkerGatewayPort = 9090
+	defaultHTTPSPort = 443
 )
 
 var configureCmd = &cobra.Command{
@@ -69,7 +69,7 @@ This command performs the following operations:
 
 Additional configuration options include base directory customization, domain name setup,
 SSL/TLS certificate management, HTTPS port configuration, and credential/certificate reset capabilities.
-Note: --workergateway-port is supported for podman runtime only (default 9090).`,
+Note: --workergateway-port is supported for podman runtime only (default 9191).`,
 	Example: `  # Configure catalog service for podman
 	 ai-services catalog configure --runtime podman
 
@@ -240,10 +240,10 @@ func initConfigurePodmanFlags() {
 	configureCmd.Flags().IntVar(
 		&workerGatewayPort,
 		constants.WorkerGatewayPortFlag,
-		defaultWorkerGatewayPort,
+		workerConstants.WorkerGatewayPort,
 		"Port for the gRPC worker gateway that workers connect to.\n"+
 			"Note: Supported for podman runtime only.\n"+
-			"Example: --workergateway-port 9090\n",
+			"Example: --workergateway-port 9191\n",
 	)
 }
 
