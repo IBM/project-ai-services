@@ -81,13 +81,25 @@ func RegisterLocalWorkerIfNeeded(ctx context.Context, mtlsSecretExists bool, c *
 	return registerLocalWorker(ctx, c)
 }
 
-// ValidateSkipLocalWorker enforces that --skip-local-worker cannot be
-// changed on a re-run. It infers what the original run used from the catalog DB:
+// ValidateSkipLocalWorker enforces that --skip-local-worker cannot be changed
+// on a re-run when a Local worker is confirmed in the catalog DB.
 //
-//   - local worker registered → original run had --skip-local-worker=false
-//   - local worker absent     → original run had --skip-local-worker=true
+// This function is only reachable when the catalog pod was NOT yet deployed
+// (catalogAlreadyDeployed=false) but catalog-secret already exists — meaning a
+// previous run created the secrets then failed before pod deployment. When the
+// pod is already running, --skip-local-worker is validated earlier against the
+// LOCAL_WORKER env var in the running container (validateReconfigureParameters),
+// and this function receives isReinstall=false and is a no-op.
 //
-// An error is returned when the current flag value contradicts that state.
+// Because the pod was never deployed, a successful first run with
+// --skip-local-worker=true is impossible here — if it had succeeded the pod
+// would be running (catalogAlreadyDeployed=true). The only state that needs
+// protecting is a registered Local worker in the DB, which means a previous
+// partial run reached worker registration before failing.
+//
+// When no Local worker exists in the DB there is nothing to protect: allow
+// any flag value through so the run can complete cleanly.
+//
 // This function is a no-op on a fresh install (isReinstall=false).
 func ValidateSkipLocalWorker(ctx context.Context, c *catalogclient.Client, isReinstall bool, skipLocalWorker bool) error {
 	if !isReinstall {
@@ -103,9 +115,15 @@ func ValidateSkipLocalWorker(ctx context.Context, c *catalogclient.Client, isRei
 	// from a previous run and must not influence this decision.
 	exists := findLocalWorker(workers, false)
 
-	// exists == true  → original flag was false (local worker was joined)
-	// exists == false → original flag was true  (local worker was skipped)
-	if skipLocalWorker == exists {
+	// No Local worker in the DB — no registered worker to protect.
+	// Allow any flag value through; the pod will be deployed fresh.
+	if !exists {
+		return nil
+	}
+
+	// Local worker confirmed in DB: a previous partial run registered it before
+	// failing. Block --skip-local-worker=true to avoid orphaning that registration.
+	if skipLocalWorker {
 		return fmt.Errorf("--skip-local-worker flag cannot be changed on re-run; to change this setting, uninstall and re-run catalog configure")
 	}
 
