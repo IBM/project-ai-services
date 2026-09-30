@@ -1,5 +1,7 @@
 model: ""
 apiKey: ""
+maxModelLen: 32768
+maxBatchSize: 32
 resources:
   requests:
     cpu: "12"

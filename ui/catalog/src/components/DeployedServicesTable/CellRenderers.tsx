@@ -16,12 +16,14 @@ interface ActionCellWrapperProps {
   rowId: string;
   dispatch: Dispatch<AppAction | SharedTableAction>;
   rowData?: { status?: string };
+  onViewIntegration?: () => void;
 }
 
 export const ActionCell = ({
   rowId,
   dispatch,
   rowData,
+  onViewIntegration,
 }: ActionCellWrapperProps) => (
   <SharedActionCell
     rowId={rowId}
@@ -30,6 +32,9 @@ export const ActionCell = ({
       dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: id })
     }
     isDeleteEnabled={(status) => status !== "Deleting"}
+    onViewIntegration={
+      onViewIntegration ? () => onViewIntegration() : undefined
+    }
   />
 );
 
@@ -60,7 +65,6 @@ export const NameCell = ({
               name,
               status,
               type: type || "Service",
-              resources: [],
             })
         : undefined
     }
@@ -73,6 +77,7 @@ interface CellRendererProps {
   dispatch: Dispatch<AppAction | SharedTableAction>;
   rowData?: { status?: string; type?: string };
   onRowClick?: (deployment: DeploymentDetails) => void;
+  onViewIntegration?: () => void;
 }
 
 type CellRendererComponent = (

@@ -7,23 +7,21 @@ import pytest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
-# CRITICAL: Patch the crash handler BEFORE importing any application modules.
+# CRITICAL: Set environment variable BEFORE any imports that might use diagnostic_logger
+# This prevents stderr monitoring from starting during test collection
 os.environ['DISABLE_CRASH_HANDLER'] = '1'
 
-import common.diagnostic_logger
+# DISABLE_CRASH_HANDLER is already set above; importing diagnostic_logger here
+# ensures the module is loaded before any app code so the env-var guard inside
+# setup_comprehensive_crash_handler fires on the first real call.
+import common.diagnostic_logger  # noqa: F401
 
-def _mock_crash_handler(logger):
-    """Mock crash handler that doesn't manipulate file descriptors."""
-    mock_stderr_monitor = Mock(name="stderr_monitor")
-    mock_stderr_monitor.start = Mock()
-    mock_stderr_monitor.stop = Mock()
-    return (
-        Mock(name="diagnostic_logger"),
-        mock_stderr_monitor,
-        Mock(name="signal_handler"),
-    )
 
-common.diagnostic_logger.setup_comprehensive_crash_handler = _mock_crash_handler
+@pytest.fixture(scope="session", autouse=True)
+def mock_diagnostic_crash_handler():
+    """Keep DISABLE_CRASH_HANDLER set for any late-bound code paths."""
+    with patch.dict(os.environ, {"DISABLE_CRASH_HANDLER": "1"}):
+        yield
 
 
 VALID_SCHEMA = {

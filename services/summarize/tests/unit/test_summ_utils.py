@@ -1,10 +1,10 @@
 import pytest
 from unittest.mock import Mock, patch
+from fastapi import HTTPException
 
 from summarize.summ_utils import (
     get_max_allowed_input_tokens,
     MAX_INPUT_WORDS,
-    SummarizeException,
     build_messages,
     build_success_response,
     compute_target_and_max_tokens,
@@ -114,21 +114,21 @@ class TestValidateSummaryLength:
         assert validate_summary_length(None) is None
 
     def test_validate_summary_length_non_integer_raises_error(self):
-        with pytest.raises(SummarizeException) as exc:
+        with pytest.raises(HTTPException) as exc:
             validate_summary_length("abc")
 
-        assert exc.value.code == 400
-        assert exc.value.status == "INVALID_PARAMETER"
-        assert exc.value.message == "Length must be an integer"
+        assert exc.value.status_code == 400
+        assert exc.value.detail["error"]["code"] == "INVALID_PARAMETER"
+        assert "Length must be an integer" in exc.value.detail["error"]["message"]
 
     @pytest.mark.parametrize("value", [-1, MAX_INPUT_WORDS + 1])
     def test_validate_summary_length_out_of_bounds_raises_error(self, value):
-        with pytest.raises(SummarizeException) as exc:
+        with pytest.raises(HTTPException) as exc:
             validate_summary_length(value)
 
-        assert exc.value.code == 400
-        assert exc.value.status == "INVALID_PARAMETER"
-        assert exc.value.message == "Length is out of bounds"
+        assert exc.value.status_code == 400
+        assert exc.value.detail["error"]["code"] == "INVALID_PARAMETER"
+        assert "Length is out of bounds" in exc.value.detail["error"]["message"]
 
     def test_validate_summary_length_zero_returns_none_per_current_implementation(self):
         assert validate_summary_length(0) is None
@@ -144,12 +144,12 @@ class TestValidateSummaryLevel:
         assert validate_summary_level(None) is None
 
     def test_validate_summary_level_invalid_value_raises_error(self):
-        with pytest.raises(SummarizeException) as exc:
+        with pytest.raises(HTTPException) as exc:
             validate_summary_level("invalid")
 
-        assert exc.value.code == 400
-        assert exc.value.status == "INVALID_PARAMETER"
-        assert "level must be one of" in exc.value.message
+        assert exc.value.status_code == 400
+        assert exc.value.detail["error"]["code"] == "INVALID_PARAMETER"
+        assert "level must be one of" in exc.value.detail["error"]["message"]
 
 
 @pytest.mark.unit
@@ -173,7 +173,7 @@ class TestValidateInputAndGetAvailableTokens:
         assert available_tokens == expected
 
     def test_summary_length_greater_than_input_word_count_raises_error(self):
-        with pytest.raises(SummarizeException) as exc:
+        with pytest.raises(HTTPException) as exc:
             validate_input_and_get_available_tokens(
                 input_tokens=100,
                 input_word_count=20,
@@ -181,11 +181,11 @@ class TestValidateInputAndGetAvailableTokens:
                 summary_length=25,
             )
 
-        assert exc.value.code == 400
-        assert exc.value.status == "INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH"
+        assert exc.value.status_code == 400
+        assert exc.value.detail["error"]["code"] == "INPUT_TEXT_SMALLER_THAN_SUMMARY_LENGTH"
 
     def test_input_tokens_over_limit_raises_context_limit_exceeded(self):
-        with pytest.raises(SummarizeException) as exc:
+        with pytest.raises(HTTPException) as exc:
             validate_input_and_get_available_tokens(
                 input_tokens=get_max_allowed_input_tokens() + 1,
                 input_word_count=5000,
@@ -193,8 +193,8 @@ class TestValidateInputAndGetAvailableTokens:
                 summary_length=None,
             )
 
-        assert exc.value.code == 413
-        assert exc.value.status == "CONTEXT_LIMIT_EXCEEDED"
+        assert exc.value.status_code == 413
+        assert exc.value.detail["error"]["code"] == "CONTEXT_LIMIT_EXCEEDED"
 
     def test_level_soft_limit_logs_warning_but_does_not_fail(self):
         input_tokens = get_max_allowed_input_tokens()

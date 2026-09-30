@@ -3,6 +3,6 @@ version: "1.0.0"
 
 # Resource requirements
 resources:
-  cpu: 1 # 500m rounded up
-  memory: 1073741824 # 1Gi in bytes
+  cpu: 1 # 1000m
+  memory: 2147483648 # 2Gi in bytes
   storage: 10737418240 # 10Gi for PostgreSQL database storage in bytes

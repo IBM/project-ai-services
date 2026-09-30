@@ -2,7 +2,7 @@
 type: connector
 id: file_system
 name: "File system"
-description: "SSH based connection with IBM i, AIX, Linux and Windows support."
+description: "SSH based connection with IBM i, AIX, Linux, and Windows support."
 
 # Connector type this provider belongs to
 connector_type: datasource

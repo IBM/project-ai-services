@@ -221,7 +221,6 @@ export interface DeploymentDetails {
   name: string;
   status: string;
   type: string;
-  resources: ResourceAllocation[];
   acceleratorCards?: AcceleratorCards[];
 }
 
@@ -231,10 +230,15 @@ export interface DeploymentServiceData {
   description: string;
   serviceVersion: string;
   largeLanguageModel?: string;
-  inferenceBackend: string;
+  inferenceBackend?: string;
   embeddingModel?: string;
   vectorStore?: string;
   rankerModel?: string;
+  customComponents?: Array<{
+    label: string;
+    model?: string;
+    providerName?: string;
+  }>;
 }
 
 export interface DeployIntegrationEndpoints {
@@ -428,6 +432,7 @@ export interface WorkerApiResponse {
   updated_at: string;
   metadata?: Record<string, unknown>;
   message?: string;
+  application_ids?: string[];
 }
 
 export interface WorkerListResponse {

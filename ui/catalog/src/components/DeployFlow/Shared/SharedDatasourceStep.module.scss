@@ -5,6 +5,9 @@
 
 .summaryGrid {
   margin-bottom: $spacing-05;
+  // Carbon's narrow grid adds left padding that offsets the tile from the
+  // upload card below. Remove it so both cards share the same left edge.
+  padding-left: 0 !important;
 }
 
 .summaryTile {
@@ -14,21 +17,27 @@
   min-height: 80px;
 }
 
+.summaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: $spacing-03;
+}
+
 .summaryLabel {
   @include type-style("label-01");
   color: $text-secondary;
-  margin-bottom: $spacing-03;
+}
+
+.checkIcon {
+  fill: $support-success;
+  flex-shrink: 0;
 }
 
 .summaryValue {
   display: flex;
   align-items: center;
   gap: $spacing-02;
-}
-
-.checkIcon {
-  fill: $support-success;
-  flex-shrink: 0;
 }
 
 .summaryCount {
@@ -90,6 +99,11 @@
 
 .dropdown {
   max-width: 40rem;
+
+  // Override the Carbon layer-based background so the field renders on white.
+  :global(.cds--list-box) {
+    background-color: #ffffff;
+  }
 }
 
 .selectedTags {

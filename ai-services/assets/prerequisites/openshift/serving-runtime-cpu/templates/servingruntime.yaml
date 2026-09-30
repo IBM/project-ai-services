@@ -17,7 +17,6 @@ spec:
   - args:
     - --port=8000
     - --model=/mnt/models
-    - --gpu-memory-utilization=0.3
     command:
     - python
     - -m

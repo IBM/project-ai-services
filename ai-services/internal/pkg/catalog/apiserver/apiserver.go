@@ -42,6 +42,7 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	workerConstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
@@ -59,7 +60,7 @@ type APIServerOptions struct {
 	CatalogProvider    *catalog.CatalogProvider
 
 	// WorkerGatewayPort is the port the gRPC worker gateway listens on.
-	// Defaults to 9090 when zero.
+	// Defaults to 9191 when zero.
 	WorkerGatewayPort int
 	// WorkerRegistry holds the in-memory state of all connected workers and owns
 	// the bootstrap token store.
@@ -91,7 +92,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		options.Port = 8080
 	}
 	if options.WorkerGatewayPort == 0 {
-		options.WorkerGatewayPort = 9090
+		options.WorkerGatewayPort = workerConstants.WorkerGatewayPort
 	}
 
 	return &APIserver{

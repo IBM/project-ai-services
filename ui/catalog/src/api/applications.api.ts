@@ -359,6 +359,8 @@ export { calculateUptime } from "@/utils/time";
 export function transformApplicationToRow(
   app: Application,
 ): DigitalAssistantRow {
+  const services = app.services ?? [];
+
   return {
     id: app.id,
     name: app.name,
@@ -372,7 +374,7 @@ export function transformApplicationToRow(
       "",
     messages: app.status === "Running" ? "" : app.message || "",
     actions: "actions",
-    children: app.services.map((service) => ({
+    children: services.map((service) => ({
       id: service.id,
       name: `${service.type} (service)`,
       status: service.status as DigitalAssistantRow["status"],

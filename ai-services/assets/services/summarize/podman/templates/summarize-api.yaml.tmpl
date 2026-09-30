@@ -85,7 +85,7 @@ spec:
         requests:
           memory: "512Mi"
         limits:
-          memory: "1Gi"
+          memory: "2Gi"
       ports:
         - containerPort: 6000
           protocol: TCP
@@ -131,7 +131,7 @@ spec:
         timeoutSeconds: 5
         failureThreshold: 3
       resources:
-        requests: 
-          memory: "128Mi"
+        requests:
+          memory: "512Mi"
         limits:
-          memory: "128Mi"
+          memory: "512Mi"

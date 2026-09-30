@@ -17,7 +17,10 @@ const Connectors = () => {
 
   return (
     <div id="connectors-page-content" className={styles.connectorsContainer}>
-      <PageHeader title="Connectors" />
+      <PageHeader
+        title="Connectors"
+        subtitle="Pre-built integrations with data workflows to connect and synchronize with data sources, exchange data between services, and push outputs to data sinks. Connectors reduce integration effort and accelerate end-to-end AI and data workflows."
+      />
       <DataSourceConnectorsTable
         onAdd={() => setIsAddModalOpen(true)}
         refreshTrigger={refreshTrigger}

@@ -31,4 +31,5 @@ spec:
       storageUri: hf://{{ .Values.model }}
       args:
         - --served-model-name={{ .Values.model }}
-        - --max-model-len=512
+        - --max-model-len={{ .Values.maxModelLen }}
+        - --kv-cache-memory-bytes=0

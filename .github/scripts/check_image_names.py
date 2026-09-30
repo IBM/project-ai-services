@@ -56,10 +56,12 @@ COMPONENTS = {
     ],
     "services/extract/Makefile": [
         ("ai-services/assets/services/extract/podman/values.yaml", "extract"),
+        ("ai-services/assets/services/extract/openshift/values.yaml", "extract"),
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "extract")
     ],
     "services/translate/Makefile": [
         ("ai-services/assets/services/translate/podman/values.yaml", "translate"),
+        ("ai-services/assets/services/translate/openshift/values.yaml", "translate"),
         ("ai-services/assets/applications/rag-dev/podman/values.yaml", "translate")
     ],
     "ui/chatbot/Makefile": [

@@ -1,6 +1,5 @@
 import { useReducer, useCallback, useRef, useEffect } from "react";
 import ConnectorDetailsPanel from "@/components/ConnectorDetailsPanel";
-import { isAxiosError } from "axios";
 import {
   DataTable,
   Table,
@@ -197,9 +196,7 @@ const DataSourceConnectorsTable = ({
       await loadConnectors();
     } catch (err) {
       const msg =
-        isAxiosError(err) && err.response?.data?.error
-          ? err.response.data.error
-          : "Failed to remove data source";
+        err instanceof Error ? err.message : "Failed to remove data source";
       dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: msg });
     } finally {
       dispatch({ type: "SHARED_SET_DELETING", payload: false });

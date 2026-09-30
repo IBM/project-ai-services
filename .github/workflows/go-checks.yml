@@ -1,0 +1,79 @@
+name: Go Checks (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Directory of the Go module (e.g. ai-services, mcp)'
+        required: true
+        type: string
+      test-tags:
+        description: 'Space-separated build tags passed to go test -tags'
+        required: false
+        type: string
+        default: ''
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: '${{ inputs.working-directory }}/go.mod'
+
+      - run: go version
+
+      - name: Go mod tidy
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Build Go binary
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          GOOS=linux GOARCH=ppc64le make binary
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: '${{ inputs.working-directory }}/go.mod'
+          cache-dependency-path: '${{ inputs.working-directory }}/go.sum'
+
+      - name: Run unit tests with coverage
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          go test \
+            ${{ inputs.test-tags != '' && format('-tags "{0}"', inputs.test-tags) || '' }} \
+            -v \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            $(go list ./... | grep -v '/tests/e2e')
+
+      - name: Print coverage summary
+        working-directory: ${{ inputs.working-directory }}
+        run: go tool cover -func=coverage.out
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      skip-cves-scan: true
+      skip-image-build: true
+      skip-code-license-scan: false

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useDeploymentDatasourceSupport } from "./hooks/useDeploymentDatasourceSupport";
 import {
   Grid,
   Column,
@@ -32,11 +33,11 @@ import type {
   ApplicationDetailsApiResponse,
   AcceleratorCards as AcceleratorCardType,
   ApplicationWorker,
+  ResourceAllocation,
 } from "@/types/api.types";
 import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
-import axios from "axios";
 import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
@@ -49,6 +50,8 @@ interface DeploymentDetailsProps {
   onBack: () => void;
   deploymentSource: string;
   onNameUpdate?: (newName: string) => void;
+  /** Pre-select a side-nav section when the panel opens */
+  defaultSection?: "details" | "services" | "integration" | "datasources";
 }
 
 const DeploymentDetails = ({
@@ -56,16 +59,26 @@ const DeploymentDetails = ({
   onBack,
   deploymentSource,
   onNameUpdate,
+  defaultSection = "details",
 }: DeploymentDetailsProps) => {
-  const [activeSection, setActiveSection] = useState("details");
-  const [resources, setResources] = useState<
-    DeploymentDetailsType["resources"]
-  >([]);
+  const [activeSection, setActiveSection] = useState(defaultSection);
+  const [resources, setResources] = useState<ResourceAllocation[]>([]);
+  const [deployedCatalogIds, setDeployedCatalogIds] = useState<
+    string[] | undefined
+  >(undefined);
+  const {
+    acceptsDatasource,
+    error: datasourceSupportError,
+    clearError: clearDatasourceSupportError,
+  } = useDeploymentDatasourceSupport(deploymentSource, deployedCatalogIds);
   const [isLoadingResources, setIsLoadingResources] = useState(false);
   const [serviceData, setServiceData] = useState<DeploymentServiceData[]>([]);
   const [integrationEndpoints, setIntegrationEndpoints] = useState<
     DeployIntegrationEndpoints[]
   >([]);
+  const [integrationFetchError, setIntegrationFetchError] = useState<
+    string | null
+  >(null);
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
@@ -147,6 +160,7 @@ const DeploymentDetails = ({
   }, [deployment.id]);
 
   useEffect(() => {
+    setIntegrationFetchError(null);
     const fetchServiceDetails = async () => {
       try {
         const [applicationDetailsResponse, servicesResponse] =
@@ -189,6 +203,11 @@ const DeploymentDetails = ({
         }, {});
 
         const deploymentServices = applicationDetailsResponse.data.services;
+
+        setDeployedCatalogIds(
+          deploymentServices.map((s) => s.catalog_id).filter(Boolean),
+        );
+
         const isDeploymentCertified =
           deployment.type === "Digital Assistant"
             ? deploymentServices.length > 0 &&
@@ -200,6 +219,10 @@ const DeploymentDetails = ({
             : deploymentServices.length > 0 &&
               serviceMetadataById[deploymentServices[0].catalog_id]
                 ?.certifiedBy === "IBM";
+        const knownComponentTypes = new Set<string>(
+          Object.values(COMPONENT_TYPES),
+        );
+
         const transformedServices: DeploymentServiceData[] =
           deploymentServices.map((service) => {
             const llmComponent = service.components.find(
@@ -214,9 +237,34 @@ const DeploymentDetails = ({
             const rerankerComponent = service.components.find(
               (c) => c.type === COMPONENT_TYPES.RERANKER,
             );
+
+            // Collect custom/unknown component types not handled by the known set.
+            const customComponents = service.components
+              .filter((c) => !knownComponentTypes.has(c.type))
+              .map((c) => ({
+                label: c.type
+                  .split("_")
+                  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                  .join(" "),
+                model: c.metadata?.model,
+                providerName: c.provider?.name,
+              }));
+
             const serviceDescription =
               serviceMetadataById[service.catalog_id]?.description ??
               `${service.type} service`;
+
+            // For inference backend: prefer known components first, then fall back
+            // to any custom component's provider name.
+            const customInferenceComponent = customComponents.find(
+              (c) => c.providerName,
+            );
+            const inferenceBackend =
+              llmComponent?.provider?.name ||
+              embeddingComponent?.provider?.name ||
+              rerankerComponent?.provider?.name ||
+              customInferenceComponent?.providerName ||
+              undefined;
 
             return {
               id: service.id,
@@ -225,14 +273,12 @@ const DeploymentDetails = ({
               description: serviceDescription,
               serviceVersion: service.version,
               largeLanguageModel: llmComponent?.metadata?.model,
-              inferenceBackend:
-                llmComponent?.provider?.name ||
-                embeddingComponent?.provider?.name ||
-                rerankerComponent?.provider?.name ||
-                "Unknown",
+              inferenceBackend,
               embeddingModel: embeddingComponent?.metadata?.model,
               vectorStore: vectorStoreComponent?.provider?.name,
               rankerModel: rerankerComponent?.metadata?.model,
+              customComponents:
+                customComponents.length > 0 ? customComponents : undefined,
             };
           });
 
@@ -267,6 +313,9 @@ const DeploymentDetails = ({
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
+        setIntegrationFetchError(
+          "Could not retrieve integration endpoints. Please try again.",
+        );
         setCertifiedBy(null);
         setWorkerInfo(null);
       }
@@ -362,15 +411,10 @@ const DeploymentDetails = ({
       onNameUpdate?.(editedName);
       setSaveSuccess(true);
     } catch (error) {
-      const rawError: string =
-        axios.isAxiosError(error) && error.response?.data?.error
-          ? error.response.data.error
-          : "Failed to update deployment name";
-      const errorIndex = rawError.indexOf("Error:");
       const errorMessage =
-        errorIndex !== -1
-          ? rawError.slice(errorIndex + "Error:".length).trim()
-          : rawError;
+        error instanceof Error
+          ? error.message
+          : "Failed to update deployment name";
       setSaveError(errorMessage);
     } finally {
       setIsSaving(false);
@@ -399,6 +443,16 @@ const DeploymentDetails = ({
           title="Failed to update name"
           subtitle={saveError}
           onClose={() => setSaveError("")}
+          className={styles.toastNotification}
+        />
+      )}
+      {datasourceSupportError && (
+        <ToastNotification
+          kind="error"
+          title="Failed to determine data sources support"
+          subtitle={datasourceSupportError}
+          timeout={5000}
+          onClose={clearDatasourceSupportError}
           className={styles.toastNotification}
         />
       )}
@@ -431,9 +485,17 @@ const DeploymentDetails = ({
           breadcrumbOverflowAriaLabel="Show more breadcrumbs"
           title={deployment.name}
           subtitle={
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div className={styles.headerSubtitle}>
               {getStatusTag(deployment.status)}
               <Tag type="gray">{deployment.type}</Tag>
+              {certifiedBy && (
+                <span className={styles.headerCertifiedBadge}>
+                  <Badge size={16} className={styles.badgeIcon} />
+                  <span className={styles.badgeName}>
+                    {certifiedBy} certified
+                  </span>
+                </span>
+              )}
             </div>
           }
         />
@@ -467,7 +529,7 @@ const DeploymentDetails = ({
               >
                 Integration endpoints
               </SideNavLink>
-              {deployment.type === "Digital Assistants" && (
+              {acceptsDatasource && (
                 <SideNavLink
                   isActive={activeSection === "datasources"}
                   onClick={() => setActiveSection("datasources")}
@@ -488,15 +550,6 @@ const DeploymentDetails = ({
                     title="Details"
                     className={styles.detailsCard}
                   >
-                    {certifiedBy && (
-                      <span className={styles.certifiedBadge}>
-                        <Badge size={16} className={styles.badgeIcon} />
-                        <span className={styles.badgeName}>
-                          {certifiedBy} certified
-                        </span>
-                      </span>
-                    )}
-
                     <Grid className={styles.resourcesGrid}>
                       <Column lg={8} md={4} sm={2}>
                         {isLoadingResources ? (
@@ -553,32 +606,24 @@ const DeploymentDetails = ({
                     title="Allocated resources"
                     className={styles.resourceCard}
                   >
-                    <Grid className={styles.resourcesInnerGrid}>
+                    <div className={styles.resourcesRow}>
                       {isLoadingResources ? (
                         <>
                           {[0, 1].map((index) => (
-                            <Column
-                              key={index}
-                              sm={4}
-                              md={4}
-                              lg={8}
-                              className={styles.resourceColumn}
-                            >
-                              <div className={styles.resourceItem}>
-                                <SkeletonText lineCount={1} width="30%" />
-                                <SkeletonPlaceholder
-                                  style={{
-                                    width: "100%",
-                                    height: "0.5rem",
-                                    marginTop: "1rem",
-                                  }}
-                                />
-                                <div className={styles.resourceStats}>
-                                  <SkeletonText lineCount={1} width="35%" />
-                                  <SkeletonText lineCount={1} width="40%" />
-                                </div>
+                            <div key={index} className={styles.resourceItem}>
+                              <SkeletonText lineCount={1} width="30%" />
+                              <SkeletonPlaceholder
+                                style={{
+                                  width: "100%",
+                                  height: "0.5rem",
+                                  marginTop: "1rem",
+                                }}
+                              />
+                              <div className={styles.resourceStats}>
+                                <SkeletonText lineCount={1} width="35%" />
+                                <SkeletonText lineCount={1} width="40%" />
                               </div>
-                            </Column>
+                            </div>
                           ))}
                         </>
                       ) : (
@@ -589,46 +634,38 @@ const DeploymentDetails = ({
                           );
 
                           return (
-                            <Column
-                              key={index}
-                              sm={4}
-                              md={4}
-                              lg={8}
-                              className={styles.resourceColumn}
-                            >
-                              <div className={styles.resourceItem}>
-                                <h4 className={styles.resourceName}>
-                                  {resource.name}
-                                </h4>
-                                <ProgressBar
-                                  value={percentage}
-                                  max={100}
-                                  label="Progress"
-                                  helperText=""
-                                  hideLabel
-                                  className={
-                                    percentage > 90
-                                      ? styles.progressDanger
-                                      : percentage > 80
-                                        ? styles.progressWarning
-                                        : styles.progressSuccess
-                                  }
-                                />
-                                <div className={styles.resourceStats}>
-                                  <span className={styles.usedValue}>
-                                    {resource.used} {`(${percentage}%)`} used
-                                  </span>
-                                  <span className={styles.allocatedValue}>
-                                    {resource.used} / {resource.allocated}{" "}
-                                    {resource.unit} allocated
-                                  </span>
-                                </div>
+                            <div key={index} className={styles.resourceItem}>
+                              <h4 className={styles.resourceName}>
+                                {resource.name}
+                              </h4>
+                              <ProgressBar
+                                value={percentage}
+                                max={100}
+                                label="Progress"
+                                helperText=""
+                                hideLabel
+                                className={
+                                  percentage > 90
+                                    ? styles.progressDanger
+                                    : percentage > 80
+                                      ? styles.progressWarning
+                                      : styles.progressSuccess
+                                }
+                              />
+                              <div className={styles.resourceStats}>
+                                <span className={styles.usedValue}>
+                                  {resource.used} {`(${percentage}%)`} used
+                                </span>
+                                <span className={styles.allocatedValue}>
+                                  {resource.used} / {resource.allocated}{" "}
+                                  {resource.unit} allocated
+                                </span>
                               </div>
-                            </Column>
+                            </div>
                           );
                         })
                       )}
-                    </Grid>
+                    </div>
 
                     {/* Accelerator Cards Section - Integrated */}
                     {acceleratorCards.length > 0 && (
@@ -779,14 +816,34 @@ const DeploymentDetails = ({
                         </div>
                       )}
 
-                      <div className={styles.serviceDetailRow}>
-                        <span className={styles.serviceDetailLabel}>
-                          Inference backend
-                        </span>
-                        <span className={styles.serviceDetailValue}>
-                          {deploymentServiceData.inferenceBackend}
-                        </span>
-                      </div>
+                      {deploymentServiceData.customComponents?.map(
+                        (customComponent) => (
+                          <div
+                            key={customComponent.label}
+                            className={styles.serviceDetailRow}
+                          >
+                            <span className={styles.serviceDetailLabel}>
+                              {customComponent.label}
+                            </span>
+                            <span className={styles.serviceDetailValue}>
+                              {customComponent.model ??
+                                customComponent.providerName ??
+                                "Unknown"}
+                            </span>
+                          </div>
+                        ),
+                      )}
+
+                      {deploymentServiceData.inferenceBackend && (
+                        <div className={styles.serviceDetailRow}>
+                          <span className={styles.serviceDetailLabel}>
+                            Inference backend
+                          </span>
+                          <span className={styles.serviceDetailValue}>
+                            {deploymentServiceData.inferenceBackend}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </ProductiveCard>
                 </Column>
@@ -794,10 +851,9 @@ const DeploymentDetails = ({
             </Grid>
           )}
 
-          {activeSection === "datasources" &&
-            deployment.type === "Digital Assistants" && (
-              <ApplicationDatasourcesTable applicationId={deployment.id} />
-            )}
+          {activeSection === "datasources" && acceptsDatasource && (
+            <ApplicationDatasourcesTable applicationId={deployment.id} />
+          )}
 
           {activeSection === "integration" && (
             <Grid className={styles.servicesGrid}>
@@ -807,6 +863,18 @@ const DeploymentDetails = ({
                   className={styles.detailsCard}
                 ></ProductiveCard>
               </Column>
+              {integrationFetchError && (
+                <Column sm={4} md={8} lg={16}>
+                  <ToastNotification
+                    aria-label="close notification"
+                    kind="error"
+                    title="Failed to load integration endpoints"
+                    subtitle={integrationFetchError}
+                    hideCloseButton
+                    className={styles.toastNotification}
+                  />
+                </Column>
+              )}
               {integrationEndpoints.map((integrationEndpointsData) => (
                 <Column key={integrationEndpointsData.id} sm={4} md={8} lg={16}>
                   <ProductiveCard
