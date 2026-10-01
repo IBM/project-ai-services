@@ -1618,7 +1618,7 @@ digitize:
   database: "digitize_metadata"
 
 postgres:
-  image: icr.io/ai-services/postgres:18-4
+  image: icr.io/ai-services-cicd/postgres:18-4
   username: "postgres"
   # @generate:password
   password: ""
