@@ -19,7 +19,7 @@ pipeline {
         string(
             name: 'ADDITIONAL_IMAGE',
             defaultValue: '',
-            description: 'Comma-separated list of additional fully-qualified image references to sign (e.g. icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le). These images are signed only — they are not built or pushed by this pipeline.'
+            description: 'Comma-separated list of additional fully-qualified image references to sign (e.g. icr.io/ai-services/opensearch:3.8.0-ppc64le). These images are signed only — they are not built or pushed by this pipeline.'
         )
         text(
             name: 'SKIP_IMAGE_LIST',
