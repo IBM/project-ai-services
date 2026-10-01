@@ -54,7 +54,7 @@ Choose your platform and run the appropriate commands:
 ### macOS (Intel)
 
 ```bash
-VERSION="v0.3.0"
+VERSION="v0.4.0"
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-amd64"
 chmod +x ai-services-darwin-amd64
 sudo mv ai-services-darwin-amd64 /usr/local/bin/ai-services
@@ -64,7 +64,7 @@ ai-services version
 ### macOS (Apple Silicon)
 
 ```bash
-VERSION="v0.3.0"
+VERSION="v0.4.0"
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-darwin-arm64"
 chmod +x ai-services-darwin-arm64
 sudo mv ai-services-darwin-arm64 /usr/local/bin/ai-services
@@ -74,7 +74,7 @@ ai-services version
 ### Linux (x86_64/AMD64)
 
 ```bash
-VERSION="v0.3.0"
+VERSION="v0.4.0"
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-amd64"
 chmod +x ai-services-linux-amd64
 sudo mv ai-services-linux-amd64 /usr/local/bin/ai-services
@@ -86,7 +86,7 @@ ai-services version
 **Optimized for IBM Power Systems and IBM Spyre™**
 
 ```bash
-VERSION="v0.3.0"
+VERSION="v0.4.0"
 curl -LO "https://github.com/IBM/project-ai-services/releases/download/${VERSION}/ai-services-linux-ppc64le"
 chmod +x ai-services-linux-ppc64le
 sudo mv ai-services-linux-ppc64le /usr/local/bin/ai-services
@@ -125,7 +125,7 @@ sudo mv cosign-linux-ppc64le /usr/local/bin/cosign
 Replace `BINARY_NAME` with your platform's binary from the table above:
 
 ```bash
-VERSION="v0.3.0"
+VERSION="v0.4.0"
 BINARY_NAME="ai-services-darwin-amd64"  # Change based on your platform
 
 # Download binary, signature, and public key
@@ -169,7 +169,7 @@ Ensure Cosign is installed (see [Verified Installation with Cosign](#verified-in
 
 **Basic verification:**
 ```bash
-VERSION="v0.3.0"
+VERSION="v0.4.0"
 # Download public key if needed
 curl -LO https://github.com/IBM/project-ai-services/releases/download/${VERSION}/cosign.pub
 
@@ -177,12 +177,12 @@ curl -LO https://github.com/IBM/project-ai-services/releases/download/${VERSION}
 cosign verify \
   --key cosign.pub \
   --insecure-ignore-tlog=true \
-  icr.io/ai-services/tools:0.7
+  icr.io/ai-services/tools:0.13
 ```
 
 **Expected output on success:**
 ```
-Verification for icr.io/ai-services/tools:0.7 --
+Verification for icr.io/ai-services/tools:0.13 --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - The signatures were verified against the specified public key
