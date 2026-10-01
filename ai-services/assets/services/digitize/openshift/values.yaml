@@ -14,7 +14,7 @@ digitize:
       memory: "50Gi"
 
 digitizeUi:
-  image: icr.io/ai-services/digitize-ui:v0.0.37
+  image: icr.io/ai-services/digitize-ui:v0.0.38
   resources:
     requests:
       cpu: "50m"
