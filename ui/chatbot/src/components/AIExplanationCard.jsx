@@ -1,16 +1,6 @@
 function AIExplanationCard() {
   return (
     <div>
-      <p
-        style={{
-          fontSize: '0.85rem',
-          color: '#525252',
-          marginBottom: '0.5rem',
-        }}
-      >
-        AI Explained
-      </p>
-
       <h2
         style={{ fontSize: '1.5rem', fontWeight: 400, marginBottom: '0.5rem' }}
       >
