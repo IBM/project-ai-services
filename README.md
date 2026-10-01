@@ -9,9 +9,15 @@ AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.i
 
 ## 📺 Demo
 
+### Installation & Features Overview
+
 <video src="https://github-production-user-asset-6210df.s3.amazonaws.com/20432587/615272192-155afcc0-1baf-412d-8c39-93ef7df6ecf7.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20260701%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260701T041911Z&X-Amz-Expires=300&X-Amz-Signature=113d1a4f6dd186fd3331cc7feac8d70762598d0f447a6f6354e163cb8ea8ca3f&X-Amz-SignedHeaders=host&response-content-type=video%2Fmp4" controls="controls" style="max-width: 100%;">
   Your browser does not support the video tag.
 </video>
+
+### 🆕 What's New in v0.4.0
+
+https://github.com/user-attachments/assets/870b2189-fc77-48e6-848c-55bb05565121
 
 ## Quick Start
 
