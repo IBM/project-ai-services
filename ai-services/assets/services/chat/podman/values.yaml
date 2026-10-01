@@ -1,6 +1,6 @@
 ui:
   port: ""
-  image: icr.io/ai-services/chatbot-ui:v0.0.55
+  image: icr.io/ai-services/chatbot-ui:v0.0.56
 
 backend:
   port: ""
