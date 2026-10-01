@@ -112,7 +112,6 @@ async function customSendMessage(
 
   const payload = {
     messages: recentMessages,
-    model: 'ibm-granite/granite-3.3-8b-instruct',
     temperature: 0.0,
     stream: true,
   };
