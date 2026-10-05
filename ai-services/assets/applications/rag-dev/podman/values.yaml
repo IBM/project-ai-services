@@ -124,3 +124,19 @@ extract:
   # @hidden
   log_level: "INFO"
   database: "extract_metadata"
+
+invoiceProcessing:
+  # @description Host port for the Invoice Processing API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  port: ""
+  # @hidden
+  image: icr.io/ai-services-cicd/invoice-processing-service:v0.0.1
+  # @hidden
+  log_level: "INFO"
+  # @description Database name for the Invoice Processing service. Default is "invoice_processing_metadata".
+  database: "invoice_processing_metadata"
+
+invoiceProcessingUi:
+  # @description Host port for the Invoice Processing UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
+  port: ""
+  # @hidden
+  image: icr.io/ai-services-cicd/invoice-processing-ui:v0.0.1

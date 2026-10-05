@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--invoice-processing"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+  annotations:
+    ai-services.io/ports: "{{ .Values.invoiceProcessingUi.port }}:4101, {{ .Values.invoiceProcessing.port }}:4100"
+spec:
+  initContainers:
+    - name: invoice-processing-db-init
+      image: "{{ .Values.invoiceProcessing.image }}"
+      command:
+        - "/var/venv/bin/python"
+        - "db/scripts/init_db.py"
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.invoiceProcessing.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+  containers:
+    - name: ui
+      image: "{{ .Values.invoiceProcessingUi.image }}"
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "512Mi"
+      env:
+        - name: BACKEND_HOST
+          value: "{{ .AppName }}--invoice-processing"
+        - name: BACKEND_PORT
+          value: "4100"
+      ports:
+        - containerPort: 4101
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /
+          port: 4101
+        initialDelaySeconds: 10
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+    - name: backend-server
+      image: "{{ .Values.invoiceProcessing.image }}"
+      command:
+        - "/var/venv/bin/python"
+        - "-m"
+        - "uvicorn"
+        - "app:app"
+        - "--host"
+        - "0.0.0.0"
+        - "--port"
+        - "4100"
+        - "--loop"
+        - "uvloop"
+        - "--http"
+        - "httptools"
+      ports:
+        - containerPort: 4100
+          name: http
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 4100
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "1Gi"
+      env:
+        - name: POSTGRES_HOST
+          value: "{{ .AppName }}--postgres"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_DB
+          value: "{{ .Values.invoiceProcessing.database }}"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "{{ .Values.postgres.password }}"
+        - name: DB_POOL_SIZE
+          value: "5"
+        - name: DB_MAX_OVERFLOW
+          value: "5"
+        - name: DIGITIZE_URL
+          value: "http://{{ .AppName }}--digitize:4000"
+        - name: EXTRACT_URL
+          value: "http://{{ .AppName }}--extract-api:9500"
+        - name: LOG_LEVEL
+          value: "{{ .Values.invoiceProcessing.log_level }}"
+      volumeMounts:
+        - mountPath: /var/cache:z
+          name: cache
+  restartPolicy: Always
+  volumes:
+    - name: cache
+      hostPath:
+        path: "{{ .BaseDir }}/applications/{{ .AppName }}/cache"
+        type: DirectoryOrCreate
