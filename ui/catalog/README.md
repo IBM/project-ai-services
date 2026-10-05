@@ -167,4 +167,8 @@ VITE_
 
 `react-table` v7 is unmaintained — in v8 it was moved to `@tanstack/react-table`, which Carbon has not yet adopted. **Remove this override once `@carbon/ibm-products` migrates to `@tanstack/react-table`.**
 
+### `source-map-js` override in `package.json`
+
+`source-map-js` is a transitive dependency pulled in by `sass` and `postcss`. Both pin it at `^1.2.1`, which resolves to `1.2.1` on a fresh install. The `overrides` entry forces it to `^1.2.2` to pick up the security fix released in that version. **Remove this override once `sass` and `postcss` raise their own floor to `>=1.2.2`.**
+
 ---

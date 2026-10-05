@@ -46,6 +46,7 @@
   "overrides": {
     "react-table": {
       "react": "^19.2.0"
-    }
+    },
+    "source-map-js": "^1.2.2"
   }
 }
