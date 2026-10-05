@@ -1,5 +1,5 @@
 digitize:
-  image: icr.io/ai-services/digitize-service:v0.0.74
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.74
   log_level: "INFO"
   database: "digitize_metadata"
   numShards: 1
@@ -14,7 +14,7 @@ digitize:
       memory: "50Gi"
 
 digitizeUi:
-  image: icr.io/ai-services/digitize-ui:v0.0.37
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.37
   resources:
     requests:
       cpu: "50m"
@@ -24,7 +24,7 @@ digitizeUi:
       memory: "512Mi"
 
 postgres:
-  image: icr.io/ai-services/postgres:18-6
+  image: icr.io/ai-services-cicd/postgres:18-6
   storage: 5Gi
   # @generate:password
   password: ""
