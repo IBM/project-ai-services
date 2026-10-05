@@ -5,6 +5,10 @@
 @use '@carbon/react';
 @use '@carbon/ibm-products/css/index.min.css';
 
+[data-carbon-theme='g100'] {
+  @include theme.theme(themes.$g100);
+}
+
 html,
 body {
   margin: 0;

@@ -11,8 +11,8 @@
   top: calc(100% + 0.5rem);
   right: 0;
   min-width: 200px;
-  background-color: #ffffff !important;
-  border: 1px solid #e0e0e0;
+  background-color: var(--cds-layer-01);
+  border: 1px solid var(--cds-border-subtle-01);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   z-index: 10000;
   border-radius: 4px;
@@ -25,7 +25,7 @@
   font-weight: 600;
   color: var(--cds-text-primary);
   border-bottom: 1px solid var(--cds-border-subtle-01);
-  background-color: var(--cds-layer-01);
+  background-color: var(--cds-layer-02);
 }
 
 .dropdownList {
@@ -49,11 +49,11 @@
   transition: background-color 0.11s;
 
   &:hover {
-    background-color: #f4f4f4 !important;
+    background-color: var(--cds-layer-hover-01);
   }
 
   &.active {
-    background-color: #e0e0e0 !important;
+    background-color: var(--cds-layer-selected-01);
     font-weight: 600;
   }
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { HeaderGlobalAction } from '@carbon/react';
+import { HeaderGlobalAction, Theme } from '@carbon/react';
 import { Asleep, Light, Laptop } from '@carbon/icons-react';
 import type { CarbonIconType } from '@carbon/icons-react';
 import { useTheme } from '@contexts/useTheme';
@@ -14,7 +14,7 @@ interface ThemeOption {
 }
 
 const ThemeSwitcher = () => {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, effectiveTheme } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +60,7 @@ const ThemeSwitcher = () => {
       </HeaderGlobalAction>
 
       {isOpen && (
+        <Theme theme={effectiveTheme}>
         <div className={styles.dropdown}>
           <div className={styles.dropdownHeader}>Theme</div>
           <ul className={styles.dropdownList}>
@@ -84,6 +85,7 @@ const ThemeSwitcher = () => {
             })}
           </ul>
         </div>
+        </Theme>
       )}
     </div>
   );

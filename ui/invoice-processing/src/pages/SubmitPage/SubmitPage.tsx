@@ -37,7 +37,7 @@ const PIPELINE_STEPS = [
   'OCR Extraction',
   'Staging',
   'Human Review',
-  'EBS Interface Load',
+  'Database Load',
 ];
 
 interface NotificationState {
@@ -129,9 +129,6 @@ const SubmitPage: React.FC = () => {
 
         {/* Pipeline progress indicator */}
         <Tile style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
-          <p style={{ fontWeight: 600, marginBottom: '1rem', fontSize: '0.875rem' }}>
-            Starting at: <span style={{ color: 'var(--cds-link-primary, #0f62fe)' }}>Full Pipeline</span>
-          </p>
           <ProgressIndicator currentIndex={0} spaceEqually>
             {PIPELINE_STEPS.map((label, i) => (
               <ProgressStep
