@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -34,6 +35,16 @@ func (r *NodeLabelsRule) Verify(ctx context.Context) error {
 	client, err := openshift.NewOpenshiftClient()
 	if err != nil {
 		return fmt.Errorf("failed to create OpenShift client: %w", err)
+	}
+
+	state, found, err := utils.GetSpyreClusterPolicyState(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	// Validate node labels only if SpyreClusterPolicy is in ready state
+	if !found || state != utils.SpyreStateReady {
+		return nil
 	}
 
 	nodeList := &corev1.NodeList{}
