@@ -6,10 +6,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 type SpyrePolicyRule struct{}
@@ -33,31 +30,16 @@ func (r *SpyrePolicyRule) Verify(ctx context.Context) error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   constants.SpyreGroup,
-		Version: constants.SpyreVersion,
-		Kind:    constants.SpyreKind,
-	})
-
-	if err := client.Client.Get(ctx, types.NamespacedName{Name: constants.SpyreClusterPolicyName}, obj); err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("SpyreClusterPolicy %s not found", constants.SpyreClusterPolicyName)
-		}
-
-		return fmt.Errorf("failed to find %s: %w", constants.SpyreClusterPolicyName, err)
-	}
-
-	state, found, err := unstructured.NestedString(obj.Object, "status", "state")
+	state, found, err := utils.GetSpyreClusterPolicyState(ctx, client)
 	if err != nil {
-		return fmt.Errorf("failed to parse status.state from policy: %w", err)
+		return err
 	}
 
 	if !found {
-		return fmt.Errorf("SpyreClusterPolicy status.state not found")
+		return fmt.Errorf("SpyreClusterPolicy %s not found", utils.SpyreClusterPolicyName)
 	}
 
-	if state != "ready" {
+	if state != utils.SpyreStateReady && state != utils.SpyreStateNoSpyreNodes {
 		return fmt.Errorf("SpyreClusterPolicy not ready (status.state: %s)", state)
 	}
 
@@ -73,5 +55,5 @@ func (r *SpyrePolicyRule) Level() constants.ValidationLevel {
 }
 
 func (r *SpyrePolicyRule) Hint() string {
-	return "Run 'oc get spyreclusterpolicy and ensure status.state is 'ready'."
+	return "Run 'oc get spyreclusterpolicy and ensure status.state is 'ready' or 'no Spyre nodes'."
 }
