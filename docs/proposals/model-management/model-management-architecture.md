@@ -1,0 +1,332 @@
+# Model Management — High-Level Architecture and Design
+
+**Version:** 2.0  
+**Date:** July 2026  
+**Supersedes:** `docs/proposals/catalog/model-management-proposal.md` (v1.0)
+
+> **What changed from v1.0:** The introduction of the Remote Worker system allows `modelmanager` to target a Worker LPAR over a persistent gRPC stream instead of only the control-plane Podman socket. All architecture diagrams below reflect this new tier.
+
+---
+
+## Table of Contents
+
+1. [System Topology](#system-topology)
+2. [Deploy / Lifecycle Request Flow](#deploy--lifecycle-request-flow)
+3. [Remote Worker — Model Deployment Sequence](#remote-worker--model-deployment-sequence)
+4. [UX Designs — UI Requirements](#ux-designs--ui-requirements)
+   - [4.1 Models List View](#41-models-list-view)
+   - [4.2 Deploy Model — Worker and Backend Selection](#42-deploy-model--worker-and-backend-selection)
+   - [4.3 Resource Check Before Deploy](#43-resource-check-before-deploy)
+
+---
+
+## System Topology
+
+```mermaid
+graph LR
+    subgraph CP["Control-plane LPAR"]
+        CPCADDY["Caddy :443\ningress"]
+        CPEGRESS["Caddy\negress"]
+        subgraph CPAPIBOX["Catalog API Server"]
+            API["REST Handlers"]
+            MM["Model Manager"]
+            GW["WorkerGateway :9090 gRPC"]
+            API --> MM
+            API --> GW
+        end
+        LITELLM["LiteLLM Gateway :4000"]
+        CPDB[("Catalog PostgreSQL :5432")]
+        LLMDB[("LiteLLM PostgreSQL :5433")]
+        CPCADDY -->|"HTTPS /litellm"| LITELLM
+        CPCADDY -->|"HTTPS /api"| API
+        MM --> LITELLM
+        MM --> CPDB
+        LITELLM --> LLMDB
+        LITELLM -->|"2 inference request\nto local model"| CPEGRESS
+    end
+
+    subgraph WK1["Worker LPAR lpar-1 Spyre"]
+        DA1["worker daemon"]
+        CADDY1["worker-caddy :443\ningress + egress"]
+        VLLM1["vLLM Pod Spyre"]
+        SVC1["Service Pod"]
+        DA1 --> VLLM1
+        DA1 --> SVC1
+        CADDY1 -->|"4 forward to vLLM"| VLLM1
+        CADDY1 --> SVC1
+        SVC1 -->|"1 call LiteLLM\nvia CP Caddy"| CADDY1
+    end
+
+    subgraph WK2["Worker LPAR lpar-2 CPU"]
+        DA2["worker daemon"]
+        CADDY2["worker-caddy :443\ningress + egress"]
+        VLLM2["vLLM Pod CPU"]
+        SVC2["Service Pod"]
+        DA2 --> VLLM2
+        DA2 --> SVC2
+        CADDY2 -->|"4 forward to vLLM"| VLLM2
+        CADDY2 --> SVC2
+        SVC2 -->|"1 call LiteLLM\nvia CP Caddy"| CADDY2
+    end
+
+    subgraph EXT["External Providers"]
+        WX["WatsonX.ai"]
+        OAI["OpenAI-compatible"]
+    end
+
+    GW -- "gRPC stream mTLS\noutbound from worker" --> DA1
+    GW -- "gRPC stream mTLS\noutbound from worker" --> DA2
+
+    CADDY1 -->|"1b egress to CP Caddy\n/litellm"| CPEGRESS
+    CADDY2 -->|"1b egress to CP Caddy\n/litellm"| CPEGRESS
+    CPEGRESS -->|"HTTPS /litellm"| LITELLM
+    CPEGRESS -->|"3 route to worker-caddy\n(registered upstream)"| CADDY1
+    CPEGRESS -->|"3 route to worker-caddy\n(registered upstream)"| CADDY2
+    LITELLM -->|"connector route"| WX
+    LITELLM -->|"connector route"| OAI
+
+    CONSUMERS(("Consumers")) -->|"HTTPS :443"| CPCADDY
+```
+
+---
+
+## Deploy / Lifecycle Request Flow
+
+```mermaid
+flowchart TD
+    subgraph CatalogAPI["Catalog API Server"]
+        A["HTTP Handlers
+           POST /api/v1/models
+           GET /api/v1/models
+           GET /api/v1/models/:id
+           DELETE /api/v1/models/:id
+           POST /api/v1/connectors/models
+           GET /api/v1/connectors/models
+           PUT /api/v1/connectors/models/:id
+           DELETE /api/v1/connectors/models/:id"]
+
+        B["modelmanager package
+           llm / embedding / reranker
+           local and remote sources"]
+
+        A --> B
+    end
+
+    B --> SRC{"source?"}
+
+    SRC -->|local| WS{"worker_selector present?"}
+
+    WS -->|no| PF["Pre-flight Check
+                   LocalRuntime.GetSystemInfo
+                   CPU / Memory / Spyre cards"]
+
+    WS -->|yes| RR["RemoteRuntime
+                    Registry.SelectWorker"]
+    RR --> RPF["Pre-flight Check via gRPC
+                COMMAND_TYPE_GET_SYSTEM_INFO
+                to Worker Daemon"]
+
+    PF  -->|pass| LPOD["LocalRuntime.CreatePod
+                        Podman on control plane"]
+    RPF -->|pass| RPOD["RemoteRuntime.CreatePod
+                        gRPC to Worker Daemon to Podman"]
+
+    PF  -->|"fail 422"| VIOL["Return violations to caller"]
+    RPF -->|"fail 422"| VIOL
+
+    SRC -->|connector| CONN["Register LiteLLM route only
+                             no pod, no pre-flight"]
+
+    LPOD --> LR
+    RPOD --> LR
+    CONN --> LR
+
+    LR["LiteLLM Gateway :4000
+        POST /model/new
+        DELETE /model/delete"]
+
+    LR --> LLMDB2[("LiteLLM PostgreSQL :5433")]
+
+    LR -->|"async after route registered"| PROBE["Probe Check
+                                                  GET /health?model=route-id"]
+    PROBE -->|"healthy_count > 0"| OK["UPDATE components
+                                       status = Running"]
+    PROBE -->|"unhealthy_count > 0"| ERR["UPDATE components
+                                          status = Error"]
+
+    B --> CATDB[("Catalog PostgreSQL :5432
+                 components / workers")]
+```
+
+---
+
+## Remote Worker — Model Deployment Sequence
+
+```mermaid
+sequenceDiagram
+    participant U as User CLI/API
+    participant MM as modelmanager
+    participant REG as Registry
+    participant RR as RemoteRuntime
+    participant GW as WorkerGateway
+    participant DA as Worker Daemon
+    participant PM as Podman on Worker
+    participant LLM as LiteLLM Gateway
+
+    U->>MM: POST /api/v1/models source=local worker_selector=lpar-1
+    MM->>REG: SelectWorker lpar-1
+    REG-->>MM: WorkerEntry lpar-1
+    MM->>RR: remote.New lpar-1
+
+    MM->>RR: GetSystemInfo
+    RR->>GW: COMMAND_TYPE_GET_SYSTEM_INFO
+    GW->>DA: stream.Send Command
+    DA->>PM: podman system info + VFIO count
+    PM-->>DA: cpu memory spyre_count
+    DA-->>GW: CommandResult data
+    GW-->>RR: SystemInfo
+    MM->>MM: Pre-flight evaluation
+
+    MM->>MM: INSERT components status=Deploying
+    MM-->>U: 202 Accepted id + status=Deploying
+
+    MM->>RR: CreatePod spec
+    RR->>GW: COMMAND_TYPE_CREATE_POD
+    GW->>DA: stream.Send Command
+    DA->>PM: podman kube play
+    PM-->>DA: success
+    DA-->>GW: CommandResult success
+    GW-->>RR: success
+
+    MM->>LLM: POST /model/new model_name + api_base=worker-caddy-url
+    MM->>LLM: POST /key/generate virtual key
+    MM->>LLM: GET /health?model=route-id
+    LLM-->>MM: healthy
+    MM->>MM: UPDATE components status=Running
+```
+
+---
+
+## UX Designs — UI Requirements
+
+### 4.1 Models List View
+
+Display all deployed models (both `local` and `remote` sources) in a flat table. Each row gives the operator an at-a-glance status of every model in the system.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│  Models                                                              [ + Deploy Model ]      │
+├──────────────────────┬────────────┬──────────┬──────────┬───────────┬──────────┬────────────┤
+│  Name                │  Type      │  Backend │  Source  │  Worker   │  Status  │  Actions   │
+├──────────────────────┼────────────┼──────────┼──────────┼───────────┼──────────┼────────────┤
+│  granite-3.3-8b      │  llm       │  vllm    │  local   │  lpar-1   │  ● Running│  [ Delete ]│
+│  granite-embedding   │  embedding │  vllm    │  local   │  lpar-2   │  ● Running│  [ Delete ]│
+│  granite-watsonx     │  llm       │  watsonx │  remote  │  —        │  ● Running│  [ Delete ]│
+│  granite-openai      │  llm       │  openai  │  remote  │  —        │  ⟳ Syncing│  [ Delete ]│
+│  reranker-v1         │  reranker  │  vllm    │  local   │  lpar-1   │  ✕ Error  │  [ Delete ]│
+└──────────────────────┴────────────┴──────────┴──────────┴───────────┴──────────┴────────────┘
+
+Status legend:  ● Running   ⟳ Deploying / Syncing   ✕ Error
+```
+
+**API backing this view:** `GET /api/v1/models` and `GET /api/v1/connectors/models`
+
+---
+
+### 4.2 Deploy Model — Worker and Backend Selection
+
+A modal / side panel opened by the **[ + Deploy Model ]** button. The user picks the model type, inference backend, and the target worker. The form adapts based on source (`local` vs `remote`).
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Deploy a Model                                         [ × ] │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Model Name        [ granite-3.3-8b-instruct             ]  │
+│                                                              │
+│  Type              ( ● ) llm   ( ) embedding   ( ) reranker  │
+│                                                              │
+│  Source            ( ● ) Local Pod   ( ) Remote Connector    │
+│                                                              │
+│  ── Local Pod options ─────────────────────────────────      │
+│                                                              │
+│  Inference Backend  [ vllm-spyre             ▾ ]            │
+│                       vllm-spyre                             │
+│                       vllm-cpu                               │
+│                                                              │
+│  Target Worker      [ lpar-1  (Spyre, Ready)  ▾ ]           │
+│                       lpar-1  Spyre   ● Ready                │
+│                       lpar-2  CPU     ● Ready                │
+│                       lpar-3  CPU     ○ Disconnected         │
+│                                                              │
+│  HuggingFace Model  [ ibm-granite/granite-3.3-8b-instruct ]  │
+│                                                              │
+│  ── Remote Connector options (hidden when local) ──────      │
+│                                                              │
+│  Provider           [ watsonx                ▾ ]            │
+│  Endpoint URL       [ https://...                        ]   │
+│  API Key            [ ••••••••••••••••••                 ]   │
+│                                                              │
+│  [ Check Resources ]                  [ Cancel ] [ Deploy ]  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Notes:**
+- **Inference Backend** dropdown is populated from available `metadata.yaml` assets on the server (`GET /api/v1/model-catalog`).
+- **Target Worker** dropdown lists all workers with `status = ready` from `GET /api/v1/workers`. Shows runtime type (Spyre / CPU) and live status alongside each entry. Disconnected workers are shown but disabled.
+- **[ Check Resources ]** triggers the resource check panel (see §4.3) before the user commits to deploy.
+- Remote Connector fields are shown/hidden based on the **Source** toggle.
+
+---
+
+### 4.3 Resource Check Before Deploy
+
+Triggered by **[ Check Resources ]** in the deploy form. Calls the pre-flight API for the selected worker and backend, then displays a per-resource breakdown before the user confirms deployment.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Resource Check — lpar-1  (vllm-spyre)             [ × ]    │
+├──────────────────────────────────────────────────────────────┤
+│  Model:   ibm-granite/granite-3.3-8b-instruct                │
+│  Worker:  lpar-1  (Spyre, Ready)                             │
+├──────────────┬────────────┬────────────┬─────────────────────┤
+│  Resource    │  Required  │  Available │  Status             │
+├──────────────┼────────────┼────────────┼─────────────────────┤
+│  CPU         │  8 cores   │  24 cores  │  ✓ Sufficient       │
+│  Memory      │  32 GiB    │  64 GiB    │  ✓ Sufficient       │
+│  Storage     │  50 GiB    │  120 GiB   │  ✓ Sufficient       │
+│  Spyre Cards │  1         │  2         │  ✓ Sufficient       │
+├──────────────┴────────────┴────────────┴─────────────────────┤
+│  ✓ All resource constraints satisfied.                       │
+│                                                              │
+│                             [ Back ]  [ Confirm Deploy ]     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Failure state** (insufficient resources):
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Resource Check — lpar-2  (vllm-spyre)             [ × ]    │
+├──────────────┬────────────┬────────────┬─────────────────────┤
+│  Resource    │  Required  │  Available │  Status             │
+├──────────────┼────────────┼────────────┼─────────────────────┤
+│  CPU         │  8 cores   │  24 cores  │  ✓ Sufficient       │
+│  Memory      │  32 GiB    │  18 GiB    │  ✕ Insufficient     │
+│  Storage     │  50 GiB    │  120 GiB   │  ✓ Sufficient       │
+│  Spyre Cards │  1         │  0         │  ✕ Insufficient     │
+├──────────────┴────────────┴────────────┴─────────────────────┤
+│  ✕ 2 constraint(s) not satisfied. Choose a different worker. │
+│                                                              │
+│                                        [ Back ]              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**API backing this view:** Pre-flight check via `POST /api/v1/models/preflight` (or inline when `GET /api/v1/workers/:id/resources` is called for the selected worker). Returns all violations in a single response — never just the first.
+
+---
+
+## Open Questions
+
+- Should worker selection be automatic instead of the user picking a target worker?
+- Should users be able to configure deployment profiles (e.g. number of Spyre cards to allocate, `max-model-len` etc and make the params flexible)?

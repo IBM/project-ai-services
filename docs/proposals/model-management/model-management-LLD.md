@@ -1,8 +1,9 @@
-# Model Management & Connectors — Design Proposal
+# Model Management & Connectors — Low-Level Design
 
 **Version:** 1.0
-**Date:** July 2026  
+**Date:** July 2026
 **Status:** Draft / Proposal
+**See also:** [`model-management-architecture.md`](model-management-architecture.md) — High-Level Architecture and UX Designs
 
 ---
 
@@ -10,45 +11,44 @@
 
 1. [Executive Summary](#1-executive-summary)
 2. [Background and Motivation](#2-background-and-motivation)
-3. [Architecture Overview](#3-architecture-overview)
-4. [LiteLLM Gateway Integration](#4-litellm-gateway-integration)
+3. [LiteLLM Gateway Integration](#3-litellm-gateway-integration)
    - [LiteLLM as a Catalog Asset](#litellm-as-a-catalog-asset)
    - [Route Registration](#route-registration)
    - [Virtual Key Provisioning](#virtual-key-provisioning)
    - [WatsonX via Connector](#watsonx-via-connector)
-5. [New Concepts](#5-new-concepts)
-   - [5.1 Models](#51-models)
-   - [5.2 Connectors](#52-connectors)
-6. [Database Schema](#6-database-schema)
-   - [6.1 Guiding Principle](#61-guiding-principle)
-   - [6.2 Additions to Existing `components` Table](#62-additions-to-existing-components-table)
-   - [6.3 New and Extended ENUM Types](#63-new-and-extended-enum-types)
-   - [6.4 Full Entity Relationship Diagram](#64-full-entity-relationship-diagram)
-7. [API Specification](#7-api-specification)
-   - [7.1 Model Endpoints](#71-model-endpoints)
-   - [7.2 Connector Endpoints](#72-connector-endpoints)
-   - [7.3 Extensions to Existing Endpoints](#73-extensions-to-existing-endpoints)
-8. [API Endpoint Details](#8-api-endpoint-details)
-   - [8.1 Deploy a Local Model](#81-deploy-a-local-model)
-   - [8.2 List Local Models](#82-list-local-models)
-   - [8.3 Get Model Details](#83-get-model-details)
-   - [8.4 Delete / Undeploy a Model](#84-delete--undeploy-a-model)
-   - [8.5 Create a Connector](#85-create-a-connector)
-   - [8.6 List Connectors](#86-list-connectors)
-   - [8.7 Update a Connector](#87-update-a-connector)
-   - [8.8 Get Connector Details](#88-get-connector-details)
-   - [8.9 Delete a Connector](#89-delete-a-connector)
-9. [Pre-flight Resource Check](#9-pre-flight-resource-check)
-10. [Deployment Flow](#10-deployment-flow)
-11. [Key Design Decisions](#11-key-design-decisions)
-12. [Common Queries](#12-common-queries)
-13. [Error Handling](#13-error-handling)
-14. [Future Considerations](#14-future-considerations)
-15. [CLI Commands](#15-cli-commands)
-    - [15.1 Model Commands](#151-model-commands)
-    - [15.2 Connector Commands](#152-connector-commands)
-    - [15.3 LiteLLM Gateway Commands](#153-litellm-gateway-commands)
-    - [15.4 Command Summary](#154-command-summary)
+4. [New Concepts](#4-new-concepts)
+   - [4.1 Models](#41-models)
+   - [4.2 Connectors](#42-connectors)
+5. [Database Schema](#5-database-schema)
+   - [5.1 Guiding Principle](#51-guiding-principle)
+   - [5.2 Additions to Existing `components` Table](#52-additions-to-existing-components-table)
+   - [5.3 New and Extended ENUM Types](#53-new-and-extended-enum-types)
+   - [5.4 Full Entity Relationship Diagram](#54-full-entity-relationship-diagram)
+6. [API Specification](#6-api-specification)
+   - [6.1 Model Endpoints](#61-model-endpoints)
+   - [6.2 Connector Endpoints](#62-connector-endpoints)
+   - [6.3 Extensions to Existing Endpoints](#63-extensions-to-existing-endpoints)
+7. [API Endpoint Details](#7-api-endpoint-details)
+   - [7.1 Deploy a Local Model](#71-deploy-a-local-model)
+   - [7.2 List Local Models](#72-list-local-models)
+   - [7.3 Get Model Details](#73-get-model-details)
+   - [7.4 Delete / Undeploy a Model](#74-delete--undeploy-a-model)
+   - [7.5 Create a Connector](#75-create-a-connector)
+   - [7.6 List Connectors](#76-list-connectors)
+   - [7.7 Update a Connector](#77-update-a-connector)
+   - [7.8 Get Connector Details](#78-get-connector-details)
+   - [7.9 Delete a Connector](#79-delete-a-connector)
+8. [Pre-flight Resource Check](#8-pre-flight-resource-check)
+9. [Deployment Flow](#9-deployment-flow)
+10. [Key Design Decisions](#10-key-design-decisions)
+11. [Common Queries](#11-common-queries)
+12. [Error Handling](#12-error-handling)
+13. [Future Considerations](#13-future-considerations)
+14. [CLI Commands](#14-cli-commands)
+    - [14.1 Model Commands](#141-model-commands)
+    - [14.2 Connector Commands](#142-connector-commands)
+    - [14.3 LiteLLM Gateway Commands](#143-litellm-gateway-commands)
+    - [14.4 Command Summary](#144-command-summary)
 
 ---
 
@@ -97,109 +97,7 @@ The current catalog deploys vLLM or WatsonX as `components` that are tightly cou
 
 ---
 
-## 3. Architecture Overview
-
-**Deploy / lifecycle request flow:**
-
-```mermaid
-flowchart TD
-    subgraph CatalogAPI["Catalog API Server"]
-        A["HTTP Handlers
-           ── /models ──────────────────────────────────────────────────
-           POST   /api/v1/models                             deploy local model     (type in body)
-           GET    /api/v1/models                             list local models      (?type=)
-           GET    /api/v1/models/:id                         get any model
-           DELETE /api/v1/models/:id                         undeploy any model
-           ── /connectors ─────────────────────────────────────────────
-           POST   /api/v1/connectors/models                  create connector       (type in body)
-           GET    /api/v1/connectors/models                  list all models        (?type=)
-           GET    /api/v1/connectors/models/:id              get connector details
-           PUT    /api/v1/connectors/models/:id              update connector
-           DELETE /api/v1/connectors/models/:id              delete connector"]
-
-        B["modelmanager package
-           LCM of llm · embedding · reranker components
-           local and remote sources
-           Podman · OpenShift · Docker Compose
-           reads deployment_strategy from assets/components/…"]
-
-        A --> B
-    end
-
-    B --> C{"source?"}
-
-    C -->|local| D["Pre-flight Check
-                       CPU · Memory · Spyre cards"]
-    D -->|pass| E["Runtime Executor
-                    CreatePod"]
-    D -->|fail 422| F["Return violations to caller"]
-
-    C -->|connector| G["Runtime Executor
-                         Register LiteLLM route — no pod"]
-
-    E --> H["LiteLLM Gateway :4000
-             POST /model/new — register route
-             DELETE /model/delete — deregister route"]
-    G --> H
-
-    H --> I[("LiteLLM PostgreSQL :5433
-              route table · credentials
-              spend logs")]
-
-    H -->|"async — after route registered"| P["Probe Check
-                                               GET /health?model=route-id
-                                               Authorization: Bearer master-key"]
-
-    P -->|"healthy_count > 0"| Q["Set status = Running"]
-    P -->|"unhealthy_count > 0"| R["Set status = Error
-                                    store error message"]
-
-    B --> J[("Catalog PostgreSQL :5432
-              components table
-              no secrets stored")]
-```
-
-**Model traffic flow (runtime):**
-
-```mermaid
-flowchart LR
-    EC["External Consumer
-        e.g. curl / third-party app
-        call model='granite-3.3-8b-instruct-vllm-spyre'"]
-
-    CS["Internal Consumer Services
-        chatbot · digitize · similarity
-        call model='granite-3.3-8b-instruct-vllm-spyre'
-        — registered name, never a backend URL"]
-
-    EC -->|"litellm:4000/v1"| GW
-    CS -->|"litellm:4000/v1"| GW
-
-    GW["LiteLLM Gateway Pod
-        route table:
-        granite-3.3-8b-instruct-vllm-spyre → vLLM pod
-        granite-3-8b-instruct-watsonx      → WatsonX.ai
-        granite-embedding-openai            → OpenAI-compat"]
-
-    GW -->|"granite-3.3-8b-instruct-vllm-spyre (local)"| V["vLLM Pod
-                                                                 local pod"]
-    GW -->|"granite-3-8b-instruct-watsonx (connector)"| W["WatsonX.ai
-                                                            external API"]
-    GW -->|"granite-embedding-openai (connector)"| O["OpenAI-compatible
-                                                      external API"]
-```
-
-**Three deployment tiers:**
-
-| Tier | When | `source` | Example |
-|---|---|---|---|
-| Catalog configure | `catalog configure` | `local` (pipeline-created) | Catalog PostgreSQL `:5432`, LiteLLM PostgreSQL `:5433`, LiteLLM Gateway, Caddy |
-| Local model | `POST /api/v1/models` | `local` (user-created) | vLLM-CPU, vLLM-Spyre |
-| Connector | `POST /api/v1/connectors/models` | `remote` (user-created) | WatsonX, OpenAI-compatible |
-
----
-
-## 4. LiteLLM Gateway Integration
+## 3. LiteLLM Gateway Integration
 
 ### LiteLLM as a Catalog Asset
 
@@ -418,9 +316,9 @@ When deploying with `provider: watsonx`, no local pod is created. Credentials ar
 
 ---
 
-## 5. New Concepts
+## 4. New Concepts
 
-### 5.1 Models
+### 4.1 Models
 
 A **Model** is an inference backend for a specific role (`llm`, `embedding`, `reranker`) deployed and managed independently of an application. Both kinds are a `components` row — distinguished by `source`:
 
@@ -441,7 +339,7 @@ The key differences from today's application-coupled components:
 | Pre-flight resource check | None | Required for `source=local` models |
 | WatsonX | Deploys a per-app LiteLLM proxy pod | `source=remote` row — credentials stored in LiteLLM, no pod, no Podman secret |
 
-### 5.2 Connectors
+### 4.2 Connectors
 
 A **Connector** is a `components` row with `source = 'remote'`. It has no pod and no Podman secret. Credentials are passed directly to the **LiteLLM Gateway** at route-registration time — LiteLLM stores and manages them. The Catalog DB stores only non-secret connection config (`params.endpoint_url`, `params.project_id`, `params.auth.type`) — never the secret values themselves.
 
@@ -461,9 +359,9 @@ A **Connector** is a `components` row with `source = 'remote'`. It has no pod an
 | `reranker` | `openai-compatible` | Any OpenAI-compatible reranker endpoint | `api_key` (optional) |
 ---
 
-## 6. Database Schema
+## 5. Database Schema
 
-### 6.1 Guiding Principle
+### 5.1 Guiding Principle
 
 > **Everything is a `components` row.** A new `source` column discriminates between a pod the platform deployed (`local`) and an external endpoint the user registered (`remote`). Catalog DB credentials never enter the database — `local` credentials live in Podman secrets; `remote` credentials live in LiteLLM.
 
@@ -478,7 +376,7 @@ A **Connector** is a `components` row with `source = 'remote'`. It has no pod an
 
 ---
 
-### 6.2 Additions to Existing `components` Table
+### 5.2 Additions to Existing `components` Table
 
 No existing columns are changed or removed. **Four** new columns are added; `component_status` is extended with new lifecycle and validation values.
 
@@ -554,7 +452,7 @@ Full enum after migration:
 
 ---
 
-### 6.3 New and Extended ENUM Types
+### 5.3 New and Extended ENUM Types
 
 ```sql
 -- New: source discriminator on components
@@ -570,7 +468,7 @@ ALTER TYPE component_status ADD VALUE 'Syncing';    -- connector: created/update
 
 ---
 
-### 6.4 Full Entity Relationship Diagram
+### 5.4 Full Entity Relationship Diagram
 
 ```mermaid
 erDiagram
@@ -635,13 +533,13 @@ erDiagram
 
 ---
 
-## 7. API Specification
+## 6. API Specification
 
 All endpoints require `Authorization: Bearer <access_token>`. `type` is supplied in the request body for writes and as a query parameter for reads — it is never a path segment, keeping the URL surface flat and extensible.
 
 > **Routing note:** The static-segment route `GET /api/v1/connectors/models` must be registered **before** the `GET /api/v1/connectors/models/:id` UUID catch-all so the router resolves it correctly.
 
-### 7.1 Model Endpoints
+### 6.1 Model Endpoints
 
 All `/api/v1/models` endpoints. Write operations create or manage local pods (`source=local`); the shared instance endpoints (`GET :id`, `DELETE :id`) operate on any model by UUID regardless of source.
 
@@ -652,7 +550,7 @@ All `/api/v1/models` endpoints. Write operations create or manage local pods (`s
 | `GET` | `/api/v1/models/:id` | Get full status and details of any model | `200 OK` |
 | `DELETE` | `/api/v1/models/:id` | Undeploy local model or delete remote connector | `202 Accepted` / `204 No Content` |
 
-### 7.2 Connector Endpoints
+### 6.2 Connector Endpoints
 
 All `/api/v1/connectors/models` endpoints. Connectors (`source=remote`) register external model endpoints — no pod is created. Credentials go directly to LiteLLM; the Catalog DB stores only non-secret connection config.
 
@@ -664,7 +562,7 @@ All `/api/v1/connectors/models` endpoints. Connectors (`source=remote`) register
 | `PUT` | `/api/v1/connectors/models/:id` | Update a connector's params or credentials | `200 OK` |
 | `DELETE` | `/api/v1/connectors/models/:id` | Delete a connector and deregister its LiteLLM route | `202 Accepted` |
 
-### 7.3 Extensions to Existing Endpoints
+### 6.3 Extensions to Existing Endpoints
 
 | Existing Endpoint | Change |
 |---|---|
@@ -673,9 +571,9 @@ All `/api/v1/connectors/models` endpoints. Connectors (`source=remote`) register
 
 ---
 
-## 8. API Endpoint Details
+## 7. API Endpoint Details
 
-### 8.1 Deploy a Local Model
+### 7.1 Deploy a Local Model
 
 **Endpoint:** `POST /api/v1/models`
 
@@ -737,7 +635,7 @@ The `modelmanager` package validates `params` against the `params` block in `ass
 
 ---
 
-### 8.2 List Local Models
+### 7.2 List Local Models
 
 **Endpoint:** `GET /api/v1/models`
 
@@ -781,7 +679,7 @@ The `modelmanager` package validates `params` against the `params` block in `ass
 
 ---
 
-### 8.3 Get Model Details
+### 7.3 Get Model Details
 
 **Endpoint:** `GET /api/v1/models/:id`
 
@@ -859,7 +757,7 @@ WHERE sd.dependency_id = :id
 
 ---
 
-### 8.4 Delete / Undeploy a Model
+### 7.4 Delete / Undeploy a Model
 
 **Endpoint:** `DELETE /api/v1/models/:id`
 
@@ -908,7 +806,7 @@ WHERE sd.dependency_id = :id
 
 ---
 
-### 8.5 Create a Connector
+### 7.5 Create a Connector
 
 **Endpoint:** `POST /api/v1/connectors/models`
 
@@ -989,7 +887,7 @@ Content-Type: application/json
 
 ---
 
-### 8.6 List Connectors
+### 7.6 List Connectors
 
 **Endpoint:** `GET /api/v1/connectors/models`
 
@@ -1085,7 +983,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 
 ---
 
-### 8.7 Update a Connector
+### 7.7 Update a Connector
 
 **Endpoint:** `PUT /api/v1/connectors/models/:id`
 
@@ -1134,7 +1032,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 
 ---
 
-### 8.8 Get Connector Details
+### 7.8 Get Connector Details
 
 **Endpoint:** `GET /api/v1/connectors/models/:id`
 
@@ -1179,7 +1077,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 
 ---
 
-### 8.9 Delete a Connector
+### 7.9 Delete a Connector
 
 **Endpoint:** `DELETE /api/v1/connectors/models/:id`
 
@@ -1215,7 +1113,7 @@ LIMIT :page_size OFFSET (:page - 1) * :page_size;
 
 ---
 
-## 9. Pre-flight Resource Check
+## 8. Pre-flight Resource Check
 
 Before any model pod is created, the platform validates that the host or cluster has sufficient CPU, memory, and Spyre accelerator cards. All constraint violations are collected and returned together — not just the first failure.
 
@@ -1264,7 +1162,7 @@ Before any model pod is created, the platform validates that the host or cluster
 
 ---
 
-## 10. Deployment Flow
+## 9. Deployment Flow
 
 ### Flow: Catalog Configure — LiteLLM Gateway (one-time setup)
 
@@ -1384,7 +1282,7 @@ DELETE /api/v1/models/:id
 
 ---
 
-## 11. Key Design Decisions
+## 10. Key Design Decisions
 
 ### 1. One Table for Everything: `components.source` Discriminates Local vs Remote
 
@@ -1428,7 +1326,7 @@ The pre-flight response always includes every constraint result (satisfied or no
 
 ---
 
-## 12. Common Queries
+## 11. Common Queries
 
 ### All active models for an application — single query:
 ```sql
@@ -1469,7 +1367,7 @@ ORDER BY created_at DESC;
 
 ---
 
-## 13. Error Handling
+## 12. Error Handling
 
 All error responses follow the existing catalog error format:
 
@@ -1504,7 +1402,7 @@ Pre-flight failures extend this with a `violations` array (see §8):
 
 ---
 
-## 14. Future Considerations
+## 13. Future Considerations
 
 1. **Component Swap API** — `PUT /api/v1/models/:id/swap` to atomically swap the active model under a given LiteLLM alias with zero consumer-service downtime (register new route before removing the old one).
 2. **Multiple Models Per Role (Fallback)** — LiteLLM supports listing multiple models under the same alias for automatic failover. Relax the one-active-model-per-role constraint to allow a primary + fallback pair per role.
@@ -1517,13 +1415,13 @@ Pre-flight failures extend this with a `violations` array (see §8):
 
 ---
 
-## 15. CLI Commands
+## 14. CLI Commands
 
 Model commands live under `ai-services model` and map to the `/api/v1/models` endpoints. Connector commands live under `ai-services connector` and map to the `/api/v1/connectors/models` endpoints. Both follow the same flag style as `ai-services application`.
 
 ---
 
-### 15.1 Model Commands
+### 14.1 Model Commands
 
 #### Deploy a local model
 
@@ -1615,7 +1513,7 @@ ai-services model delete granite-llm --keep-data --runtime podman
 
 ---
 
-### 15.2 Connector Commands
+### 14.2 Connector Commands
 
 #### Create a connector
 
@@ -1742,7 +1640,7 @@ ai-services connector delete prod-watsonx -y --runtime podman
 
 ---
 
-### 15.3 LiteLLM Gateway Commands
+### 14.3 LiteLLM Gateway Commands
 
 #### Retrieve the virtual key for a model
 
@@ -1770,7 +1668,7 @@ ai-services model litellm key ibm-granite-3-8b-instruct-watsonx --runtime podman
 
 ---
 
-### 15.4 Command Summary
+### 14.4 Command Summary
 
 | Command | Maps to | Description |
 |---|---|---|
