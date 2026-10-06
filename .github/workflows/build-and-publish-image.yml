@@ -19,6 +19,9 @@ env:
   ICR_REGISTRY: icr.io
   ICR_NAMESPACE: ai-services-cicd
 
+permissions:
+  contents: read
+
 jobs:
   build-publish-image:
     runs-on: ${{ inputs.runner }}
