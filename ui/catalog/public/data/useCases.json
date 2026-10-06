@@ -6,7 +6,7 @@
       "description": "Provides farmers with accurate, validated crop‑growing guidance tailored to their region and preferred language.",
       "creator": "IBM",
       "domain": "Agriculture",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -26,7 +26,7 @@
       "description": "Enables finance teams to investigate fraud, identify high‑value clients, and uncover non‑performing assets using their core data—without needing specialized AI or IT skills such as SQL.",
       "creator": "IBM",
       "domain": "Banking and finance",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -46,7 +46,7 @@
       "description": "Enables teams to ask a question to analyze their data, understand business logic, and uncover what's happening, why it matters, and what to do next.",
       "creator": "IBM",
       "domain": "Enterprise resource planning",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -66,7 +66,7 @@
       "description": "Innovates conference experiences by enabling fast access to presentation slides from current and past events through a search‑driven digital assistant.",
       "creator": "IBM",
       "domain": "Professional services",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -89,7 +89,7 @@
       "description": "Enables conversational self-service for financial FAQs by helping customers quickly find information without digging through documents—reducing support friction.",
       "creator": "IBM",
       "domain": "Banking and finance",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -111,7 +111,7 @@
       "description": "Ensures accurate, complete, and compliant financial transactions through automated multi‑way invoice matching within your ERP system.",
       "creator": "IBM",
       "domain": "Enterprise resource planning",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -131,7 +131,7 @@
       "description": "Enables teams to quickly resolve everyday IT issues, automate common support tasks, and get instant help—without waiting for a technician.",
       "creator": "IBM",
       "domain": "IT operations",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -158,15 +158,15 @@
       "description": "Streamline account opening by automatically classifying onboarding documents and improving compliance with built‑in PII controls.",
       "creator": "IBM",
       "domain": "Banking and finance",
-      "architectures": [
-        "Digital assistant"
+      "services": [
+        "Digitize documents"
       ],
       "assets": [
         "Video demos",
         "Client stories and testimonials"
       ],
       "tag": [
-        "Digitize assistant"
+        "Digitize documents"
       ],
       "demo": "https://mediacenter.ibm.com/media/AI+on+PowerA+IBM+Power10+Entity+Extraction+%28Demo%29/1_0r3zgnd4",
       "demoTitle": "AI on Power: IBM Power10 Entity Extraction (Demo)",
@@ -183,7 +183,7 @@
       "description": "Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
       "creator": "IBM",
       "domain": "Enterprise resource planning",
-      "architectures": [
+      "services": [
         "Extract information"
       ],
       "assets": [
@@ -211,7 +211,7 @@
       "description": "Reduces administrative effort by enabling fast, secure access to relevant information from private documents and keeping content continuously up to date.",
       "creator": "IBM",
       "domain": "Public sector",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -233,7 +233,7 @@
       "description": "Drive growth and optimize costs with accurate, timely data tailored to real‑estate business.",
       "creator": "IBM",
       "domain": "Real estate",
-      "architectures": [
+      "services": [
         "Digital assistant"
       ],
       "assets": [
@@ -266,7 +266,7 @@
       "description": "Reduce volatility, optimize batch sizes, and better coordinate materials and manufacturing capacity across the entire production chain.",
       "creator": "IBM",
       "domain": "Manufacturing",
-      "architectures": [
+      "services": [
         "Forecasting"
       ],
       "assets": [

@@ -43,7 +43,7 @@ const WorkerResources = () => {
   return (
     <>
       <PageHeader
-        title="Worker Resources"
+        title="Worker resources"
         subtitle="Deployment locations that provide the infrastructure and runtime targets where AI services are deployed, executed, and managed. They enable consistent deployment, scaling, monitoring, and governance across development, test, and production workloads."
       />
       <WorkerResourcesTable

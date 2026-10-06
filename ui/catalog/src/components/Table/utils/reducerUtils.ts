@@ -10,7 +10,7 @@ const SHARED_ACTION_TYPES = new Set<SharedTableAction["type"]>([
   "SHARED_SET_PAGE_SIZE",
   "SHARED_OPEN_DELETE_DIALOG",
   "SHARED_CLOSE_DELETE_DIALOG",
-  "SHARED_SET_CONFIRMED",
+  "SHARED_SET_CONFIRM_VALUE",
   "SHARED_SET_SELECTED_ROW_ID",
   "SHARED_SET_LOADING",
   "SHARED_SHOW_ERROR",
@@ -50,12 +50,9 @@ export function handleSharedTableAction<
     case "SHARED_OPEN_DELETE_DIALOG":
       return { ...state, ...openDeleteDialog(action.payload) };
     case "SHARED_CLOSE_DELETE_DIALOG":
-      return {
-        ...state,
-        ...closeDeleteDialog(state.hasError, state.selectedRowId),
-      };
-    case "SHARED_SET_CONFIRMED":
-      return { ...state, ...setConfirmed(action.payload) };
+      return { ...state, ...closeDeleteDialog() };
+    case "SHARED_SET_CONFIRM_VALUE":
+      return { ...state, confirmValue: action.payload };
     case "SHARED_SET_SELECTED_ROW_ID":
       return { ...state, ...setSelectedRowId(action.payload) };
     case "SHARED_SET_LOADING":
@@ -123,33 +120,28 @@ export function setPageSize(
 
 export function openDeleteDialog(
   rowId: string,
-): Pick<BaseTableState, "selectedRowId" | "isDeleteDialogOpen" | "toastOpen"> {
+): Pick<
+  BaseTableState,
+  "selectedRowId" | "isDeleteDialogOpen" | "toastOpen" | "confirmValue"
+> {
   return {
     selectedRowId: rowId,
     isDeleteDialogOpen: true,
     toastOpen: false,
+    confirmValue: "",
   };
 }
 
-export function closeDeleteDialog(
-  hasError: boolean,
-  selectedRowId: string | null,
-): Pick<
+export function closeDeleteDialog(): Pick<
   BaseTableState,
-  "isDeleteDialogOpen" | "isConfirmed" | "selectedRowId" | "isDeleting"
+  "isDeleteDialogOpen" | "isDeleting" | "confirmValue" | "selectedRowId"
 > {
   return {
     isDeleteDialogOpen: false,
-    isConfirmed: false,
     isDeleting: false,
-    selectedRowId: hasError ? selectedRowId : null,
+    confirmValue: "",
+    selectedRowId: null,
   };
-}
-
-export function setConfirmed(
-  checked: boolean,
-): Pick<BaseTableState, "isConfirmed"> {
-  return { isConfirmed: checked };
 }
 
 export function setSelectedRowId(

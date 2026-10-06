@@ -192,7 +192,7 @@ const DataSourceConnectorsTable = ({
     try {
       await deleteDataSourceConnector(state.selectedRowId);
       dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
-      dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+      dispatch({ type: "SHARED_SET_CONFIRM_VALUE", payload: "" });
       await loadConnectors();
     } catch (err) {
       const msg =
@@ -428,11 +428,16 @@ const DataSourceConnectorsTable = ({
                 state.rowsData.find((r) => r.id === state.selectedRowId)
                   ?.name ?? ""
               }
+              modalHeading="Remove data source"
+              primaryButtonLabel="Remove"
+              primaryButtonLoadingLabel="Removing..."
+              errorNotificationTitle="Removal failed:"
+              showInfoNotification
               warningText="Removing this data source will stop future syncing and ingestion, permanently delete indexed data from each connected vector store."
-              confirmValue={state.confirmTextValue}
+              confirmValue={state.confirmValue}
               onConfirmValueChange={(value) =>
                 dispatch({
-                  type: ACTION_TYPES.SET_CONFIRM_TEXT,
+                  type: "SHARED_SET_CONFIRM_VALUE",
                   payload: value,
                 })
               }
@@ -440,7 +445,6 @@ const DataSourceConnectorsTable = ({
               onConfirm={() => void handleDelete()}
               onClose={() => {
                 dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
-                dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
                 dispatch({
                   type: ACTION_TYPES.SET_MODAL_DELETE_ERROR,
                   payload: "",
