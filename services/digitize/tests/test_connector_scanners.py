@@ -972,6 +972,26 @@ class TestSSHScannerDownloadTo:
         call_args = mock_sftp.getfo.call_args
         assert isinstance(call_args[0][1], HashingWriter)
 
+    def test_download_retries_on_transient_error(self, tmp_path):
+        import paramiko
+        scanner = _make_ssh_scanner()
+        mock_sftp = MagicMock()
+        calls = 0
+
+        def _flaky_getfo(remote_path, fileobj):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise paramiko.SSHException("Connection reset")
+            fileobj.write(b"content")
+
+        mock_sftp.getfo.side_effect = _flaky_getfo
+        self._attach(scanner, mock_sftp)
+
+        scanner.download_to("/data/report.pdf", tmp_path / "report.pdf")
+        assert calls == 2
+        assert (tmp_path / "report.pdf").read_bytes() == b"content"
+
 
 # ---------------------------------------------------------------------------
 # SSHScanner — verify_integrity (inherits base class direct equality)
