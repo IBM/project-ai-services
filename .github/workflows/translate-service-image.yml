@@ -30,6 +30,4 @@ jobs:
       path: 'services'
       service: 'translate'
       image: 'translate-service'
-    secrets:
-      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
-      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+    secrets: inherit
