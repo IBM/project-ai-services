@@ -77,6 +77,5 @@ jobs:
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      skip-cves-scan: true
       skip-image-build: true
-      scan-image-licenses: false
+      is-image-scan: false
