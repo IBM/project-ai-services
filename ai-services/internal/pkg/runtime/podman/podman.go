@@ -529,6 +529,27 @@ func (pc *PodmanClient) RunContainerWithSpec(ctx context.Context, s *specgen.Spe
 	}
 }
 
+// StartContainerWithSpec creates and starts a container from the given spec,
+// returning the container ID immediately without waiting for the container to
+// exit. Unlike RunContainerWithSpec, it does not block — the caller polls the
+// container state separately (e.g. via containers.Inspect).
+func (pc *PodmanClient) StartContainerWithSpec(ctx context.Context, s *specgen.SpecGenerator) (string, error) {
+	createResponse, err := containers.CreateWithSpec(pc.Context, s, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create container: %w", err)
+	}
+
+	containerID := createResponse.ID
+	if err := containers.Start(pc.Context, containerID, nil); err != nil {
+		// Best-effort remove to avoid an orphaned created-but-not-started container.
+		_, _ = containers.Remove(pc.Context, containerID, nil)
+
+		return "", fmt.Errorf("failed to start container: %w", err)
+	}
+
+	return containerID, nil
+}
+
 func (pc *PodmanClient) ListRoutes(_ context.Context, _ string) ([]types.Route, error) {
 	logger.Errorf("unsupported method called!")
 

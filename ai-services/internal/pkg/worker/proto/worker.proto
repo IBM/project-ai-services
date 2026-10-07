@@ -98,7 +98,16 @@ enum CommandType {
   // against a pod endpoint and returns the response.
   COMMAND_TYPE_HTTP_PROXY                = 26;
 
+  // Start downloading a model on the worker.
+  // The worker launches the tools container and returns the container ID
+  // immediately without waiting for the download to finish.
   COMMAND_TYPE_DOWNLOAD_MODEL            = 27;
+
+  // Poll whether a previously-started model download container has finished.
+  // The control plane sends the container ID returned by COMMAND_TYPE_DOWNLOAD_MODEL;
+  // the worker inspects the container and returns its exit code and a done flag.
+  COMMAND_TYPE_CHECK_MODEL_DOWNLOAD      = 39;
+
   COMMAND_TYPE_FIND_FREE_SPYRE_CARDS    = 28;
   COMMAND_TYPE_GET_BASE_DIR             = 29;
 

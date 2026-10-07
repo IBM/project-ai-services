@@ -2,6 +2,7 @@ package podman
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
@@ -31,29 +32,68 @@ func PullImages(ctx context.Context, rt runtime.Runtime, images []string) error 
 }
 
 // DownloadModels downloads the given models to the models directory of the target host.
-// For remote workers the command is forwarded over the gRPC stream; the worker resolves
-// AI_SERVICES_BASE_DIR from its own environment to find the models directory. For local
-// deployments helpers.DownloadModelContainer is called directly with the local models path.
-// It is shared by the application and model deployment paths.
+//
+// For remote workers the download is split into two gRPC commands to avoid
+// timing out the stream on large models:
+//  1. COMMAND_TYPE_DOWNLOAD_MODEL — launches the tools container and returns
+//     the container ID immediately.
+//  2. COMMAND_TYPE_CHECK_MODEL_DOWNLOAD — waits on the worker until the container
+//     exits (respects ctx for cancellation).
+//
+// For local deployments helpers.DownloadModelContainer is called directly with the
+// local models path. It is shared by the application and model deployment paths.
 func DownloadModels(ctx context.Context, rt runtime.Runtime, models []string) error {
-	remoteRT, isRemote := rt.(*remoteruntime.RemoteRuntime)
+	if remoteRT, ok := rt.(*remoteruntime.RemoteRuntime); ok {
+		return downloadModelsRemote(ctx, remoteRT, models)
+	}
+
 	modelsPath := utils.GetModelsPath()
 
 	for _, modelName := range models {
 		logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
 
-		if isRemote {
-			if _, err := remoteRT.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
-				Model: modelName,
-			}); err != nil {
-				return fmt.Errorf("failed to download model %s: %w", modelName, err)
-			}
-
-			continue
-		}
-
 		if err := helpers.DownloadModelContainer(ctx, modelName, modelsPath); err != nil {
 			return fmt.Errorf("failed to download model %s: %w", modelName, err)
+		}
+	}
+
+	return nil
+}
+
+// downloadModelsRemote starts all model download containers on the remote worker
+// (step 1), then waits for each one to complete (step 2).
+func downloadModelsRemote(ctx context.Context, rt *remoteruntime.RemoteRuntime, models []string) error {
+	type modelContainer struct {
+		model       string
+		containerID string
+	}
+
+	started := make([]modelContainer, 0, len(models))
+
+	for _, modelName := range models {
+		logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
+
+		res, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
+			Model: modelName,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to start model download %s: %w", modelName, err)
+		}
+
+		var containerID string
+		if err := json.Unmarshal(res.GetData(), &containerID); err != nil {
+			return fmt.Errorf("failed to decode container ID for model %s: %w", modelName, err)
+		}
+
+		started = append(started, modelContainer{model: modelName, containerID: containerID})
+	}
+
+	for _, mc := range started {
+		if _, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD, payload.CheckModelDownload{
+			Model:       mc.model,
+			ContainerID: mc.containerID,
+		}); err != nil {
+			return fmt.Errorf("model download failed for %s: %w", mc.model, err)
 		}
 	}
 
