@@ -9,6 +9,14 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
+// SetUpgradeMode enables or disables the operator upgrade prompt flow for the
+// given runtime.
+func SetUpgradeMode(rt types.RuntimeType, upgrade bool) {
+	if rt == types.RuntimeTypeOpenShift {
+		openshift.SetUpgradeMode(upgrade)
+	}
+}
+
 // BootstrapFactory creates bootstrap instances based on configuration.
 type BootstrapFactory struct {
 	runtimeType types.RuntimeType
