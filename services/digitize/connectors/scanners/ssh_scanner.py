@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Iterator, Optional
@@ -107,7 +108,14 @@ class SSHScanner(BaseScanner):
         return local_md5
 
     def _remote_md5(self, remote_file_path: str) -> str:
-        _, stdout, stderr = self._ssh.exec_command(f'md5sum "{remote_file_path}"')
+        cmd = (
+            f'if command -v md5sum >/dev/null 2>&1; then md5sum "{remote_file_path}"; '
+            f'elif command -v openssl >/dev/null 2>&1; then openssl md5 "{remote_file_path}"; '
+            f'elif command -v md5 >/dev/null 2>&1; then md5 "{remote_file_path}"; '
+            f'elif command -v csum >/dev/null 2>&1; then csum -h MD5 "{remote_file_path}"; '
+            f'else echo "No md5 utility found" >&2; exit 127; fi'
+        )
+        _, stdout, stderr = self._ssh.exec_command(cmd)
         output = stdout.read().decode().strip()
         error_output = stderr.read().decode().strip()
         exit_status = stdout.channel.recv_exit_status()
@@ -116,7 +124,13 @@ class SSHScanner(BaseScanner):
                 f"[ssh_scanner] Failed to compute md5 for {remote_file_path!r}: "
                 f"stdout={output!r} stderr={error_output!r}"
             )
-        return output.split()[0]
+        match = re.search(r"\b[a-fA-F0-9]{32}\b", output)
+        if not match:
+            raise RuntimeError(
+                f"[ssh_scanner] Could not parse md5 checksum from output for {remote_file_path!r}: "
+                f"stdout={output!r}"
+            )
+        return match.group(0).lower()
 
     def _walk_remote_tree(self, path: str) -> Iterator[str]:
         try:
