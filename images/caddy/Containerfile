@@ -39,7 +39,9 @@ RUN microdnf update ${DNF_FLAGS} -y && \
     microdnf clean all
 
 RUN groupadd --gid 1000 caddy && \
-    useradd --uid 1000 --gid caddy --home-dir /srv --shell /sbin/nologin --no-create-home caddy
+    useradd --uid 1000 --gid caddy --home-dir /srv --shell /sbin/nologin --no-create-home caddy && \
+    microdnf remove ${DNF_FLAGS} -y shadow-utils && \
+    microdnf clean all
 
 COPY --from=builder /out/ /
 
