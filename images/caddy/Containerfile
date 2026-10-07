@@ -17,9 +17,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 RUN set -eux; \
     mkdir -p /out/etc/caddy /out/usr/share/caddy /out/config/caddy /out/data/caddy; \
     wget -O /out/etc/caddy/Caddyfile "https://github.com/caddyserver/dist/raw/${CADDY_VERSION}/config/Caddyfile"; \
-    wget -O /out/usr/share/caddy/index.html "https://github.com/caddyserver/dist/raw/${CADDY_VERSION}/welcome/index.html"; \
-    echo "caddy:x:1000:1000:caddy:/srv:/sbin/nologin" > /out/etc/passwd; \
-    echo "caddy:x:1000:" > /out/etc/group
+    wget -O /out/usr/share/caddy/index.html "https://github.com/caddyserver/dist/raw/${CADDY_VERSION}/welcome/index.html"
 
 COPY patches/ /tmp/patches/
 
@@ -37,8 +35,11 @@ ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9
 ARG CADDY_VERSION=v2.11.4
 
 RUN microdnf update ${DNF_FLAGS} -y && \
-    microdnf install ${DNF_FLAGS} -y ca-certificates libcap && \
+    microdnf install ${DNF_FLAGS} -y ca-certificates libcap shadow-utils && \
     microdnf clean all
+
+RUN groupadd --gid 1000 caddy && \
+    useradd --uid 1000 --gid caddy --home-dir /srv --shell /sbin/nologin --no-create-home caddy
 
 COPY --from=builder /out/ /
 
