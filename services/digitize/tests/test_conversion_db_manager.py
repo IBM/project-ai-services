@@ -263,6 +263,53 @@ class TestUpdateTaskStatus:
         ok = DatabaseManager.update_task_status("t1", "running")
         assert ok is False
 
+    def test_non_terminal_status_does_not_trigger_purge(self, session):
+        """RUNNING/QUEUED/PENDING updates must not issue a DELETE."""
+        from digitize.db.manager import DatabaseManager
+
+        session.execute.return_value = Mock(rowcount=1)
+
+        DatabaseManager.update_task_status("t1", "running")
+
+        # Only one execute call: the UPDATE — no purge DELETE issued.
+        assert session.execute.call_count == 1
+
+    def test_terminal_status_triggers_purge_in_same_session(self, session):
+        """Completing a task also deletes stale terminal rows in the same session."""
+        from digitize.db.manager import DatabaseManager
+
+        # First call: UPDATE rowcount=1; second call: DELETE rowcount=3 (purged).
+        session.execute.side_effect = [Mock(rowcount=1), Mock(rowcount=3)]
+
+        ok = DatabaseManager.update_task_status("t1", "completed")
+
+        assert ok is True
+        assert session.execute.call_count == 2
+
+    def test_terminal_status_no_stale_rows_is_silent(self, session):
+        """Purge DELETE returning 0 rows must not raise or log at warning level."""
+        from digitize.db.manager import DatabaseManager
+
+        session.execute.side_effect = [Mock(rowcount=1), Mock(rowcount=0)]
+
+        ok = DatabaseManager.update_task_status("t1", "failed")
+
+        assert ok is True
+        assert session.execute.call_count == 2
+
+    def test_update_still_succeeds_even_if_row_not_found(self, session):
+        """Purge path must not be reached when the UPDATE itself matched nothing."""
+        from digitize.db.manager import DatabaseManager
+
+        # UPDATE returns 0 matched rows; DELETE should still run (cleanup is
+        # best-effort regardless of whether the target task existed).
+        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0)]
+
+        ok = DatabaseManager.update_task_status("t-ghost", "cancelled")
+
+        assert ok is False
+        assert session.execute.call_count == 2
+
 
 @pytest.mark.unit
 class TestPeekHead:

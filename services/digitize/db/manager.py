@@ -2085,6 +2085,12 @@ class DatabaseManager:
         """
         Update the status (and optional result/error) of a ConversionTask.
 
+        When the new status is terminal (completed / failed / cancelled) this
+        method also deletes stale terminal rows whose ``completed_at`` is older
+        than ``settings.digitize.conversion_task_retention_hours`` hours.  The
+        delete runs in the same DB session as the status update so it adds no
+        extra round-trip overhead for non-terminal transitions.
+
         Args:
             task_id:     Task identifier.
             status:      New status string.
@@ -2094,6 +2100,14 @@ class DatabaseManager:
         Returns:
             True on success, False otherwise.
         """
+        from digitize.settings import settings
+        from datetime import timedelta
+
+        _TERMINAL = (
+            ConversionTaskStatus.COMPLETED,
+            ConversionTaskStatus.FAILED,
+            ConversionTaskStatus.CANCELLED,
+        )
         try:
             with get_db_session() as session:
                 now = datetime.now(timezone.utc)
@@ -2102,11 +2116,7 @@ class DatabaseManager:
                 }
                 if status == ConversionTaskStatus.RUNNING:
                     updates["started_at"] = now
-                if status in (
-                    ConversionTaskStatus.COMPLETED,
-                    ConversionTaskStatus.FAILED,
-                    ConversionTaskStatus.CANCELLED,
-                ):
+                if status in _TERMINAL:
                     updates["completed_at"] = now
                 if result_path is not None:
                     updates["result_path"] = result_path
@@ -2119,6 +2129,22 @@ class DatabaseManager:
                     .values(**updates)
                 )
                 result = cast(CursorResult, session.execute(stmt))
+
+                # Piggyback cleanup: purge old terminal rows in the same session.
+                if status in _TERMINAL:
+                    retention_h = settings.digitize.conversion_task_retention_hours
+                    cutoff = now - timedelta(hours=retention_h)
+                    purge_stmt = delete(ConversionTask).where(
+                        ConversionTask.status.in_(_TERMINAL),
+                        ConversionTask.completed_at < cutoff,
+                    )
+                    purged = cast(CursorResult, session.execute(purge_stmt)).rowcount
+                    if purged:
+                        logger.debug(
+                            f"Purged {purged} terminal conversion_task(s) older than "
+                            f"{retention_h}h"
+                        )
+
                 return result.rowcount > 0
         except SQLAlchemyError as e:
             logger.error(f"DB error updating task {task_id}: {e}", exc_info=True)
