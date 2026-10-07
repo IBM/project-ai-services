@@ -22,12 +22,17 @@ func configureCmd() *cobra.Command {
 
 			logger.Infoln("Running bootstrap configuration...")
 
+			rt := vars.RuntimeFactory.GetRuntimeType()
 			// Create bootstrap instance based on runtime
-			factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
+			factory := bootstrap.NewBootstrapFactory(rt)
 			bootstrapInstance, err := factory.Create()
 			if err != nil {
 				return fmt.Errorf("failed to create bootstrap instance: %w", err)
 			}
+
+			// --upgrade is declared as a persistent flag on the parent bootstrap
+			// command, so it is inherited here and accessible via upgradeOperators.
+			bootstrap.SetUpgradeMode(rt, upgradeOperators)
 
 			if err := bootstrapInstance.Configure(cmd.Context()); err != nil {
 				return fmt.Errorf("bootstrap configuration failed: %w", err)
