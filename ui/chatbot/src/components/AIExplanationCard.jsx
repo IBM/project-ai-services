@@ -1,18 +1,6 @@
-import { Link } from '@carbon/react';
-
 function AIExplanationCard() {
   return (
     <div>
-      <p
-        style={{
-          fontSize: '0.85rem',
-          color: '#525252',
-          marginBottom: '0.5rem',
-        }}
-      >
-        AI Explained
-      </p>
-
       <h2
         style={{ fontSize: '1.5rem', fontWeight: 400, marginBottom: '0.5rem' }}
       >
@@ -49,25 +37,6 @@ function AIExplanationCard() {
             model.
           </li>
         </ol>
-      </div>
-
-      <hr style={{ margin: '1rem 0' }} />
-
-      <div style={{}}>
-        <p style={{ fontSize: '0.95rem', color: '#525252' }}>AI model</p>
-        <Link size="md" />{' '}
-        <a
-          style={{
-            color: 'rgb(13, 110, 253)',
-            textDecoration: 'underline',
-            cursor: 'pointer',
-          }}
-          href="https://huggingface.co/ibm-granite/granite-3.3-8b-instruct"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          ibm-granite/granite-3.3-8b-instruct{' '}
-        </a>
       </div>
     </div>
   );
