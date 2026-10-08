@@ -1,6 +1,7 @@
 @use "@carbon/react/scss/spacing" as *;
 @use "@carbon/react/scss/theme" as *;
 @use "@carbon/react/scss/type" as *;
+@use "@carbon/react/scss/breakpoint" as *;
 
 .breadcrumbDivider {
   border: none;
@@ -80,6 +81,7 @@
   gap: $spacing-03;
   align-items: center;
   flex-wrap: wrap;
+  padding: $spacing-03 0;
 }
 
 .headerCertifiedBadge {
@@ -150,15 +152,25 @@
   color: $text-secondary;
 }
 
-.actionsGrid {
-  margin-top: $spacing-09;
-  row-gap: 0;
+.titleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-03;
 }
 
-.actionButtons {
-  display: flex;
-  gap: $spacing-03;
-  justify-content: flex-start;
+.inlineEditRow {
+  margin: 0;
+  padding: 0;
+}
+
+.inlineEditButton {
+  width: 100%;
+}
+
+.inlineEditButtonCol {
+  @include breakpoint-down(md) {
+    padding-top: $spacing-03;
+  }
 }
 
 .toastNotification {
@@ -274,14 +286,6 @@
   .sideNav {
     position: relative;
     max-width: 100%;
-  }
-
-  .actionButtons {
-    flex-direction: column;
-
-    button {
-      width: 100%;
-    }
   }
 }
 
