@@ -446,16 +446,15 @@ func buildCatalogPayload(ctx context.Context, appClient *catalogClient.Applicati
 // pollApplicationStatus polls the application status until it's ready or fails.
 func pollApplicationStatus(ctx context.Context, appClient *catalogClient.ApplicationClient, appName, id string) error {
 	logger.Infof("Waiting for application '%s' to be ready...\n", appName)
+	var deployingPhaseStart time.Time
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	timeout := time.After(pollTimeout)
-
 	for {
 		select {
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for application '%s': %w", appName, ctx.Err())
 
 		case <-ticker.C:
 			app, err := appClient.GetApplicationWithRefresh(ctx, id)
@@ -463,7 +462,11 @@ func pollApplicationStatus(ctx context.Context, appClient *catalogClient.Applica
 				return fmt.Errorf("failed to get application status: %w", err)
 			}
 
-			done, err := handleApplicationStatus(ctx, app, appName)
+			if !deployingPhaseStart.IsZero() && time.Since(deployingPhaseStart) > pollTimeout {
+				return fmt.Errorf("timeout waiting for application '%s' to be ready", appName)
+			}
+
+			done, err := handleApplicationStatus(ctx, app, appName, &deployingPhaseStart)
 			if err != nil {
 				return err
 			}
@@ -475,7 +478,7 @@ func pollApplicationStatus(ctx context.Context, appClient *catalogClient.Applica
 }
 
 // handleApplicationStatus handles the application status and returns (done, error).
-func handleApplicationStatus(ctx context.Context, app *catalogTypes.Application, appName string) (bool, error) {
+func handleApplicationStatus(ctx context.Context, app *catalogTypes.Application, appName string, deployingPhaseStart *time.Time) (bool, error) {
 	switch app.Status {
 	case "Running":
 		logger.Infof("Application '%s' is ready!\n", appName)
@@ -497,6 +500,9 @@ func handleApplicationStatus(ctx context.Context, app *catalogTypes.Application,
 	case "Downloading", "Deploying":
 		// Still in progress, continue polling.
 		logger.Infof("Deploying application: %s, Status: %s, Message: %s\n", appName, app.Status, app.Message)
+		if app.Status == "Deploying" && deployingPhaseStart.IsZero() {
+			*deployingPhaseStart = time.Now()
+		}
 
 		return false, nil
 

@@ -336,7 +336,24 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 			return nil, fmt.Errorf("decode download_model payload: %w", err)
 		}
 
-		return nil, helpers.DownloadModelContainer(ctx, req.Model, utils.GetModelsPath())
+		containerID, err := helpers.StartModelDownloadContainer(ctx, req.Model, utils.GetModelsPath())
+		if err != nil {
+			return nil, err
+		}
+
+		// Return the container ID so the control plane can poll completion via
+		// COMMAND_TYPE_CHECK_MODEL_DOWNLOAD.
+		return marshalOr(containerID, nil)
+
+	case workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD:
+		var req payload.CheckModelDownload
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("decode check_model_download payload: %w", err)
+		}
+
+		// WaitForModelDownload polls the container until it exits and returns
+		// an error if the exit code was non-zero.
+		return nil, helpers.WaitForModelDownload(ctx, req.Model, req.ContainerID)
 
 	// ── Caddy proxy management ────────────────────────────────────────────────
 
