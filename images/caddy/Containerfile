@@ -35,7 +35,12 @@ ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9
 ARG CADDY_VERSION=v2.11.4
 
 RUN microdnf update ${DNF_FLAGS} -y && \
-    microdnf install ${DNF_FLAGS} -y ca-certificates libcap && \
+    microdnf install ${DNF_FLAGS} -y ca-certificates libcap shadow-utils && \
+    microdnf clean all
+
+RUN groupadd --gid 1000 caddy && \
+    useradd --uid 1000 --gid caddy --home-dir /srv --shell /sbin/nologin --no-create-home caddy && \
+    microdnf remove ${DNF_FLAGS} -y shadow-utils && \
     microdnf clean all
 
 COPY --from=builder /out/ /
@@ -43,6 +48,7 @@ COPY --from=builder /out/ /
 RUN set -eux; \
     setcap cap_net_bind_service=+ep /usr/bin/caddy; \
     chmod +x /usr/bin/caddy; \
+    chown -R caddy:caddy /config /data; \
     caddy version
 
 ENV XDG_CONFIG_HOME=/config
@@ -59,5 +65,7 @@ EXPOSE 443/udp
 EXPOSE 2019/tcp
 
 WORKDIR /srv
+
+USER caddy
 
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
