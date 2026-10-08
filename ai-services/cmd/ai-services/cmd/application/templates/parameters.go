@@ -9,6 +9,7 @@ import (
 
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
@@ -33,6 +34,14 @@ func NewParametersCmd() *cobra.Command {
 
   # Display parameters for an architecture
   ai-services application templates parameters --template rag --runtime podman`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			rt, _ := cmd.Flags().GetString(constants.RuntimeFlag)
+			if rt == "" {
+				return fmt.Errorf("required flag(s) \"%s\" not set", constants.RuntimeFlag)
+			}
+
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 

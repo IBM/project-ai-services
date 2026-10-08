@@ -7,14 +7,16 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/spf13/cobra"
+
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconfig "github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -24,6 +26,14 @@ var (
 		Long: `Manage AI models for application templates.
 This command provides subcommands to list and download models required by application templates.`,
 		Args: cobra.MaximumNArgs(0),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			rt, _ := cmd.Flags().GetString(constants.RuntimeFlag)
+			if rt == "" {
+				return fmt.Errorf("required flag(s) \"%s\" not set", constants.RuntimeFlag)
+			}
+
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
