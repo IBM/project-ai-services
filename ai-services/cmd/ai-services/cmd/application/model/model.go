@@ -9,13 +9,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconfig "github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -27,12 +27,11 @@ var (
 This command provides subcommands to list and download models required by application templates.`,
 		Args: cobra.MaximumNArgs(0),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			rt, _ := cmd.Flags().GetString(constants.RuntimeFlag)
-			if rt == "" {
-				return fmt.Errorf("required flag(s) \"%s\" not set", constants.RuntimeFlag)
+			if runtimeType == "" {
+				return fmt.Errorf("required flag(s) \"runtime\" not set")
 			}
 
-			return nil
+			return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -41,12 +40,14 @@ This command provides subcommands to list and download models required by applic
 
 	hiddenTemplates bool
 	legacyModel     bool
+	runtimeType     string
 )
 
 func init() {
 	ModelCmd.AddCommand(listCmd)
 	ModelCmd.AddCommand(downloadCmd)
 	ModelCmd.PersistentFlags().BoolVar(&legacyModel, "legacy", false, "Use legacy application model implementation")
+	cmdcommon.ConfigurePersistentRuntimeFlag(ModelCmd, &runtimeType)
 }
 
 func models(template string) ([]string, error) {
