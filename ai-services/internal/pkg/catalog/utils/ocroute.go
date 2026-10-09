@@ -37,7 +37,7 @@ func ModelGatewayRouteHost(ctx context.Context) (string, error) {
 }
 
 func routeHost(ctx context.Context, routeName string) (string, error) {
-	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogAppName)
+	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogNamespace)
 	if err != nil {
 		return "", fmt.Errorf("create OpenShift client to look up route %q: %w", routeName, err)
 	}
