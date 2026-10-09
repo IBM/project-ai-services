@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -31,9 +32,9 @@ func HandleDeploymentStepError(ctx context.Context, appRepo dbrepo.ApplicationRe
 }
 
 // AppNamespace derives the Kubernetes namespace from an application UUID.
-// Format: "ai-services-<first 8 chars of UUID>".
+// Format: "<CatalogNamespace>-<first 8 chars of UUID>".
 func AppNamespace(appID uuid.UUID) string {
-	return "ai-services-" + appID.String()[:8]
+	return catalogconstants.CatalogNamespace + "-" + appID.String()[:8]
 }
 
 // HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".

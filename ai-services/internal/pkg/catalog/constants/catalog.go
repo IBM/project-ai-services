@@ -90,7 +90,12 @@ const (
 
 // Catalog name constants.
 const (
-	// CatalogAppName represents the catalog name.
+	// CatalogNamespace is the single source of truth for the OpenShift namespace
+	// where the catalog (backend, DB, UI) and worker are deployed.
+	// Change this constant to target a different namespace at build time (e.g. for local dev).
+	CatalogNamespace = "ai-services"
+
+	// CatalogAppName represents the catalog Helm release name and resource label value.
 	CatalogAppName = "ai-services"
 	// CatalogModelsNamespace represents the shared namespace where all local models are deployed on OpenShift.
 	CatalogModelsNamespace = "ai-services-models"

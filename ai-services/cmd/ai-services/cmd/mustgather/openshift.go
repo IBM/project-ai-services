@@ -51,8 +51,8 @@ func newOpenshiftGatherer() *openshiftGatherer {
 func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (string, error) {
 	logger.InfolnCtx(ctx, "Starting must-gather for OpenShift runtime…")
 
-	// catalogCl is scoped to the fixed catalog namespace ("ai-services").
-	catalogCl, err := openshiftRuntime.NewOpenshiftClientWithNamespace(catalogConstants.CatalogAppName)
+	// catalogCl is scoped to the catalog namespace defined by catalogConstants.CatalogNamespace.
+	catalogCl, err := openshiftRuntime.NewOpenshiftClientWithNamespace(catalogConstants.CatalogNamespace)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to OpenShift cluster: %w", err)
 	}
@@ -63,7 +63,7 @@ func (g *openshiftGatherer) gather(ctx context.Context, opts gatherOptions) (str
 	}
 
 	logger.InfofCtx(ctx, "Output directory: %s\n", outDir)
-	logger.InfofCtx(ctx, "Catalog namespace: %s\n", catalogConstants.CatalogAppName)
+	logger.InfofCtx(ctx, "Catalog namespace: %s\n", catalogConstants.CatalogNamespace)
 
 	catalogInstalled, err := checkCatalogInstalled(ctx, catalogCl)
 	if err != nil {
