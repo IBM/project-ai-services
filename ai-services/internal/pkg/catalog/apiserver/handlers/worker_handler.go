@@ -157,8 +157,8 @@ func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 //	@Tags			Workers
 //	@Produce		json
 //	@Param			name	query		string					false	"Case-insensitive substring search on worker name"
-//	@Success		200	{array}		catalogtypes.Worker		"List of workers"
-//	@Failure		500	{object}	map[string]interface{}	"Internal error"
+//	@Success		200		{array}		catalogtypes.Worker		"List of workers"
+//	@Failure		500		{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers [get]
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {
