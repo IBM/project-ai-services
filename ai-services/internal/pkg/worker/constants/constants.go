@@ -2,6 +2,8 @@
 // (deploy, join, uninstall, gateway, etc.) to avoid duplication.
 package constants
 
+import catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+
 const (
 	// LocalWorkerName is the sentinel value used when no remote worker is specified.
 	// It means "deploy on this machine using the local runtime".
@@ -21,7 +23,6 @@ const (
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
 
-	WorkerAppName = "ai-services"
 	// WorkerAppTemplate is the app name passed to the template provider.
 	// Resolves to assets/worker/<runtime>/templates/.
 	WorkerAppTemplate     = "worker"
@@ -83,10 +84,6 @@ const (
 	OpenShiftCatalogPodName = "catalog-backend"
 	CaddyCertSecretName     = "caddy-cert-secret"
 
-	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
-	// auto-generated gateway server certificate for internal cluster communication.
-	OpenShiftGatewayServiceEndpoint = "catalog-api.ai-services.svc.cluster.local"
-
 	// LocalWorkerEnvVar is the environment variable name that enables local-worker mode.
 	LocalWorkerEnvVar = "LOCAL_WORKER"
 
@@ -101,4 +98,15 @@ const (
 	WorkerJoinErr = "failed to join the worker"
 	// WorkerJoinSuccess is the log message emitted by the worker container once the gRPC CommandStream is open.
 	WorkerJoinSuccess = "Opening CommandStream for worker"
+)
+
+var (
+	// WorkerAppName is the OpenShift namespace where the worker is deployed.
+	// Derived from CatalogNamespace so a single constant change redeploys to a different namespace.
+	WorkerAppName = catalogconstants.CatalogNamespace
+
+	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
+	// auto-generated gateway server certificate for internal cluster communication.
+	// Derived from CatalogNamespace so the DNS name tracks the namespace automatically.
+	OpenShiftGatewayServiceEndpoint = "catalog-api." + catalogconstants.CatalogNamespace + ".svc.cluster.local"
 )
