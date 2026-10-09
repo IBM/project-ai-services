@@ -63,7 +63,7 @@
                     {
                         "type": "string",
                         "description": "Case-insensitive substring search on application name",
-                        "name": "name",
+                        "name": "q",
                         "in": "query"
                     }
                 ],
@@ -2647,7 +2647,7 @@
                     {
                         "type": "string",
                         "description": "Case-insensitive substring search on worker name",
-                        "name": "name",
+                        "name": "q",
                         "in": "query"
                     }
                 ],

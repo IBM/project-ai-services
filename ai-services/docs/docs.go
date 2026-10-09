@@ -69,7 +69,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Case-insensitive substring search on application name",
-                        "name": "name",
+                        "name": "q",
                         "in": "query"
                     }
                 ],
@@ -2653,7 +2653,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "Case-insensitive substring search on worker name",
-                        "name": "name",
+                        "name": "q",
                         "in": "query"
                     }
                 ],

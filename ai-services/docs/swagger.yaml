@@ -1064,7 +1064,7 @@ paths:
         type: string
       - description: Case-insensitive substring search on application name
         in: query
-        name: name
+        name: q
         type: string
       produces:
       - application/json
@@ -2804,7 +2804,7 @@ paths:
       parameters:
       - description: Case-insensitive substring search on worker name
         in: query
-        name: name
+        name: q
         type: string
       produces:
       - application/json

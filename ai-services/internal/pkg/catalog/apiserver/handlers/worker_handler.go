@@ -156,17 +156,17 @@ func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 //	@Description	Returns all registered workers, their current status, human-readable message, and connected application IDs.
 //	@Tags			Workers
 //	@Produce		json
-//	@Param			name	query		string					false	"Case-insensitive substring search on worker name"
-//	@Success		200		{array}		catalogtypes.Worker		"List of workers"
-//	@Failure		500		{object}	map[string]interface{}	"Internal error"
+//	@Param			q	query		string					false	"Case-insensitive substring search on worker name"
+//	@Success		200	{array}		catalogtypes.Worker		"List of workers"
+//	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
 //	@Router			/workers [get]
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var filters *repository.WorkerFilters
-	if name := c.Query("name"); name != "" {
-		filters = &repository.WorkerFilters{Name: name}
+	if q := c.Query("q"); q != "" {
+		filters = &repository.WorkerFilters{Query: q}
 	}
 
 	workers, err := h.reg.List(ctx, filters)
