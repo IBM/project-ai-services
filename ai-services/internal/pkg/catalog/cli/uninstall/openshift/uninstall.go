@@ -24,7 +24,7 @@ import (
 // UninstallCatalog removes the catalog helm release and optionally cleans up PVCs and catalog namespace.
 func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	catalog := catalogConstants.CatalogAppName
-	namespace := catalog
+	namespace := catalogConstants.CatalogNamespace
 
 	rt, err := openshiftruntime.NewOpenshiftClientWithNamespace(namespace)
 	if err != nil {

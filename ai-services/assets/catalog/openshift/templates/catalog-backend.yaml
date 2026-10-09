@@ -21,7 +21,7 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: catalog-backend
     spec:
-      serviceAccountName: ai-services-catalog-sa
+      serviceAccountName: {{ .Release.Namespace }}-catalog-sa
       automountServiceAccountToken: true
       initContainers:
         - name: db-migration
