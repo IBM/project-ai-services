@@ -144,8 +144,8 @@ func (r *workerRepo) Delete(ctx context.Context, id uuid.UUID) (bool, error) {
 	return tag.RowsAffected() > 0, nil
 }
 
-// GetAll returns all worker rows with optional filters, ordered by registered_at ascending.
-func (r *workerRepo) GetAll(ctx context.Context, filters *WorkerFilters) ([]models.Worker, error) {
+// buildGetAllWorkerQuery constructs the SQL query and arguments for GetAll.
+func buildGetAllWorkerQuery(filters *WorkerFilters) (string, []interface{}) {
 	query := `SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at FROM workers`
 	args := []interface{}{}
 
@@ -156,6 +156,44 @@ func (r *workerRepo) GetAll(ctx context.Context, filters *WorkerFilters) ([]mode
 
 	query += " ORDER BY registered_at ASC"
 
+	return query, args
+}
+
+// scanWorkerRow scans a single worker row into a Worker model.
+func scanWorkerRow(rows pgx.Rows) (models.Worker, error) {
+	var (
+		w            models.Worker
+		message      sql.NullString
+		hb           sql.NullTime
+		metadataJSON []byte
+	)
+
+	if err := rows.Scan(
+		&w.ID, &w.Name, &w.RuntimeType, &w.Status,
+		&message, &hb, &metadataJSON, &w.RegisteredAt, &w.UpdatedAt,
+	); err != nil {
+		return w, fmt.Errorf("failed to scan worker row: %w", err)
+	}
+
+	if message.Valid {
+		w.Message = message.String
+	}
+	if hb.Valid {
+		w.LastHeartbeat = &hb.Time
+	}
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &w.Metadata); err != nil {
+			return w, fmt.Errorf("failed to unmarshal worker metadata: %w", err)
+		}
+	}
+
+	return w, nil
+}
+
+// GetAll returns all worker rows with optional filters, ordered by registered_at ascending.
+func (r *workerRepo) GetAll(ctx context.Context, filters *WorkerFilters) ([]models.Worker, error) {
+	query, args := buildGetAllWorkerQuery(filters)
+
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workers: %w", err)
@@ -165,30 +203,9 @@ func (r *workerRepo) GetAll(ctx context.Context, filters *WorkerFilters) ([]mode
 	var workers []models.Worker
 
 	for rows.Next() {
-		var (
-			w            models.Worker
-			message      sql.NullString
-			hb           sql.NullTime
-			metadataJSON []byte
-		)
-
-		if err := rows.Scan(
-			&w.ID, &w.Name, &w.RuntimeType, &w.Status,
-			&message, &hb, &metadataJSON, &w.RegisteredAt, &w.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan worker row: %w", err)
-		}
-
-		if message.Valid {
-			w.Message = message.String
-		}
-		if hb.Valid {
-			w.LastHeartbeat = &hb.Time
-		}
-		if len(metadataJSON) > 0 {
-			if err := json.Unmarshal(metadataJSON, &w.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal worker metadata: %w", err)
-			}
+		w, err := scanWorkerRow(rows)
+		if err != nil {
+			return nil, err
 		}
 
 		workers = append(workers, w)
