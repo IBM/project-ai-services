@@ -105,7 +105,7 @@ func (g *openshiftGatherer) collectCatalogInstalled(ctx context.Context, catalog
 }
 
 func (g *openshiftGatherer) collectWorkerOnly(ctx context.Context, catalogCl *openshiftRuntime.OpenshiftClient, outDir, appName string) []string {
-	logger.InfolnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogAppName+". Collecting worker and application pods...")
+	logger.InfolnCtx(ctx, "No catalog pods found in namespace "+catalogConstants.CatalogNamespace+". Collecting worker and application pods...")
 	g.collectWorkerArtifacts(ctx, catalogCl, outDir)
 
 	workerName, err := workercommon.ResolveWorkerName(ctx, catalogCl)
@@ -195,7 +195,7 @@ func (g *openshiftGatherer) collectPodsByTemplate(ctx context.Context, rt *opens
 	}
 
 	for _, pod := range pods {
-		g.collectPod(ctx, podsDir, pod.Name, catalogConstants.CatalogAppName)
+		g.collectPod(ctx, podsDir, pod.Name, catalogConstants.CatalogNamespace)
 	}
 }
 

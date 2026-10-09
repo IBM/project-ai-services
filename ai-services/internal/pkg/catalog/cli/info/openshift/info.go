@@ -17,7 +17,7 @@ import (
 // DisplayCatalogInfo displays detailed information about the catalog service on OpenShift.
 func DisplayCatalogInfo(ctx context.Context) error {
 	// Initialize OpenShift client scoped to the catalog namespace
-	runtime, err := oc.NewOpenshiftClientWithNamespace(constants.CatalogAppName)
+	runtime, err := oc.NewOpenshiftClientWithNamespace(constants.CatalogNamespace)
 	if err != nil {
 		return fmt.Errorf("failed to initialize openshift client: %w", err)
 	}
