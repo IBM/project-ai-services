@@ -28,17 +28,17 @@ import (
 
 // upgradeVersions holds the current and available version information for display.
 type upgradeVersions struct {
-	currentChannel  string
-	currentCSV      string
+	currentChannel   string
+	currentCSV       string
 	availableChannel string
-	availableCSV    string
+	availableCSV     string
 	// availableCSVLabel is availableCSV or "(latest in channel)" when unset.
 	availableCSVLabel string
 }
 
 const (
-	yamlDecoderBufSz    = 4096
-	tableColumnPadding  = 2
+	yamlDecoderBufSz   = 4096
+	tableColumnPadding = 2
 )
 
 // csvVersionRe matches the semver portion of an OLM CSV name, e.g.
