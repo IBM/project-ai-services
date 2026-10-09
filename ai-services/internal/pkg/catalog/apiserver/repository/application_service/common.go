@@ -45,6 +45,7 @@ type ListApplicationsRequest struct {
 	PageSize       int
 	DeploymentType string
 	CatalogID      string
+	Query          string // Optional: case-insensitive substring search on the application name
 }
 
 // DeleteApplicationResponse is the response body for a delete application request.
@@ -677,6 +678,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	filters := &dbrepo.ApplicationFilters{
 		DeploymentType: req.DeploymentType,
 		CatalogID:      req.CatalogID,
+		Query:          req.Query,
 		Limit:          req.PageSize,
 		Offset:         (req.Page - 1) * req.PageSize,
 	}

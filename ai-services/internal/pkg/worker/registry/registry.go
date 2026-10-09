@@ -272,13 +272,13 @@ func (r *Registry) Preregister(ctx context.Context, workerName string) (string, 
 	return r.tokenStore.IssueToken(workerName), nil
 }
 
-// List returns all worker rows from the database ordered by registered_at ascending.
-func (r *Registry) List(ctx context.Context) ([]models.Worker, error) {
+// List returns all worker rows from the database with optional filters, ordered by registered_at ascending.
+func (r *Registry) List(ctx context.Context, filters *repository.WorkerFilters) ([]models.Worker, error) {
 	if r.repo == nil {
 		return nil, nil
 	}
 
-	return r.repo.GetAll(ctx)
+	return r.repo.GetAll(ctx, filters)
 }
 
 // Get returns the in-memory entry for a connected worker, or false if not found.
@@ -319,7 +319,7 @@ func (r *Registry) SweepStale(ctx context.Context, timeout time.Duration) {
 		return
 	}
 
-	workers, err := r.repo.GetAll(ctx)
+	workers, err := r.repo.GetAll(ctx, nil)
 	if err != nil {
 		logger.WarningfCtx(ctx, "worker registry: sweeper failed to fetch workers: %v", err)
 

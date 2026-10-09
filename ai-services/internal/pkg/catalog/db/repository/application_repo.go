@@ -17,6 +17,7 @@ import (
 type ApplicationFilters struct {
 	DeploymentType string // Optional: filter by deployment_type ("architectures" or "services")
 	CatalogID      string // Optional: filter by catalog_id (e.g., "rag", "chat", "digitize")
+	Query          string // Optional: case-insensitive substring search on the application name
 	Limit          int    // Optional: number of records to return (for pagination)
 	Offset         int    // Optional: number of records to skip (for pagination)
 }
@@ -93,6 +94,11 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 		if filters.CatalogID != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("a.catalog_id = $%d", len(args)+1))
 			args = append(args, filters.CatalogID)
+		}
+
+		if filters.Query != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.name ILIKE $%d ESCAPE '\\'", len(args)+1))
+			args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
 		}
 	}
 
@@ -199,25 +205,27 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 func (r *applicationRepo) GetCount(ctx context.Context, filters *ApplicationFilters) (int, error) {
 	query := `SELECT COUNT(DISTINCT a.id) FROM applications a`
 	args := []interface{}{}
-	argIndex := 1
-	whereAdded := false
+	whereClauses := []string{}
 
-	// Add deployment_type filter if provided
-	if filters != nil && filters.DeploymentType != "" {
-		query += fmt.Sprintf(" WHERE a.deployment_type = $%d", argIndex)
-		args = append(args, filters.DeploymentType)
-		argIndex++
-		whereAdded = true
+	if filters != nil {
+		if filters.DeploymentType != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.deployment_type = $%d", len(args)+1))
+			args = append(args, filters.DeploymentType)
+		}
+
+		if filters.CatalogID != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.catalog_id = $%d", len(args)+1))
+			args = append(args, filters.CatalogID)
+		}
+
+		if filters.Query != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.name ILIKE $%d ESCAPE '\\'", len(args)+1))
+			args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
+		}
 	}
 
-	// Add catalog_id filter if provided
-	if filters != nil && filters.CatalogID != "" {
-		if whereAdded {
-			query += fmt.Sprintf(" AND a.catalog_id = $%d", argIndex)
-		} else {
-			query += fmt.Sprintf(" WHERE a.catalog_id = $%d", argIndex)
-		}
-		args = append(args, filters.CatalogID)
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
 	var count int

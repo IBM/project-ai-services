@@ -65,6 +65,12 @@ const docTemplate = `{
                         "description": "Filter by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')",
                         "name": "catalog_id",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring search on application name",
+                        "name": "q",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2643,6 +2649,14 @@ const docTemplate = `{
                     "Workers"
                 ],
                 "summary": "List all workers",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring search on worker name",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "List of workers",
