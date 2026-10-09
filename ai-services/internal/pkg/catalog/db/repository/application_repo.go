@@ -17,7 +17,7 @@ import (
 type ApplicationFilters struct {
 	DeploymentType string // Optional: filter by deployment_type ("architectures" or "services")
 	CatalogID      string // Optional: filter by catalog_id (e.g., "rag", "chat", "digitize")
-	Name           string // Optional: case-insensitive substring search on the application name
+	Query          string // Optional: case-insensitive substring search on the application name
 	Limit          int    // Optional: number of records to return (for pagination)
 	Offset         int    // Optional: number of records to skip (for pagination)
 }
@@ -96,9 +96,9 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 			args = append(args, filters.CatalogID)
 		}
 
-		if filters.Name != "" {
+		if filters.Query != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("a.name ILIKE $%d ESCAPE '\\'", len(args)+1))
-			args = append(args, "%"+escapeLikePattern(filters.Name)+"%")
+			args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
 		}
 	}
 
@@ -218,9 +218,9 @@ func (r *applicationRepo) GetCount(ctx context.Context, filters *ApplicationFilt
 			args = append(args, filters.CatalogID)
 		}
 
-		if filters.Name != "" {
+		if filters.Query != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("a.name ILIKE $%d ESCAPE '\\'", len(args)+1))
-			args = append(args, "%"+escapeLikePattern(filters.Name)+"%")
+			args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
 		}
 	}
 
@@ -439,17 +439,6 @@ func (r *applicationRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	return nil
-}
-
-// escapeLikePattern escapes SQL LIKE/ILIKE wildcard characters in user-supplied
-// search input so that '%' and '_' are treated as literals, not pattern wildcards.
-// The backslash is used as the escape character (paired with ESCAPE '\' in the query).
-func escapeLikePattern(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
-
-	return s
 }
 
 // Made with Bob

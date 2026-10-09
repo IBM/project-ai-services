@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,7 +24,7 @@ type WorkerUpdate struct {
 
 // WorkerFilters defines optional filters for querying workers.
 type WorkerFilters struct {
-	Name string // Optional: case-insensitive substring search on the worker name
+	Query string // Optional: case-insensitive substring search on the worker name
 }
 
 // WorkerRepository defines the interface for worker data operations.
@@ -149,9 +148,9 @@ func buildGetAllWorkerQuery(filters *WorkerFilters) (string, []interface{}) {
 	query := `SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at FROM workers`
 	args := []interface{}{}
 
-	if filters != nil && filters.Name != "" {
+	if filters != nil && filters.Query != "" {
 		query += fmt.Sprintf(" WHERE name ILIKE $%d ESCAPE '\\'", len(args)+1)
-		args = append(args, "%"+escapeLikeWorkerPattern(filters.Name)+"%")
+		args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
 	}
 
 	query += " ORDER BY registered_at ASC"
@@ -343,17 +342,6 @@ func (r *workerRepo) GetApplicationIDsByWorkerIDs(ctx context.Context, workerIDs
 	}
 
 	return result, nil
-}
-
-// escapeLikeWorkerPattern escapes SQL LIKE/ILIKE wildcard characters in user-supplied
-// search input so that '%' and '_' are treated as literals, not pattern wildcards.
-// The backslash is used as the escape character (paired with ESCAPE '\' in the query).
-func escapeLikeWorkerPattern(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `%`, `\%`)
-	s = strings.ReplaceAll(s, `_`, `\_`)
-
-	return s
 }
 
 // Made with Bob
