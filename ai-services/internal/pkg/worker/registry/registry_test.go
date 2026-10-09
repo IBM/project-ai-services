@@ -67,7 +67,7 @@ func (r *fakeWorkerRepo) Delete(_ context.Context, id uuid.UUID) (bool, error) {
 	return true, nil
 }
 
-func (r *fakeWorkerRepo) GetAll(_ context.Context) ([]models.Worker, error) {
+func (r *fakeWorkerRepo) GetAll(_ context.Context, filters *repository.WorkerFilters) ([]models.Worker, error) {
 	out := make([]models.Worker, 0, len(r.workers))
 	for _, w := range r.workers {
 		out = append(out, *w)
@@ -513,7 +513,7 @@ func TestRegistry_SweepStale_PendingNotSwept(t *testing.T) {
 	// Sweep with a zero timeout — would sweep anything with a nil heartbeat.
 	reg.SweepStale(context.Background(), 0)
 
-	workers, _ := repo.GetAll(context.Background())
+	workers, _ := repo.GetAll(context.Background(), nil)
 	if len(workers) != 1 {
 		t.Fatalf("expected 1 worker, got %d", len(workers))
 	}
@@ -541,7 +541,7 @@ func TestRegistry_SweepStale_StaleReadyWorkerSwept(t *testing.T) {
 	// Sweep with a 1-minute timeout — the worker is 2 minutes stale.
 	reg.SweepStale(context.Background(), time.Minute)
 
-	workers, _ := repo.GetAll(context.Background())
+	workers, _ := repo.GetAll(context.Background(), nil)
 	if workers[0].Status != models.WorkerStatusDisconnected {
 		t.Errorf("expected status %q, got %q", models.WorkerStatusDisconnected, workers[0].Status)
 	}
