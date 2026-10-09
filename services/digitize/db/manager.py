@@ -2085,6 +2085,12 @@ class DatabaseManager:
         """
         Update the status (and optional result/error) of a ConversionTask.
 
+        When the new status is terminal (completed / failed / cancelled) this
+        method also deletes stale terminal rows whose ``completed_at`` is older
+        than ``settings.digitize.conversion_task_retention_hours`` hours.  The
+        delete runs in the same DB session as the status update so it adds no
+        extra round-trip overhead for non-terminal transitions.
+
         Args:
             task_id:     Task identifier.
             status:      New status string.
@@ -2094,6 +2100,14 @@ class DatabaseManager:
         Returns:
             True on success, False otherwise.
         """
+        from digitize.settings import settings
+        from datetime import timedelta
+
+        _TERMINAL = (
+            ConversionTaskStatus.COMPLETED,
+            ConversionTaskStatus.FAILED,
+            ConversionTaskStatus.CANCELLED,
+        )
         try:
             with get_db_session() as session:
                 now = datetime.now(timezone.utc)
@@ -2102,11 +2116,7 @@ class DatabaseManager:
                 }
                 if status == ConversionTaskStatus.RUNNING:
                     updates["started_at"] = now
-                if status in (
-                    ConversionTaskStatus.COMPLETED,
-                    ConversionTaskStatus.FAILED,
-                    ConversionTaskStatus.CANCELLED,
-                ):
+                if status in _TERMINAL:
                     updates["completed_at"] = now
                 if result_path is not None:
                     updates["result_path"] = result_path
@@ -2119,6 +2129,22 @@ class DatabaseManager:
                     .values(**updates)
                 )
                 result = cast(CursorResult, session.execute(stmt))
+
+                # Piggyback cleanup: purge old terminal rows in the same session.
+                if status in _TERMINAL:
+                    retention_h = settings.digitize.conversion_task_retention_hours
+                    cutoff = now - timedelta(hours=retention_h)
+                    purge_stmt = delete(ConversionTask).where(
+                        ConversionTask.status.in_(_TERMINAL),
+                        ConversionTask.completed_at < cutoff,
+                    )
+                    purged = cast(CursorResult, session.execute(purge_stmt)).rowcount
+                    if purged:
+                        logger.debug(
+                            f"Purged {purged} terminal conversion_task(s) older than "
+                            f"{retention_h}h"
+                        )
+
                 return result.rowcount > 0
         except SQLAlchemyError as e:
             logger.error(f"DB error updating task {task_id}: {e}", exc_info=True)
@@ -2379,6 +2405,63 @@ class DatabaseManager:
                 return [row[0] for row in session.execute(stmt).all()]
         except SQLAlchemyError as e:
             logger.error(f"DB error in get_connector_ids_with_queued_tasks: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def get_unregistered_connector_doc_ids(connector_id: str) -> List[str]:
+        """
+        Return doc_ids that were created for a connector job but were never
+        registered in ``connector_document_checksum``, AND whose parent job has
+        already reached a terminal state.
+
+        These are the docs that the safety-net step in ``_run_teardown`` needs
+        to clean up.  Docs whose job is still active (accepted / in_progress /
+        cancel_pending) are excluded because they are owned by a running
+        ``launch_ingest_pipeline`` task that will delete them itself when it
+        catches ``JobCancelledError`` with ``clean_files=True``.
+
+        The query is:
+            SELECT DISTINCT ct.doc_id
+            FROM conversion_tasks ct
+            JOIN jobs j ON j.job_id = ct.job_id
+            LEFT JOIN connector_document_checksum cdc
+                ON cdc.doc_id = ct.doc_id AND cdc.connector_id = :connector_id
+            WHERE ct.connector_id = :connector_id
+              AND cdc.doc_id IS NULL          -- not in checksum table
+              AND ct.doc_id IS NOT NULL
+              AND j.status NOT IN ('accepted', 'in_progress', 'cancel_pending')
+        """
+        _active_statuses = (
+            JobStatus.ACCEPTED.value,
+            JobStatus.IN_PROGRESS.value,
+            JobStatus.CANCEL_PENDING.value,
+        )
+        try:
+            with get_db_session() as session:
+                stmt = (
+                    select(ConversionTask.doc_id)
+                    .join(Job, Job.job_id == ConversionTask.job_id)
+                    .outerjoin(
+                        ConnectorDocumentChecksum,
+                        and_(
+                            ConnectorDocumentChecksum.doc_id == ConversionTask.doc_id,
+                            ConnectorDocumentChecksum.connector_id == connector_id,
+                        ),
+                    )
+                    .where(
+                        ConversionTask.connector_id == connector_id,
+                        ConnectorDocumentChecksum.doc_id.is_(None),
+                        ConversionTask.doc_id.is_not(None),
+                        Job.status.not_in(_active_statuses),
+                    )
+                    .distinct()
+                )
+                return list(session.scalars(stmt).all())
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in get_unregistered_connector_doc_ids({connector_id!r}): {e}",
+                exc_info=True,
+            )
             return []
 
     @staticmethod

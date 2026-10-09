@@ -505,6 +505,14 @@ async def _handle_interrupt(
 
     SYNC_CANCEL: Stop the current sync, set connector to OUT_OF_SYNC, cleanup staging.
     DELETE_CONNECTOR: Stop sync + full teardown (remove checksums, docs, connector row).
+
+    For DELETE_CONNECTOR the flow is fire-and-don't-wait: _run_teardown kicks
+    off immediately after _cancel_tick.  The in-flight job's
+    launch_ingest_pipeline coroutine is still running as an asyncio task and
+    owns its own VDB + document-row cleanup when it catches JobCancelledError
+    (clean_files=True).  _run_teardown's Step 4 acts as a safety net for any
+    docs that were already in a terminal state before the cancel propagated and
+    were therefore not handled by launch_ingest_pipeline.
     """
     if interrupt_type is None:
         # Default cancel behavior — treat as sync cancel
@@ -527,7 +535,10 @@ async def _handle_interrupt(
     elif interrupt_type == InterruptType.DELETE_CONNECTOR:
         logger.info(f"Handling delete connector for {connector_id!r}")
         _cancel_tick(sync_seq, connector_id)
-        # Run full teardown: remove checksums, delete orphaned docs, delete connector row
+        # Run full teardown immediately: registered checksums + already-terminal
+        # unregistered docs are cleaned up here.  Docs that are still being
+        # processed by the in-flight launch_ingest_pipeline task are handled
+        # there when it catches JobCancelledError (clean_files=True path).
         from digitize.api.v1.connectors import _run_teardown
         await _run_teardown(connector_id)
 

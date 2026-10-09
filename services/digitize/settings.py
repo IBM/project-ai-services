@@ -136,6 +136,20 @@ class DigitizeConfig(BaseSettings):
         description="Content sample size for chunk ID generation",
     )
 
+    # Conversion task retention
+    # Terminal conversion_tasks rows (completed / failed / cancelled) older than
+    # this threshold are deleted from the table whenever update_task_status writes
+    # a new terminal row.  The long default (24 h) keeps recent tasks available
+    # for debugging while preventing unbounded table growth.
+    conversion_task_retention_hours: float = Field(
+        default=24.0,
+        gt=12.0,
+        description=(
+            "Hours to retain terminal conversion_tasks rows (completed / failed / "
+            "cancelled) before they are purged.  Must be > 12."
+        ),
+    )
+
     @property
     def staging_dir(self) -> Path:
         """Directory for staging files."""
