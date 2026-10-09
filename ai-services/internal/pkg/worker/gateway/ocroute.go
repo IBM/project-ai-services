@@ -22,7 +22,7 @@ const (
 // If no route named "catalog-worker-gateway" is found, or the route has no host
 // assigned yet, an error is returned.
 func GatewayRouteHost(ctx context.Context) (string, error) {
-	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogAppName)
+	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogNamespace)
 	if err != nil {
 		return "", fmt.Errorf("worker gateway: create OpenShift client to look up gateway route: %w", err)
 	}

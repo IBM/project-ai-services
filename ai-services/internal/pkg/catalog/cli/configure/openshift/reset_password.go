@@ -15,7 +15,7 @@ import (
 
 func ResetCatalogPassword(ctx context.Context) error {
 	catalog := catalogConstants.CatalogAppName
-	namespace := catalog
+	namespace := catalogConstants.CatalogNamespace
 
 	// Create a new Helm client
 	helmClient, err := helm.NewHelm(namespace)
