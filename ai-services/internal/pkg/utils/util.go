@@ -480,13 +480,17 @@ func GetSpyreClusterPolicyState(ctx context.Context, client *openshift.Openshift
 
 	if err := client.Client.Get(ctx, types.NamespacedName{Name: SpyreClusterPolicyName}, obj); err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", false, nil
+			return "", false, fmt.Errorf("SpyreClusterPolicy %s not found: %w", SpyreClusterPolicyName, err)
 		}
 		if apierrors.IsForbidden(err) {
 			return "", false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
 		}
 		if IsTransientK8sError(err) {
-			return "", false, err
+			// Treat rate-limit / timeout errors as "not found yet"; callers
+			// that poll will retry, and one-shot callers will skip validation.
+			logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout)...")
+
+			return "", false, nil
 		}
 
 		return "", false, fmt.Errorf("failed to get SpyreClusterPolicy: %w", err)

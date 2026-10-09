@@ -9,6 +9,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 const (
@@ -39,10 +40,17 @@ func (r *NodeLabelsRule) Verify(ctx context.Context) error {
 
 	state, found, err := utils.GetSpyreClusterPolicyState(ctx, client)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Spyre not installed; node-label validation does not apply.
+			return nil
+		}
+
 		return err
 	}
 
-	// Validate node labels only if SpyreClusterPolicy is in ready state
+	// Validate node labels only if SpyreClusterPolicy is in ready state.
+	// When status.state is absent (!found) or set to SpyreStateNoSpyreNodes,
+	// there are no Spyre nodes to validate labels against.
 	if !found || state != utils.SpyreStateReady {
 		return nil
 	}

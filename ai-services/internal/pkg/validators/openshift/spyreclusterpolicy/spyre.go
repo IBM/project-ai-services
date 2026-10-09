@@ -35,12 +35,8 @@ func (r *SpyrePolicyRule) Verify(ctx context.Context) error {
 		return err
 	}
 
-	if !found {
-		return fmt.Errorf("SpyreClusterPolicy %s not found", utils.SpyreClusterPolicyName)
-	}
-
-	if state != utils.SpyreStateReady && state != utils.SpyreStateNoSpyreNodes {
-		return fmt.Errorf("SpyreClusterPolicy not ready (status.state: %s)", state)
+	if !found || (state != utils.SpyreStateReady && state != utils.SpyreStateNoSpyreNodes) {
+		return fmt.Errorf("SpyreClusterPolicy not ready (status.state: %q)", state)
 	}
 
 	return nil
@@ -55,5 +51,5 @@ func (r *SpyrePolicyRule) Level() constants.ValidationLevel {
 }
 
 func (r *SpyrePolicyRule) Hint() string {
-	return "Run 'oc get spyreclusterpolicy and ensure status.state is 'ready' or 'no Spyre nodes'."
+	return "Run 'oc get spyreclusterpolicy' and ensure status.state is 'ready' or 'no Spyre nodes'."
 }
