@@ -69,7 +69,7 @@ func (r *mockWorkerRepo) Delete(_ context.Context, id uuid.UUID) (bool, error) {
 	return true, nil
 }
 
-func (r *mockWorkerRepo) GetAll(_ context.Context) ([]models.Worker, error) {
+func (r *mockWorkerRepo) GetAll(_ context.Context, _ *repository.WorkerFilters) ([]models.Worker, error) {
 	out := make([]models.Worker, 0, len(r.workers))
 	for _, w := range r.workers {
 		out = append(out, *w)
