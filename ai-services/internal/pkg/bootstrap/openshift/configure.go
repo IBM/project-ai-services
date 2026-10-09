@@ -88,7 +88,7 @@ func waitForAllCRs(ctx context.Context, client *openshift.OpenshiftClient) error
 
 		return fmt.Errorf("SpyreClusterPolicy not ready: %w", err)
 	}
-	s.Stop("SpyreClusterPolicy is running")
+	s.Stop("SpyreClusterPolicy is ready")
 
 	// Wait for DSCInitialization
 	s = spinner.New("Waiting for DSCInitialization to be ready")
@@ -258,8 +258,8 @@ func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftC
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
 		state, found, err := utils.GetSpyreClusterPolicyState(pollCtx, client)
 		if err != nil {
-			if utils.IsTransientK8sError(err) {
-				logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...")
+			if apierrors.IsNotFound(err) {
+				logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
 
 				return false, nil
 			}
@@ -268,7 +268,8 @@ func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftC
 		}
 
 		if !found {
-			logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
+			// CR exists but status.state not set yet.
+			logger.Debugln("SpyreClusterPolicy status.state not populated yet, waiting...")
 
 			return false, nil
 		}
