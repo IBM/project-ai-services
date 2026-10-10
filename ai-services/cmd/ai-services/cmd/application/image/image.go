@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
@@ -17,6 +18,7 @@ import (
 var (
 	templateName string
 	legacyImage  bool
+	runtimeType  string
 )
 
 var ImageCmd = &cobra.Command{
@@ -24,6 +26,13 @@ var ImageCmd = &cobra.Command{
 	Short: "Manage application images",
 	Long:  ``,
 	Args:  cobra.MaximumNArgs(0),
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if runtimeType == "" {
+			return fmt.Errorf("required flag(s) \"runtime\" not set")
+		}
+
+		return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return nil
 	},
@@ -107,4 +116,5 @@ func init() {
 	ImageCmd.PersistentFlags().StringVarP(&templateName, "template", "t", "", "Application template name (Required)")
 	_ = ImageCmd.MarkPersistentFlagRequired("template")
 	ImageCmd.PersistentFlags().BoolVar(&legacyImage, "legacy", false, "Use legacy application image implementation")
+	cmdcommon.ConfigurePersistentRuntimeFlag(ImageCmd, &runtimeType)
 }
