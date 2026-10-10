@@ -1,6 +1,8 @@
---- pyproject.toml.bkp	2026-09-17 22:53:51
-+++ pyproject.toml	2026-09-17 22:53:51
-@@ -68,13 +68,13 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index fc8415e5..09139395 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -68,14 +68,15 @@ proxy = [
      "azure-storage-blob>=12.28.0,<13.0",
      "mcp>=1.28.1,<2.0",
      "litellm-proxy-extras==0.4.94",
@@ -14,5 +16,7 @@
 -    "pyroscope-io>=0.8.16,<1.0; sys_platform != 'win32'",
 +    "pyroscope-io>=0.8.16,<1.0; sys_platform != 'win32' and platform_machine != 'ppc64le'",
      "expression>=5.6.0,<6.0",
++    "prisma>=0.11.0,<1.0",
  ]
  # Thin client install for the `lite` CLI on developer laptops. The CLI's heavy
+ # imports are all guarded, so it runs on the base SDK plus just these five, and

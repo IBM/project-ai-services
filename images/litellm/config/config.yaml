@@ -11,3 +11,5 @@ general_settings:
   pass_through_endpoints:
     - path: "/tokenize"
       target: http://localhost:8000/watsonx/ml/v1/text/tokenization
+  master_key: "os.environ/LITELLM_MASTER_KEY"
+  database_url: "os.environ/DATABASE_URL"

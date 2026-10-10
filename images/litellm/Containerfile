@@ -2,10 +2,11 @@
 FROM registry.access.redhat.com/ubi9/ubi:9.8 as builder
 
 ARG VERSION=${VERSION}
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
-RUN dnf -y update && \
-    dnf -y install \
+RUN dnf update ${DNF_FLAGS} -y && \
+    dnf install ${DNF_FLAGS} -y \
         wget \
         patch \
         python3.12 \
@@ -14,7 +15,11 @@ RUN dnf -y update && \
         gcc \
         gcc-c++ \
         openssl-devel \
-        zlib-devel && \
+        zlib-devel \
+        git \
+        # Required for building primsa engines
+        https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os/Packages/protobuf-compiler-3.14.0-17.el9.ppc64le.rpm \
+        https://mirror.stream.centos.org/9-stream/AppStream/ppc64le/os/Packages/protobuf-3.14.0-17.el9.ppc64le.rpm && \
     dnf clean all
 
 WORKDIR /build
@@ -35,7 +40,7 @@ ENV RUSTC_BOOTSTRAP=1 \
 RUN wget https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz >/dev/null
 RUN tar -xzf v${VERSION}.tar.gz && \
     cd litellm-${VERSION} && \
-    patch -p1 pyproject.toml < ../pyproject-toml.patch && \
+    patch -p1 < ../pyproject-toml.patch && \
     patch -p1 < ../watsonx-passthrough.patch && \
     uv lock && \
 # 5. Export dependencies to a requirements.txt file \
@@ -57,31 +62,65 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 	--prefer-binary && \
     uv build --wheel --out-dir /wheels
 
+# 7. Patch & build Prisma
+WORKDIR /build
+RUN git clone --depth 1 --branch 5.4.2 https://github.com/prisma/prisma-engines.git && \
+    curl -sSL https://static.crates.io/crates/ring/ring-0.16.20.crate | tar -xvzf -
+
+WORKDIR /build/ring-0.16.20
+RUN patch -p1 < ../prisma/ring.patch
+
+WORKDIR /build/prisma-engines
+RUN source "$HOME/.cargo/env" && rustup install 1.94.1 && rustup default 1.94.1 && \
+    export RUSTFLAGS="--cap-lints allow -A ambiguous_glob_imports" && \
+    patch -p1 < ../prisma/prisma.patch && \
+    cargo update -p time@0.3.25 && \
+    cargo build --release --bin query-engine && \
+    cargo build --release --bin schema-engine && \
+    cargo build --release -p query-engine-node-api
+
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 ARG VERSION=${VERSION}
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
-ENV DISABLE_ADMIN_UI=true \
-    LITELLM_NON_ROOT=true
-
-RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
-    microdnf -y update && \
-    microdnf -y install \
-        python3.12 \
-        python3.12-pip && \
-    python3.12 -m pip install --no-cache-dir --no-index \
-	--find-links=/wheels  \
-	litellm[proxy,semantic-router]==${VERSION} && \
-    python3.12 -m pip cache purge && \
-    microdnf remove -y python3.12-pip && \
-    microdnf clean all 
-
-USER 1001
+ENV LITELLM_NON_ROOT=true \
+    #pyroscope isn't supported on ppc64le
+    LITELLM_ENABLE_PYROSCOPE=false \
+    LITELLM_UI_PATH=/app/ui \
+    LITELLM_ASSETS_PATH=/app/assets \
+    PRISMA_QUERY_ENGINE_LIBRARY=/app/prisma/libquery_engine-rhel-openssl-3.0.x.so.node \
+    PRISMA_QUERY_ENGINE_BINARY=/app/prisma/query-engine \
+    PRISMA_SCHEMA_ENGINE_BINARY=/app/prisma/schema-engine \
+    PRISMA_ENGINES_CHECKSUM_IGNORE_WARNING="true" \
+    HOME=/app \
+    PATH="/app/.venv/bin:${PATH}"
 
 WORKDIR /app
 
 COPY config ./
+COPY --from=builder /build/prisma-engines/target/release/query-engine prisma/query-engine
+COPY --from=builder /build/prisma-engines/target/release/schema-engine prisma/schema-engine
+COPY --from=builder /build/prisma-engines/target/release/libquery_engine.so prisma/libquery_engine-rhel-openssl-3.0.x.so.node
+COPY --from=builder /build/litellm-${VERSION}/schema.prisma ./
+
+RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
+    microdnf -y update ${DNF_FLAGS} && \
+    microdnf -y install ${DNF_FLAGS} \
+        python3.12 \
+        libatomic \
+        openssl && \
+    microdnf clean all && \
+    useradd -u 1001 -M -d /app -s /sbin/nologin litellm && \
+    python3.12 -m venv /app/.venv && \
+    /app/.venv/bin/pip install --no-cache-dir --no-index \
+        --find-links=/wheels \
+        litellm[proxy,semantic-router]==${VERSION} && \
+    prisma generate --schema=/app/schema.prisma && \
+    chown -R 1001:1001 /app
+
+USER 1001
 
 EXPOSE 4000
 
