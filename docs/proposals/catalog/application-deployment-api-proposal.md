@@ -165,8 +165,7 @@ Authorization: Bearer <access_token>
 #### Component Catalog Endpoints
 
 - `GET /api/v1/components` - List available component types; filter with `?category=model|db`
-- `GET /api/v1/components/{type}/params` - Get component parameters (returns `values.schema.json`)
-- `GET /api/v1/components/{type}/deploy_options` - Get component deploy options
+- `GET /api/v1/components/{type}/deploy_options` - Get deploy options for a component type
 
 ## 5. API Endpoint Details
 
@@ -1860,13 +1859,15 @@ Component and Provider object schemas are the same as in [5.4.1](#541-get-archit
 
 ## 5.5 Component Catalog Endpoints
 
-Read-only catalog endpoints that describe the available component types and their providers. Sourced from `assets/components/` asset files — no database reads.
+Read-only endpoints that describe available component types and their providers. Sourced entirely from `assets/components/` — no database reads.
+
+---
 
 ### 5.5.1 List Available Components
 
 **Endpoint:** `GET /api/v1/components`
 
-**Description:** Retrieves a flat list of all available component types. Use the `?category` query parameter to scope the result to model components or database components.
+**Description:** Returns a flat list of all available component types. Use `?category` to filter by kind.
 
 **Request Headers:**
 
@@ -1876,44 +1877,57 @@ Authorization: Bearer <access_token>
 
 **Query Parameters:**
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| category | string | No | — | `model` — returns `llm`, `embedding`, `reranker` only. `db` — returns `vector_db` only. Omit for all. |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| category | string | No | `model` — returns `llm`, `embedding`, `reranker` only. `db` — returns `vector_db` only. Omit for all. |
 
-**Response (200 OK):**
+**Example Requests:**
+
+```
+GET /api/v1/components
+GET /api/v1/components?category=model
+GET /api/v1/components?category=db
+```
+
+**Response (200 OK) — no filter:**
 
 ```json
 [
   {
     "type": "llm",
     "name": "Large language model (LLM)",
-    "description": "Deploy and manage LLM inference backends across supported runtimes"
+    "description": "Deploy and manage LLM inference backends across supported runtimes",
+    "category": "model"
   },
   {
     "type": "embedding",
     "name": "Embedding model",
-    "description": "Deploy embedding model backends for vector generation"
+    "description": "Deploy embedding model backends for vector generation",
+    "category": "model"
   },
   {
     "type": "reranker",
     "name": "Reranker model",
-    "description": "Deploy reranker model backends for retrieval quality improvement"
+    "description": "Deploy reranker model backends for retrieval quality improvement",
+    "category": "model"
   },
   {
     "type": "vector_db",
     "name": "Vector database",
-    "description": "Deploy vector store backends for semantic search"
+    "description": "Deploy vector store backends for semantic search",
+    "category": "db"
   }
 ]
 ```
 
-**Response Schema (ComponentSummary[]):**
+**Response Schema:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| type | string | Component type identifier: `llm`, `embedding`, `reranker`, `vector_db` |
+| type | string | Component type identifier |
 | name | string | Display name |
-| description | string | Description of the component type |
+| description | string | Short description |
+| category | string | `model` for `llm`, `embedding`, `reranker`; `db` for `vector_db` |
 
 **Error Responses:**
 
@@ -1921,125 +1935,34 @@ Authorization: Bearer <access_token>
 - `401 Unauthorized` - Invalid or missing access token
 - `500 Internal Server Error` - Server error
 
-**Implementation Notes:**
+**`category` field in `metadata.yaml`:**
 
-- Read the top-level `assets/components/<type>/metadata.yaml` for each type
-- No database reads — purely asset-driven
+`category` is a new field added to each component's top-level `metadata.yaml`.
+The backend reads it to populate the response and to apply `?category` filtering.
+
+```yaml
+# assets/components/llm/vllm-spyre/metadata.yaml
+type: component
+id: vllm-spyre
+component_type: llm
+category: model          # NEW — "model" for llm / embedding / reranker
+...
+
+# assets/components/vector_store/opensearch/metadata.yaml
+type: component
+id: opensearch
+component_type: vector_db
+category: db             # NEW — "db" for vector store components
+...
+```
 
 ---
 
-### 5.5.2 Get Component Parameters
-
-**Endpoint:** `GET /api/v1/components/{type}/params`
-
-**Description:** Returns the `values.schema.json` for the given component type verbatim. This is the single source of truth for all configuration parameters, validation rules, and credential fields needed to deploy or connect a component.
-
-**Request Headers:**
-
-```
-Authorization: Bearer <access_token>
-```
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| type | string | Yes | Component type: `llm`, `embedding`, `reranker`, `vector_db` |
-
-**Request Body:** None
-
-**Example Request:**
-
-```
-GET /api/v1/components/reranker/params
-```
-
-**Response (200 OK) — `reranker`:**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "model": {
-      "type": "string",
-      "title": "Reranker model",
-      "description": "Reranker model",
-      "oneOf": [
-        {
-          "const": "BAAI/bge-reranker-v2-m3",
-          "title": "bge-reranker-v2-m3",
-          "description": "A multilingual, cross-encoder-based reranker model used to improve retrieval quality by scoring and ranking candidate documents."
-        }
-      ],
-      "default": "BAAI/bge-reranker-v2-m3"
-    }
-  }
-}
-```
-
-**Response (200 OK) — `llm` (watsonx provider):**
-
-```json
-{
-  "$schema": "https://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["watsonxApiKey", "watsonxProjectId", "watsonxUrl"],
-  "properties": {
-    "model": {
-      "type": "string",
-      "title": "Large language model (LLM)",
-      "description": "Chat/Instruct model name for WatsonX",
-      "oneOf": [
-        { "const": "ibm/granite-4-h-small", "title": "granite-4-h-small" }
-      ],
-      "default": "ibm/granite-4-h-small"
-    },
-    "watsonxApiKey": {
-      "type": "string",
-      "title": "API key",
-      "format": "password",
-      "description": "API key for accessing watsonx",
-      "pattern": "^[A-Za-z0-9_-]{44}$",
-      "minLength": 44,
-      "maxLength": 44
-    },
-    "watsonxProjectId": {
-      "type": "string",
-      "title": "Project ID",
-      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-    },
-    "watsonxUrl": {
-      "type": "string",
-      "title": "API endpoint",
-      "pattern": "^https://[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*(/.*)?$"
-    }
-  }
-}
-```
-
-**Response Schema:** Raw `values.schema.json` (JSON Schema draft-07). Fields with `"format": "password"` are secret credentials the UI should mask.
-
-**Error Responses:**
-
-- `401 Unauthorized` - Invalid or missing access token
-- `404 Not Found` - Component type not found
-- `500 Internal Server Error` - Server error
-
-**Implementation Notes:**
-
-- Read `assets/components/<type>/<provider>/<runtime>/values.schema.json` for the active provider
-- Return verbatim with `Content-Type: application/json`
-
----
-
-### 5.5.3 Get Component Deploy Options
+### 5.5.2 Get Component Deploy Options
 
 **Endpoint:** `GET /api/v1/components/{type}/deploy_options`
 
-**Description:** Returns the full component type object — including all providers and their resource requirements — for the given type. Sourced from `metadata.yaml` files under `assets/components/<type>/` — no database reads.
+**Description:** Returns all providers for the given component type, including their version, resource requirements, and the URL to fetch their configuration schema.
 
 **Request Headers:**
 
@@ -2053,12 +1976,16 @@ Authorization: Bearer <access_token>
 |-----------|------|----------|-------------|
 | type | string | Yes | Component type: `llm`, `embedding`, `reranker`, `vector_db` |
 
-**Request Body:** None
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| runtime | string | No | `podman` or `openshift`. Defaults to server runtime. |
 
 **Example Request:**
 
 ```
-GET /api/v1/components/llm/deploy_options
+GET /api/v1/components/llm/deploy_options?runtime=podman
 ```
 
 **Response (200 OK):**
@@ -2073,39 +2000,28 @@ GET /api/v1/components/llm/deploy_options
       "name": "AI Inference on CPU",
       "description": "Deploy instruct models on vLLM inference engine (CPU-only)",
       "version": "1.0.0",
-      "schema": "/api/v1/components/llm/params",
       "resources": {
         "cpu": 10,
         "memory": 161061273600,
         "storage": 53687091200
-      }
-    },
-    {
-      "id": "watsonx",
-      "name": "IBM watsonx.ai on IBM Cloud",
-      "description": "Deploy llm models using watsonx",
-      "version": "1.0.0",
-      "schema": "/api/v1/components/llm/params",
-      "resources": {
-        "cpu": 1,
-        "memory": 4294967296
-      }
+      },
+      "schema": "/api/v1/components/llm/providers/vllm-cpu/params?runtime=podman"
     },
     {
       "id": "vllm-spyre",
-      "name": "RedHat AI Inference with Spyre",
-      "description": "Deploy instruct models on vLLM inference engine with Spyre acceleration",
+      "name": "Red Hat AI Inference with Spyre",
+      "description": "Deploy instruct models on vLLM with Spyre acceleration",
       "version": "1.0.0",
       "default": true,
-      "schema": "/api/v1/components/llm/params",
       "resources": {
         "cpu": 8,
-        "memory": 161061273600,
+        "memory": 214748364800,
+        "storage": 53687091200,
         "accelerators": {
           "ibm.com/spyre_pf": 4
-        },
-        "storage": 53687091200
-      }
+        }
+      },
+      "schema": "/api/v1/components/llm/providers/vllm-spyre/params?runtime=podman"
     }
   ]
 }
@@ -2116,28 +2032,20 @@ GET /api/v1/components/llm/deploy_options
 | Field | Type | Description |
 |-------|------|-------------|
 | type | string | Component type identifier |
-| name | string | Display name of the component type |
-| providers | array | All available providers for this component type |
+| name | string | Display name |
 | providers[].id | string | Provider identifier |
 | providers[].name | string | Provider display name |
 | providers[].description | string | Provider description |
 | providers[].version | string | Provider asset version |
-| providers[].default | boolean | `true` for the recommended default provider; omitted otherwise |
-| providers[].schema | string | URL to `GET /api/v1/components/{type}/params` |
-| providers[].resources | object | Resource requirements — `cpu` (cores), `memory` (bytes), `storage` (bytes, optional), `accelerators` (map, optional) |
+| providers[].default | boolean | `true` for the recommended default; omitted otherwise |
+| providers[].resources | object | `cpu` (cores), `memory` (bytes), `storage` (bytes, optional), `accelerators` (map, optional) |
+| providers[].schema | string | URL to fetch this provider's configuration schema — `GET /api/v1/components/{type}/providers/{id}/params?runtime=<rt>` |
 
 **Error Responses:**
 
-- `400 Bad Request` - Invalid `type`
+- `400 Bad Request` - Invalid `type` or `runtime`
 - `401 Unauthorized` - Invalid or missing access token
 - `404 Not Found` - Component type not found
-
-**Implementation Notes:**
-
-1. Validate `type`
-2. Read all `assets/components/<type>/<provider>/metadata.yaml` files for the given type
-3. Read `assets/components/<type>/<provider>/<runtime>/metadata.yaml` for `version` and `resources`
-4. Assemble and return the component type object in the shape above
 
 ---
 
