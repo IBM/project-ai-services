@@ -152,21 +152,35 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
   "model_name": "ibm-granite/granite-3.3-8b-instruct",
   "litellm_params": {
     "model": "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
-    "api_base": "http://llm-52db58ac5a:8000/v1"
-  },
-  "model_info": {
-    "enable_tag_filtering": true,
-    "tags": ["vllm-cpu"]
+    "api_base": "http://llm-5b6297a4b5:8000/v1",
+    "tags": ["vllm-spyre"]
   }
 }
+```
+
+Equivalent `curl`:
+
+```bash
+curl -k -X POST https://litellm-api.10.20.185.165.nip.io/model/new \
+  -H "Authorization: Bearer $LITELLM_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_name": "ibm-granite/granite-3.3-8b-instruct",
+    "litellm_params": {
+      "model": "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
+      "api_base": "http://llm-5b6297a4b5:8000/v1",
+      "tags": ["vllm-spyre"]
+    }
+  }'
 ```
 
 > **Notes:**
 > - `model_name` is the full model name as configured in `params.model` — no provider suffix. This is exactly what consumer services pass in the `model` field.
 > - `model` uses the `hosted_vllm/<model-name>` prefix — LiteLLM infers the provider from the prefix. No separate `custom_llm_provider` field and no `api_key` are needed for local vLLM endpoints.
 > - `api_base` for **llm** and **embedding** routes **must** include a `/v1` suffix (e.g. `http://llm-52db58ac5a:8000/v1`). The `hosted_vllm` provider does not prepend it automatically — omitting it causes LiteLLM to call `/chat/completions` directly, which vLLM does not serve, resulting in a `404`. For **reranker** routes, use the **bare** base URL (no `/v1`) — the Cohere `ClientV2` constructs `/v2/rerank` itself from the base.
-> - `enable_tag_filtering` and `tags` are nested inside the **`model_info`** block on the `/model/new` request body — not at the top level and not inside `litellm_params`.
-> - `tags` carries the **provider ID** (e.g. `vllm-cpu`, `vllm-spyre`, `watsonx`). Consumer services pass the same provider ID in `metadata.tags` on inference requests so LiteLLM routes to the correct backend.
+> - `tags` is nested inside **`litellm_params`** on the `/model/new` request body and carries the **provider ID** of the backing deployment (e.g. `vllm-cpu`, `vllm-spyre`, `watsonx`).
+> - Tag enforcement is enabled gateway-wide via `router_settings.enable_tag_filtering: true` in the LiteLLM config rendered by `litellm.yaml.tmpl` — it is not set per route.
+> - The same `model_name` may be registered multiple times (once per provider, e.g. a `vllm-cpu` and a `vllm-spyre` deployment of granite). Each registration is a separate LiteLLM deployment distinguished by its provider tag.
 > - For **embedding** and **reranker** component types, a `model_info` block is also included to tell LiteLLM the routing mode: `{ "model_info": { "mode": "embedding" } }` or `{ "model_info": { "mode": "rerank" } }`. This is omitted for `llm` type routes.
 
 **Deregister (on undeploy):**
@@ -181,9 +195,13 @@ No UUID lookup needed — `model_name` is the stable, unique identifier for the 
 
 **Tag-based routing convention:**
 
-Each registered route carries a single tag — the **provider ID** of the backing deployment (e.g. `vllm-cpu`, `vllm-spyre`, `watsonx`). The `model_name` is the full `params.model` value (e.g. `ibm-granite/granite-3.3-8b-instruct`, `BAAI/bge-m3`, `BAAI/bge-reranker-v2-m3`). Consumer services pass the model name in the `model` field and the provider ID in `metadata.tags` — LiteLLM selects a healthy route matching both. The provider identity is tracked via tags rather than being encoded in the model name.
+Each registered route carries a single tag in `litellm_params.tags` — the **provider ID** of the backing deployment (e.g. `vllm-cpu`, `vllm-spyre`, `watsonx`). The `model_name` is the full `params.model` value (e.g. `ibm-granite/granite-3.3-8b-instruct`, `BAAI/bge-m3`, `BAAI/bge-reranker-v2-m3`). The provider identity is tracked via tags rather than being encoded in the model name.
 
-`enable_tag_filtering: true` is set on each route registration so LiteLLM enforces tag matching on every request — a request carrying `metadata.tags: ["vllm-cpu"]` will only reach routes tagged `vllm-cpu`.
+Tags reach the router from two sources:
+- **Virtual key metadata** — `metadata.tags` on the key (see [Virtual Key Provisioning](#virtual-key-provisioning)) holds the single provider the key is allowed to reach (e.g. `["vllm-spyre"]`). LiteLLM applies this tag to every request made with that key.
+- **Request metadata** (optional) — a consumer may pass `metadata.tags` on an individual inference request to pin a specific provider.
+
+With `enable_tag_filtering` on, a request is only eligible for deployments of the requested `model_name` whose `litellm_params.tags` intersect the request/key tags — e.g. a key tagged `["vllm-spyre"]` only reaches the Spyre deployment of granite.
 
 Since `model_name` is the full `params.model` value and is unique per model, there is no need to derive or store a route ID string in the Catalog DB.
 
@@ -201,12 +219,29 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
   "models": ["ibm-granite/granite-3.3-8b-instruct"],
   "duration": null,
   "metadata": {
-    "tags": ["vllm-cpu"]
+    "tags": ["vllm-spyre"]
   }
 }
 ```
 
-`"key_name"` matches the model name exactly. `"models"` scopes the key to routes registered under that model name — attempts to call any other model name return `401`. `"duration": null` makes the key non-expiring. `"metadata.tags"` carries the provider ID (e.g. `vllm-cpu`, `watsonx`) so LiteLLM associates the key with the correct provider for spend tracking and observability. LiteLLM returns a `key` value of the form `sk-...`.
+Equivalent `curl`:
+
+```bash
+curl -k -X POST 'https://litellm-api.10.20.185.165.nip.io/key/generate' \
+  -H "Authorization: Bearer $LITELLM_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "key_name": "ibm-granite/granite-3.3-8b-instruct",
+    "models": ["ibm-granite/granite-3.3-8b-instruct"],
+    "metadata": {
+      "tags": ["vllm-spyre"]
+    }
+  }'
+```
+
+`"key_name"` matches the model name exactly. `"models"` scopes the key to routes registered under that model name — attempts to call any other model name return `401`. `"duration": null` makes the key non-expiring. `"metadata.tags"` holds exactly **one provider ID** — the provider of the model the key was generated for (e.g. `["vllm-spyre"]`, or `["watsonx"]` for a connector). LiteLLM attaches this tag to every request made with the key, so tag filtering restricts the request to the deployment of the model whose `litellm_params.tags` matches it. The tag also drives per-provider spend tracking and observability. LiteLLM returns a `key` value of the form `sk-...`.
+
+> **Note:** `metadata.tags` accepts multiple provider IDs. A key tagged `["vllm-cpu", "vllm-spyre"]` would let LiteLLM route (load-balance) requests across **both** the CPU and Spyre deployments of the same `model_name`. The platform intentionally does **not** do this — each key is pinned to a single provider so a consumer always reaches the deployment it was provisioned for.
 
 **Storage — `keys` table in Catalog DB (local models and remote connectors):**
 
@@ -258,7 +293,7 @@ The `keys` array is the list of virtual key values (not key names) to revoke. On
 
 **Usage by consumer services:**
 
-Consumer services call the LiteLLM gateway with the per-model virtual key as a standard bearer token, passing the **provider ID** in `metadata.tags` so LiteLLM routes to the correct backend:
+Consumer services call the LiteLLM gateway with the per-model virtual key as a standard bearer token. Provider routing is driven by the key's `metadata.tags`; a request may additionally pass `metadata.tags` to pin a single provider:
 
 ```
 POST http://litellm:4000/chat/completions
@@ -273,7 +308,7 @@ Authorization: Bearer <virtual-key>
 }
 ```
 
-The `model` field is the **full model name** as configured — no provider suffix. `metadata.tags` carries the provider ID, which must match the tag on the registered route. LiteLLM uses `enable_tag_filtering` to enforce this — only routes tagged `vllm-cpu` are eligible to serve this request. Consumer services never need to embed the provider in the model name; only the `metadata.tags` field changes if the provider changes.
+The `model` field is the **full model name** as configured — no provider suffix. Request-level `metadata.tags` is optional; when present it must match a route's `litellm_params.tags`. LiteLLM uses `enable_tag_filtering` to enforce this — only routes tagged `vllm-cpu` are eligible to serve this request. When omitted, the key's `metadata.tags` apply. Consumer services never need to embed the provider in the model name.
 
 Each consumer service fetches only the key(s) for the model(s) it uses via `GET /api/v1/models/keys?instance_id=<component_id>`. A service using an LLM does not fetch the key for an embedding model — principle of least privilege. The virtual key is the **only credential** needed for model access, regardless of whether the backing provider is a local vLLM pod or an external WatsonX connector.
 
@@ -359,10 +394,9 @@ Content-Type: application/json
     "model": "watsonx/ibm/granite-4-h-small",
     "api_base": "https://us-south.ml.cloud.ibm.com",
     "api_key": "<params.api_key>",
-    "project_id": "<params.project_id>"
-  },
-  "enable_tag_filtering": true,
-  "tags": ["watsonx"]
+    "project_id": "<params.project_id>",
+    "tags": ["watsonx"]
+  }
 }
 ```
 
@@ -1575,8 +1609,8 @@ POST /api/v1/models
   6. [async] Poll InspectPod until liveness probe passes
   7. [async] POST /model/new to LiteLLM (model_name="ibm-granite/granite-3.3-8b-instruct",
                                        model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
-                                       api_base="http://<pod-name>:8000",
-                                       tags=["ibm-granite/granite-3.3-8b-instruct"])
+                                       api_base="http://<pod-name>:8000/v1",
+                                       litellm_params.tags=["vllm-cpu"])
   8. [async] POST /key/generate → LiteLLM Admin API
             body: { "key_name": "ibm-granite/granite-3.3-8b-instruct",
                     "models": ["ibm-granite/granite-3.3-8b-instruct"],
@@ -1616,7 +1650,7 @@ POST /api/v1/models
   7. [async] POST /model/new to LiteLLM (model_name="ibm-granite/granite-3.3-8b-instruct",
                                        model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
                                        api_base="http://ai-services--caddy:8080/worker/lpar-1/models/<caddyRouteID>",
-                                       tags=["ibm-granite/granite-3.3-8b-instruct"])
+                                       litellm_params.tags=["vllm-spyre"])
   8. [async] POST /key/generate → LiteLLM Admin API
             body: { "key_name": "ibm-granite/granite-3.3-8b-instruct",
                     "models": ["ibm-granite/granite-3.3-8b-instruct"],
@@ -1647,7 +1681,7 @@ POST /api/v1/models          (deployment_type=remote)
                                       api_base:   params.api_base,
                                       api_key:    params.api_key,
                                       project_id: params.project_id,
-                                      tags:       ["ibm/granite-4-h-small"] } }
+                                      tags:       ["watsonx"] } }
   4. Run connectivity probe via LiteLLM GET /health?model=ibm/granite-4-h-small → if fails, DELETE /model/delete and return 422
   5. POST /key/generate { key_name: "ibm/granite-4-h-small",
                           models: ["ibm/granite-4-h-small"],
@@ -1691,7 +1725,7 @@ POST /api/v1/applications
               remote worker → register mTLS ingress on worker Caddy :8443
                             → register mTLS egress on CP Caddy :8080
                             → apiBase = http://ai-services--caddy:8080/worker/<name>/models/<caddyRouteID>
-          → POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, model_info.tags=[providerID])
+          → POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[providerID])
         → generate per-app virtual key: POST /key/generate {key_name: modelName, models:[modelName], duration:null, metadata:{tags:[providerID]}}
         → injectLiteLLMIntoServices:
             svc.Values["litellm"]["key"] = appVirtualKey
@@ -1738,7 +1772,7 @@ POST /api/v1/applications
           local → apiBase = http://<pod-name>:8000
           remote → register mTLS ingress + egress Caddy routes
                  → apiBase = http://ai-services--caddy:8080/worker/<name>/models/<caddyRouteID>
-      POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, model_info.tags=[providerID])
+      POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[providerID])
       KeyRepo.GetByDependency('component', componentID) → nil → generate model key → INSERT keys row
       generate per-app virtual key → POST /key/generate {key_name: modelName, models:[modelName], duration:null, metadata:{tags:[providerID]}}
       injectLiteLLMIntoServices → svc.Values["litellm"]["key"] = appVirtualKey
@@ -1916,19 +1950,19 @@ The `litellm:` block in each provider's `metadata.yaml` similarly externalises L
 
 ### 8. Tag-Based Routing — Provider ID in Tags, Not in Model Name
 
-Routes are registered with `enable_tag_filtering: true` and a top-level `tags: [<provider-id>]` (e.g. `["vllm-cpu"]`). Consumer services call LiteLLM using the full model name as configured (e.g. `ibm-granite/granite-3.3-8b-instruct`) and pass the provider ID in `metadata.tags` — the provider suffix is never encoded in the model name.
+Routes are registered with `litellm_params.tags: [<provider-id>]` (e.g. `["vllm-spyre"]`), and tag filtering is enabled gateway-wide (`router_settings.enable_tag_filtering: true`). Virtual keys carry `metadata.tags` with a single provider ID (e.g. `["vllm-spyre"]`); multiple tags would allow LiteLLM to route across providers, which the platform does not use. Consumer services call LiteLLM using the full model name as configured (e.g. `ibm-granite/granite-3.3-8b-instruct`); routing to a provider is decided by the key tags (optionally narrowed by request `metadata.tags`) — the provider suffix is never encoded in the model name.
 
 | Property | Old | New |
 |---|---|---|
 | Consumer `model` field | `"ibm-granite/granite-3.3-8b-instruct--vllm-spyre"` | `"ibm-granite/granite-3.3-8b-instruct"` |
-| Provider communicated via | Encoded in model name string | `metadata.tags: ["vllm-cpu"]` in the request body |
-| `tags` field on `/model/new` | Inside `litellm_params` | Inside `model_info` block (`model_info.tags`, `model_info.enable_tag_filtering`) |
+| Provider communicated via | Encoded in model name string | Virtual key `metadata.tags` (single provider, e.g. `["vllm-spyre"]`), optionally request `metadata.tags` |
+| `tags` field on `/model/new` | Inside `litellm_params` (full model name) | Inside `litellm_params` (provider ID) |
 | Tag value | Full model name | Provider ID (e.g. `vllm-cpu`, `vllm-spyre`, `watsonx`) |
 | Stored in Catalog DB | `model_id` in `components.metadata` + derived string in `keys.route_id` | Only LiteLLM model UUID in `keys.route_id` |
-| Swap provider (e.g. cpu → spyre) | Consumer model name config must change | Consumer updates `metadata.tags` only — `model` field unchanged |
+| Swap provider (e.g. cpu → spyre) | Consumer model name config must change | Key `metadata.tags` updated (or request `metadata.tags`) — `model` field unchanged |
 | Deregister call | `{ "id": "ibm-granite-granite-3.3-8b-instruct--vllm-spyre" }` | `{ "model_name": "ibm-granite/granite-3.3-8b-instruct" }` |
 
-The LiteLLM-assigned model UUID (returned by `POST /model/new`) is stored in `keys.route_id` and is the only identifier needed for deregistration and key revocation. The `model_name` in `POST /model/new` is the full model name from `params.model`; the top-level `tags` array carries the provider ID. They are set independently — `model_name` never changes when the provider changes, only `tags` does.
+The LiteLLM-assigned model UUID (returned by `POST /model/new`) is stored in `keys.route_id` and is the only identifier needed for deregistration and key revocation. The `model_name` in `POST /model/new` is the full model name from `params.model`; the `litellm_params.tags` array carries the provider ID. They are set independently — `model_name` never changes when the provider changes, only `tags` does.
 
 The `litellm_params.model` field uses the `hosted_vllm/<upstream-model-name>` prefix. LiteLLM infers the provider from this prefix — no separate `custom_llm_provider` field is required, and no `api_key` is needed for local vLLM endpoints.
 
@@ -2312,8 +2346,8 @@ curl -k -X POST 'https://litellm-api.10.20.185.165.nip.io/key/generate' \
   -H "Authorization: Bearer $LITELLM_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
-    "key_name": "ibm-granite/granite-3.3-8b-instruct--vllm-spyre",
-    "models": ["ibm-granite/granite-3.3-8b-instruct--vllm-spyre"],
+    "key_name": "ibm-granite/granite-3.3-8b-instruct",
+    "models": ["ibm-granite/granite-3.3-8b-instruct"],
     "metadata": {
       "tags": ["vllm-spyre"]
     }
