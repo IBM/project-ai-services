@@ -22,9 +22,13 @@ type WorkerUpdate struct {
 	Message       *string
 }
 
+// workerSearchColumns defines the columns searched when a ?q= term is provided.
+// Add column names here to extend search to additional fields in future.
+var workerSearchColumns = []string{"name"}
+
 // WorkerFilters defines optional filters for querying workers.
 type WorkerFilters struct {
-	Query string // Optional: case-insensitive substring search on the worker name
+	Search string // Optional: case-insensitive substring search on the worker name
 }
 
 // WorkerRepository defines the interface for worker data operations.
@@ -148,9 +152,8 @@ func buildGetAllWorkerQuery(filters *WorkerFilters) (string, []interface{}) {
 	query := `SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at FROM workers`
 	args := []interface{}{}
 
-	if filters != nil && filters.Query != "" {
-		query += fmt.Sprintf(" WHERE name ILIKE $%d ESCAPE '\\'", len(args)+1)
-		args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
+	if filters != nil && filters.Search != "" {
+		query += " WHERE " + buildSearchClause(workerSearchColumns, &args, filters.Search)
 	}
 
 	query += " ORDER BY registered_at ASC"

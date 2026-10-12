@@ -73,7 +73,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 	// Parse filter parameters
 	deploymentType := c.Query("deployment_type")
 	catalogID := c.Query("catalog_id")
-	query := c.Query("q")
+	search := c.Query("q")
 
 	// Validate deployment_type if provided
 	if deploymentType != "" && deploymentType != string(dbmodels.DeploymentTypeArchitectures) && deploymentType != string(dbmodels.DeploymentTypeServices) {
@@ -90,7 +90,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 		PageSize:       pageSize,
 		DeploymentType: deploymentType,
 		CatalogID:      catalogID,
-		Query:          query,
+		Search:         search,
 	}
 
 	// Call service layer
