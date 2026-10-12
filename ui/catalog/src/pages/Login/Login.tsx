@@ -11,9 +11,8 @@ import { ArrowRight } from "@carbon/icons-react";
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router";
 import styles from "./Login.module.scss";
-import { login } from "@/services/auth";
-import { ROUTES } from "@/constants/endpoints.constants";
-import { APP_NAME } from "@/constants";
+import { login } from "@/api/auth";
+import { ROUTES, APP_NAME } from "@/constants";
 import {
   LogoutReason,
   SESSION_STORAGE_KEYS,
