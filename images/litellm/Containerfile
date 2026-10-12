@@ -1,8 +1,11 @@
 # Builder stage
 FROM registry.access.redhat.com/ubi9/ubi:9.8 as builder
 
-ARG VERSION=${VERSION}
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
+ARG VERSION
+ARG LITELLM_SHA256
+ARG NODE_VERSION
+ARG NODE_SHA256
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
 RUN dnf update ${DNF_FLAGS} -y && \
@@ -37,8 +40,10 @@ ENV RUSTC_BOOTSTRAP=1 \
     GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
 
 # 4. Download litellm & patch it
-RUN wget https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz >/dev/null
-RUN tar -xzf v${VERSION}.tar.gz && \
+RUN wget -q https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz && \
+    echo "${LITELLM_SHA256}  v${VERSION}.tar.gz" | sha256sum -c - && \
+    tar -xzf v${VERSION}.tar.gz && \
+    rm v${VERSION}.tar.gz && \
     cd litellm-${VERSION} && \
     patch -p1 < ../pyproject-toml.patch && \
     patch -p1 < ../watsonx-passthrough.patch && \
@@ -79,6 +84,24 @@ RUN source "$HOME/.cargo/env" && rustup install 1.94.1 && rustup default 1.94.1 
     cargo build --release --bin schema-engine && \
     cargo build --release -p query-engine-node-api
 
+# 8. Install Node.js and bake Prisma CLI into /app/prisma
+# Avoids nodeenv downloading Node at runtime, eliminating CVEs from bundled npm packages
+WORKDIR /build
+RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-ppc64le.tar.gz \
+        -o /tmp/node.tar.gz && \
+    echo "${NODE_SHA256}  /tmp/node.tar.gz" | sha256sum -c - && \
+    tar -xz -C /usr/local --strip-components=1 -f /tmp/node.tar.gz && \
+    rm /tmp/node.tar.gz && \
+    python3.12 -m pip install --no-cache-dir --no-index \
+        --find-links=/wheels prisma && \
+    mkdir -p /build/prisma && \
+    HOME=/build/prisma XDG_CACHE_HOME=/build/prisma/.cache PRISMA_BINARY_CACHE_DIR=/build/prisma/binaries \
+    PRISMA_QUERY_ENGINE_BINARY=/build/prisma-engines/target/release/query-engine \
+    PRISMA_SCHEMA_ENGINE_BINARY=/build/prisma-engines/target/release/schema-engine \
+    PRISMA_QUERY_ENGINE_LIBRARY=/build/prisma-engines/target/release/libquery_engine.so \
+    PRISMA_ENGINES_CHECKSUM_IGNORE_WARNING=true \
+    prisma version
+
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
@@ -94,8 +117,12 @@ ENV LITELLM_NON_ROOT=true \
     PRISMA_QUERY_ENGINE_BINARY=/app/prisma/query-engine \
     PRISMA_SCHEMA_ENGINE_BINARY=/app/prisma/schema-engine \
     PRISMA_ENGINES_CHECKSUM_IGNORE_WARNING="true" \
+    PRISMA_BINARY_CACHE_DIR=/app/prisma/binaries \
+    PRISMA_CLI_PATH=/app/prisma/binaries/node_modules/.bin/prisma \
+    PRISMA_CLI_QUERY_ENGINE_TYPE=binary \
+    PRISMA_OFFLINE_MODE=true \
     HOME=/app \
-    PATH="/app/.venv/bin:${PATH}"
+    PATH="/app/node/bin:/app/.venv/bin:${PATH}"
 
 WORKDIR /app
 
@@ -104,6 +131,8 @@ COPY --from=builder /build/prisma-engines/target/release/query-engine prisma/que
 COPY --from=builder /build/prisma-engines/target/release/schema-engine prisma/schema-engine
 COPY --from=builder /build/prisma-engines/target/release/libquery_engine.so prisma/libquery_engine-rhel-openssl-3.0.x.so.node
 COPY --from=builder /build/litellm-${VERSION}/schema.prisma ./
+COPY --from=builder /build/prisma/binaries prisma/binaries
+COPY --from=builder /usr/local/bin/node /app/node/bin/node
 
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
     microdnf -y update ${DNF_FLAGS} && \
@@ -114,8 +143,7 @@ RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
     microdnf clean all && \
     useradd -u 1001 -M -d /app -s /sbin/nologin litellm && \
     python3.12 -m venv /app/.venv && \
-    /app/.venv/bin/pip install --no-cache-dir --no-index \
-        --find-links=/wheels \
+    /app/.venv/bin/pip install --no-cache-dir --no-index --find-links=/wheels \
         litellm[proxy,semantic-router]==${VERSION} && \
     prisma generate --schema=/app/schema.prisma && \
     rm -rf /app/.npm /tmp/node-compile-cache && \
