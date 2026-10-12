@@ -103,7 +103,11 @@ COMPONENTS = {
         ("ai-services/assets/services/summarize/podman/values.yaml", "postgres"),
         ("ai-services/assets/services/summarize/openshift/values.yaml", "postgres"),
         ("ai-services/assets/services/digitize/podman/values.yaml", "postgres"),
-        ("ai-services/assets/services/digitize/openshift/values.yaml", "postgres")
+        ("ai-services/assets/services/digitize/openshift/values.yaml", "postgres"),
+        ("ai-services/assets/services/extract/podman/values.yaml", "postgres"),
+        ("ai-services/assets/services/extract/openshift/values.yaml", "postgres"),
+        ("ai-services/assets/services/translate/podman/values.yaml", "postgres"),
+        ("ai-services/assets/services/translate/openshift/values.yaml", "postgres")
     ],
     "images/litellm/Makefile": [
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "litellm"),

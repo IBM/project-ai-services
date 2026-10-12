@@ -3,7 +3,7 @@
 # ============================================================================
 FROM registry.access.redhat.com/ubi9/ubi:9.8 AS builder
 
-ARG GO_VERSION=1.26.6
+ARG GO_VERSION=1.26.9
 
 WORKDIR /go/src/github.com/project-ai-services/mcp
 
