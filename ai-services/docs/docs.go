@@ -1833,6 +1833,12 @@ const docTemplate = `{
                         "description": "Filter by provider ID (e.g. 'object_storage', 'file_system')",
                         "name": "provider",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring search on datasource name",
+                        "name": "q",
+                        "in": "query"
                     }
                 ],
                 "responses": {
