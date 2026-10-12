@@ -13,11 +13,15 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
 
+// applicationSearchColumns defines the columns searched when a ?q= term is provided.
+// Add column names here to extend search to additional fields in future.
+var applicationSearchColumns = []string{"a.name"}
+
 // ApplicationFilters defines optional filters for querying applications.
 type ApplicationFilters struct {
 	DeploymentType string // Optional: filter by deployment_type ("architectures" or "services")
 	CatalogID      string // Optional: filter by catalog_id (e.g., "rag", "chat", "digitize")
-	Query          string // Optional: case-insensitive substring search on the application name
+	Search         string // Optional: case-insensitive substring search on the application name
 	Limit          int    // Optional: number of records to return (for pagination)
 	Offset         int    // Optional: number of records to skip (for pagination)
 }
@@ -96,9 +100,8 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 			args = append(args, filters.CatalogID)
 		}
 
-		if filters.Query != "" {
-			whereClauses = append(whereClauses, fmt.Sprintf("a.name ILIKE $%d ESCAPE '\\'", len(args)+1))
-			args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
+		if filters.Search != "" {
+			whereClauses = append(whereClauses, buildSearchClause(applicationSearchColumns, &args, filters.Search))
 		}
 	}
 
@@ -218,9 +221,8 @@ func (r *applicationRepo) GetCount(ctx context.Context, filters *ApplicationFilt
 			args = append(args, filters.CatalogID)
 		}
 
-		if filters.Query != "" {
-			whereClauses = append(whereClauses, fmt.Sprintf("a.name ILIKE $%d ESCAPE '\\'", len(args)+1))
-			args = append(args, "%"+escapeLikePattern(filters.Query)+"%")
+		if filters.Search != "" {
+			whereClauses = append(whereClauses, buildSearchClause(applicationSearchColumns, &args, filters.Search))
 		}
 	}
 

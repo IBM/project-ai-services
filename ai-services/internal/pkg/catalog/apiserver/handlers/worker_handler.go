@@ -166,7 +166,7 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 
 	var filters *repository.WorkerFilters
 	if q := c.Query("q"); q != "" {
-		filters = &repository.WorkerFilters{Query: q}
+		filters = &repository.WorkerFilters{Search: q}
 	}
 
 	workers, err := h.reg.List(ctx, filters)
