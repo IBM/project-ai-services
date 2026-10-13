@@ -60,7 +60,7 @@ const (
 var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Configure the catalog service",
-	Long: `Configure and deploy the AI Services catalog service with the specified runtime.
+	Long: `Configure and deploy the AI Launchpad catalog service with the specified runtime.
 
 This command performs the following operations:
 	 - Deploys the catalog services

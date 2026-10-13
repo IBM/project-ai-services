@@ -1,11 +1,11 @@
-# AI-Services
+# IBM Power AI Launchpad (AI-Services)
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![DCO](https://img.shields.io/badge/DCO-1.1-blue)](DCO1.1.txt)
 [![Contributing](https://img.shields.io/badge/contributions-welcome-brightgreen)](CONTRIBUTING.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/IBM/project-ai-services)
 
-AI Services, part of the [IBM Open-Source AI Foundation for Power](https://www.ibm.com/docs/en/aiservices), deliver pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, they enable fast deployment and support models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
+IBM Power AI Launchpad, part of the [IBM Open-Source AI Foundation for Power](https://www.ibm.com/docs/en/aiservices), deliver pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, they enable fast deployment and support models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
 
 ## 📺 Demo
 
@@ -31,18 +31,18 @@ For a comprehensive reference of supported runtimes, operator channels, and syst
 
 ```bash
 % ai-services --help
-A CLI tool for managing AI Services infrastructure.
+A CLI tool for managing AI Launchpad infrastructure.
 
 Usage:
   ai-services [command]
 
 Available Commands:
   application Deploy and monitor the applications
-  bootstrap   Initializes AI Services infrastructure
-  catalog     Manage the AI Services catalog
+  bootstrap   Initializes AI Launchpad infrastructure
+  catalog     Manage the AI Launchpad catalog
   completion  Generate the autocompletion script for the specified shell
   help        Help about any command
-  must-gather Collect debugging information from an AI Services deployment
+  must-gather Collect debugging information from an AI Launchpad deployment
   version     Prints CLI version with more info
   worker      Manage this node as a worker
 
@@ -72,7 +72,7 @@ project-ai-services/
 │   ├── digitize/      # Digitize UI
 │   └── catalog/       # Catalog UI
 ├── images/            # Container base images
-│   ├── service-base/  # Base image for AI services
+│   ├── service-base/  # Base image for AI Launchpad
 │   ├── postgres/      # PostgreSQL image
 │   ├── litellm/       # LiteLLM proxy
 │   ├── caddy/         # Caddy proxy

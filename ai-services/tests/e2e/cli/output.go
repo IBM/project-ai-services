@@ -121,7 +121,7 @@ func ValidateCreateAppOutput(output, appName string) error {
 // ValidateHelpCommandOutput validates the output of the help command.
 func ValidateHelpCommandOutput(output string) error {
 	return checkRequiredStrings(output, "help command", []string{
-		"A CLI tool for managing AI Services infrastructure.",
+		"A CLI tool for managing AI Launchpad infrastructure.",
 		"Use \"ai-services [command] --help\" for more information about a command.",
 	})
 }
