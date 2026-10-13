@@ -32,7 +32,7 @@ import { getAllJobs, getJobById, uploadDocuments, deleteJob, cancelJob, Job } fr
 import IngestSidePanel from '../../components/IngestSidePanel';
 import { calculateDuration } from '../../utils/dateUtils';
 import { exportToCSV, validateFilename } from '../../utils/csvExport';
-import { JOB_STATUS, DISPLAY_STATUS, DOC_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
+import { JOB_STATUS, DOC_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
 import styles from './JobMonitorPage.module.scss';
 
 interface NotificationStatus {
@@ -315,45 +315,60 @@ const headers = [
 const getStatusIcon = (status: string) => {
   switch (status) {
     case JOB_STATUS.COMPLETED:
-    case DISPLAY_STATUS.INGESTED:
+    case JOB_STATUS.INGESTED:
+    case JOB_STATUS.DIGITIZED:
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
     case JOB_STATUS.COMPLETED_WITH_ERRORS:
-    case DISPLAY_STATUS.COMPLETED_WITH_ERRORS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case JOB_STATUS.FAILED:
-    case DISPLAY_STATUS.INGESTION_ERROR:
-    case DISPLAY_STATUS.DIGITIZATION_ERROR:
+    case JOB_STATUS.INGESTION_ERROR:
+    case JOB_STATUS.DIGITIZATION_ERROR:
       return <ErrorFilled size={16} className={styles.statusIconError} />;
     case JOB_STATUS.ACCEPTED:
     case JOB_STATUS.IN_PROGRESS:
-    case DISPLAY_STATUS.ACCEPTED:
-    case DISPLAY_STATUS.DIGITIZED:
-    case DISPLAY_STATUS.PROCESSED:
-    case DISPLAY_STATUS.CHUNKED:
-    case DISPLAY_STATUS.INGESTING:
-    case DISPLAY_STATUS.DIGITIZING:
+    case JOB_STATUS.INGESTING:
+    case JOB_STATUS.DIGITIZING:
       return <InProgress size={16} className={styles.statusIconProgress} />;
     case JOB_STATUS.CANCEL_PENDING:
-    case DISPLAY_STATUS.CANCEL_PENDING:
+    case JOB_STATUS.CANCELLING:
       return <InProgress size={16} className={styles.statusIconCancelling} />;
     case JOB_STATUS.CANCELLED:
-    case DISPLAY_STATUS.CANCELLED:
+      return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
+    default:
+      return null;
+  }
+};
+
+const getDocStatusIcon = (status: string) => {
+  switch (status) {
+    case DOC_STATUS.COMPLETED:
+      return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
+    case DOC_STATUS.FAILED:
+      return <ErrorFilled size={16} className={styles.statusIconError} />;
+    case DOC_STATUS.ACCEPTED:
+    case DOC_STATUS.IN_PROGRESS:
+    case DOC_STATUS.DIGITIZED:
+    case DOC_STATUS.PROCESSED:
+    case DOC_STATUS.CHUNKED:
+      return <InProgress size={16} className={styles.statusIconProgress} />;
+    case DOC_STATUS.ALREADY_EXISTS:
+    case DOC_STATUS.COMPLETED_WITH_ERRORS:
+      return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case DOC_STATUS.CANCELLED:
       return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
-    case DOC_STATUS.ALREADY_EXISTS:
-      return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     default:
       return null;
   }
 };
 
 const getTypeTagStyle = (type: string) => {
-  if (type === JOB_TYPE_DISPLAY.INGESTION) {
-    return 'gray';
-  } else if (type === JOB_TYPE_DISPLAY.DIGITIZATION) {
-    return 'cool-gray';
+  switch (type) {
+    case JOB_TYPE_DISPLAY.DIGITIZATION:
+      return 'cool-gray';
+    case JOB_TYPE_DISPLAY.INGESTION:
+    default:
+      return 'gray';
   }
-  return 'gray';
 };
 
 const JobMonitorPage = () => {
@@ -617,22 +632,22 @@ const JobMonitorPage = () => {
   };
 
   const getJobStatus = (job: Job) => {
-    if (job.status === JOB_STATUS.COMPLETED) {
-      return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTED : DISPLAY_STATUS.DIGITIZED;
-    } else if (job.status === JOB_STATUS.COMPLETED_WITH_ERRORS) {
-      return DISPLAY_STATUS.COMPLETED_WITH_ERRORS;
-    } else if (job.status === JOB_STATUS.FAILED) {
-      return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTION_ERROR : DISPLAY_STATUS.DIGITIZATION_ERROR;
-    } else if (job.status === JOB_STATUS.IN_PROGRESS) {
-      return job.operation === JOB_OPERATION.INGESTION ? DISPLAY_STATUS.INGESTING : DISPLAY_STATUS.DIGITIZING;
-    } else if (job.status === JOB_STATUS.ACCEPTED) {
-      return DISPLAY_STATUS.ACCEPTED;
-    } else if (job.status === JOB_STATUS.CANCEL_PENDING) {
-      return DISPLAY_STATUS.CANCEL_PENDING;
-    } else if (job.status === JOB_STATUS.CANCELLED) {
-      return DISPLAY_STATUS.CANCELLED;
+    const isIngestion = job.operation === JOB_OPERATION.INGESTION;
+    switch (job.status) {
+      case JOB_STATUS.COMPLETED:
+        return isIngestion ? JOB_STATUS.INGESTED : JOB_STATUS.DIGITIZED;
+      case JOB_STATUS.FAILED:
+        return isIngestion ? JOB_STATUS.INGESTION_ERROR : JOB_STATUS.DIGITIZATION_ERROR;
+      case JOB_STATUS.IN_PROGRESS:
+        return isIngestion ? JOB_STATUS.INGESTING : JOB_STATUS.DIGITIZING;
+      case JOB_STATUS.COMPLETED_WITH_ERRORS:
+      case JOB_STATUS.ACCEPTED:
+      case JOB_STATUS.CANCEL_PENDING:
+      case JOB_STATUS.CANCELLED:
+        return job.status;
+      default:
+        return job.status;
     }
-    return job.status;
   };
 
   const getErrorMessage = (job: Job) => {
@@ -1135,7 +1150,7 @@ const JobMonitorPage = () => {
                         <div className={styles.documentInfo}>
                           <span className={styles.documentName}>{doc.name}</span>
                           <div className={styles.documentStatus}>
-                            {getStatusIcon(doc.status)}
+                            {getDocStatusIcon(doc.status)}
                             <span className={styles.statusText}>
                               {doc.message ?? doc.status}
                             </span>

@@ -1,5 +1,4 @@
 import { useReducer, useCallback } from "react";
-import { extractDeployError } from "@/components/DeployFlow/Shared/utils/deployError";
 import { PageHeader } from "@carbon/ibm-products";
 import WorkerResourcesTable from "@/components/WorkerResourcesTable";
 import RegisterWorkerModal from "@/components/WorkerResourcesTable/RegisterWorkerModal";
@@ -28,7 +27,8 @@ const WorkerResources = () => {
     } catch (err) {
       dispatch({
         type: "REGISTER_ERROR",
-        payload: extractDeployError(err, "Failed to register worker"),
+        payload:
+          err instanceof Error ? err.message : "Failed to register worker",
       });
     }
   }, [state.workerName]);
@@ -42,7 +42,10 @@ const WorkerResources = () => {
 
   return (
     <>
-      <PageHeader title="Worker Resources" />
+      <PageHeader
+        title="Worker Resources"
+        subtitle="Deployment locations that provide the infrastructure and runtime targets where AI services are deployed, executed, and managed. They enable consistent deployment, scaling, monitoring, and governance across development, test, and production workloads."
+      />
       <WorkerResourcesTable
         onRegister={() => dispatch({ type: "OPEN_MODAL" })}
         registerError={registerError}

@@ -1,5 +1,6 @@
 import axios from "axios";
 import { API_BASE_URL } from "@/constants/env.constants";
+import { GENERIC_ERROR_MESSAGE } from "@/constants/app.constants";
 import { useAuthStore } from "@/store/auth.store";
 import { refreshAccessToken } from "@/services/auth";
 import { AUTH_ENDPOINTS } from "@/constants/api-endpoints.constants";
@@ -69,6 +70,13 @@ api.interceptors.response.use(
         refreshPromise = null;
       }
     }
-    return Promise.reject(error);
+    const serverMessage =
+      error.response?.data?.error ??
+      error.response?.data?.message ??
+      error.response?.data?.detail ??
+      GENERIC_ERROR_MESSAGE;
+
+    const enhanced = new Error(serverMessage, { cause: error });
+    return Promise.reject(enhanced);
   },
 );

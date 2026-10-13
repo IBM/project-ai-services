@@ -38,7 +38,6 @@ import type {
 import { formatVersion } from "@/utils/string";
 import styles from "./DeploymentDetails.module.scss";
 import { api } from "@/api/axios";
-import axios from "axios";
 import {
   APPLICATION_ENDPOINTS,
   SERVICE_ENDPOINTS,
@@ -220,6 +219,10 @@ const DeploymentDetails = ({
             : deploymentServices.length > 0 &&
               serviceMetadataById[deploymentServices[0].catalog_id]
                 ?.certifiedBy === "IBM";
+        const knownComponentTypes = new Set<string>(
+          Object.values(COMPONENT_TYPES),
+        );
+
         const transformedServices: DeploymentServiceData[] =
           deploymentServices.map((service) => {
             const llmComponent = service.components.find(
@@ -234,9 +237,34 @@ const DeploymentDetails = ({
             const rerankerComponent = service.components.find(
               (c) => c.type === COMPONENT_TYPES.RERANKER,
             );
+
+            // Collect custom/unknown component types not handled by the known set.
+            const customComponents = service.components
+              .filter((c) => !knownComponentTypes.has(c.type))
+              .map((c) => ({
+                label: c.type
+                  .split("_")
+                  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                  .join(" "),
+                model: c.metadata?.model,
+                providerName: c.provider?.name,
+              }));
+
             const serviceDescription =
               serviceMetadataById[service.catalog_id]?.description ??
               `${service.type} service`;
+
+            // For inference backend: prefer known components first, then fall back
+            // to any custom component's provider name.
+            const customInferenceComponent = customComponents.find(
+              (c) => c.providerName,
+            );
+            const inferenceBackend =
+              llmComponent?.provider?.name ||
+              embeddingComponent?.provider?.name ||
+              rerankerComponent?.provider?.name ||
+              customInferenceComponent?.providerName ||
+              undefined;
 
             return {
               id: service.id,
@@ -245,14 +273,12 @@ const DeploymentDetails = ({
               description: serviceDescription,
               serviceVersion: service.version,
               largeLanguageModel: llmComponent?.metadata?.model,
-              inferenceBackend:
-                llmComponent?.provider?.name ||
-                embeddingComponent?.provider?.name ||
-                rerankerComponent?.provider?.name ||
-                "Unknown",
+              inferenceBackend,
               embeddingModel: embeddingComponent?.metadata?.model,
               vectorStore: vectorStoreComponent?.provider?.name,
               rankerModel: rerankerComponent?.metadata?.model,
+              customComponents:
+                customComponents.length > 0 ? customComponents : undefined,
             };
           });
 
@@ -385,15 +411,10 @@ const DeploymentDetails = ({
       onNameUpdate?.(editedName);
       setSaveSuccess(true);
     } catch (error) {
-      const rawError: string =
-        axios.isAxiosError(error) && error.response?.data?.error
-          ? error.response.data.error
-          : "Failed to update deployment name";
-      const errorIndex = rawError.indexOf("Error:");
       const errorMessage =
-        errorIndex !== -1
-          ? rawError.slice(errorIndex + "Error:".length).trim()
-          : rawError;
+        error instanceof Error
+          ? error.message
+          : "Failed to update deployment name";
       setSaveError(errorMessage);
     } finally {
       setIsSaving(false);
@@ -795,14 +816,34 @@ const DeploymentDetails = ({
                         </div>
                       )}
 
-                      <div className={styles.serviceDetailRow}>
-                        <span className={styles.serviceDetailLabel}>
-                          LLM inference backend
-                        </span>
-                        <span className={styles.serviceDetailValue}>
-                          {deploymentServiceData.inferenceBackend}
-                        </span>
-                      </div>
+                      {deploymentServiceData.customComponents?.map(
+                        (customComponent) => (
+                          <div
+                            key={customComponent.label}
+                            className={styles.serviceDetailRow}
+                          >
+                            <span className={styles.serviceDetailLabel}>
+                              {customComponent.label}
+                            </span>
+                            <span className={styles.serviceDetailValue}>
+                              {customComponent.model ??
+                                customComponent.providerName ??
+                                "Unknown"}
+                            </span>
+                          </div>
+                        ),
+                      )}
+
+                      {deploymentServiceData.inferenceBackend && (
+                        <div className={styles.serviceDetailRow}>
+                          <span className={styles.serviceDetailLabel}>
+                            Inference backend
+                          </span>
+                          <span className={styles.serviceDetailValue}>
+                            {deploymentServiceData.inferenceBackend}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </ProductiveCard>
                 </Column>

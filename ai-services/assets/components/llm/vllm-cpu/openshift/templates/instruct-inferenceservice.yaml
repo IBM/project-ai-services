@@ -22,8 +22,8 @@ spec:
         name: vLLM
       args:
         - --served-model-name={{ .Values.model }}
-        - --max-model-len=8096
-        - --max-num-seqs=32
+        - --max-model-len={{ .Values.maxModelLen }}
+        - --max-num-seqs={{ .Values.maxBatchSize }}
       env:
         - name: VLLM_CPU_OMP_THREADS_BIND
           value: "auto"

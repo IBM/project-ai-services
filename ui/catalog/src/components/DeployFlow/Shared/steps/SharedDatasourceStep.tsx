@@ -52,7 +52,12 @@ export const SharedDatasourceStep: FC<SharedDatasourceStepProps> = ({
     showSelectionError && uploadEnabled && selectedCount === 0;
 
   const handleToggle = (checked: boolean) => {
-    onChange({ uploadFromSourceEnabled: checked });
+    onChange({
+      uploadFromSourceEnabled: checked,
+      // Clear selections when the toggle is turned off so stale IDs are not
+      // submitted if the user re-enables and re-deploys without re-selecting.
+      ...(!checked && { dataSources: [] }),
+    });
   };
 
   const handleSourceChange = (ids: string[]) => {
@@ -72,8 +77,8 @@ export const SharedDatasourceStep: FC<SharedDatasourceStepProps> = ({
         <Grid narrow className={stepStyles.summaryGrid}>
           <Column sm={4} md={4} lg={4}>
             <Tile className={stepStyles.summaryTile}>
-              <p className={stepStyles.summaryLabel}>Source data location</p>
-              <div className={stepStyles.summaryValue}>
+              <div className={stepStyles.summaryHeader}>
+                <p className={stepStyles.summaryLabel}>Source data location</p>
                 {selectedCount > 0 && (
                   <CheckmarkFilled
                     className={stepStyles.checkIcon}
@@ -81,6 +86,8 @@ export const SharedDatasourceStep: FC<SharedDatasourceStepProps> = ({
                     aria-hidden
                   />
                 )}
+              </div>
+              <div className={stepStyles.summaryValue}>
                 <span className={stepStyles.summaryCount}>{selectedCount}</span>
                 <span className={stepStyles.summaryText}>
                   {selectedCount === 1

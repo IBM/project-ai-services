@@ -47,6 +47,9 @@ env:
   PARLAY_SBOM_FILE: parlay.json
   PARLAY_VERSION: v0.11.0
 
+permissions:
+  contents: read
+
 jobs:
   cves:
     runs-on: ubuntu-24.04-ppc64le

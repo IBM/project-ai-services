@@ -1,5 +1,8 @@
 export const APP_NAME = "IBM Power AI Launchpad";
 
+export const GENERIC_ERROR_MESSAGE =
+  "An unexpected error occurred. Please try again.";
+
 export const COMPONENT_TYPES = {
   LLM: "llm",
   RERANKER: "reranker",

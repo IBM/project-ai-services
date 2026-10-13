@@ -2,6 +2,8 @@ FROM localhost/prebuilder as prebuilder
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+RUN microdnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && microdnf clean all
+
 RUN microdnf install -y python3.12-devel \
         lcms2-devel openblas-devel freetype libicu libjpeg-turbo && \
     curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \

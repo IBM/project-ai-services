@@ -30,14 +30,18 @@ export const StepOne: React.FC<StepProps> = ({
     (s) => s.componentModelsError,
   );
 
+  // Step 1 shows only known "selector" component types (embedding, vector store).
+  // Any other type — including custom types like custom_llm — belongs in Step 2.
+  const isStepOneComponentType = (type: string) =>
+    type === COMPONENT_TYPES.EMBEDDING || type === COMPONENT_TYPES.VECTOR_STORE;
+
   // Collect component types whose models failed to load (Step 1 components only).
   const failedComponentTypes = useMemo(() => {
     if (!selectedServiceId || !deployOptions.components) return [];
     return deployOptions.components
       .filter(
         (c) =>
-          c.type !== COMPONENT_TYPES.LLM &&
-          c.type !== COMPONENT_TYPES.RERANKER &&
+          isStepOneComponentType(c.type) &&
           !!componentModelsError[`${selectedServiceId}:${c.type}:${runtime}`],
       )
       .map((c) => c.name || c.type);
@@ -49,7 +53,8 @@ export const StepOne: React.FC<StepProps> = ({
   ]);
 
   // Build component rows for SharedStepOne.
-  // Shows all components EXCEPT llm and reranker — those belong in StepTwo.
+  // Shows only known Step 1 component types (embedding, vector store).
+  // All other types — including unknown/custom types — belong in StepTwo.
   const components = useMemo<StepOneComponentRow[]>(() => {
     if (!selectedServiceId) return [];
 
@@ -63,8 +68,7 @@ export const StepOne: React.FC<StepProps> = ({
         ?.filter(
           (c) =>
             serviceComponentTypes.includes(c.type) &&
-            c.type !== COMPONENT_TYPES.LLM &&
-            c.type !== COMPONENT_TYPES.RERANKER,
+            isStepOneComponentType(c.type),
         )
         .map((component) => {
           const selectedProviderId =

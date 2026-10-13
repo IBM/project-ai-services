@@ -19,7 +19,7 @@ import {
   SESSION_STORAGE_KEYS,
   type LoginLocationState,
 } from "@/types/navigation.types";
-import axios from "axios";
+import axios, { type AxiosError } from "axios";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -64,8 +64,17 @@ const LoginPage = () => {
 
       navigate(ROUTES.DIGITAL_ASSISTANTS);
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response) {
-        if (error.response.status === 400 || error.response.status === 401) {
+      const axiosError = axios.isAxiosError(error)
+        ? error
+        : axios.isAxiosError((error as { cause?: unknown })?.cause)
+          ? (error as { cause: AxiosError }).cause
+          : null;
+
+      if (axiosError?.response) {
+        if (
+          axiosError.response.status === 400 ||
+          axiosError.response.status === 401
+        ) {
           setCredentialError(true);
         } else {
           setNetworkError(true);

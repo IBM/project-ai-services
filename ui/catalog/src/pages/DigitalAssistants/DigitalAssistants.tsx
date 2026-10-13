@@ -128,7 +128,7 @@ const DigitalAssistantsPage = () => {
   );
 
   // Use architecture data or fallback to defaults
-  const pageTitle = selectedArchitecture?.name || "Digital Assistants";
+  const pageTitle = selectedArchitecture?.name || "Digital assistants";
   const pageSubtitle =
     selectedArchitecture?.description ||
     "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG).";

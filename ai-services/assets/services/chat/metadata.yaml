@@ -30,7 +30,7 @@ about:
         value: "granite-3.3-8b-instruct"
       - title: "Inference backend"
         values:
-          - "RedHat AI Inference with Spyre"
+          - "Red Hat AI Inference with Spyre"
           - "AI Inference on CPU"
           - "IBM watsonx.ai on IBM Cloud"
       - title: "Embedding model"

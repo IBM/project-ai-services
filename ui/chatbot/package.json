@@ -8,7 +8,7 @@
         "@carbon/react": "^1.102.0",
         "@testing-library/jest-dom": "^5.17.0",
         "@testing-library/react": "^13.4.0",
-        "axios": "^1.18.1",
+        "axios": "^1.20.0",
         "express": "^5.2.1",
         "openai": "^6.37.0",
         "react": "^18.3.1",
@@ -17,7 +17,8 @@
     },
     "overrides": {
         "qs": "^6.16.0",
-        "proxy-addr": "^2.0.8"
+        "proxy-addr": "^2.0.8",
+        "source-map-js": "^1.2.2"
     },
     "devDependencies": {
         "@ianvs/prettier-plugin-sort-imports": "^4.7.1",

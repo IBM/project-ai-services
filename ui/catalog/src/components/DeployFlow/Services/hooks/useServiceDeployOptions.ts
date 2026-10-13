@@ -131,22 +131,25 @@ export const useServiceDeployOptions = (
           // Short-circuit if no components (Scenario B / D) — skip all model fetches.
           if (!hasComponents) return;
 
-          // Identify Step 1 components (exclude llm and reranker)
+          // Step 1 shows only known selector types (embedding, vector store).
+          // All other types — including unknown/custom ones — are treated as
+          // inference/Step 2 components and fetched in the background.
+          const isStep1Type = (type: string) =>
+            type === COMPONENT_TYPES.EMBEDDING ||
+            type === COMPONENT_TYPES.VECTOR_STORE;
+
+          // Identify Step 1 components
           const step1Components =
             deployData.components?.filter(
               (component) =>
-                component.type !== COMPONENT_TYPES.LLM &&
-                component.type !== COMPONENT_TYPES.RERANKER &&
-                component.providers.length > 0,
+                isStep1Type(component.type) && component.providers.length > 0,
             ) || [];
 
-          // Identify Step 2 inference components (llm and reranker)
+          // Identify Step 2 inference components (llm, reranker, and any custom types)
           const inferenceComponents =
             deployData.components?.filter(
               (component) =>
-                (component.type === COMPONENT_TYPES.LLM ||
-                  component.type === COMPONENT_TYPES.RERANKER) &&
-                component.providers.length > 0,
+                !isStep1Type(component.type) && component.providers.length > 0,
             ) || [];
 
           // STAGE 1: Fetch Step 1 component models in parallel (Promise.allSettled so a
@@ -313,12 +316,13 @@ export const useServiceDeployOptions = (
         });
     }
 
+    const isStep1Type = (type: string) =>
+      type === COMPONENT_TYPES.EMBEDDING ||
+      type === COMPONENT_TYPES.VECTOR_STORE;
+
     const step1Components =
       deployOptions.components?.filter(
-        (c) =>
-          c.type !== COMPONENT_TYPES.LLM &&
-          c.type !== COMPONENT_TYPES.RERANKER &&
-          c.providers.length > 0,
+        (c) => isStep1Type(c.type) && c.providers.length > 0,
       ) ?? [];
     step1Components.forEach((component) => {
       const err =

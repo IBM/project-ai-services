@@ -19,7 +19,7 @@
     "@carbon/ibm-products": "^2.85.0",
     "@carbon/icons-react": "^11.76.0",
     "@carbon/react": "^1.103.0",
-    "axios": "^1.18.1",
+    "axios": "^1.20.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-is": "^19.2.4",
@@ -46,6 +46,7 @@
   "overrides": {
     "react-table": {
       "react": "^19.2.0"
-    }
+    },
+    "source-map-js": "^1.2.2"
   }
 }

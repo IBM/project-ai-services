@@ -1,6 +1,5 @@
 import { SHARED_ACTION_TYPES } from "../types";
 import type { SharedDeployFlowAction } from "../types";
-import { extractDeployError } from "./deployError";
 
 interface RunDeploymentOptions {
   dispatch: React.Dispatch<SharedDeployFlowAction>;
@@ -23,7 +22,8 @@ export async function runDeployment({
   } catch (error: unknown) {
     dispatch({
       type: SHARED_ACTION_TYPES.SET_DEPLOY_ERROR,
-      payload: extractDeployError(error),
+      payload:
+        error instanceof Error ? error.message : "Failed to deploy application",
     });
     dispatch({ type: SHARED_ACTION_TYPES.SHOW_DEPLOY_TOAST });
   } finally {

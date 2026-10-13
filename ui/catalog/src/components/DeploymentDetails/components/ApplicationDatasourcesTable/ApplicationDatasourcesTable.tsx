@@ -1,5 +1,4 @@
 import { useReducer, useCallback, useRef, useState } from "react";
-import { isAxiosError } from "axios";
 import {
   DataTable,
   Table,
@@ -154,9 +153,7 @@ const ApplicationDatasourcesTable = ({
       await loadDatasources();
     } catch (err) {
       const msg =
-        isAxiosError(err) && err.response?.data?.error
-          ? (err.response.data.error as string)
-          : "Failed to remove data source";
+        err instanceof Error ? err.message : "Failed to remove data source";
       dispatch({ type: ACTION_TYPES.SET_MODAL_DELETE_ERROR, payload: msg });
     } finally {
       dispatch({ type: "SHARED_SET_DELETING", payload: false });

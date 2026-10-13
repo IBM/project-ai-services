@@ -46,7 +46,7 @@ spec:
             - name: EMB_MODEL
               value: {{ .Values.embedding.model | quote }}
             - name: EMB_MAX_MODEL_LEN
-              value: "512"
+              value: {{ .Values.embedding.maxModelLen | quote }}
             - name: RERANKER_ENDPOINT
               value: http://reranker-predictor:8000
             - name: RERANKER_MODEL

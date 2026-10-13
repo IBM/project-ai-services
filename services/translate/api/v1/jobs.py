@@ -105,6 +105,40 @@ def _job_to_state(job) -> JobState:
         429: http_error_responses[429],   # job_limiter at capacity
         500: http_error_responses[500],
     },
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["file", "target_language"],
+                        "properties": {
+                            "file": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "The .txt or .md file to translate (UTF-8)",
+                            },
+                            "target_language": {
+                                "type": "string",
+                                "description": "Target language (e.g. 'English')",
+                            },
+                            "source_language": {
+                                "type": "string",
+                                "default": "auto",
+                                "description": "Source language name, or 'auto' for automatic detection",
+                            },
+                            "job_name": {
+                                "type": "string",
+                                "nullable": True,
+                                "description": "Optional human-readable label for the job",
+                            },
+                        },
+                    }
+                },
+            },
+        }
+    },
 )
 async def create_translation_job(
     file: UploadFile = File(..., description="The .txt or .md file to translate (UTF-8)"),

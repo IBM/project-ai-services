@@ -58,11 +58,11 @@ const (
 	// the server when the connection is idle. This fires independently of the
 	// application-level heartbeat and is the primary mechanism for detecting a
 	// dead control-plane TCP connection quickly.
-	grpcKeepaliveTime = 20 * time.Second
+	grpcKeepaliveTime = 45 * time.Second
 
 	// grpcKeepaliveTimeout is how long the transport waits for a PING ACK before
 	// treating the connection as dead and surfacing an error to stream.Recv.
-	grpcKeepaliveTimeout = 10 * time.Second
+	grpcKeepaliveTimeout = 20 * time.Second
 )
 
 // StartGrpcStream dials the catalog gRPC worker-gateway, registers with the

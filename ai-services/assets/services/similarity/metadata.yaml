@@ -28,7 +28,7 @@ about:
         value: "1.0.0"
       - title: "Inference backend"
         values:
-          - "RedHat AI Inference with Spyre"
+          - "Red Hat AI Inference with Spyre"
           - "AI Inference on CPU"
       - title: "Embedding model"
         value: "granite-embedding-278m-multilingual"

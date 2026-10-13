@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
+
+const rhnTimeout = 30 * time.Second
 
 type RHNRule struct{}
 
@@ -24,9 +27,12 @@ func (r *RHNRule) Description() string {
 	return "Validates that the system is registered with Red Hat Network (RHN)."
 }
 
-func (r *RHNRule) Verify(_ context.Context) error {
+func (r *RHNRule) Verify(ctx context.Context) error {
 	logger.Debugln("Validating RHN registration...")
-	cmd := exec.Command("dnf", "repolist")
+	rhnCtx, cancel := context.WithTimeout(ctx, rhnTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(rhnCtx, "dnf", "repolist")
 	output, err := cmd.CombinedOutput()
 
 	// Checking the output content first, as dnf may return non-zero exit code

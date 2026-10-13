@@ -330,6 +330,54 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         "\nEither `schema_id` or `schema_name` or `json_schema` or `json_example` must be provided.\n"
     ),
     tags=["jobs"],
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["files"],
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary",
+                                },
+                                "description": "One or more .txt or .md files to extract from (no duplicates)",
+                            },
+                            "schema_id": {
+                                "type": "string",
+                                "nullable": True,
+                                "description": "ID of a registered schema",
+                            },
+                            "schema_name": {
+                                "type": "string",
+                                "nullable": True,
+                                "description": "Name of a registered schema",
+                            },
+                            "json_schema": {
+                                "type": "string",
+                                "nullable": True,
+                                "description": "Ephemeral JSON Schema (as a JSON string)",
+                            },
+                            "json_example": {
+                                "type": "string",
+                                "nullable": True,
+                                "description": "Ephemeral JSON example (as a JSON string)",
+                            },
+                            "job_name": {
+                                "type": "string",
+                                "nullable": True,
+                                "description": "Optional human-readable label for the job",
+                            },
+                        },
+                    }
+                },
+            },
+        }
+    },
 )
 async def create_extract_job(
     files: List[UploadFile] = File(...),
