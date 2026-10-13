@@ -340,7 +340,7 @@ async def delete_connector(connector_id: str):
 
 # How long teardown waits for the connector's jobs to reach a terminal state
 # after requesting cancellation, and how often it polls.
-_TEARDOWN_JOB_WAIT_TIMEOUT_S = 300
+_TEARDOWN_JOB_WAIT_TIMEOUT_S = 600
 _TEARDOWN_JOB_POLL_INTERVAL_S = 2
 
 
