@@ -1,8 +1,8 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "API server for managing AI Services catalog, applications, and authentication",
-        "title": "AI Services Catalog API",
+        "description": "API server for managing AI Launchpad catalog, applications, and authentication",
+        "title": "AI Launchpad Catalog API",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {
             "name": "API Support",

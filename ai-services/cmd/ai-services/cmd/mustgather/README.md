@@ -1,6 +1,6 @@
 # must-gather
 
-`ai-services must-gather` collects debugging information from an AI Services
+`ai-services must-gather` collects debugging information from an AI Launchpad
 deployment and writes it to a timestamped directory for support and
 troubleshooting.
 

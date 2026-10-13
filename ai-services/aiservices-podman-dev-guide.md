@@ -1,6 +1,6 @@
-# AI Services - Deployment Guide (Podman)
+# AI Launchpad - Deployment Guide (Podman)
 
-This guide provides step-by-step instructions for deploying and managing the AI Services Catalog in a Podman environment. The catalog-based deployment workflow enables streamlined application management through both UI and CLI interfaces.
+This guide provides step-by-step instructions for deploying and managing the AI Launchpad Catalog in a Podman environment. The catalog-based deployment workflow enables streamlined application management through both UI and CLI interfaces.
 
 ## Getting Started
 
@@ -31,7 +31,7 @@ mv ./bin/<original-name> ./bin/ai-services
 
 ### 4. Bootstrap the Environment
 
-Bootstrap the AI Services environment for Podman:
+Bootstrap the AI Launchpad environment for Podman:
 
 ```bash
 ./bin/ai-services bootstrap --runtime podman

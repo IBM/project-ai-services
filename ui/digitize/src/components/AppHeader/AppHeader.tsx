@@ -122,11 +122,11 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
             <p>
               For detailed documentation and support, please visit the{" "}
               <a
-                href="https://www.ibm.com/docs/en/aiservices/2025.12.0?topic=services-introduction"
+                href="https://www.ibm.com/docs/en/aiservices/2026.09.0"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                IBM AI Services documentation
+                IBM Power AI Launchpad documentation
               </a>{" "}
               or contact your system administrator.
             </p>
