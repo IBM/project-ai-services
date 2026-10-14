@@ -523,13 +523,17 @@ def _sweep_staging_dir(
 async def list_connectors(
     limit: int = Query(50, ge=1, le=200, description="Max records to return (capped at 200)."),
     offset: int = Query(0, ge=0, description="Zero-based offset for pagination."),
+    name: Optional[str] = Query(
+        None,
+        description="Filter by connector name (partial match, case-insensitive).",
+    ),
 ):
     """Retrieve a paginated list of all active connectors with their current sync state.
 
     Strips out any sensitive/secret connection details from the response.
     """
     try:
-        connectors, total = db_ops.list_connectors_paginated(limit=limit, offset=offset)
+        connectors, total = db_ops.list_connectors_paginated(limit=limit, offset=offset, name=name)
         items = [
             ConnectorListItem(
                 id=c.id,

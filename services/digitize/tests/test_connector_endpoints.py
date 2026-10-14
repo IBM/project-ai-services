@@ -483,7 +483,17 @@ class TestListConnectors:
         data = response.json()
         assert data["limit"] == 10
         assert data["offset"] == 2
-        mock.assert_called_once_with(limit=10, offset=2)
+        mock.assert_called_once_with(limit=10, offset=2, name=None)
+
+    def test_name_filter_forwarded(self, connector_test_client, monkeypatch):
+        mock = Mock(return_value=([_make_connector()], 1))
+        monkeypatch.setattr(
+            "digitize.api.v1.connectors.db_ops.list_connectors_paginated",
+            mock,
+        )
+        response = connector_test_client.get("/v1/connectors?name=sftp")
+        assert response.status_code == 200
+        mock.assert_called_once_with(limit=50, offset=0, name="sftp")
 
     def test_never_returns_secret_fields(self, connector_test_client, monkeypatch):
         c = _make_connector()

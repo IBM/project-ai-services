@@ -1438,12 +1438,15 @@ def list_connectors() -> List[Connector]:
 def list_connectors_paginated(
     limit: int = 50,
     offset: int = 0,
+    name: Optional[str] = None,
 ) -> tuple[List[Connector], int]:
     """Return paginated connectors ordered by attached_at descending.
 
+    ``name`` is an optional case-insensitive substring filter on connector name.
+
     Returns (items, total_count).
     """
-    return db_manager.get_all_connectors_paginated(limit=limit, offset=offset)
+    return db_manager.get_all_connectors_paginated(limit=limit, offset=offset, name=name)
 
 
 def delete_active_connector(connector_id: str) -> bool:
