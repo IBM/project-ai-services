@@ -794,6 +794,7 @@ Model management adds the following goose migration files:
 | `20260801000002_create_workers_table.sql` | Creates `worker_runtime_type` enum (`unknown\|podman\|openshift`), `worker_status` enum (`pending\|ready\|disconnected`), and `workers` table (`name`, `runtime_type`, `status`, `message`, `last_heartbeat`, `metadata`, `registered_at`, `updated_at`) with status and runtime_type indexes |
 | `20260801000003_add_worker_fk_to_applications.sql` | Adds `worker_id UUID NOT NULL` FK column to `applications` (ON DELETE RESTRICT) with index |
 | `20260801000004_add_worker_fk_to_components.sql` | Adds `worker_id UUID` nullable FK column to `components` (ON DELETE SET NULL) |
+| `20260901000001_create_model_profiles_table.sql` | Creates `model_profiles` table (`provider_id`, `profile_id`, `title`, `description`, `is_default`, `params JSONB`, `created_by`) with unique index on `(provider_id, profile_id)`; seeds built-in profiles from `profiles.yaml` via `ON CONFLICT DO NOTHING` |
 
 > There is no migration for virtual keys: they are not stored in the Catalog DB. If an earlier draft migration `20260430094511_create_keys_table.sql` was already applied in a development environment, add a follow-up migration that runs `DROP TABLE keys`.
 
@@ -954,6 +955,7 @@ These two endpoints are already implemented and shared with datasource connector
 | Method | Path | Description | Response |
 |---|---|---|---|
 | `GET` | `/api/v1/connectors?type=<type>` | List all registered provider definitions for a connector type (`llm`, `embedding`, `reranker`, `datasource`). Omit `type` to list all. | `200 OK` |
+| `GET` | `/api/v1/components/:component_type/providers/:provider_id/profiles` | Return all hardware profiles for the given local provider, optionally filtered to one model via `?model=<model_name>`. Each entry has `id`, `title`, `description`, `default` and `params`. Providers without a `profiles.yaml` return `[]`. See [`model-profiles.md §11.5`](model-profiles.md#115-new-api-endpoint--get-apiv1componentscomponent_typeproviderssprovider_idprofiles) | `200 OK` |
 | `GET` | `/api/v1/connectors/:connector_type/providers/:provider_id/params` | Return the provider's `schema.json` (field definitions, required fields, sensitive-field markers). Examples: `/api/v1/connectors/llm/providers/watsonx/params` | `200 OK` |
 
 #### Reuse check against the current implementation
@@ -1272,7 +1274,7 @@ Each of the three form steps is backed by one call:
 | Step | Call |
 |---|---|
 | 1. Model | The model list from the provider's params schema: `GET /api/v1/components/:component_type/providers/:provider_id/params` (the `model` `oneOf`) |
-| 2. Profile | The same schema response: the selected model's `x-profiles` entries (see `model-profiles.md`) |
+| 2. Profile | `GET /api/v1/components/:component_type/providers/:provider_id/profiles?model=<selected_model>` — returns only the profiles valid for that model; the entry with `"default": true` is pre-selected (see `model-profiles.md §11.5`) |
 | 3. Instance | `GET /api/v1/models` with the filters above, using the selections from steps 1 and 2 |
 
 The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profile` and `status=Running`, because application create accepts only `Running` local instances. An empty result means no instance exists yet at that profile, and the form tells the user to deploy one from the Models page first. The list is paginated (`page_size` up to 100), which is ample for one model and profile.
