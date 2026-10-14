@@ -1,6 +1,6 @@
 extract:
   port: ""
-  image: icr.io/ai-services-cicd/extract-service:v0.0.17
+  image: icr.io/ai-services-cicd/extract-service:v0.0.18
   log_level: "INFO"
   database: "extract_metadata"
 
@@ -9,5 +9,9 @@ postgres:
   username: "postgres"
   # @generate:password
   password: ""
+
+mcp:
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.4
+  port: "9501"
 
 # Made with Bob
