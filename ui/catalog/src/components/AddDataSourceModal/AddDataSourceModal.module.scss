@@ -1,57 +1,55 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/theme";
+@use "carbonTokens" as *;
 
 // ── Panel body ──────────────────────────────────────────────────────────────
 .panelBody {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-09;
-  padding: spacing.$spacing-05;
+  gap: $spacing-09;
+  padding: $spacing-05;
 }
 
 .detailsSection {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-06;
+  gap: $spacing-06;
 }
 
 .sectionHeading {
-  @include type.type-style("heading-03");
-  color: theme.$text-primary;
+  @include type-style("heading-03");
+  color: $text-primary;
   // gap is $spacing-06 (24px); add $spacing-03 (8px) to reach $spacing-07 (32px) total
-  margin: 0 0 spacing.$spacing-03;
+  margin: 0 0 $spacing-03;
 }
 
 .sectionDivider {
   border: none;
-  border-top: 1px solid theme.$border-subtle-00;
+  border-top: 1px solid $border-subtle-00;
   margin: 0;
 }
 
 .paramSection {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-06;
+  gap: $spacing-06;
 }
 
 .sectionTitle {
-  @include type.type-style("heading-02");
-  color: theme.$text-primary;
+  @include type-style("heading-02");
+  color: $text-primary;
   // gap is $spacing-06 (24px); pull back 8px to reach $spacing-05 (16px) total
-  margin: 0 0 calc(spacing.$spacing-05 - spacing.$spacing-06);
+  margin: 0 0 calc($spacing-05 - $spacing-06);
 }
 
 .connectorDescription {
-  @include type.type-style("helper-text-01");
-  color: theme.$text-secondary;
+  @include type-style("helper-text-01");
+  color: $text-secondary;
   margin: 0;
 }
 
 .checkboxGroup {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-03;
+  gap: $spacing-03;
 
   :global(.cds--form-item) {
     margin-bottom: 0;
@@ -62,14 +60,14 @@
 .checkboxError {
   display: flex;
   align-items: center;
-  gap: spacing.$spacing-02;
-  @include type.type-style("label-01");
-  color: theme.$support-error;
-  margin: spacing.$spacing-02 0 0;
+  gap: $spacing-02;
+  @include type-style("label-01");
+  color: $support-error;
+  margin: $spacing-02 0 0;
 
   // Carbon ErrorFilled icon inherits the error color
   svg {
-    fill: theme.$support-error;
+    fill: $support-error;
     flex-shrink: 0;
   }
 }
@@ -91,7 +89,7 @@
 .labelWithInfo {
   display: flex;
   align-items: center;
-  gap: spacing.$spacing-03;
+  gap: $spacing-03;
 }
 
 // ── "Add prefix +" button in the Location section ───────────────────────────

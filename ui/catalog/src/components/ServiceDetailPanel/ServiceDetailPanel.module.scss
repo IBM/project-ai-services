@@ -1,9 +1,8 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
+@use "carbonTokens" as *;
 
 .sidePanel {
   :global(.c4p--side-panel__body) {
-    padding: spacing.$spacing-07 spacing.$spacing-06;
+    padding: $spacing-07 $spacing-06;
   }
   :global(.c4p--side-panel__action-toolbar) {
     height: 0;
@@ -16,23 +15,23 @@
 }
 
 .description {
-  @include type.type-style("body-compact-01");
+  @include type-style("body-compact-01");
   color: var(--cds-text-primary);
-  margin: 0 0 spacing.$spacing-06 0;
+  margin: 0 0 $spacing-06 0;
 }
 
 .tagContainer {
   display: flex;
   align-items: center;
-  gap: spacing.$spacing-04;
-  margin-bottom: spacing.$spacing-01;
+  gap: $spacing-04;
+  margin-bottom: $spacing-01;
 }
 
 .certifiedTag {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
   display: inline-flex;
   align-items: center;
-  gap: spacing.$spacing-02;
+  gap: $spacing-02;
   color: var(--cds-text-primary);
 }
 
@@ -43,24 +42,24 @@
 
 .divider {
   border: 1px solid var(--cds-border-subtle-01);
-  margin: spacing.$spacing-06 0;
+  margin: $spacing-06 0;
 }
 
 .section {
-  margin-bottom: spacing.$spacing-02;
+  margin-bottom: $spacing-02;
 }
 
 .sectionTitle {
-  @include type.type-style("heading-02");
+  @include type-style("heading-02");
   color: var(--cds-text-primary);
-  margin: 0 0 spacing.$spacing-05 0;
+  margin: 0 0 $spacing-05 0;
 }
 
 .demoGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: spacing.$spacing-05 spacing.$spacing-06;
-  margin-bottom: spacing.$spacing-05;
+  gap: $spacing-05 $spacing-06;
+  margin-bottom: $spacing-05;
 
   &:last-child {
     margin-bottom: 0;
@@ -70,33 +69,33 @@
 .demoItem {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-02;
+  gap: $spacing-02;
 }
 
 .fieldLabel {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
   color: var(--cds-text-secondary);
 }
 
 .fieldValue {
-  @include type.type-style("body-01");
+  @include type-style("body-01");
   color: var(--cds-text-primary);
 }
 
 .fieldmodel {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
 }
 
 .twoColumns {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: spacing.$spacing-05 spacing.$spacing-06;
+  gap: $spacing-05 $spacing-06;
 }
 
 .threeColumns {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: spacing.$spacing-05;
+  gap: $spacing-05;
 }
 
 .column {
@@ -105,16 +104,16 @@
 }
 
 .columnLabel {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
   color: var(--cds-text-secondary);
-  margin-bottom: spacing.$spacing-03;
+  margin-bottom: $spacing-03;
 }
 
 .subLabel {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
   color: var(--cds-text-secondary);
-  margin-top: spacing.$spacing-04;
-  margin-bottom: spacing.$spacing-02;
+  margin-top: $spacing-04;
+  margin-bottom: $spacing-02;
 }
 .bulletList {
   margin: 0;
@@ -122,9 +121,9 @@
   list-style: none;
 
   li {
-    @include type.type-style("body-01");
+    @include type-style("body-01");
     color: var(--cds-text-primary);
-    padding-left: spacing.$spacing-04;
+    padding-left: $spacing-04;
     position: relative;
 
     &:last-child {
@@ -146,11 +145,11 @@
   list-style: none;
 
   li {
-    @include type.type-style("body-01");
+    @include type-style("body-01");
     color: var(--cds-text-primary);
-    margin-bottom: spacing.$spacing-02;
+    margin-bottom: $spacing-02;
     position: relative;
-    padding-left: spacing.$spacing-04;
+    padding-left: $spacing-04;
 
     &:last-child {
       margin-bottom: 0;
@@ -167,21 +166,21 @@
 .assetsGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: spacing.$spacing-06;
-  margin-bottom: spacing.$spacing-05;
+  gap: $spacing-06;
+  margin-bottom: $spacing-05;
 }
 
 .assetField {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-02;
+  gap: $spacing-02;
 }
 
 .assetTag {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
   display: inline-flex;
   align-items: center;
-  padding: spacing.$spacing-02 spacing.$spacing-03;
+  padding: $spacing-02 $spacing-03;
   background-color: var(--cds-border-subtle-01);
   border-radius: 15px;
   color: var(--cds-text-primary);
@@ -190,7 +189,7 @@
 
 .sourceButton {
   align-self: flex-start;
-  margin-top: spacing.$spacing-02;
+  margin-top: $spacing-02;
 }
 
 .skeletonContainer {
@@ -199,13 +198,13 @@
 }
 
 .skeletonDescription {
-  margin-bottom: spacing.$spacing-06;
+  margin-bottom: $spacing-06;
 }
 
 .skeletonTags {
   display: flex;
-  gap: spacing.$spacing-04;
-  margin-bottom: spacing.$spacing-01;
+  gap: $spacing-04;
+  margin-bottom: $spacing-01;
 }
 
 .skeletonTag {
@@ -215,31 +214,31 @@
 }
 
 .skeletonSection {
-  margin-bottom: spacing.$spacing-02;
+  margin-bottom: $spacing-02;
 }
 
 .skeletonSectionTitle {
-  margin-bottom: spacing.$spacing-05;
+  margin-bottom: $spacing-05;
 }
 
 .skeletonGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: spacing.$spacing-05 spacing.$spacing-06;
-  margin-bottom: spacing.$spacing-05;
+  gap: $spacing-05 $spacing-06;
+  margin-bottom: $spacing-05;
 }
 
 .errorMessage {
-  @include type.type-style("body-01");
+  @include type-style("body-01");
   color: var(--cds-text-error);
-  padding: spacing.$spacing-05;
+  padding: $spacing-05;
   background-color: var(--cds-notification-background-error);
   border-left: 3px solid var(--cds-support-error);
-  margin-bottom: spacing.$spacing-05;
+  margin-bottom: $spacing-05;
 }
 
 .infoLink {
-  @include type.type-style("body-01");
+  @include type-style("body-01");
   color: var(--cds-link-primary);
   text-decoration: none;
   word-break: break-all;

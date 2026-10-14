@@ -1,5 +1,4 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/motion";
+@use "carbonTokens" as *;
 
 html,
 body {
@@ -9,12 +8,11 @@ body {
 .appLayout {
   min-height: 100vh;
   background-color: var(--cds-background);
-  padding-top: spacing.$spacing-09;
+  padding-top: $spacing-09;
 }
 
 .mainContent {
-  transition: margin-left motion.$duration-moderate-01
-    motion.motion(standard, productive);
+  transition: margin-left $duration-moderate-01 motion(standard, productive);
 }
 
 .mainContent.shifted {

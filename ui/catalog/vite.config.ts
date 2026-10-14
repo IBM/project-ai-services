@@ -7,6 +7,13 @@ export default defineConfig({
     cssMinify: 'esbuild',
   },
   plugins: [react()],
+  css: {
+    preprocessorOptions: {
+      scss: {
+        loadPaths: [path.resolve(__dirname, "src")],
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
