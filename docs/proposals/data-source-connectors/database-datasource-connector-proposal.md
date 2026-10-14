@@ -15,8 +15,8 @@
    - 5.1 [metadata.yaml](#51-metadatayaml)
    - 5.2 [schema.json](#52-schemajson)
 6. [Service Compatibility and Restricted Datasource Support](#6-service-compatibility-and-restricted-datasource-support)
- 
- ---
+
+---
 
 ## 1. Executive Summary
 
@@ -39,13 +39,12 @@ The connector follows the **exact same extensibility pattern** already establish
 | `ConnectorSyncJob`             | Picks up the new provider automatically via the `testers` map               |
 | API response DTOs              | Reused as-is (`DatasourceResponse`, `GetDatasourceResponse`, …)             |
 
-| Concern                  | New work in this proposal                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------- |
-| Asset files              | `assets/connectors/datasource/<dbprovider>/metadata.yaml` + `schema.json`             |
-| ConnectionTester         | `databaseTester` in `datasource_service/<dbprovider>.go`                              |
-| Tester registration      | One extra map entry in `NewDatasourceService` and `NewConnectorSyncJob`               |
-| Provider ID constant     | `DatasourceProviderDatabase = "database"` in `constants/catalog.go`                   |
-| Digitize service support | Digitize must implement `type: "<dbprovider>"` connector handling (out of scope here) |
+| Concern              | New work in this proposal                                                 |
+| -------------------- | ------------------------------------------------------------------------- |
+| Asset files          | `assets/connectors/datasource/<dbprovider>/metadata.yaml` + `schema.json` |
+| ConnectionTester     | `databaseTester` in `datasource_service/<dbprovider>.go`                  |
+| Tester registration  | One extra map entry in `NewDatasourceService` and `NewConnectorSyncJob`   |
+| Provider ID constant | `DatasourceProviderDatabase = "database"` in `constants/catalog.go`       |
 
 ---
 
@@ -246,14 +245,17 @@ This file is loaded at startup by `CatalogProvider.loadEmbeddedItems` and return
 ## 6. Service Compatibility and Restricted Datasource Support
 
 ### 6.1 Background
+
 Currently, any service (such as `digitize`) can declare whether it accepts a datasource connector via its metadata. However, with the introduction of non-file-based datasource connectors (like databases), certain services may only support specific types of datasources. For example, the `digitize` service currently only processes file-based content and therefore only supports `file_system` and `object_storage` datasources.
 
 To prevent users from associating unsupported datasource types with a service, we must extend the service metadata to define, enforce, and filter on restricted datasource support.
 
 ### 6.2 Service Metadata Schema Enhancements (Option B)
+
 We will maintain this restriction directly in the **service metadata** file (`metadata.yaml` for each service). When `accepts_datasource` is set to `true`, we introduce an optional `supported_datasource_providers` list to specify which datasource provider IDs are compatible. If this list is omitted, all providers are supported by default.
 
 Example for `digitize` service `metadata.yaml`:
+
 ```yaml
 # ai-services/assets/services/digitize/metadata.yaml
 id: digitize
@@ -265,6 +267,7 @@ supported_datasource_providers:
 ```
 
 ### 6.3 Validation in Catalog API Server
+
 When a user attempts to link a datasource connector as a dependency to a service (e.g., `POST /api/v1/services/{service_id}/dependencies` or similar linking route), the Catalog API Server must validate compatibility:
 
 1. **Load Service Metadata**: Load the target service's `metadata.yaml` and inspect its `accepts_datasource` and `supported_datasource_providers` configurations.
@@ -280,17 +283,22 @@ When a user attempts to link a datasource connector as a dependency to a service
      ```
 
 ### 6.4 Filtering Available Connectors and Datasources by Service Type
+
 To provide a seamless user experience across creation and association workflows, we will support filtering both the connector templates (types) and the configured datasource instances based on a target service type.
 
 #### API Changes
+
 We will add an optional `service_type` query parameter to both endpoints:
-1. **Connectors Listing Endpoint** (filtering templates when creating a *new* datasource):
+
+1. **Connectors Listing Endpoint** (filtering templates when creating a _new_ datasource):
    `GET /api/v1/connectors?type=datasource&service_type=<service_id>`
-2. **Datasources Listing Endpoint** (filtering active instances when attaching an *existing* datasource):
+2. **Datasources Listing Endpoint** (filtering active instances when attaching an _existing_ datasource):
    `GET /api/v1/datasources?service_type=<service_id>`
 
 #### Server-side Filtering Logic
+
 When the `service_type` parameter is provided:
+
 1. **Fetch Service Metadata**: Retrieve the metadata (including `accepts_datasource` and `supported_datasource_providers`) for the service specified by `service_type`.
 2. **Check Support**:
    - If `accepts_datasource` is `false` for that service, return an empty list of connectors/datasources.
