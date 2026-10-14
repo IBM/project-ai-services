@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/assets"
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconfig "github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
