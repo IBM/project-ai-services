@@ -1,6 +1,6 @@
 module github.com/project-ai-services/ai-services
 
-go 1.26.0
+go 1.26.9
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.6
