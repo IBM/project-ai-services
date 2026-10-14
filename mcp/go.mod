@@ -1,6 +1,6 @@
 module github.com/project-ai-services/mcp
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/IBM/go-sdk-core/v5 v5.21.2
