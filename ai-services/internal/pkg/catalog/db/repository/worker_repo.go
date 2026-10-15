@@ -26,8 +26,10 @@ type WorkerUpdate struct {
 // Add column names here to extend search to additional fields in future.
 var workerSearchColumns = []string{"name"}
 
-// WorkerFilters defines optional filters for querying workers.
-type WorkerFilters struct {
+// ListWorkersRequest carries the parameters for listing workers.
+// Pagination fields (Page, PageSize) may be added here in future without
+// touching the DB layer.
+type ListWorkersRequest struct {
 	Search string // Optional: case-insensitive substring search on the worker name
 }
 
@@ -39,8 +41,8 @@ type WorkerRepository interface {
 	Update(ctx context.Context, id uuid.UUID, update WorkerUpdate) error
 	// Delete removes a worker by ID. Returns (false, nil) if no row matched.
 	Delete(ctx context.Context, id uuid.UUID) (bool, error)
-	// GetAll returns all worker rows with optional filters, ordered by registered_at ascending.
-	GetAll(ctx context.Context, filters *WorkerFilters) ([]models.Worker, error)
+	// GetAll returns all worker rows matching the request, ordered by registered_at ascending.
+	GetAll(ctx context.Context, req *ListWorkersRequest) ([]models.Worker, error)
 	// GetByID returns the worker with the given UUID, or (nil, nil) if not found.
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Worker, error)
 	// GetByName returns the worker with the given name, or (nil, nil) if not found.
@@ -148,12 +150,12 @@ func (r *workerRepo) Delete(ctx context.Context, id uuid.UUID) (bool, error) {
 }
 
 // buildGetAllWorkerQuery constructs the SQL query and arguments for GetAll.
-func buildGetAllWorkerQuery(filters *WorkerFilters) (string, []interface{}) {
+func buildGetAllWorkerQuery(req *ListWorkersRequest) (string, []interface{}) {
 	query := `SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at FROM workers`
 	args := []interface{}{}
 
-	if filters != nil && filters.Search != "" {
-		query += " WHERE " + buildSearchClause(workerSearchColumns, &args, filters.Search)
+	if req != nil && req.Search != "" {
+		query += " WHERE " + buildSearchClause(workerSearchColumns, &args, req.Search)
 	}
 
 	query += " ORDER BY registered_at ASC"
@@ -192,9 +194,9 @@ func scanWorkerRow(rows pgx.Rows) (models.Worker, error) {
 	return w, nil
 }
 
-// GetAll returns all worker rows with optional filters, ordered by registered_at ascending.
-func (r *workerRepo) GetAll(ctx context.Context, filters *WorkerFilters) ([]models.Worker, error) {
-	query, args := buildGetAllWorkerQuery(filters)
+// GetAll returns all worker rows matching the request, ordered by registered_at ascending.
+func (r *workerRepo) GetAll(ctx context.Context, req *ListWorkersRequest) ([]models.Worker, error) {
+	query, args := buildGetAllWorkerQuery(req)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {

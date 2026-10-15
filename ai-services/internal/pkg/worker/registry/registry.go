@@ -273,12 +273,12 @@ func (r *Registry) Preregister(ctx context.Context, workerName string) (string, 
 }
 
 // List returns all worker rows from the database with optional filters, ordered by registered_at ascending.
-func (r *Registry) List(ctx context.Context, filters *repository.WorkerFilters) ([]models.Worker, error) {
+func (r *Registry) List(ctx context.Context, req *repository.ListWorkersRequest) ([]models.Worker, error) {
 	if r.repo == nil {
 		return nil, nil
 	}
 
-	return r.repo.GetAll(ctx, filters)
+	return r.repo.GetAll(ctx, req)
 }
 
 // Get returns the in-memory entry for a connected worker, or false if not found.

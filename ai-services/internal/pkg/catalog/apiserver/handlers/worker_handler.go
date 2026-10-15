@@ -164,12 +164,11 @@ func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var filters *repository.WorkerFilters
-	if q := c.Query("q"); q != "" {
-		filters = &repository.WorkerFilters{Search: q}
+	req := &repository.ListWorkersRequest{
+		Search: c.Query("q"),
 	}
 
-	workers, err := h.reg.List(ctx, filters)
+	workers, err := h.reg.List(ctx, req)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "worker handler: failed to list workers: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workers"})
