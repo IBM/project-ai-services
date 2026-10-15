@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -40,12 +41,6 @@ import (
 
 // Dispatcher routes commands to the local runtime and tracks in-flight
 // commands so they can be cancelled by COMMAND_TYPE_CANCEL.
-// maxCancelledTombstones is the maximum number of pre-register cancel tombstones
-// held in memory at once. If a cancel arrives for an ID that never calls
-// register() (stale cancel, malformed message, control-plane retry storm) the
-// entry would otherwise accumulate forever. When the cap is exceeded one entry
-// is evicted before the new one is added.
-const maxCancelledTombstones = 1024
 
 type Dispatcher struct {
 	mu        sync.Mutex
@@ -94,26 +89,18 @@ func (d *Dispatcher) deregister(commandID string) {
 }
 
 // cancelCommand signals the in-flight command to stop, or records a tombstone
-// in cancelled if the command has not called register() yet. If the tombstone
-// map has reached maxCancelledTombstones, the oldest entry is evicted (FIFO)
-// before the new one is added, bounding memory consumption.
+// in cancelled if the command has not called register() yet.
 func (d *Dispatcher) cancelCommand(commandID string) {
 	d.mu.Lock()
 	cancel, ok := d.inflight[commandID]
 	if ok {
 		delete(d.inflight, commandID)
 	} else {
-		// Evict one tombstone when the cap is reached. All entries at this
-		// point are stale (cancels for IDs that never registered), so eviction
-		// order does not matter — any one will do.
-		if len(d.cancelled) >= maxCancelledTombstones {
-			for id := range d.cancelled {
-				delete(d.cancelled, id)
-
-				break
-			}
-		}
 		d.cancelled[commandID] = struct{}{}
+		if n := len(d.cancelled); n > 10 {
+			slog.Warn("dispatch: unusually high number of pre-register cancel tombstones; possible stale-cancel or control-plane retry storm",
+				"count", n)
+		}
 	}
 	d.mu.Unlock()
 
