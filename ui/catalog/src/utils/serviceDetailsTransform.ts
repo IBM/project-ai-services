@@ -1,4 +1,4 @@
-import type { ServiceDetailsData } from "@/services/serviceDetails.api";
+import type { ServiceDetailsData } from "@/api/serviceDetails.api";
 import type { ServiceDetailData } from "@/components/ServiceDetailPanel/ServiceDetailPanel";
 
 /**
