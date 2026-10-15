@@ -3,46 +3,42 @@ name: Image Scanner
 on:
   workflow_call:
     inputs:
+      # Path to the directory containing the Makefile used to build/tag the image (e.g. 'images/caddy', 'services').
       path:
         required: false
         type: string
+      # Service name passed to the Makefile targets (e.g. 'chatbot', 'digitize'). Only needed when multiple
+      # services share the same path (i.e. the 'services' directory).
       service:
         required: false
         type: string
-      # Set skip-image-build to true, to scan the latest image from the registry else set to false for building the image and scanning it
+      # When true, skips the image build step and pulls the latest image directly from the registry.
+      # When false (default), the image is built locally from source before scanning.
       skip-image-build:
         required: false
         type: boolean
         default: false
+      # Name of the image in the registry (e.g. 'caddy', 'chatbot-service'). Used to construct the full
+      # image reference when pulling from the registry (skip-image-build: true).
       image:
         required: false
         type: string
+      # When true (default), Trivy only reports vulnerabilities that have a known fix available.
+      # Set to false to also report unfixed/unpatched CVEs.
       ignore-unfixed:
         required: false
         type: boolean
         default: true
-      skip-cves-scan:
-        required: false
-        type: boolean
-        default: false
-      skip-license-scan:
-        required: false
-        type: boolean
-        default: false
-      skip-code-license-scan:
+      # When true (default), the scan targets the built container image (CVE + license).
+      # When false, the license scan targets the ai-services source code on the filesystem instead,
+      # and the CVE scan is skipped entirely.
+      is-image-scan:
         required: false
         type: boolean
         default: true
-    secrets:
-      ICR_USERNAME:
-        required: false
-      ICR_APIKEY:
-        required: false
-
 env:
   IMAGE_FILE_NAME: image.tar
-  ICR_REGISTRY: icr.io
-  ICR_NAMESPACE: ai-services-cicd
+  ICR_REGISTRY: icr.io/ai-services-cicd
   TRIVY_SBOM_FILE: trivy.json
   PARLAY_SBOM_FILE: parlay.json
   PARLAY_VERSION: v0.11.0
@@ -51,86 +47,43 @@ permissions:
   contents: read
 
 jobs:
-  cves:
+  scan:
     runs-on: ubuntu-24.04-ppc64le
-    if: ${{ !inputs['skip-cves-scan'] }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      
+
       - name: Build image
         if: ${{ !inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         run: |
-          make build SERVICE=${{ inputs.service }} REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+          make build \
+            SERVICE=${{ inputs.service }} \
+            REGISTRY=${{ env.ICR_REGISTRY }} \
+            REGISTRY_USER=${{ secrets.ICR_USERNAME }} \
+            REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
-      - name: Pull latest image Tag
+      - name: Pull latest image tag
         if: ${{ inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
-        id: image-tag
         run: |
           TAG_VALUE=$(make image-tag SERVICE=${{ inputs.service }})
-          IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/${{ inputs.image }}:${TAG_VALUE}
+          IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ inputs.image }}:${TAG_VALUE}
           podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }} $IMAGE_NAME
 
       - name: Save image in file
+        if: ${{ inputs.is-image-scan }}
         run: |
-          IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" | head -n 1)
+          IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}" | head -n 1)
           podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
 
-      - name: Trivy vulnerability scan
+      # --- License scan ---
+
+      - name: Generate trivy SBOM scan report
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          input: ${{ env.IMAGE_FILE_NAME }}
-          format: table
-          severity: CRITICAL,HIGH
-          exit-code: 1
-          ignore-unfixed: ${{ inputs.ignore-unfixed }}
-          skip-dirs: '**/site-packages/docs'
-
-
-  license:
-    runs-on: ubuntu-24.04-ppc64le
-    if: ${{ !inputs['skip-license-scan'] }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Build image
-        if: ${{ !inputs.skip-image-build }}
-        working-directory: ${{ inputs.path }}
-        run: |
-          make build SERVICE=${{ inputs.service }} REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
-      
-      - name: Pull latest image tag
-        if: ${{ inputs.skip-image-build && inputs.skip-code-license-scan }}
-        working-directory: ${{ inputs.path }}
-        run: |
-          TAG_VALUE=$(make image-tag SERVICE=${{ inputs.service }})
-          IMAGE_NAME=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}/${{ inputs.image }}:${TAG_VALUE}
-          podman pull --creds ${{ secrets.ICR_USERNAME }}:${{ secrets.ICR_APIKEY }} $IMAGE_NAME
-
-      - name: Save image in file
-        if: ${{ inputs.skip-code-license-scan }}
-        run: |
-          IMAGE_NAME=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }}" | head -n 1)
-          podman save > ${{ env.IMAGE_FILE_NAME }} $IMAGE_NAME
-
-      - name: Generate trivy sbom scan report for images
-        if: ${{ inputs.skip-code-license-scan }}
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: image
-          input: ${{ env.IMAGE_FILE_NAME }}
-          format: cyclonedx
-          output: ${{ env.TRIVY_SBOM_FILE }}
-      
-      - name: Generate trivy sbom scan report for ai-services code
-        if: ${{ !inputs.skip-code-license-scan }}
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: 'fs'
-          input: './ai-services'
+          scan-type: ${{ inputs.is-image-scan && 'image' || 'fs' }}
+          input: ${{ inputs.is-image-scan && env.IMAGE_FILE_NAME || './ai-services' }}
           format: cyclonedx
           output: ${{ env.TRIVY_SBOM_FILE }}
 
@@ -145,13 +98,18 @@ jobs:
           parlay --version
           parlay ecosystems enrich ${{ env.TRIVY_SBOM_FILE }} | jq . > ${{ env.PARLAY_SBOM_FILE }}
 
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: ${{ inputs.image || 'ai-services' }}-sbom-json-artifact
-          path: |
-            ${{ env.TRIVY_SBOM_FILE }}
-            ${{ env.PARLAY_SBOM_FILE }}
-
       - name: Licenses scan
         run: python .github/scripts/license_scan.py ${{ env.TRIVY_SBOM_FILE }} ${{ env.PARLAY_SBOM_FILE }}
+
+      # --- CVE scan ---
+
+      - name: Trivy vulnerability scan
+        if: ${{ inputs.is-image-scan }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          input: ${{ env.IMAGE_FILE_NAME }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: ${{ inputs.ignore-unfixed }}
+          skip-dirs: '**/site-packages/docs'
