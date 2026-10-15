@@ -139,6 +139,8 @@ The connection check error messages should be clear and actionable:
 | Auth    | `Database authentication failed for user SVCACCT: check username and password` |
 | Access  | `Database query test failed: connection is read-only or permission denied`     |
 
+> **Note:** For IBM i Db2 (`ibmi-db2`), we use the [Mapepire Go SDK](https://github.com/Mapepire-IBMi/mapepire-go) for database connectivity, which requires a Mapepire server running on the target IBM i system as a prerequisite. Mapepire is used exclusively for IBM i Db2; all other database providers rely on standard Go SQL driver packages (`database/sql`).
+
 ### 4.4 Sensitive Fields
 
 Exactly one field is sensitive: **`password`**. It carries `"format": "password"` in `schema.json`. The `catalogutils.SensitiveFieldsFromSchema` utility (used by both `DatasourceService` and `ConnectorSyncJob`) will automatically identify it at runtime — no hardcoded list is required.
