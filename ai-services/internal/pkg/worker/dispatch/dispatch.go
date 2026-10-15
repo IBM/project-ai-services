@@ -39,9 +39,11 @@ import (
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 )
 
+// maxCancelTombstonesWarn is the tombstone count above which a warning is logged.
+const maxCancelTombstonesWarn = 10
+
 // Dispatcher routes commands to the local runtime and tracks in-flight
 // commands so they can be cancelled by COMMAND_TYPE_CANCEL.
-
 type Dispatcher struct {
 	mu        sync.Mutex
 	inflight  map[string]context.CancelFunc // commandID → cancel
@@ -97,7 +99,7 @@ func (d *Dispatcher) cancelCommand(commandID string) {
 		delete(d.inflight, commandID)
 	} else {
 		d.cancelled[commandID] = struct{}{}
-		if n := len(d.cancelled); n > 10 {
+		if n := len(d.cancelled); n > maxCancelTombstonesWarn {
 			slog.Warn("dispatch: unusually high number of pre-register cancel tombstones; possible stale-cancel or control-plane retry storm",
 				"count", n)
 		}
