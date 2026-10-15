@@ -165,7 +165,7 @@ func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]s
 			return nil, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
 		}
 
-		return []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}, nil
+		return []string{route, workerconstants.OpenShiftGatewayServiceEndpoint()}, nil
 	case types.RuntimeTypePodman:
 		domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 		if domainSuffix == "" {

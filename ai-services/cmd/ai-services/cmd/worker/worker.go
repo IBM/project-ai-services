@@ -3,7 +3,11 @@
 // (catalog worker register/list/deregister) which target the catalog API.
 package worker
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
+)
 
 // WorkerCmd returns the top-level worker command.
 func WorkerCmd() *cobra.Command {
@@ -21,6 +25,8 @@ To join this node as a worker:
 			return cmd.Help()
 		},
 	}
+
+	common.ConfigureNamespaceFlag(cmd)
 
 	cmd.AddCommand(newResetCmd())
 	cmd.AddCommand(newJoinCmd())

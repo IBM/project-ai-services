@@ -42,6 +42,7 @@ spec:
             - "{{ .Values.worker.gatewayAddr }}"
             - --token={{ .Values.worker.token }}
             - --runtime={{ .Values.worker.runtime }}
+            - --namespace={{ .Release.Namespace }}
           env:
             - name: AI_SERVICES_LOG_LEVEL
               value: "info"
