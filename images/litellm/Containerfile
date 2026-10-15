@@ -6,9 +6,20 @@ ARG VERSION
 ARG LITELLM_SHA256
 ARG NODE_VERSION
 ARG NODE_SHA256
+ARG TARGETARCH
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
-RUN dnf update ${DNF_FLAGS} -y && \
+# Derive RPM_ARCH, NODE_ARCH and SKIP_CHECKSUM from the builder-provided TARGETARCH.
+# SKIP_CHECKSUM=1 for non-ppc64le arches since NODE_SHA256 is only set for ppc64le.
+RUN case "${TARGETARCH}" in \
+        x86_64|amd64)  RPM_ARCH=x86_64;  NODE_ARCH=x64;   SKIP_CHECKSUM=1 ;; \
+        aarch64|arm64) RPM_ARCH=aarch64; NODE_ARCH=arm64;  SKIP_CHECKSUM=1 ;; \
+        ppc64le)       RPM_ARCH=ppc64le; NODE_ARCH=ppc64le; SKIP_CHECKSUM=0 ;; \
+        *)             RPM_ARCH="${TARGETARCH}"; NODE_ARCH="${TARGETARCH}"; SKIP_CHECKSUM=1 ;; \
+    esac && \
+    echo "NODE_ARCH=${NODE_ARCH}" > /tmp/arch_env && \
+    echo "SKIP_CHECKSUM=${SKIP_CHECKSUM}" >> /tmp/arch_env && \
+    dnf update ${DNF_FLAGS} -y && \
     dnf install ${DNF_FLAGS} -y \
         wget \
         patch \
@@ -21,13 +32,13 @@ RUN dnf update ${DNF_FLAGS} -y && \
         zlib-devel \
         git \
         # Required for building primsa engines
-        https://mirror.stream.centos.org/9-stream/CRB/ppc64le/os/Packages/protobuf-compiler-3.14.0-17.el9.ppc64le.rpm \
-        https://mirror.stream.centos.org/9-stream/AppStream/ppc64le/os/Packages/protobuf-3.14.0-17.el9.ppc64le.rpm && \
+        https://mirror.stream.centos.org/9-stream/CRB/${RPM_ARCH}/os/Packages/protobuf-compiler-3.14.0-17.el9.${RPM_ARCH}.rpm \
+        https://mirror.stream.centos.org/9-stream/AppStream/${RPM_ARCH}/os/Packages/protobuf-3.14.0-17.el9.${RPM_ARCH}.rpm && \
     dnf clean all
 
 WORKDIR /build
 
-COPY pre-requirements.txt patches ./
+COPY pre-requirements.txt patches build-prisma.sh ./
 
 # 2. Install Pre-requistes
 RUN python3.12 -m pip install -r pre-requirements.txt \
@@ -67,40 +78,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 	--prefer-binary && \
     uv build --wheel --out-dir /wheels
 
-# 7. Patch & build Prisma
+# 7. Patch & build Prisma engines, install Node.js, bake Prisma CLI
 WORKDIR /build
-RUN git clone --depth 1 --branch 5.4.2 https://github.com/prisma/prisma-engines.git && \
-    curl -sSL https://static.crates.io/crates/ring/ring-0.16.20.crate | tar -xvzf -
-
-WORKDIR /build/ring-0.16.20
-RUN patch -p1 < ../prisma/ring.patch
-
-WORKDIR /build/prisma-engines
-RUN source "$HOME/.cargo/env" && rustup install 1.94.1 && rustup default 1.94.1 && \
-    export RUSTFLAGS="--cap-lints allow -A ambiguous_glob_imports" && \
-    patch -p1 < ../prisma/prisma.patch && \
-    cargo update -p time@0.3.25 && \
-    cargo build --release --bin query-engine && \
-    cargo build --release --bin schema-engine && \
-    cargo build --release -p query-engine-node-api
-
-# 8. Install Node.js and bake Prisma CLI into /app/prisma
-# Avoids nodeenv downloading Node at runtime, eliminating CVEs from bundled npm packages
-WORKDIR /build
-RUN curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-ppc64le.tar.gz \
-        -o /tmp/node.tar.gz && \
-    echo "${NODE_SHA256}  /tmp/node.tar.gz" | sha256sum -c - && \
-    tar -xz -C /usr/local --strip-components=1 -f /tmp/node.tar.gz && \
-    rm /tmp/node.tar.gz && \
-    python3.12 -m pip install --no-cache-dir --no-index \
-        --find-links=/wheels prisma && \
-    mkdir -p /build/prisma && \
-    HOME=/build/prisma XDG_CACHE_HOME=/build/prisma/.cache PRISMA_BINARY_CACHE_DIR=/build/prisma/binaries \
-    PRISMA_QUERY_ENGINE_BINARY=/build/prisma-engines/target/release/query-engine \
-    PRISMA_SCHEMA_ENGINE_BINARY=/build/prisma-engines/target/release/schema-engine \
-    PRISMA_QUERY_ENGINE_LIBRARY=/build/prisma-engines/target/release/libquery_engine.so \
-    PRISMA_ENGINES_CHECKSUM_IGNORE_WARNING=true \
-    prisma version
+RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} bash build-prisma.sh
 
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
