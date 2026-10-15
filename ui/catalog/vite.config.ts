@@ -3,13 +3,17 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
-  build: {
-    cssMinify: 'esbuild',
+  css: {
+    preprocessorOptions: {
+      scss: {
+        silenceDeprecations: ["if-function"],
+      },
+    },
   },
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(import.meta.dirname, "src"),
     },
   },
   server: {
