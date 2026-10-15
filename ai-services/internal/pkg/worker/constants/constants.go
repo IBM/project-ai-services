@@ -5,6 +5,9 @@ package constants
 import catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 
 const (
+	// WorkerAppName is the app name used for Podman worker pods/templates.
+	WorkerAppName = "ai-services"
+
 	// LocalWorkerName is the sentinel value used when no remote worker is specified.
 	// It means "deploy on this machine using the local runtime".
 	LocalWorkerName = "Local"
@@ -100,13 +103,9 @@ const (
 	WorkerJoinSuccess = "Opening CommandStream for worker"
 )
 
-var (
-	// WorkerAppName is the OpenShift namespace where the worker is deployed.
-	// Derived from CatalogNamespace so a single constant change redeploys to a different namespace.
-	WorkerAppName = catalogconstants.CatalogNamespace
-
-	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
-	// auto-generated gateway server certificate for internal cluster communication.
-	// Derived from CatalogNamespace so the DNS name tracks the namespace automatically.
-	OpenShiftGatewayServiceEndpoint = "catalog-api." + catalogconstants.CatalogNamespace + ".svc.cluster.local"
-)
+// OpenShiftGatewayServiceEndpoint returns the OpenShift service DNS name embedded in the
+// auto-generated gateway server certificate for internal cluster communication.
+// It is a function so it reflects the --namespace flag parsed at runtime.
+func OpenShiftGatewayServiceEndpoint() string {
+	return "catalog-api." + catalogconstants.CatalogNamespace + ".svc.cluster.local"
+}

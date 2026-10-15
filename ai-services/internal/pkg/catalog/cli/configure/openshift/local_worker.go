@@ -48,7 +48,7 @@ func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient
 	// internal service DNS endpoint. This avoids routing out through the OpenShift
 	// router/external route. The internal service DNS name is already included in
 	// the gateway's TLS server certificate SANs.
-	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.OpenShiftGatewayServiceEndpoint, workerconstants.WorkerGatewayPort)
+	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.OpenShiftGatewayServiceEndpoint(), workerconstants.WorkerGatewayPort)
 
 	opts := workertypes.OpenshiftWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
