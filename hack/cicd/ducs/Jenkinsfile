@@ -1,0 +1,235 @@
+pipeline {
+    agent { label 'shared-x86-centos9' }
+
+    triggers {
+        // Run once a week, on Monday around 02:00
+        cron('H 2 * * 1')
+    }
+
+    parameters {
+        string(
+            name: 'BRANCH',
+            defaultValue: 'main',
+            description: 'Branch name where we have to run the scan'
+        )
+        string(
+            name: 'ICR_REGISTRY',
+            defaultValue: 'icr.io/ai-services-cicd',
+            description: 'Registry where images will be pushed'
+        )
+        string(
+            name: 'IMAGES_LIST',
+            defaultValue: '',
+            description: 'Space separated list of images for which we need to trigger the scan. If empty, the list is generated from the repo.'
+        )
+        string(
+            name: 'ADDITIONAL_IMAGES',
+            defaultValue: 'icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le',
+            description: 'Space separated list of extra images (full reference, e.g. icr.io/ns/image:tag) to append to the final scan list.'
+        )
+    }
+
+    environment {
+        AI_SERVICES_REPO_URL = 'https://github.com/IBM/project-ai-services.git'
+        REPO_DIR = 'project-ai-services'
+
+        CONTROL_GROUP = credentials('mend-ws-product-name')
+        SCAN_TYPE = 'prod'
+        WORKSPACE = 'ai-services-scan'
+    }
+
+    stages {
+        stage('Clone AI Services') {
+            steps {
+                script {
+                    checkoutRepository()
+                }
+            }
+        }
+
+        stage('List Images') {
+            steps {
+                script {
+                    if (params.IMAGES_LIST?.trim()) {
+                        env.SCAN_IMAGES = params.IMAGES_LIST.trim()
+                        echo "Using images from IMAGES_LIST: ${env.SCAN_IMAGES}"
+                    } else {
+                        generateImageList()
+                    }
+
+                    if (params.ADDITIONAL_IMAGES?.trim()) {
+                        env.SCAN_IMAGES = "${env.SCAN_IMAGES} ${params.ADDITIONAL_IMAGES.trim()}"
+                        echo "Appended ADDITIONAL_IMAGES: ${params.ADDITIONAL_IMAGES.trim()}"
+                    }
+                    echo "Final images to scan: ${env.SCAN_IMAGES}"
+                }
+            }
+        }
+
+        stage('Download DUCS') {
+            steps {
+                // Artifactory creds: ai-power-jrog-creds
+                withCredentials([usernamePassword(
+                    credentialsId: 'ai-power-jrog-creds',
+                    usernameVariable: 'ARTIFACTORY_USER_NAME',
+                    passwordVariable: 'ARTIFACTORY_TOKEN'
+                )]) {
+                    sh '''#!/bin/bash
+                        set -euo pipefail
+
+                        OS="$(uname -s | tr 'A-Z' 'a-z')"
+                        ARCH="$(uname -m | sed -e 's/aarch64/arm64/' -e 's/x86_64/amd64/')"
+                        DUCS_CLIENT="ducs-${OS}-${ARCH}"
+                        URL="https://na.artifactory.swg-devops.com/artifactory/hyc-cims-team-generic-local/ducs/${DUCS_CLIENT}"
+
+                        curl --user "${ARTIFACTORY_USER_NAME}:${ARTIFACTORY_TOKEN}" --fail --location --output "${DUCS_CLIENT}" "${URL}"
+                        mv "${DUCS_CLIENT}" ducs
+                        chmod +x ducs
+                    '''
+                }
+            }
+        }
+
+        stage('Update Data Feeds') {
+            steps {
+                // Artifactory creds: ai-power-jrog-creds
+                // Encryption key (secret text): ducs-encryption-key
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'ai-power-jrog-creds',
+                        usernameVariable: 'ARTIFACTORY_ID',
+                        passwordVariable: 'ARTIFACTORY_TOKEN'
+                    ),
+                    string(
+                        credentialsId: 'ducs-encryption-key',
+                        variable: 'ENCRYPTION_KEY'
+                    )
+                ]) {
+                    sh '''#!/bin/bash
+                        set -euo pipefail
+
+                        SCAN_IMAGES=(${SCAN_IMAGES})
+                    echo "Images to scan: ${SCAN_IMAGES[@]}"
+
+
+                        ARTIFACTORY_ID="$ARTIFACTORY_ID" ARTIFACTORY_TOKEN="$ARTIFACTORY_TOKEN" ENCRYPTION_KEY="$ENCRYPTION_KEY" \
+                            ./ducs --image-pull-credentials=env-vars://ARTIFACTORY_ID:ARTIFACTORY_TOKEN \
+                            --encryption-key=env-var://ENCRYPTION_KEY -- update-data-feeds
+                    '''
+                }
+            }
+        }
+
+        stage('Seed Credentials') {
+            steps {
+                // DUCS service creds: ducs-api-key
+                // ICR registry creds: icr-iam-creds
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'ducs-api-key',
+                        usernameVariable: 'DUCS_USER',
+                        passwordVariable: 'DUCS_API_KEY'
+                    ),
+                    usernamePassword(
+                        credentialsId: 'icr-iam-creds',
+                        usernameVariable: 'ICR_USER',
+                        passwordVariable: 'ICR_PASSWORD'
+                    )
+                ]) {
+                    sh '''#!/bin/bash
+                        set -euo pipefail
+
+                        ./ducs -- seed-service-credentials api-key 'n/a' "${DUCS_USER}" "${DUCS_API_KEY}"
+                        ./ducs -- seed-registry-credentials 'icr.io' "${ICR_USER}" "${ICR_PASSWORD}"
+                    '''
+                }
+            }
+        }
+
+        stage('DUCS Scan') {
+            steps {
+                sh '''#!/bin/bash
+                    set -euo pipefail
+
+                    
+                    ./ducs -- ucs-scan ${WORKSPACE:-test-scan} ${SCAN_IMAGES[@]} \
+                        --scan-control-group "${CONTROL_GROUP}" \
+                        --scan-image-type "${SCAN_TYPE:-nonprod}" \
+                        --scanner-set=aqua,twistlock 2>&1 | tee ducs-scan.log
+
+                    # Parse the report path from the scan output
+                    REPORT_PATH="$(grep -oE '/[^[:space:]]+full-compact-cve-correlation-report\\.csv' ducs-scan.log | tail -n 1 || true)"
+                    if [ -z "${REPORT_PATH}" ] || [ ! -f "${REPORT_PATH}" ]; then
+                        echo "ERROR: full-compact-cve-correlation-report.csv not found in ucs-scan output"
+                        exit 1
+                    fi
+
+                    echo "CVE report: ${REPORT_PATH}"
+                    # Branch names may contain '/', which is not valid in a file name
+                    BRANCH_NAME="$(echo "${BRANCH}" | tr '/' '-')"
+                    mkdir -p ducs-reports
+                    cp "${REPORT_PATH}" "ducs-reports/${BRANCH_NAME}-full-compact-cve-correlation-report.csv"
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            archiveArtifacts artifacts: 'ducs-reports/*-full-compact-cve-correlation-report.csv', fingerprint: true
+        }
+        always {
+            archiveArtifacts artifacts: 'ducs-scan.log', allowEmptyArchive: true
+        }
+    }
+}
+
+def checkoutRepository() {
+    echo "Cloning ${env.AI_SERVICES_REPO_URL} (branch: ${params.BRANCH})..."
+    dir(env.REPO_DIR) {
+        deleteDir()
+        git url: env.AI_SERVICES_REPO_URL, branch: params.BRANCH
+    }
+}
+
+def generateImageList() {
+    echo 'Discovering images from Makefiles...'
+
+    // Every Makefile (up to depth 3) that defines IMAGE is an image to scan.
+    // Prints "<image>:<tag>" per line. For services/<name>/Makefile, the tag has to be
+    // resolved via the shared services/Makefile (make -C services image-tag SERVICE=<name>).
+    def output = ''
+    dir(env.REPO_DIR) {
+        withEnv(["ICR_REGISTRY=${params.ICR_REGISTRY}"]) {
+        output = sh(returnStdout: true, script: '''#!/bin/bash
+            set -euo pipefail
+
+            find . -maxdepth 3 -name Makefile -not -path '*/vendor/*' -not -path '*/node_modules/*' | sort | while read -r mk; do
+                dir="$(dirname "${mk}")"
+                image="$(sed -nE 's/^IMAGE[[:space:]]*[?]?=[[:space:]]*([^[:space:]#]+).*/\\1/p' "${mk}" | head -n 1)"
+                [ -z "${image}" ] && continue
+
+                case "${dir}" in
+                    ./services/*) tag="$(make -s -C services image-tag REGISTRY="${ICR_REGISTRY}" SERVICE="$(basename "${dir}")")" ;;
+                    *)            tag="$(make -s -C "${dir}" image-tag REGISTRY="${ICR_REGISTRY}")" ;;
+                esac
+                echo "${image}:${tag}"
+            done
+        ''').trim()
+        }
+    }
+
+    def images = []
+    for (line in output.readLines()) {
+        def imageWithTag = "${params.ICR_REGISTRY}/${line.trim()}"
+        images.add(imageWithTag)
+        echo "Adding image for scan: ${imageWithTag}"
+    }
+
+    if (images.isEmpty()) {
+        error 'No images discovered from Makefiles'
+    }
+
+    // Space separated
+    env.SCAN_IMAGES = images.join(' ')
+}
