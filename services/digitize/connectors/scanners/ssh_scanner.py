@@ -109,11 +109,11 @@ class SSHScanner(BaseScanner):
 
     def _remote_md5(self, remote_file_path: str) -> str:
         cmd = (
-            f'if command -v md5sum >/dev/null 2>&1; then md5sum "{remote_file_path}"; '
-            f'elif command -v openssl >/dev/null 2>&1; then openssl dgst -md5 "{remote_file_path}"; '
-            f'elif command -v md5 >/dev/null 2>&1; then md5 "{remote_file_path}"; '
-            f'elif command -v csum >/dev/null 2>&1; then csum -h MD5 "{remote_file_path}"; '
-            f'else echo "No md5 utility found" >&2; exit 127; fi'
+            f'md5sum "{remote_file_path}" 2>/dev/null || '
+            f'openssl dgst -md5 "{remote_file_path}" 2>/dev/null || '
+            f'md5 "{remote_file_path}" 2>/dev/null || '
+            f'csum -h MD5 "{remote_file_path}" 2>/dev/null || '
+            f'{{ echo "No md5 utility found" >&2; exit 127; }}'
         )
         _, stdout, stderr = self._ssh.exec_command(cmd)
         output = stdout.read().decode().strip()
