@@ -434,68 +434,100 @@ LiteLLM does not natively proxy the vLLM `/tokenize` endpoint. This endpoint is 
 
 #### LiteLLM passthrough configuration
 
-To make `/tokenize` reachable through the LiteLLM gateway, a **passthrough endpoint** must be registered **per model** — one for the LLM model and one for the embedding model. The passthrough is keyed on the model name, not on individual pod instances. If multiple pod instances serve the same model (e.g. for redundancy), the `target` points to any one of them — LiteLLM load-balances inference calls across instances itself, but passthrough targets are static. LiteLLM forwards passthrough requests directly to the `target` URL without authentication or transformation.
+To make `/tokenize` reachable through the LiteLLM gateway, a **passthrough endpoint** is registered in LiteLLM for **each deployed local vLLM instance** (`component_id`) and for **each remote `hosted_vllm` connector** (`connector_id`).
 
-Because multiple models would otherwise all register the same `/tokenize` path — causing conflicts — the path must be **scoped per model name**:
+Because multiple vLLM instances or models may run simultaneously, the gateway path is **scoped per instance UUID**:
 
 ```
-/tokenize/<sanitised-model-name>   →   http://<vllm-pod>:8000/tokenize
+/tokenize/{UUID}   →   http://<target-pod-or-host>:8000/tokenize
 ```
 
-The model name is sanitised for use as a URL path segment (slashes replaced with dashes). Consumer services set their tokenize base URL to `https://<litellm-host>/tokenize/<sanitised-model-name>` and the existing code appends nothing further — [`tokenize_with_llm()`](services/common/llm_utils.py:626) posts directly to the full URL passed to it.
+where `{UUID}` is:
+- `components.id` for a **locally deployed vLLM instance** (`vllm-cpu`, `vllm-spyre`).
+- `connectors.id` for a **remote `hosted_vllm` connector**.
 
-Register a passthrough entry per model at deploy time:
+The passthrough endpoint is registered via LiteLLM's `POST /config/pass_through_endpoint` API with `"auth": false`.
+
+> **Security & Authentication Boundary:**
+> LiteLLM virtual keys do not enforce authentication on passthrough endpoints. Therefore, `"auth": false` is configured on LiteLLM passthrough routes for internal consumption by platform services.
+> To prevent unauthorized external access, **Caddy's public ingress (port 443) explicitly blocks all requests matching `/tokenize` (and `/tokenize/*`)**, ensuring the tokenize endpoint is only reachable internally across the private service network and never exposed to the public internet.
+
+#### Registration payload examples
+
+**1. Local control-plane vLLM instance (e.g. `components.id = "7a465ce2-1234-5678-90ab-cdef12345678"`, pod name `llm-7a465ce212`):**
 
 ```bash
-# LLM model (ibm-granite/granite-3.3-8b-instruct → sanitised: ibm-granite-granite-3.3-8b-instruct)
-curl -X POST "https://<litellm-host>/config/pass_through_endpoint" \
-  -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
+curl -k -X POST "https://<litellm-host>/config/pass_through_endpoint" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "id": "ibm-granite-granite-3.3-8b-instruct-tokenize",
-    "path": "/tokenize/ibm-granite-granite-3.3-8b-instruct",
-    "target": "http://<llm-pod-host>:8000/tokenize",
-    "methods": ["POST"],
-    "auth": false
-  }'
-
-# Embedding model (BAAI/bge-m3 → sanitised: BAAI-bge-m3)
-curl -X POST "https://<litellm-host>/config/pass_through_endpoint" \
-  -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "BAAI-bge-m3-tokenize",
-    "path": "/tokenize/BAAI-bge-m3",
-    "target": "http://<emb-pod-host>:8000/tokenize",
+    "id": "vllm-token-passthrough-7a465ce2-1234-5678-90ab-cdef12345678",
+    "path": "/tokenize/7a465ce2-1234-5678-90ab-cdef12345678",
+    "target": "http://llm-7a465ce212:8000/tokenize",
     "methods": ["POST"],
     "auth": false
   }'
 ```
 
-| Field | Value |
+**2. Local remote-worker vLLM instance (deployed on worker LPAR `lpar-1`, routed via Caddy proxy):**
+
+```bash
+curl -k -X POST "https://<litellm-host>/config/pass_through_endpoint" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "vllm-token-passthrough-9b123456-789a-bcde-f012-3456789abcde",
+    "path": "/tokenize/9b123456-789a-bcde-f012-3456789abcde",
+    "target": "http://ai-services--caddy:8080/worker/lpar-1/models/<caddyRouteID>/tokenize",
+    "methods": ["POST"],
+    "auth": false
+  }'
+```
+
+**3. Remote `hosted_vllm` connector (e.g. `connectors.id = "c-4f8a12bc-90ab-cdef-1234-567890abcdef"`, remote target `https://remote-vllm.corp.internal:8000`):**
+
+```bash
+curl -k -X POST "https://<litellm-host>/config/pass_through_endpoint" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "vllm-token-passthrough-c-4f8a12bc-90ab-cdef-1234-567890abcdef",
+    "path": "/tokenize/c-4f8a12bc-90ab-cdef-1234-567890abcdef",
+    "target": "https://remote-vllm.corp.internal:8000/tokenize",
+    "methods": ["POST"],
+    "auth": false
+  }'
+```
+
+| Field | Description / Value |
 |---|---|
-| `id` | `<sanitised-model-name>-tokenize` — unique per model (e.g. `ibm-granite-granite-3.3-8b-instruct-tokenize`) |
-| `path` | `/tokenize/<sanitised-model-name>` — scoped path, unique per model, avoids conflicts when multiple models are registered |
-| `target` | Direct URL of the backing vLLM pod's `/tokenize` endpoint |
+| `id` | `vllm-token-passthrough-{UUID}` — unique identifier for the passthrough entry |
+| `path` | `/tokenize/{UUID}` — scoped path using `components.id` (local) or `connectors.id` (remote `hosted_vllm`), preventing conflicts across models and instances |
+| `target` | Direct upstream URL pointing to the backing vLLM instance `/tokenize` endpoint |
 | `methods` | `["POST"]` |
-| `auth` | `false` — no bearer token is forwarded to the upstream vLLM pod |
+| `auth` | `false` — LiteLLM virtual keys do not enforce authentication on passthrough endpoints; public ingress security is enforced at the Caddy ingress layer (blocking `/tokenize/*` on port 443) |
 
 #### Lifecycle
 
-Register the passthrough at the same time as the LiteLLM model route (`POST /model/new`). Deregister it when the model is undeployed, alongside the model route deletion (`DELETE /model/delete`).
+- **Registration:**
+  - Local vLLM instance: Registered after the pod passes its readiness/liveness probe, alongside route registration (`POST /model/new`).
+  - Remote `hosted_vllm` connector: Registered during connector creation after the connectivity probe succeeds, alongside route registration (`POST /model/new`).
+- **Deregistration:**
+  - Local vLLM instance: Removed during model undeployment via `DELETE /config/pass_through_endpoint` (with `{"id": "vllm-token-passthrough-<components.id>"}`), alongside `DELETE /model/delete`.
+  - Remote `hosted_vllm` connector: Removed during connector deletion via `DELETE /config/pass_through_endpoint` (with `{"id": "vllm-token-passthrough-<connectors.id>"}`), alongside `DELETE /model/delete`.
 
 #### Consumer service configuration
 
-Each consumer service must be configured with the **model-scoped tokenize URL** for the model it measures against:
+Each consumer service is configured with the **instance-scoped tokenize URL** pointing to the LiteLLM gateway:
 
 | Config variable | Example value |
 |---|---|
-| `LLM_ENDPOINT` | `https://litellm:4000` (inference — unchanged) |
-| `LLM_TOKENIZE_ENDPOINT` | `https://litellm:4000/tokenize/ibm-granite-granite-3.3-8b-instruct` |
-| `EMB_ENDPOINT` | `https://litellm:4000` (embeddings — unchanged) |
-| `EMB_TOKENIZE_ENDPOINT` | `https://litellm:4000/tokenize/BAAI-bge-m3` |
+| `LLM_ENDPOINT` | `https://litellm-api:4000` (inference via LiteLLM route) |
+| `LLM_TOKENIZE_ENDPOINT` | `https://litellm-api:4000/tokenize/7a465ce2-1234-5678-90ab-cdef12345678` |
+| `EMB_ENDPOINT` | `https://litellm-api:4000` (embeddings via LiteLLM route) |
+| `EMB_TOKENIZE_ENDPOINT` | `https://litellm-api:4000/tokenize/c-4f8a12bc-90ab-cdef-1234-567890abcdef` |
 
-> **Note:** This requires a code change in [`tokenize_with_llm()`](services/common/llm_utils.py:626) — callers must pass the full scoped tokenize URL rather than the inference base URL. Alternatively, services can continue pointing their tokenize calls directly at the vLLM pod URL, bypassing LiteLLM entirely for `/tokenize`. Both approaches are valid; the scoped-path approach is preferred when all traffic must flow through the gateway.
+Internal consumer services reach the LiteLLM gateway over the internal network using `LLM_TOKENIZE_ENDPOINT` / `EMB_TOKENIZE_ENDPOINT`. External requests hitting public ingress on Caddy (port 443) for `/tokenize/*` are rejected with `403 Forbidden`.
 
 ---
 
@@ -1612,10 +1644,16 @@ POST /api/v1/models
   4. Return 202 { id: components.id }
   5. [async] LocalRuntime.CreatePod → Render vllm-server.yaml.tmpl → podman kube play
   6. [async] Poll InspectPod until liveness probe passes
-  7. [async] POST /model/new to LiteLLM (model_name="ibm-granite/granite-3.3-8b-instruct",
-                                       model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
-                                       api_base="http://<pod-name>:8000/v1",
-                                       litellm_params.tags=["vllm-spyre", <components.id>])
+  7. [async] Register routes in LiteLLM Gateway:
+       a. POST /model/new (model_name="ibm-granite/granite-3.3-8b-instruct",
+                          model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
+                          api_base="http://<pod-name>:8000/v1",
+                          litellm_params.tags=["vllm-spyre", <components.id>])
+       b. POST /config/pass_through_endpoint:
+                          { id: "vllm-token-passthrough-" + <components.id>,
+                            path: "/tokenize/" + <components.id>,
+                            target: "http://<pod-name>:8000/tokenize",
+                            methods: ["POST"], auth: false }
   8. [async] Probe GET /health?model=ibm-granite/granite-3.3-8b-instruct → UPDATE components.status = 'Running' or 'Error'
 ```
 
@@ -1645,10 +1683,16 @@ POST /api/v1/models
        WorkerGateway sends COMMAND_TYPE_CREATE_POD over gRPC stream to Worker Daemon
        Daemon: podman kube play vllm-server.yaml → pod starts on worker LPAR
   6. [async] Poll InspectPod (via gRPC COMMAND_TYPE_INSPECT_POD) until liveness probe passes
-  7. [async] POST /model/new to LiteLLM (model_name="ibm-granite/granite-3.3-8b-instruct",
-                                       model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
-                                       api_base="http://ai-services--caddy:8080/worker/lpar-1/models/<caddyRouteID>",
-                                       litellm_params.tags=["vllm-spyre", <components.id>])
+  7. [async] Register routes in LiteLLM Gateway:
+       a. POST /model/new (model_name="ibm-granite/granite-3.3-8b-instruct",
+                          model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
+                          api_base="http://ai-services--caddy:8080/worker/lpar-1/models/<caddyRouteID>",
+                          litellm_params.tags=["vllm-spyre", <components.id>])
+       b. POST /config/pass_through_endpoint:
+                          { id: "vllm-token-passthrough-" + <components.id>,
+                            path: "/tokenize/" + <components.id>,
+                            target: "http://ai-services--caddy:8080/worker/lpar-1/models/<caddyRouteID>/tokenize",
+                            methods: ["POST"], auth: false }
   8. [async] Probe GET /health?model=ibm-granite/granite-3.3-8b-instruct → UPDATE components.status = 'Running' or 'Error'
 ```
 
@@ -1680,10 +1724,44 @@ POST /api/v1/models          (deployment_type=remote)
                              metadata={model_name: ...,        ← from request params.model_name
                                        api_base: ...,      ← from request params.api_base
                                        project_id: ...})       ← from request params.project_id
-                                                               ← api_key (format: password) stripped, not stored
+                                                                ← api_key (format: password) stripped, not stored
      (on INSERT failure: DELETE /model/delete → 500)
   6. Return 201 { id: connectors.id }
      No virtual key is generated here — see Virtual Key Provisioning.
+```
+
+### Flow: Register Hosted vLLM Connector — remote (no pod)
+
+```
+POST /api/v1/models          (deployment_type=remote)
+
+{ deployment_type: "remote", name: "external-vllm", type: "llm", provider_id: "hosted_vllm",
+  params: {model_name: "ibm-granite/granite-3.3-8b-instruct",
+           api_base: "https://remote-vllm.corp.internal:8000/v1",
+           api_key: "<optional-api-key>"} }
+
+  Read assets/connectors/models/hosted_vllm/ (metadata.yaml + schema.json)
+
+  1. Validate request fields (name uniqueness, required params)
+  2. No pod, no pre-flight resource check
+  2a. Generate connectors.id up front (used as a route tag, passthrough path ID, and as the row id)
+  3. POST /model/new to LiteLLM Gateway:
+            body: { model_name: "ibm-granite/granite-3.3-8b-instruct",
+                    litellm_params: { model:      "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
+                                      api_base:   params.api_base,
+                                      api_key:    params.api_key,
+                                      tags:       ["hosted_vllm", <connectors.id>] } }
+  4. Run connectivity probe via LiteLLM GET /health?model=ibm-granite/granite-3.3-8b-instruct → if fails, DELETE /model/delete and return 422
+  5. POST /config/pass_through_endpoint to LiteLLM Gateway:
+            { id: "vllm-token-passthrough-" + <connectors.id>,
+              path: "/tokenize/" + <connectors.id>,
+              target: "<params.api_base_without_/v1>/tokenize",
+              methods: ["POST"], auth: false }
+  6. INSERT into connectors (id=<connectors.id from 2a>, name='external-vllm', type='models', provider='hosted_vllm',
+                             status='connected', created_by=<user>,
+                             metadata={model_name: ...,
+                                       api_base: ...})
+  7. Return 201 { id: connectors.id }
 ```
 
 ### Flow: Application Create — Model Already Deployed (pre-deployed path)
@@ -1920,7 +1998,9 @@ DELETE /api/v1/models/:id
 
   1. Verify created_by=user
   2. Return 202
-  3. [async] DELETE /model/delete { "model_name": modelName } from LiteLLM Gateway (deregisters the route)
+  3. [async] Deregister routes from LiteLLM Gateway:
+       a. DELETE /model/delete { "model_name": modelName }
+       b. DELETE /config/pass_through_endpoint { "id": "vllm-token-passthrough-" + components.id }
   4. [async] StopPod → DeletePod
        control-plane: LocalRuntime.StopPod / DeletePod (local Podman)
        worker: RemoteRuntime → WorkerGateway sends COMMAND_TYPE_DELETE_POD over gRPC to Worker Daemon
@@ -1937,7 +2017,9 @@ DELETE /api/v1/models/:id          (resolves to connectors table — same handle
   modelName = connectors.metadata["model_name"]  (e.g. "ibm/granite-4-h-small")
 
   1. Verify created_by=user
-  2. DELETE /model/delete { "model_name": modelName } from LiteLLM Gateway (removes route + upstream credentials from LiteLLM DB)
+  2. Deregister from LiteLLM Gateway:
+       a. DELETE /model/delete { "model_name": modelName } (removes route + upstream credentials from LiteLLM DB)
+       b. If provider='hosted_vllm': DELETE /config/pass_through_endpoint { "id": "vllm-token-passthrough-" + connectors.id }
   3. DELETE connectors row
   4. Return 204 No Content
 

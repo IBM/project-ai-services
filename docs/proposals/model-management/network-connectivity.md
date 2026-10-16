@@ -13,6 +13,7 @@ This document explains, in one place, how traffic moves between the control plan
 1. Whenever a vLLM pod is deployed, it is registered with LiteLLM. After that, every consumer reaches the model through LiteLLM and never talks to the pod directly.
 2. **Port `443` is for end users only.** Services inside the AI-Services platform never use it. They communicate through the **private ingress and private egress** (`:8443` / `:8080`).
 3. A vLLM pod that runs on the **control-plane node** (the local worker) is reached by LiteLLM directly. It is **not** exposed through any ingress.
+4. **Public ingress blocks internal utility paths:** Endpoints such as `/tokenize/*` registered in LiteLLM for internal service token-budget calculations are strictly internal. Caddy's public ingress (`:443`) explicitly blocks `/tokenize/*`.
 
 ---
 
@@ -81,6 +82,8 @@ The pod behind Caddy (vLLM, summarise, and so on) listens on its own container p
 
 **Rule:** a service inside the platform must never call another service or node through `:443`. Doing so would bypass mTLS and the internal CA. All platform-internal traffic goes through private egress (`:8080`) on the caller's node and private ingress (`:8443`) on the target node.
 
+**Security filtering on `:443`:** Caddy on public ingress (`:443`) explicitly blocks all requests matching `/tokenize` and `/tokenize/*` (returning `403 Forbidden`). LiteLLM configures `/tokenize/{UUID}` passthrough endpoints with `auth: false` for internal platform services, so blocking this prefix at the public ingress prevents unauthorized external access to tokenizer endpoints.
+
 ---
 
 ## 4. Certificates
@@ -144,7 +147,7 @@ summarise ──http :8080──▶ Worker-A Caddy (private egress)
 
 **Example:** `summarise` on Worker-A needs `granite-3.3-8b`, which runs on Worker-B. It sends one HTTP call to its local Caddy. LiteLLM selects the route, and the control plane forwards the request over mTLS to Worker-B. `summarise` needs no knowledge of Worker-B's address.
 
-Before the first call, the service fetches its LiteLLM virtual key through the same private path: `GET /api/v1/models/keys?instance_id=<id>`.
+The service authenticates to LiteLLM with its `internal` virtual key. That key is issued at application create and delivered to the pod through a Podman Secret, so the service makes no extra network call to obtain it.
 
 ### 5.5 OpenShift worker (Worker-C)
 
@@ -173,6 +176,13 @@ Worker daemon ──outbound gRPC stream, mTLS──▶ WorkerGateway (control p
 ```
 
 Deploy, inspect, and system-info commands travel back down this already-open stream. **Benefit:** no inbound firewall rules are needed on worker LPARs for management.
+
+### 5.8 Internal service tokenization (`/tokenize/*`) and public ingress blocking
+
+Platform services (e.g. `chatbot`, `summarise`, `digitize`) call LiteLLM's `/tokenize/{UUID}` passthrough endpoint to count tokens against a specific model's tokenizer for context-budget calculations.
+
+- **Internal services:** Call `https://<litellm-internal-host>/tokenize/{UUID}` directly or through private egress (`:8080`) / private ingress (`:8443`).
+- **Public ingress (`:443`):** Caddy explicitly blocks any request matching `/tokenize/*` with `403 Forbidden`, ensuring unauthenticated passthrough endpoints are never accessible to external users.
 
 ---
 
@@ -218,6 +228,7 @@ The route ID format is `<modelName>--<componentID[:8]>`. It keeps routes unique 
 
 - **Plain HTTP stays on the node.** Encryption is applied only when traffic crosses a host boundary, and Caddy handles it.
 - **Two trust zones.** End-user traffic (`:443`) uses public or customer certificates. Platform-internal service traffic (private ingress/egress, `:8443`/`:8080`) uses mTLS from the internal CA.
+- **Public ingress blocks internal utility paths.** Sensitive or unauthenticated endpoints configured in LiteLLM for internal platform operations (such as `/tokenize/*` passthroughs) are explicitly blocked on Caddy `:443` with `403 Forbidden`.
 - **No ingress for local models.** A vLLM pod on the control-plane node is reached directly by LiteLLM and is never exposed through ingress.
 - **Uniform private networking.** Every node uses Caddy for private ingress and egress, so Podman and OpenShift workers are handled identically for service-to-service traffic. Only public ingress differs: Caddy `:443` on Podman nodes, OpenShift Routes on OpenShift.
 - **LiteLLM is the single entry point to models.** Consumers and services learn one address and one key, not the topology.
