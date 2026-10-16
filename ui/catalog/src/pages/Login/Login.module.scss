@@ -1,6 +1,4 @@
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/breakpoint";
+@use "carbonTokens" as *;
 
 .loginPage {
   min-height: 100vh;
@@ -11,8 +9,8 @@
   display: flex;
   align-items: center;
 
-  @include breakpoint.breakpoint-up(lg) {
-    padding-left: spacing.$spacing-05; // extra 16px only on large screens
+  @include breakpoint-up(lg) {
+    padding-left: $spacing-05; // extra 16px only on large screens
   }
 }
 
@@ -26,17 +24,17 @@
   max-width: 28rem;
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-09;
+  gap: $spacing-09;
 }
 
 .heading {
-  @include type.type-style("heading-05");
+  @include type-style("heading-05");
 }
 
 .inputFields {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-06;
+  gap: $spacing-06;
   width: 100%;
 }
 
@@ -47,7 +45,7 @@
 
 .toastNotification {
   position: fixed;
-  top: spacing.$spacing-10;
-  right: spacing.$spacing-05;
+  top: $spacing-10;
+  right: $spacing-05;
   z-index: 9999;
 }
