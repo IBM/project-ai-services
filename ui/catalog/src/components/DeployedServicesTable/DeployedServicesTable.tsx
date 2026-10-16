@@ -39,7 +39,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
 import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
-import DeleteModal from "@/components/Table/components/DeleteModal";
+import DeleteConfirmNameModal from "@/components/DeleteConfirmNameModal/DeleteConfirmNameModal";
 import ExportModal from "@/components/Table/components/ExportModal";
 import TableToasts from "@/components/Table/components/TableToasts";
 import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
@@ -302,6 +302,9 @@ const DeployedServicesTable = ({
   // Visible headers for the DataTable (shared utility)
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
+  const selectedItemName =
+    state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
+
   // Service filter slot — injected into the shared toolbar's filterSlot prop
   const serviceFilterSlot = (
     <>
@@ -532,25 +535,20 @@ const DeployedServicesTable = ({
               </DataTable>
             )}
 
-            <DeleteModal
+            <DeleteConfirmNameModal
               isOpen={state.isDeleteDialogOpen}
               isDeleting={state.isDeleting}
-              isConfirmed={state.isConfirmed}
-              itemName={
-                state.rowsData.find((r) => r.id === state.selectedRowId)
-                  ?.name ?? ""
+              itemName={selectedItemName}
+              confirmValue={state.confirmValue}
+              modalLabel={`Delete ${selectedItemName}`}
+              primaryButtonLabel="Delete"
+              primaryButtonLoadingLabel="Deleting..."
+              warningText="Deleting a service deployment permanently removes all associated components, including connected services, runtime metadata, and configurations, and cannot be undone."
+              onConfirmValueChange={(value) =>
+                dispatch({ type: "SHARED_SET_CONFIRM_VALUE", payload: value })
               }
-              modalLabel="Delete service deployment"
-              confirmLegend="Confirm service deployment to be deleted"
-              warningText="Deleting a service deployment permanently deletes all associated components, including connected services, runtime metadata, and configurations. This action cannot be undone."
-              onConfirm={() => handleDelete()}
+              onConfirm={handleDelete}
               onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
-              onCheckboxChange={(checked) =>
-                dispatch({
-                  type: "SHARED_SET_CONFIRMED",
-                  payload: checked,
-                })
-              }
             />
 
             <ExportModal

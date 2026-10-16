@@ -149,7 +149,7 @@ const ApplicationDatasourcesTable = ({
     try {
       await removeApplicationDatasource(applicationId, state.selectedRowId);
       dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
-      dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
+      dispatch({ type: "SHARED_SET_CONFIRM_VALUE", payload: "" });
       await loadDatasources();
     } catch (err) {
       const msg =
@@ -394,11 +394,16 @@ const ApplicationDatasourcesTable = ({
                 state.rowsData.find((r) => r.id === state.selectedRowId)
                   ?.name ?? ""
               }
+              modalHeading="Remove data source"
+              primaryButtonLabel="Remove"
+              primaryButtonLoadingLabel="Removing..."
+              errorNotificationTitle="Removal failed:"
+              showInfoNotification
               warningText="Disconnecting this data source will remove it from this service and permanently delete its indexed data from this service's vector store. Syncing and ingestion will continue for any other services still connected to this data source."
-              confirmValue={state.confirmTextValue}
+              confirmValue={state.confirmValue}
               onConfirmValueChange={(value) =>
                 dispatch({
-                  type: ACTION_TYPES.SET_CONFIRM_TEXT,
+                  type: "SHARED_SET_CONFIRM_VALUE",
                   payload: value,
                 })
               }
@@ -406,7 +411,6 @@ const ApplicationDatasourcesTable = ({
               onConfirm={() => void handleRemove()}
               onClose={() => {
                 dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
-                dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
                 dispatch({
                   type: ACTION_TYPES.SET_MODAL_DELETE_ERROR,
                   payload: "",

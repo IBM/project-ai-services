@@ -50,7 +50,7 @@ import {
 import { AboutTab } from "./components/AboutTab";
 import DeploymentDetails from "@/components/DeploymentDetails";
 import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
-import DeleteModal from "@/components/Table/components/DeleteModal";
+import DeleteConfirmNameModal from "@/components/DeleteConfirmNameModal/DeleteConfirmNameModal";
 import ExportModal from "@/components/Table/components/ExportModal";
 import TableToasts from "@/components/Table/components/TableToasts";
 import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
@@ -301,6 +301,9 @@ const DigitalAssistantsPage = () => {
 
   // Visible headers for the DataTable (shared utility)
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
+
+  const selectedItemName =
+    state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
 
   // Navigate to DeploymentDetails with integration section pre-selected
   const handleViewIntegration = (rowId: string) => {
@@ -651,28 +654,24 @@ const DigitalAssistantsPage = () => {
                     </DataTable>
                   )}
 
-                  <DeleteModal
+                  <DeleteConfirmNameModal
                     isOpen={state.isDeleteDialogOpen}
                     isDeleting={state.isDeleting}
-                    isConfirmed={state.isConfirmed}
-                    itemName={
-                      state.rowsData.find(
-                        (r: DigitalAssistantRow) =>
-                          r.id === state.selectedRowId,
-                      )?.name ?? ""
+                    itemName={selectedItemName}
+                    confirmValue={state.confirmValue}
+                    modalLabel={`Delete ${selectedItemName}`}
+                    primaryButtonLabel="Delete"
+                    primaryButtonLoadingLabel="Deleting..."
+                    warningText="Deleting a digital assistant deployment permanently removes all associated components, including connected services, runtime metadata, and configurations, and cannot be undone."
+                    onConfirmValueChange={(value) =>
+                      dispatch({
+                        type: "SHARED_SET_CONFIRM_VALUE",
+                        payload: value,
+                      })
                     }
-                    modalLabel="Delete digital assistant deployment"
-                    confirmLegend="Confirm digital assistant deployment to be deleted"
-                    warningText="Deleting a digital assistant deployment permanently deletes all associated components, including connected services, runtime metadata, and configurations will be permanently deleted, and it cannot be undone."
-                    onConfirm={() => handleDelete()}
+                    onConfirm={handleDelete}
                     onClose={() =>
                       dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })
-                    }
-                    onCheckboxChange={(checked) =>
-                      dispatch({
-                        type: "SHARED_SET_CONFIRMED",
-                        payload: checked,
-                      })
                     }
                   />
 
