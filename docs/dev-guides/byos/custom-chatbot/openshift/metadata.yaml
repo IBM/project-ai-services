@@ -1,0 +1,8 @@
+name: custom-chatbot
+version: "1.0.0"
+
+# Resource requirements
+resources:
+  cpu: 1                # 500m rounded up
+  memory: 536870912     # 512Mi in bytes
+  storage: 0            # No persistent storage required

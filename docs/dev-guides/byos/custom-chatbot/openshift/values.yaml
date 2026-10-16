@@ -1,0 +1,20 @@
+chatbot:
+  image: icr.io/ai-services-private/custom-chatbot-service:v1.0.0
+  log_level: "INFO"
+  max_tokens: "1024"
+  system_prompt: ""
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+llm:
+  model:
+    name: ""
+  apiKey: ""
+
+# Populated at deploy time by ai-services; must be present for Helm validation.
+templateID: ""
