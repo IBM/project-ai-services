@@ -110,32 +110,39 @@ validated configuration so no naming distinction is needed:
 
 Profiles apply to any provider whose `metadata.yaml` carries `category: model` — covering `llm` (`vllm-spyre`, `vllm-cpu`), `reranker` (`vllm-spyre`), and `embedding` (`vllm-cpu`). Providers without `category: model` return `400` on profile endpoints.
 
-Each model-category provider carries a `profiles.yaml` alongside its `values.schema.json`. Profile definitions live in that file; `values.schema.json` retains only the `x-profiles` list on each model entry (the IDs valid for that model). Hardware params (`numCards`, `maxModelLen`, etc.) are never sent by the client — the backend reads and merges them from `profiles.yaml` at deploy time.
+Each model-category provider carries a single, runtime-agnostic `profiles.yaml` directly at the **provider level** (e.g. `assets/components/llm/vllm-spyre/profiles.yaml`), shared across both `podman/` and `openshift/` runtimes. Profile definitions live in that provider-level file; `values.schema.json` retains only the `x-profiles` list and `x-default-profile` on each model entry. Hardware params (`numCards`, `maxModelLen`, etc.) are never sent by the client — the backend reads and merges them from the provider's `profiles.yaml` at deploy time.
 
 ```
-assets/components/llm/
-  vllm-spyre/
-    podman/
-      profiles.yaml          ← profile definitions
-      values.schema.json     ← x-profiles per model; no profiles array
-      values.yaml
-  vllm-cpu/
-    podman/
-      profiles.yaml
-      values.schema.json
-      values.yaml
-reranker/
-  vllm-spyre/
-    podman/
-      profiles.yaml
-      values.schema.json
-      values.yaml
-embedding/
-  vllm-cpu/
-    podman/
-      profiles.yaml
-      values.schema.json
-      values.yaml
+assets/components/
+  llm/
+    vllm-spyre/
+      profiles.yaml            ← provider-level (shared across podman & openshift)
+      podman/
+        values.schema.json     ← x-profiles & x-default-profile per model
+        values.yaml
+      openshift/
+        values.schema.json
+        values.yaml
+    vllm-cpu/
+      profiles.yaml            ← provider-level (shared across podman & openshift)
+      podman/
+        values.schema.json
+        values.yaml
+      openshift/
+        values.schema.json
+        values.yaml
+  reranker/
+    vllm-spyre/
+      profiles.yaml            ← provider-level
+      podman/
+        values.schema.json
+        values.yaml
+  embedding/
+    vllm-cpu/
+      profiles.yaml            ← provider-level
+      podman/
+        values.schema.json
+        values.yaml
 ```
 
 ### 3.2 `profiles.yaml` structure (example: `llm/vllm-spyre`)
@@ -187,37 +194,43 @@ The schema retains the `profile` field for validation and the `x-profiles` list 
           "const": "ibm-granite/granite-3.3-8b-instruct",
           "title": "granite-3.3-8b-instruct",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "minimal"]
+          "x-profiles": ["standard", "compact-4k", "minimal"],
+          "x-default-profile": "standard"
         },
         {
           "const": "ibm-granite/granite-4.1-8b-fp8",
           "title": "granite-4.1-8b-fp8",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "minimal"]
+          "x-profiles": ["standard", "compact-4k", "minimal"],
+          "x-default-profile": "standard"
         },
         {
           "const": "meta-llama/Llama-3.1-8B-Instruct",
           "title": "Llama-3.1-8B-Instruct",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "minimal"]
+          "x-profiles": ["standard", "compact-4k", "minimal"],
+          "x-default-profile": "standard"
         },
         {
           "const": "mistralai/Mistral-Small-3.2-24B-Instruct",
           "title": "Mistral-Small-3.2-24B-Instruct",
           "description": "...",
-          "x-profiles": ["standard", "balanced"]
+          "x-profiles": ["standard", "balanced"],
+          "x-default-profile": "balanced"
         },
         {
           "const": "mistralai/Ministral-3-14B-Instruct-2512-BF16",
           "title": "Ministral-3-14B-Instruct-2512-BF16",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "balanced"]
+          "x-profiles": ["standard", "compact-4k", "balanced"],
+          "x-default-profile": "compact-4k"
         },
         {
           "const": "ibm-granite/granite-vision-3.3-2b",
           "title": "granite-vision-3.3-2b",
           "description": "...",
-          "x-profiles": ["compact-8k", "compact-16k"]
+          "x-profiles": ["compact-8k", "compact-16k"],
+          "x-default-profile": "compact-8k"
         }
       ],
       "default": "ibm-granite/granite-4.1-8b-fp8"
@@ -286,7 +299,8 @@ Single validated configuration — no dropdown shown in the UI (backend omits th
           "const": "BAAI/bge-reranker-v2-m3",
           "title": "bge-reranker-v2-m3",
           "description": "...",
-          "x-profiles": ["standard"]
+          "x-profiles": ["standard"],
+          "x-default-profile": "standard"
         }
       ],
       "default": "BAAI/bge-reranker-v2-m3"
@@ -322,7 +336,8 @@ Single validated configuration — no dropdown shown in the UI.
           "const": "ibm-granite/granite-embedding-278m-multilingual",
           "title": "granite-embedding-278m-multilingual",
           "description": "...",
-          "x-profiles": ["standard"]
+          "x-profiles": ["standard"],
+          "x-default-profile": "standard"
         }
       ],
       "default": "ibm-granite/granite-embedding-278m-multilingual"
@@ -352,9 +367,8 @@ No `profile` default is written here — the hardware params are already encoded
 inside each model's `x-profiles` list in `values.schema.json`, so a static
 `"standard"` default in `values.yaml` would be incorrect for models that don't
 support `standard` (e.g. `granite-vision-3.3-2b` only supports `compact-8k` /
-`compact-16k`). The backend resolves the default at deploy time by selecting the
-first profile in the chosen model's `x-profiles` list that has `"default": true`
-in `profiles.yaml` (see §5.4).
+`compact-16k`). The backend resolves the default at deploy time using the chosen model's
+`x-default-profile` (falling back to the first entry in its `x-profiles` list).
 
 **`llm/vllm-spyre/podman/values.yaml`**
 ```yaml
@@ -558,11 +572,11 @@ type Profile struct {
 
 ### 5.2 `loadProfilesFromFile()` — new private helper
 
-A new private helper reads `profiles.yaml` from the provider's asset directory (the same directory as `values.schema.json`). If no `profiles.yaml` exists the function returns `nil, nil` — not an error.
+A new private helper reads `profiles.yaml` from the provider's top-level asset directory (e.g., `assets/components/<type>/<provider>/profiles.yaml`). Because profiles are runtime-agnostic, they are read once from the provider root, rather than duplicated inside runtime subdirectories. If no `profiles.yaml` exists the function returns `nil, nil` — not an error.
 
 ```go
-func loadProfilesFromFile(providerDir string) ([]types.Profile, error) {
-    data, err := os.ReadFile(filepath.Join(providerDir, "profiles.yaml"))
+func loadProfilesFromFile(providerRootDir string) ([]types.Profile, error) {
+    data, err := os.ReadFile(filepath.Join(providerRootDir, "profiles.yaml"))
     if os.IsNotExist(err) {
         return nil, nil // provider has no profiles — not an error
     }
@@ -670,18 +684,20 @@ The extension is inserted **after** the existing `argParams` merge so
 //   2. Apply argParams        → values["profile"] = "compact-4k" (user wins, if supplied)
 //
 // NEW step 3 — resolve selected profile and flatten its params into values:
-// If the user did not supply a profile, selectedID is "" and the branch
-// pr.Default == true selects the first profile in profiles.yaml marked default.
-// This is model-aware because GetComponentProviderParams already constrained
-// which profiles are valid for the chosen model.
+// If the user did not supply a profile, selectedID is "" and the backend resolves
+// the default profile for the chosen model from its `x-default-profile` in `values.schema.json`
+// (falling back to the first profile in its `x-profiles` list).
 profiles, err := loadProfilesFromFile(providerDir) // providerDir is the provider's asset directory, known at this call site
 if err != nil {
     return nil, fmt.Errorf("failed to load profiles: %w", err)
 }
 if len(profiles) > 0 {
     selectedID, _ := values["profile"].(string)
+    if selectedID == "" {
+        selectedID = resolveModelDefaultProfile(schema, values["model"])
+    }
     for i, pr := range profiles {
-        if pr.ID == selectedID || (selectedID == "" && pr.Default) {
+        if pr.ID == selectedID {
             p.mergeProfileParams(values, profiles[i].Params)
             break
         }
@@ -730,7 +746,7 @@ ParamBuilder.BuildServiceParams()
               │          model overwritten:  "ibm-granite/granite-4.1-8b-fp8"
               │
               │  3. loadProfiles("llm", "vllm-spyre")
-              │       → reads llm/vllm-spyre/<runtime>/profiles.yaml
+              │       → reads llm/vllm-spyre/profiles.yaml (provider root)
               │       → finds entry id="compact-4k"
               │
               │  4. mergeProfileParams()
@@ -787,10 +803,10 @@ request.
 
 | File | Change |
 |---|---|
-| `components/llm/vllm-spyre/podman/profiles.yaml` | **New** — profile definitions for Spyre LLM (Podman) |
-| `components/llm/vllm-spyre/openshift/profiles.yaml` | **New** — same, OpenShift variant |
-| `components/llm/vllm-cpu/podman/profiles.yaml` | **New** — `standard` and `compact-3k` for CPU LLM |
-| `components/llm/vllm-cpu/openshift/profiles.yaml` | **New** |
+| `components/llm/vllm-spyre/profiles.yaml` | **New** — profile definitions for Spyre LLM (shared across Podman & OpenShift) |
+| `components/llm/vllm-cpu/profiles.yaml` | **New** — `standard` and `compact-3k` for CPU LLM (shared across runtimes) |
+| `components/reranker/vllm-spyre/profiles.yaml` | **New** — profile definitions for Spyre Reranker |
+| `components/embedding/vllm-cpu/profiles.yaml` | **New** — profile definitions for CPU Embedding |
 | All LLM provider `values.schema.json` | Remove `profiles` array from `properties.profile`; keep `x-profiles` on each model `oneOf` entry |
 | `components/llm/vllm-spyre/podman/values.yaml` | Remove `maxModelLen`/`maxBatchSize` |
 | `components/llm/vllm-spyre/openshift/values.yaml` | Remove resource params |

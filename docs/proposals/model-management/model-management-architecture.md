@@ -446,7 +446,7 @@ A modal / side panel opened by the **[ + Deploy Model ]** button. The user picks
 - **Target Worker** dropdown lists all workers with `status = ready` from `GET /api/v1/workers`. Shows runtime type (Spyre / CPU) and live status alongside each entry. Disconnected workers are shown but disabled.
 - **Profile** dropdown is disabled until a model is selected. Once the user picks a model, the UI calls `GET /api/v1/components/:component_type/providers/:provider_id/profiles?model=<selected_model>` (see `model-profiles.md §11.5`) to fetch only the profiles that model supports, with the model's default profile pre-selected. Changing the model reloads the list, and changing the profile updates the resource numbers shown by **[ Check Resources ]**. The chosen value is sent as `params.profile`. Not shown for Remote Connectors.
 - **[ Check Resources ]** triggers the resource check panel (see §4.4) before the user commits to deploy. Only shown for `deployment_type=local`.
-- Remote Connector fields (Provider, Endpoint URL, API Key) are shown/hidden based on the **Deployment Type** toggle. Provider dropdown is populated from `GET /api/v1/connectors?type=<selected-type>`.
+- Remote Connector fields (Provider, Endpoint URL, API Key) are shown/hidden based on the **Deployment Type** toggle. Provider dropdown is populated from `GET /api/v1/connectors?type=models`.
 
 ---
 
@@ -561,7 +561,7 @@ No new endpoint is needed for any of the three steps (see **How the UI populates
         { "component_type": "embedding", "instance_id": "a91b44e0-3c2d-4e7f-8a10-5b6c7d8e9f01" }
       ],
       "connectors": [
-        { "type": "llm", "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc" }
+        { "type": "models", "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc" }
       ]
     }
   ]
