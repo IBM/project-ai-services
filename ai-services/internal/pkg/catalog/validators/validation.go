@@ -53,6 +53,12 @@ func (v *ApplicationValidator) WithConnectorRepo(repo dbrepo.ConnectorRepository
 	}
 }
 
+// ConnectorRepo returns the connector repository set on this validator.
+// Returns nil when no repository has been configured.
+func (v *ApplicationValidator) ConnectorRepo() dbrepo.ConnectorRepository {
+	return v.connectorRepo
+}
+
 // ValidateDeploymentRequest validates the entire deployment request.
 func (v *ApplicationValidator) ValidateDeploymentRequest(ctx context.Context, req apimodels.CreateApplicationRequest) error {
 	// Validate based on deployment type
