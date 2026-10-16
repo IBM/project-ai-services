@@ -1399,12 +1399,12 @@ a1b2c3d4-e5f6-7890-abcd-ef1234567890   component     llm--my-provider  1.0.0    
 
 The on-disk path is derived at runtime as `<catalog_id>-<version>` (e.g. `/data/catalog-bundles/component/llm--my-provider-1.0.0/`) — it is not stored in the DB or shown in this output.
 
-#### `bundle get` — get a single bundle
+#### `bundle info` — get a single bundle
 
 Prints full details for one bundle by ID. Primarily used to poll status after `bundle update`.
 
 ```
-ai-services catalog bundle get <bundle_id>
+ai-services catalog bundle info <bundle_id>
 ```
 
 **Example output:**
