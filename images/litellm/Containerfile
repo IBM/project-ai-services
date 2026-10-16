@@ -1,11 +1,26 @@
 # Builder stage
 FROM registry.access.redhat.com/ubi9/ubi:9.8 as builder
 
-ARG VERSION=${VERSION}
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
+ARG VERSION
+ARG LITELLM_SHA256
+ARG NODE_VERSION
+ARG NODE_SHA256
+ARG TARGETARCH
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
-RUN dnf -y update && \
-    dnf -y install \
+# Derive RPM_ARCH, NODE_ARCH and SKIP_CHECKSUM from the builder-provided TARGETARCH.
+# SKIP_CHECKSUM=1 for non-ppc64le arches since NODE_SHA256 is only set for ppc64le.
+RUN case "${TARGETARCH}" in \
+        x86_64|amd64)  RPM_ARCH=x86_64;  NODE_ARCH=x64;   SKIP_CHECKSUM=1 ;; \
+        aarch64|arm64) RPM_ARCH=aarch64; NODE_ARCH=arm64;  SKIP_CHECKSUM=1 ;; \
+        ppc64le)       RPM_ARCH=ppc64le; NODE_ARCH=ppc64le; SKIP_CHECKSUM=0 ;; \
+        *)             RPM_ARCH="${TARGETARCH}"; NODE_ARCH="${TARGETARCH}"; SKIP_CHECKSUM=1 ;; \
+    esac && \
+    echo "NODE_ARCH=${NODE_ARCH}" > /tmp/arch_env && \
+    echo "SKIP_CHECKSUM=${SKIP_CHECKSUM}" >> /tmp/arch_env && \
+    dnf update ${DNF_FLAGS} -y && \
+    dnf install ${DNF_FLAGS} -y \
         wget \
         patch \
         python3.12 \
@@ -14,12 +29,16 @@ RUN dnf -y update && \
         gcc \
         gcc-c++ \
         openssl-devel \
-        zlib-devel && \
+        zlib-devel \
+        git \
+        # Required for building primsa engines
+        https://mirror.stream.centos.org/9-stream/CRB/${RPM_ARCH}/os/Packages/protobuf-compiler-3.14.0-17.el9.${RPM_ARCH}.rpm \
+        https://mirror.stream.centos.org/9-stream/AppStream/${RPM_ARCH}/os/Packages/protobuf-3.14.0-17.el9.${RPM_ARCH}.rpm && \
     dnf clean all
 
 WORKDIR /build
 
-COPY pre-requirements.txt patches ./
+COPY pre-requirements.txt patches build-prisma.sh ./
 
 # 2. Install Pre-requistes
 RUN python3.12 -m pip install -r pre-requirements.txt \
@@ -32,10 +51,12 @@ ENV RUSTC_BOOTSTRAP=1 \
     GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
 
 # 4. Download litellm & patch it
-RUN wget https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz >/dev/null
-RUN tar -xzf v${VERSION}.tar.gz && \
+RUN wget -q https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz && \
+    echo "${LITELLM_SHA256}  v${VERSION}.tar.gz" | sha256sum -c - && \
+    tar -xzf v${VERSION}.tar.gz && \
+    rm v${VERSION}.tar.gz && \
     cd litellm-${VERSION} && \
-    patch -p1 pyproject.toml < ../pyproject-toml.patch && \
+    patch -p1 < ../pyproject-toml.patch && \
     patch -p1 < ../watsonx-passthrough.patch && \
     uv lock && \
 # 5. Export dependencies to a requirements.txt file \
@@ -57,31 +78,58 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 	--prefer-binary && \
     uv build --wheel --out-dir /wheels
 
+# 7. Patch & build Prisma engines, install Node.js, bake Prisma CLI
+WORKDIR /build
+RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} bash build-prisma.sh
+
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 ARG VERSION=${VERSION}
+ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
-ENV DISABLE_ADMIN_UI=true \
-    LITELLM_NON_ROOT=true
-
-RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
-    microdnf -y update && \
-    microdnf -y install \
-        python3.12 \
-        python3.12-pip && \
-    python3.12 -m pip install --no-cache-dir --no-index \
-	--find-links=/wheels  \
-	litellm[proxy,semantic-router]==${VERSION} && \
-    python3.12 -m pip cache purge && \
-    microdnf remove -y python3.12-pip && \
-    microdnf clean all 
-
-USER 1001
+ENV LITELLM_NON_ROOT=true \
+    #pyroscope isn't supported on ppc64le
+    LITELLM_ENABLE_PYROSCOPE=false \
+    LITELLM_UI_PATH=/app/ui \
+    LITELLM_ASSETS_PATH=/app/assets \
+    PRISMA_QUERY_ENGINE_LIBRARY=/app/prisma/libquery_engine-rhel-openssl-3.0.x.so.node \
+    PRISMA_QUERY_ENGINE_BINARY=/app/prisma/query-engine \
+    PRISMA_SCHEMA_ENGINE_BINARY=/app/prisma/schema-engine \
+    PRISMA_ENGINES_CHECKSUM_IGNORE_WARNING="true" \
+    PRISMA_BINARY_CACHE_DIR=/app/prisma/binaries \
+    PRISMA_CLI_PATH=/app/prisma/binaries/node_modules/.bin/prisma \
+    PRISMA_CLI_QUERY_ENGINE_TYPE=binary \
+    PRISMA_OFFLINE_MODE=true \
+    HOME=/app \
+    PATH="/app/node/bin:/app/.venv/bin:${PATH}"
 
 WORKDIR /app
 
 COPY config ./
+COPY --from=builder /build/prisma-engines/target/release/query-engine prisma/query-engine
+COPY --from=builder /build/prisma-engines/target/release/schema-engine prisma/schema-engine
+COPY --from=builder /build/prisma-engines/target/release/libquery_engine.so prisma/libquery_engine-rhel-openssl-3.0.x.so.node
+COPY --from=builder /build/litellm-${VERSION}/schema.prisma ./
+COPY --from=builder /build/prisma/binaries prisma/binaries
+COPY --from=builder /usr/local/bin/node /app/node/bin/node
+
+RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
+    microdnf -y update ${DNF_FLAGS} && \
+    microdnf -y install ${DNF_FLAGS} \
+        python3.12 \
+        libatomic \
+        openssl && \
+    microdnf clean all && \
+    useradd -u 1001 -M -d /app -s /sbin/nologin litellm && \
+    python3.12 -m venv /app/.venv && \
+    /app/.venv/bin/pip install --no-cache-dir --no-index --find-links=/wheels \
+        litellm[proxy,semantic-router]==${VERSION} && \
+    prisma generate --schema=/app/schema.prisma && \
+    rm -rf /app/.npm /tmp/node-compile-cache && \
+    chown -R 1001:1001 /app
+
+USER 1001
 
 EXPOSE 4000
 
