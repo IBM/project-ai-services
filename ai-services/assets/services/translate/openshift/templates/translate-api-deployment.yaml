@@ -139,6 +139,41 @@ spec:
           volumeMounts:
             - mountPath: /var/cache/translate
               name: cache
+        {{- if .Values.mcp.enabled }}
+        # No readinessProbe: a pod is only Ready when every container is, so a
+        # failing sidecar would pull translate-api out of the Service endpoints
+        - name: mcp-sidecar
+          image: "{{ .Values.mcp.image }}"
+          args:
+            - "--description"
+            - "http://localhost:9000/openapi.json"
+            - "--endpoint"
+            - "http://localhost:9000"
+            - "--tag"
+            - "mcp"
+            - "--port"
+            - {{ .Values.mcp.port | quote }}
+            - "--auth-passthrough"
+            - "--http"
+          ports:
+            - containerPort: {{ .Values.mcp.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.mcp.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.mcp.resources.requests.cpu | quote }}
+              memory: {{ .Values.mcp.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.mcp.resources.limits.cpu | quote }}
+              memory: {{ .Values.mcp.resources.limits.memory | quote }}
+        {{- end }}
       volumes:
         - name: cache
           persistentVolumeClaim:
