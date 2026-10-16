@@ -845,10 +845,11 @@ class TestSSHScannerScan:
             ("MD5(/data/doc.pdf)= d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"),
             ("MD5 (/data/doc.pdf) = D41D8CD98F00B204E9800998ECF8427E", "d41d8cd98f00b204e9800998ecf8427e"),
             ("d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"),
+            ("MD5(/data/doc.pdf)= d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"),
         ],
     )
     def test_scan_checksum_from_remote_md5(self, remote_output, expected_md5):
-        """scan() must parse 32-char md5 checksum across md5sum, openssl, md5, and csum formats."""
+        """scan() must parse 32-char md5 checksum across md5sum, openssl dgst -md5, md5, and csum formats."""
         scanner = _make_ssh_scanner()
         mock_sftp = MagicMock()
         mock_ssh = MagicMock()

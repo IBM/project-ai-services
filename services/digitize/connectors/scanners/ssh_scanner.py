@@ -110,7 +110,7 @@ class SSHScanner(BaseScanner):
     def _remote_md5(self, remote_file_path: str) -> str:
         cmd = (
             f'if command -v md5sum >/dev/null 2>&1; then md5sum "{remote_file_path}"; '
-            f'elif command -v openssl >/dev/null 2>&1; then openssl md5 "{remote_file_path}"; '
+            f'elif command -v openssl >/dev/null 2>&1; then openssl dgst -md5 "{remote_file_path}"; '
             f'elif command -v md5 >/dev/null 2>&1; then md5 "{remote_file_path}"; '
             f'elif command -v csum >/dev/null 2>&1; then csum -h MD5 "{remote_file_path}"; '
             f'else echo "No md5 utility found" >&2; exit 127; fi'
