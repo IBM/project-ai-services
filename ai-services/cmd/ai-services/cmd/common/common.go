@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -54,6 +55,15 @@ func ConfigurePersistentRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
 	cmd.PersistentFlags().StringVarP(runtimeType, constants.RuntimeFlag, "r", "",
 		fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
 	_ = cmd.MarkPersistentFlagRequired(constants.RuntimeFlag)
+}
+
+// ConfigureNamespaceFlag registers the hidden, dev-only persistent --namespace flag on cmd.
+// It overrides the OpenShift namespace for the catalog and worker, so multiple catalogs
+// can coexist on one cluster. Use it only on the catalog and worker parent commands.
+func ConfigureNamespaceFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&catalogconstants.CatalogNamespace, "namespace", catalogconstants.DefaultCatalogNamespace,
+		"OpenShift namespace for the catalog and worker")
+	_ = cmd.PersistentFlags().MarkHidden("namespace")
 }
 
 // ValidateSkipChecksFlag validates the skip-validation flag for the current runtime.
