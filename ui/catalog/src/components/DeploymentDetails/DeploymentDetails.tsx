@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useDeploymentDatasourceSupport } from "./hooks/useDeploymentDatasourceSupport";
 import {
   Grid,
@@ -9,8 +9,8 @@ import {
   Tag,
   ProgressBar,
   Button,
+  IconButton,
   TextInput,
-  TextInputSkeleton,
   SkeletonText,
   SkeletonPlaceholder,
   ToastNotification,
@@ -24,6 +24,7 @@ import {
   PauseOutline,
   ErrorFilled,
   InProgress,
+  Edit,
 } from "@carbon/icons-react";
 import type {
   DeploymentDetails as DeploymentDetailsType,
@@ -83,16 +84,26 @@ const DeploymentDetails = ({
     AcceleratorCardType[]
   >([]);
   const [editedName, setEditedName] = useState(deployment.name);
+  const [isEditingName, setIsEditingName] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
   const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setEditedName(deployment.name);
     setSaveError("");
+    setIsEditingName(false);
   }, [deployment.name]);
+
+  useEffect(() => {
+    if (isEditingName) {
+      nameInputRef.current?.focus();
+      nameInputRef.current?.select();
+    }
+  }, [isEditingName]);
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -410,6 +421,7 @@ const DeploymentDetails = ({
       });
       onNameUpdate?.(editedName);
       setSaveSuccess(true);
+      setIsEditingName(false);
     } catch (error) {
       const errorMessage =
         error instanceof Error
@@ -424,6 +436,7 @@ const DeploymentDetails = ({
   const handleCancel = () => {
     setEditedName(deployment.name);
     setSaveError("");
+    setIsEditingName(false);
   };
 
   return (
@@ -483,7 +496,86 @@ const DeploymentDetails = ({
             },
           ]}
           breadcrumbOverflowAriaLabel="Show more breadcrumbs"
-          title={deployment.name}
+          title={{
+            content: (
+              <div
+                aria-label={
+                  isEditingName ? "Edit deployment name" : deployment.name
+                }
+              >
+                {isEditingName ? (
+                  <Grid className={styles.inlineEditRow} narrow>
+                    <Column sm={4} md={4} lg={8}>
+                      <TextInput
+                        ref={nameInputRef}
+                        id="deployment-name-inline"
+                        labelText="Deployment name"
+                        hideLabel
+                        size="md"
+                        value={editedName}
+                        onChange={(e) => {
+                          setEditedName(e.target.value);
+                          setSaveError("");
+                        }}
+                        disabled={isSaving}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void handleSave();
+                          if (e.key === "Escape") handleCancel();
+                        }}
+                      />
+                    </Column>
+                    <Column
+                      sm={2}
+                      md={2}
+                      lg={2}
+                      className={styles.inlineEditButtonCol}
+                    >
+                      <Button
+                        kind="secondary"
+                        size="md"
+                        onClick={handleCancel}
+                        disabled={isSaving}
+                        className={styles.inlineEditButton}
+                      >
+                        Cancel
+                      </Button>
+                    </Column>
+                    <Column
+                      sm={2}
+                      md={2}
+                      lg={2}
+                      className={styles.inlineEditButtonCol}
+                    >
+                      <Button
+                        kind="tertiary"
+                        size="md"
+                        onClick={() => void handleSave()}
+                        disabled={isSaving || !editedName.trim()}
+                        className={styles.inlineEditButton}
+                      >
+                        {isSaving ? "Saving..." : "Save"}
+                      </Button>
+                    </Column>
+                  </Grid>
+                ) : (
+                  <div className={styles.titleRow}>
+                    <span>{deployment.name}</span>
+                    <IconButton
+                      label="Edit deployment name"
+                      kind="ghost"
+                      size="md"
+                      align="right"
+                      onClick={() => setIsEditingName(true)}
+                    >
+                      <Edit size={16} />
+                    </IconButton>
+                  </div>
+                )}
+              </div>
+            ),
+            asText: "",
+            breadcrumbContent: deployment.name,
+          }}
           subtitle={
             <div className={styles.headerSubtitle}>
               {getStatusTag(deployment.status)}
@@ -550,26 +642,6 @@ const DeploymentDetails = ({
                     title="Details"
                     className={styles.detailsCard}
                   >
-                    <Grid className={styles.resourcesGrid}>
-                      <Column lg={8} md={4} sm={2}>
-                        {isLoadingResources ? (
-                          <TextInputSkeleton />
-                        ) : (
-                          <TextInput
-                            className={styles.labelColor}
-                            id="deployment-name"
-                            labelText="AI deployment name"
-                            value={editedName}
-                            onChange={(e) => {
-                              setEditedName(e.target.value);
-                              setSaveError("");
-                            }}
-                            disabled={isSaving}
-                          />
-                        )}
-                      </Column>
-                    </Grid>
-
                     {(workerInfo?.name || workerInfo?.runtime_type) && (
                       <div className={styles.workerInfoRow}>
                         {workerInfo.name && (
@@ -721,27 +793,6 @@ const DeploymentDetails = ({
                       </Column>
                     )}
                   </ProductiveCard>
-                </Column>
-              </Grid>
-
-              <Grid className={styles.actionsGrid}>
-                <Column sm={4} md={8} lg={16}>
-                  <div className={styles.actionButtons}>
-                    <Button
-                      kind="secondary"
-                      onClick={handleCancel}
-                      disabled={isSaving}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      kind="primary"
-                      onClick={handleSave}
-                      disabled={isSaving}
-                    >
-                      {isSaving ? "Saving..." : "Save"}
-                    </Button>
-                  </div>
                 </Column>
               </Grid>
             </>
