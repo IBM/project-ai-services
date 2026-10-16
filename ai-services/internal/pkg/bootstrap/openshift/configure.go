@@ -16,7 +16,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -256,42 +255,26 @@ func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec 
 }
 
 func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftClient) error {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "spyre.ibm.com",
-		Version: "v1alpha1",
-		Kind:    "SpyreClusterPolicy",
-	})
-
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
-		if err := client.Client.Get(pollCtx, k8stypes.NamespacedName{Name: "spyreclusterpolicy"}, obj); err != nil {
+		state, found, err := utils.GetSpyreClusterPolicyState(pollCtx, client)
+		if err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
 
 				return false, nil
 			}
-			if apierrors.IsForbidden(err) {
-				return false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
-			}
-			// Handle rate limiting and other transient errors as retryable
-			if utils.IsTransientK8sError(err) {
-				logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...")
 
-				return false, nil
-			}
-
-			return false, fmt.Errorf("failed to get SpyreClusterPolicy: %w", err)
+			return false, err
 		}
 
-		state, found, err := unstructured.NestedString(obj.Object, "status", "state")
-		if err != nil {
-			return false, fmt.Errorf("failed to parse status.state: %w", err)
+		if !found {
+			// CR exists but status.state not set yet.
+			logger.Debugln("SpyreClusterPolicy status.state not populated yet, waiting...")
+
+			return false, nil
 		}
 
-		if !found || state != "ready" {
-			if !found {
-				state = "unknown"
-			}
+		if state != utils.SpyreStateReady && state != utils.SpyreStateNoSpyreNodes {
 			logger.Debugf("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state)
 
 			return false, nil
