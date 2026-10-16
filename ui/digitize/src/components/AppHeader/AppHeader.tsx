@@ -38,7 +38,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
   
   return (
     <>
-      <Header aria-label="IBM AI Services" className={styles.header}>
+      <Header aria-label="IBM AI Launchpad" className={styles.header}>
           <HeaderMenuButton
             aria-label="Open menu"
             onClick={(e) => {
@@ -51,7 +51,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
           />
 
           <HeaderName prefix="IBM" href="#" onClick={handleLogoClick} className={styles.headerName}>
-            AI Services
+            AI Launchpad
           </HeaderName>
 
           <HeaderGlobalBar>
@@ -104,7 +104,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                IBM AI Services documentation
+                IBM AI Launchpad documentation
               </a>{' '}
               or contact your system administrator.
             </p>

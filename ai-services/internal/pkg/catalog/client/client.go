@@ -1,4 +1,4 @@
-// Package client provides an authenticated HTTP client for the AI Services catalog API server.
+// Package client provides an authenticated HTTP client for the AI Launchpad catalog API server.
 // It handles authentication, automatic token refresh, and all API calls.
 package client
 
