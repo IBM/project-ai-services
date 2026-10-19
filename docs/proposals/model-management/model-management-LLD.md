@@ -386,6 +386,56 @@ The `model` query parameter is the `model_name` registered in the previous step 
 
 > For local models the probe is fire-and-forget (`POST /api/v1/models` with `deployment_type=local` returns `202` immediately). Callers poll `GET /api/v1/models/:id` to observe `Deploying` → `Running` / `Error`. For remote models the probe is blocking — `POST /api/v1/models` with `deployment_type=remote` only returns `201` after the probe passes.
 
+### Status Sync Service
+
+The one-time probe at creation only confirms the model was healthy at registration time. The **status sync service** is a background goroutine inside `modelmanager` that continuously re-checks all registered models and connectors and keeps their status in sync with reality — detecting pods that have crashed, remote credentials that have expired, or network connectivity that has been lost since creation.
+
+**Trigger:** runs on a configurable interval (default: **60 seconds**) using a `time.Ticker` started when the Catalog API server boots. It is not a separate process or sidecar — it runs inside the same `modelmanager` package as the rest of the lifecycle logic.
+
+**What it checks:**
+
+| Target | Source | Health call |
+|---|---|---|
+| Local models (`components`) | All rows with `type IN ('llm','embedding','reranker')` and `status != 'Error'` and `created_by IS NOT NULL` | `GET /health?model=<model_name>` on LiteLLM |
+| Remote connectors (`connectors`) | All rows with `type = 'models'` and `status IN ('connected','offline')` | `GET /health?model=<metadata.model_name>` on LiteLLM |
+
+The `model` query parameter is the model name stored in `components.metadata->>'model'` (local) or `connectors.metadata->>'model_name'` (remote).
+
+**Status transitions:**
+
+| Previous status | Probe result | New status | Action |
+|---|---|---|---|
+| `Running` / `connected` | healthy | unchanged | — |
+| `Running` / `connected` | unhealthy | `Error` / `offline` | Update status + write error message |
+| `Error` / `offline` | healthy | `Running` / `connected` | Update status + clear message |
+| `Error` / `offline` | unhealthy | unchanged | Update message if error text changed |
+| `Deploying` | — | skipped | Pods still starting are not probed |
+
+**Implementation sketch:**
+
+```go
+// inside modelmanager package, started from catalog server boot
+func (s *SyncService) Start(ctx context.Context) {
+    ticker := time.NewTicker(s.interval) // default 60s, configurable
+    defer ticker.Stop()
+    for {
+        select {
+        case <-ticker.C:
+            s.syncLocalModels(ctx)
+            s.syncRemoteConnectors(ctx)
+        case <-ctx.Done():
+            return
+        }
+    }
+}
+```
+
+`syncLocalModels` queries `components` for all managed model rows not in `Deploying`, probes each via LiteLLM `/health`, and writes back any status change. `syncRemoteConnectors` does the same for `connectors` rows with `type = 'models'`.
+
+**Back-off on repeated failures:** if a model has been `Error`/`offline` for more than a configurable threshold (default: **5 consecutive failed probes**), the sync service stops probing it and sets `message = "Health checks suspended after N consecutive failures — manual intervention required"`. It resumes on the next explicit action (e.g. credential update via `PUT /api/v1/models/:id`).
+
+**No probe storms:** all probes in a single tick run sequentially (not concurrently) to avoid flooding the LiteLLM gateway.
+
 ### WatsonX via Connector
 
 When deploying with `provider: watsonx`, no local pod is created. Credentials are passed directly to LiteLLM at route-registration time — they are never stored in the Catalog DB or a Podman secret. LiteLLM stores and manages them internally:
