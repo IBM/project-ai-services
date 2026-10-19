@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 620" width="820" height="620" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="12">
+  <defs>
+    <marker id="ca-arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#3b82d4"/></marker>
+    <marker id="ca-arrg" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#2d9a5f"/></marker>
+    <marker id="ca-arry" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="820" height="620" fill="#ffffff"/>
+
+  <!-- ── 1. Remote Confluence Box ── -->
+  <rect x="20" y="20" width="780" height="95" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="35" y="42" font-weight="700" font-size="13" fill="#0f172a">Remote Data Source (Confluence Cloud / Data Center)</text>
+  
+  <rect x="35" y="52" width="230" height="50" rx="4" fill="#ffffff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="45" y="72" font-weight="600" fill="#1e293b">REST API &amp; CQL Engine</text>
+  <text x="45" y="89" font-size="10" fill="#64748b">/wiki/rest/api/content?cql=...</text>
+
+  <rect x="280" y="52" width="240" height="50" rx="4" fill="#ffffff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="290" y="72" font-weight="600" fill="#1e293b">Page Export &amp; Storage Format</text>
+  <text x="290" y="89" font-size="10" fill="#64748b">HTML / Storage View / Native PDF Export</text>
+
+  <rect x="535" y="52" width="250" height="50" rx="4" fill="#ffffff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="545" y="72" font-weight="600" fill="#1e293b">Attachments Endpoint</text>
+  <text x="545" y="89" font-size="10" fill="#64748b">Download .pdf, .docx binaries</text>
+
+  <!-- Line connecting Confluence down to Digitize -->
+  <line x1="410" y1="115" x2="410" y2="155" stroke="#3b82d4" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#ca-arr)"/>
+  <text x="420" y="140" font-size="11" font-weight="600" fill="#2563eb">HTTPS (Port 443) / Token Auth</text>
+
+  <!-- ── 2. Digitize Service Outer Box ── -->
+  <rect x="20" y="155" width="780" height="445" rx="6" fill="#f7f8fa" stroke="#e5e7eb" stroke-width="1.5"/>
+  <text x="35" y="177" font-weight="700" font-size="13" fill="#1f2328">Digitize Service Core</text>
+
+  <!-- Connector API & Scheduler Row -->
+  <rect x="35" y="190" width="360" height="60" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1"/>
+  <text x="45" y="210" font-weight="600" fill="#1e40af">Connector API (/v1/connectors)</text>
+  <text x="45" y="227" font-size="10" fill="#1e3a8a">CRUD Management · Encrypt Secrets (AES-256-GCM)</text>
+  <text x="45" y="241" font-size="10" fill="#1e3a8a">Validates connection_details schema for 'confluence'</text>
+
+  <rect x="420" y="190" width="365" height="60" rx="4" fill="#dcfce7" stroke="#2d9a5f" stroke-width="1"/>
+  <text x="430" y="210" font-weight="600" fill="#166534">APScheduler &amp; Sync Dispatcher</text>
+  <text x="430" y="227" font-size="10" fill="#14532d">Interval trigger · Dispatches run_tick(connector_id)</text>
+  <text x="430" y="241" font-size="10" fill="#14532d">Atomic sync locking (try_acquire_sync_lock)</text>
+
+  <!-- Arrow down to Sync Engine -->
+  <line x1="215" y1="250" x2="215" y2="275" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#ca-arr)"/>
+  <line x1="602" y1="250" x2="602" y2="275" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#ca-arrg)"/>
+
+  <!-- Confluence Scanner & Sync Tick Row -->
+  <rect x="35" y="275" width="470" height="135" rx="4" fill="#eff6ff" stroke="#3b82d4" stroke-width="1"/>
+  <text x="45" y="295" font-weight="600" fill="#1e40af">ConfluenceScanner (BaseScanner Subclass)</text>
+  <text x="45" y="315" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">scan():</tspan> Walks spaces via CQL; yields canonical path &amp; checksum</text>
+  <text x="55" y="330" font-size="11" fill="#1d4ed8">&#x2192; Checksum formula: MD5(PageID + VersionNumber)</text>
+  <text x="45" y="348" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">download_to():</tspan> Fetches page export / attachments to local staging</text>
+  <text x="45" y="366" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">_classify():</tspan> Identifies new, modified, unchanged, &amp; orphan pages</text>
+  <text x="45" y="384" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">Client:</tspan> Direct REST API calls via httpx (async I/O concurrency)</text>
+
+  <!-- Database Box -->
+  <rect x="520" y="275" width="265" height="135" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
+  <text x="530" y="295" font-weight="600" fill="#92400e">PostgreSQL Metadata Store</text>
+  <text x="530" y="315" font-size="11" fill="#78350f">&#x2022; <tspan font-weight="600">connectors:</tspan> config, encrypted tokens</text>
+  <text x="530" y="333" font-size="11" fill="#78350f">&#x2022; <tspan font-weight="600">connector_document_checksum:</tspan></text>
+  <text x="542" y="348" font-size="10" fill="#78350f">PK (checksum, connector_id) &#x2192; doc_id</text>
+  <text x="530" y="366" font-size="11" fill="#78350f">&#x2022; <tspan font-weight="600">connector_sync_logs:</tspan> execution history</text>
+  <text x="530" y="384" font-size="11" fill="#78350f">&#x2022; <tspan font-weight="600">documents:</tspan> content &amp; chunk status</text>
+
+  <!-- Arrow down to Ingest Pipeline -->
+  <line x1="270" y1="410" x2="270" y2="435" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#ca-arr)"/>
+  <text x="280" y="427" font-size="10" fill="#57606a">Staged .pdf / .docx files</text>
+
+  <!-- Document Ingestion Pipeline Box -->
+  <rect x="35" y="435" width="750" height="145" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1"/>
+  <text x="45" y="455" font-weight="600" fill="#166534">Document Ingestion Pipeline (initialize_and_launch)</text>
+  
+  <rect x="50" y="468" width="165" height="50" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
+  <text x="60" y="488" font-weight="600" fill="#14532d">1. Batch Dispatch</text>
+  <text x="60" y="505" font-size="10" fill="#57606a">Batches of &#x2264; 10 files</text>
+
+  <rect x="230" y="468" width="170" height="50" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
+  <text x="240" y="488" font-weight="600" fill="#14532d">2. Parsing Engine</text>
+  <text x="240" y="505" font-size="10" fill="#57606a">PDF/DOCX OCR, Text, Tables</text>
+
+  <rect x="415" y="468" width="170" height="50" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
+  <text x="425" y="488" font-weight="600" fill="#14532d">3. Chunking &amp; Embed</text>
+  <text x="425" y="505" font-size="10" fill="#57606a">Semantic token slicing</text>
+
+  <rect x="600" y="468" width="170" height="50" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
+  <text x="610" y="488" font-weight="600" fill="#14532d">4. OpenSearch Vector Store</text>
+  <text x="610" y="505" font-size="10" fill="#57606a">Embeddings indexed for RAG</text>
+
+  <text x="50" y="540" font-size="10" fill="#166534">&#x25B8; Post-Ingestion: doc_id registered with MD5 checksum in DB &#x2022; Local batch staging directory immediately unlinked</text>
+  <text x="50" y="555" font-size="10" fill="#166534">&#x25B8; Interrupt handling: Gracefully terminates pending tasks if DELETE or CANCEL arrives during execution</text>
+</svg>
