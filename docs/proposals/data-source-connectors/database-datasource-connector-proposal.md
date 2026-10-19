@@ -14,7 +14,14 @@
 5. [Asset Files](#5-asset-files)
    - 5.1 [metadata.yaml](#51-metadatayaml)
    - 5.2 [schema.json](#52-schemajson)
-6. [Service Compatibility and Restricted Datasource Support](#6-service-compatibility-and-restricted-datasource-support)
+6. [Service Compatibility, Restricted Providers, and Lifecycle Settings](#6-service-compatibility-restricted-providers-and-lifecycle-settings)
+   - 6.1 [Background and Operational Paradigms](#61-background-and-operational-paradigms)
+   - 6.2 [Service Metadata Settings Specification](#62-service-metadata-settings-specification)
+   - 6.3 [Service Metadata Configuration Examples](#63-service-metadata-configuration-examples)
+   - 6.4 [Catalog API Server Enforcement and Validation Rules](#64-catalog-api-server-enforcement-and-validation-rules)
+   - 6.5 [Filtering Available Connectors and Datasources by Service Type](#65-filtering-available-connectors-and-datasources-by-service-type)
+   - 6.6 [API Models and Deploy Options Propagation](#66-api-models-and-deploy-options-propagation)
+   - 6.7 [UI Guardrails and User Experience](#67-ui-guardrails-and-user-experience)
 
 ---
 
@@ -244,53 +251,169 @@ This file is loaded at startup by `CatalogProvider.loadEmbeddedItems` and return
 
 ---
 
-## 6. Service Compatibility and Restricted Datasource Support
+## 6. Service Compatibility, Restricted Providers, and Lifecycle Settings
 
-### 6.1 Background
+### 6.1 Background and Operational Paradigms
 
-Currently, any service (such as `digitize`) can declare whether it accepts a datasource connector via its metadata. However, with the introduction of non-file-based datasource connectors (like databases), certain services may only support specific types of datasources. For example, the `digitize` service currently only processes file-based content and therefore only supports `file_system` and `object_storage` datasources.
+With the introduction of non-file-based datasource connectors (like databases), AI services exhibit different operational dependencies and compatibility constraints regarding datasources:
 
-To prevent users from associating unsupported datasource types with a service, we must extend the service metadata to define, enforce, and filter on restricted datasource support.
+1. **Provider Compatibility Restrictions:**
+   - Certain services only support specific datasource types. For example, `digitize` currently processes file-based content and therefore only supports `file_system` and `object_storage` datasources, whereas relational database services (e.g., Text-to-SQL / Database Query) require database connectors (`ibmi-db2`, `postgresql`).
+2. **Mandatory vs. Optional Datasource Requirement at Creation:**
+   - **Optional / Dynamically Bound Services (e.g., Digitize):** Can deploy and run without a datasource at creation time.
+   - **Mandatory / Tightly Coupled Services (e.g., Database Query):** **Require a datasource always**; they cannot initialize or function without one and **must not be created without a datasource**.
+3. **Post-Creation Lifecycle Constraints (Connect / Disconnect):**
+   - **Post-creation connection:** For services where the datasource topology is fixed at provision time (or single-tenant bound), dynamically connecting additional datasources post-creation must be disabled.
+   - **Post-creation disconnection:** Disconnecting or deleting the active datasource dependency would break the running service instance and must be disabled.
 
-### 6.2 Service Metadata Schema Enhancements (Option B)
+To support these varying service paradigms, the catalog introduces declarative compatibility and lifecycle settings directly at the service metadata level (`metadata.yaml`).
 
-We will maintain this restriction directly in the **service metadata** file (`metadata.yaml` for each service). When `accepts_datasource` is set to `true`, we introduce an optional `supported_datasource_providers` list to specify which datasource provider IDs are compatible. If this list is omitted, all providers are supported by default.
+---
 
-Example for `digitize` service `metadata.yaml`:
+### 6.2 Service Metadata Settings Specification
+
+We define the following declarative settings in the service `metadata.yaml` using standard affirmative boolean naming and snake_case conventions:
+
+| Setting                          | Type           | Default                                                                 | Description                                                                                                                                                                       |
+| -------------------------------- | -------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accepts_datasource`             | `boolean`      | `false`                                                                 | Baseline flag indicating whether the service supports datasources.                                                                                                                |
+| `requires_datasource`            | `boolean`      | `false`                                                                 | When `true`, the service **cannot be created without a datasource**. At least one valid datasource connector must be specified during application creation.                       |
+| `allow_datasource_connect`       | `boolean`      | `true` (if `accepts_datasource: true`)                                  | When `false`, disables connecting/attaching datasources post-application creation. Connect UI actions and API endpoints are blocked.                                              |
+| `allow_datasource_disconnect`    | `boolean`      | `true` (if `accepts_datasource: true` and `requires_datasource: false`) | When `false`, disables disconnecting/detaching datasources post-application creation. Disconnect UI actions and API endpoints are blocked.                                        |
+| `supported_datasource_providers` | `list[string]` | `[]` (all supported)                                                    | Whitelist of compatible datasource provider IDs (e.g., `[file_system, object_storage]` or `[ibmi-db2, postgresql]`). If omitted or empty, all providers are supported by default. |
+
+#### Lifecycle and Compatibility Matrix
+
+| Service Type                              | `accepts_datasource` | `requires_datasource` | `allow_datasource_connect` | `allow_datasource_disconnect` | `supported_datasource_providers` | UI & API Lifecycle Behavior                                                                            |
+| ----------------------------------------- | :------------------: | :-------------------: | :------------------------: | :---------------------------: | :------------------------------: | ------------------------------------------------------------------------------------------------------ |
+| **Mandatory DB Service (e.g., DB Query)** |        `true`        |        `true`         |          `false`           |            `false`            |     `[ibmi-db2, postgresql]`     | Required at creation (filtered to DBs). "Connect Data Source" and "Disconnect" disabled post-creation. |
+| **Dynamic File Service (Digitize)**       |        `true`        |        `false`        |           `true`           |            `true`             | `[file_system, object_storage]`  | Optional at creation. Connect and disconnect available post-creation (filtered to file providers).     |
+| **Static Fixed Service**                  |        `true`        |        `false`        |          `false`           |            `false`            |             `[...]`              | Optional at creation. If configured at creation, locked against post-creation changes.                 |
+| **Non-Datasource Service (Chat)**         |       `false`        |        `false`        |          `false`           |            `false`            |               `[]`               | No datasource capabilities. All datasource UI options and API routes blocked.                          |
+
+---
+
+### 6.3 Service Metadata Configuration Examples
+
+#### Example 1: Database-Centric Service Requiring a Datasource (`metadata.yaml`)
+
+```yaml
+# ai-services/assets/services/db-query/metadata.yaml
+id: db-query
+name: "Database Query Service"
+description: "Natural language querying and analytics over relational databases."
+type: service
+
+# Datasource Compatibility & Lifecycle Constraints
+accepts_datasource: true
+requires_datasource: true
+allow_datasource_connect: false
+allow_datasource_disconnect: false
+supported_datasource_providers:
+  - ibmi-db2
+  - postgresql
+```
+
+#### Example 2: Document Processing Service with Optional Dynamic Datasources (`metadata.yaml`)
 
 ```yaml
 # ai-services/assets/services/digitize/metadata.yaml
 id: digitize
-name: "Digitize Service"
+name: "Digitize documents"
+type: service
+
+# Datasource Compatibility & Lifecycle Constraints
 accepts_datasource: true
+requires_datasource: false
+allow_datasource_connect: true
+allow_datasource_disconnect: true
 supported_datasource_providers:
   - file_system
   - object_storage
 ```
 
-### 6.3 Validation in Catalog API Server
+---
 
-When a user attempts to link a datasource connector as a dependency to a service (e.g., `POST /api/v1/services/{service_id}/dependencies` or similar linking route), the Catalog API Server must validate compatibility:
+### 6.4 Catalog API Server Enforcement and Validation Rules
 
-1. **Load Service Metadata**: Load the target service's `metadata.yaml` and inspect its `accepts_datasource` and `supported_datasource_providers` configurations.
-2. **Retrieve Connector Provider**: Identify the provider type (`file_system`, `object_storage`, `<dbprovider>`) of the target datasource connector.
-3. **Validate Compatibility**:
-   - If `accepts_datasource` is `false`, reject the operation.
-   - If a `supported_datasource_providers` list is present, verify that the connector's provider type is included in that list.
-   - If the provider type is not supported, reject the request with a `400 Bad Request` and a descriptive error message:
-     ```json
-     {
-       "error": "Service 'digitize' does not support '<dbprovider>' datasources. Supported types: [file_system, object_storage]"
-     }
-     ```
+The Catalog API Server enforces compatibility and lifecycle settings at every API boundary:
 
-### 6.4 Filtering Available Connectors and Datasources by Service Type
+```mermaid
+flowchart TD
+    subgraph AppCreation ["Application Creation: POST /api/v1/applications"]
+        A["Incoming Create App Request"] --> B{"Service has<br/>requires_datasource = true?"}
+        B -- Yes --> C{"Datasource connector<br/>provided in payload?"}
+        C -- No --> D["Reject 400 Bad Request:<br/>Datasource required for service"]
+        C -- Yes --> E{"Provider in<br/>supported_datasource_providers?"}
+        E -- No --> F["Reject 400 Bad Request:<br/>Unsupported datasource provider"]
+        E -- Yes --> G["Proceed with Deployment"]
+        B -- No --> H{"Datasource connector<br/>provided?"}
+        H -- Yes --> E
+        H -- No --> G
+    end
 
-To provide a seamless user experience across creation and association workflows, we will support filtering both the connector templates (types) and the configured datasource instances based on a target service type.
+    subgraph PostCreationConnect ["Post-Creation Connect: PUT /api/v1/applications/:id/datasources/:datasource_id"]
+        I["Incoming Connect Request"] --> J{"Service has<br/>accepts_datasource == false?"}
+        J -- Yes --> K["Reject 422 Unprocessable Entity:<br/>Service does not accept datasources"]
+        J -- No --> L{"Service has<br/>allow_datasource_connect == false?"}
+        L -- Yes --> M["Reject 422 Unprocessable Entity:<br/>Post-creation connect disabled"]
+        L -- No --> N{"Provider in<br/>supported_datasource_providers?"}
+        N -- No --> O["Reject 400 Bad Request:<br/>Unsupported datasource provider"]
+        N -- Yes --> P["Attach Datasource & Propagate"]
+    end
 
-#### API Changes
+    subgraph PostCreationDisconnect ["Post-Creation Disconnect: DELETE /api/v1/applications/:id/datasources/:datasource_id"]
+        Q["Incoming Disconnect Request"] --> R{"Linked service has<br/>allow_datasource_disconnect == false?"}
+        R -- Yes --> S["Reject 422 Unprocessable Entity:<br/>Datasource disconnection disabled"]
+        R -- No --> T["Proceed with Disconnect & Cleanup"]
+    end
+```
 
-We will add an optional `service_type` query parameter to both endpoints:
+#### 1. Application Creation Validation (`POST /api/v1/applications`)
+
+- **Mandatory Datasource Check:** If a service declares `requires_datasource: true`, the handler validates that `connectors` contains at least one valid datasource reference targeting that service. If absent, the request is rejected with `400 Bad Request`:
+  ```json
+  {
+    "error": "Service 'db-query' requires a datasource connector at creation time, but none was provided."
+  }
+  ```
+- **Provider Compatibility Check:** For any supplied datasource reference, the provider type is validated against `supported_datasource_providers`. If unsupported, the request is rejected with `400 Bad Request`:
+  ```json
+  {
+    "error": "Service 'digitize' does not support 'ibmi-db2' datasources. Supported types: [file_system, object_storage]"
+  }
+  ```
+
+#### 2. Post-Creation Connect Validation (`PUT /api/v1/applications/:id/datasources/:datasource_id`)
+
+- **Accepts Datasource Check:** If `accepts_datasource` is `false`, return `422 Unprocessable Entity`.
+- **Connect Allowed Check:** If `allow_datasource_connect` is `false`, reject with `422 Unprocessable Entity`:
+  ```json
+  {
+    "error": "Service 'db-query' does not permit connecting datasources post-creation."
+  }
+  ```
+- **Provider Compatibility Check:** If the datasource provider is not in `supported_datasource_providers`, reject with `400 Bad Request`.
+
+#### 3. Post-Creation Disconnect Validation (`DELETE /api/v1/applications/:id/datasources/:datasource_id`)
+
+- The handler inspects all services linked to the target datasource in the application.
+- If any linked service has `allow_datasource_disconnect: false`, deletion is blocked with `422 Unprocessable Entity`:
+  ```json
+  {
+    "error": "Cannot disconnect datasource 'ds-123': service 'db-query' requires a permanent datasource and does not permit disconnection."
+  }
+  ```
+
+---
+
+### 6.5 Filtering Available Connectors and Datasources by Service Type
+
+To ensure a seamless user experience across creation and attachment workflows, the catalog supports filtering connector templates and registered datasource instances by service type.
+
+#### API Query Parameter
+
+An optional `service_type` query parameter is supported on both listing endpoints:
 
 1. **Connectors Listing Endpoint** (filtering templates when creating a _new_ datasource):
    `GET /api/v1/connectors?type=datasource&service_type=<service_id>`
@@ -299,10 +422,64 @@ We will add an optional `service_type` query parameter to both endpoints:
 
 #### Server-side Filtering Logic
 
-When the `service_type` parameter is provided:
+When `service_type` is provided:
 
-1. **Fetch Service Metadata**: Retrieve the metadata (including `accepts_datasource` and `supported_datasource_providers`) for the service specified by `service_type`.
-2. **Check Support**:
-   - If `accepts_datasource` is `false` for that service, return an empty list of connectors/datasources.
-   - If `accepts_datasource` is `true` and `supported_datasource_providers` is specified (e.g., `["file_system", "object_storage"]`), retrieve all records and filter them, returning only those whose provider matches an entry in the `supported_datasource_providers` list.
-   - If `supported_datasource_providers` is omitted, return all records (since all are allowed by default).
+1. **Retrieve Service Metadata:** Load `metadata.yaml` for the specified service.
+2. **Filter Results:**
+   - If `accepts_datasource` is `false`, return an empty list `[]`.
+   - If `accepts_datasource` is `true` and `supported_datasource_providers` is non-empty (e.g., `["file_system", "object_storage"]`), return only records whose provider matches an entry in `supported_datasource_providers`.
+   - If `supported_datasource_providers` is omitted or empty, return all records (all providers permitted).
+
+---
+
+### 6.6 API Models and Deploy Options Propagation
+
+To allow frontend UI components and API clients to dynamically adapt their forms and action buttons, these settings are exposed in catalog API responses.
+
+#### Service Catalog Go Struct Updates (`ai-services/internal/pkg/catalog/types/types.go`)
+
+```go
+// Service represents a deployable AI service catalog definition.
+type Service struct {
+    ID                          string                `yaml:"id" json:"id"`
+    Name                        string                `yaml:"name" json:"name"`
+    Description                 string                `yaml:"description" json:"description"`
+    Type                        string                `yaml:"type" json:"type"`
+    AcceptsDatasource           bool                  `yaml:"accepts_datasource,omitempty" json:"accepts_datasource,omitempty"`
+    RequiresDatasource          bool                  `yaml:"requires_datasource,omitempty" json:"requires_datasource,omitempty"`
+    AllowDatasourceConnect      *bool                 `yaml:"allow_datasource_connect,omitempty" json:"allow_datasource_connect,omitempty"`
+    AllowDatasourceDisconnect   *bool                 `yaml:"allow_datasource_disconnect,omitempty" json:"allow_datasource_disconnect,omitempty"`
+    SupportedDatasourceProviders []string             `yaml:"supported_datasource_providers,omitempty" json:"supported_datasource_providers,omitempty"`
+    // ...
+}
+
+// DeployOptionsService surfaces service configuration and constraints to deployment workflows.
+type DeployOptionsService struct {
+    ID                          string                   `json:"id"`
+    Name                        string                   `json:"name"`
+    Version                     string                   `json:"version,omitempty"`
+    Components                  []DeployOptionsComponent `json:"components"`
+    AcceptsDatasource           bool                     `json:"accepts_datasource,omitempty"`
+    RequiresDatasource          bool                     `json:"requires_datasource,omitempty"`
+    AllowDatasourceConnect      bool                     `json:"allow_datasource_connect"`
+    AllowDatasourceDisconnect   bool                     `json:"allow_datasource_disconnect"`
+    SupportedDatasourceProviders []string                `json:"supported_datasource_providers,omitempty"`
+}
+```
+
+---
+
+### 6.7 UI Guardrails and User Experience
+
+Surfacing these settings in `GET /api/v1/services/{id}/deploy-options` enables consistent, intuitive guardrails across UI workflows:
+
+1. **Application Creation Wizard:**
+   - When `requires_datasource` is `true`, the UI marks the datasource selection step as **Required** (displaying a required indicator and validation message).
+   - The "Deploy / Create Application" button remains disabled until a valid datasource is selected.
+   - The datasource picker dropdown automatically queries `GET /api/v1/datasources?service_type=<service_id>` to show only compatible datasource instances.
+2. **Application Details Page — Connect Action:**
+   - If `allow_datasource_connect` is `false`, the **"Connect Data Source"** button/menu item is hidden or disabled with a tooltip:
+     > _"This service requires datasource configuration during creation and does not support connecting datasources post-deployment."_
+3. **Application Details Page — Disconnect Action:**
+   - If `allow_datasource_disconnect` is `false`, the **"Disconnect"** option on the attached datasource card/row is disabled with a tooltip:
+     > _"This datasource cannot be disconnected because the service requires an active datasource to function."_
