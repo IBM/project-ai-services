@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Build image
-        if: ${{ !inputs.skip-image-build }}
+        if: ${{ inputs.is-image-scan && !inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         run: |
           make build \
@@ -64,7 +64,7 @@ jobs:
             REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
       - name: Pull latest image tag
-        if: ${{ inputs.skip-image-build }}
+        if: ${{ inputs.is-image-scan && inputs.skip-image-build }}
         working-directory: ${{ inputs.path }}
         run: |
           TAG_VALUE=$(make image-tag SERVICE=${{ inputs.service }})
