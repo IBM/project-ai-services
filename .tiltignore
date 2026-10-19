@@ -1,0 +1,26 @@
+# Tilt file watch ignore rules
+.git/
+.bob/
+.vscode/
+.idea/
+.pytest_cache/
+.venv/
+docs/
+example/
+tests/
+digitize-api-sample/
+mcp/
+podman-client/
+services/
+
+# UI ignores
+ui/catalog/node_modules/
+ui/catalog/dist/
+ui/catalog/.vite/
+ui/chatbot/
+ui/digitize/
+
+# Backend ignores
+ai-services/bin/
+ai-services/tests/
+ai-services/docs/
