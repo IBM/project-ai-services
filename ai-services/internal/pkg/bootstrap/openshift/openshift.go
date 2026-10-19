@@ -2,13 +2,13 @@ package openshift
 
 import "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 
-// upgradeMode controls whether existing operator subscriptions are offered an
-// upgrade prompt instead of being silently skipped.
-var upgradeMode bool
+// skipUpgrade controls whether existing operator subscriptions are silently
+// skipped instead of being offered an upgrade prompt.
+var skipUpgrade bool
 
-// SetUpgradeMode enables or disables the operator upgrade prompt flow.
-func SetUpgradeMode(upgrade bool) {
-	upgradeMode = upgrade
+// SetSkipUpgrade enables or disables skipping the operator upgrade prompt flow.
+func SetSkipUpgrade(skip bool) {
+	skipUpgrade = skip
 }
 
 // OpenshiftBootstrap implements Bootstrap interface for Openshift runtime.

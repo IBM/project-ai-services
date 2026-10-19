@@ -30,9 +30,9 @@ func configureCmd() *cobra.Command {
 				return fmt.Errorf("failed to create bootstrap instance: %w", err)
 			}
 
-			// --upgrade is declared as a persistent flag on the parent bootstrap
-			// command, so it is inherited here and accessible via upgradeOperators.
-			bootstrap.SetUpgradeMode(rt, upgradeOperators)
+			// --skip-upgrade is declared as a persistent flag on the parent bootstrap
+			// command, so it is inherited here and accessible via skipOperatorUpgrade.
+			bootstrap.SetSkipUpgrade(rt, skipOperatorUpgrade)
 
 			if err := bootstrapInstance.Configure(cmd.Context()); err != nil {
 				return fmt.Errorf("bootstrap configuration failed: %w", err)
