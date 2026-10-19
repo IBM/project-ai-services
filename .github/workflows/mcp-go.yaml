@@ -5,6 +5,7 @@ on:
     paths:
       - 'mcp/**'
       - .github/workflows/mcp-go.yaml
+      - .github/workflows/go-checks.yml
     branches:
       - main
       - 'release-*'

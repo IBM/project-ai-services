@@ -5,6 +5,7 @@ on:
     paths:
       - 'ai-services/**'
       - .github/workflows/go.yaml
+      - .github/workflows/go-checks.yml
     branches:
       - main
       - 'release-*'
