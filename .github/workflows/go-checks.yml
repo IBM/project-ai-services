@@ -77,5 +77,4 @@ jobs:
   scan:
     uses: ./.github/workflows/scanner.yml
     with:
-      skip-image-build: true
       is-image-scan: false
