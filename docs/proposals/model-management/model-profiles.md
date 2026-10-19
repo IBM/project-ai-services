@@ -93,6 +93,7 @@ validated configuration so no naming distinction is needed:
 | Component | Profile ID | Cards | Max context | Batch | Memory | shm |
 |---|---|---|---|---|---|---|
 | `reranker/vllm-spyre` | `standard` | 1 | 8,192 | 4 | 50 GB | default |
+| `reranker/vllm-cpu` | `standard` | — | 8,192 | 4 | 50 GB | default |
 | `embedding/vllm-cpu` | `standard` | — | 512 | 256 | 50 GB | default |
 
 **CPU LLM profiles** — no card dimension; names follow context window only:
@@ -108,7 +109,7 @@ validated configuration so no naming distinction is needed:
 
 ### 3.1 Design
 
-Profiles apply to any provider whose `metadata.yaml` carries `category: model` — covering `llm` (`vllm-spyre`, `vllm-cpu`), `reranker` (`vllm-spyre`), and `embedding` (`vllm-cpu`). Providers without `category: model` return `400` on profile endpoints.
+Profiles apply to any provider whose `metadata.yaml` carries `category: model` — covering `llm` (`vllm-spyre`, `vllm-cpu`), `reranker` (`vllm-spyre`, `vllm-cpu`), and `embedding` (`vllm-cpu`). Providers without `category: model` return `400` on profile endpoints.
 
 Each model-category provider carries a single, runtime-agnostic `profiles.yaml` directly at the **provider level** (e.g. `assets/components/llm/vllm-spyre/profiles.yaml`), shared across both `podman/` and `openshift/` runtimes. Profile definitions live in that provider-level file; `values.schema.json` retains only the `x-profiles` list and `x-default-profile` on each model entry. Hardware params (`numCards`, `maxModelLen`, etc.) are never sent by the client — the backend reads and merges them from the provider's `profiles.yaml` at deploy time.
 
@@ -133,6 +134,11 @@ assets/components/
         values.yaml
   reranker/
     vllm-spyre/
+      profiles.yaml            ← provider-level
+      podman/
+        values.schema.json
+        values.yaml
+    vllm-cpu/
       profiles.yaml            ← provider-level
       podman/
         values.schema.json
@@ -318,7 +324,44 @@ Single validated configuration — no dropdown shown in the UI (backend omits th
 }
 ```
 
-### 3.6 `embedding/vllm-cpu/values.schema.json`
+### 3.6 `reranker/vllm-cpu/values.schema.json`
+
+Single validated configuration — no dropdown shown in the UI.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Reranker model",
+      "oneOf": [
+        {
+          "const": "BAAI/bge-reranker-v2-m3",
+          "title": "bge-reranker-v2-m3",
+          "description": "...",
+          "x-profiles": ["standard"],
+          "x-default-profile": "standard"
+        }
+      ],
+      "default": "BAAI/bge-reranker-v2-m3"
+    },
+    "profile": {
+      "type": "string",
+      "title": "Deployment profile",
+      "x-profile-source": {
+        "type": "api",
+        "endpoint": "/api/v1/components/reranker/providers/vllm-cpu/profiles",
+        "x-profile-filter": "model"
+      }
+    }
+  }
+}
+```
+
+### 3.7 `embedding/vllm-cpu/values.schema.json`
 
 Single validated configuration — no dropdown shown in the UI.
 
@@ -806,6 +849,7 @@ request.
 | `components/llm/vllm-spyre/profiles.yaml` | **New** — profile definitions for Spyre LLM (shared across Podman & OpenShift) |
 | `components/llm/vllm-cpu/profiles.yaml` | **New** — `standard` and `compact-3k` for CPU LLM (shared across runtimes) |
 | `components/reranker/vllm-spyre/profiles.yaml` | **New** — profile definitions for Spyre Reranker |
+| `components/reranker/vllm-cpu/profiles.yaml` | **New** — profile definitions for CPU Reranker |
 | `components/embedding/vllm-cpu/profiles.yaml` | **New** — profile definitions for CPU Embedding |
 | All LLM provider `values.schema.json` | Remove `profiles` array from `properties.profile`; keep `x-profiles` on each model `oneOf` entry |
 | `components/llm/vllm-spyre/podman/values.yaml` | Remove `maxModelLen`/`maxBatchSize` |
@@ -939,6 +983,9 @@ GET /api/v1/components/llm/providers/vllm-spyre/profiles
     ?model=ibm-granite/granite-4.1-8b-fp8
 
 GET /api/v1/components/reranker/providers/vllm-spyre/profiles
+    ?model=BAAI/bge-reranker-v2-m3
+
+GET /api/v1/components/reranker/providers/vllm-cpu/profiles
     ?model=BAAI/bge-reranker-v2-m3
 
 GET /api/v1/components/embedding/providers/vllm-cpu/profiles

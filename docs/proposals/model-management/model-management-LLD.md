@@ -91,8 +91,6 @@ The current catalog deploys vLLM or WatsonX as `components` that are tightly cou
 
 - Model lifecycle is locked to application lifecycle; a model upgrade forces full application re-deployment.
 - No mechanism to connect to an already-running WatsonX, OpenAI, or vLLM endpoint outside of the platform.
-- Consumer services (`chatbot`, `digitize`, `similarity`, `summarize`) hold direct references to provider-specific endpoints — swapping providers requires re-deploying those services.
-- No pre-flight validation of available resources (CPU, memory, Spyre cards) before attempting deployment, leading to silent pod failures.
 - `component_status` enum only has `Initializing`, `Running`, `Error` — insufficient to express the `Deploying` lifecycle state needed for async model deployment.
 
 ### Goals
@@ -707,7 +705,7 @@ A model connector record in the `connectors` table:
 |---|---|
 | `id` | `uuid` |
 | `name` | `"prod-watsonx"` (unique, case-insensitive) |
-| `type` | `"llm"` / `"embedding"` / `"reranker"` |
+| `type` | `"models"` (fixed value — discriminates model connectors from datasource connectors; the specific model role is in `metadata.component_type`) |
 | `provider` | `"watsonx"` / `"hosted_vllm"` / `"openai"` |
 | `status` | `"connected"` / `"offline"` (lowercase, reuses `connector_status` enum) |
 | `message` | `null` / `"Endpoint reachable and credentials accepted"` |
@@ -972,6 +970,7 @@ All endpoints require `Authorization: Bearer <access_token>`. All routes are und
 
 | Method | Path | Description | Response |
 |---|---|---|---|
+| `GET` | `/api/v1/models/catalog` | List all catalog model names, each with the providers that support it and their `component_type` and `deployment_type`. Read-only, no DB access | `200 OK` |
 | `POST` | `/api/v1/models` | Create a model — `deployment_type=local` deploys a pod; `deployment_type=remote` registers a remote connector | `202 Accepted` (local) / `201 Created` (remote) |
 | `GET` | `/api/v1/models` | List all models (both local and remote); filter with `?type=`, `?deployment_type=`, `?provider_id=`, `?model_name=`, `?profile=` and `?status=` | `200 OK` |
 | `GET` | `/api/v1/models/:id` | Get full status and details of any model (local or remote) | `200 OK` |
@@ -1120,7 +1119,144 @@ There is no endpoint to read a key back. Internal consumer services do not call 
 
 ## 7. API Endpoint Details
 
-### 7.1 Create a Model (polymorphic)
+### 7.1 Model Catalog
+
+**Endpoint:** `GET /api/v1/models/catalog`
+
+**Description:** Returns all catalog model names, each with the list of providers that support it. Sourced entirely from catalog assets — no database access. The UI uses this to drive the **Add Model** form: first pick a model name, then choose from the providers that support it.
+
+**Data sources:**
+- Local providers — `assets/components/<component_type>/<provider_id>/values.schema.json` (`model.oneOf[]`)
+- Remote providers — `assets/connectors/models/<provider_id>/schema.json` (`model_name.oneOf[]`)
+- `hosted_vllm` has no fixed model list (`model_name` is a free-text field) — it appears as an `open: true` provider on every entry
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `component_type` | string | No | Filter by model role: `llm`, `embedding`, `reranker`. Omit for all types |
+
+**Response `200 OK`:**
+
+Each element is one `model_name`. `providers[]` lists every provider (local or remote) that supports it.
+
+```json
+[
+  {
+    "model_name": "ibm-granite/granite-3.3-8b-instruct",
+    "component_type": "llm",
+    "description": "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. Powers tasks such as prompt-based reasoning, summarization, and answer generation.\n\n**Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.",
+    "providers": [
+      {
+        "id": "vllm-spyre",
+        "name": "Red Hat AI Inference with Spyre",
+        "deployment_type": "local",
+        "profiles": "/api/v1/components/llm/providers/vllm-spyre/profiles?model=ibm-granite%2Fgranite-3.3-8b-instruct"
+      },
+      {
+        "id": "vllm-cpu",
+        "name": "AI Inference on CPU",
+        "deployment_type": "local",
+        "profiles": "/api/v1/components/llm/providers/vllm-cpu/profiles?model=ibm-granite%2Fgranite-3.3-8b-instruct"
+      }
+    ]
+  },
+  {
+    "model_name": "ibm-granite/granite-4.1-8b-fp8",
+    "component_type": "llm",
+    "description": "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. Powers tasks such as prompt-based reasoning, summarization, and answer generation.\n\n**Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.",
+    "providers": [
+      {
+        "id": "vllm-spyre",
+        "name": "Red Hat AI Inference with Spyre",
+        "deployment_type": "local",
+        "profiles": "/api/v1/components/llm/providers/vllm-spyre/profiles?model=ibm-granite%2Fgranite-4.1-8b-fp8"
+      }
+    ]
+  },
+  {
+    "model_name": "ibm-granite/granite-4.1-8b",
+    "component_type": "llm",
+    "description": "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. Powers tasks such as prompt-based reasoning, summarization, and answer generation.\n\n**Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.",
+    "providers": [
+      {
+        "id": "vllm-cpu",
+        "name": "AI Inference on CPU",
+        "deployment_type": "local",
+        "profiles": "/api/v1/components/llm/providers/vllm-cpu/profiles?model=ibm-granite%2Fgranite-4.1-8b"
+      }
+    ]
+  },
+  {
+    "model_name": "ibm/granite-4-h-small",
+    "component_type": "llm",
+    "description": "A 32B parameter long-context instruct model finetuned from Granite-4.0-H-Small-Base. Powers tasks such as summarization, text classification, text extraction, question-answering, RAG, code-related tasks, function-calling, and multilingual dialog.\n\n**Model strengths**: Improved instruction following, tool-calling capabilities, natural conversation, strong reasoning, and enterprise-grade accuracy.\n\n**Supported Languages**: English, German, Spanish, French, Japanese, Portuguese, Arabic, Czech, Italian, Korean, Dutch, and Chinese.",
+    "providers": [
+      {
+        "id": "watsonx",
+        "name": "Watsonx",
+        "deployment_type": "remote",
+        "profiles": null
+      }
+    ]
+  },
+  {
+    "model_name": "ibm-granite/granite-embedding-278m-multilingual",
+    "component_type": "embedding",
+    "description": "**Languages:** Multilingual (100+ languages)\n\n**Use Cases:** Cross-lingual semantic search, multilingual document retrieval, international content matching.\n\n**Strengths:** Excellent multilingual support, efficient 278M parameter model, strong performance across diverse languages.",
+    "providers": [
+      {
+        "id": "vllm-cpu",
+        "name": "AI Inference on CPU",
+        "deployment_type": "local",
+        "profiles": "/api/v1/components/embedding/providers/vllm-cpu/profiles?model=ibm-granite%2Fgranite-embedding-278m-multilingual"
+      }
+    ]
+  },
+  {
+    "model_name": "BAAI/bge-reranker-v2-m3",
+    "component_type": "reranker",
+    "description": "A multilingual, cross-encoder–based reranker model used to improve retrieval quality by scoring and ranking candidate documents. Enhances search relevance by providing high-accuracy reranking on top of initial vector retrieval.\n\n**Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 90+ more.",
+    "providers": [
+      {
+        "id": "vllm-spyre",
+        "name": "Red Hat AI Inference with Spyre",
+        "deployment_type": "local",
+        "profiles": "/api/v1/components/reranker/providers/vllm-spyre/profiles?model=BAAI%2Fbge-reranker-v2-m3"
+      },
+      {
+        "id": "vllm-cpu",
+        "name": "AI Inference on CPU",
+        "deployment_type": "local",
+        "profiles": "/api/v1/components/reranker/providers/vllm-cpu/profiles?model=BAAI%2Fbge-reranker-v2-m3"
+      }
+    ]
+  }
+]
+```
+
+> **`hosted_vllm` is not listed here** — its `model_name` field is free-text (no `oneOf`), so there are no catalog entries to enumerate. When a user selects `hosted_vllm` as provider, the model name is typed in directly. The provider's schema is available at `GET /api/v1/connectors/models/providers/hosted_vllm/params`.
+
+**Response field notes:**
+
+| Field | Description |
+|---|---|
+| `model_name` | The model identifier — value to pass as `params.model` (local) or `params.model_name` (remote) when calling `POST /api/v1/models` |
+| `component_type` | Model role: `llm`, `embedding`, or `reranker` |
+| `description` | Human-readable model description sourced from the `description` field of the matching `oneOf` entry in the provider's schema file |
+| `providers[].id` | Value to pass as `provider_id` in `POST /api/v1/models` |
+| `providers[].name` | Human-readable name from `metadata.yaml` |
+| `providers[].deployment_type` | `local` (pod) or `remote` (connector) |
+| `providers[].profiles` | URL to fetch hardware profiles for this model + provider combination (`local` only); `null` for remote |
+
+**Implementation note:** Served entirely from the in-memory catalog asset loader — walks `assets/components/*/providers/*/values.schema.json` and `assets/connectors/models/*/schema.json`, collects each `model.oneOf[]` / `model_name.oneOf[]` entry, and groups results by `model_name`. No DB queries.
+
+**Error Responses:** `401 Unauthorized`
+
+---
+
+
+### 7.2 Create a Model (polymorphic)
 
 **Endpoint:** `POST /api/v1/models`
 
@@ -1153,10 +1289,10 @@ Content-Type: application/json
 ```json
 {
   "deployment_type": "remote",
-  "type": "llm",
   "name": "prod-watsonx",
   "provider_id": "watsonx",
   "params": {
+    "component_type": "llm",
     "model_name": "ibm/granite-4-h-small",
     "api_base": "https://us-south.ml.cloud.ibm.com",
     "project_id": "my-watsonx-project-id",
@@ -1170,10 +1306,12 @@ Content-Type: application/json
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `deployment_type` | string | Yes | `local` (pod) or `remote` (connector — no pod) |
-| `type` | string | Yes | Model role: `llm`, `embedding`, `reranker` |
+| `type` | string | `local` only | Model role for local models: `llm`, `embedding`, `reranker`. **Not present for `remote`** — the model role is passed as `params.component_type` instead |
 | `name` | string | Yes | Human-readable label (3–100 chars, slug-safe, unique case-insensitively) |
 | `provider_id` | string | Yes | Provider identifier — local: `vllm-cpu`, `vllm-spyre`; remote: `watsonx`, `hosted_vllm`, `openai` |
 | `params` | object | Yes | Model and provider config — validated against the provider's asset schema |
+
+> **`connectors.type` is always `"models"` for remote models — it is set server-side and is not a request field.** The client does not send it. It is the fixed discriminator that separates model connectors from datasource connectors in the shared `connectors` table, and is the value `ConnectorRef.type` must match when an application references the connector (`{ "type": "models", "id": "<uuid>" }`).
 
 **Additional fields for `deployment_type=local`:**
 
@@ -1188,9 +1326,9 @@ The `modelmanager` package validates `params` against the provider's asset schem
 | `deployment_type` | `provider_id` | Required `params` fields | Sensitive fields |
 |---|---|---|---|
 | `local` | `vllm-cpu`, `vllm-spyre` | `model_name` (optional: `profile` — defaults to the model's default profile, see `model-profiles.md`; stored in `components.metadata.profile`) | — |
-| `remote` | `watsonx` | `model_name`, `api_key` (optional: `api_base`, `project_id`) | `api_key` |
-| `remote` | `hosted_vllm` | `model_name`, `api_base` | `api_key` (optional) |
-| `remote` | `openai` | `model_name`, `api_key` | `api_key` |
+| `remote` | `watsonx` | `component_type`, `model_name`, `api_key` (optional: `api_base`, `project_id`) | `api_key` |
+| `remote` | `hosted_vllm` | `component_type`, `model_name`, `api_base` | `api_key` (optional) |
+| `remote` | `openai` | `component_type`, `model_name`, `api_key` | `api_key` |
 
 **Response — `deployment_type=local`, `202 Accepted` (async):**
 
@@ -1219,7 +1357,7 @@ The `modelmanager` package validates `params` against the provider's asset schem
 
 ---
 
-### 7.2 List Models (polymorphic)
+### 7.3 List Models (polymorphic)
 
 **Endpoint:** `GET /api/v1/models`
 
@@ -1307,7 +1445,7 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 
 ---
 
-### 7.3 Get Model Details
+### 7.4 Get Model Details
 
 **Endpoint:** `GET /api/v1/models/:id`
 
@@ -1378,7 +1516,7 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 
 ---
 
-### 7.4 Update a Remote Model's Credentials
+### 7.5 Update a Remote Model's Credentials
 
 **Endpoint:** `PUT /api/v1/models/:id`
 
@@ -1408,9 +1546,27 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 
 **Processing steps:**
 
-1. Re-register LiteLLM route (`DELETE /model/delete` then `POST /model/new`) with the updated credential fields.
-2. Run connectivity check — if it fails, return `422` and revert LiteLLM registration; leave the `connectors` row unchanged.
-3. Merge supplied credential fields into `connectors.metadata` (omitted keys preserved); update `connectors.status = 'connected'` and `updated_at`.
+1. Read the connector's current params from `connectors.metadata` (stored credential fields, `project_id`, `model_name`, etc.).
+2. Merge the supplied credential fields over the stored values to produce the updated params set.
+3. Call `POST /model/update` on the LiteLLM Gateway with the merged params — the `model_name`, `model_info.id`, and any non-secret `litellm_params` (e.g. `project_id`) are sourced from `connectors.metadata`; only the rotated credential field(s) come from the request body:
+   ```
+   POST https://<litellm-host>/model/update
+   Authorization: Bearer <litellm-master-key>
+   Content-Type: application/json
+
+   {
+     "model_name": "<model_name>--<provider>--<worker>",
+     "model_info": {
+       "id": "<model_name>--<provider>"
+     },
+     "litellm_params": {
+       "api_key": "<updated_api_key>",
+       "project_id": "<project_id_from_metadata>"
+     }
+   }
+   ```
+4. Run connectivity check — if it fails, return `422` and leave the `connectors` row unchanged. Note: `POST /model/update` has no transactional rollback; if a revert is needed, re-issue the call with the previous key.
+5. Merge supplied credential fields into `connectors.metadata` (omitted keys preserved); update `connectors.status = 'connected'` and `updated_at`.
 
 **Response `200 OK`:** Updated model object (same shape as `GET /api/v1/models/:id`, without secret fields):
 
@@ -1449,7 +1605,7 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 
 ---
 
-### 7.5 Delete / Undeploy a Model
+### 7.6 Delete / Undeploy a Model
 
 **Endpoint:** `DELETE /api/v1/models/:id`
 
@@ -1493,7 +1649,7 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 
 ---
 
-### 7.6 Generate Public Key
+### 7.7 Generate Public Key
 
 **Endpoint:** `POST /api/v1/models/keys`
 
@@ -1701,8 +1857,8 @@ POST /api/v1/models
 ```
 POST /api/v1/models          (deployment_type=remote)
 
-{ deployment_type: "remote", name: "prod-watsonx", type: "llm", provider_id: "watsonx",
-  params: {model_name: "ibm/granite-4-h-small",
+{ deployment_type: "remote", name: "prod-watsonx", provider_id: "watsonx",
+  params: {component_type: "llm", model_name: "ibm/granite-4-h-small",
            api_base: "https://us-south.ml.cloud.ibm.com", project_id: "my-watsonx-project-id",
            api_key: "<watsonx-api-key>"} }
 
@@ -1721,8 +1877,9 @@ POST /api/v1/models          (deployment_type=remote)
   4. Run connectivity probe via LiteLLM GET /health?model=ibm/granite-4-h-small → if fails, DELETE /model/delete and return 422
   5. INSERT into connectors (id=<connectors.id from 2a>, name='prod-watsonx', type='models', provider='watsonx',
                              status='connected', created_by=<user>,
-                             metadata={model_name: ...,        ← from request params.model_name
-                                       api_base: ...,      ← from request params.api_base
+                             metadata={component_type: ...,    ← from request params.component_type
+                                       model_name: ...,        ← from request params.model_name
+                                       api_base: ...,          ← from request params.api_base
                                        project_id: ...})       ← from request params.project_id
                                                                 ← api_key (format: password) stripped, not stored
      (on INSERT failure: DELETE /model/delete → 500)
@@ -1735,8 +1892,8 @@ POST /api/v1/models          (deployment_type=remote)
 ```
 POST /api/v1/models          (deployment_type=remote)
 
-{ deployment_type: "remote", name: "external-vllm", type: "llm", provider_id: "hosted_vllm",
-  params: {model_name: "ibm-granite/granite-3.3-8b-instruct",
+{ deployment_type: "remote", name: "external-vllm", provider_id: "hosted_vllm",
+  params: {component_type: "llm", model_name: "ibm-granite/granite-3.3-8b-instruct",
            api_base: "https://remote-vllm.corp.internal:8000/v1",
            api_key: "<optional-api-key>"} }
 
@@ -1759,7 +1916,8 @@ POST /api/v1/models          (deployment_type=remote)
               methods: ["POST"], auth: false }
   6. INSERT into connectors (id=<connectors.id from 2a>, name='external-vllm', type='models', provider='hosted_vllm',
                              status='connected', created_by=<user>,
-                             metadata={model_name: ...,
+                             metadata={component_type: ...,    ← from request params.component_type
+                                       model_name: ...,
                                        api_base: ...})
   7. Return 201 { id: connectors.id }
 ```
