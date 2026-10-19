@@ -3,6 +3,8 @@
 ## 1. Overview
 This proposal defines the integration of **Confluence** (Cloud and Data Center / Server) as a first-class data source connector in Digitize alongside S3 (`object_storage`) and SSH/SFTP (`file_system`).
 
+Confluence page bodies are not files: the REST API returns them as XHTML/HTML. Digitize today only ingests `.pdf` and `.docx`. This proposal therefore also introduces **HTML (`.html`) as a supported Digitize input format** (Section 8), so that pages are ingested as structured HTML rather than being rendered to PDF/DOCX first.
+
 ---
 
 ## 2. Architecture Diagram
@@ -19,7 +21,7 @@ To onboard a Confluence instance, the following must be requested from the Admin
 | :--- | :--- |
 | **Instance Info** | Base URL (`https://<domain>.atlassian.com/wiki` or self-hosted URL) and deployment type (Cloud vs. Data Center / Server). |
 | **Authentication** | Dedicated service account credentials:<br>• **Cloud:** Service account email + API token.<br>• **Data Center / Server:** Personal Access Token (PAT) or Bearer token. |
-| **Permissions** | Read/View permissions for target Space Keys (`space_keys`), page contents, and attachments (`.pdf`, `.docx`). |
+| **Permissions** | Read/View permissions for target Space Keys (`space_keys`), page contents (rendered body), and attachments (`.pdf`, `.docx`). |
 | **Network & TLS** | Firewall/egress allowlist from cluster pods to Confluence (port 443). Corporate CA bundle (`.pem`) if using internal self-signed TLS. |
 
 ---
@@ -34,6 +36,19 @@ Stored in `connectors.connection_details` and validated at API boundaries:
 | **Auth Credentials** | `access_key_id`, `secret_access_key` | `username`, `private_key` (PEM) | `username` (Cloud email / PAT identifier), `api_token` / `personal_access_token` |
 | **Scope & Filters** | `prefix`, `allowed_extensions` | `remote_path`, `allowed_extensions` | `cql_filter` (optional), `include_attachments` (bool), `allowed_extensions` |
 | **TLS & Security** | `verify_ssl` | Host key validation | `verify_ssl`, `ca_cert_path` (optional) |
+
+### 4.1 Meaning of `allowed_extensions` for Confluence
+
+Pages have no file extension on the remote side, so `allowed_extensions` is interpreted as follows:
+
+| Entry | Effect |
+| :--- | :--- |
+| `.html` | **Enables page-body ingestion.** Each page is fetched as rendered HTML and staged as an `.html` file. |
+| `.pdf`, `.docx` | Filters which **attachments** are downloaded (only when `include_attachments` is `true`). |
+
+Recommended default for a Confluence connector: `[".html", ".pdf", ".docx"]`. Removing `.html` gives an attachments-only connector.
+
+> `.html` is added to the set of extensions accepted by the connector API validator (Section 8.2). S3 and SSH connectors may also use it.
 
 ---
 
@@ -55,11 +70,12 @@ Confluence content is tracked via composite key `(checksum, connector_id)` in `c
 
 * **Confluence Pages:** Checksum is computed as:
   $$\text{checksum} = \text{MD5}(\text{PageID} + \text{VersionNumber})$$
-  Any page edit increments `VersionNumber`, producing a new MD5 and triggering automated re-ingestion.
+  Any page edit increments `VersionNumber`, producing a new MD5 and triggering automated re-ingestion. The checksum is computed from metadata returned by the scan query, so no body download is needed to detect changes.
 * **Attachments:** MD5 of the raw attachment byte stream or attachment `(AttachmentID + VersionNumber)`.
 * **Canonical Path (`remote_path`):**
   * Pages: `spaces/{spaceKey}/pages/{pageId}`
   * Attachments: `spaces/{spaceKey}/pages/{pageId}/attachments/{attachmentId}`
+* **Staged file name:** Pages are written to the staging folder as `{title-slug}__{pageId}.html`. The name becomes the `filename` metadata stored with each OpenSearch chunk and shown in citations, so a readable title slug is preferred over a bare numeric ID. The `pageId` suffix keeps names unique.
 
 ---
 
@@ -72,7 +88,168 @@ Confluence content is tracked via composite key `(checksum, connector_id)` in `c
 1. **Connect (`scanner.connect()`):** Validates credentials against Confluence REST endpoint (`/wiki/rest/api/space` or `/rest/api/space`).
 2. **Scan (`scanner.scan()`):** Queries pages via CQL for configured spaces. Computes $\text{MD5}(\text{PageID} + \text{VersionNumber})$.
 3. **Classify (`_classify()`):** Identifies new, modified, unchanged, or orphaned (deleted) pages against `connector_document_checksum`.
-4. **Download & Transform (`scanner.download_to()`):**
-   * **Page Content:** Fetches page export (native PDF export or HTML/storage format converted to `.docx`/`.pdf`) into the batch staging folder.
+4. **Download & Stage (`scanner.download_to()`):**
+   * **Page Content:** Fetches the rendered page body (`expand=body.export_view,version,space`) and writes a self-contained `.html` file (see 7.1) into the batch staging folder. **No PDF/DOCX conversion is performed.**
    * **Attachments:** Downloads `.pdf` and `.docx` attachments directly.
-5. **Batch Ingest & Indexing:** Dispatches staged files to `initialize_and_launch()` with `OperationType.INGESTION`. Extracted text and embeddings are indexed directly into the **OpenSearch Vector Store** for downstream RAG retrieval.
+5. **Batch Ingest & Indexing:** Dispatches staged files to `initialize_and_launch()` with `OperationType.INGESTION`. Digitize routes each file by extension (`.pdf` / `.docx` / `.html`), chunks the extracted text, embeds it, and indexes the chunks into the **OpenSearch Vector Store** for downstream RAG retrieval.
+
+### 7.1 Staged HTML Page Format
+
+The scanner wraps the page body in a minimal document and injects the page title as `<h1>`:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><title>{escaped title}</title></head>
+  <body>
+    <h1>{escaped title}</h1>
+    {body.export_view}
+  </body>
+</html>
+```
+
+Rules:
+
+* **Use `body.export_view` (or `body.view`), not `body.storage`.** Storage format contains `ac:` / `ri:` macro tags (info panels, code macros, expand blocks) that the HTML parser does not understand; the rendered views contain the expanded macro output as plain HTML.
+* **Always inject the title as `<h1>`.** The REST body does not contain it, and the page title is the top of the chunk hierarchy (Sections 8.1 and 8.5) and a strong retrieval signal.
+* Always UTF-8 encoded; the file always begins with `<!DOCTYPE html>` (used by content validation, Section 8.2).
+
+---
+
+## 8. HTML Support in Digitize
+
+### 8.1 Why HTML (and not PDF/DOCX or Markdown)
+
+| Option | Approach | Verdict |
+| :--- | :--- | :--- |
+| **A. Render page to PDF/DOCX in the connector** | Confluence's PDF export (`flyingpdf`) is not part of the documented REST API; HTML→DOCX/PDF needs extra heavy dependencies (pandoc / WeasyPrint). Header levels in the output are then re-guessed from font size or a TOC. | Rejected: lossy, fragile, extra dependencies. |
+| **B. Ingest HTML directly** | Docling natively supports `InputFormat.HTML` and preserves headings, lists, code and tables as structure. | **Selected.** |
+| **C. Convert HTML to Markdown first** | Same code changes as B plus an extra lossy conversion step. | Rejected: no benefit over B. |
+
+**Embedding / OpenSearch impact.** The chunker builds `chapter_title → section_title → subsection_title → subsubsection_title` from header levels. These are stored as `source` on every chunk and prepended to the chunk text before embedding. HTML has explicit `<h1>`–`<h6>` tags, so the hierarchy is exact. With PDF the levels are inferred from font size or a fuzzy TOC match, and with converted DOCX there are usually no real Word heading styles.
+
+### 8.2 Required Changes (Extension Plumbing)
+
+| # | Location | Change |
+| :-- | :--- | :--- |
+| 1 | `parsing/converter.py` — `get_doc_converter()` | Add `InputFormat.HTML` to `allowed_formats`. No `format_options` entry is needed (defaults are used). |
+| 2 | `connectors/models.py` — `validate_allowed_extensions` | Add `.html` to the `supported` set. |
+| 3 | `connectors/scanners/config.py`, `scanner_factory.py` | Keep the `[".pdf", ".docx"]` defaults for S3/SSH (no behaviour change); the Confluence config defaults to `[".html", ".pdf", ".docx"]`. |
+| 4 | `parsing/pdf.py` — `get_document_page_count()` | Return `1` for `.html`. This keeps `convert_doc()` on its single-pass path; Docling HTML documents have no pages, so page-range chunked conversion does not apply. |
+| 5 | `pipeline/ingest.py` (~line 185) | Add `*.html` to the file globs that build `input_file_paths`. Without this, staged HTML files are silently skipped. |
+| 6 | `common/misc_utils.py` — `validate_document_file()` | Add `.html` to `allowed_extensions` and a content check: there is no magic number for HTML, so require that the content decodes as UTF-8 and, after stripping a BOM and whitespace, starts with `<`. Update the "Only PDF and DOCX…" error message. This function is called by both `sync_tick.py` (staged connector files — the "Validate Document" step) and the `/v1/jobs` upload path in `api/v1/jobs.py`, so direct uploads gain `.html` support too. |
+| 7 | `processing/orchestrator.py` (~line 474) | Dispatch on extension: `.docx → process_text_docx`, `.html → process_text_html`, otherwise `process_text`. |
+| 8 | `processing/text.py` | New `process_text_html()` (Section 8.3). |
+
+**No change needed:**
+
+* `processing/tables.py` — `is_docx` only gates the DOCX-specific caption recovery. For HTML, Docling populates captions from `<caption>` natively, so the default path is correct.
+* `processing/orchestrator.py` chunking — it already honours `#` prefixes on headers (`get_header_level` priority 1), and null `page` values are tolerated.
+* `common/opensearch.py` — `page_number` is only written when not null (line 251), so HTML chunks simply omit it.
+
+### 8.3 `process_text_html()` — Design
+
+**Goal:** a separate function, keeping HTML logic isolated, that reuses as much of `process_text_docx()` as possible and adds only the HTML-specific header mapping.
+
+`process_text_docx()` already has a loop that (a) skips `excluded_labels`, (b) resolves section-header text/levels, (c) emits the `{label, text, page, font_size}` records, and (d) writes the JSON and returns `(page_count, process_time)`. Only (b) differs between formats. So the loop is extracted into a private helper that takes a header-resolver callback:
+
+```python
+# processing/text.py
+
+def _build_structured_text(converted_doc, src_path, out_path, resolve_header, page_count):
+    """Shared by process_text_docx / process_text_html (page-less formats).
+
+    resolve_header(text_obj, last_level) -> (header_text, new_last_level)
+    """
+    t0 = time.time()
+    if not converted_doc.texts:
+        out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
+        return page_count, 0.0
+
+    out, last_level = [], 0
+    for text_obj in converted_doc.texts:
+        if text_obj.label in excluded_labels:
+            continue
+        text = text_obj.text
+        label = text_obj.label
+        if label in ("section_header", "title"):
+            text, last_level = resolve_header(text_obj, last_level)
+            label = "section_header"
+        out.append({"label": label, "text": text, "page": None, "font_size": None})
+
+    out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return page_count, time.time() - t0
+```
+
+* `process_text_docx()` keeps its TOC loading and passes a resolver containing its existing logic (TOC match via `get_matching_header_lvl`, else previous level + 1). This is a **behaviour-preserving refactor** and must keep the existing `test_docx_utils.py` / text-processing tests green.
+* `process_text_html()` is then only the HTML resolver and a page estimate:
+
+```python
+def process_text_html(converted_doc, html_path, out_path):
+    from digitize.parsing.docx import CHARS_PER_PAGE      # reuse existing constant
+
+    def resolve(text_obj, last_level):
+        # Docling: <h1> -> label "title"; <hN> (N>=2) -> section_header level N-1
+        level = 1 if text_obj.label == "title" else text_obj.level + 1
+        return f"{'#' * level} {text_obj.text.strip()}", level
+
+    chars = sum(len(t.text) for t in converted_doc.texts)
+    page_count = max(1, math.ceil(chars / CHARS_PER_PAGE))
+    return _build_structured_text(converted_doc, html_path, out_path, resolve, page_count)
+```
+
+Reused as-is: `excluded_labels`, the output record schema, the JSON write, `CHARS_PER_PAGE`, the chunker's `#`-prefix handling, and `process_table`. HTML-specific: only the 3-line `resolve` function. No TOC extraction, no font-size lookup and no page numbers are needed.
+
+> If the refactor of `process_text_docx()` is judged too risky for the first iteration, `process_text_html()` can initially be a standalone ~25-line function with the same shape and the helper extracted in a follow-up. The resolver logic above is unchanged either way.
+
+### 8.4 Verified Docling Behaviour (Docling 2.133.0)
+
+The following was verified by running Docling's HTML converter on sample pages. These are plain-HTML samples, not real Confluence output (see Section 9).
+
+| HTML input | Docling result | Mapped to `#`-prefix |
+| :--- | :--- | :--- |
+| `<h1>` | item with label `title`, `level` unset | `#` (level 1) |
+| `<h2>` | `section_header`, `level=1` | `##` |
+| `<h3>` | `section_header`, `level=2` | `###` |
+| `<h4>` / `<h6>` | `section_header`, `level=3` / `level=5` | `####` / `######` |
+| `<p>`, `<li>`, `<pre>` | `text`, `list_item`, `code` | unchanged |
+| `<table>` + `<caption>` | entry in `doc.tables`, caption available via `caption_text()` | handled by `process_table` |
+| `<img alt=…>` | label `caption` | skipped (`excluded_labels`) |
+| Any element | no `prov` (no page numbers); `doc.pages == {}` | `page` = `None` |
+
+**Why a dedicated function is needed:** running an HTML file through the existing `process_text_docx()` was tested. The DOCX TOC extraction fails (not a ZIP package), headers are emitted without `#` prefixes, and `get_header_level()` returns level `0` for every header. The chunker then files all headers under `subsubsection_title`, producing a flat and incorrect hierarchy in OpenSearch. The `_build_structured_text` / `process_text_html` design in Section 8.3 was prototyped against Docling 2.133.0 and, with the `resolve` mapping above, `get_header_level()` returned the correct levels (1, 2, 3, 2) for the test page and (1, 1, 4, 6) for a page with a duplicate `<h1>` and skipped heading levels. The estimated page count for both samples was 1.
+
+### 8.5 Resulting OpenSearch Metadata for Confluence Pages
+
+| Field | Value |
+| :--- | :--- |
+| `filename` | `{title-slug}__{pageId}.html` |
+| `source` | Hierarchy built from headings: page title (chapter) → `h2` (section) → `h3` (subsection) → … |
+| `type` | `text` / `table` (unchanged) |
+| `page_number` | Not set (HTML has no pages) |
+| Chunk text | `source` hierarchy prepended to content, as for other formats |
+
+Citations for Confluence documents should use the page title and the Confluence URL (derivable from `pageId` and the connector `url`) rather than a page number.
+
+### 8.6 Processing Flow for HTML
+
+![HTML Processing Flow](confluence-html-processing-flow.svg)
+
+---
+
+## 9. Testing & Open Items
+
+**Unit tests to add**
+
+* `process_text_html`: heading mapping (`title`, levels 1–5), exclusion of `caption` items, empty document, page estimate ≥ 1.
+* `_build_structured_text` refactor: existing `process_text_docx` tests unchanged and passing.
+* `get_document_page_count(".html") == 1`; `validate_document_file` accepts valid HTML, rejects empty/binary/non-`<` content; `validate_allowed_extensions` accepts `.html`.
+* `ingest.py` globbing includes `.html`.
+* `ConfluenceScanner`: page wrapper generation (title escaping, `<h1>` injection), `allowed_extensions` semantics (Section 4.1), checksum on `PageID + VersionNumber`.
+
+**Open items to validate before implementation**
+
+1. **Real Confluence HTML.** Run Docling on actual `body.export_view` output from Cloud and Data Center for pages that use panels, expand macros, code macros, nested tables, and the table-of-contents macro. Confirm headings and tables survive, and decide whether any boilerplate (e.g. TOC macro output) should be stripped by the scanner before staging.
+2. **Duplicate `<h1>`.** Docling labels every `<h1>` as `title`. A page body that contains its own `<h1>` will produce two level-1 headers (verified). The mapping handles this, but the scanner may downgrade body `<h1>` to `<h2>` if this proves noisy.
+3. **Images.** Images embedded in pages are not ingested; only `alt` text is seen (and is excluded as a `caption`). Image attachments are out of scope.
+4. **Heading-level gaps.** `<h4>` directly under `<h1>` yields level 4 (`####`); the chunker accepts this, but skipped levels are not normalised.

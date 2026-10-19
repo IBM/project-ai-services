@@ -17,8 +17,8 @@
   <text x="45" y="89" font-size="10" fill="#64748b">/wiki/rest/api/content?cql=...</text>
 
   <rect x="280" y="52" width="240" height="50" rx="4" fill="#ffffff" stroke="#94a3b8" stroke-width="1"/>
-  <text x="290" y="72" font-weight="600" fill="#1e293b">Page Export &amp; Storage Format</text>
-  <text x="290" y="89" font-size="10" fill="#64748b">HTML / Storage View / Native PDF Export</text>
+  <text x="290" y="72" font-weight="600" fill="#1e293b">Rendered Page Body</text>
+  <text x="290" y="89" font-size="10" fill="#64748b">body.export_view (HTML) + version</text>
 
   <rect x="535" y="52" width="250" height="50" rx="4" fill="#ffffff" stroke="#94a3b8" stroke-width="1"/>
   <text x="545" y="72" font-weight="600" fill="#1e293b">Attachments Endpoint</text>
@@ -52,7 +52,7 @@
   <text x="45" y="295" font-weight="600" fill="#1e40af">ConfluenceScanner (BaseScanner Subclass)</text>
   <text x="45" y="315" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">scan():</tspan> Walks spaces via CQL; yields canonical path &amp; checksum</text>
   <text x="55" y="330" font-size="11" fill="#1d4ed8">&#x2192; Checksum formula: MD5(PageID + VersionNumber)</text>
-  <text x="45" y="348" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">download_to():</tspan> Fetches page export / attachments to local staging</text>
+  <text x="45" y="348" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">download_to():</tspan> Stages page as .html (title as h1) + attachments</text>
   <text x="45" y="366" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">_classify():</tspan> Identifies new, modified, unchanged, &amp; orphan pages</text>
   <text x="45" y="384" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">Client:</tspan> Direct REST API calls via httpx (async I/O concurrency)</text>
 
@@ -67,7 +67,7 @@
 
   <!-- Arrow down to Ingest Pipeline -->
   <line x1="270" y1="410" x2="270" y2="435" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#ca-arr)"/>
-  <text x="280" y="427" font-size="10" fill="#57606a">Staged .pdf / .docx files</text>
+  <text x="280" y="427" font-size="10" fill="#57606a">Staged .html (pages) / .pdf / .docx (attachments)</text>
 
   <!-- Document Ingestion Pipeline Box -->
   <rect x="35" y="435" width="750" height="145" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1"/>
@@ -79,7 +79,7 @@
 
   <rect x="230" y="468" width="170" height="50" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
   <text x="240" y="488" font-weight="600" fill="#14532d">2. Parsing Engine</text>
-  <text x="240" y="505" font-size="10" fill="#57606a">PDF/DOCX OCR, Text, Tables</text>
+  <text x="240" y="505" font-size="10" fill="#57606a">PDF / DOCX / HTML (new)</text>
 
   <rect x="415" y="468" width="170" height="50" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
   <text x="425" y="488" font-weight="600" fill="#14532d">3. Chunking &amp; Embed</text>
