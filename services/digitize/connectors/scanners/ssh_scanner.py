@@ -140,7 +140,10 @@ class SSHScanner(BaseScanner):
             return
         for entry in entries:
             full_path = path.rstrip("/") + "/" + entry.filename
-            if stat.S_ISDIR(entry.st_mode):
+            # Some SFTP servers return st_mode with bits outside the 16-bit
+            # mode_t range (or None); mask to the low 16 bits so
+            # stat.S_ISDIR() cannot raise OverflowError.
+            if stat.S_ISDIR((entry.st_mode or 0) & 0xFFFF):
                 yield from self._walk_remote_tree(full_path)
             else:
                 yield full_path
