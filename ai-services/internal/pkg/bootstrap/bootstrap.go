@@ -9,11 +9,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
-// SetUpgradeMode enables or disables the operator upgrade prompt flow for the
-// given runtime.
-func SetUpgradeMode(rt types.RuntimeType, upgrade bool) {
+// SetSkipUpgrade enables or disables skipping the operator upgrade prompt flow
+// for the given runtime.
+func SetSkipUpgrade(rt types.RuntimeType, skip bool) {
 	if rt == types.RuntimeTypeOpenShift {
-		openshift.SetUpgradeMode(upgrade)
+		openshift.SetSkipUpgrade(skip)
 	}
 }
 

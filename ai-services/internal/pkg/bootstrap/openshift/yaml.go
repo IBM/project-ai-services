@@ -232,7 +232,7 @@ func handleExistingSubscription(ctx context.Context, c *openshift.OpenshiftClien
 	csvReady := isCSVReady(ctx, c, sub)
 	operatorLabel := getOperatorLabel(sub.Spec.Package)
 
-	if upgradeMode && csvReady {
+	if !skipUpgrade && csvReady {
 		// promptAndUpgrade returns true when an upgrade was confirmed and applied —
 		// in that case the caller should NOT skip so waitForOperator picks up the new CSV.
 		return !promptAndUpgrade(ctx, c, sub, object, operatorLabel)
@@ -246,7 +246,7 @@ func handleExistingSubscription(ctx context.Context, c *openshift.OpenshiftClien
 }
 
 // shouldSkipSubscription checks if a subscription should be skipped because it already exists.
-// When upgradeMode is true and the operator is ready, the user is prompted to upgrade.
+// Unless skipUpgrade is set, when the operator is ready the user is prompted to upgrade.
 // Returns true if the resource should be skipped (i.e. no SSA apply needed).
 func shouldSkipSubscription(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured) bool {
 	packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
@@ -370,15 +370,16 @@ func promptAndUpgrade(ctx context.Context, c *openshift.OpenshiftClient, sub *op
 
 	// Already at the desired version — nothing to do.
 	if v.currentChannel == v.availableChannel && (v.availableCSV == "" || v.currentCSV == v.availableCSV) {
-		s.Stop(fmt.Sprintf("%s is already at the desired version (%s / %s)", operatorLabel, v.currentChannel, v.currentCSV))
+		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
 
 		return false
 	}
 
 	// Block downgrades silently.
 	if isDowngrade(v) {
-		s.Stop(fmt.Sprintf("%s: skipping, manifest version %s is older than installed %s",
-			operatorLabel, v.availableCSV, v.currentCSV))
+		logger.Debugf("%s: skipping, manifest version %s is older than installed %s\n",
+			operatorLabel, v.availableCSV, v.currentCSV)
+		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
 
 		return false
 	}
