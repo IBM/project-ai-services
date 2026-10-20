@@ -96,6 +96,9 @@ var (
 	fetchMaxBackoff     = 15 * time.Second
 )
 
+// fetchBackoffMultiplier is the factor the wait grows by after each failed fetch
+const fetchBackoffMultiplier = 2
+
 // retryableError marks a fetch failure that may succeed once the service is up
 type retryableError struct {
 	err error
@@ -121,7 +124,7 @@ func loadFromURLWithRetry(urlStr string, tlsSkipVerify bool) ([]byte, error) {
 
 		log.Printf("OpenAPI description not available yet (attempt %d): %v; retrying in %s", attempt, err, backoff)
 		time.Sleep(backoff)
-		backoff = min(backoff*2, fetchMaxBackoff)
+		backoff = min(backoff*fetchBackoffMultiplier, fetchMaxBackoff)
 	}
 }
 
