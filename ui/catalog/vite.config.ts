@@ -10,13 +10,14 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
-        loadPaths: [path.resolve(__dirname, "src")],
+        loadPaths: [path.resolve(import.meta.dirname, "src")],
+        silenceDeprecations: ["if-function"],
       },
     },
   },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(import.meta.dirname, "src"),
     },
   },
   server: {
