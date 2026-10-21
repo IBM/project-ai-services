@@ -89,7 +89,7 @@ Confluence content is tracked via composite key `(checksum, connector_id)` in `c
 2. **Scan (`scanner.scan()`):** Queries pages via CQL for configured spaces. Computes $\text{MD5}(\text{PageID} + \text{VersionNumber})$.
 3. **Classify (`_classify()`):** Identifies new, modified, unchanged, or orphaned (deleted) pages against `connector_document_checksum`.
 4. **Download & Stage (`scanner.download_to()`):**
-   * **Page Content:** Fetches the rendered page body (`expand=body.export_view,version,space`) and writes a self-contained `.html` file (see 7.1) into the batch staging folder. **No PDF/DOCX conversion is performed.**
+   * **Page Content:** Fetches the rendered page body (`expand=body.export_view,version,space`) and writes a self-contained `.html` file (see 7.1) into the batch staging folder. **No PDF/DOCX conversion is performed.** Before writing, the scanner strips any embedded ("Include Page") macro output from the rendered body (see 7.2).
    * **Attachments:** Downloads `.pdf` and `.docx` attachments directly. This includes both explicitly uploaded attachments and files embedded inline in the page body via macros (e.g. the Confluence PDF viewer / Office connector macro). Inline-embedded files are resolved by their attachment ID, which is retrievable from the page's attachment list via the REST API — no special macro parsing of `body.storage` is required. Only `.pdf` and `.docx` are downloaded; all other attachment types (images, spreadsheets, etc.) are ignored, consistent with `allowed_extensions`.
 5. **Batch Ingest & Indexing:** Dispatches staged files to `initialize_and_launch()` with `OperationType.INGESTION`. Digitize routes each file by extension (`.pdf` / `.docx` / `.html`), chunks the extracted text, embeds it, and indexes the chunks into the **OpenSearch Vector Store** for downstream RAG retrieval.
 
@@ -113,6 +113,36 @@ Rules:
 * **Use `body.export_view` (or `body.view`), not `body.storage`.** Storage format contains `ac:` / `ri:` macro tags (info panels, code macros, expand blocks) that the HTML parser does not understand; the rendered views contain the expanded macro output as plain HTML.
 * **Always inject the title as `<h1>`.** The REST body does not contain it, and the page title is the top of the chunk hierarchy (Sections 8.1 and 8.5) and a strong retrieval signal.
 * Always UTF-8 encoded; the file always begins with `<!DOCTYPE html>` (used by content validation, Section 8.2).
+
+### 7.2 Embedded ("Include Page") Macro Handling
+
+When a Confluence page (Page A) embeds another page (Page B) via an `{include}` macro, the `body.export_view` response for Page A contains Page B's fully rendered content inline. Without intervention, Page A's staged HTML would duplicate Page B's text, causing the same content to appear in OpenSearch under two different `filename` values.
+
+#### Strategy: strip-and-reference, ingest independently
+
+Each included page is already a first-class scanned page with its own `PageID` and `VersionNumber`. The existing checksum formula `MD5(PageID + VersionNumber)` covers it identically to any other page. No new change-detection mechanism is needed.
+
+The scanner applies the following rule when staging Page A's HTML:
+
+1. **Identify embeds.** Fetch `body.storage` for Page A alongside `body.export_view`. Parse `<ac:macro ac:name="include">` (and the equivalent `<ac:structured-macro ac:name="include">`) nodes to extract the target page titles / IDs. This is the only use of `body.storage`; it is not parsed for content.
+2. **Strip expanded embed output.** Locate the corresponding rendered block in `body.export_view` and replace it with a lightweight comment placeholder:
+
+```html
+<!-- embedded page: {title-slug}__{pageId}.html -->
+```
+
+3. **Write Page A's HTML** without the embedded content. Page A's chunks carry only Page A's own text; the `filename` metadata on every OpenSearch chunk correctly attributes that content to Page A.
+4. **Page B is staged and ingested independently** under its own checksum. Its OpenSearch chunks carry `filename: {title-slug}__pageB.html`. When Page B changes, only Page B's `VersionNumber` increments, only its checksum changes, and only its chunks are deleted and re-indexed — Page A is untouched.
+
+#### What this means for retrieval
+
+A RAG query that spans content from both pages will retrieve chunks from two `filename` values (`pageA…html` and `pageB…html`). This is the correct and most attribution-accurate result: citations point to the actual source page rather than a composite that masks where the content originated. No cross-page nesting of metadata is performed.
+
+#### Scope and limitations
+
+* Only `ac:macro ac:name="include"` (Include Page macro) is handled. Other transcluding macros (e.g. Excerpt Include, Multiexcerpt Include) follow the same structural pattern and can be added to the strip list incrementally.
+* If Page B is **not** within the configured `space_keys` it will not be scanned and therefore not indexed. In that case the placeholder comment is still inserted, but no independent file for Page B will exist in OpenSearch.
+* If Page A is the only page that embeds Page B and Page B is later deleted from Confluence, the orphan-deletion flow (Step 6) removes Page B's chunks as normal; the placeholder comment in Page A's HTML remains but produces no indexed content.
 
 ---
 
@@ -246,11 +276,14 @@ Citations for Confluence documents should use the page title and the Confluence 
 * `get_document_page_count(".html") == 1`; `validate_document_file` accepts valid HTML, rejects empty/binary/non-`<` content; `validate_allowed_extensions` accepts `.html`.
 * `ingest.py` globbing includes `.html`.
 * `ConfluenceScanner`: page wrapper generation (title escaping, `<h1>` injection), `allowed_extensions` semantics (Section 4.1), checksum on `PageID + VersionNumber`.
+* `ConfluenceScanner` embed handling (Section 7.2): `body.storage` parsed to detect `ac:macro ac:name="include"` nodes; expanded embed block stripped from `body.export_view`; placeholder comment inserted; included page staged independently under its own checksum and ingested as a separate document.
 
 **Open items to validate before implementation**
 
 1. **Real Confluence HTML.** Run Docling on actual `body.export_view` output from Cloud and Data Center for pages that use panels, expand macros, code macros, nested tables, and the table-of-contents macro. Confirm headings and tables survive, and decide whether any boilerplate (e.g. TOC macro output) should be stripped by the scanner before staging.
 2. **Duplicate `<h1>`.** Docling labels every `<h1>` as `title`. A page body that contains its own `<h1>` will produce two level-1 headers (verified). The mapping handles this, but the scanner may downgrade body `<h1>` to `<h2>` if this proves noisy.
 3. **Heading-level gaps.** `<h4>` directly under `<h1>` yields level 4 (`####`); the chunker accepts this, but skipped levels are not normalised.
+4. **Embed-strip accuracy.** Validate that the `body.export_view` block corresponding to an Include Page macro can be reliably located and stripped via the macro node boundaries in `body.storage`. Edge cases: nested includes (Page A includes Page B which includes Page C), pages included multiple times in the same parent, and pages included but not within `space_keys`.
+5. **Excerpt Include / Multiexcerpt Include.** These macros transclude only a labelled excerpt of a page rather than its full body. The strip logic should be extended to cover `ac:macro ac:name="excerpt-include"` and `ac:macro ac:name="multiexcerpt-include"`; the same independent-ingestion rule applies.
 
 > **Images are not in scope.** The current Digitize pipeline only processes `.pdf` and `.docx`; there is no image ingestion path. Images embedded in page bodies are already excluded as `caption` labels by `excluded_labels` and require no further handling.

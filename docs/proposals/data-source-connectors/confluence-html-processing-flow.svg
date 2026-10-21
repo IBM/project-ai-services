@@ -1,73 +1,74 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 640" width="820" height="640" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="11">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 655" width="820" height="655" font-family="-apple-system, Segoe UI, system-ui, sans-serif" font-size="11">
   <defs>
     <marker id="hp-arr"  markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#3b82d4"/></marker>
     <marker id="hp-arrg" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#2d9a5f"/></marker>
   </defs>
 
-  <rect width="820" height="640" fill="#ffffff"/>
+  <rect width="820" height="655" fill="#ffffff"/>
   <text x="40" y="24" font-weight="700" font-size="13" fill="#1f2328">HTML Processing in Digitize (new .html path)</text>
 
   <!-- 1. Staged file -->
-  <rect x="40" y="40" width="740" height="50" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.2"/>
+  <rect x="40" y="40" width="740" height="65" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.2"/>
   <text x="55" y="59" font-weight="700" fill="#1e40af">1. Staged page: {title-slug}__{pageId}.html</text>
   <text x="55" y="77" font-size="10" fill="#57606a">&lt;h1&gt;title&lt;/h1&gt; injected by ConfluenceScanner + body.export_view &#x2022; validated as UTF-8 text starting with '&lt;'</text>
+  <text x="55" y="93" font-size="10" fill="#713f12">Include Page macro output stripped (§7.2); placeholder &lt;!-- embedded page: B.html --&gt; inserted &#x2022; included pages staged as separate .html files</text>
 
-  <line x1="410" y1="90" x2="410" y2="110" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#hp-arr)"/>
+  <line x1="410" y1="105" x2="410" y2="125" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#hp-arr)"/>
 
   <!-- 2. Pipeline glob + page count -->
-  <rect x="40" y="110" width="740" height="50" rx="4" fill="#eff6ff" stroke="#3b82d4" stroke-width="1.2"/>
-  <text x="55" y="129" font-weight="700" fill="#1e40af">2. Ingest pipeline pickup</text>
-  <text x="55" y="147" font-size="10" fill="#57606a">ingest.py globs *.html &#x2022; get_document_page_count('.html') = 1 &#x2192; convert_doc() single-pass (no 100-page chunking)</text>
+  <rect x="40" y="125" width="740" height="50" rx="4" fill="#eff6ff" stroke="#3b82d4" stroke-width="1.2"/>
+  <text x="55" y="144" font-weight="700" fill="#1e40af">2. Ingest pipeline pickup</text>
+  <text x="55" y="162" font-size="10" fill="#57606a">ingest.py globs *.html &#x2022; get_document_page_count('.html') = 1 &#x2192; convert_doc() single-pass (no 100-page chunking)</text>
 
-  <line x1="410" y1="160" x2="410" y2="180" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#hp-arr)"/>
+  <line x1="410" y1="175" x2="410" y2="195" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#hp-arr)"/>
 
   <!-- 3. Docling -->
-  <rect x="40" y="180" width="740" height="75" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1.2"/>
-  <text x="55" y="199" font-weight="700" fill="#166534">3. Docling conversion (InputFormat.HTML)</text>
-  <text x="55" y="217" font-size="10" fill="#1f2328">&lt;h1&gt; &#x2192; label 'title' &#x2022; &lt;h2&gt;..&lt;h6&gt; &#x2192; 'section_header' level 1..5 &#x2022; lists, code, tables preserved</text>
-  <text x="55" y="233" font-size="10" fill="#1f2328">No page provenance (prov empty, doc.pages == {}) &#x2192; page_number stays null</text>
-  <text x="55" y="247" font-size="10" fill="#57606a">Result: DoclingDocument JSON</text>
+  <rect x="40" y="195" width="740" height="75" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1.2"/>
+  <text x="55" y="214" font-weight="700" fill="#166534">3. Docling conversion (InputFormat.HTML)</text>
+  <text x="55" y="232" font-size="10" fill="#1f2328">&lt;h1&gt; &#x2192; label 'title' &#x2022; &lt;h2&gt;..&lt;h6&gt; &#x2192; 'section_header' level 1..5 &#x2022; lists, code, tables preserved</text>
+  <text x="55" y="248" font-size="10" fill="#1f2328">No page provenance (prov empty, doc.pages == {}) &#x2192; page_number stays null</text>
+  <text x="55" y="262" font-size="10" fill="#57606a">Result: DoclingDocument JSON</text>
 
-  <line x1="410" y1="255" x2="410" y2="275" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#hp-arrg)"/>
+  <line x1="410" y1="270" x2="410" y2="290" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#hp-arrg)"/>
 
   <!-- 4. Dispatch -->
-  <rect x="40" y="275" width="740" height="60" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1.2"/>
-  <text x="55" y="294" font-weight="700" fill="#92400e">4. orchestrator: dispatch on file extension</text>
-  <text x="55" y="312" font-size="10" fill="#1f2328">.pdf &#x2192; process_text()   &#x2022;   .docx &#x2192; process_text_docx()   &#x2022;   <tspan font-weight="700" fill="#b45309">.html &#x2192; process_text_html()  (new)</tspan></text>
-  <text x="55" y="326" font-size="10" fill="#57606a">process_table() is shared by all formats (HTML &lt;caption&gt; handled natively by Docling)</text>
+  <rect x="40" y="290" width="740" height="60" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1.2"/>
+  <text x="55" y="309" font-weight="700" fill="#92400e">4. orchestrator: dispatch on file extension</text>
+  <text x="55" y="327" font-size="10" fill="#1f2328">.pdf &#x2192; process_text()   &#x2022;   .docx &#x2192; process_text_docx()   &#x2022;   <tspan font-weight="700" fill="#b45309">.html &#x2192; process_text_html()  (new)</tspan></text>
+  <text x="55" y="341" font-size="10" fill="#57606a">process_table() is shared by all formats (HTML &lt;caption&gt; handled natively by Docling)</text>
 
-  <line x1="410" y1="335" x2="410" y2="355" stroke="#d97706" stroke-width="1.5" marker-end="url(#hp-arr)"/>
+  <line x1="410" y1="350" x2="410" y2="370" stroke="#d97706" stroke-width="1.5" marker-end="url(#hp-arr)"/>
 
   <!-- 5. process_text_html -->
-  <rect x="40" y="355" width="740" height="125" rx="4" fill="#fff7ed" stroke="#f97316" stroke-width="1.2"/>
-  <text x="55" y="374" font-weight="700" fill="#c2410c">5. process_text_html()  &#x2192;  _build_structured_text(...)  (loop shared with process_text_docx)</text>
+  <rect x="40" y="370" width="740" height="125" rx="4" fill="#fff7ed" stroke="#f97316" stroke-width="1.2"/>
+  <text x="55" y="389" font-weight="700" fill="#c2410c">5. process_text_html()  &#x2192;  _build_structured_text(...)  (loop shared with process_text_docx)</text>
 
-  <rect x="55" y="384" width="340" height="86" rx="3" fill="#ffffff" stroke="#fdba74" stroke-width="1"/>
-  <text x="65" y="401" font-weight="600" fill="#7c2d12">Shared with DOCX path</text>
-  <text x="65" y="417" font-size="10" fill="#57606a">&#x2022; skip excluded_labels (caption, footer, ...)</text>
-  <text x="65" y="431" font-size="10" fill="#57606a">&#x2022; record schema {label, text, page, font_size}</text>
-  <text x="65" y="445" font-size="10" fill="#57606a">&#x2022; JSON write, (page_count, time) return</text>
-  <text x="65" y="459" font-size="10" fill="#57606a">&#x2022; CHARS_PER_PAGE page estimate</text>
+  <rect x="55" y="399" width="340" height="86" rx="3" fill="#ffffff" stroke="#fdba74" stroke-width="1"/>
+  <text x="65" y="416" font-weight="600" fill="#7c2d12">Shared with DOCX path</text>
+  <text x="65" y="432" font-size="10" fill="#57606a">&#x2022; skip excluded_labels (caption, footer, ...)</text>
+  <text x="65" y="446" font-size="10" fill="#57606a">&#x2022; record schema {label, text, page, font_size}</text>
+  <text x="65" y="460" font-size="10" fill="#57606a">&#x2022; JSON write, (page_count, time) return</text>
+  <text x="65" y="474" font-size="10" fill="#57606a">&#x2022; CHARS_PER_PAGE page estimate</text>
 
-  <rect x="415" y="384" width="350" height="86" rx="3" fill="#ffffff" stroke="#fdba74" stroke-width="1"/>
-  <text x="425" y="401" font-weight="600" fill="#7c2d12">HTML-specific (only this)</text>
-  <text x="425" y="417" font-size="10" fill="#57606a">resolve_header(): add '#' prefix from Docling level</text>
-  <text x="425" y="433" font-size="10" fill="#1f2328">title &#x2192; '#'   h2 &#x2192; '##'   h3 &#x2192; '###' ...</text>
-  <text x="425" y="449" font-size="10" fill="#57606a">No TOC extraction, no font-size lookup,</text>
-  <text x="425" y="461" font-size="10" fill="#57606a">no page numbers</text>
+  <rect x="415" y="399" width="350" height="86" rx="3" fill="#ffffff" stroke="#fdba74" stroke-width="1"/>
+  <text x="425" y="416" font-weight="600" fill="#7c2d12">HTML-specific (only this)</text>
+  <text x="425" y="432" font-size="10" fill="#57606a">resolve_header(): add '#' prefix from Docling level</text>
+  <text x="425" y="448" font-size="10" fill="#1f2328">title &#x2192; '#'   h2 &#x2192; '##'   h3 &#x2192; '###' ...</text>
+  <text x="425" y="464" font-size="10" fill="#57606a">No TOC extraction, no font-size lookup,</text>
+  <text x="425" y="476" font-size="10" fill="#57606a">no page numbers</text>
 
-  <line x1="410" y1="480" x2="410" y2="500" stroke="#d97706" stroke-width="1.5" marker-end="url(#hp-arr)"/>
+  <line x1="410" y1="495" x2="410" y2="515" stroke="#d97706" stroke-width="1.5" marker-end="url(#hp-arr)"/>
 
   <!-- 6. Chunk -->
-  <rect x="40" y="500" width="740" height="60" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1.2"/>
-  <text x="55" y="519" font-weight="700" fill="#166534">6. Chunking (unchanged)</text>
-  <text x="55" y="537" font-size="10" fill="#1f2328">get_header_level(): '#' prefix wins &#x2192; chapter / section / subsection / subsubsection titles</text>
-  <text x="55" y="551" font-size="10" fill="#57606a">Titles are prepended to chunk text and stored as 'source'; null page_number is tolerated</text>
+  <rect x="40" y="515" width="740" height="60" rx="4" fill="#f0fdf4" stroke="#2d9a5f" stroke-width="1.2"/>
+  <text x="55" y="534" font-weight="700" fill="#166534">6. Chunking (unchanged)</text>
+  <text x="55" y="552" font-size="10" fill="#1f2328">get_header_level(): '#' prefix wins &#x2192; chapter / section / subsection / subsubsection titles</text>
+  <text x="55" y="566" font-size="10" fill="#57606a">Titles are prepended to chunk text and stored as 'source'; null page_number is tolerated</text>
 
-  <line x1="410" y1="560" x2="410" y2="580" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#hp-arrg)"/>
+  <line x1="410" y1="575" x2="410" y2="595" stroke="#2d9a5f" stroke-width="1.5" marker-end="url(#hp-arrg)"/>
 
   <!-- 7. Embed/index -->
-  <rect x="40" y="580" width="740" height="45" rx="4" fill="#f8fafc" stroke="#64748b" stroke-width="1.2"/>
-  <text x="55" y="599" font-weight="700" fill="#334155">7. Embed &amp; index into OpenSearch</text>
-  <text x="55" y="615" font-size="10" fill="#57606a">filename = {title-slug}__{pageId}.html &#x2022; page_number omitted &#x2022; same index and schema as PDF/DOCX</text>
+  <rect x="40" y="595" width="740" height="45" rx="4" fill="#f8fafc" stroke="#64748b" stroke-width="1.2"/>
+  <text x="55" y="614" font-weight="700" fill="#334155">7. Embed &amp; index into OpenSearch</text>
+  <text x="55" y="630" font-size="10" fill="#57606a">filename = {title-slug}__{pageId}.html &#x2022; chunks attributed to this page only &#x2022; page_number omitted &#x2022; same index and schema as PDF/DOCX</text>
 </svg>
