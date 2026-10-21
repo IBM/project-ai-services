@@ -4,11 +4,14 @@ import {
   SideNavItems,
   SideNavMenuItem,
   SideNavDivider,
+  Tag,
 } from "@carbon/react";
 import { NavLink } from "react-router";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { ROUTES } from "@/constants";
+import { fetchDataSourceConnectors } from "@/api/connectors.api";
+import styles from "./Navbar.module.scss";
 
 type NavbarProps = {
   isSideNavOpen: boolean;
@@ -18,6 +21,7 @@ type NavbarProps = {
 const Navbar = (props: NavbarProps) => {
   const { isSideNavOpen, setIsSideNavOpen } = props;
   const navRef = useRef<HTMLElement | null>(null);
+  const [offlineCount, setOfflineCount] = useState<number | null>(null);
 
   useEffect(() => {
     function handleOutsideClick(e: MouseEvent) {
@@ -30,6 +34,36 @@ const Navbar = (props: NavbarProps) => {
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [isSideNavOpen, setIsSideNavOpen]);
+
+  useEffect(() => {
+    if (!isSideNavOpen) {
+      return;
+    }
+
+    let isMounted = true;
+    const loadOfflineCount = async () => {
+      try {
+        const response = await fetchDataSourceConnectors(1, 1, "offline");
+        if (isMounted) {
+          setOfflineCount(response.pagination?.total_items ?? 0);
+        }
+      } catch (error) {
+        console.error("Failed to fetch offline connectors count", error);
+        if (isMounted) {
+          setOfflineCount(null);
+        }
+      }
+    };
+
+    loadOfflineCount();
+
+    const intervalId = setInterval(loadOfflineCount, 120000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [isSideNavOpen]);
 
   return (
     <Theme theme="g90">
@@ -49,7 +83,14 @@ const Navbar = (props: NavbarProps) => {
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to={ROUTES.CONNECTORS}>
-            Connectors
+            <div className={styles.navItemContent}>
+              <span>Connectors</span>
+              {offlineCount !== null && offlineCount > 0 && (
+                <Tag type="red" size="sm" className={styles.badge}>
+                  {offlineCount}
+                </Tag>
+              )}
+            </div>
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to={ROUTES.WORKER_RESOURCES}>
