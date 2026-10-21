@@ -9,18 +9,12 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
+        loadPaths: [path.resolve(import.meta.dirname, "src")],
         silenceDeprecations: ["if-function"],
       },
     },
   },
   plugins: [react()],
-  css: {
-    preprocessorOptions: {
-      scss: {
-        loadPaths: [path.resolve(__dirname, "src")],
-      },
-    },
-  },
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
