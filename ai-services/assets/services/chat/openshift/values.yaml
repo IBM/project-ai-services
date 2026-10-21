@@ -38,3 +38,16 @@ opensearch:
   auth:
     username: "admin"
     password: ""
+
+mcp:
+  enabled: true
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.7
+  port: 5001
+  routeTimeout: 5m
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "250m"
+      memory: "128Mi"
