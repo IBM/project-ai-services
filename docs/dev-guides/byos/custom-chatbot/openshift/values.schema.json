@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "chatbot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "editSystemPrompt": {
+          "type": "boolean",
+          "title": "Edit system prompt",
+          "description": "Enable editing of the default system instruction sent to the LLM",
+          "default": false,
+          "x-ui-only": true,
+          "x-ui-controls": "systemPrompt"
+        },
+        "systemPrompt": {
+          "type": "string",
+          "title": "System prompt",
+          "description": "Custom system instruction for the assistant",
+          "default": "You are a helpful, concise, and friendly AI assistant. Engage naturally across multiple conversation turns and reference prior context when it is relevant.",
+          "minLength": 10,
+          "maxLength": 5000,
+          "x-ui-controlled-by": "editSystemPrompt"
+        }
+      }
+    }
+  }
+}

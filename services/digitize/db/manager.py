@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
+from common.db.search_utils import ilike_contains
 from common.misc_utils import get_logger
 from digitize.db.models import (
     Job, JobSource, Document, DocumentSource, DocumentChecksum,
@@ -990,9 +991,14 @@ class DatabaseManager:
     def get_all_connectors_paginated(
         limit: int = 50,
         offset: int = 0,
+        name: Optional[str] = None,
     ) -> tuple[List[Connector], int]:
         """
         Return paginated connectors ordered by attached_at descending.
+
+        Args:
+            name: Optional case-insensitive substring match on connector name.
+                LIKE wildcards in the term are escaped and matched literally.
 
         Returns (items, total_count).
         Each object is eagerly loaded and expunged from the session.
@@ -1000,11 +1006,13 @@ class DatabaseManager:
         try:
             with get_db_session() as session:
                 base = select(Connector)
+                if name:
+                    base = base.where(ilike_contains(Connector.name, name))
                 total = session.execute(
                     select(func.count()).select_from(base.subquery())
                 ).scalar() or 0
                 stmt = (
-                    select(Connector)
+                    base
                     .order_by(Connector.attached_at.desc())
                     .limit(limit)
                     .offset(offset)

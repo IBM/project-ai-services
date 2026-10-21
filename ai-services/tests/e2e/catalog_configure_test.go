@@ -214,11 +214,33 @@ func chatEndpointExpectNoError(ctx context.Context, backendURL, appName, token s
 
 var _ = ginkgo.Describe("Catalog Configure Tests",
 	ginkgo.Ordered,
+	ginkgo.Label("catalog-configure"),
 	func() {
+
+		// ── Default-exclusion guard ───────────────────────────────────────────
+		//
+		// This suite reconfigures, uninstalls, and reinstalls the catalog service,
+		// which is disruptive to any concurrently running full e2e suite.
+		// It is skipped unless --run-catalog-configure-tests is explicitly passed,
+		// regardless of how ginkgo is invoked (make, direct ginkgo, CI pipeline).
+		//
+		// To run this suite standalone:
+		//   ginkgo -r --label-filter="catalog-configure" ./tests/e2e \
+		//     -- --run-catalog-configure-tests
+		ginkgo.BeforeEach(func() {
+			if !runCatalogConfigureTests {
+				ginkgo.Skip(
+					"[CATALOG-CONFIGURE] Skipping — pass --run-catalog-configure-tests to opt in",
+				)
+			}
+		})
 
 		// ── Suite-level setup / teardown ──────────────────────────────────────
 
 		ginkgo.BeforeAll(func() {
+			if !runCatalogConfigureTests {
+				return
+			}
 			if appRuntime != "podman" || bootstrap.GetCatalogAdminPassword() == "" {
 				return
 			}
@@ -254,6 +276,9 @@ var _ = ginkgo.Describe("Catalog Configure Tests",
 		})
 
 		ginkgo.AfterAll(func() {
+			if !runCatalogConfigureTests {
+				return
+			}
 			if appRuntime != "podman" || bootstrap.GetCatalogAdminPassword() == "" {
 				return
 			}

@@ -1,8 +1,8 @@
 FROM registry.access.redhat.com/ubi9/ubi:9.8 AS builder
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
-ARG CADDY_VERSION=v2.11.4
-ARG GO_VERSION=1.26.6
+ARG CADDY_VERSION=v2.11.7
+ARG GO_VERSION=1.26.9
 
 RUN dnf update ${DNF_FLAGS} -y && \
     dnf install ${DNF_FLAGS} -y git ca-certificates wget && \
@@ -32,7 +32,7 @@ RUN set -eux; \
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
-ARG CADDY_VERSION=v2.11.4
+ARG CADDY_VERSION=v2.11.7
 
 RUN microdnf update ${DNF_FLAGS} -y && \
     microdnf install ${DNF_FLAGS} -y ca-certificates libcap && \

@@ -398,6 +398,12 @@ const docTemplate = `{
                         "description": "Number of items per page (max: 100)",
                         "name": "page_size",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring search on datasource name",
+                        "name": "q",
+                        "in": "query"
                     }
                 ],
                 "responses": {
