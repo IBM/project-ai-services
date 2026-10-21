@@ -6,18 +6,21 @@ ARG VERSION
 ARG LITELLM_SHA256
 ARG NODE_VERSION
 ARG NODE_SHA256
+ARG PROTOC_VERSION
+ARG PROTOC_SHA256
 ARG TARGETARCH
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
 # Derive RPM_ARCH, NODE_ARCH and SKIP_CHECKSUM from the builder-provided TARGETARCH.
 # SKIP_CHECKSUM=1 for non-ppc64le arches since NODE_SHA256 is only set for ppc64le.
 RUN case "${TARGETARCH}" in \
-        x86_64|amd64)  RPM_ARCH=x86_64;  NODE_ARCH=x64;   SKIP_CHECKSUM=1 ;; \
-        aarch64|arm64) RPM_ARCH=aarch64; NODE_ARCH=arm64;  SKIP_CHECKSUM=1 ;; \
-        ppc64le)       RPM_ARCH=ppc64le; NODE_ARCH=ppc64le; SKIP_CHECKSUM=0 ;; \
-        *)             RPM_ARCH="${TARGETARCH}"; NODE_ARCH="${TARGETARCH}"; SKIP_CHECKSUM=1 ;; \
+        x86_64|amd64)  RPM_ARCH=x86_64;  NODE_ARCH=x64;    SKIP_CHECKSUM=1; PROTOC_ARCH=x86_64    ;; \
+        aarch64|arm64) RPM_ARCH=aarch64; NODE_ARCH=arm64;   SKIP_CHECKSUM=1; PROTOC_ARCH=aarch_64  ;; \
+        ppc64le)       RPM_ARCH=ppc64le; NODE_ARCH=ppc64le; SKIP_CHECKSUM=0; PROTOC_ARCH=ppcle_64  ;; \
+        *)             RPM_ARCH="${TARGETARCH}"; NODE_ARCH="${TARGETARCH}"; SKIP_CHECKSUM=1; PROTOC_ARCH="${TARGETARCH}" ;; \
     esac && \
     echo "NODE_ARCH=${NODE_ARCH}" > /tmp/arch_env && \
+    echo "PROTOC_ARCH=${PROTOC_ARCH}" >> /tmp/arch_env && \
     echo "SKIP_CHECKSUM=${SKIP_CHECKSUM}" >> /tmp/arch_env && \
     dnf update ${DNF_FLAGS} -y && \
     dnf install ${DNF_FLAGS} -y \
@@ -31,9 +34,7 @@ RUN case "${TARGETARCH}" in \
         openssl-devel \
         zlib-devel \
         git \
-        # Required for building primsa engines
-        https://mirror.stream.centos.org/9-stream/CRB/${RPM_ARCH}/os/Packages/protobuf-compiler-3.14.0-17.el9.${RPM_ARCH}.rpm \
-        https://mirror.stream.centos.org/9-stream/AppStream/${RPM_ARCH}/os/Packages/protobuf-3.14.0-17.el9.${RPM_ARCH}.rpm && \
+        unzip && \
     dnf clean all
 
 WORKDIR /build
@@ -80,7 +81,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # 7. Patch & build Prisma engines, install Node.js, bake Prisma CLI
 WORKDIR /build
-RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} bash build-prisma.sh
+RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} \
+    PROTOC_VERSION=${PROTOC_VERSION} PROTOC_SHA256=${PROTOC_SHA256} \
+    bash build-prisma.sh
 
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8

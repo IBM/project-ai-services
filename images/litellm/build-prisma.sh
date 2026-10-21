@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Load arch env written by step 1 (NODE_ARCH, SKIP_CHECKSUM)
+# Load arch env written by step 1 (NODE_ARCH, SKIP_CHECKSUM, PROTOC_ARCH)
 . /tmp/arch_env
 
 WORKDIR=/build
 
-# 1. Patch & build Prisma engines
+# 1. Install protoc from GitHub releases
+wget -q "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${PROTOC_ARCH}.zip" \
+    -O /tmp/protoc.zip
+if [ "${SKIP_CHECKSUM}" != "1" ]; then
+    echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -
+fi
+unzip -q /tmp/protoc.zip -d /tmp/protoc
+install -m 0755 /tmp/protoc/bin/protoc /usr/local/bin/protoc
+cp -r /tmp/protoc/include/* /usr/local/include/
+rm -rf /tmp/protoc /tmp/protoc.zip
+
+# 2. Patch & build Prisma engines
 cd "${WORKDIR}"
 git clone --depth 1 --branch 5.4.2 https://github.com/prisma/prisma-engines.git
 curl -sSL https://static.crates.io/crates/ring/ring-0.16.20.crate | tar -xvzf -
@@ -25,7 +36,7 @@ cargo build --release --bin query-engine
 cargo build --release --bin schema-engine
 cargo build --release -p query-engine-node-api
 
-# 2. Install Node.js and bake Prisma CLI into /build/prisma
+# 3. Install Node.js and bake Prisma CLI into /build/prisma
 cd "${WORKDIR}"
 curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.gz" \
     -o /tmp/node.tar.gz
