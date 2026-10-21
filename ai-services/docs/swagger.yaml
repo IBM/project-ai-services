@@ -1283,6 +1283,10 @@ paths:
         in: query
         name: page_size
         type: integer
+      - description: Case-insensitive substring search on datasource name
+        in: query
+        name: q
+        type: string
       produces:
       - application/json
       responses:

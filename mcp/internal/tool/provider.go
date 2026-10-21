@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -68,7 +69,13 @@ func getBodyName(operation types.OperationInfo) string {
 	return "data"
 }
 
+// isText reports whether data is non-empty, valid UTF-8 text with no null bytes.
+func isText(data []byte) bool {
+	return len(data) > 0 && utf8.Valid(data) && !bytes.Contains(data, []byte{0})
+}
+
 // detectFilename returns a filename with the correct extension based on file magic bytes.
+// Text content (including Markdown, which cannot be told apart from plain text) is named ".txt".
 // Falls back to "<fieldname>-<index>.bin" if the type is unrecognised.
 func detectFilename(data []byte, fieldName string, index int) string {
 	if len(data) >= magicBytesLen {
@@ -81,7 +88,11 @@ func detectFilename(data []byte, fieldName string, index int) string {
 			return fmt.Sprintf("%s-%d.docx", fieldName, index)
 		}
 	}
-	
+
+	if isText(data) {
+		return fmt.Sprintf("%s-%d.txt", fieldName, index)
+	}
+
 	return fmt.Sprintf("%s-%d.bin", fieldName, index)
 }
 
@@ -95,7 +106,11 @@ func detectMIMEType(data []byte) string {
 			return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 		}
 	}
-	
+
+	if isText(data) {
+		return "text/plain"
+	}
+
 	return "application/octet-stream"
 }
 

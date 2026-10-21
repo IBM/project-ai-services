@@ -189,10 +189,12 @@ export function transformToDeploymentPayload(
         formData.dataSources &&
         formData.dataSources.length > 0
       ) {
-        entry.connectors = formData.dataSources.map((id): ConnectorRef => ({
-          id,
-          type: "datasource",
-        }));
+        entry.connectors = formData.dataSources.map(
+          (id): ConnectorRef => ({
+            id,
+            type: "datasource",
+          }),
+        );
       }
       services.push(entry);
       continue;

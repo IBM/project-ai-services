@@ -1,20 +1,18 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/theme";
+@use "carbonTokens" as *;
 
 // Fixed-position toast notification
 .customToast {
   position: fixed;
-  top: spacing.$spacing-10;
-  right: spacing.$spacing-07;
+  top: $spacing-10;
+  right: $spacing-07;
   z-index: 9000;
 }
 
 // Delete confirmation checkbox block
 
 .deleteConfirmation {
-  margin-top: spacing.$spacing-07;
-  @include type.type-style("heading-compact-01");
+  margin-top: $spacing-07;
+  @include type-style("heading-compact-01");
 }
 
 // Overflow menu panel (Edit columns, Filter)
@@ -27,20 +25,20 @@
 }
 
 .overflowMenuContent {
-  padding: spacing.$spacing-05;
+  padding: $spacing-05;
   padding-bottom: 0;
   width: 100%;
 }
 
 .overflowMenuHeading {
-  margin-bottom: spacing.$spacing-03;
-  @include type.type-style("heading-compact-01");
+  margin-bottom: $spacing-03;
+  @include type-style("heading-compact-01");
 }
 
 .overflowMenuActions {
-  margin-top: spacing.$spacing-03;
-  margin-left: calc(-1 * spacing.$spacing-05);
-  margin-right: calc(-1 * spacing.$spacing-05);
+  margin-top: $spacing-03;
+  margin-left: calc(-1 * $spacing-05);
+  margin-right: calc(-1 * $spacing-05);
   display: flex;
   gap: 0;
 
@@ -67,7 +65,7 @@
 .messageWithIcon {
   display: flex;
   align-items: flex-start;
-  gap: spacing.$spacing-03;
+  gap: $spacing-03;
 }
 
 .messageText {
@@ -79,41 +77,41 @@
 
 .messageIconError {
   flex-shrink: 0;
-  color: theme.$support-error;
+  color: $support-error;
 }
 
 .messageIconSuccess {
   flex-shrink: 0;
-  color: theme.$support-success;
+  color: $support-success;
 }
 
 .messageIconInfo {
   flex-shrink: 0;
-  color: theme.$support-info;
+  color: $support-info;
 }
 
 // Status tag icon colours
 
 .statusTagError {
   :global(svg) {
-    fill: theme.$support-error;
+    fill: $support-error;
   }
 }
 
 .statusTagSuccess {
   :global(svg) {
-    fill: theme.$support-success;
+    fill: $support-success;
   }
 }
 
 .statusTagInfo {
   :global(svg) {
-    fill: theme.$support-info;
+    fill: $support-info;
   }
 }
 
 .statusTagSecondary {
   :global(svg) {
-    fill: theme.$text-secondary;
+    fill: $text-secondary;
   }
 }

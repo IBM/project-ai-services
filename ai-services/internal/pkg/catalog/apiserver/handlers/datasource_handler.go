@@ -329,6 +329,7 @@ func (h *DatasourceHandler) UpdateDatasource(c *gin.Context) {
 //	@Param			id			path		string	true	"Application ID (UUID)"
 //	@Param			page		query		int		false	"Page number (1-indexed)"				default(1)
 //	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
+//	@Param			q			query		string	false	"Case-insensitive substring search on datasource name"
 //	@Success		200			{object}	models.ApplicationDatasourceListResponse
 //	@Failure		400			{object}	ErrorResponse	"Invalid path parameter or query params"
 //	@Failure		401			{object}	ErrorResponse	"Unauthorized"
@@ -359,6 +360,7 @@ func (h *DatasourceHandler) ListApplicationDatasources(c *gin.Context) {
 		ApplicationID: appID,
 		Page:          page,
 		PageSize:      pageSize,
+		Search:        c.Query("q"),
 	}
 
 	resp, err := h.datasourceSvc.ListApplicationDatasources(c.Request.Context(), req)
