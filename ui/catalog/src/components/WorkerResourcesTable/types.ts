@@ -78,7 +78,7 @@ export const INITIAL_STATE: AppState = {
   pageSize: 20,
   totalItems: 0,
   isDeleteDialogOpen: false,
-  isConfirmed: false,
+  confirmValue: "",
   rowsData: [],
   selectedRowId: null,
   toastOpen: false,
