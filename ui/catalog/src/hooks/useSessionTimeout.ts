@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router";
 import { useAuthStore } from "@/store/auth.store";
-import { logout, refreshAccessToken } from "@/services/auth";
+import { logout, refreshAccessToken } from "@/api/auth";
 import { SESSION_CONFIG } from "@/constants";
 import {
   getTimeUntilWarning,

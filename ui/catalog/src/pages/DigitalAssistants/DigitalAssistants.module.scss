@@ -1,10 +1,7 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/theme";
-@use "@carbon/react/scss/breakpoint" as *;
+@use "carbonTokens" as *;
 
 .tableContent {
-  padding: spacing.$spacing-07;
+  padding: $spacing-07;
 
   :global(.cds--data-table) {
     width: 100%;
@@ -45,7 +42,7 @@
 }
 
 .noDataContent {
-  padding: spacing.$spacing-07;
+  padding: $spacing-07;
 }
 
 .tableColumn {
@@ -55,56 +52,56 @@
 // AboutTab styles — DA-specific
 
 .aboutContent {
-  padding: spacing.$spacing-06;
+  padding: $spacing-06;
 }
 
 .aboutSection {
-  padding: spacing.$spacing-05;
-  margin-bottom: spacing.$spacing-05;
+  padding: $spacing-05;
+  margin-bottom: $spacing-05;
 }
 
 .sectionHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: spacing.$spacing-05;
+  margin-bottom: $spacing-05;
 }
 
 .aboutSectionTitle {
   margin: 0;
-  @include type.type-style("heading-compact-01");
+  @include type-style("heading-compact-01");
 }
 
 .servicesList {
   list-style: disc;
-  padding-left: spacing.$spacing-06;
+  padding-left: $spacing-06;
   margin: 0;
 
   li {
-    margin-bottom: spacing.$spacing-03;
-    @include type.type-style("heading-compact-01");
+    margin-bottom: $spacing-03;
+    @include type-style("heading-compact-01");
     font-weight: 400;
   }
 }
 
 .gridWithTopMargin {
-  margin-top: spacing.$spacing-05;
+  margin-top: $spacing-05;
 }
 
 .useCaseDomain {
-  margin-bottom: spacing.$spacing-03;
-  @include type.type-style("label-01");
-  color: theme.$text-secondary;
+  margin-bottom: $spacing-03;
+  @include type-style("label-01");
+  color: $text-secondary;
 }
 
 .useCaseList {
   list-style: disc;
-  padding-left: spacing.$spacing-06;
-  margin-bottom: spacing.$spacing-07;
+  padding-left: $spacing-06;
+  margin-bottom: $spacing-07;
 
   li {
-    margin-bottom: spacing.$spacing-02;
-    @include type.type-style("heading-compact-01");
+    margin-bottom: $spacing-02;
+    @include type-style("heading-compact-01");
     font-weight: 400;
   }
 }
@@ -112,21 +109,21 @@
 .resourceItem {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-02;
+  gap: $spacing-02;
 }
 
 .resourceLabel {
-  @include type.type-style("label-01");
-  color: theme.$text-secondary;
+  @include type-style("label-01");
+  color: $text-secondary;
 }
 
 .resourceValue {
-  @include type.type-style("body-01");
+  @include type-style("body-01");
 }
 
 .sideBySideGrid {
   display: flex;
-  gap: spacing.$spacing-05;
+  gap: $spacing-05;
 
   @include breakpoint-down("md") {
     flex-direction: column;
@@ -143,13 +140,13 @@
 .sideBySideSection {
   display: flex;
   flex-direction: column;
-  padding: spacing.$spacing-05;
+  padding: $spacing-05;
   flex: 1;
 }
 
 .architectureDiagram {
-  margin-top: spacing.$spacing-05;
-  padding: spacing.$spacing-05;
+  margin-top: $spacing-05;
+  padding: $spacing-05;
 }
 
 .diagramImage {
@@ -159,7 +156,7 @@
 }
 
 .demosSection {
-  padding: spacing.$spacing-05;
+  padding: $spacing-05;
   flex: 1;
 }
 
@@ -167,14 +164,14 @@
   display: flex;
   gap: 0;
   padding: 0;
-  background-color: theme.$layer;
+  background-color: $layer;
   position: relative;
-  margin-top: spacing.$spacing-06;
+  margin-top: $spacing-06;
   overflow: hidden;
 }
 
 .demoImage {
-  width: spacing.$spacing-13;
+  width: $spacing-13;
   height: 100%;
   object-fit: cover;
   flex-shrink: 0;
@@ -190,17 +187,17 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: spacing.$spacing-05;
+  padding: $spacing-05;
 }
 
 .demoTitle {
-  @include type.type-style("heading-03");
+  @include type-style("heading-03");
   margin: 0;
 }
 
 .demoDescription {
-  @include type.type-style("body-compact-01");
-  margin: spacing.$spacing-03 0 0 0;
+  @include type-style("body-compact-01");
+  margin: $spacing-03 0 0 0;
 }
 
 .demoActions {
@@ -217,5 +214,5 @@
 }
 
 .codeButton {
-  margin-top: spacing.$spacing-07;
+  margin-top: $spacing-07;
 }

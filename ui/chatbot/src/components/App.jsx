@@ -169,7 +169,7 @@ function App() {
                     onAfterRender={onAfterRender}
                     renderUserDefinedResponse={renderUserDefinedResponse}
                     strings={{
-                      ai_slug_title: undefined,
+                      ai_slug_title: '',
                       ai_slug_description: <AIExplanationCard />,
                     }}
                   />

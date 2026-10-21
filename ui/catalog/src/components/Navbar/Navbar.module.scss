@@ -1,0 +1,31 @@
+@use "@carbon/react/scss/colors";
+@use "@carbon/react/scss/theme";
+@use "@carbon/react/scss/spacing";
+
+:global(.cds--side-nav__link) {
+  // width is not set by Carbon — no competing rule, no !important needed
+  width: 100%;
+
+  :global(.cds--side-nav__link-text) {
+    // Carbon sets display:block via text-overflow mixin; override to flex so
+    // the label and badge sit side-by-side. Specificity of :global wins — no !important needed.
+    display: flex;
+    align-items: center;
+    width: 100%;
+    flex: 1;
+  }
+}
+
+.navItemContent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.badge {
+  // Override Carbon Tag's CSS variables to style the badge natively in a Carbon-compliant format
+  --cds-tag-background-red: #{colors.$red-60};
+  --cds-tag-color-red: #{colors.$white}; // White text color
+  border-radius: 4px;
+}

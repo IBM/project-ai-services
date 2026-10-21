@@ -1,4 +1,4 @@
-@use "./tokens" as *;
+@use "carbonTokens" as *;
 
 // Tearsheet sizing — 48px top, 32px left/right
 :global(.c4p--tearsheet.customTearsheet) {
