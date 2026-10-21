@@ -19,9 +19,9 @@
   <!-- Step 2: Scan & Checksum -->
   <rect x="60" y="77" width="700" height="65" rx="4" fill="#eff6ff" stroke="#3b82d4" stroke-width="1.2"/>
   <text x="75" y="96" font-weight="700" fill="#1e40af">2. Scan Spaces via Confluence REST API &amp; Compute MD5</text>
-  <text x="75" y="112" font-size="10" fill="#1f2328">&#x25B8; ConfluenceScanner executes async CQL queries across configured space_keys</text>
-  <text x="75" y="126" font-size="10" fill="#1d4ed8" font-weight="600">&#x25B8; Checksum for pages: MD5(PageID + VersionNumber) | Canonical path: spaces/{spaceKey}/pages/{pageId}</text>
-  <text x="75" y="137" font-size="10" fill="#57606a">&#x25B8; Checksum for attachments: MD5(AttachmentID + VersionNumber) or direct raw stream MD5</text>
+  <text x="75" y="112" font-size="10" fill="#1f2328">&#x25B8; ConfluenceScanner executes CQL queries across configured space_keys</text>
+  <text x="75" y="126" font-size="10" fill="#1d4ed8" font-weight="600">&#x25B8; Pages: MD5(ConnectorID + PageID + Version) &#x2192; {SpaceKey}-{PageTitle}-{PageID}.html</text>
+  <text x="75" y="137" font-size="10" fill="#1d4ed8" font-weight="600">&#x25B8; Attachments: MD5(ConnectorID + AttachmentID + AttachmentVersion) &#x2192; {PageID}-{AttachmentName}</text>
 
   <line x1="410" y1="142" x2="410" y2="162" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sf-arr)"/>
 
@@ -29,7 +29,7 @@
   <rect x="60" y="162" width="700" height="80" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1.2"/>
   <text x="75" y="181" font-weight="700" fill="#92400e">3. Deduplication &amp; Classification (_classify)</text>
   <text x="75" y="198" font-size="10" fill="#1f2328">Compare scanned checksums against known_checksums and global checksum registry:</text>
-  <text x="85" y="213" font-size="10" fill="#1f2328">&#x2022; <tspan font-weight="600">Unchanged (in known):</tspan> Skip &#x2022; <tspan font-weight="600">Cross-connector duplicate:</tspan> Register checksum entry immediately inline</text>
+  <text x="85" y="213" font-size="10" fill="#1f2328">&#x2022; <tspan font-weight="600">Unchanged (in known):</tspan> Skip &#x2022; <tspan font-weight="600">Cross-connector duplicate:</tspan> not expected (checksums are ConnectorID-scoped)</text>
   <text x="85" y="228" font-size="10" fill="#1f2328">&#x2022; <tspan font-weight="600">Brand-new / Modified:</tspan> Add to ingest_list &#x2022; <tspan font-weight="600">Orphans (deleted on Confluence):</tspan> Flag for unlinking</text>
 
   <line x1="410" y1="242" x2="410" y2="262" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#sf-arr)"/>
@@ -48,15 +48,16 @@
   <text x="93" y="358" font-size="9.5" font-weight="600" fill="#713f12">Embed strip (§7.2):</text>
   <text x="93" y="371" font-size="9.5" fill="#713f12">Parse body.storage for include macros;</text>
   <text x="93" y="383" font-size="9.5" fill="#713f12">strip expanded block from export_view;</text>
-  <text x="93" y="394" font-size="9.5" fill="#713f12">insert &lt;!-- embedded page: B.html --&gt;</text>
+  <text x="93" y="394" font-size="9.5" fill="#713f12">insert &lt;!-- embedded page: {filename} --&gt;</text>
 
   <rect x="305" y="292" width="210" height="112" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
   <text x="315" y="309" font-weight="600" fill="#14532d">4b. Validate Document</text>
   <text x="315" y="324" font-size="10" fill="#57606a">.pdf/.docx magic bytes; .html UTF-8</text>
   <text x="315" y="337" font-size="10" fill="#57606a">Skip corrupt files cleanly</text>
-  <text x="315" y="356" font-size="9.5" fill="#57606a">Included pages (Page B) validated</text>
-  <text x="315" y="369" font-size="9.5" fill="#57606a">independently under their own</text>
-  <text x="315" y="382" font-size="9.5" fill="#57606a">checksum entry — no special path</text>
+  <text x="315" y="350" font-size="9.5" font-weight="600" fill="#b45309">verify_integrity() bypassed</text>
+  <text x="315" y="362" font-size="9.5" fill="#b45309">(ID-based checksum, no content hash)</text>
+  <text x="315" y="378" font-size="9.5" fill="#57606a">Included pages (Page B) validated</text>
+  <text x="315" y="390" font-size="9.5" fill="#57606a">independently, own checksum</text>
 
   <rect x="535" y="292" width="210" height="112" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
   <text x="545" y="309" font-weight="600" fill="#14532d">4c. Initialize Pipeline</text>

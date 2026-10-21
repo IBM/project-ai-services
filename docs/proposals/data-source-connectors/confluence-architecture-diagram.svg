@@ -51,15 +51,17 @@
   <rect x="35" y="275" width="470" height="175" rx="4" fill="#eff6ff" stroke="#3b82d4" stroke-width="1"/>
   <text x="45" y="295" font-weight="600" fill="#1e40af">ConfluenceScanner (BaseScanner Subclass)</text>
   <text x="45" y="315" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">scan():</tspan> Walks spaces via CQL; yields canonical path &amp; checksum</text>
-  <text x="55" y="330" font-size="11" fill="#1d4ed8">&#x2192; Checksum formula: MD5(PageID + VersionNumber)</text>
-  <text x="45" y="348" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">download_to():</tspan> Stages page as .html + .pdf/.docx attachments</text>
+  <text x="55" y="328" font-size="10" fill="#1d4ed8">&#x2192; Pages: MD5(ConnectorID + PageID + Version)</text>
+  <text x="55" y="340" font-size="10" fill="#1d4ed8">&#x2192; Attachments: MD5(ConnectorID + AttachmentID + AttachmentVersion)</text>
+  <text x="45" y="356" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">download_to():</tspan> Stages .html pages + .pdf/.docx (names per &#xA7;6)</text>
   <!-- embed strip callout -->
-  <rect x="55" y="356" width="440" height="48" rx="2" fill="#fef9c3" stroke="#fde047" stroke-width="0.8"/>
-  <text x="65" y="370" font-size="10" font-weight="600" fill="#713f12">Embed strip (§7.2): body.storage parsed for &lt;ac:macro ac:name="include"&gt; nodes;</text>
-  <text x="65" y="384" font-size="10" fill="#713f12">expanded block stripped from export_view; placeholder inserted. Included page (B) staged</text>
-  <text x="65" y="397" font-size="10" fill="#713f12">independently — its own checksum, its own doc, its own OpenSearch chunks (filename = B.html).</text>
-  <text x="45" y="416" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">_classify():</tspan> Identifies new, modified, unchanged, &amp; orphan pages</text>
-  <text x="45" y="434" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">Client:</tspan> Direct REST API calls via httpx (async I/O concurrency)</text>
+  <rect x="55" y="363" width="440" height="45" rx="2" fill="#fef9c3" stroke="#fde047" stroke-width="0.8"/>
+  <text x="65" y="375" font-size="10" font-weight="600" fill="#713f12">Embed strip (&#xA7;7.2): body.storage parsed for &lt;ac:macro ac:name="include"&gt; nodes;</text>
+  <text x="65" y="388" font-size="10" fill="#713f12">expanded block stripped from export_view; placeholder inserted. Included page (B)</text>
+  <text x="65" y="401" font-size="10" fill="#713f12">staged independently: own checksum, own doc, own chunks (own filename).</text>
+  <text x="45" y="420" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">_classify():</tspan> Identifies new, modified, unchanged, &amp; orphan pages</text>
+  <text x="45" y="432" font-size="9" fill="#b45309">verify_integrity() bypassed for Confluence (ID-based checksum, not a content hash)</text>
+  <text x="45" y="445" font-size="11" fill="#1f2328">&#x25B8;  <tspan font-weight="600">Client:</tspan> Direct REST API calls via httpx</text>
 
   <!-- Database Box — aligned to scanner row -->
   <rect x="520" y="275" width="265" height="175" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
@@ -93,8 +95,8 @@
 
   <rect x="600" y="508" width="170" height="50" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
   <text x="610" y="528" font-weight="600" fill="#14532d">4. OpenSearch Vector Store</text>
-  <text x="610" y="545" font-size="10" fill="#57606a">Page A chunks: filename=A.html</text>
-  <text x="610" y="558" font-size="10" fill="#57606a">Page B chunks: filename=B.html</text>
+  <text x="610" y="543" font-size="9" fill="#57606a">filename per page/attachment:</text>
+  <text x="610" y="554" font-size="8.5" fill="#57606a">{SpaceKey}-{Title}-{PageID}.html</text>
 
   <text x="50" y="580" font-size="10" fill="#166534">&#x25B8; Post-Ingestion: doc_id registered with MD5 checksum in DB &#x2022; Local batch staging directory immediately unlinked</text>
   <text x="50" y="595" font-size="10" fill="#166534">&#x25B8; Interrupt handling: Gracefully terminates pending tasks if DELETE or CANCEL arrives during execution</text>

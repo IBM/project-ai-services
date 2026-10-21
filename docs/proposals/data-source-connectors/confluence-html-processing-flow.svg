@@ -9,9 +9,9 @@
 
   <!-- 1. Staged file -->
   <rect x="40" y="40" width="740" height="65" rx="4" fill="#dbeafe" stroke="#3b82d4" stroke-width="1.2"/>
-  <text x="55" y="59" font-weight="700" fill="#1e40af">1. Staged page: {title-slug}__{pageId}.html</text>
+  <text x="55" y="59" font-weight="700" fill="#1e40af">1. Staged page: {SpaceKey}-{PageTitle}-{PageID}.html</text>
   <text x="55" y="77" font-size="10" fill="#57606a">&lt;h1&gt;title&lt;/h1&gt; injected by ConfluenceScanner + body.export_view &#x2022; validated as UTF-8 text starting with '&lt;'</text>
-  <text x="55" y="93" font-size="10" fill="#713f12">Include Page macro output stripped (§7.2); placeholder &lt;!-- embedded page: B.html --&gt; inserted &#x2022; included pages staged as separate .html files</text>
+  <text x="55" y="93" font-size="10" fill="#713f12">Include Page output stripped (§7.2); placeholder &lt;!-- embedded page: {filename} --&gt; inserted &#x2022; included pages staged separately</text>
 
   <line x1="410" y1="105" x2="410" y2="125" stroke="#3b82d4" stroke-width="1.5" marker-end="url(#hp-arr)"/>
 
@@ -70,5 +70,5 @@
   <!-- 7. Embed/index -->
   <rect x="40" y="595" width="740" height="45" rx="4" fill="#f8fafc" stroke="#64748b" stroke-width="1.2"/>
   <text x="55" y="614" font-weight="700" fill="#334155">7. Embed &amp; index into OpenSearch</text>
-  <text x="55" y="630" font-size="10" fill="#57606a">filename = {title-slug}__{pageId}.html &#x2022; chunks attributed to this page only &#x2022; page_number omitted &#x2022; same index and schema as PDF/DOCX</text>
+  <text x="55" y="630" font-size="10" fill="#57606a">filename = {SpaceKey}-{PageTitle}-{PageID}.html &#x2022; chunks attributed to this page only &#x2022; page_number omitted &#x2022; same index and schema as PDF/DOCX</text>
 </svg>

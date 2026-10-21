@@ -69,13 +69,49 @@ Recommended default for a Confluence connector: `[".html", ".pdf", ".docx"]`. Re
 Confluence content is tracked via composite key `(checksum, connector_id)` in `connector_document_checksum`:
 
 * **Confluence Pages:** Checksum is computed as:
-  $$\text{checksum} = \text{MD5}(\text{PageID} + \text{VersionNumber})$$
-  Any page edit increments `VersionNumber`, producing a new MD5 and triggering automated re-ingestion. The checksum is computed from metadata returned by the scan query, so no body download is needed to detect changes.
-* **Attachments:** MD5 of the raw attachment byte stream or attachment `(AttachmentID + VersionNumber)`.
-* **Canonical Path (`remote_path`):**
-  * Pages: `spaces/{spaceKey}/pages/{pageId}`
-  * Attachments: `spaces/{spaceKey}/pages/{pageId}/attachments/{attachmentId}`
-* **Staged file name:** Pages are written to the staging folder as `{title-slug}__{pageId}.html`. The name becomes the `filename` metadata stored with each OpenSearch chunk and shown in citations, so a readable title slug is preferred over a bare numeric ID. The `pageId` suffix keeps names unique.
+  $$\text{checksum} = \text{MD5}(\text{ConnectorID} + \text{PageID} + \text{VersionNumber})$$
+  Components are joined with a `:` delimiter (`"{connectorId}:{pageId}:{version}"`) so that different ID/version splits cannot collide (e.g. `12`+`3` vs `1`+`23`).
+  * **Why `ConnectorID` is included:** the checksum registry is also consulted across connectors (`all_checksums` in `_classify()`): a checksum already owned by another connector is linked to the existing document and **not** ingested. `PageID` and `VersionNumber` are only unique within one Confluence instance, so without `ConnectorID` two connectors pointing at different Confluence instances (or at the same page via different connectors) could produce identical checksums, and one would silently reuse the other's document. Scoping the checksum by `ConnectorID` guarantees each Confluence connector ingests and owns its own copy of every page. Consequently, cross-connector deduplication does not apply to Confluence content.
+  * Any page edit increments `VersionNumber`, producing a new MD5 and triggering automated re-ingestion. The checksum is computed from metadata returned by the scan query, so no body download is needed to detect changes.
+* **Attachments:** Checksum is computed as:
+  $$\text{checksum} = \text{MD5}(\text{ConnectorID} + \text{AttachmentID} + \text{AttachmentVersion})$$
+  (same `:` delimiter: `"{connectorId}:{attachmentId}:{attachmentVersion}"`). It is computed from the attachment metadata returned by the scan query (`version.number`), so no byte download is needed to detect changes. `ConnectorID` is included for the same reason as for pages (see above).
+  * Uploading a new version of an existing attachment increments `AttachmentVersion`, producing a new MD5 and triggering re-ingestion; the old version's chunks are removed through the normal orphan flow.
+* **Canonical Path (`remote_path`):** The last path segment is the staged file name (see below), because the sync engine derives the staged file name from `Path(remote_path).name`.
+  * Pages: `spaces/{spaceKey}/pages/{pageId}/{SpaceKey}-{PageTitle}-{PageID}.html`
+  * Attachments: `spaces/{spaceKey}/pages/{pageId}/attachments/{attachmentId}/{PageID}-{AttachmentName}`
+* **Staged file name (pages):** Pages are written to the staging folder as:
+
+  ```
+  {SpaceKey}-{PageTitle}-{PageID}.html
+  ```
+
+  e.g. `ENG-Deployment-Guide-123456.html`. The name becomes the `filename` metadata stored with each OpenSearch chunk and shown in citations, so the space key and a readable title are included rather than a bare numeric ID. Rules:
+  * `SpaceKey` is used as-is (Confluence space keys are alphanumeric).
+  * `PageTitle` is made filesystem-safe: runs of characters other than letters, digits and `_` are collapsed to a single `-`, leading/trailing `-` are trimmed, and the result is truncated to 80 characters. If nothing remains (e.g. an emoji-only title) the title segment is omitted: `{SpaceKey}-{PageID}.html`.
+  * `PageID` is always the final segment, so names stay unique even when two pages share a title.
+  * The name is only a label; identity and change detection rely on the checksum above, so a page rename (new title, same `PageID`) produces a new version/checksum and is re-ingested under the new file name while the old chunks are removed via the normal orphan flow.
+* **Staged file name (attachments):** Attachments are written to the staging folder as:
+
+  ```
+  {PageID}-{AttachmentName}
+  ```
+
+  where `AttachmentName` is the attachment's original file name including its extension, e.g. `123456-architecture-overview.pdf`. Rules:
+  * Confluence enforces unique attachment names within a page, so `{PageID}-{AttachmentName}` is unique across the connector, and two pages that each hold a `report.pdf` stage as `111-report.pdf` and `222-report.pdf` instead of overwriting each other in the batch directory.
+  * Path separators and control characters in `AttachmentName` are replaced with `_`; the extension is preserved (and lower-cased for the `allowed_extensions` check and `validate_document_file`).
+  * As with pages, the name becomes the `filename` stored with each OpenSearch chunk and shown in citations.
+
+### 6.1 Integrity Verification
+
+The sync engine calls `scanner.verify_integrity(local_checksum, remote_checksum)` after every download and skips the file when it returns `False`. `BaseScanner` implements it as a plain equality check, which is correct for S3 / SSH because their checksum is a hash of the file bytes.
+
+For Confluence, the checksum is **not** a hash of the file content: it is derived from IDs (and a page version) and Confluence does not return a content hash for page bodies or attachments. A byte-level comparison would therefore always fail. Accordingly:
+
+* **No integrity check is performed for Confluence content.** `ConfluenceScanner` overrides `verify_integrity()` to always return `True` (the same mechanism `S3Scanner` uses to bypass multi-part ETags).
+* `download_to()` still returns a hex digest to satisfy the `BaseScanner` contract; its value is not compared against anything for Confluence.
+* Transport-level integrity relies on TLS and on `httpx` raising on a truncated response (HTTP status / content-length errors). A failed or partial download surfaces as a download exception for that file and is handled by the existing per-batch error handling, not by checksum comparison.
+* Downloaded files are still validated by `validate_document_file()` (Section 8.2, item 6), which catches empty or wrongly formatted content.
 
 ---
 
@@ -86,11 +122,12 @@ Confluence content is tracked via composite key `(checksum, connector_id)` in `c
 ### Step-by-Step Summary
 
 1. **Connect (`scanner.connect()`):** Validates credentials against Confluence REST endpoint (`/wiki/rest/api/space` or `/rest/api/space`).
-2. **Scan (`scanner.scan()`):** Queries pages via CQL for configured spaces. Computes $\text{MD5}(\text{PageID} + \text{VersionNumber})$.
+2. **Scan (`scanner.scan()`):** Queries pages via CQL for configured spaces. Computes $\text{MD5}(\text{ConnectorID} + \text{PageID} + \text{VersionNumber})$.
 3. **Classify (`_classify()`):** Identifies new, modified, unchanged, or orphaned (deleted) pages against `connector_document_checksum`.
 4. **Download & Stage (`scanner.download_to()`):**
-   * **Page Content:** Fetches the rendered page body (`expand=body.export_view,version,space`) and writes a self-contained `.html` file (see 7.1) into the batch staging folder. **No PDF/DOCX conversion is performed.** Before writing, the scanner strips any embedded ("Include Page") macro output from the rendered body (see 7.2).
-   * **Attachments:** Downloads `.pdf` and `.docx` attachments directly. This includes both explicitly uploaded attachments and files embedded inline in the page body via macros (e.g. the Confluence PDF viewer / Office connector macro). Inline-embedded files are resolved by their attachment ID, which is retrievable from the page's attachment list via the REST API — no special macro parsing of `body.storage` is required. Only `.pdf` and `.docx` are downloaded; all other attachment types (images, spreadsheets, etc.) are ignored, consistent with `allowed_extensions`.
+   * **Page Content:** Fetches the rendered page body (`expand=body.export_view,version,space`) and writes a self-contained `.html` file (see 7.1), named `{SpaceKey}-{PageTitle}-{PageID}.html` (Section 6), into the batch staging folder. **No PDF/DOCX conversion is performed.** Before writing, the scanner strips any embedded ("Include Page") macro output from the rendered body (see 7.2).
+   * **Attachments:** Downloads `.pdf` and `.docx` attachments directly, staged as `{PageID}-{AttachmentName}` (Section 6). This includes both explicitly uploaded attachments and files embedded inline in the page body via macros (e.g. the Confluence PDF viewer / Office connector macro). Inline-embedded files are resolved by their attachment ID, which is retrievable from the page's attachment list via the REST API — no special macro parsing of `body.storage` is required. Only `.pdf` and `.docx` are downloaded; all other attachment types (images, spreadsheets, etc.) are ignored, consistent with `allowed_extensions`.
+   * **Integrity:** `verify_integrity()` is bypassed for Confluence pages and attachments (Section 6.1).
 5. **Batch Ingest & Indexing:** Dispatches staged files to `initialize_and_launch()` with `OperationType.INGESTION`. Digitize routes each file by extension (`.pdf` / `.docx` / `.html`), chunks the extracted text, embeds it, and indexes the chunks into the **OpenSearch Vector Store** for downstream RAG retrieval.
 
 ### 7.1 Staged HTML Page Format
@@ -120,7 +157,7 @@ When a Confluence page (Page A) embeds another page (Page B) via an `{include}` 
 
 #### Strategy: strip-and-reference, ingest independently
 
-Each included page is already a first-class scanned page with its own `PageID` and `VersionNumber`. The existing checksum formula `MD5(PageID + VersionNumber)` covers it identically to any other page. No new change-detection mechanism is needed.
+Each included page is already a first-class scanned page with its own `PageID` and `VersionNumber`. The existing checksum formula `MD5(ConnectorID + PageID + VersionNumber)` covers it identically to any other page. No new change-detection mechanism is needed.
 
 The scanner applies the following rule when staging Page A's HTML:
 
@@ -128,11 +165,11 @@ The scanner applies the following rule when staging Page A's HTML:
 2. **Strip expanded embed output.** Locate the corresponding rendered block in `body.export_view` and replace it with a lightweight comment placeholder:
 
 ```html
-<!-- embedded page: {title-slug}__{pageId}.html -->
+<!-- embedded page: {SpaceKey}-{PageTitle}-{PageID}.html -->
 ```
 
 3. **Write Page A's HTML** without the embedded content. Page A's chunks carry only Page A's own text; the `filename` metadata on every OpenSearch chunk correctly attributes that content to Page A.
-4. **Page B is staged and ingested independently** under its own checksum. Its OpenSearch chunks carry `filename: {title-slug}__pageB.html`. When Page B changes, only Page B's `VersionNumber` increments, only its checksum changes, and only its chunks are deleted and re-indexed — Page A is untouched.
+4. **Page B is staged and ingested independently** under its own checksum. Its OpenSearch chunks carry `filename: {SpaceKey}-{PageTitle}-{PageID}.html` (Page B's own values). When Page B changes, only Page B's `VersionNumber` increments, only its checksum changes, and only its chunks are deleted and re-indexed — Page A is untouched.
 
 #### What this means for retrieval
 
@@ -253,7 +290,7 @@ The following was verified by running Docling's HTML converter on sample pages. 
 
 | Field | Value |
 | :--- | :--- |
-| `filename` | `{title-slug}__{pageId}.html` |
+| `filename` | `{SpaceKey}-{PageTitle}-{PageID}.html` |
 | `source` | Hierarchy built from headings: page title (chapter) → `h2` (section) → `h3` (subsection) → … |
 | `type` | `text` / `table` (unchanged) |
 | `page_number` | Not set (HTML has no pages) |
@@ -275,7 +312,9 @@ Citations for Confluence documents should use the page title and the Confluence 
 * `_build_structured_text` refactor: existing `process_text_docx` tests unchanged and passing.
 * `get_document_page_count(".html") == 1`; `validate_document_file` accepts valid HTML, rejects empty/binary/non-`<` content; `validate_allowed_extensions` accepts `.html`.
 * `ingest.py` globbing includes `.html`.
-* `ConfluenceScanner`: page wrapper generation (title escaping, `<h1>` injection), `allowed_extensions` semantics (Section 4.1), checksum on `PageID + VersionNumber`.
+* `ConfluenceScanner`: page wrapper generation (title escaping, `<h1>` injection), `allowed_extensions` semantics (Section 4.1), checksum on `ConnectorID + PageID + VersionNumber` (the same page under two connectors yields different checksums), and staged file name generation (`{SpaceKey}-{PageTitle}-{PageID}.html`: special characters, truncation, empty/emoji-only title, duplicate titles).
+* `ConfluenceScanner` attachments: checksum is `MD5(ConnectorID + AttachmentID + AttachmentVersion)` and changes when a new attachment version is uploaded; staged file name is `{PageID}-{AttachmentName}` (two pages with an identically named attachment do not collide; unsafe characters sanitised; extension preserved).
+* `ConfluenceScanner.verify_integrity()` always returns `True` (Section 6.1); a truncated or failed HTTP download raises and is handled per batch.
 * `ConfluenceScanner` embed handling (Section 7.2): `body.storage` parsed to detect `ac:macro ac:name="include"` nodes; expanded embed block stripped from `body.export_view`; placeholder comment inserted; included page staged independently under its own checksum and ingested as a separate document.
 
 **Open items to validate before implementation**
