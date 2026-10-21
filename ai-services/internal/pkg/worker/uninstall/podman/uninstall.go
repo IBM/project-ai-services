@@ -103,6 +103,12 @@ func PerformCleanup(ctx context.Context, rt runtime.Runtime, pods []types.Pod, s
 		return err
 	}
 
+	// Delete models data
+	modelsDataPath := filepath.Join(baseDir, "models")
+	if err := podmanutils.RemoveDataDir(ctx, modelsDataPath); err != nil {
+		return err
+	}
+
 	// Delete skip-cleanup resources (secrets and volumes preserved when --skip-cleanup is set)
 	if err := podmanutils.CleanupSkippedResources(ctx, rt, secretsToSkip, volumesToSkip, skipCleanup); err != nil {
 		return err

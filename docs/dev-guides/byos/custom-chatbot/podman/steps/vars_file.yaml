@@ -1,0 +1,8 @@
+containers:
+  - name: "custom-chatbot-{{ .InstanceSlug }}-custom-chatbot"
+    format: ".Status"
+    alias: UI_STATUS
+
+  - name: "custom-chatbot-{{ .InstanceSlug }}-custom-chatbot"
+    format: ".Status"
+    alias: API_STATUS

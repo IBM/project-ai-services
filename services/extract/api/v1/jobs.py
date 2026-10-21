@@ -101,7 +101,7 @@ def _resolve_schema_name(schema_name: str):
     "",
     response_model=ExtractionResponse,
     status_code=200,
-    tags=["extraction"],
+    tags=["extraction", "MCP"],
     summary="Synchronous extraction",
     description=(
         "Extract structured data from plain text against a registered schema in a "
@@ -329,7 +329,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         "- `job_name` (optional): Human-readable label for the job\n"
         "\nEither `schema_id` or `schema_name` or `json_schema` or `json_example` must be provided.\n"
     ),
-    tags=["jobs"],
+    tags=["jobs", "MCP"],
     openapi_extra={
         "requestBody": {
             "required": True,
@@ -660,7 +660,7 @@ async def list_extract_jobs(
     description=(
         "Retrieve the full status of a specific extraction job.\n\n"
     ),
-    tags=["jobs"],
+    tags=["jobs", "MCP"],
 )
 async def get_extract_job(job_id: str) -> JobDetailResponse:
     """Retrieve the full status and detail metadata of a specific extraction job."""
@@ -743,7 +743,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
         "- **404** if the job or document does not exist.\n"
         "- **200** with the result payload once the document is `completed`."
     ),
-    tags=["jobs"],
+    tags=["jobs", "MCP"],
 )
 async def get_document_result(job_id: str, doc_id: str):
     """Retrieve the extraction result for one document in a batch job."""

@@ -7,19 +7,21 @@ import (
 
 	"github.com/spf13/cobra"
 
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// runtimeType returns the current runtime type as a string.
-func runtimeType() string {
+// currentRuntime returns the current runtime type as a string.
+func currentRuntime() string {
 	return string(vars.RuntimeFactory.GetRuntimeType())
 }
 
 var (
-	templateID string
+	templateID  string
+	runtimeType string
 )
 
 // NewParametersCmd creates the parameters subcommand.
@@ -33,6 +35,13 @@ func NewParametersCmd() *cobra.Command {
 
   # Display parameters for an architecture
   ai-services application templates parameters --template rag --runtime podman`,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if runtimeType == "" {
+				return fmt.Errorf("required flag(s) \"runtime\" not set")
+			}
+
+			return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -61,6 +70,7 @@ func NewParametersCmd() *cobra.Command {
 		},
 	}
 
+	cmdcommon.ConfigureRuntimeFlag(cmd, &runtimeType)
 	cmd.Flags().StringVar(&templateID, "template", "", "Template ID (service or architecture)")
 	_ = cmd.MarkFlagRequired("template")
 
@@ -69,7 +79,7 @@ func NewParametersCmd() *cobra.Command {
 
 // displayServiceParameters loads a service and displays its parameters.
 func displayServiceParameters(ctx context.Context, source catalogClient.CatalogSource, serviceID string) error {
-	deployOpts, err := source.GetServiceDeployOptions(ctx, serviceID, runtimeType())
+	deployOpts, err := source.GetServiceDeployOptions(ctx, serviceID, currentRuntime())
 	if err != nil {
 		return fmt.Errorf("failed to get deploy options for service '%s': %w", serviceID, err)
 	}
@@ -96,7 +106,7 @@ func displayArchitectureParameters(ctx context.Context, source catalogClient.Cat
 	// Display parameters for each service in the architecture.
 	// Log a warning if a service fails so the user knows output may be incomplete.
 	for _, svcRef := range arch.Services {
-		deployOpts, err := source.GetServiceDeployOptions(ctx, svcRef.ID, runtimeType())
+		deployOpts, err := source.GetServiceDeployOptions(ctx, svcRef.ID, currentRuntime())
 		if err != nil {
 			logger.Warningf("skipping parameters for service '%s': %v", svcRef.ID, err)
 
@@ -112,7 +122,7 @@ func displayArchitectureParameters(ctx context.Context, source catalogClient.Cat
 // If displayedComponents map is provided, it tracks and skips duplicate component providers.
 func displayDeployOptionsParameters(ctx context.Context, source catalogClient.CatalogSource, deployOpts *catalogTypes.DeployOptionsService, displayedComponents map[string]bool) {
 	// Display the service's own parameters
-	schema, err := source.GetServiceParams(ctx, deployOpts.ID, runtimeType())
+	schema, err := source.GetServiceParams(ctx, deployOpts.ID, currentRuntime())
 	if err == nil && schema != nil {
 		displaySchemaParameters(schema, deployOpts.ID)
 	}
@@ -130,7 +140,7 @@ func displayDeployOptionsParameters(ctx context.Context, source catalogClient.Ca
 				displayedComponents[componentKey] = true
 			}
 
-			schema, err := source.GetComponentProviderParams(ctx, comp.Type, provider.ID, runtimeType())
+			schema, err := source.GetComponentProviderParams(ctx, comp.Type, provider.ID, currentRuntime())
 			if err == nil && schema != nil {
 				displaySchemaParameters(schema, componentKey)
 			}

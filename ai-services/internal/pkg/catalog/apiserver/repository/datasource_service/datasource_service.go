@@ -1222,7 +1222,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 
 	// Resolve the service base URL and call GET /v1/connectors with the caller's pagination
 	// params. The service response is authoritative for both the page content and total count.
-	baseURL, servicePage := s.fetchServiceConnectors(ctx, proxy, appID, allConnectorIDs, req.PageSize, offset)
+	baseURL, servicePage := s.fetchServiceConnectors(ctx, proxy, appID, allConnectorIDs, req.PageSize, offset, req.Search)
 
 	// The service pod may still return a connector with status="delete pending" after
 	// DisconnectDatasourcesFromApplication has removed its service_dependencies row but
@@ -1265,7 +1265,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 // Only rows belonging to appID are considered when selecting the base URL, preventing a
 // mismatch when the same connector is linked to multiple applications.
 // Returns an empty-page result when no endpoint is found or the call fails.
-func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy httpproxy.HTTPProxier, appID uuid.UUID, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy httpproxy.HTTPProxier, appID uuid.UUID, connectorIDs []uuid.UUID, limit, offset int, search string) (string, catalogclient.ServiceConnectorPage) {
 	empty := catalogclient.ServiceConnectorPage{ByID: make(map[string]apimodels.ConnectorItem)}
 
 	if len(connectorIDs) == 0 {
@@ -1296,7 +1296,7 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy ht
 		return "", empty
 	}
 
-	page, err := catalogclient.NewServiceClient(proxy, baseURL).ListConnectors(ctx, limit, offset)
+	page, err := catalogclient.NewServiceClient(proxy, baseURL).ListConnectors(ctx, limit, offset, search)
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to list connectors from service at %s: %v", baseURL, err)
 
