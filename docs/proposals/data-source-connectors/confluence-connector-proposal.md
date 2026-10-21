@@ -326,3 +326,209 @@ Citations for Confluence documents should use the page title and the Confluence 
 5. **Excerpt Include / Multiexcerpt Include.** These macros transclude only a labelled excerpt of a page rather than its full body. The strip logic should be extended to cover `ac:macro ac:name="excerpt-include"` and `ac:macro ac:name="multiexcerpt-include"`; the same independent-ingestion rule applies.
 
 > **Images are not in scope.** The current Digitize pipeline only processes `.pdf` and `.docx`; there is no image ingestion path. Images embedded in page bodies are already excluded as `caption` labels by `excluded_labels` and require no further handling.
+
+---
+
+## 10. Implementation PR Plan
+
+Each PR is scoped to a single concern and keeps diffs small and reviewable. They are sequenced so that each builds on a green main. PRs 1–5 deliver full HTML ingestion support through the Docling pipeline with no Confluence-specific code. PRs 6–9 introduce the Confluence connector on top of that foundation.
+
+---
+
+### Group A — Docling / HTML pipeline (no Confluence symbols)
+
+---
+
+### PR 1 — `validate_document_file`: accept `.html`
+
+**Touches:** `services/common/misc_utils.py`
+
+**Changes:**
+- `validate_document_file()`: add `.html` to `allowed_extensions`; add the HTML content check (UTF-8 decode + strip BOM/whitespace + `startswith("<")`); update the "Only PDF and DOCX…" error message. No magic-byte check (there is none for HTML).
+
+**Tests added/updated:**
+- `test_doc_utils.py`: accepts a valid UTF-8 HTML string; rejects empty content; rejects binary content; rejects content that does not start with `<` after stripping; existing PDF/DOCX cases unchanged.
+
+**Why minimal:** Single function in one file. Zero behaviour change for PDF/DOCX or any connector.
+
+---
+
+### PR 2 — `get_document_page_count` HTML branch + `get_doc_converter` HTML format
+
+**Touches:** `services/digitize/parsing/pdf.py`, `services/digitize/parsing/converter.py`
+
+**Changes:**
+- `parsing/pdf.py` — `get_document_page_count()`: add `elif file_ext == '.html': return 1` before the `else` warning.
+- `parsing/converter.py` — `get_doc_converter()`: add `InputFormat.HTML` to `allowed_formats`. No `format_options` entry needed (Docling defaults are correct).
+
+**Tests added/updated:**
+- `test_pdf_utils.py`: `get_document_page_count("doc.html") == 1`; existing PDF/DOCX cases unchanged.
+- Integration smoke: `convert_doc` on a minimal `<!DOCTYPE html>` file returns a non-empty `DoclingDocument` without raising.
+
+**Why minimal:** One `elif` addition in each file.
+
+---
+
+### PR 3 — `process_text_html` + `_build_structured_text` refactor
+
+**Touches:** `services/digitize/processing/text.py`
+
+**Changes:**
+- Extract `_build_structured_text(converted_doc, src_path, out_path, resolve_header, page_count)` private helper from `process_text_docx()`. `process_text_docx()` is updated to call it with its existing TOC-based resolver — **behaviour-preserving refactor**.
+- Add `process_text_html(converted_doc, html_path, out_path)`: HTML `resolve` callback (Docling `title` → level 1; `section_header` level `N` → `N+1`), character-based page estimate (`math.ceil(chars / CHARS_PER_PAGE)`), delegates to `_build_structured_text`.
+
+**Tests added/updated:**
+- `test_docx_utils.py`: all existing `process_text_docx` tests pass unchanged.
+- New `test_html_utils.py`:
+  - `process_text_html`: `<h1>` → `#`, `<h2>` → `##`, `<h3>` → `###`; `caption` label excluded; empty document → `[]`; page estimate ≥ 1.
+  - `_build_structured_text`: label exclusion and JSON write via a synthetic `DoclingDocument`.
+
+**Why minimal:** `process_text_docx` caller interface is unchanged; no other file is touched.
+
+---
+
+### PR 4 — Dispatch `.html` in `processing/orchestrator.py`
+
+**Touches:** `services/digitize/processing/orchestrator.py`
+
+**Changes:**
+- `process_converted_document()` (~line 473): extend the two-branch `if/else` to a three-branch `if/elif/elif`:
+  ```python
+  if file_ext == '.docx':
+      page_count, process_time = process_text_docx(...)
+  elif file_ext == '.html':
+      page_count, process_time = process_text_html(...)
+  else:
+      page_count, process_time = process_text(...)
+  ```
+- Add `process_text_html` to the import from `digitize.processing.text`.
+
+**Tests added/updated:**
+- `test_conversion_dispatcher.py`: mock a minimal `.html` converted doc; assert `process_text_html` is called; `process_text_docx` and `process_text` are not.
+
+**Why minimal:** Two-line change to an existing dispatch block, one import update.
+
+---
+
+### PR 5 — `pipeline/ingest.py` HTML glob + `connectors/models.py` `.html` extension allowlist
+
+**Touches:** `services/digitize/pipeline/ingest.py`, `services/digitize/connectors/models.py`
+
+**Changes:**
+- `pipeline/ingest.py` (~line 185): add `html_files = list(directory_path.glob("*.html"))` and include it in `input_file_paths`. Without this, staged `.html` files are silently skipped.
+- `connectors/models.py` — `ConnectorCreateRequest.validate_allowed_extensions`: add `.html` to the `supported` set; update the error string. S3 and SSH connectors may now accept `.html` in their `allowed_extensions` list.
+
+**Tests added/updated:**
+- `test_connector_models_extra.py`: `validate_allowed_extensions` accepts `[".html"]` and `[".html", ".pdf", ".docx"]`; still rejects `[".csv"]`.
+- `test_sync_tick.py` / `test_connector_endpoints.py`: no regressions; existing `validate_document_file` patches unaffected.
+
+**Why minimal:** `ingest.py` change is one line; `models.py` change is one set-literal entry. Keeps the Confluence enum out until Group B.
+
+---
+
+### Group B — Confluence connector
+
+---
+
+### PR 6 — `ConnectorType.CONFLUENCE` + `ConfluenceConnectorConfig` + factory registration
+
+**Touches:** `services/digitize/connectors/models.py`, `services/digitize/connectors/scanners/config.py`, `services/digitize/connectors/scanners/scanner_factory.py`
+
+**Changes:**
+- `connectors/models.py` — `ConnectorType`: add `CONFLUENCE = "confluence"`.
+- `connectors/models.py` — `ConnectorCreateRequest.validate_type`: no change needed (driven by `ConnectorType` enum).
+- `connectors/models.py` — `ConnectorCreateRequest.validate_connection_details_schema`: add `elif self.type == "confluence": ConfluenceConnectorConfig.model_validate(...)`.
+- `connectors/scanners/config.py`: add `ConfluenceConnectorConfig(BaseModel)` with all fields from Section 4 (`url`, `space_keys`, `username`, `api_token` / `personal_access_token`, `cql_filter`, `include_attachments`, `allowed_extensions` defaulting to `[".html", ".pdf", ".docx"]`, `verify_ssl`, `ca_cert_path`); field validators; `from_connection_details` classmethod.
+- `connectors/scanners/scanner_factory.py`: import `ConfluenceConnectorConfig` and stub `ConfluenceScanner`; add `"confluence"` to `_REGISTRY`; add `elif config_cls is ConfluenceConnectorConfig` branch.
+
+**Tests added/updated:**
+- `test_connector_scanners.py`: `ConfluenceConnectorConfig` validates correctly; rejects missing `url` and unknown fields; `allowed_extensions` defaults to `[".html", ".pdf", ".docx"]`.
+- `test_connector_models_extra.py`: `POST /v1/connectors` with `type: "confluence"` and valid `connection_details` → 201; invalid fields → 422.
+- `test_connector_scanners.py`: `build_scanner("confluence", ...)` returns a `ConfluenceScanner` instance (stub class, no HTTP).
+
+**Why minimal:** `ConfluenceScanner` is a stub (`pass`). No HTTP client code. This PR only registers the type and validates the config schema.
+
+---
+
+### PR 7 — `ConfluenceScanner`: connect, scan, checksums, staged filenames
+
+**Touches:** `services/digitize/connectors/scanners/confluence_scanner.py` *(new file)*
+
+**Changes:**
+- Implement `ConfluenceScanner(BaseScanner)`:
+  - `connect()`: `GET /rest/api/space`; raises `ConnectorError` on 401/403.
+  - `scan()`: CQL pagination (`/rest/api/content/search`); builds `RemoteFile` list; checksum = `MD5("{connectorId}:{pageId}:{version}")` for pages, `MD5("{connectorId}:{attachmentId}:{attachmentVersion}")` for attachments.
+  - `_build_page_filename(space_key, title, page_id)`: filesystem-safe `{SpaceKey}-{SafeTitle}-{PageID}.html` (collapse non-alphanumeric runs to `-`, trim, truncate to 80 chars, fallback on empty sanitised title).
+  - `_build_attachment_filename(page_id, attachment_name)`: `{PageID}-{SanitisedAttachmentName}`.
+  - `verify_integrity()`: always returns `True` (Section 6.1).
+  - `download_to()`: stub (`raise NotImplementedError`) — implemented in PR 8.
+  - `close()`: closes `httpx.AsyncClient`.
+
+**Tests added/updated:**
+- `test_connector_scanners.py`:
+  - `connect()` succeeds on mock 200; raises on 401/403.
+  - `scan()` with paginated mock responses returns correct `RemoteFile` list with expected checksums.
+  - Same page under two `connector_id` values yields different checksums (no cross-connector collision).
+  - `_build_page_filename`: special characters, emoji-only title (fallback), duplicate titles (unique via `PageID`), 80-char truncation.
+  - `_build_attachment_filename`: two pages with identical attachment names do not collide; unsafe characters sanitised; extension preserved.
+  - `verify_integrity()` always returns `True`.
+
+**Why minimal:** No download or body-parsing logic; `download_to` is a stub. All HTTP calls mocked.
+
+---
+
+### PR 8 — `ConfluenceScanner.download_to`: page HTML staging + embed stripping + attachments
+
+**Touches:** `services/digitize/connectors/scanners/confluence_scanner.py`
+
+**Changes:**
+- Implement `download_to()` for pages:
+  - Fetches `body.export_view` + `body.storage` in one request (`?expand=body.export_view,body.storage,version,space`).
+  - Parses `body.storage` XML to find `<ac:macro ac:name="include">` / `<ac:structured-macro ac:name="include">` nodes; strips their expanded output from `body.export_view`; inserts `<!-- embedded page: … -->` placeholder (Section 7.2).
+  - Wraps result in the HTML scaffold (Section 7.1): `<!DOCTYPE html>`, UTF-8 meta, `<h1>` title injection.
+  - Writes to `dest_path`; returns hex digest of written bytes (satisfies `BaseScanner` contract; never compared for Confluence — Section 6.1).
+- Implement `download_to()` for attachments:
+  - Lists from `/rest/api/content/{pageId}/child/attachment`; filters by `allowed_extensions` and `include_attachments`; stages as `{PageID}-{AttachmentName}`.
+
+**Tests added/updated:**
+- `test_connector_scanners.py`:
+  - Written HTML contains `<!DOCTYPE html>`, `<h1>Escaped Title</h1>`, body content.
+  - Include macro output stripped; placeholder comment present; included page staged independently.
+  - Edge cases: nested includes, page included multiple times, included page outside `space_keys`.
+  - Attachment staging: collision-free for two pages with same-named attachments; unsafe characters sanitised; extension preserved; only `allowed_extensions` types downloaded.
+  - Truncated HTTP response raises and is handled per-batch (no checksum comparison).
+
+**Why minimal:** All changes are inside the single new `confluence_scanner.py` file.
+
+---
+
+### PR 9 — Encryption wiring + end-to-end `sync_tick` integration
+
+**Touches:** `services/digitize/connectors/encryption.py`, `services/digitize/connectors/scanners/scanner_factory.py`
+
+**Changes:**
+- `connectors/encryption.py`: add `"confluence"` to the secrets map so `api_token` / `personal_access_token` are encrypted at rest and decrypted by `decrypt_secrets`.
+- `connectors/scanners/scanner_factory.py`: replace the stub `ConfluenceScanner` import with the real implementation now that PRs 7–8 are merged.
+- `connectors/sync_tick.py`: no structural changes expected — the existing `_classify` / `_download_batch` / orphan flow works for Confluence via `build_scanner`. Confirm `.html` files dispatched correctly (PR 5 glob is already in place).
+
+**Tests added/updated:**
+- `test_sync_tick.py`: Confluence connector fixture; full mock sync cycle (connect → scan → classify → download → ingest dispatch); assert new pages create checksum rows; modified pages re-ingest; deleted pages trigger orphan removal; HTML files reach `initialize_and_launch`.
+- `test_connector_encryption.py`: `decrypt_secrets("confluence", {...})` correctly decrypts `api_token` / `personal_access_token`.
+
+**Why minimal:** `sync_tick.py` itself is unchanged. Only secrets registration and a stub-swap in the factory.
+
+---
+
+### Summary Table
+
+| PR | Group | Files changed | New files | Core concern |
+|:---|:---|:---|:---|:---|
+| **1** | Docling | `misc_utils.py` | — | `validate_document_file` accepts `.html` |
+| **2** | Docling | `parsing/pdf.py`, `parsing/converter.py` | — | Docling `InputFormat.HTML` + page-count |
+| **3** | Docling | `processing/text.py` | — | `process_text_html` + shared helper |
+| **4** | Docling | `processing/orchestrator.py` | — | Dispatch `.html` → `process_text_html` |
+| **5** | Docling | `pipeline/ingest.py`, `connectors/models.py` | — | HTML glob in ingest + `.html` in extension allowlist |
+| **6** | Confluence | `connectors/models.py`, `scanners/config.py`, `scanner_factory.py` | — | `ConnectorType.CONFLUENCE` + config schema + factory stub |
+| **7** | Confluence | — | `scanners/confluence_scanner.py` | Scanner connect / scan / checksums / filenames |
+| **8** | Confluence | `scanners/confluence_scanner.py` | — | `download_to`: HTML staging + embed strip + attachments |
+| **9** | Confluence | `encryption.py`, `scanner_factory.py` | — | Secrets wiring + end-to-end sync integration |
