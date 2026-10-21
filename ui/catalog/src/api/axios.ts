@@ -2,7 +2,7 @@ import axios from "axios";
 import { API_BASE_URL } from "@/constants/env.constants";
 import { GENERIC_ERROR_MESSAGE } from "@/constants/app.constants";
 import { useAuthStore } from "@/store/auth.store";
-import { refreshAccessToken } from "@/services/auth";
+import { refreshAccessToken } from "@/api/auth";
 import { AUTH_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import { parseTokenExpiry } from "@/utils/sessionTimeout";
 

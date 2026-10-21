@@ -224,7 +224,10 @@ export async function transformToDeploymentPayload(
         formData.dataSources.length > 0
       ) {
         entry.connectors = formData.dataSources.map(
-          (id): ConnectorRef => ({ id, type: "datasource" }),
+          (id): ConnectorRef => ({
+            id,
+            type: "datasource",
+          }),
         );
       }
       services.push(entry);

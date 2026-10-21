@@ -1,5 +1,4 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/breakpoint" as *;
+@use "carbonTokens" as *;
 
 .tableContent {
   // On small screens, allow the table to scroll horizontally
@@ -92,7 +91,7 @@
 }
 
 .noDataContent {
-  padding: spacing.$spacing-07;
+  padding: $spacing-07;
 }
 
 .tableColumn {

@@ -1,23 +1,21 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/breakpoint";
+@use "carbonTokens" as *;
 
 .panelContent {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-06;
+  gap: $spacing-06;
 }
 
 .header {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-07;
-  padding-bottom: spacing.$spacing-06;
+  gap: $spacing-07;
+  padding-bottom: $spacing-06;
   border-bottom: 1px solid var(--cds-border-subtle-01);
 }
 
 .description {
-  @include type.type-style("body-long-01");
+  @include type-style("body-long-01");
   max-width: 85%;
   word-wrap: break-word;
 }
@@ -25,14 +23,14 @@
 .tags {
   display: flex;
   align-items: center;
-  gap: spacing.$spacing-05;
+  gap: $spacing-05;
 }
 
 .certifiedTag {
   display: inline-flex;
   align-items: center;
-  gap: spacing.$spacing-02;
-  @include type.type-style("body-short-01");
+  gap: $spacing-02;
+  @include type-style("body-short-01");
 }
 
 .badgeIcon {
@@ -48,12 +46,12 @@
 }
 
 .domainSection {
-  gap: spacing.$spacing-02;
-  padding-bottom: spacing.$spacing-07;
+  gap: $spacing-02;
+  padding-bottom: $spacing-07;
 }
 
 .domainSectionTitle {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
 }
 
 .domainList {
@@ -62,70 +60,70 @@
   margin: 0;
 
   li {
-    @include type.type-style("body-long-01");
+    @include type-style("body-long-01");
   }
 }
 
 .demoSection {
-  gap: spacing.$spacing-05;
-  padding-bottom: spacing.$spacing-05;
+  gap: $spacing-05;
+  padding-bottom: $spacing-05;
 }
 
 .demoSectionTitle {
-  @include type.type-style("heading-compact-02");
+  @include type-style("heading-compact-02");
 }
 
 .demoCard {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-05;
-  padding: spacing.$spacing-05;
-  margin-bottom: spacing.$spacing-05;
+  gap: $spacing-05;
+  padding: $spacing-05;
+  margin-bottom: $spacing-05;
 }
 
 .demoCardTitle {
-  @include type.type-style("heading-03");
+  @include type-style("heading-03");
 }
 
 .demoCardDescription {
-  @include type.type-style("body-long-02");
+  @include type-style("body-long-02");
 }
 
 .demoCardFooter {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: spacing.$spacing-05;
-  margin-top: spacing.$spacing-03;
+  gap: $spacing-05;
+  margin-top: $spacing-03;
 }
 
 .demoDuration {
-  @include type.type-style("body-compact-01");
+  @include type-style("body-compact-01");
   color: var(--cds-text-secondary);
 }
 
 .demoLink {
   display: inline-flex;
   align-items: center;
-  gap: spacing.$spacing-02;
+  gap: $spacing-02;
   text-decoration: none;
 }
 
 .storiesSection {
-  gap: spacing.$spacing-05;
+  gap: $spacing-05;
   border-bottom: none;
-  padding-top: spacing.$spacing-03;
+  padding-top: $spacing-03;
   padding-bottom: 0;
 }
 
 .storiesSectionTitle {
-  @include type.type-style("heading-02");
+  @include type-style("heading-02");
 }
 
 .storiesContainer {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-03;
+  gap: $spacing-03;
 }
 
 .storyCard {
@@ -136,16 +134,16 @@
 .story {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-04;
+  gap: $spacing-04;
 }
 
 .storyCompany {
-  @include type.type-style("heading-01");
+  @include type-style("heading-01");
 }
 
 .storyDescription {
-  @include type.type-style("body-long-01");
-  margin-top: spacing.$spacing-04;
+  @include type-style("body-long-01");
+  margin-top: $spacing-04;
 }
 
 .demoButton {
@@ -157,19 +155,19 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-05;
-  padding: spacing.$spacing-05;
+  gap: $spacing-05;
+  padding: $spacing-05;
 }
 
 .storyCardTitle {
-  @include type.type-style("heading-03");
+  @include type-style("heading-03");
   margin: 0;
 }
 
 .storyLink {
   display: inline-flex;
   align-items: center;
-  gap: spacing.$spacing-02;
+  gap: $spacing-02;
   text-decoration: none;
   margin-top: auto;
   align-self: flex-end;
@@ -178,29 +176,29 @@
 .testimonialSection {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-05;
-  padding-top: spacing.$spacing-04;
+  gap: $spacing-05;
+  padding-top: $spacing-04;
   border-top: none;
 }
 
 .testimonialContent {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-05;
+  gap: $spacing-05;
 }
 
 .testimonialCompany {
-  @include type.type-style("heading-02");
+  @include type-style("heading-02");
   margin: 0;
 }
 
 .testimonialQuote {
-  @include type.type-style("body-long-02");
+  @include type-style("body-long-02");
   font-style: italic;
   margin: 0;
 }
 
 .testimonialAttribution {
-  @include type.type-style("body-long-02");
+  @include type-style("body-long-02");
   margin: 0;
 }

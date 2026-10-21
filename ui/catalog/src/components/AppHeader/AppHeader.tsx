@@ -12,7 +12,7 @@ import { User, Logout } from "@carbon/icons-react";
 import styles from "./AppHeader.module.scss";
 import { useReducer, useRef, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { getUserInfo } from "@/services/auth";
+import { getUserInfo } from "@/api/auth";
 import { APP_NAME } from "@/constants";
 import { useAuthStore } from "@/store/auth.store";
 
