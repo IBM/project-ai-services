@@ -40,8 +40,8 @@
   
   <rect x="75" y="292" width="210" height="52" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
   <text x="85" y="309" font-weight="600" fill="#14532d">4a. Download &amp; Convert</text>
-  <text x="85" y="324" font-size="10" fill="#57606a">Fetch body.export_view &#x2192; .html</text>
-  <text x="85" y="337" font-size="10" fill="#57606a">(no PDF/DOCX conversion)</text>
+  <text x="85" y="324" font-size="10" fill="#57606a">Page: export_view &#x2192; .html (no conversion)</text>
+  <text x="85" y="337" font-size="10" fill="#57606a">Attachments: .pdf/.docx (explicit + inline-embedded)</text>
 
   <rect x="305" y="292" width="210" height="52" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="1"/>
   <text x="315" y="309" font-weight="600" fill="#14532d">4b. Validate Document</text>

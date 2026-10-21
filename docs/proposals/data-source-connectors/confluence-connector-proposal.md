@@ -90,7 +90,7 @@ Confluence content is tracked via composite key `(checksum, connector_id)` in `c
 3. **Classify (`_classify()`):** Identifies new, modified, unchanged, or orphaned (deleted) pages against `connector_document_checksum`.
 4. **Download & Stage (`scanner.download_to()`):**
    * **Page Content:** Fetches the rendered page body (`expand=body.export_view,version,space`) and writes a self-contained `.html` file (see 7.1) into the batch staging folder. **No PDF/DOCX conversion is performed.**
-   * **Attachments:** Downloads `.pdf` and `.docx` attachments directly.
+   * **Attachments:** Downloads `.pdf` and `.docx` attachments directly. This includes both explicitly uploaded attachments and files embedded inline in the page body via macros (e.g. the Confluence PDF viewer / Office connector macro). Inline-embedded files are resolved by their attachment ID, which is retrievable from the page's attachment list via the REST API — no special macro parsing of `body.storage` is required. Only `.pdf` and `.docx` are downloaded; all other attachment types (images, spreadsheets, etc.) are ignored, consistent with `allowed_extensions`.
 5. **Batch Ingest & Indexing:** Dispatches staged files to `initialize_and_launch()` with `OperationType.INGESTION`. Digitize routes each file by extension (`.pdf` / `.docx` / `.html`), chunks the extracted text, embeds it, and indexes the chunks into the **OpenSearch Vector Store** for downstream RAG retrieval.
 
 ### 7.1 Staged HTML Page Format
@@ -251,5 +251,6 @@ Citations for Confluence documents should use the page title and the Confluence 
 
 1. **Real Confluence HTML.** Run Docling on actual `body.export_view` output from Cloud and Data Center for pages that use panels, expand macros, code macros, nested tables, and the table-of-contents macro. Confirm headings and tables survive, and decide whether any boilerplate (e.g. TOC macro output) should be stripped by the scanner before staging.
 2. **Duplicate `<h1>`.** Docling labels every `<h1>` as `title`. A page body that contains its own `<h1>` will produce two level-1 headers (verified). The mapping handles this, but the scanner may downgrade body `<h1>` to `<h2>` if this proves noisy.
-3. **Images.** Images embedded in pages are not ingested; only `alt` text is seen (and is excluded as a `caption`). Image attachments are out of scope.
-4. **Heading-level gaps.** `<h4>` directly under `<h1>` yields level 4 (`####`); the chunker accepts this, but skipped levels are not normalised.
+3. **Heading-level gaps.** `<h4>` directly under `<h1>` yields level 4 (`####`); the chunker accepts this, but skipped levels are not normalised.
+
+> **Images are not in scope.** The current Digitize pipeline only processes `.pdf` and `.docx`; there is no image ingestion path. Images embedded in page bodies are already excluded as `caption` labels by `excluded_labels` and require no further handling.
