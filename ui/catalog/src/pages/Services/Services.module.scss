@@ -1,5 +1,4 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
+@use "carbonTokens" as *;
 
 .servicesContainer {
   background-color: var(--cds-layer-02);
@@ -20,10 +19,10 @@
 }
 
 .tabList {
-  @include type.type-style("heading-compact-01");
+  @include type-style("heading-compact-01");
   margin: 0;
   background-color: var(--cds-layer-01);
-  padding-left: spacing.$spacing-06;
+  padding-left: $spacing-06;
   border-bottom: 1px solid var(--cds-border-subtle-01);
 
   :global(.cds--tabs__nav-item),
@@ -38,22 +37,22 @@
 
 :global(.cds--tab-content) {
   background-color: var(--cds-layer-02);
-  min-height: spacing.$spacing-13;
+  min-height: $spacing-13;
 }
 
 .catalogGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
-  column-gap: spacing.$spacing-05;
-  row-gap: spacing.$spacing-05;
-  margin: spacing.$spacing-07 spacing.$spacing-06 0 spacing.$spacing-07;
+  column-gap: $spacing-05;
+  row-gap: $spacing-05;
+  margin: $spacing-07 $spacing-06 0 $spacing-07;
 }
 
 .loadingMessage,
 .errorMessage {
-  @include type.type-style("body-long-01");
-  padding: spacing.$spacing-07;
-  margin: spacing.$spacing-05 spacing.$spacing-06;
+  @include type-style("body-long-01");
+  padding: $spacing-07;
+  margin: $spacing-05 $spacing-06;
   text-align: center;
 }
 
