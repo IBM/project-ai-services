@@ -5,7 +5,7 @@ import { Badge } from "@carbon/icons-react";
 import {
   fetchServiceDetails,
   type AboutSection,
-} from "@/services/serviceDetails.api";
+} from "@/api/serviceDetails.api";
 import { transformServiceDetails } from "@/utils/serviceDetailsTransform";
 import { formatVersion } from "@/utils/string";
 import { useServiceDetailsStore } from "@/store/serviceDetails.store";
