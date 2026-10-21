@@ -11,7 +11,11 @@ import {
 } from "@/components/Table/utils/reducerUtils";
 
 export type RegisterPhase =
-  "idle" | "invalid" | "loading" | "success" | "error";
+  | "idle"
+  | "invalid"
+  | "loading"
+  | "success"
+  | "error";
 
 export interface WorkerResourceRow {
   id: string;

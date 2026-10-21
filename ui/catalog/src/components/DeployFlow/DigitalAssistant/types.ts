@@ -13,7 +13,8 @@ export const ACTION_TYPES = {
 } as const;
 
 export type DeployFlowAction =
-  SharedDeployFlowAction | { type: typeof ACTION_TYPES.RESET_STATE };
+  | SharedDeployFlowAction
+  | { type: typeof ACTION_TYPES.RESET_STATE };
 
 export interface StepProps extends BaseStepProps {
   deployOptions: DeployOptionsResponse;

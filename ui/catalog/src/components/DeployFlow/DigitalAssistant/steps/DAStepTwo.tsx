@@ -273,7 +273,8 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
 
     deployOptions.services.forEach((service) => {
       const schemaCacheEntry = serviceParamsMap[`${runtime}:${service.id}`] as
-        ServiceParamsCache | undefined;
+        | ServiceParamsCache
+        | undefined;
       if (!schemaCacheEntry?.data) return;
 
       const serviceConfig = formData.services[service.id];
@@ -476,7 +477,8 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
         const serviceSchema =
           (
             serviceParamsMap[`${runtime}:${service.id}`] as
-              ServiceParamsCache | undefined
+              | ServiceParamsCache
+              | undefined
           )?.data ?? null;
 
         return [
