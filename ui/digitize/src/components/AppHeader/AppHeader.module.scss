@@ -1,11 +1,11 @@
-@use '@carbon/react/scss/spacing' as *;
+@use "@carbon/react/scss/spacing" as *;
 
 .header {
   :global {
     .cds--header__name {
       font-size: 0.875rem;
       font-weight: 600;
-      
+
       &--prefix {
         font-weight: 600;
       }
@@ -24,11 +24,11 @@
 .headerName {
   cursor: pointer;
   transition: opacity 0.2s ease-in-out;
-  
+
   &:hover {
     opacity: 0.8;
   }
-  
+
   &:active {
     opacity: 0.6;
   }
@@ -59,10 +59,11 @@
     line-height: 1.6;
   }
 
-  ul, ol {
+  ul,
+  ol {
     margin-bottom: $spacing-05;
     padding-left: $spacing-06;
-    
+
     li {
       margin-bottom: $spacing-03;
       line-height: 1.6;
