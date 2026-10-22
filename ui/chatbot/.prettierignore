@@ -4,3 +4,4 @@ build
 coverage
 .vscode
 .github
+package-lock.json
