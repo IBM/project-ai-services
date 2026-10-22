@@ -30,7 +30,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-24.04-ppc64le
+          - os: ubuntu-24.04-ppc64le-p10
             arch: ppc64le
           - os: ubuntu-24.04  # Standard amd64
             arch: amd64

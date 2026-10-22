@@ -219,6 +219,7 @@ func (h *DatasourceHandler) DeleteDatasource(c *gin.Context) {
 //	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
 //	@Param			status		query		string	false	"Filter by status: 'connected' or 'offline'"
 //	@Param			provider	query		string	false	"Filter by provider ID (e.g. 'object_storage', 'file_system')"
+//	@Param			q			query		string	false	"Case-insensitive substring search on datasource name"
 //	@Success		200			{object}	models.DatasourceListResponse
 //	@Failure		400			{object}	ErrorResponse	"Invalid query parameters"
 //	@Failure		401			{object}	ErrorResponse	"Unauthorized"
@@ -251,6 +252,7 @@ func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 		PageSize: pageSize,
 		Status:   status,
 		Provider: c.Query("provider"),
+		Search:   c.Query("q"),
 	}
 
 	resp, err := h.datasourceSvc.ListDatasources(c.Request.Context(), req)

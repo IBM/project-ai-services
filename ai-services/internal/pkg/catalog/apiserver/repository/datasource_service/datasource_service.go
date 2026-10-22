@@ -304,6 +304,7 @@ func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.L
 		Type:     catalogconstants.ConnectorTypeDatasource,
 		Status:   dbmodels.ConnectorStatus(req.Status),
 		Provider: req.Provider,
+		Search:   req.Search,
 		Limit:    req.PageSize,
 		Offset:   (req.Page - 1) * req.PageSize,
 	}

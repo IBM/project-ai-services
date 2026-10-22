@@ -14,3 +14,6 @@ vendor
 # Coverage reports
 .coverage
 coverage.xml
+
+# Local Tilt dev state (gateway PKI keys etc.)
+.tilt/
