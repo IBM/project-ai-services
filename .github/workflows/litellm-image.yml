@@ -5,12 +5,14 @@ on:
       - 'images/litellm/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/litellm/**'
       - .github/workflows/litellm-image.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
