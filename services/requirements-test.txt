@@ -18,14 +18,14 @@ python-multipart==0.0.31
 
 # Additional utilities
 python-dotenv>=1.0.0
-pydantic>=2.0.0
-pydantic-settings==2.14.1
+pydantic>=2.14.1
+pydantic-settings==2.16.1
 
 # Language detection (required by chatbot)
 lingua-language-detector==2.2.0
 
 # Common dependencies with specific versions for test compatibility
-tqdm==4.67.3
+tqdm==4.70.1
 opensearch-py==3.1.0
 cohere==7.0.3
 numpy==2.4.4
@@ -36,8 +36,8 @@ SQLAlchemy==2.0.49
 psycopg2-binary==2.9.11
 
 # Document processing (required by digitize)
-pypdfium2==5.9.0
+pypdfium2==5.14.0
 pdfplumber==0.11.9
 RapidFuzz==3.14.5
-docling==2.95.0
+docling==2.141.0
 sentence-splitter==1.4
