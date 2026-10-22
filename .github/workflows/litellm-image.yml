@@ -5,12 +5,14 @@ on:
       - 'images/litellm/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/litellm/**'
       - .github/workflows/litellm-image.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
@@ -32,7 +34,7 @@ jobs:
 
       - name: Publish litellm image
         working-directory: images/litellm
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
   
