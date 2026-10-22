@@ -7,8 +7,8 @@ set -euo pipefail
 WORKDIR=/build
 
 # 1. Install protoc from GitHub releases
-wget -q "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${PROTOC_ARCH}.zip" \
-    -O /tmp/protoc.zip
+curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${PROTOC_ARCH}.zip" \
+    -o /tmp/protoc.zip
 if [ "${SKIP_CHECKSUM}" != "1" ]; then
     echo "${PROTOC_SHA256}  /tmp/protoc.zip" | sha256sum -c -
 fi

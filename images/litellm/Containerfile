@@ -24,7 +24,6 @@ RUN case "${TARGETARCH}" in \
     echo "SKIP_CHECKSUM=${SKIP_CHECKSUM}" >> /tmp/arch_env && \
     dnf update ${DNF_FLAGS} -y && \
     dnf install ${DNF_FLAGS} -y \
-        wget \
         patch \
         python3.12 \
         python3.12-pip \
@@ -52,7 +51,8 @@ ENV RUSTC_BOOTSTRAP=1 \
     GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
 
 # 4. Download litellm & patch it
-RUN wget -q https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz && \
+RUN curl -fsSL https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz \
+         -o v${VERSION}.tar.gz && \
     echo "${LITELLM_SHA256}  v${VERSION}.tar.gz" | sha256sum -c - && \
     tar -xzf v${VERSION}.tar.gz && \
     rm v${VERSION}.tar.gz && \

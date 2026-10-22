@@ -1,10 +1,12 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=litellm
-# 1. Must run update-patch after updating the Litellm version
-# 2. Manually regenerate the patches/watsonx-passthrough.patch
-# 3. Run update-checksums to regenerate the checksums
-LITELLM_VERSION?=1.101.5
-LITELLM_SHA256?=e68f150d655f58324b11bbac5a695565839baadc045fa6925a92e3622947ae44
+# When updating LITELLM_VERSION:
+# 1. Run update-patch to regenerate patches/pyproject-toml.patch
+# 2. Manually update patches/watsonx-passthrough.patch if the patched file changed upstream
+# 3. Run verify-patch to confirm all patches apply cleanly
+# 4. Run update-checksums to regenerate the checksums
+LITELLM_VERSION?=1.106.2
+LITELLM_SHA256?=c91c0ab3c176c6a60b60faf3097ea1f14a459112a0f49cd7bee31083539b6b1d
 IMAGE_REVISION?=0
 # Node.js version for baking Prisma CLI — Active LTS version
 NODE_VERSION?=24.21.0
@@ -74,6 +76,12 @@ image-tag:
 update-patch:
 	cd ./patches && ./pyproject-toml.sh $(LITELLM_VERSION)
 .PHONY: update-patch
+
+# Fetch the upstream source files for LITELLM_VERSION, apply each patch, and
+# show the resulting diff so you can confirm the patches apply cleanly.
+verify-patch:
+	./patches/verify-patch.sh $(LITELLM_VERSION)
+.PHONY: verify-patch
 
 update-checksums:
 	$(eval NEW_LITELLM_SHA256 := $(shell curl -fsSL https://github.com/BerriAI/litellm/archive/refs/tags/v$(LITELLM_VERSION).tar.gz | sha256sum | cut -d' ' -f1))
