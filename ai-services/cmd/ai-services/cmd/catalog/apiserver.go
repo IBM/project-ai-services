@@ -239,8 +239,8 @@ func NewAPIServerCmd() *cobra.Command {
 
 	apiserverCmd := &cobra.Command{
 		Use:   "apiserver",
-		Short: "Manage AI Services API server",
-		Long:  `Start the AI Services API server to provide REST endpoints for managing applications, services, and authentication.`,
+		Short: "Manage AI Launchpad API server",
+		Long:  `Start the AI Launchpad API server to provide REST endpoints for managing applications, services, and authentication.`,
 		Example: ` # Start the API server with default settings
 	 ai-services catalog apiserver --admin-password-hash <PASSWORD_HASH> --runtime podman
 

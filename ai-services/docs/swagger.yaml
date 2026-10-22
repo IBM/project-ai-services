@@ -1031,12 +1031,12 @@ info:
     email: support@example.com
     name: API Support
     url: https://github.com/project-ai-services/ai-services
-  description: API server for managing AI Services catalog, applications, and authentication
+  description: API server for managing AI Launchpad catalog, applications, and authentication
   license:
     name: Apache 2.0
     url: http://www.apache.org/licenses/LICENSE-2.0.html
   termsOfService: http://swagger.io/terms/
-  title: AI Services Catalog API
+  title: AI Launchpad Catalog API
   version: "1.0"
 paths:
   /applications:
