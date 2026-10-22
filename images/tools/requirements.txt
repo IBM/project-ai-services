@@ -4,7 +4,7 @@ click==8.4.1
 typer==0.25.1
 annotated_doc==0.0.4
 anyio==4.13.0
-certifi==2026.5.20
+certifi==2026.10.19
 filelock==3.29.1
 fsspec==2026.9.0
 h11==0.16.0
