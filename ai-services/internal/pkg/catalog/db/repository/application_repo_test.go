@@ -110,9 +110,9 @@ func TestGetCountQueryMatchesGetAllQuery_SearchFilter(t *testing.T) {
 func TestBuildGetAllQuery_PaginationArgs(t *testing.T) {
 	repo := &applicationRepo{}
 	filters := &ApplicationFilters{
-		Search:  "myapp",
-		Limit:   20,
-		Offset:  40,
+		Search: "myapp",
+		Limit:  20,
+		Offset: 40,
 	}
 
 	query, args := repo.buildGetAllQuery(filters)
