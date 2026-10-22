@@ -1,5 +1,5 @@
-hf_xet==1.6.0
-huggingface_hub[cli]==1.33.0
+hf_xet==1.5.1
+huggingface_hub[cli]==1.18.0
 click==8.5.0
 typer==0.26.8
 annotated_doc==0.0.5
