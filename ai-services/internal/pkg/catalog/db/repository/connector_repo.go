@@ -29,6 +29,7 @@ type ConnectorFilters struct {
 	Type     string                 // Optional: filter by connector type (e.g. "datasource")
 	Status   models.ConnectorStatus // Optional: filter by connector status
 	Provider string                 // Optional: filter by provider identifier (e.g. "object_storage", "file_system")
+	Search   string                 // Optional: case-insensitive substring search on connector name
 	Limit    int                    // Optional: maximum number of records to return
 	Offset   int                    // Optional: number of records to skip
 }
@@ -272,8 +273,11 @@ func (r *connectorRepo) GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid
 	return result, nil
 }
 
+// connectorSearchColumns defines the columns searched when a ?q= term is provided.
+var connectorSearchColumns = []string{"name"}
+
 // buildWhereClause constructs the WHERE clause string and positional arguments from the
-// status and provider filters.
+// provided filters.
 func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 	args := []interface{}{}
 	whereClauses := []string{}
@@ -290,6 +294,9 @@ func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 		if filters.Provider != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("provider = $%d", len(args)+1))
 			args = append(args, filters.Provider)
+		}
+		if filters.Search != "" {
+			whereClauses = append(whereClauses, buildSearchClause(connectorSearchColumns, &args, filters.Search))
 		}
 	}
 
