@@ -22,6 +22,17 @@ type WorkerUpdate struct {
 	Message       *string
 }
 
+// workerSearchColumns defines the columns searched when a ?q= term is provided.
+// Add column names here to extend search to additional fields in future.
+var workerSearchColumns = []string{"name"}
+
+// ListWorkersRequest carries the parameters for listing workers.
+// Pagination fields (Page, PageSize) may be added here in future without
+// touching the DB layer.
+type ListWorkersRequest struct {
+	Search string // Optional: case-insensitive substring search on the worker name
+}
+
 // WorkerRepository defines the interface for worker data operations.
 type WorkerRepository interface {
 	// Upsert inserts a new worker or updates its runtime_type, status, and metadata on name conflict.
@@ -30,8 +41,8 @@ type WorkerRepository interface {
 	Update(ctx context.Context, id uuid.UUID, update WorkerUpdate) error
 	// Delete removes a worker by ID. Returns (false, nil) if no row matched.
 	Delete(ctx context.Context, id uuid.UUID) (bool, error)
-	// GetAll returns all worker rows ordered by registered_at ascending.
-	GetAll(ctx context.Context) ([]models.Worker, error)
+	// GetAll returns all worker rows matching the request, ordered by registered_at ascending.
+	GetAll(ctx context.Context, req *ListWorkersRequest) ([]models.Worker, error)
 	// GetByID returns the worker with the given UUID, or (nil, nil) if not found.
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Worker, error)
 	// GetByName returns the worker with the given name, or (nil, nil) if not found.
@@ -138,15 +149,56 @@ func (r *workerRepo) Delete(ctx context.Context, id uuid.UUID) (bool, error) {
 	return tag.RowsAffected() > 0, nil
 }
 
-// GetAll returns all worker rows ordered by registered_at ascending.
-func (r *workerRepo) GetAll(ctx context.Context) ([]models.Worker, error) {
-	query := `
-		SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at
-		FROM workers
-		ORDER BY registered_at ASC
-	`
+// buildGetAllWorkerQuery constructs the SQL query and arguments for GetAll.
+func buildGetAllWorkerQuery(req *ListWorkersRequest) (string, []interface{}) {
+	query := `SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at FROM workers`
+	args := []interface{}{}
 
-	rows, err := r.pool.Query(ctx, query)
+	if req != nil && req.Search != "" {
+		query += " WHERE " + buildSearchClause(workerSearchColumns, &args, req.Search)
+	}
+
+	query += " ORDER BY registered_at ASC"
+
+	return query, args
+}
+
+// scanWorkerRow scans a single worker row into a Worker model.
+func scanWorkerRow(rows pgx.Rows) (models.Worker, error) {
+	var (
+		w            models.Worker
+		message      sql.NullString
+		hb           sql.NullTime
+		metadataJSON []byte
+	)
+
+	if err := rows.Scan(
+		&w.ID, &w.Name, &w.RuntimeType, &w.Status,
+		&message, &hb, &metadataJSON, &w.RegisteredAt, &w.UpdatedAt,
+	); err != nil {
+		return w, fmt.Errorf("failed to scan worker row: %w", err)
+	}
+
+	if message.Valid {
+		w.Message = message.String
+	}
+	if hb.Valid {
+		w.LastHeartbeat = &hb.Time
+	}
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &w.Metadata); err != nil {
+			return w, fmt.Errorf("failed to unmarshal worker metadata: %w", err)
+		}
+	}
+
+	return w, nil
+}
+
+// GetAll returns all worker rows matching the request, ordered by registered_at ascending.
+func (r *workerRepo) GetAll(ctx context.Context, req *ListWorkersRequest) ([]models.Worker, error) {
+	query, args := buildGetAllWorkerQuery(req)
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workers: %w", err)
 	}
@@ -155,30 +207,9 @@ func (r *workerRepo) GetAll(ctx context.Context) ([]models.Worker, error) {
 	var workers []models.Worker
 
 	for rows.Next() {
-		var (
-			w            models.Worker
-			message      sql.NullString
-			hb           sql.NullTime
-			metadataJSON []byte
-		)
-
-		if err := rows.Scan(
-			&w.ID, &w.Name, &w.RuntimeType, &w.Status,
-			&message, &hb, &metadataJSON, &w.RegisteredAt, &w.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan worker row: %w", err)
-		}
-
-		if message.Valid {
-			w.Message = message.String
-		}
-		if hb.Valid {
-			w.LastHeartbeat = &hb.Time
-		}
-		if len(metadataJSON) > 0 {
-			if err := json.Unmarshal(metadataJSON, &w.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal worker metadata: %w", err)
-			}
+		w, err := scanWorkerRow(rows)
+		if err != nil {
+			return nil, err
 		}
 
 		workers = append(workers, w)
