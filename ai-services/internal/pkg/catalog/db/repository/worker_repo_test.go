@@ -90,6 +90,51 @@ func TestWorkerUpdate_ZeroValueLeavesFieldsNil(t *testing.T) {
 	assert.Nil(t, u.Message)
 }
 
+// TestBuildGetAllWorkerQuery_Pagination tests LIMIT and OFFSET parameter construction.
+func TestBuildGetAllWorkerQuery_Pagination(t *testing.T) {
+	t.Run("limit only", func(t *testing.T) {
+		query, args := buildGetAllWorkerQuery(&ListWorkersRequest{Limit: 10})
+		assert.Contains(t, query, "LIMIT $1")
+		assert.NotContains(t, query, "OFFSET")
+		require.Len(t, args, 1)
+		assert.Equal(t, 10, args[0])
+	})
+
+	t.Run("offset only", func(t *testing.T) {
+		query, args := buildGetAllWorkerQuery(&ListWorkersRequest{Offset: 20})
+		assert.NotContains(t, query, "LIMIT")
+		assert.Contains(t, query, "OFFSET $1")
+		require.Len(t, args, 1)
+		assert.Equal(t, 20, args[0])
+	})
+
+	t.Run("search with limit and offset", func(t *testing.T) {
+		query, args := buildGetAllWorkerQuery(&ListWorkersRequest{
+			Search: "worker",
+			Limit:  10,
+			Offset: 20,
+		})
+		assert.Contains(t, query, "name ILIKE $1")
+		assert.Contains(t, query, "LIMIT $2")
+		assert.Contains(t, query, "OFFSET $3")
+		require.Len(t, args, 3)
+		assert.Equal(t, "%worker%", args[0])
+		assert.Equal(t, 10, args[1])
+		assert.Equal(t, 20, args[2])
+
+		assert.Less(t, strings.Index(query, "WHERE"), strings.Index(query, "ORDER BY"))
+		assert.Less(t, strings.Index(query, "ORDER BY"), strings.Index(query, "LIMIT"))
+		assert.Less(t, strings.Index(query, "LIMIT"), strings.Index(query, "OFFSET"))
+	})
+}
+
+// TestBuildWorkerWhereClauses_NilRequest checks that nil request yields empty WHERE clauses.
+func TestBuildWorkerWhereClauses_NilRequest(t *testing.T) {
+	clauses, args := buildWorkerWhereClauses(nil)
+	assert.Empty(t, clauses)
+	assert.Empty(t, args)
+}
+
 // TestStatusPriorityCase verifies the generated CASE expressions rank statuses as required.
 func TestStatusPriorityCase(t *testing.T) {
 	assert.Equal(t,

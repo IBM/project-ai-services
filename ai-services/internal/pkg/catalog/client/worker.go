@@ -75,10 +75,12 @@ func (c *WorkerClient) CreateWorker(ctx context.Context, name string) (*CreateWo
 
 // ListWorkers returns all registered workers from the catalog.
 func (c *WorkerClient) ListWorkers(ctx context.Context) ([]catalogtypes.Worker, error) {
-	var result []catalogtypes.Worker
+	var result catalogtypes.WorkerListResponse
 	resp, err := c.client.httpClient.R().
 		SetContext(ctx).
 		SetResult(&result).
+		SetQueryParam("page", "1").
+		SetQueryParam("page_size", "100").
 		Get(workersRoute)
 	if err != nil {
 		return nil, fmt.Errorf("list workers: %w", err)
@@ -89,7 +91,7 @@ func (c *WorkerClient) ListWorkers(ctx context.Context) ([]catalogtypes.Worker, 
 			resp.StatusCode(), utils.ParseErrorResponse(resp))
 	}
 
-	return result, nil
+	return result.Data, nil
 }
 
 // DeleteWorkerByName resolves a worker name to its UUID and permanently removes it.
