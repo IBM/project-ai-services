@@ -75,7 +75,7 @@ packaging==26.3
 pandas==3.0.5
 pdfminer.six==20251230
 pdfplumber==0.11.9
-pillow==12.3.0
+pillow==13.0.0
 pluggy==1.7.0
 polyfactory==3.5.0
 psutil==7.2.2
