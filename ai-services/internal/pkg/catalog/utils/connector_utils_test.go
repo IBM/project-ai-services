@@ -71,6 +71,16 @@ func TestDecryptSensitiveFields_NonStringSensitiveField(t *testing.T) {
 	}
 }
 
+func TestDecryptSensitiveFields_InvalidCiphertext(t *testing.T) {
+	params := map[string]any{"password": "invalid-ciphertext"}
+	sensitive := map[string]bool{"password": true}
+
+	_, err := DecryptSensitiveFields(params, sensitive, "key")
+	if err == nil {
+		t.Fatal("expected error when decrypting invalid ciphertext, got nil")
+	}
+}
+
 func TestEncryptDecryptSensitiveFields_Roundtrip(t *testing.T) {
 	key := "my-secret-key"
 	params := map[string]any{
@@ -132,6 +142,18 @@ func TestStripSensitiveFields(t *testing.T) {
 	if metadata["secret"] != "my-secret" {
 		t.Fatal("original metadata map was mutated")
 	}
+
+	// Nil metadata returns empty map
+	nilResult := StripSensitiveFields(nil, sensitive)
+	if len(nilResult) != 0 {
+		t.Fatalf("expected empty map for nil metadata, got %v", nilResult)
+	}
+
+	// Nil sensitiveFields leaves all fields
+	noSensitiveResult := StripSensitiveFields(metadata, nil)
+	if len(noSensitiveResult) != len(metadata) {
+		t.Fatalf("expected all fields preserved with nil sensitive map, got %v", noSensitiveResult)
+	}
 }
 
 func TestSchemaFields(t *testing.T) {
@@ -161,5 +183,40 @@ func TestSchemaFields(t *testing.T) {
 	updatable := UpdatableFieldsFromSchema(schema)
 	if !updatable["password"] || !updatable["apiKey"] || updatable["host"] {
 		t.Fatalf("unexpected updatable fields: %v", updatable)
+	}
+}
+
+func TestSchemaFields_EdgeCases(t *testing.T) {
+	// Nil schema
+	if len(SensitiveFieldsFromSchema(nil)) != 0 {
+		t.Fatal("expected empty map for nil schema")
+	}
+
+	// Missing properties key
+	if len(SensitiveFieldsFromSchema(map[string]any{"type": "object"})) != 0 {
+		t.Fatal("expected empty map for schema without properties")
+	}
+
+	// Properties is not a map[string]any
+	if len(SensitiveFieldsFromSchema(map[string]any{"properties": "not-a-map"})) != 0 {
+		t.Fatal("expected empty map when properties is not a map")
+	}
+
+	// Invalid property element (not a map[string]any) or non-string attribute value
+	schema := map[string]any{
+		"properties": map[string]any{
+			"invalidProp": "not-a-property-map",
+			"nonStringVal": map[string]any{
+				"format": 12345,
+			},
+			"validProp": map[string]any{
+				"format": "password",
+			},
+		},
+	}
+
+	fields := SensitiveFieldsFromSchema(schema)
+	if !fields["validProp"] || fields["invalidProp"] || fields["nonStringVal"] {
+		t.Fatalf("unexpected result for edge case schema: %v", fields)
 	}
 }
