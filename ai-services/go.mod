@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.16
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.2
 	github.com/aws/smithy-go v1.27.8
+	github.com/blang/semver/v4 v4.0.0
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/huh v0.7.0
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -76,7 +77,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.38 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/bytedance/sonic v1.14.0 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
