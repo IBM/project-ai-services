@@ -13,6 +13,18 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
 
+// applicationStatusPriority ranks applications for listing: Error first, then in-progress
+// states (Downloading/Deploying/Deleting), then Running.
+var applicationStatusPriority = buildStatusPriorityCase("a.status",
+	[]string{string(models.ApplicationStatusError)},
+	[]string{
+		string(models.ApplicationStatusDownloading),
+		string(models.ApplicationStatusDeploying),
+		string(models.ApplicationStatusDeleting),
+	},
+	[]string{string(models.ApplicationStatusRunning)},
+)
+
 // applicationSearchColumns defines the columns searched when a ?q= term is provided.
 // Add column names here to extend search to additional fields in future.
 var applicationSearchColumns = []string{"a.name"}
@@ -124,7 +136,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	query += " ORDER BY a.created_at DESC"
+	query += " ORDER BY " + applicationStatusPriority + ", a.created_at DESC"
 
 	// Add pagination if provided
 	if filters != nil {
@@ -145,7 +157,7 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 			s.id, s.app_id, s.catalog_id, s.status, s.message, s.endpoints, s.version, s.created_at, s.updated_at
 		FROM paged_applications a
 		INNER JOIN services s ON a.id = s.app_id
-		ORDER BY a.created_at DESC, s.created_at ASC
+		ORDER BY ` + applicationStatusPriority + `, a.created_at DESC, s.created_at ASC
 	`
 
 	return query, args
