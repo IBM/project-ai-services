@@ -15,6 +15,7 @@ from typing import Optional, Tuple, Dict, Any
 from fastapi import UploadFile
 
 from common.misc_utils import get_logger
+from common.validation_utils import safe_filename
 from summarize.settings import settings
 
 logger = get_logger("job_utils")
@@ -78,9 +79,9 @@ def stage_uploaded_file(job_id: str, file: UploadFile) -> Path:
     job_staging_dir = settings.summarize.staging_dir / job_id
     job_staging_dir.mkdir(parents=True, exist_ok=True)
     
-    # Determine staged file path
+    # Determine staged file path — sanitise to prevent path traversal (CWE-22)
     filename = file.filename or "uploaded_file"
-    staged_file_path = job_staging_dir / filename
+    staged_file_path = safe_filename(filename, job_staging_dir)
     
     try:
         # Write file to staging directory
