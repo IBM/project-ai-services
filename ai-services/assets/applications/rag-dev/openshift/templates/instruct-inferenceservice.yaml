@@ -10,6 +10,8 @@ metadata:
     ai-services.io/application: {{ .Release.Name }}
     ai-services.io/template: {{ .Chart.Name }}
     ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "1"
 spec:
   predictor:
     automountServiceAccountToken: false
