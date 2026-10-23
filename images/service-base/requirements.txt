@@ -17,12 +17,12 @@ defusedxml==0.7.1
 dill==0.4.1
 distro==1.9.0
 dnspython==2.8.0
-doclang==0.7.3
-docling==2.141.0
-docling-core==2.103.1
+doclang==0.8.0
+docling==2.142.0
+docling-core==2.104.0
 docling-ibm-models==4.0.4
-docling-slim==2.141.0
-docling-parse==7.22.2
+docling-slim==2.142.0
+docling-parse==7.23.0
 email-validator==2.3.0
 et_xmlfile==2.0.0
 Events==0.5
