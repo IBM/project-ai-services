@@ -5,12 +5,14 @@ on:
       - 'ui/catalog/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'ui/catalog/**'
       - .github/workflows/catalog-ui-image.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
