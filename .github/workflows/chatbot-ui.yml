@@ -5,12 +5,14 @@ on:
       - 'ui/chatbot/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'ui/chatbot/**'
       - .github/workflows/chatbot-ui.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io

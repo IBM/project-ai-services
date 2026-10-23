@@ -5,12 +5,14 @@ on:
       - 'ui/digitize/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'ui/digitize/**'
       - .github/workflows/digitize-ui-image.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
