@@ -15,7 +15,7 @@ func TestBuildGetAllWorkerQuery_NilRequest(t *testing.T) {
 
 	assert.NotContains(t, query, "WHERE")
 	assert.Contains(t, query, "FROM workers")
-	assert.Contains(t, query, "ORDER BY registered_at ASC")
+	assert.Contains(t, query, "ORDER BY "+workerStatusPriority+", registered_at ASC")
 	assert.Empty(t, args)
 }
 
@@ -88,4 +88,18 @@ func TestWorkerUpdate_ZeroValueLeavesFieldsNil(t *testing.T) {
 	assert.Nil(t, u.Status)
 	assert.Nil(t, u.LastHeartbeat)
 	assert.Nil(t, u.Message)
+}
+
+// TestStatusPriorityCase verifies the generated CASE expressions rank statuses as required.
+func TestStatusPriorityCase(t *testing.T) {
+	assert.Equal(t,
+		"CASE status WHEN 'disconnected' THEN 0 WHEN 'pending' THEN 1 WHEN 'ready' THEN 2 ELSE 3 END",
+		workerStatusPriority)
+	assert.Equal(t,
+		"CASE status WHEN 'offline' THEN 0 WHEN 'connected' THEN 1 ELSE 2 END",
+		connectorStatusPriority)
+	assert.Equal(t,
+		"CASE a.status WHEN 'Error' THEN 0 WHEN 'Downloading' THEN 1 WHEN 'Deploying' THEN 1 "+
+			"WHEN 'Deleting' THEN 1 WHEN 'Running' THEN 2 ELSE 3 END",
+		applicationStatusPriority)
 }
