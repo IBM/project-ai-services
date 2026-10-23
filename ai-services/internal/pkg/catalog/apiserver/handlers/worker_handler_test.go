@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"github.com/stretchr/testify/assert"
@@ -69,10 +72,32 @@ func (r *mockWorkerRepo) Delete(_ context.Context, id uuid.UUID) (bool, error) {
 	return true, nil
 }
 
-func (r *mockWorkerRepo) GetAll(_ context.Context, _ *repository.ListWorkersRequest) ([]models.Worker, error) {
+func (r *mockWorkerRepo) GetCount(_ context.Context, req *repository.ListWorkersRequest) (int, error) {
+	workers, err := r.GetAll(context.Background(), &repository.ListWorkersRequest{Search: req.Search})
+	if err != nil {
+		return 0, err
+	}
+	return len(workers), nil
+}
+
+func (r *mockWorkerRepo) GetAll(_ context.Context, req *repository.ListWorkersRequest) ([]models.Worker, error) {
 	out := make([]models.Worker, 0, len(r.workers))
 	for _, w := range r.workers {
+		if req != nil && req.Search != "" && !strings.Contains(strings.ToLower(w.Name), strings.ToLower(req.Search)) {
+			continue
+		}
 		out = append(out, *w)
+	}
+	if req != nil && (req.Offset > 0 || req.Limit > 0) {
+		start := req.Offset
+		if start > len(out) {
+			return []models.Worker{}, nil
+		}
+		end := len(out)
+		if req.Limit > 0 && start+req.Limit < end {
+			end = start + req.Limit
+		}
+		return out[start:end], nil
 	}
 	return out, nil
 }
@@ -230,4 +255,102 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkerHandler_ListWorkers_Pagination(t *testing.T) {
+	repo := newMockWorkerRepo()
+	for i := 1; i <= 5; i++ {
+		w := &models.Worker{
+			ID:          uuid.New(),
+			Name:        fmt.Sprintf("worker-%d", i),
+			RuntimeType: models.WorkerRuntimeTypePodman,
+			Status:      models.WorkerStatusReady,
+		}
+		_ = repo.Upsert(context.Background(), w)
+	}
+
+	reg := registry.New(repo)
+	handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9191)
+	router := setupWorkerRouter(handler)
+
+	t.Run("default pagination", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp catalogtypes.WorkerListResponse
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, 5, len(resp.Data))
+		assert.Equal(t, 1, resp.Pagination.Page)
+		assert.Equal(t, 20, resp.Pagination.PageSize)
+		assert.Equal(t, 5, resp.Pagination.TotalItems)
+		assert.Equal(t, 1, resp.Pagination.TotalPages)
+		assert.False(t, resp.Pagination.HasNext)
+		assert.False(t, resp.Pagination.HasPrev)
+	})
+
+	t.Run("custom page size and page", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page=1&page_size=2", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp catalogtypes.WorkerListResponse
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(resp.Data))
+		assert.Equal(t, 1, resp.Pagination.Page)
+		assert.Equal(t, 2, resp.Pagination.PageSize)
+		assert.Equal(t, 5, resp.Pagination.TotalItems)
+		assert.Equal(t, 3, resp.Pagination.TotalPages)
+		assert.True(t, resp.Pagination.HasNext)
+		assert.False(t, resp.Pagination.HasPrev)
+	})
+
+	t.Run("page 2", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page=2&page_size=2", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp catalogtypes.WorkerListResponse
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(resp.Data))
+		assert.Equal(t, 2, resp.Pagination.Page)
+		assert.True(t, resp.Pagination.HasNext)
+		assert.True(t, resp.Pagination.HasPrev)
+	})
+
+	t.Run("search with pagination", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?q=worker-1&page=1&page_size=10", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		var resp catalogtypes.WorkerListResponse
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(resp.Data))
+		assert.Equal(t, 1, resp.Pagination.TotalItems)
+		assert.Equal(t, 1, resp.Pagination.TotalPages)
+	})
+
+	t.Run("invalid page param", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page=-1", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("invalid page_size param exceeding max", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page_size=101", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
 }
