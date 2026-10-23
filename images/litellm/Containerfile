@@ -1,13 +1,7 @@
-# Builder stage
-FROM registry.access.redhat.com/ubi9/ubi:9.8 as builder
+# Base stage: shared build dependencies for the parallel stages below
+FROM registry.access.redhat.com/ubi9/ubi:9.8 as base
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
-ARG VERSION
-ARG LITELLM_SHA256
-ARG NODE_VERSION
-ARG NODE_SHA256
-ARG PROTOC_VERSION
-ARG PROTOC_SHA256
 ARG TARGETARCH
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
@@ -36,21 +30,34 @@ RUN case "${TARGETARCH}" in \
         unzip && \
     dnf clean all
 
+# 2. Install rust toolchain (shared by the wheels and prisma-engines stages)
+# RUSTC_BOOTSTRAP is needed by both the litellm wheel builds and the prisma engines
+ENV RUSTC_BOOTSTRAP=1 \
+    PATH="/root/.cargo/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+    rustup install 1.94.1 && \
+    rustup default 1.94.1
+
 WORKDIR /build
 
-COPY pre-requirements.txt patches build-prisma.sh ./
+# Litellm wheels stage (runs in parallel with the prisma-engines stage)
+FROM base as wheels
 
-# 2. Install Pre-requistes
+ARG VERSION
+ARG LITELLM_SHA256
+
+COPY pre-requirements.txt patches/pyproject-toml.patch patches/watsonx-passthrough.patch ./
+
+# 3. Install Pre-requistes
 RUN python3.12 -m pip install -r pre-requirements.txt \
 	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
 	--prefer-binary
 
-# 3. Set compiler variables for ppc64le
-ENV RUSTC_BOOTSTRAP=1 \
-    GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
+# 4. Set compiler variables for ppc64le
+ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
     GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
 
-# 4. Download litellm & patch it
+# 5. Download litellm & patch it
 RUN curl -fsSL https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz \
          -o v${VERSION}.tar.gz && \
     echo "${LITELLM_SHA256}  v${VERSION}.tar.gz" | sha256sum -c - && \
@@ -60,7 +67,7 @@ RUN curl -fsSL https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.
     patch -p1 < ../pyproject-toml.patch && \
     patch -p1 < ../watsonx-passthrough.patch && \
     uv lock && \
-# 5. Export dependencies to a requirements.txt file \
+# 6. Export dependencies to a requirements.txt file \
     uv export --no-hashes --no-dev \
 	--extra proxy \
 	--extra semantic-router \
@@ -69,21 +76,41 @@ RUN curl -fsSL https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.
 
 WORKDIR /build/litellm-${VERSION}
 
-# 6. Compile all dependencies into .whl files
+# 7. Compile all dependencies into .whl files
 RUN --mount=type=cache,target=/root/.cache/pip \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | /usr/bin/sh -s -- -y && \
-    source "$HOME/.cargo/env" && rustup install 1.94.1 && rustup default 1.94.1 && \
     python3.12 -m pip wheel -r requirements.txt \
 	-w /wheels \
 	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
 	--prefer-binary && \
     uv build --wheel --out-dir /wheels
 
-# 7. Patch & build Prisma engines, install Node.js, bake Prisma CLI
+# Prisma engines stage (runs in parallel with the wheels stage)
+FROM base as prisma-engines
+
+ARG PROTOC_VERSION
+ARG PROTOC_SHA256
+
+COPY patches/prisma ./prisma
+
+# 8. Patch & build Prisma engines
+RUN PROTOC_VERSION=${PROTOC_VERSION} PROTOC_SHA256=${PROTOC_SHA256} \
+    bash prisma/build-prisma.sh
+
+# Builder stage: needs both the wheels and the compiled engines
+FROM wheels as builder
+
+ARG NODE_VERSION
+ARG NODE_SHA256
+
 WORKDIR /build
+COPY --from=prisma-engines /build/prisma-engines/target/release/query-engine prisma-engines/target/release/query-engine
+COPY --from=prisma-engines /build/prisma-engines/target/release/schema-engine prisma-engines/target/release/schema-engine
+COPY --from=prisma-engines /build/prisma-engines/target/release/libquery_engine.so prisma-engines/target/release/libquery_engine.so
+COPY install-prisma-cli.sh ./
+
+# 9. Install Node.js and bake Prisma CLI
 RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} \
-    PROTOC_VERSION=${PROTOC_VERSION} PROTOC_SHA256=${PROTOC_SHA256} \
-    bash build-prisma.sh
+    bash install-prisma-cli.sh
 
 # Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8

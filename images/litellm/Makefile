@@ -56,6 +56,7 @@ clean:
 
 build:
 	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) \
+		--jobs 2 \
 		--build-arg VERSION=$(LITELLM_VERSION) \
 		--build-arg LITELLM_SHA256=$(LITELLM_SHA256) \
 		--build-arg NODE_VERSION=$(NODE_VERSION) \
