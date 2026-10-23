@@ -3,6 +3,7 @@ package podman
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -230,23 +231,18 @@ func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet
 }
 
 // downloadModels downloads all models in the provided set.
-// For remote workers the command is forwarded over the gRPC stream; the worker
-// resolves AI_SERVICES_BASE_DIR from its own environment to find the models
-// directory. For local deployments helpers.DownloadModelContainer is called
-// directly with the local models path.
+//
+// For remote workers the download is split into two gRPC commands to avoid
+// timing out the stream on large models:
+//  1. COMMAND_TYPE_DOWNLOAD_MODEL — launches the tools container and returns
+//     the container ID immediately.
+//  2. COMMAND_TYPE_CHECK_MODEL_DOWNLOAD — polls the container on the worker
+//     until it exits (respects ctx for cancellation).
+//
+// For local deployments helpers.DownloadModelContainer is called directly.
 func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
 	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		for modelName := range modelSet {
-			logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
-			_, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
-				Model: modelName,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to download model %s: %w", modelName, err)
-			}
-		}
-
-		return nil
+		return d.downloadModelsRemote(ctx, rt, modelSet)
 	}
 
 	modelsPath := utils.GetModelsPath()
@@ -256,6 +252,49 @@ func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string
 
 		if err := helpers.DownloadModelContainer(ctx, modelName, modelsPath); err != nil {
 			return fmt.Errorf("failed to download model %s: %w", modelName, err)
+		}
+	}
+
+	return nil
+}
+
+// downloadModelsRemote fires off all model download containers on the remote
+// worker (step 1), then waits for each one to complete (step 2).
+func (d *PodmanDeployer) downloadModelsRemote(ctx context.Context, rt *remoteruntime.RemoteRuntime, modelSet map[string]bool) error {
+	// Step 1: start all downloads, collect container IDs.
+	type modelContainer struct {
+		model       string
+		containerID string
+	}
+
+	started := make([]modelContainer, 0, len(modelSet))
+
+	for modelName := range modelSet {
+		logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
+
+		res, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
+			Model: modelName,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to start model download %s: %w", modelName, err)
+		}
+
+		var containerID string
+		if err := json.Unmarshal(res.GetData(), &containerID); err != nil {
+			return fmt.Errorf("failed to decode container ID for model %s: %w", modelName, err)
+		}
+
+		started = append(started, modelContainer{model: modelName, containerID: containerID})
+	}
+
+	// Step 2: wait for each download to complete.
+	for _, mc := range started {
+		_, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_CHECK_MODEL_DOWNLOAD, payload.CheckModelDownload{
+			Model:       mc.model,
+			ContainerID: mc.containerID,
+		})
+		if err != nil {
+			return fmt.Errorf("model download failed for %s: %w", mc.model, err)
 		}
 	}
 
