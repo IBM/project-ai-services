@@ -10,6 +10,7 @@ import (
 
 	appBootstrap "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/bootstrap"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -140,7 +141,7 @@ func validateWorkerJoinFlags(ctx context.Context) error {
 // catalog control plane, which means it cannot be managed as a standalone worker.
 func checkNotLocalWorker(ctx context.Context) error {
 	rtType := vars.RuntimeFactory.GetRuntimeType()
-	rt, err := runtime.CreateRuntime(rtType, workerconstants.WorkerAppName)
+	rt, err := runtime.CreateRuntime(rtType, catalogconstants.CatalogNamespace)
 	if err != nil {
 		return fmt.Errorf("worker join: init runtime: %w", err)
 	}
@@ -317,7 +318,7 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		}
 	case types.RuntimeTypeOpenShift:
 		var err error
-		rt, err = runtime.CreateRuntime(types.RuntimeTypeOpenShift, workerconstants.WorkerAppName)
+		rt, err = runtime.CreateRuntime(types.RuntimeTypeOpenShift, catalogconstants.CatalogNamespace)
 		if err != nil {
 			return fmt.Errorf("worker grpcstream: init runtime: %w", err)
 		}

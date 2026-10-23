@@ -1,13 +1,16 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ai-services-sa
+  # Namespace-qualified so each worker deployment on the same cluster owns its own SA.
+  name: {{ .Release.Namespace }}-sa
   namespace: {{ .Release.Namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ai-services-manager
+  # Namespace-qualified so multiple worker deployments on the same cluster each own
+  # their own ClusterRole and do not conflict on Helm release-namespace annotations.
+  name: {{ .Release.Namespace }}-manager
 rules:
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -49,26 +52,28 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ai-services-manager-binding
+  # Namespace-qualified to match the ClusterRole above.
+  name: {{ .Release.Namespace }}-manager-binding
 subjects:
   - kind: ServiceAccount
-    name: ai-services-sa
+    name: {{ .Release.Namespace }}-sa
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole
-  name: ai-services-manager
+  name: {{ .Release.Namespace }}-manager
   apiGroup: rbac.authorization.k8s.io
 ---
-# Grants the backend SA access to query the OpenShift Thanos Querier (port 9091).
+# Grants the worker SA access to query the OpenShift Thanos Querier (port 9091).
 # Without this the Thanos HTTP endpoint returns 403 Forbidden (plain text),
 # which causes a JSON parse error in GetSystemInfo.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ai-services-monitoring-view-binding
+  # Namespace-qualified so multiple worker deployments do not conflict.
+  name: {{ .Release.Namespace }}-monitoring-view-binding
 subjects:
   - kind: ServiceAccount
-    name: ai-services-sa
+    name: {{ .Release.Namespace }}-sa
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: ClusterRole

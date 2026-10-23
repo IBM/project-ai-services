@@ -38,7 +38,10 @@ const (
 
 // Catalog name constants.
 const (
-	// CatalogAppName represents the catalog name.
+	// DefaultCatalogNamespace is the default OpenShift namespace for the catalog and worker.
+	DefaultCatalogNamespace = "ai-services"
+
+	// CatalogAppName represents the catalog Helm release name and resource label value.
 	CatalogAppName = "ai-services"
 	// CatalogAppTemplate represents the catalog template name used for loading catalog infrastructure templates.
 	CatalogAppTemplate = "catalog"
@@ -68,6 +71,10 @@ const (
 	// stamped on the catalog pod.
 	CatalogComponentValue = "catalog"
 )
+
+// CatalogNamespace is the single source of truth for the OpenShift namespace
+// where the catalog (backend, DB, UI) and worker are deployed.
+var CatalogNamespace = DefaultCatalogNamespace
 
 // Pagination constants.
 const (
