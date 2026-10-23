@@ -1,0 +1,46 @@
+name: PR Title Validation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  validate-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR Title Format
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          
+          # Check if PR title matches the convention
+          if ! echo "$PR_TITLE" | grep -qE '^(feat|fix|docs|build|chore|test|perf|cicd):\s+.+'; then
+            echo "❌ PR title does not follow the naming convention!"
+            echo ""
+            echo "Expected format: type: description"
+            echo "Or with ticket: type: [TICKET-123] description"
+            echo ""
+            echo "Valid types:"
+            echo "  feat    - New feature"
+            echo "  fix     - Bug fix"
+            echo "  docs    - Documentation"
+            echo "  build   - Build/dependencies"
+            echo "  chore   - Maintenance"
+            echo "  test    - Tests"
+            echo "  perf    - Performance"
+            echo "  cicd    - CI/CD"
+            echo ""
+            echo "Examples:"
+            echo "  feat: Add user authentication"
+            echo "  fix: [AISERVICES-123] Resolve memory leak"
+            echo "  docs: Update installation guide"
+            echo ""
+            echo "Your PR title: $PR_TITLE"
+            echo ""
+            echo "See docs/PR_NAMING_CONVENTION.md for details"
+            exit 1
+          fi
+          
+          echo "✅ PR title follows the naming convention"
+          echo "PR title: $PR_TITLE"
+
+# Made with Bob
