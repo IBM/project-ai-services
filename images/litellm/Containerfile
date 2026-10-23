@@ -1,8 +1,9 @@
-# Base stage: shared build dependencies for the parallel stages below
+#### Base stage: shared build dependencies for the parallel stages below
 FROM registry.access.redhat.com/ubi9/ubi:9.8 as base
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 ARG TARGETARCH
+ARG RUST_VERSION
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
 # Derive RPM_ARCH, NODE_ARCH and SKIP_CHECKSUM from the builder-provided TARGETARCH.
@@ -35,56 +36,27 @@ RUN case "${TARGETARCH}" in \
 ENV RUSTC_BOOTSTRAP=1 \
     PATH="/root/.cargo/bin:${PATH}"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-    rustup install 1.94.1 && \
-    rustup default 1.94.1
+    rustup install ${RUST_VERSION} && \
+    rustup default ${RUST_VERSION}
 
 WORKDIR /build
 
-# Litellm wheels stage (runs in parallel with the prisma-engines stage)
+#### Litellm wheels stage (runs in parallel with the prisma-engines stage)
 FROM base as wheels
 
 ARG VERSION
 ARG LITELLM_SHA256
 
-COPY pre-requirements.txt patches/pyproject-toml.patch patches/watsonx-passthrough.patch ./
+COPY pre-requirements.txt \
+     patches/litellm/build-litellm.sh \
+     patches/litellm/*.patch \
+     ./
 
-# 3. Install Pre-requistes
-RUN python3.12 -m pip install -r pre-requirements.txt \
-	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
-	--prefer-binary
-
-# 4. Set compiler variables for ppc64le
-ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
-    GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
-
-# 5. Download litellm & patch it
-RUN curl -fsSL https://github.com/BerriAI/litellm/archive/refs/tags/v${VERSION}.tar.gz \
-         -o v${VERSION}.tar.gz && \
-    echo "${LITELLM_SHA256}  v${VERSION}.tar.gz" | sha256sum -c - && \
-    tar -xzf v${VERSION}.tar.gz && \
-    rm v${VERSION}.tar.gz && \
-    cd litellm-${VERSION} && \
-    patch -p1 < ../pyproject-toml.patch && \
-    patch -p1 < ../watsonx-passthrough.patch && \
-    uv lock && \
-# 6. Export dependencies to a requirements.txt file \
-    uv export --no-hashes --no-dev \
-	--extra proxy \
-	--extra semantic-router \
-	-o requirements.txt && \
-    cat requirements.txt
-
-WORKDIR /build/litellm-${VERSION}
-
-# 7. Compile all dependencies into .whl files
+# 3. Download, patch and compile litellm and its dependencies into wheels
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3.12 -m pip wheel -r requirements.txt \
-	-w /wheels \
-	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
-	--prefer-binary && \
-    uv build --wheel --out-dir /wheels
+    bash build-litellm.sh
 
-# Prisma engines stage (runs in parallel with the wheels stage)
+#### Prisma engines stage (runs in parallel with the wheels stage)
 FROM base as prisma-engines
 
 ARG PROTOC_VERSION
@@ -92,11 +64,11 @@ ARG PROTOC_SHA256
 
 COPY patches/prisma ./prisma
 
-# 8. Patch & build Prisma engines
+# 4. Patch & build Prisma engines
 RUN PROTOC_VERSION=${PROTOC_VERSION} PROTOC_SHA256=${PROTOC_SHA256} \
     bash prisma/build-prisma.sh
 
-# Builder stage: needs both the wheels and the compiled engines
+#### Builder stage: needs both the wheels and the compiled engines
 FROM wheels as builder
 
 ARG NODE_VERSION
@@ -108,11 +80,11 @@ COPY --from=prisma-engines /build/prisma-engines/target/release/schema-engine pr
 COPY --from=prisma-engines /build/prisma-engines/target/release/libquery_engine.so prisma-engines/target/release/libquery_engine.so
 COPY install-prisma-cli.sh ./
 
-# 9. Install Node.js and bake Prisma CLI
+# 5. Install Node.js and bake Prisma CLI
 RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} \
     bash install-prisma-cli.sh
 
-# Runtime Stage
+#### Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 ARG VERSION=${VERSION}

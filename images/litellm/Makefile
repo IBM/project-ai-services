@@ -1,8 +1,8 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=litellm
 # When updating LITELLM_VERSION:
-# 1. Run update-patch to regenerate patches/pyproject-toml.patch
-# 2. Manually update patches/watsonx-passthrough.patch if the patched file changed upstream
+# 1. Run update-patch to regenerate patches/litellm/pyproject-toml.patch
+# 2. Manually update patches/litellm/watsonx-passthrough.patch if the patched file changed upstream
 # 3. Run verify-patch to confirm all patches apply cleanly
 # 4. Run update-checksums to regenerate the checksums
 LITELLM_VERSION?=1.106.2
@@ -11,6 +11,8 @@ IMAGE_REVISION?=0
 # Node.js version for baking Prisma CLI — Active LTS version
 NODE_VERSION?=24.21.0
 NODE_SHA256?=51c5d53066ee92920b61783b03b06ecb99f3661160f7b15ca77e8474115a67bc
+# Rust toolchain version used to build the litellm wheels and the prisma engines
+RUST_VERSION?=1.94.1
 # protoc version from https://github.com/protocolbuffers/protobuf/releases
 # PROTOC_SHA256 is the sha256 of protoc-$(PROTOC_VERSION)-linux-ppcle_64.zip
 PROTOC_VERSION?=34.1
@@ -61,6 +63,7 @@ build:
 		--build-arg LITELLM_SHA256=$(LITELLM_SHA256) \
 		--build-arg NODE_VERSION=$(NODE_VERSION) \
 		--build-arg NODE_SHA256=$(NODE_SHA256) \
+		--build-arg RUST_VERSION=$(RUST_VERSION) \
 		--build-arg PROTOC_VERSION=$(PROTOC_VERSION) \
 		--build-arg PROTOC_SHA256=$(PROTOC_SHA256) \
 		.
@@ -75,13 +78,13 @@ image-tag:
 .PHONY: image-tag
 
 update-patch:
-	cd ./patches && ./pyproject-toml.sh $(LITELLM_VERSION)
+	cd ./patches/litellm && ./pyproject-toml.sh $(LITELLM_VERSION)
 .PHONY: update-patch
 
 # Fetch the upstream source files for LITELLM_VERSION, apply each patch, and
 # show the resulting diff so you can confirm the patches apply cleanly.
 verify-patch:
-	./patches/verify-patch.sh $(LITELLM_VERSION)
+	./patches/litellm/verify-patch.sh $(LITELLM_VERSION)
 .PHONY: verify-patch
 
 update-checksums:
