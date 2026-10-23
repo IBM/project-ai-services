@@ -3,8 +3,8 @@ package podman
 import (
 	"strings"
 
-	"github.com/containers/podman/v5/libpod/define"
-	podmanTypes "github.com/containers/podman/v5/pkg/domain/entities/types"
+	"go.podman.io/podman/v6/libpod/define"
+	podmanTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 

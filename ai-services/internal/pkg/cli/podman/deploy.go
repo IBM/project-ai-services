@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "github.com/containers/podman/v5/pkg/k8s.io/api/core/v1"
+	v1 "go.podman.io/podman/v6/pkg/k8s.io/api/core/v1"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
