@@ -292,6 +292,7 @@ type PodmanOptions struct {
 	DomainName        string
 	GatewayAddr       string
 	WorkerGatewayPort int
+	LocalWorker       bool // reflects the LOCAL_WORKER env var baked into the running container
 }
 
 // ExtractPodConfigFromEnv populates PodmanOptions from the container environment variables.
@@ -314,6 +315,10 @@ func ExtractPodConfigFromEnv(env map[string]string, opts *PodmanOptions) {
 
 	if value, ok := env["WORKER_GATEWAY_PORT"]; ok {
 		opts.WorkerGatewayPort, _ = strconv.Atoi(value)
+	}
+
+	if value, ok := env["LOCAL_WORKER"]; ok {
+		opts.LocalWorker = value == "true"
 	}
 }
 
