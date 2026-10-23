@@ -5,12 +5,14 @@ on:
       - 'images/service-base/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/service-base/**'
       - .github/workflows/service-base.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
