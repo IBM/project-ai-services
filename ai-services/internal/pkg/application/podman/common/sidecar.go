@@ -6,11 +6,11 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/google/uuid"
 	"go.podman.io/podman/v6/pkg/bindings/containers"
 	"go.podman.io/podman/v6/pkg/bindings/pods"
 	"go.podman.io/podman/v6/pkg/bindings/secrets"
 	"go.podman.io/podman/v6/pkg/specgen"
-	"github.com/google/uuid"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
