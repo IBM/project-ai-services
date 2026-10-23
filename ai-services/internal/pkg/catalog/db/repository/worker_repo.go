@@ -22,6 +22,13 @@ type WorkerUpdate struct {
 	Message       *string
 }
 
+// workerStatusPriority ranks workers for listing: disconnected first, then pending, then ready.
+var workerStatusPriority = buildStatusPriorityCase("status",
+	[]string{string(models.WorkerStatusDisconnected)},
+	[]string{string(models.WorkerStatusPending)},
+	[]string{string(models.WorkerStatusReady)},
+)
+
 // workerSearchColumns defines the columns searched when a ?q= term is provided.
 // Add column names here to extend search to additional fields in future.
 var workerSearchColumns = []string{"name"}
@@ -158,7 +165,7 @@ func buildGetAllWorkerQuery(req *ListWorkersRequest) (string, []interface{}) {
 		query += " WHERE " + buildSearchClause(workerSearchColumns, &args, req.Search)
 	}
 
-	query += " ORDER BY registered_at ASC"
+	query += " ORDER BY " + workerStatusPriority + ", registered_at ASC"
 
 	return query, args
 }
