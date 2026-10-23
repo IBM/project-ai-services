@@ -146,14 +146,28 @@ const DeployedServicesTable = ({
       }));
   }, [services]);
 
-  // Fetch deployed services data
+  // hasTransitionalRow activates the additional 5-second poll whenever any
+  // row is in a transitional state (Deploying or Deleting).
+  const hasTransitionalRow = state.rowsData.some(
+    (row) =>
+      row.status === "Deploying" ||
+      row.status === "Deleting" ||
+      row.status === "Downloading",
+  );
+  const hasTransitionalRowRef = useRef(hasTransitionalRow);
+  hasTransitionalRowRef.current = hasTransitionalRow;
+
+  // Fetch deployed services data.
   const fetchDeployedServices = useCallback(
     async (
       page = pageRef.current,
       pageSize = pageSizeRef.current,
       selectedServices = selectedServicesRef.current,
     ) => {
-      dispatch({ type: "SHARED_SET_LOADING", payload: true });
+      // Skip the skeleton while rows are transitional so polling updates statuses in place
+      if (!hasTransitionalRowRef.current) {
+        dispatch({ type: "SHARED_SET_LOADING", payload: true });
+      }
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
@@ -198,15 +212,6 @@ const DeployedServicesTable = ({
   );
 
   // Mount fetch + 2-minute auto-refresh interval (shared hook).
-  // hasTransitionalRow activates the additional 5-second poll whenever any
-  // row is in a transitional state (Deploying or Deleting).
-  const hasTransitionalRow = state.rowsData.some(
-    (row) =>
-      row.status === "Deploying" ||
-      row.status === "Deleting" ||
-      row.status === "Downloading",
-  );
-
   useAutoRefresh({
     fetchFn: fetchDeployedServices,
     hasData: state.rowsData.length > 0,
