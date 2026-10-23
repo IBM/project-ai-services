@@ -8,10 +8,16 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/text/unicode/norm"
 )
+
+// maxCertifiedByLen is the maximum number of characters allowed in certified_by.
+const maxCertifiedByLen = 64
 
 // Catalog type constants shared across the bundle pipeline.
 const (
@@ -135,17 +141,69 @@ func parseComponentMetadataYAML(data []byte) (*ComponentMetadataYAML, error) {
 	return &m, nil
 }
 
-// validateCertifiedBy returns a ValidationError when certified_by is set to "IBM"
-// (case-insensitive). IBM is a reserved value that must not be used by external bundles.
+// validateCertifiedBy returns a ValidationError when certified_by contains characters
+// outside the allow-list (letters, digits, space and . , & ' - _ ( )), exceeds
+// maxCertifiedByLen characters, equals "IBM" (ignoring case, spaces and punctuation),
+// or is not already in normalized form (NFKC, no leading, trailing or repeated spaces).
+// The catalog serves the raw metadata.yaml value, so the value is rejected rather than
+// cleaned: the validated value is always the served value.
+// IBM is a reserved value that must not be used by external bundles.
 func validateCertifiedBy(certifiedBy string) error {
-	if strings.EqualFold(certifiedBy, "IBM") {
+	for _, r := range certifiedBy {
+		if !isAllowedCertifiedByRune(r) {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: fmt.Sprintf("metadata.yaml: 'certified_by' contains an unsupported character %q", r),
+			}
+		}
+	}
+
+	// Only letters, digits and plain spaces/punctuation remain, so Fields safely trims and collapses spaces.
+	normalized := strings.Join(strings.Fields(norm.NFKC.String(certifiedBy)), " ")
+
+	if isReservedCertifiedBy(normalized) {
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: "metadata.yaml: 'certified_by' must not be \"IBM\"",
 		}
 	}
 
+	if normalized != certifiedBy {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "metadata.yaml: 'certified_by' must not contain leading, trailing or repeated spaces or compatibility characters",
+		}
+	}
+
+	if utf8.RuneCountInString(certifiedBy) > maxCertifiedByLen {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("metadata.yaml: 'certified_by' must not exceed %d characters", maxCertifiedByLen),
+		}
+	}
+
 	return nil
+}
+
+// isAllowedCertifiedByRune reports whether r is permitted in certified_by.
+func isAllowedCertifiedByRune(r rune) bool {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		return true
+	}
+
+	return strings.ContainsRune(" .,&'-_()", r)
+}
+
+// isReservedCertifiedBy reports whether s is "IBM" once case, spaces and punctuation are ignored.
+func isReservedCertifiedBy(s string) bool {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+
+	return strings.EqualFold(b.String(), "IBM")
 }
 
 // validateCommonFields checks the fields required for every bundle type.
