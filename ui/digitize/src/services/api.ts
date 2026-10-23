@@ -1,13 +1,13 @@
-import axios, { AxiosResponse } from 'axios';
+import axios, { AxiosResponse } from "axios";
 
 // Use relative URL to leverage Vite's proxy configuration
 // This avoids CORS issues by routing through the dev server
-const API_BASE_URL = '/v1';
+const API_BASE_URL = "/v1";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
@@ -89,22 +89,22 @@ export interface ListDocumentsParams {
 // Document Upload and Processing
 export const uploadDocuments = async (
   files: File[],
-  operation: string = 'ingestion',
-  outputFormat: string = 'json',
-  jobName?: string
+  operation: string = "ingestion",
+  outputFormat: string = "json",
+  jobName?: string,
 ): Promise<UploadResponse> => {
   const formData = new FormData();
-  files.forEach(file => {
-    formData.append('files', file);
+  files.forEach((file) => {
+    formData.append("files", file);
   });
 
   let url = `/jobs?operation=${operation}`;
-  
+
   // Only include output_format for digitization operations
-  if (operation === 'digitization') {
+  if (operation === "digitization") {
     url += `&output_format=${outputFormat}`;
   }
-  
+
   if (jobName) {
     url += `&job_name=${encodeURIComponent(jobName)}`;
   }
@@ -114,30 +114,40 @@ export const uploadDocuments = async (
     formData,
     {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        "Content-Type": "multipart/form-data",
       },
-    }
+    },
   );
   return response.data;
 };
 
 // Job Management
-export const getAllJobs = async (params: GetJobsParams = {}): Promise<JobsResponse> => {
-  const { latest = false, limit = 20, offset = 0, status = null, operation = null } = params;
+export const getAllJobs = async (
+  params: GetJobsParams = {},
+): Promise<JobsResponse> => {
+  const {
+    latest = false,
+    limit = 20,
+    offset = 0,
+    status = null,
+    operation = null,
+  } = params;
   const queryParams = new URLSearchParams({
     latest: latest.toString(),
     limit: limit.toString(),
     offset: offset.toString(),
   });
-  
+
   if (status) {
-    queryParams.append('status', status);
+    queryParams.append("status", status);
   }
   if (operation) {
-    queryParams.append('operation', operation);
+    queryParams.append("operation", operation);
   }
 
-  const response: AxiosResponse<JobsResponse> = await api.get(`/jobs?${queryParams}`);
+  const response: AxiosResponse<JobsResponse> = await api.get(
+    `/jobs?${queryParams}`,
+  );
   return response.data;
 };
 
@@ -147,65 +157,99 @@ export const getJobById = async (jobId: string): Promise<Job> => {
 };
 
 // Document Management
-export const listDocuments = async (params: ListDocumentsParams = {}): Promise<DocumentsResponse> => {
+export const listDocuments = async (
+  params: ListDocumentsParams = {},
+): Promise<DocumentsResponse> => {
   const { limit = 20, offset = 0, status = null, name = null } = params;
   const queryParams = new URLSearchParams({
     limit: limit.toString(),
     offset: offset.toString(),
   });
-  
+
   if (status) {
-    queryParams.append('status', status);
+    queryParams.append("status", status);
   }
   if (name) {
-    queryParams.append('name', name);
+    queryParams.append("name", name);
   }
 
-  const response: AxiosResponse<DocumentsResponse> = await api.get(`/documents?${queryParams}`);
+  const response: AxiosResponse<DocumentsResponse> = await api.get(
+    `/documents?${queryParams}`,
+  );
   return response.data;
 };
 
-export async function getDocumentMetadata(docId: string, details: true): Promise<DocumentDetail>;
-export async function getDocumentMetadata(docId: string, details?: false): Promise<Document>;
-export async function getDocumentMetadata(docId: string, details: boolean = false): Promise<Document | DocumentDetail> {
-  const response: AxiosResponse<Document | DocumentDetail> = await api.get(`/documents/${docId}?details=${details}`);
+export async function getDocumentMetadata(
+  docId: string,
+  details: true,
+): Promise<DocumentDetail>;
+export async function getDocumentMetadata(
+  docId: string,
+  details?: false,
+): Promise<Document>;
+export async function getDocumentMetadata(
+  docId: string,
+  details: boolean = false,
+): Promise<Document | DocumentDetail> {
+  const response: AxiosResponse<Document | DocumentDetail> = await api.get(
+    `/documents/${docId}?details=${details}`,
+  );
   return response.data;
 }
 
-
 export const getDocumentContent = async (docId: string): Promise<any> => {
-  const response: AxiosResponse<any> = await api.get(`/documents/${docId}/content`);
+  const response: AxiosResponse<any> = await api.get(
+    `/documents/${docId}/content`,
+  );
   return response.data;
 };
 
-export const deleteDocument = async (docId: string): Promise<{ message: string }> => {
-  const response: AxiosResponse<{ message: string }> = await api.delete(`/documents/${docId}`);
+export const deleteDocument = async (
+  docId: string,
+): Promise<{ message: string }> => {
+  const response: AxiosResponse<{ message: string }> = await api.delete(
+    `/documents/${docId}`,
+  );
   return response.data;
 };
 
 export const bulkDeleteDocuments = async (): Promise<{ message: string }> => {
-  const response: AxiosResponse<{ message: string }> = await api.delete('/documents?confirm=true');
+  const response: AxiosResponse<{ message: string }> = await api.delete(
+    "/documents?confirm=true",
+  );
   return response.data;
 };
 
-export const deleteJob = async (jobId: string): Promise<{ message: string }> => {
-  const response: AxiosResponse<{ message: string }> = await api.delete(`/jobs/${jobId}`);
+export const deleteJob = async (
+  jobId: string,
+): Promise<{ message: string }> => {
+  const response: AxiosResponse<{ message: string }> = await api.delete(
+    `/jobs/${jobId}`,
+  );
   return response.data;
 };
 
-export const bulkDeleteJobs = async (jobIds: string[]): Promise<{ message: string }> => {
-  const response: AxiosResponse<{ message: string }> = await api.post('/jobs/bulk-delete', {
-    job_ids: jobIds,
-  });
+export const bulkDeleteJobs = async (
+  jobIds: string[],
+): Promise<{ message: string }> => {
+  const response: AxiosResponse<{ message: string }> = await api.post(
+    "/jobs/bulk-delete",
+    {
+      job_ids: jobIds,
+    },
+  );
   return response.data;
 };
 
-export const cancelJob = async (jobId: string): Promise<{ message: string }> => {
-  const response: AxiosResponse<{ message: string }> = await api.post(`/jobs/${jobId}/cancel`);
+export const cancelJob = async (
+  jobId: string,
+): Promise<{ message: string }> => {
+  const response: AxiosResponse<{ message: string }> = await api.post(
+    `/jobs/${jobId}/cancel`,
+  );
   return response.data;
 };
 
 export default api;
 
 // Made with Bob
-

@@ -17,11 +17,13 @@ A modern React application built with IBM Carbon Design System to provide a user
 ## Installation
 
 1. Navigate to the ui/digitize directory:
+
 ```bash
 cd ui/digitize
 ```
 
 2. Install dependencies:
+
 ```bash
 npm install
 ```
@@ -33,11 +35,13 @@ The application uses environment variables for configuration.
 ### Quick Setup
 
 1. Copy the example environment file:
+
 ```bash
 cp .env.example .env.local
 ```
 
 2. Edit `.env.local` to configure your API target:
+
 ```env
 VITE_API_TARGET=http://localhost:4000
 VITE_PORT=3000
@@ -53,11 +57,13 @@ For detailed configuration instructions, see [.env.README.md](.env.README.md).
 ### Examples
 
 **Local backend (default):**
+
 ```env
 VITE_API_TARGET=http://localhost:4000
 ```
 
 **Remote development server:**
+
 ```env
 VITE_API_TARGET=http://dev-server.example.com:4000
 ```
@@ -69,6 +75,7 @@ VITE_API_TARGET=http://dev-server.example.com:4000
 ### Development Mode
 
 Start the development server:
+
 ```bash
 npm run dev
 ```
@@ -78,11 +85,13 @@ The application will be available at `http://localhost:3000`
 ### Production Build
 
 Build the application for production:
+
 ```bash
 npm run build
 ```
 
 Preview the production build:
+
 ```bash
 npm run preview
 ```
@@ -129,7 +138,7 @@ The UI communicates with the following backend endpoints:
 
 ## Technology Stack
 
-- **React 18**: Modern React with hooks
+- **React 19**: Modern React with hooks
 - **IBM Carbon Design System**: Professional UI components
 - **Vite**: Fast build tool and dev server
 - **React Router**: Client-side routing
@@ -153,7 +162,7 @@ ui/digitize/
 │   ├── App.scss           # Global styles
 │   └── main.jsx           # Application entry point
 ├── index.html             # HTML template
-├── vite.config.js         # Vite configuration
+├── vite.config.ts         # Vite configuration
 └── package.json           # Project dependencies
 ```
 
@@ -175,13 +184,15 @@ The application uses IBM Carbon Design System's theming. Global styles are in `s
 ### Backend Connection Issues
 
 If you see connection errors:
+
 1. Ensure the backend service is running on port 4000
-2. Check the proxy configuration in `vite.config.js`
+2. Check the proxy configuration in `vite.config.ts`
 3. Verify CORS settings on the backend
 
 ### Build Issues
 
 If you encounter build errors:
+
 1. Delete `node_modules` and `package-lock.json`
 2. Run `npm install` again
 3. Clear Vite cache: `rm -rf node_modules/.vite`
@@ -198,9 +209,4 @@ This project is part of the IBM Project AI Services.
 
 `react-table` v7 is unmaintained — in v8 it was moved to `@tanstack/react-table`, which Carbon has not yet adopted. **Remove this override once `@carbon/ibm-products` migrates to `@tanstack/react-table`.**
 
-### `source-map-js` override in `package.json`
-
-`source-map-js` is a transitive dependency pulled in by `sass` and `postcss`. Both pin it at `^1.2.1`, which resolves to `1.2.1` on a fresh install. The `overrides` entry forces it to `^1.2.2` to pick up the security fix released in that version. **Remove this override once `sass` and `postcss` raise their own floor to `>=1.2.2`.**
-
 ---
-
