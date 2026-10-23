@@ -1034,7 +1034,7 @@ class TestDatabaseManagerFindCompletedDocumentByHash:
 class TestDatabaseManagerDeleteDocumentClearsChecksum:
     """delete_document must remove the checksum registry entry and shadow docs before deleting the doc."""
 
-    def test_execute_called_three_times(self):
+    def test_execute_called_four_times(self):
         session = MagicMock()
         session.execute.return_value = Mock(rowcount=1)
 
@@ -1044,13 +1044,14 @@ class TestDatabaseManagerDeleteDocumentClearsChecksum:
 
         # 1st execute: registry delete.
         # 2nd execute: shadow already_exists docs delete.
-        # 3rd execute: document delete.
-        assert session.execute.call_count == 3
+        # 3rd execute: conversion_tasks delete.
+        # 4th execute: document delete.
+        assert session.execute.call_count == 4
 
     def test_returns_true_when_deleted(self):
         session = MagicMock()
-        # registry delete, shadow docs delete (rowcount irrelevant), doc delete rowcount=1
-        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=1)]
+        # registry delete, shadow docs delete, conversion_tasks delete, doc delete rowcount=1
+        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=1)]
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
@@ -1060,7 +1061,7 @@ class TestDatabaseManagerDeleteDocumentClearsChecksum:
 
     def test_returns_false_when_not_found(self):
         session = MagicMock()
-        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=0)]
+        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=0)]
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
@@ -1106,7 +1107,7 @@ class TestDatabaseManagerDeleteUserDocuments:
         assert session.execute.call_count == 0
         assert result == {"deleted_count": 0, "doc_ids": [], "success": True}
 
-    def test_execute_called_three_times_when_user_docs_exist(self):
+    def test_execute_called_four_times_when_user_docs_exist(self):
         session = MagicMock()
         session.scalars.return_value = Mock(all=Mock(return_value=["doc-1", "doc-2"]))
         session.execute.return_value = Mock(rowcount=2)
@@ -1117,13 +1118,14 @@ class TestDatabaseManagerDeleteUserDocuments:
 
         # 1st execute: delete checksum registry rows.
         # 2nd execute: delete shadow already_exists docs.
-        # 3rd execute: delete the documents themselves.
-        assert session.execute.call_count == 3
+        # 3rd execute: delete conversion_tasks rows.
+        # 4th execute: delete the documents themselves.
+        assert session.execute.call_count == 4
 
     def test_returns_deleted_count(self):
         session = MagicMock()
         session.scalars.return_value = Mock(all=Mock(return_value=["doc-1", "doc-2"]))
-        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=2)]
+        session.execute.side_effect = [Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=0), Mock(rowcount=2)]
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
@@ -1131,6 +1133,55 @@ class TestDatabaseManagerDeleteUserDocuments:
 
         assert result["deleted_count"] == 2
         assert result["success"] is True
+
+    def test_conversion_tasks_purged_before_document_delete(self):
+        """conversion_tasks rows must be deleted in the same session before the
+        Document rows are removed, so no orphaned tasks survive a bulk delete."""
+        from sqlalchemy.sql.expression import Delete
+        from digitize.db.models import ConversionTask, Document
+
+        session = MagicMock()
+        session.scalars.return_value = Mock(all=Mock(return_value=["doc-a", "doc-b"]))
+        session.execute.return_value = Mock(rowcount=0)
+
+        captured: list = []
+        orig_execute = session.execute.side_effect
+
+        def capture(stmt, *a, **kw):
+            captured.append(stmt)
+            return Mock(rowcount=2 if len(captured) == 4 else 0)
+
+        session.execute.side_effect = capture
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
+            from digitize.db.manager import DatabaseManager
+            DatabaseManager.delete_user_documents()
+
+        # Verify that a DELETE against ConversionTask appears (3rd call, index 2)
+        # and a DELETE against Document appears as the last call (index 3).
+        assert len(captured) == 4
+        ct_stmt = captured[2]
+        doc_stmt = captured[3]
+        assert isinstance(ct_stmt, Delete)
+        assert isinstance(doc_stmt, Delete)
+        # Confirm the tables targeted are ConversionTask and Document respectively.
+        # Use == (structural equality) rather than `is` — the model may be imported
+        # under two different module paths during test collection, yielding distinct
+        # but equivalent Table objects.
+        assert ct_stmt.table == ConversionTask.__table__
+        assert doc_stmt.table == Document.__table__
+
+    def test_conversion_tasks_not_deleted_when_no_user_docs(self):
+        """When there are no user-submitted docs, no execute calls are made at all —
+        including no attempt to delete conversion_tasks."""
+        session = MagicMock()
+        session.scalars.return_value = Mock(all=Mock(return_value=[]))
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
+            from digitize.db.manager import DatabaseManager
+            DatabaseManager.delete_user_documents()
+
+        assert session.execute.call_count == 0
 
 
 @pytest.mark.unit
