@@ -136,11 +136,12 @@ func ValidateStatusAndUnmarshal(body []byte, statusCode, expectedStatus int, v a
 
 // ErrorResponse is the standard API error envelope.
 // Shape: {"error":{"code":N,"message":"...","status":"..."}}.
+// Note: code may be an integer (most services) or a string (extract service).
 type ErrorResponse struct {
 	Error struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		Status  string `json:"status"` // e.g. "UNSUPPORTED_FILE_TYPE"
+		Code    interface{} `json:"code"`
+		Message string      `json:"message"`
+		Status  interface{} `json:"status"` // int or string depending on service
 	} `json:"error,omitempty"`
 }
 
@@ -257,3 +258,4 @@ func SummaryContainsAnyKeyword(summary string, keywords []string) (string, bool)
 
 	return "", false
 }
+
