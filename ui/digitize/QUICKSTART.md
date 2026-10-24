@@ -3,6 +3,7 @@
 ## Prerequisites
 
 1. **Node.js and npm**: Ensure you have Node.js 18+ installed
+
    ```bash
    node --version  # Should be 18.x or higher
    npm --version
@@ -19,16 +20,19 @@
 ## Installation & Setup
 
 1. **Navigate to the UI directory**:
+
    ```bash
    cd ui/digitize
    ```
 
 2. **Install dependencies**:
+
    ```bash
    npm install
    ```
 
 3. **Start the development server**:
+
    ```bash
    npm run dev
    ```
@@ -75,13 +79,13 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/v1': {
-        target: 'http://your-backend-host:port',  // Change this
+      "/v1": {
+        target: "http://your-backend-host:port", // Change this
         changeOrigin: true,
-      }
-    }
-  }
-})
+      },
+    },
+  },
+});
 ```
 
 ## Troubleshooting
@@ -106,11 +110,13 @@ export default defineConfig({
 ## Production Deployment
 
 1. **Build the application**:
+
    ```bash
    npm run build
    ```
 
 2. **Preview the build**:
+
    ```bash
    npm run preview
    ```
@@ -128,12 +134,13 @@ VITE_API_BASE_URL=http://localhost:4000
 Then update `src/services/api.js`:
 
 ```javascript
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/v1";
 ```
 
 ## Support
 
 For issues or questions:
+
 - Check the main README.md for detailed documentation
 - Review the backend API documentation
 - Check the browser console for error messages

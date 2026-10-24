@@ -1,8 +1,8 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
-import { ThemeProvider } from './contexts/ThemeProvider';
-import MainLayout from './layouts/MainLayout';
-import JobMonitorPage from './pages/JobMonitorPage';
-import DocumentListPage from './pages/DocumentListPage';
+import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { ThemeProvider } from "./contexts/ThemeProvider";
+import MainLayout from "./layouts/MainLayout";
+import JobMonitorPage from "./pages/JobMonitorPage";
+import DocumentListPage from "./pages/DocumentListPage";
 
 function App() {
   return (
@@ -10,7 +10,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Navigate to="/jobs" replace />} />
-          
+
           <Route element={<MainLayout />}>
             <Route path="/jobs" element={<JobMonitorPage />} />
             <Route path="/documents" element={<DocumentListPage />} />
