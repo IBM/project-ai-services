@@ -1,5 +1,3 @@
-FROM localhost/prebuilder as prebuilder
-
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 RUN microdnf install -y python3.12-devel \
