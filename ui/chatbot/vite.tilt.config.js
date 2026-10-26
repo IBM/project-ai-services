@@ -2,7 +2,6 @@
 // It reuses vite.config.js but sends chat requests to the chatbot service and
 // similarity-search requests to the similarity service, like the production nginx does.
 import { defineConfig } from 'vite';
-
 import baseConfig from './vite.config.js';
 
 const chatbotUrl = process.env.RAG_CHATBOT_URL || 'http://localhost:5000';
