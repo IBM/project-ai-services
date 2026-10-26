@@ -2,6 +2,7 @@ package validators
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -477,7 +478,7 @@ func validateConnectorInDB(
 ) error {
 	connector, err := connectorRepo.GetByID(ctx, connectorID, false)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return &ValidationError{
 				Code:    http.StatusBadRequest,
 				Message: fmt.Sprintf("connector %q referenced in service %q not found", ref.ID, serviceCatalogID),

@@ -6,7 +6,7 @@ import (
 	"text/template"
 	"time"
 
-	v1 "github.com/containers/podman/v5/pkg/k8s.io/api/core/v1"
+	v1 "go.podman.io/podman/v6/pkg/k8s.io/api/core/v1"
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/stretchr/testify/assert"
