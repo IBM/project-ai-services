@@ -145,8 +145,8 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 		checkBody      func(t *testing.T, w *httptest.ResponseRecorder)
 	}{
 		{
-			name: "success - new worker registered",
-			body: `{"worker_name": "worker-1"}`,
+			name:           "success - new worker registered",
+			body:           `{"worker_name": "worker-1"}`,
 			wantStatusCode: http.StatusCreated,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp createWorkerResp
@@ -164,7 +164,7 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 				_, err = reg.Register(context.Background(), "worker-ready", "podman", nil)
 				require.NoError(t, err)
 			},
-			body: `{"worker_name": "worker-ready"}`,
+			body:           `{"worker_name": "worker-ready"}`,
 			wantStatusCode: http.StatusConflict,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp map[string]string
@@ -182,7 +182,7 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 				require.NoError(t, err)
 				reg.Disconnect(context.Background(), "worker-disc")
 			},
-			body: `{"worker_name": "worker-disc"}`,
+			body:           `{"worker_name": "worker-disc"}`,
 			wantStatusCode: http.StatusCreated,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp createWorkerResp
@@ -198,7 +198,7 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 				_, err := reg.Preregister(context.Background(), "worker-pending")
 				require.NoError(t, err)
 			},
-			body: `{"worker_name": "worker-pending"}`,
+			body:           `{"worker_name": "worker-pending"}`,
 			wantStatusCode: http.StatusCreated,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp createWorkerResp
@@ -273,84 +273,95 @@ func TestWorkerHandler_ListWorkers_Pagination(t *testing.T) {
 	handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9191)
 	router := setupWorkerRouter(handler)
 
-	t.Run("default pagination", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers", nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+	tests := []struct {
+		name           string
+		query          string
+		wantStatusCode int
+		wantCount      int
+		wantPage       int
+		wantPageSize   int
+		wantTotalItems int
+		wantTotalPages int
+		wantHasNext    bool
+		wantHasPrev    bool
+	}{
+		{
+			name:           "default pagination",
+			query:          "",
+			wantStatusCode: http.StatusOK,
+			wantCount:      5,
+			wantPage:       1,
+			wantPageSize:   20,
+			wantTotalItems: 5,
+			wantTotalPages: 1,
+		},
+		{
+			name:           "custom page size and page",
+			query:          "?page=1&page_size=2",
+			wantStatusCode: http.StatusOK,
+			wantCount:      2,
+			wantPage:       1,
+			wantPageSize:   2,
+			wantTotalItems: 5,
+			wantTotalPages: 3,
+			wantHasNext:    true,
+		},
+		{
+			name:           "page 2",
+			query:          "?page=2&page_size=2",
+			wantStatusCode: http.StatusOK,
+			wantCount:      2,
+			wantPage:       2,
+			wantPageSize:   2,
+			wantTotalItems: 5,
+			wantTotalPages: 3,
+			wantHasNext:    true,
+			wantHasPrev:    true,
+		},
+		{
+			name:           "search with pagination",
+			query:          "?q=worker-1&page=1&page_size=10",
+			wantStatusCode: http.StatusOK,
+			wantCount:      1,
+			wantPage:       1,
+			wantPageSize:   10,
+			wantTotalItems: 1,
+			wantTotalPages: 1,
+		},
+		{
+			name:           "invalid page param",
+			query:          "?page=-1",
+			wantStatusCode: http.StatusBadRequest,
+		},
+		{
+			name:           "invalid page_size param exceeding max",
+			query:          "?page_size=101",
+			wantStatusCode: http.StatusBadRequest,
+		},
+	}
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		var resp catalogtypes.WorkerListResponse
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-		assert.Equal(t, 5, len(resp.Data))
-		assert.Equal(t, 1, resp.Pagination.Page)
-		assert.Equal(t, 20, resp.Pagination.PageSize)
-		assert.Equal(t, 5, resp.Pagination.TotalItems)
-		assert.Equal(t, 1, resp.Pagination.TotalPages)
-		assert.False(t, resp.Pagination.HasNext)
-		assert.False(t, resp.Pagination.HasPrev)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, "/api/v1/workers"+tt.query, nil)
+			require.NoError(t, err)
 
-	t.Run("custom page size and page", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page=1&page_size=2", nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		var resp catalogtypes.WorkerListResponse
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-		assert.Equal(t, 2, len(resp.Data))
-		assert.Equal(t, 1, resp.Pagination.Page)
-		assert.Equal(t, 2, resp.Pagination.PageSize)
-		assert.Equal(t, 5, resp.Pagination.TotalItems)
-		assert.Equal(t, 3, resp.Pagination.TotalPages)
-		assert.True(t, resp.Pagination.HasNext)
-		assert.False(t, resp.Pagination.HasPrev)
-	})
+			require.Equal(t, tt.wantStatusCode, w.Code)
+			if tt.wantStatusCode != http.StatusOK {
+				return
+			}
 
-	t.Run("page 2", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page=2&page_size=2", nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		var resp catalogtypes.WorkerListResponse
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-		assert.Equal(t, 2, len(resp.Data))
-		assert.Equal(t, 2, resp.Pagination.Page)
-		assert.True(t, resp.Pagination.HasNext)
-		assert.True(t, resp.Pagination.HasPrev)
-	})
-
-	t.Run("search with pagination", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?q=worker-1&page=1&page_size=10", nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		var resp catalogtypes.WorkerListResponse
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
-		require.NoError(t, err)
-		assert.Equal(t, 1, len(resp.Data))
-		assert.Equal(t, 1, resp.Pagination.TotalItems)
-		assert.Equal(t, 1, resp.Pagination.TotalPages)
-	})
-
-	t.Run("invalid page param", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page=-1", nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("invalid page_size param exceeding max", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/api/v1/workers?page_size=101", nil)
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+			var resp catalogtypes.WorkerListResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Len(t, resp.Data, tt.wantCount)
+			assert.Equal(t, tt.wantPage, resp.Pagination.Page)
+			assert.Equal(t, tt.wantPageSize, resp.Pagination.PageSize)
+			assert.Equal(t, tt.wantTotalItems, resp.Pagination.TotalItems)
+			assert.Equal(t, tt.wantTotalPages, resp.Pagination.TotalPages)
+			assert.Equal(t, tt.wantHasNext, resp.Pagination.HasNext)
+			assert.Equal(t, tt.wantHasPrev, resp.Pagination.HasPrev)
+		})
+	}
 }
