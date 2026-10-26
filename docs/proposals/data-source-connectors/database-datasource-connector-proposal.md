@@ -290,9 +290,6 @@ datasource:
 | `datasource.allow_disconnect` | `boolean` | `true` (if `required: false`)<br/>`false` (if `required: true`) | When `false`, disables disconnecting/detaching datasources post-application creation. Disconnect UI actions and API endpoints are blocked. |
 | `datasource.supported_providers` | `list[string]` | `[]` (all supported) | Whitelist of compatible datasource provider IDs (e.g., `[file_system, object_storage]` or `[ibmi-db2, postgresql]`). If omitted or empty, all providers are supported by default. |
 
-> **Backward Compatibility:** For backward compatibility with existing catalog files, `accepts_datasource: true` remains supported. When `accepts_datasource: true` is present without a `datasource` block, it is automatically unmarshaled as:
-> `datasource: { required: false, allow_connect: true, allow_disconnect: true, supported_providers: [] }`.
-
 #### Lifecycle and Compatibility Matrix
 
 | Service Type | `datasource` present? | `required` | `allow_connect` | `allow_disconnect` | `supported_providers` | UI & API Lifecycle Behavior |
@@ -437,7 +434,7 @@ When `service_type` is provided:
 
 1. **Retrieve Service Metadata:** Load `metadata.yaml` for the specified service.
 2. **Filter Results:**
-   - If `datasource` is `nil` (or `accepts_datasource` is `false`), return an empty list `[]`.
+   - If `datasource` is `nil`, return an empty list `[]`.
    - If `datasource` is configured and `supported_providers` is non-empty (e.g., `["file_system", "object_storage"]`), return only records whose provider matches an entry in `supported_providers`.
    - If `supported_providers` is omitted or empty, return all records (all providers permitted).
 
@@ -460,12 +457,11 @@ type DatasourceConfig struct {
 
 // Service represents a deployable AI service catalog definition.
 type Service struct {
-    ID                string            `yaml:"id" json:"id"`
-    Name              string            `yaml:"name" json:"name"`
-    Description       string            `yaml:"description" json:"description"`
-    Type              string            `yaml:"type" json:"type"`
-    AcceptsDatasource bool              `yaml:"accepts_datasource,omitempty" json:"accepts_datasource,omitempty"` // Legacy backward-compatibility
-    Datasource        *DatasourceConfig `yaml:"datasource,omitempty" json:"datasource,omitempty"`
+    ID          string            `yaml:"id" json:"id"`
+    Name        string            `yaml:"name" json:"name"`
+    Description string            `yaml:"description" json:"description"`
+    Type        string            `yaml:"type" json:"type"`
+    Datasource  *DatasourceConfig `yaml:"datasource,omitempty" json:"datasource,omitempty"`
     // ...
 }
 
@@ -479,12 +475,11 @@ type DeployOptionsDatasource struct {
 
 // DeployOptionsService surfaces service configuration and constraints to deployment workflows.
 type DeployOptionsService struct {
-    ID                string                   `json:"id"`
-    Name              string                   `json:"name"`
-    Version           string                   `json:"version,omitempty"`
-    Components        []DeployOptionsComponent `json:"components"`
-    AcceptsDatasource bool                     `json:"accepts_datasource,omitempty"` // Legacy backward-compatibility
-    Datasource        *DeployOptionsDatasource `json:"datasource,omitempty"`
+    ID         string                   `json:"id"`
+    Name       string                   `json:"name"`
+    Version    string                   `json:"version,omitempty"`
+    Components []DeployOptionsComponent `json:"components"`
+    Datasource *DeployOptionsDatasource `json:"datasource,omitempty"`
 }
 ```
 
