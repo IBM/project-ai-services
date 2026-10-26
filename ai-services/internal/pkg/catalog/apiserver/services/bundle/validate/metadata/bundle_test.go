@@ -217,6 +217,7 @@ func TestParseRootMetadata_CertifiedBy(t *testing.T) {
 		{name: "service/newline", yaml: svcBase + "certified_by: \"Acme\\nCorp\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
 		{name: "service/disallowed symbol", yaml: svcBase + "certified_by: Acme/Corp\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
 		{name: "service/too long", yaml: svcBase + "certified_by: " + strings.Repeat("a", 65) + "\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not exceed 64 characters"},
+		{name: "service/trailing space", yaml: svcBase + "certified_by: \"Acme Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
 		{name: "service/repeated and trailing spaces", yaml: svcBase + "certified_by: \"Acme  Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
 		{name: "service/leading space", yaml: svcBase + "certified_by: \" Acme Corp\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
 		{name: "service/full-width letters", yaml: svcBase + "certified_by: \"Ａcme\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "compatibility characters"},
@@ -232,7 +233,10 @@ func TestParseRootMetadata_CertifiedBy(t *testing.T) {
 		{name: "component/IBM mixed", yaml: compBase + "certified_by: iBM\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
 		{name: "component/zero-width space", yaml: compBase + "certified_by: \"IBM\\u200B\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
 		{name: "component/padded IBM", yaml: compBase + "certified_by: \" IBM \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not be \"IBM\""},
+		{name: "component/full-width letters", yaml: compBase + "certified_by: \"Ａcme\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "compatibility characters"},
 		{name: "component/too long", yaml: compBase + "certified_by: " + strings.Repeat("a", 65) + "\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not exceed 64 characters"},
+		{name: "component/leading space", yaml: compBase + "certified_by: \" Acme Corp\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
+		{name: "component/trailing space", yaml: compBase + "certified_by: \"Acme Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
 		{name: "component/repeated and trailing spaces", yaml: compBase + "certified_by: \"Acme  Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
 		// component — allowed
 		{name: "component/empty (absent)", yaml: compBase},

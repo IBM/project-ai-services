@@ -142,13 +142,16 @@ func parseComponentMetadataYAML(data []byte) (*ComponentMetadataYAML, error) {
 }
 
 // validateCertifiedBy returns a ValidationError when certified_by contains characters
-// outside the allow-list (letters, digits, space and . , & ' - _ ( )), exceeds
-// maxCertifiedByLen characters, equals "IBM" (ignoring case, spaces and punctuation),
-// or is not already in normalized form (NFKC, no leading, trailing or repeated spaces).
+// outside the allow-list (letters, digits, space and . , & ' - _ ( )), contains
+// Unicode compatibility characters (e.g. full-width letters), equals "IBM" (ignoring
+// case, spaces and punctuation), exceeds maxCertifiedByLen characters, or contains
+// leading, trailing or repeated spaces.
 // The catalog serves the raw metadata.yaml value, so the value is rejected rather than
 // cleaned: the validated value is always the served value.
-// IBM is a reserved value that must not be used by external bundles.
 func validateCertifiedBy(certifiedBy string) error {
+	// Step 1: reject any character outside the allow-list (e.g. zero-width space, bidi
+	// controls, newlines). This runs first so that inputs with outright invalid characters
+	// always produce an "unsupported character" error rather than a secondary one.
 	for _, r := range certifiedBy {
 		if !isAllowedCertifiedByRune(r) {
 			return &validators.ValidationError{
@@ -158,27 +161,46 @@ func validateCertifiedBy(certifiedBy string) error {
 		}
 	}
 
-	// Only letters, digits and plain spaces/punctuation remain, so Fields safely trims and collapses spaces.
-	normalized := strings.Join(strings.Fields(norm.NFKC.String(certifiedBy)), " ")
+	// Step 2: reject Unicode compatibility characters (e.g. full-width "Ａ").
+	// isAllowedCertifiedByRune permits any Unicode letter, so full-width letters pass step 1;
+	// NFKC normalization collapses them and the inequality detects the difference.
+	// Special case: if the normalized form is the reserved name "IBM", report that error
+	// instead so that full-width "ＩＢＭ" produces the same message as plain "IBM".
+	nfkc := norm.NFKC.String(certifiedBy)
+	if nfkc != certifiedBy {
+		if isReservedCertifiedBy(nfkc) {
+			return &validators.ValidationError{
+				Code:    http.StatusUnprocessableEntity,
+				Message: "metadata.yaml: 'certified_by' must not be \"IBM\"",
+			}
+		}
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "metadata.yaml: 'certified_by' must not contain compatibility characters",
+		}
+	}
 
-	if isReservedCertifiedBy(normalized) {
+	// Step 3: reject the reserved name "IBM" (and visually similar variants like "I.B.M." or "i b m").
+	if isReservedCertifiedBy(certifiedBy) {
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: "metadata.yaml: 'certified_by' must not be \"IBM\"",
 		}
 	}
 
-	if normalized != certifiedBy {
-		return &validators.ValidationError{
-			Code:    http.StatusUnprocessableEntity,
-			Message: "metadata.yaml: 'certified_by' must not contain leading, trailing or repeated spaces or compatibility characters",
-		}
-	}
-
+	// Step 4: reject values that exceed the character limit.
 	if utf8.RuneCountInString(certifiedBy) > maxCertifiedByLen {
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: fmt.Sprintf("metadata.yaml: 'certified_by' must not exceed %d characters", maxCertifiedByLen),
+		}
+	}
+
+	// Step 5: reject leading, trailing or repeated spaces.
+	if strings.TrimSpace(certifiedBy) != certifiedBy || strings.Contains(certifiedBy, "  ") {
+		return &validators.ValidationError{
+			Code:    http.StatusUnprocessableEntity,
+			Message: "metadata.yaml: 'certified_by' must not contain leading, trailing or repeated spaces",
 		}
 	}
 
