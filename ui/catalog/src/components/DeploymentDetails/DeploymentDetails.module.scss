@@ -286,11 +286,6 @@
   }
 }
 
-.labelColor :global(.cds--text-input),
-:global(.cds--list-box) {
-  background-color: var(--cds-layer-02);
-}
-
 .progressSuccess :global(.cds--progress-bar__bar) {
   background-color: var(--cds-support-success) !important;
 }
