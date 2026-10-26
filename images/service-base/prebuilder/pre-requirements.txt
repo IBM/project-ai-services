@@ -1,1 +1,1 @@
-ujson==5.12.1
+docling-parse==7.23.0
