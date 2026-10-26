@@ -5,12 +5,14 @@ on:
       - 'ui/digitize/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'ui/digitize/**'
       - .github/workflows/digitize-ui-image.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
@@ -56,7 +58,7 @@ jobs:
 
       - name: Publish digitize-ui image
         working-directory: ui/digitize
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push \
             REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} \
