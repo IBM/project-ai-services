@@ -159,13 +159,13 @@ func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 //	@Tags			Workers
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			page		query		int		false	"Page number (1-indexed)"				default(1)
-//	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
-//	@Param			q			query		string	false	"Case-insensitive substring search on worker name"
+//	@Param			page		query		int								false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size	query		int								false	"Number of items per page (max: 100)"	default(20)
+//	@Param			q			query		string							false	"Case-insensitive substring search on worker name"
 //	@Success		200			{object}	catalogtypes.WorkerListResponse	"List of workers with pagination"
-//	@Failure		400			{object}	ErrorResponse			"Invalid query parameters"
-//	@Failure		401			{object}	ErrorResponse			"Unauthorized"
-//	@Failure		500			{object}	ErrorResponse			"Internal error"
+//	@Failure		400			{object}	ErrorResponse					"Invalid query parameters"
+//	@Failure		401			{object}	ErrorResponse					"Unauthorized"
+//	@Failure		500			{object}	ErrorResponse					"Internal error"
 //	@Router			/workers [get]
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 	page, _ := strconv.Atoi(c.Query("page"))
@@ -210,6 +210,11 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, buildWorkerListResponse(workers, appIDMap, page, pageSize, totalCount))
+}
+
+// buildWorkerListResponse converts workers into the paginated API response.
+func buildWorkerListResponse(workers []models.Worker, appIDMap map[uuid.UUID][]uuid.UUID, page, pageSize, totalCount int) catalogtypes.WorkerListResponse {
 	result := make([]catalogtypes.Worker, len(workers))
 	for i, w := range workers {
 		result[i] = toAPIWorker(w, appIDMap[w.ID])
@@ -220,7 +225,7 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 		totalPages = (totalCount + pageSize - 1) / pageSize
 	}
 
-	c.JSON(http.StatusOK, catalogtypes.WorkerListResponse{
+	return catalogtypes.WorkerListResponse{
 		Data: result,
 		Pagination: catalogtypes.PaginationMetadata{
 			Page:       page,
@@ -230,7 +235,7 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 			HasNext:    page < totalPages,
 			HasPrev:    page > 1,
 		},
-	})
+	}
 }
 
 // GetWorker godoc
