@@ -52,6 +52,7 @@
 12. [Error Handling](#12-error-handling)
 13. [Future Considerations](#13-future-considerations)
 14. [CLI Commands](#14-cli-commands)
+    - [14.0 Catalog Configure](#140-catalog-configure)
     - [14.1 Model Commands](#141-model-commands)
     - [14.2 Connector Commands](#142-connector-commands)
     - [14.3 LiteLLM Gateway Commands](#143-litellm-gateway-commands)
@@ -66,7 +67,7 @@ This proposal extends the existing Catalog Service with two new capabilities:
 
 1. **Model Management** — dynamic deploy, undeploy, list, and status of model inference backends (`llm`, `embedding`, `reranker`) across all supported runtimes (Podman, OpenShift, Docker Compose). Models are no longer bundled statically inside application pods; they are standalone deployable components managed independently and exposed to consumer services through a **LiteLLM Gateway** — a universal model proxy that sits between applications and any backend provider.
 
-2. **Connectors** — a way to register external model endpoints (WatsonX, hosted vLLM, OpenAI) without deploying any local pod. Credentials are passed directly to the **LiteLLM Gateway** at route-registration time and stored there — they never enter the Catalog database or a Podman secret.
+2. **Connectors** — a way to register external model endpoints (WatsonX, hosted vLLM) without deploying any local pod. Credentials are passed directly to the **LiteLLM Gateway** at route-registration time and stored there — they never enter the Catalog database or a Podman secret.
 
 > **`modelmanager` is a Go package inside the Catalog API server process** — not a separate service or sidecar. The HTTP handlers call into it directly; there is no inter-process communication. It owns the full lifecycle (deploy, update, undeploy, status) of all three component types: `llm`, `embedding`, and `reranker` — for both local pods and remote connectors.
 
@@ -75,7 +76,7 @@ This proposal extends the existing Catalog Service with two new capabilities:
 | Kind | Table | Pod? | Credentials stored in | Examples |
 |---|---|---|---|---|
 | Local pod | `components` | ✅ | None (virtual keys live only in the LiteLLM Gateway DB) | vLLM (cpu, spyre) |
-| Remote connector | `connectors` | ❌ | LiteLLM Gateway DB (provider secrets and virtual keys) | WatsonX, hosted vLLM, OpenAI |
+| Remote connector | `connectors` | ❌ | LiteLLM Gateway DB (provider secrets and virtual keys) | WatsonX, hosted vLLM |
 
 Three new columns on `components` (`name`, `created_by`, `worker_id`) and a new `workers` table are the complete schema delta. Remote model connectors reuse the shared `connectors` table (same as datasource connectors). Credentials and virtual keys never touch the Catalog database.
 
@@ -90,7 +91,7 @@ The current catalog deploys vLLM or WatsonX as `components` that are tightly cou
 ### Problems
 
 - Model lifecycle is locked to application lifecycle; a model upgrade forces full application re-deployment.
-- No mechanism to connect to an already-running WatsonX, OpenAI, or vLLM endpoint outside of the platform.
+- No mechanism to connect to an already-running WatsonX or vLLM endpoint outside of the platform.
 - `component_status` enum only has `Initializing`, `Running`, `Error` — insufficient to express the `Deploying` lifecycle state needed for async model deployment.
 
 ### Goals
@@ -138,7 +139,7 @@ The LiteLLM DB runs on port **5433** to avoid conflict with the Catalog API's Po
 
 ### Route Registration
 
-When a model reaches `Running` status (pod healthy / connector validated), the platform registers a route via the LiteLLM Admin API using **tag-based routing**. The provider suffix (`--vllm-spyre`, `--vllm-cpu`, etc.) is removed from the consumer-facing model identifier — consumer services call LiteLLM using the full model name as configured (e.g. `ibm-granite/granite-3.3-8b-instruct`), and LiteLLM selects a healthy route tagged with the provider ID.
+When a model reaches `Running` status (pod healthy / connector validated), the platform registers a route via the LiteLLM Admin API using **tag-based routing**. The provider suffix (`--vllm-spyre`, `--vllm-cpu`, etc.) is removed from the consumer-facing model identifier — consumer services call LiteLLM using the full model name as configured (e.g. `ibm-granite/granite-3.3-8b-instruct`), and LiteLLM selects the route tagged with the deployment ID.
 
 **Register (on deploy):**
 ```
@@ -150,7 +151,7 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
   "litellm_params": {
     "model": "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
     "api_base": "http://llm-5b6297a4b5:8000/v1",
-    "tags": ["vllm-spyre", "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"]
+    "tags": ["7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"]
   }
 }
 ```
@@ -166,7 +167,7 @@ curl -k -X POST https://litellm-api.10.20.185.165.nip.io/model/new \
     "litellm_params": {
       "model": "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
       "api_base": "http://llm-5b6297a4b5:8000/v1",
-      "tags": ["vllm-spyre", "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"]
+      "tags": ["7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"]
     }
   }'
 ```
@@ -175,7 +176,7 @@ curl -k -X POST https://litellm-api.10.20.185.165.nip.io/model/new \
 > - `model_name` is the full model name as configured in `params.model` — no provider suffix. This is exactly what consumer services pass in the `model` field.
 > - `model` uses the `hosted_vllm/<model-name>` prefix — LiteLLM infers the provider from the prefix. No separate `custom_llm_provider` field and no `api_key` are needed for local vLLM endpoints.
 > - `api_base` for **llm** and **embedding** routes **must** include a `/v1` suffix (e.g. `http://llm-52db58ac5a:8000/v1`). The `hosted_vllm` provider does not prepend it automatically — omitting it causes LiteLLM to call `/chat/completions` directly, which vLLM does not serve, resulting in a `404`. For **reranker** routes, use the **bare** base URL (no `/v1`) — the Cohere `ClientV2` constructs `/v2/rerank` itself from the base.
-> - `tags` is nested inside **`litellm_params`** on the `/model/new` request body. Every route carries two tags: the **provider ID** (e.g. `vllm-cpu`, `vllm-spyre`, `watsonx`) and the **deployment ID** — `components.id` for a local model, `connectors.id` for a remote connector (the same `id` returned by `GET /api/v1/models`). The deployment ID identifies exactly one deployment, and that deployment's row already records its worker (`components.worker_id`) and profile (`components.metadata.profile`), so no worker or profile string needs to be encoded in the tag.
+> - `tags` is nested inside **`litellm_params`** on the `/model/new` request body. Every route carries exactly one tag: the **deployment ID** — `components.id` for a local model, `connectors.id` for a remote connector (the same `id` returned by `GET /api/v1/models`). The deployment ID uniquely identifies one deployment; its row already records the provider, worker (`components.worker_id`) and profile (`components.metadata.profile`), so nothing else needs to be encoded in the tag.
 > - Tag enforcement is enabled gateway-wide via `router_settings.enable_tag_filtering: true` in the LiteLLM config rendered by `litellm.yaml.tmpl` — it is not set per route.
 > - The same `model_name` may be registered multiple times (once per deployment, e.g. a `vllm-cpu` and a `vllm-spyre` deployment of granite, or the same Spyre model on two workers or at `compact-4k` and `standard`). Each registration is a separate LiteLLM deployment distinguished by its deployment ID tag.
 > - For **embedding** and **reranker** component types, a `model_info` block is also included to tell LiteLLM the routing mode: `{ "model_info": { "mode": "embedding" } }` or `{ "model_info": { "mode": "rerank" } }`. This is omitted for `llm` type routes.
@@ -192,14 +193,13 @@ No UUID lookup needed — `model_name` is the stable, unique identifier for the 
 
 **Tag-based routing convention:**
 
-Each route carries two tags in `litellm_params.tags`:
+Each route carries exactly one tag in `litellm_params.tags`:
 
 | Tag | Example | Purpose |
 |---|---|---|
-| Provider ID | `vllm-spyre` | Coarse routing by provider. Used by `internal` keys and optional request tags |
-| Deployment ID | `7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f` | `components.id` (local) or `connectors.id` (remote). Pins the route to one specific deployment — its worker and profile. Used by `public` keys |
+| Deployment ID | `7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f` | `components.id` (local) or `connectors.id` (remote). Uniquely identifies one deployment — its provider, worker and profile are all recoverable from the row. Used by both `internal` and `public` keys |
 
-The `model_name` is the full `params.model` value (e.g. `ibm-granite/granite-3.3-8b-instruct`, `BAAI/bge-m3`, `BAAI/bge-reranker-v2-m3`). Provider and deployment are tracked via tags rather than being encoded in the model name.
+The `model_name` is the full `params.model` value (e.g. `ibm-granite/granite-3.3-8b-instruct`, `BAAI/bge-m3`, `BAAI/bge-reranker-v2-m3`). Deployment is tracked via the ID tag rather than being encoded in the model name.
 
 Tags reach the router from two sources:
 - **Virtual key metadata** — `metadata.tags` on a key (see [Virtual Key Provisioning](#virtual-key-provisioning)) lists what the key is allowed to reach. An `internal` key holds exactly one deployment ID — the instance the user chose at application create; a `public` key holds one deployment ID per selected deployment (e.g. `["7f3a1c2d-…", "a91b44e0-…"]`). LiteLLM applies these tags to every request made with that key.
@@ -452,7 +452,7 @@ Content-Type: application/json
     "api_base": "https://us-south.ml.cloud.ibm.com",
     "api_key": "<params.api_key>",
     "project_id": "<params.project_id>",
-    "tags": ["watsonx", "<connectors.id>"]
+    "tags": ["<connectors.id>"]
   }
 }
 ```
@@ -463,7 +463,7 @@ Content-Type: application/json
 | `api_base` | `params.api_base` |
 | `api_key` | `params.api_key` — passed to LiteLLM at registration; **never stored in Catalog DB** |
 | `project_id` | `params.project_id` |
-| `tags` | `[provider_id, connectors.id]`. The connector `id` is generated up front (before route registration) so it can be used as the tag; the row is inserted with that same `id` once the probe succeeds |
+| `tags` | `[connectors.id]`. The connector `id` is generated up front (before route registration) so it can be used as the tag; the row is inserted with that same `id` once the probe succeeds |
 
 ### Tokenize Passthrough
 
@@ -588,7 +588,7 @@ A **Model** is an inference backend for a specific role (`llm`, `embedding`, `re
 | Kind | `deployment_type` | Storage table | Example providers | Pod? | Credentials location |
 |---|---|---|---|---|---|
 | Local | `local` | `components` | `vllm-cpu`, `vllm-spyre` | ✅ Yes | None — a local vLLM endpoint needs no upstream credential |
-| Remote | `remote` | `connectors` | `watsonx`, `hosted_vllm`, `openai` | ❌ No | LiteLLM Gateway DB |
+| Remote | `remote` | `connectors` | `watsonx`, `hosted_vllm` | ❌ No | LiteLLM Gateway DB |
 
 Both kinds are registered as a route in the **LiteLLM Gateway** pod. Consumer services only ever talk to the LiteLLM gateway — they have no knowledge of which table is behind it.
 
@@ -662,7 +662,6 @@ Defined in [`assets/connectors/models/watsonx/schema.json`](../../../ai-services
 | vLLM (cpu / spyre) | `components` | — | ✅ | None (local endpoint needs no credential) |
 | WatsonX (`watsonx`) | `connectors` | `llm` / `embedding` | ❌ | LiteLLM Gateway |
 | Hosted vLLM (`hosted_vllm`) | `connectors` | `llm` / `embedding` / `reranker` | ❌ | LiteLLM Gateway |
-| OpenAI (`openai`) | `connectors` | `llm` / `embedding` | ❌ | LiteLLM Gateway |
 
 `service_dependencies.dependency_id` points at `components.id` for local models and at `connectors.id` for remote model connectors — both already use `dependency_type = 'connector'` from §4.2 of the datasource proposal, so no new enum value is needed.
 
@@ -747,7 +746,7 @@ litellm:
 
 ### 5.3 Reuse of Shared `connectors` Table for Remote Model Connectors
 
-Remote model connectors (`watsonx`, `hosted_vllm`, `openai`) are stored in the **same `connectors` table** defined in the datasource connectors proposal (§4.1). No new table is required. The existing `type` column discriminates between datasource and model connector records.
+Remote model connectors (`watsonx`, `hosted_vllm`) are stored in the **same `connectors` table** defined in the datasource connectors proposal (§4.1). No new table is required. The existing `type` column discriminates between datasource and model connector records.
 
 A model connector record in the `connectors` table:
 
@@ -756,7 +755,7 @@ A model connector record in the `connectors` table:
 | `id` | `uuid` |
 | `name` | `"prod-watsonx"` (unique, case-insensitive) |
 | `type` | `"models"` (fixed value — discriminates model connectors from datasource connectors; the specific model role is in `metadata.component_type`) |
-| `provider` | `"watsonx"` / `"hosted_vllm"` / `"openai"` |
+| `provider` | `"watsonx"` / `"hosted_vllm"` |
 | `status` | `"connected"` / `"offline"` (lowercase, reuses `connector_status` enum) |
 | `message` | `null` / `"Endpoint reachable and credentials accepted"` |
 | `metadata` | `{"component_type": "llm", "model_name": "ibm/granite-4-h-small", "api_base": "https://...", "project_id": "..."}` |
@@ -943,7 +942,7 @@ erDiagram
         UUID             id              PK
         VARCHAR_255      name               "UNIQUE"
         VARCHAR_64       type               "llm | embedding | reranker | datasource"
-        VARCHAR_64       provider           "watsonx | hosted_vllm | openai | object_storage | file_system"
+        VARCHAR_64       provider           "watsonx | hosted_vllm | object_storage | file_system"
         connector_status status             "connected | offline"
         TEXT             message
         JSONB            metadata           "no credentials stored"
@@ -1155,7 +1154,7 @@ Error responses: `404 {"error": "connector type \"<type>\" not found"}` for an u
 | `POST /api/v1/applications` | `services[].connectors[]` accepts `{type, id}` entries with `type = "models"`, referencing remote model connectors in the `connectors` table (alongside `type = "datasource"`). The model role (`llm`, `embedding`, `reranker`) is resolved from `connectors.metadata.component_type`. A given model role can be set via `components` or `connectors`, not both. See [Flow: Application Create — Model Connector](#flow-application-create--model-connector-remote) |
 | `POST /api/v1/applications` | `services[].components[]` entries of type `llm` / `embedding` / `reranker` may carry an `instance_id` — the `components.id` of an existing `Running` instance. The entry is then just `{component_type, instance_id}`; `provider_id`, `version` and `params` are omitted because they are read from that row. Without `instance_id` the entry keeps its existing shape. See [Flow: Application Create — Model Already Deployed](#flow-application-create--model-already-deployed-pre-deployed-path) |
 | `GET /api/v1/applications/:id` | Response includes model connectors from `connectors` table alongside `services` and local `components` |
-| `GET /api/v1/architectures/:id/deploy-options` | `providers` list under `llm`/`embedding`/`reranker` includes connector provider options (`watsonx`, `hosted_vllm`, `openai`) alongside `vllm-cpu`, `vllm-spyre`; worker list included for target-worker selection |
+| `GET /api/v1/architectures/:id/deploy-options` | `providers` list under `llm`/`embedding`/`reranker` includes connector provider options (`watsonx`, `hosted_vllm`) alongside `vllm-cpu`, `vllm-spyre`; worker list included for target-worker selection |
 
 ### 6.4 Public Key Endpoint
 
@@ -1358,7 +1357,7 @@ Content-Type: application/json
 | `deployment_type` | string | Yes | `local` (pod) or `remote` (connector — no pod) |
 | `type` | string | `local` only | Model role for local models: `llm`, `embedding`, `reranker`. **Not present for `remote`** — the model role is passed as `params.component_type` instead |
 | `name` | string | Yes | Human-readable label (3–100 chars, slug-safe, unique case-insensitively) |
-| `provider_id` | string | Yes | Provider identifier — local: `vllm-cpu`, `vllm-spyre`; remote: `watsonx`, `hosted_vllm`, `openai` |
+| `provider_id` | string | Yes | Provider identifier — local: `vllm-cpu`, `vllm-spyre`; remote: `watsonx`, `hosted_vllm` |
 | `params` | object | Yes | Model and provider config — validated against the provider's asset schema |
 
 > **`connectors.type` is always `"models"` for remote models — it is set server-side and is not a request field.** The client does not send it. It is the fixed discriminator that separates model connectors from datasource connectors in the shared `connectors` table, and is the value `ConnectorRef.type` must match when an application references the connector (`{ "type": "models", "id": "<uuid>" }`).
@@ -1378,7 +1377,6 @@ The `modelmanager` package validates `params` against the provider's asset schem
 | `local` | `vllm-cpu`, `vllm-spyre` | `model_name` (optional: `profile` — defaults to the model's default profile, see `model-profiles.md`; stored in `components.metadata.profile`) | — |
 | `remote` | `watsonx` | `component_type`, `model_name`, `api_key` (optional: `api_base`, `project_id`) | `api_key` |
 | `remote` | `hosted_vllm` | `component_type`, `model_name`, `api_base` | `api_key` (optional) |
-| `remote` | `openai` | `component_type`, `model_name`, `api_key` | `api_key` |
 
 **Response — `deployment_type=local`, `202 Accepted` (async):**
 
@@ -1582,7 +1580,6 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 |---|---|
 | `watsonx` | `api_key` |
 | `hosted_vllm` | `api_key` |
-| `openai` | `api_key` |
 
 **Request Body:**
 
@@ -1825,6 +1822,9 @@ catalog configure  (same command that starts postgres, caddy, catalog API)
     8. [NEW] INSERT components (type='llm', provider='litellm',
                                 status='Running', created_by=NULL,
                                 metadata={model_name: "litellm"})
+    9. [NEW] POST https://<litellm-host>/config/update (Authorization: Bearer <LITELLM_MASTER_KEY>)
+                body: { "router_settings": { "enable_tag_filtering": true } }
+             Enables gateway-wide tag filtering so virtual key tags pin requests to the correct deployment.
 
   No virtual key is generated at configure time or on model deploy.
   Internal keys are generated per application at application create; a public key is generated on demand per model.
@@ -1854,7 +1854,7 @@ POST /api/v1/models
        a. POST /model/new (model_name="ibm-granite/granite-3.3-8b-instruct",
                           model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
                           api_base="http://<pod-name>:8000/v1",
-                          litellm_params.tags=["vllm-spyre", <components.id>])
+                          litellm_params.tags=[<components.id>])
        b. POST /config/pass_through_endpoint:
                           { id: "vllm-token-passthrough-" + <components.id>,
                             path: "/tokenize/" + <components.id>,
@@ -1893,7 +1893,7 @@ POST /api/v1/models
        a. POST /model/new (model_name="ibm-granite/granite-3.3-8b-instruct",
                           model="hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
                           api_base="http://ai-services--caddy:8080/worker/lpar-1/models/<caddyRouteID>",
-                          litellm_params.tags=["vllm-spyre", <components.id>])
+                          litellm_params.tags=[<components.id>])
        b. POST /config/pass_through_endpoint:
                           { id: "vllm-token-passthrough-" + <components.id>,
                             path: "/tokenize/" + <components.id>,
@@ -1923,7 +1923,7 @@ POST /api/v1/models          (deployment_type=remote)
                                       api_base:   params.api_base,
                                       api_key:    params.api_key,
                                       project_id: params.project_id,
-                                      tags:       ["watsonx", <connectors.id>] } }
+                                      tags:       [<connectors.id>] } }
   4. Run connectivity probe via LiteLLM GET /health?model=ibm/granite-4-h-small → if fails, DELETE /model/delete and return 422
   5. INSERT into connectors (id=<connectors.id from 2a>, name='prod-watsonx', type='models', provider='watsonx',
                              status='connected', created_by=<user>,
@@ -1957,7 +1957,7 @@ POST /api/v1/models          (deployment_type=remote)
                     litellm_params: { model:      "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
                                       api_base:   params.api_base,
                                       api_key:    params.api_key,
-                                      tags:       ["hosted_vllm", <connectors.id>] } }
+                                      tags:       [<connectors.id>] } }
   4. Run connectivity probe via LiteLLM GET /health?model=ibm-granite/granite-3.3-8b-instruct → if fails, DELETE /model/delete and return 422
   5. POST /config/pass_through_endpoint to LiteLLM Gateway:
             { id: "vllm-token-passthrough-" + <connectors.id>,
@@ -2040,7 +2040,7 @@ POST /api/v1/applications
               remote worker → register mTLS ingress on worker Caddy :8443
                             → register mTLS egress on CP Caddy :8080
                             → apiBase = http://ai-services--caddy:8080/worker/<name>/models/<caddyRouteID>
-          → POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[providerID, componentID])
+          → POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[componentID])
         → generate per-app virtual key: POST /key/generate {key_name: modelName, models:[modelName], duration:null, metadata:{type:"internal", tags:[componentID]}}
         → injectLiteLLMIntoServices:
             svc.Values["litellm"]["key"] = appVirtualKey
@@ -2095,7 +2095,7 @@ POST /api/v1/applications
           local → apiBase = http://<pod-name>:8000
           remote → register mTLS ingress + egress Caddy routes
                  → apiBase = http://ai-services--caddy:8080/worker/<name>/models/<caddyRouteID>
-      POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[providerID, componentID])
+      POST /model/new to LiteLLM (model_name=modelName, api_base=apiBase, litellm_params.tags=[componentID])
       generate per-app virtual key → POST /key/generate {key_name: modelName, models:[modelName], duration:null, metadata:{type:"internal", tags:[componentID]}}
       injectLiteLLMIntoServices → svc.Values["litellm"]["key"] = appVirtualKey
                                 → svc.Values["llm"]["host/port/prefixPath/model"] = LiteLLM coords
@@ -2272,21 +2272,21 @@ The `litellm:` block in each provider's `metadata.yaml` similarly externalises L
 
 `connector_status.connected` means the last connectivity probe reached the endpoint with valid credentials. UI status display: green = `connected`, red = `offline`. Local model status uses `component_status` (`Running` / `Deploying` / `Error`).
 
-### 8. Tag-Based Routing — Provider ID in Tags, Not in Model Name
+### 8. Tag-Based Routing — Deployment ID Only in Tags
 
-Routes are registered with `litellm_params.tags: [<provider-id>, <deployment-id>]` (e.g. `["vllm-spyre", "7f3a1c2d-…"]`), and tag filtering is enabled gateway-wide (`router_settings.enable_tag_filtering: true`). `internal` virtual keys carry `metadata.tags` with the single deployment ID of the instance the user chose for the application, so a service always reaches exactly that instance. `public` keys carry the deployment ID(s) the user selected, which ties the key to specific workers and profiles; with several tags LiteLLM may route across those deployments. Consumer services call LiteLLM using the full model name as configured (e.g. `ibm-granite/granite-3.3-8b-instruct`); routing to a deployment is decided by the key tags (optionally narrowed by request `metadata.tags`) — the provider suffix is never encoded in the model name.
+Routes are registered with `litellm_params.tags: [<deployment-id>]` (e.g. `["7f3a1c2d-…"]`), and tag filtering is enabled gateway-wide (`router_settings.enable_tag_filtering: true`). `internal` virtual keys carry `metadata.tags` with the single deployment ID of the instance the user chose for the application, so a service always reaches exactly that instance. `public` keys carry the deployment ID(s) the user selected, which ties the key to specific workers and profiles; with several tags LiteLLM may route across those deployments. Consumer services call LiteLLM using the full model name as configured (e.g. `ibm-granite/granite-3.3-8b-instruct`); routing to a deployment is decided by the key tags (optionally narrowed by request `metadata.tags`) — the provider suffix is never encoded in the model name.
 
 | Property | Old | New |
 |---|---|---|
 | Consumer `model` field | `"ibm-granite/granite-3.3-8b-instruct--vllm-spyre"` | `"ibm-granite/granite-3.3-8b-instruct"` |
 | Deployment communicated via | Encoded in model name string | Virtual key `metadata.tags` (deployment ID), optionally request `metadata.tags` |
-| `tags` field on `/model/new` | Inside `litellm_params` (full model name) | Inside `litellm_params` (provider ID) |
-| Tag value | Full model name | Provider ID (e.g. `vllm-cpu`, `vllm-spyre`, `watsonx`) plus the deployment ID (`components.id` / `connectors.id`) |
+| `tags` field on `/model/new` | Inside `litellm_params` (full model name) | Inside `litellm_params` (deployment ID only — `components.id` / `connectors.id`) |
+| Tag value | Full model name | Deployment ID (`components.id` / `connectors.id`) — provider, worker and profile are all recoverable from the row |
 | Stored in Catalog DB | `model_id` in `components.metadata` + derived string in the keys table | Nothing extra — routes are addressed by `model_name`; the deployment ID tag is the existing `components.id` / `connectors.id` |
 | Swap provider (e.g. cpu → spyre) | Consumer model name config must change | Key `metadata.tags` updated (or request `metadata.tags`) — `model` field unchanged |
 | Deregister call | `{ "id": "ibm-granite-granite-3.3-8b-instruct--vllm-spyre" }` | `{ "model_name": "ibm-granite/granite-3.3-8b-instruct" }` |
 
-Deregistration uses `model_name` (`DELETE /model/delete { "model_name": ... }`), so no LiteLLM-assigned model UUID has to be kept in the Catalog DB. The `model_name` in `POST /model/new` is the full model name from `params.model`; the `litellm_params.tags` array carries the provider ID. They are set independently — `model_name` never changes when the provider changes, only `tags` does.
+Deregistration uses `model_name` (`DELETE /model/delete { "model_name": ... }`), so no LiteLLM-assigned model UUID has to be kept in the Catalog DB. The `model_name` in `POST /model/new` is the full model name from `params.model`; the deployment ID in `litellm_params.tags` is the only tag — `model_name` never changes when the provider changes.
 
 The `litellm_params.model` field uses the `hosted_vllm/<upstream-model-name>` prefix. LiteLLM infers the provider from this prefix — no separate `custom_llm_provider` field is required, and no `api_key` is needed for local vLLM endpoints.
 
@@ -2445,6 +2445,45 @@ All model commands live under `ai-services model` and map to the `/api/v1/models
 
 ---
 
+### 14.0 Catalog Configure
+
+`catalog configure` is extended to deploy the LiteLLM Gateway as part of the one-time platform setup sequence. No new top-level command is added — the existing command picks up the new steps automatically.
+
+**What changes:**
+
+```
+ai-services catalog configure --runtime podman
+```
+
+The existing steps (secrets, postgres, caddy, catalog API) are unchanged. The following are appended to the sequence:
+
+| Step | Action |
+|---|---|
+| Generate master key | A UUID is generated and stored as Podman Secret `LITELLM_MASTER_KEY` |
+| Deploy LiteLLM pod | `litellm.yaml.tmpl` is rendered and `podman kube play` is called |
+| Wait for readiness | Liveness probe polled until healthy |
+| Register in DB | `components` row inserted (`provider='litellm'`, `status='Running'`) |
+| Enable tag filtering | `POST /config/update` sent to the gateway with `router_settings.enable_tag_filtering: true` |
+
+**Tag filtering config call (step 5):**
+
+```bash
+curl -k -X POST https://<litellm-host>/config/update \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "router_settings": {
+          "enable_tag_filtering": true
+        }
+      }'
+```
+
+This is a one-time call made by the platform immediately after the LiteLLM pod reaches healthy status. It enables gateway-wide tag filtering so that virtual key tags pin every inference request to the correct deployment. It does not need to be repeated on restart — the setting is persisted in the LiteLLM PostgreSQL instance.
+
+> **No new CLI flag is needed.** The configure command detects whether LiteLLM is already running (by checking the `components` row) and skips steps 4–8 if it is, making the command safely idempotent.
+
+---
+
 ### 14.1 Model Commands
 
 #### Deploy a local model
@@ -2487,7 +2526,7 @@ ai-services model list --runtime podman
 |---|---|---|---|
 | `--type` | `-t` | No | Filter by model role: `llm`, `embedding`, `reranker` |
 | `--deployment-type` | | No | Filter by kind: `local`, `remote`. Omit for both |
-| `--provider` | `-p` | No | Filter by provider: `vllm-spyre`, `vllm-cpu`, `watsonx`, `hosted_vllm`, `openai` |
+| `--provider` | `-p` | No | Filter by provider: `vllm-spyre`, `vllm-cpu`, `watsonx`, `hosted_vllm` |
 | `--status` | | No | Filter by status: `Running`, `Deploying`, `Error` (local); `connected`, `offline` (remote) |
 
 ```bash
@@ -2550,9 +2589,9 @@ ai-services model create [name] --type <type> --provider <provider> --deployment
 | Flag | Short | Required | Description |
 |---|---|---|---|
 | `--type` | `-t` | Yes | Model role: `llm`, `embedding`, `reranker` |
-| `--provider` | `-p` | Yes | Connector provider: `watsonx`, `hosted_vllm`, `openai` |
+| `--provider` | `-p` | Yes | Connector provider: `watsonx`, `hosted_vllm` |
 | `--deployment-type` | | Yes | `remote` |
-| `--api-key` | | Conditional | API key (required by `watsonx`, `openai`; optional for `hosted_vllm`) — passed to LiteLLM, never stored in DB |
+| `--api-key` | | Conditional | API key (required by `watsonx`; optional for `hosted_vllm`) — passed to LiteLLM, never stored in DB |
 | `--params` | | No | Inline key=value pairs (e.g. `api_base=...`, `project_id=...`, `model_name=...`) |
 
 ```bash
@@ -2563,15 +2602,6 @@ ai-services model create prod-watsonx \
   --provider watsonx \
   --api-key sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
   --params api_base=https://us-south.ml.cloud.ibm.com,model_name=ibm/granite-4-h-small,project_id=my-project-id \
-  --runtime podman
-
-# Register an OpenAI embedding connector
-ai-services model create openai-embed \
-  --deployment-type remote \
-  --type embedding \
-  --provider openai \
-  --api-key sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
-  --params model_name=text-embedding-3-small \
   --runtime podman
 
 # Register a hosted vLLM connector
@@ -2643,6 +2673,7 @@ curl -s http://litellm:4000/chat/completions \
 
 | Command | Maps to | Description |
 |---|---|---|
+| `ai-services catalog configure` | internal sequence | Deploy LiteLLM Gateway, enable tag filtering via `POST /config/update` (one-time, idempotent) |
 | `ai-services model deploy [name]` | `POST /api/v1/models` (`deployment_type=local`) | Deploy a local model pod |
 | `ai-services model create [name] --deployment-type remote` | `POST /api/v1/models` (`deployment_type=remote`) | Register a remote model connector |
 | `ai-services model list` | `GET /api/v1/models` | List all models (local + remote) |
