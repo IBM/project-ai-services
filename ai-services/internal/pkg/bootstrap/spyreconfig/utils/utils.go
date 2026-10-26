@@ -12,9 +12,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/containers/podman/v5/pkg/bindings/system"
 	"github.com/jaypipes/ghw"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	"go.podman.io/podman/v6/pkg/bindings/system"
 )
 
 const (

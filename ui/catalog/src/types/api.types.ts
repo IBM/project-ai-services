@@ -414,8 +414,7 @@ export interface ServiceDeploymentPayload {
 }
 
 export type DeploymentPayload =
-  | ArchitectureDeploymentPayload
-  | ServiceDeploymentPayload;
+  ArchitectureDeploymentPayload | ServiceDeploymentPayload;
 
 export type ConnectorStatus = "connected" | "offline";
 
@@ -526,11 +525,7 @@ export interface CreateDatasourceResponse {
 // Sync-state status values produced by the Digitize service pod.
 // "unknown" is set by the Go catalog when the pod is unreachable.
 export type DatasourceSyncStatus =
-  | "up to date"
-  | "syncing"
-  | "out of sync"
-  | "delete pending"
-  | "unknown";
+  "up to date" | "syncing" | "out of sync" | "delete pending" | "unknown";
 
 // Matches backend ApplicationDatasourceItem (GET /applications/:id/datasources).
 export interface ApplicationDatasourceApiItem {

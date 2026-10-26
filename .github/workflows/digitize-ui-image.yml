@@ -22,6 +22,29 @@ permissions:
   contents: read
 
 jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: ui/digitize/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ui/digitize
+        run: npm ci
+
+      - name: Run Prettier check
+        working-directory: ui/digitize
+        run: npm run format:check
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -47,7 +70,7 @@ jobs:
 
   build-publish-image:
     name: Build and Publish Image
-    needs: [lint]
+    needs: [format, lint]
     uses: ./.github/workflows/build-and-publish-image.yml
     with:
       working-directory: 'ui/digitize'

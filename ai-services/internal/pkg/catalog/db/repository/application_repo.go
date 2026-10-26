@@ -13,10 +13,15 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 )
 
+// applicationSearchColumns defines the columns searched when a ?q= term is provided.
+// Add column names here to extend search to additional fields in future.
+var applicationSearchColumns = []string{"a.name"}
+
 // ApplicationFilters defines optional filters for querying applications.
 type ApplicationFilters struct {
 	DeploymentType string // Optional: filter by deployment_type ("architectures" or "services")
 	CatalogID      string // Optional: filter by catalog_id (e.g., "rag", "chat", "digitize")
+	Search         string // Optional: case-insensitive substring search on the application name
 	Limit          int    // Optional: number of records to return (for pagination)
 	Offset         int    // Optional: number of records to skip (for pagination)
 }
@@ -78,12 +83,12 @@ func (r *applicationRepo) GetAll(ctx context.Context, filters *ApplicationFilter
 	return r.scanApplicationsWithServices(rows)
 }
 
-// buildGetAllQuery constructs the SQL query and arguments for GetAll.
-func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string, []interface{}) {
+// buildApplicationWhereClauses builds the shared WHERE clauses and args for application filter queries.
+// It is used by both buildGetAllQuery and GetCount to guarantee consistent filtering.
+func buildApplicationWhereClauses(filters *ApplicationFilters) ([]string, []interface{}) {
 	args := []interface{}{}
 	whereClauses := []string{}
 
-	// Build WHERE clause dynamically based on provided filters
 	if filters != nil {
 		if filters.DeploymentType != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("a.deployment_type = $%d", len(args)+1))
@@ -94,7 +99,18 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 			whereClauses = append(whereClauses, fmt.Sprintf("a.catalog_id = $%d", len(args)+1))
 			args = append(args, filters.CatalogID)
 		}
+
+		if filters.Search != "" {
+			whereClauses = append(whereClauses, buildSearchClause(applicationSearchColumns, &args, filters.Search))
+		}
 	}
+
+	return whereClauses, args
+}
+
+// buildGetAllQuery constructs the SQL query and arguments for GetAll.
+func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string, []interface{}) {
+	whereClauses, args := buildApplicationWhereClauses(filters)
 
 	query := `
 		WITH paged_applications AS (
@@ -198,26 +214,11 @@ func (r *applicationRepo) scanApplicationsWithServices(rows pgx.Rows) ([]models.
 // This is used for pagination metadata.
 func (r *applicationRepo) GetCount(ctx context.Context, filters *ApplicationFilters) (int, error) {
 	query := `SELECT COUNT(DISTINCT a.id) FROM applications a`
-	args := []interface{}{}
-	argIndex := 1
-	whereAdded := false
 
-	// Add deployment_type filter if provided
-	if filters != nil && filters.DeploymentType != "" {
-		query += fmt.Sprintf(" WHERE a.deployment_type = $%d", argIndex)
-		args = append(args, filters.DeploymentType)
-		argIndex++
-		whereAdded = true
-	}
+	whereClauses, args := buildApplicationWhereClauses(filters)
 
-	// Add catalog_id filter if provided
-	if filters != nil && filters.CatalogID != "" {
-		if whereAdded {
-			query += fmt.Sprintf(" AND a.catalog_id = $%d", argIndex)
-		} else {
-			query += fmt.Sprintf(" WHERE a.catalog_id = $%d", argIndex)
-		}
-		args = append(args, filters.CatalogID)
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
 	var count int

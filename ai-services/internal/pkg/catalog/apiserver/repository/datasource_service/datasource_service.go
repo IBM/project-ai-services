@@ -184,7 +184,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 	// is built; they are never forwarded to the caller.
 	connector, err := s.connectorRepo.GetByID(ctx, id, true)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: "datasource not found",
@@ -245,7 +245,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 func (s *DatasourceService) GetDatasourceApplications(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceApplicationsResponse, error) {
 	// Step 1: existence check — fetch without credentials (no metadata needed here).
 	if _, err := s.connectorRepo.GetByID(ctx, id, false); err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: "datasource not found",
@@ -304,6 +304,7 @@ func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.L
 		Type:     catalogconstants.ConnectorTypeDatasource,
 		Status:   dbmodels.ConnectorStatus(req.Status),
 		Provider: req.Provider,
+		Search:   req.Search,
 		Limit:    req.PageSize,
 		Offset:   (req.Page - 1) * req.PageSize,
 	}
@@ -612,7 +613,7 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 func (s *DatasourceService) loadConnector(ctx context.Context, datasourceID uuid.UUID) (*dbmodels.Connector, error) {
 	connector, err := s.connectorRepo.GetByID(ctx, datasourceID, true)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: fmt.Sprintf("datasource %s not found", datasourceID),
@@ -806,7 +807,7 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 	// Step 2: verify the datasource connector exists (credentials not needed for this response).
 	connector, err := s.connectorRepo.GetByID(ctx, datasourceID, false)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: fmt.Sprintf("datasource %s not found", datasourceID),

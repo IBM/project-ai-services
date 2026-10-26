@@ -1062,6 +1062,10 @@ paths:
         in: query
         name: catalog_id
         type: string
+      - description: Case-insensitive substring search on application name
+        in: query
+        name: q
+        type: string
       produces:
       - application/json
       responses:
@@ -2245,6 +2249,10 @@ paths:
         in: query
         name: provider
         type: string
+      - description: Case-insensitive substring search on datasource name
+        in: query
+        name: q
+        type: string
       produces:
       - application/json
       responses:
@@ -2801,6 +2809,11 @@ paths:
     get:
       description: Returns all registered workers, their current status, human-readable
         message, and connected application IDs.
+      parameters:
+      - description: Case-insensitive substring search on worker name
+        in: query
+        name: q
+        type: string
       produces:
       - application/json
       responses:
