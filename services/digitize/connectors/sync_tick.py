@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 from pydantic import ValidationError
@@ -371,8 +372,12 @@ async def _process_new_files(
 
         try:
             for remote_path, checksum in batch:
-                filename = sanitize_basename(remote_path)
-                local_path = safe_filename(remote_path, batch_dir)
+                # Normalise the extension to lowercase (same as the user upload
+                # path) so ingest() picks the file up; remote names like
+                # "file.PDF" are otherwise skipped and the doc stays "accepted".
+                remote_name = Path(sanitize_basename(remote_path))
+                filename = remote_name.stem + remote_name.suffix.lower()
+                local_path = safe_filename(filename, batch_dir)
                 local_checksum = await asyncio.to_thread(
                     scanner.download_to, remote_path, local_path
                 )
