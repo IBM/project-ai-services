@@ -1160,7 +1160,7 @@ Error responses: `404 {"error": "connector type \"<type>\" not found"}` for an u
 
 | Method | Path | Description | Response |
 |---|---|---|---|
-| `POST` | `/api/v1/models/keys` | Generate a **public** LiteLLM key for one model and one or more of its deployments (each a specific provider, worker and profile), for use by callers outside the platform. Any existing public key for that model is revoked first. The key is returned once and never stored | `201 Created` |
+| `POST` | `/api/v1/models/{id}/keys` | Generate a **public** LiteLLM key for the model identified by `{id}`, for use by callers outside the platform. Any existing public key for that model is revoked first. The key is returned once and never stored | `201 Created` |
 
 There is no endpoint to read a key back. Internal consumer services do not call the Catalog API for a key; they receive theirs through a Podman Secret (§10.11).
 
@@ -1698,28 +1698,11 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 
 ### 7.7 Generate Public Key
 
-**Endpoint:** `POST /api/v1/models/keys`
+**Endpoint:** `POST /api/v1/models/{id}/keys`
 
-**Description:** Generates a **public** LiteLLM virtual key (`metadata.type = "public"`) for developers, CI pipelines and scripts that call the LiteLLM Gateway from outside the platform. The key is scoped to one `model_name` and to the listed deployments, so it is tied to exactly the workers and profiles those deployments run on. If a public key already exists for that model it is **revoked first**, so at most one public key per model is valid at any time. The new key is returned **once** in this response; it is not stored by the platform and cannot be retrieved again. See [Virtual Key Provisioning](#virtual-key-provisioning) for the LiteLLM calls involved.
+**Description:** Generates a **public** LiteLLM virtual key (`metadata.type = "public"`) for developers, CI pipelines and scripts that call the LiteLLM Gateway from outside the platform. The key is scoped to the model identified by `{id}` and covers all its active deployments. If a public key already exists for that model it is **revoked first**, so at most one public key per model is valid at any time. The new key is returned **once** in this response; it is not stored by the platform and cannot be retrieved again. See [Virtual Key Provisioning](#virtual-key-provisioning) for the LiteLLM calls involved.
 
-**Request Body:**
-
-```json
-{
-  "model_name": "ibm-granite/granite-3.3-8b-instruct",
-  "deployment_ids": [
-    "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
-    "a91b44e0-3c2d-4e7f-8a10-5b6c7d8e9f01"
-  ]
-}
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `model_name` | string | Yes | Full model name, exactly as registered in LiteLLM (`params.model` for local models, `metadata.model_name` for connectors). Must have at least one registered route |
-| `deployment_ids` | string[] | Yes | One or more deployment IDs (`components.id` or `connectors.id`, as returned by `GET /api/v1/models`) the key may reach. Each must serve `model_name`, be `Running` / `connected`, and have a registered route. Each ID fixes a provider, a worker and a profile, so the key reaches only those. Written to the key's `metadata.tags` |
-
-`created_by` is taken from the access token and is not part of the request.
+No request body. `created_by` is taken from the access token.
 
 **Response `201 Created`:**
 
@@ -1738,15 +1721,15 @@ The UI sets `deployment_type=local`, `type`, `provider_id`, `model_name`, `profi
 }
 ```
 
-> The `key` value is the raw bearer token to be sent as `Authorization: Bearer <key>` when calling LiteLLM. It is never logged by the Catalog API server. It only works for `model_name` and only reaches the listed deployments (their workers and profiles). `worker` is `Local` for the control-plane Podman socket; `profile` is `null` for remote connectors.
+> The `key` value is the raw bearer token to be sent as `Authorization: Bearer <key>` when calling LiteLLM. It is never logged by the Catalog API server. `worker` is `Local` for the control-plane Podman socket; `profile` is `null` for remote connectors.
 
 **Error Responses:**
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | `model_name` missing, `deployment_ids` missing or empty, or a deployment does not serve `model_name` or is not `Running` / `connected` |
+| `400 Bad Request` | Model `{id}` has no active deployments with a registered route |
 | `401 Unauthorized` | Invalid or missing access token |
-| `404 Not Found` | A deployment ID does not exist, or `model_name` has no registered route |
+| `404 Not Found` | Model `{id}` does not exist |
 | `502 Bad Gateway` | LiteLLM unreachable or rejected the request. If the old key was already revoked when this happens, **no public key exists for the model** and the user must call the endpoint again |
 
 ---
@@ -2638,34 +2621,32 @@ ai-services model update prod-watsonx \
 
 #### Generate a public virtual key
 
-Generates a **public** LiteLLM key for one model and one or more of its deployments (each a specific worker and profile) via `POST /api/v1/models/keys`. Use it to authenticate calls to `POST /chat/completions`, `POST /embeddings`, and other inference endpoints from external clients or scripts.
+Generates a **public** LiteLLM key for a model (identified by its ID) covering all its active deployments via `POST /api/v1/models/{id}/keys`. Use it to authenticate calls to `POST /chat/completions`, `POST /embeddings`, and other inference endpoints from external clients or scripts.
 
 ```
-ai-services model litellm key generate --model <model-name> --deployments <name-or-id>[,<name-or-id>...] --runtime podman
+ai-services model litellm key generate --model <model-id> --runtime podman
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--model` | Yes | Full model name (e.g. `ibm-granite/granite-3.3-8b-instruct`) |
-| `--deployments` | Yes | Comma-separated deployment names or IDs the key may reach (the `name` / `id` shown by `ai-services model list`). Names are resolved to IDs by the CLI |
+| `--model` | Yes | Model ID (the `id` shown by `ai-services model list`) |
 
 ```bash
-# Generate a key for two granite deployments (Spyre on lpar-1 at compact-4k, CPU on Local) and print it once
+# Generate a key for granite-3.3-8b-instruct and print it once
 ai-services model litellm key generate \
-  --model ibm-granite/granite-3.3-8b-instruct \
-  --deployments granite-spyre-lpar1,granite-cpu \
+  --model 7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f \
   --runtime podman
 
 # Example: capture it and use it in a curl call
 KEY=$(ai-services model litellm key generate \
-  --model ibm-granite/granite-3.3-8b-instruct --deployments granite-cpu --runtime podman)
+  --model 7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f --runtime podman)
 curl -s http://litellm:4000/chat/completions \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
   -d '{"model":"ibm-granite/granite-3.3-8b-instruct","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-> Only one public key exists per model. Running the command again for the same model **revokes that model's previous key** and prints a new one. The key is printed once, is **never logged** by the CLI, and cannot be retrieved later — copy it when it is shown. The key only works for the given model and deployments (their workers and profiles).
+> Only one public key exists per model. Running the command again for the same model **revokes that model's previous key** and prints a new one. The key is printed once, is **never logged** by the CLI, and cannot be retrieved later — copy it when it is shown.
 
 ---
 
@@ -2680,7 +2661,7 @@ curl -s http://litellm:4000/chat/completions \
 | `ai-services model info [name]` | `GET /api/v1/models/:id` | Get full details of any model (local or remote) |
 | `ai-services model update [name]` | `PUT /api/v1/models/:id` | Update credentials of a remote model |
 | `ai-services model delete [name]` | `DELETE /api/v1/models/:id` | Undeploy/delete a model and delete its row |
-| `ai-services model litellm key generate --model --deployments` | `POST /api/v1/models/keys` | Generate a public LiteLLM key for a model and deployment(s) (shown once); revokes any previous public key for that model |
+| `ai-services model litellm key generate --model` | `POST /api/v1/models/{id}/keys` | Generate a public LiteLLM key for a model covering all its active deployments (shown once); revokes any previous public key for that model |
 
 ---
 
@@ -2690,7 +2671,7 @@ Virtual keys are generated with `"duration": null` and have no built-in expiry. 
 
 ### Public key
 
-Rotating a public key is the same operation as generating it: calling `POST /api/v1/models/keys` (or `ai-services model litellm key generate`) for the same model revokes that model's current public key and returns a new one. There is no separate rotate step and no database row to update.
+Rotating a public key is the same operation as generating it: calling `POST /api/v1/models/{id}/keys` (or `ai-services model litellm key generate --model <id>`) revokes that model's current public key and returns a new one. There is no separate rotate step and no database row to update.
 
 Rotate when:
 
@@ -2698,8 +2679,7 @@ Rotate when:
 - An operator who held a copy is offboarded.
 - Routine rotation policy applies (e.g. every 90 days).
 - The key was lost. It cannot be retrieved, so generate a new one.
-- The model is redeployed. A redeploy gets a new `components.id`, so generate again with the new `deployment_ids`.
-- The set of deployments (workers or profiles) should change. Generate again with the new `deployment_ids` list.
+- The model is redeployed with a new configuration. Generate again to refresh the key's deployment scope.
 
 After rotation, every script or pipeline using the old key receives `401` and must be updated with the new value.
 

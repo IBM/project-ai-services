@@ -57,35 +57,21 @@ share the same card count). The rule is:
 
 > **`standard`** = 4 cards · full context.
 > **`balanced`** = 2 cards · mid context.
-> **`compact-{context}`** = 1 card at that context window.
-> **`minimal`** = 1 card · smallest context (legacy RHAIIS ≤ 3.5 configs).
-
-Context window suffixes on `compact` are always in lowercase K units:
-`compact-3k`, `compact-4k`, `compact-8k`, `compact-16k`.
+> **`compact-4k`** = 1 card · 4 096 context.
 
 `standard` and `balanced` never need a context suffix because IBM has only one
 validated config at 4 cards and one at 2 cards respectively.
 
 ### 2.2 Profile derivation table
 
-This is the authoritative mapping from IBM Spyre RHAIIS validated use-case
+This is the authoritative mapping from IBM Spyre RHAIIS 3.6 validated use-case
 configurations (source: IBM docs, last updated 2026-09-22) to profile IDs.
 
 | Profile ID | Cards | Max context | Batch | Memory | shm | IBM use case / notes |
 |---|---|---|---|---|---|---|
 | `standard` | 4 | 32,768 | 32 | 200 GB | 2 GB | RAG inferencing — all supported LLMs |
-| `balanced` | 2 | 8,192 | 32 | 150 GB | 2 GB | Entity extraction — Mistral-Small-24B (RHAIIS 3.5+); Ministral-14b-BF16 2-card option (RHAIIS 3.6) |
-| `compact-4k` | 1 | 4,096 | 32 | 100 GB | default | Entity extraction — Granite-3.3, Granite-4.1-fp8, Llama-3.1-8B (RHAIIS 3.6); Ministral-14b-BF16 1-card option |
-| `compact-4k-150` | 1 | 4,096 | 32 | 150 GB | 2 GB | Entity extraction — Ministral-14b-BF16 1-card option (higher memory variant) |
-| `compact-8k` | 1 | 8,192 | 16 | 100 GB | 2 GB | Entity extraction — Granite-vision-3.3-2b 1-card option (RHAIIS 3.6) |
-| `compact-16k` | 1 | 16,384 | 16 | 100 GB | 2 GB | Entity extraction — Granite-vision-3.3-2b 2nd option (RHAIIS 3.6), treated as 1-card wide-context |
-| `minimal` | 1 | 3,072 | 16 | 100 GB | default | Entity extraction — Granite-3.3, Granite-4.1-fp8, Llama-3.1-8B (RHAIIS 3.3–3.5 only) |
-
-> **`balanced-16k`** would be the profile for the Granite-vision 2-card / 16K
-> config if it were split out; for now it is folded into `compact-16k` since the
-> IBM table treats both 1-card and 2-card Granite-vision options under the same
-> entity-extraction row. If a distinct 2-card / 16K use case is validated for a
-> non-vision model in future, `balanced-16k` is the natural name.
+| `balanced` | 2 | 8,192 | 32 | 150 GB | 2 GB | Entity extraction — Mistral-Small-24B, Ministral-14b-BF16 2-card option (RHAIIS 3.6) |
+| `compact-4k` | 1 | 4,096 | 32 | 100 GB | default | Entity extraction — Granite-3.3, Granite-4.1-fp8, Llama-3.1-8B, Ministral-14b-BF16 1-card option (RHAIIS 3.6) |
 
 **Reranker and embedding profiles** — these component types each have a single
 validated configuration so no naming distinction is needed:
@@ -96,12 +82,11 @@ validated configuration so no naming distinction is needed:
 | `reranker/vllm-cpu` | `standard` | — | 8,192 | 4 | 50 GB | default |
 | `embedding/vllm-cpu` | `standard` | — | 512 | 256 | 50 GB | default |
 
-**CPU LLM profiles** — no card dimension; names follow context window only:
+**CPU LLM profiles** — no card dimension:
 
 | Profile ID | Max context | Batch | Notes |
 |---|---|---|---|
 | `standard` | 8,096 | 32 | Default CPU config |
-| `compact-3k` | 3,072 | 16 | Short-context CPU workloads |
 
 ---
 
@@ -176,7 +161,7 @@ assets/components/
     memory: "100Gi"
     shmSize: "2Gi"
 
-# … further profiles (balanced, compact-8k, compact-16k, minimal) follow the same shape
+# … balanced follows the same shape (2 cards, 8 192 context)
 ```
 
 `params` keys match `values.yaml` exactly (flat camelCase). The profile with `"default": true` is used when the caller omits `profile` from the deploy request.
@@ -200,21 +185,21 @@ The schema retains the `profile` field for validation and the `x-profiles` list 
           "const": "ibm-granite/granite-3.3-8b-instruct",
           "title": "granite-3.3-8b-instruct",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "minimal"],
+          "x-profiles": ["standard", "balanced", "compact-4k"],
           "x-default-profile": "standard"
         },
         {
           "const": "ibm-granite/granite-4.1-8b-fp8",
           "title": "granite-4.1-8b-fp8",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "minimal"],
+          "x-profiles": ["standard", "balanced", "compact-4k"],
           "x-default-profile": "standard"
         },
         {
           "const": "meta-llama/Llama-3.1-8B-Instruct",
           "title": "Llama-3.1-8B-Instruct",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "minimal"],
+          "x-profiles": ["standard", "compact-4k"],
           "x-default-profile": "standard"
         },
         {
@@ -228,15 +213,8 @@ The schema retains the `profile` field for validation and the `x-profiles` list 
           "const": "mistralai/Ministral-3-14B-Instruct-2512-BF16",
           "title": "Ministral-3-14B-Instruct-2512-BF16",
           "description": "...",
-          "x-profiles": ["standard", "compact-4k", "balanced"],
+          "x-profiles": ["standard", "balanced", "compact-4k"],
           "x-default-profile": "compact-4k"
-        },
-        {
-          "const": "ibm-granite/granite-vision-3.3-2b",
-          "title": "granite-vision-3.3-2b",
-          "description": "...",
-          "x-profiles": ["compact-8k", "compact-16k"],
-          "x-default-profile": "compact-8k"
         }
       ],
       "default": "ibm-granite/granite-4.1-8b-fp8"
@@ -407,11 +385,9 @@ Single validated configuration — no dropdown shown in the UI.
 The individual parameter fields (`maxModelLen`, `maxBatchSize`, etc.) are
 removed from `values.yaml` because they are now authoritative in `profiles.yaml`.
 No `profile` default is written here — the hardware params are already encoded
-inside each model's `x-profiles` list in `values.schema.json`, so a static
-`"standard"` default in `values.yaml` would be incorrect for models that don't
-support `standard` (e.g. `granite-vision-3.3-2b` only supports `compact-8k` /
-`compact-16k`). The backend resolves the default at deploy time using the chosen model's
-`x-default-profile` (falling back to the first entry in its `x-profiles` list).
+inside each model's `x-profiles` list in `values.schema.json`. The backend resolves
+the correct profile at deploy time using the chosen model's `x-default-profile`
+(falling back to the first entry in its `x-profiles` list).
 
 **`llm/vllm-spyre/podman/values.yaml`**
 ```yaml

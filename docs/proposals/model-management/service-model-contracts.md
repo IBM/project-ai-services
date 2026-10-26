@@ -1,4 +1,4 @@
-# Proposal: Service–Model Contracts (Exclusion & Recommendation Strategy)
+# Proposal: Service–Model Contracts (Recommendation & Filtering Strategy)
 
 - **Status:** Recommended (Draft / Proposal)
 - **Created**: October 2026
@@ -39,7 +39,7 @@ workload, while still allowing users to pick an alternative valid profile if des
 
 ---
 
-## 2. Core Architectural Principle: Default-All (Exclusion & Recommendation)
+## 2. Core Architectural Principle: Default-All with Service-Specific Guidance
 
 To eliminate maintenance overhead, ensure zero-friction onboarding of new models, and provide guided user experience:
 
@@ -49,15 +49,19 @@ To eliminate maintenance overhead, ensure zero-friction onboarding of new models
 2. **By default, every service supports all providers, all models, and all profiles.** When a
    new model or profile is added to `vllm-spyre`, all services inherit it immediately without
    requiring edits to service metadata files.
-3. **Services ONLY declare exclusions when needed:**
-   - If a service cannot work with a specific model $\rightarrow$ list it in `excludeModels`.
-   - If a service cannot run certain hardware profiles for a model $\rightarrow$ list them in `excludeProfiles`.
-4. **Services can override recommended profiles per model:**
-   - **Service Primary Recommendation:** `recommended: { modelId, profile }` pre-selects the primary model & profile when the service form opens.
-   - **Per-Model Recommended Profile Override:** `recommendedProfiles: [{ modelId, profile }]` overrides the component's default profile for specific models when selected in this service.
-5. **User Flexibility:** Recommendations guide the user with **"★ Recommended"** badges and pre-selections, but users are free to override the profile at deploy time with any other non-excluded profile.
-6. **Zero-configuration for open services:** If a service has no incompatibilities and requires
-   no custom recommendations, its `models` section is omitted entirely.
+3. **Services declare `exclusions` in `metadata.yaml` for internal backend filtering:**
+   - Exclusions are read by the backend when computing the params schema for a `?service=<id>` call.
+   - They are applied server-side and **never returned to the UI** — the UI always receives a single clean, already-filtered schema.
+   - If a service cannot work with a specific model → add an entry with `modelId` and no `profiles` key.
+   - If a service cannot run certain hardware profiles for a model → add an entry with `modelId` and a `profiles` list.
+4. **`recommendations` is purely additive guidance — not a definition of supported models:**
+   - If a service declares no `recommendations`, all models and profiles from the provider are offered to the user unchanged.
+   - If `recommendations` are declared, **all models and profiles still appear** in the params schema; the recommendations only add `model.default` and `x-recommended-profile` annotations to guide the user.
+   - The **first entry** acts as the primary recommendation — its `modelId` is set as `model.default`; the UI renders a **"★ Recommended"** badge on it.
+   - **All entries** (including the first) have `x-recommended-profile` set on their schema entry so the UI can pre-select the right profile whenever that model is picked.
+5. **User Flexibility:** Recommendations pre-select the model and profile, but users are free to select any model or profile at deploy time (subject only to `exclusions`).
+6. **Zero-configuration for open services:** If a service has no filtering needs and requires
+   no custom recommendations, its `models` section is omitted entirely — all models and profiles from the provider are served as-is.
 
 ---
 
@@ -65,10 +69,10 @@ To eliminate maintenance overhead, ensure zero-friction onboarding of new models
 
 ### Same `metadata.yaml`, not a new file
 
-Model recommendations and profile restrictions belong in the service's top-level metadata:
+Model recommendations and filtering rules belong in the service's top-level metadata:
 
 ```
-services/<name>/metadata.yaml            ← service-level (identity, dependencies, exclusions, recommendations)
+services/<name>/metadata.yaml            ← service-level (identity, dependencies, recommendations, exclusions)
 services/<name>/podman/metadata.yaml     ← runtime-level (resources, deploy steps)
 services/<name>/openshift/metadata.yaml  ← runtime-level
 ```
@@ -88,53 +92,44 @@ Each service may declare an optional top-level `models` list in `services/<name>
 ```yaml
 models:
   - componentType: <llm | embedding | reranker>
-    # Optional: Exclude entire providers (e.g. if service cannot run on remote models)
-    excludeProviders:
-      - <provider-id-to-exclude>
-
+    recommendedProvider: <provider-id>         # optional: pre-selects this provider tab in UI
     providers:
-      # Local Provider Example (includes hardware profile recommendations and exclusions)
+      # Local Provider Example
       - providerId: <vllm-spyre | vllm-cpu>
-        recommended:
-          modelId: <recommended-model-id>
-          profile: <recommended-profile-id>
-        recommendedProfiles:
+        recommendations:
+          - modelId: <primary-model-id>        # first entry = primary (pre-selected in UI)
+            profile: <profile-id>
+          - modelId: <other-model-id>          # per-model profile override
+            profile: <profile-id>
+        exclusions:
+          - modelId: <model-id-to-exclude>     # no profiles key = exclude the model entirely
           - modelId: <model-id>
-            profile: <recommended-profile-id>
-        excludeModels:
-          - <model-id-to-exclude>
-        excludeProfiles:
-          - modelId: <model-id>
-            profiles:
+            profiles:                           # only these profiles are excluded for this model
               - <profile-id-to-exclude>
 
       # Remote Provider Example (WatsonX, hosted_vllm — no hardware profiles)
       - providerId: <watsonx | hosted_vllm>
-        recommended:
-          modelId: <recommended-model-id>    # profile is omitted for remote
-        excludeModels:
-          - <model-id-to-exclude>             # excludes unsuited remote models
+        recommendations:
+          - modelId: <primary-model-id>        # no profile for remote; first entry = primary
+        exclusions:
+          - modelId: <model-id-to-exclude>     # no profiles key = model excluded entirely
 ```
 
 #### Complete Key Reference
 
 | Key | Level | Type | Required? | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `models` | Root | `list` | Optional | Top-level section declaring model restrictions and recommendations. If omitted, all models/profiles are supported. |
+| `models` | Root | `list` | Optional | Top-level section declaring recommendations and/or exclusions. If omitted (or if no `exclusions` are declared), all models and profiles from the provider are served unchanged. `recommendations` are purely additive — they do not restrict the model set. |
 | `componentType` | `models[]` | `string` | **Yes** (if `models` present) | The component dependency type (`llm`, `embedding`, `reranker`). Must match one of `dependencies`. |
-| `excludeProviders` | `models[]` | `list<string>` | Optional | List of provider IDs (e.g. `watsonx`, `hosted_vllm`) **completely excluded** by this service. |
+| `recommendedProvider` | `models[]` | `string` | Optional | The `providerId` to pre-select when the service deploy form opens. Must match an entry in the sibling `providers` list. |
 | `providers` | `models[]` | `list` | **Yes** | List of provider-specific contract entries. |
 | `providerId` | `providers[]` | `string` | **Yes** | Registered provider identifier (local: `vllm-spyre`, `vllm-cpu`; remote: `watsonx`, `hosted_vllm`). |
-| `recommended` | `providers[]` | `object` | Optional | Primary recommended model (and profile for local) for this service under this provider. |
-| `modelId` | `recommended` | `string` | **Yes** (if `recommended` used) | The primary recommended model ID (pre-selected in UI with "★ Recommended" badge). |
-| `profile` | `recommended` | `string` | Optional | The primary recommended profile ID for local providers (omitted for remote connectors). |
-| `recommendedProfiles` | `providers[]` | `list<object>` | Optional | List of per-model profile recommendation overrides (local providers only). |
-| `modelId` | `recommendedProfiles[]` | `string` | **Yes** | The target model ID whose recommended profile is being overridden. |
-| `profile` | `recommendedProfiles[]` | `string` | **Yes** | The recommended profile ID for that model in this service. |
-| `excludeModels` | `providers[]` | `list<string>` | Optional | List of model IDs from this provider that are **not supported** by the service (works for both local models and remote models). |
-| `excludeProfiles` | `providers[]` | `list<object>` | Optional | List of model-specific profile exclusions (local providers only). |
-| `modelId` | `excludeProfiles[]` | `string` | **Yes** (if `excludeProfiles` used) | The model ID whose profiles are being restricted. |
-| `profiles` | `excludeProfiles[]` | `list<string>` | **Yes** | List of profile IDs (e.g., `standard`, `balanced`) to exclude for this specific model. |
+| `recommendations` | `providers[]` | `list<object>` | Optional | Ordered list of model+profile recommendations. The **first entry** is the primary — its `modelId` becomes `model.default` and its `profile` becomes the initial `x-recommended-profile`. All entries set `x-recommended-profile` on their schema entry for dynamic profile pre-selection. |
+| `modelId` | `recommendations[]` | `string` | **Yes** | The model ID to recommend. |
+| `profile` | `recommendations[]` | `string` | Optional | The recommended profile ID (local providers only; omitted for remote). |
+| `exclusions` | `providers[]` | `list<object>` | Optional | List of model-level or profile-level exclusions. An entry without `profiles` excludes the model entirely; an entry with `profiles` restricts only those profiles for that model. |
+| `modelId` | `exclusions[]` | `string` | **Yes** | The model ID to exclude or restrict. |
+| `profiles` | `exclusions[]` | `list<string>` | Optional | Profile IDs to exclude for this model (e.g. `standard`, `balanced`). Omit to exclude the model entirely. |
 
 ---
 
@@ -148,21 +143,19 @@ Chat is a conversational RAG workload. On Spyre it recommends `granite-4.1-8b-fp
 # Added to services/chat/metadata.yaml
 models:
   - componentType: llm
+    recommendedProvider: vllm-spyre
     providers:
       - providerId: vllm-spyre
-        # Primary recommended model + profile
-        recommended:
-          modelId: ibm-granite/granite-4.1-8b-fp8
-          profile: standard
-        # Override recommended profile when granite-3.3 is selected
-        recommendedProfiles:
+        recommendations:
+          - modelId: ibm-granite/granite-4.1-8b-fp8    # primary — pre-selected in UI
+            profile: standard
           - modelId: ibm-granite/granite-3.3-8b-instruct
             profile: balanced
-        excludeModels:
-          - ibm-granite/granite-20b-code
+        exclusions:
+          - modelId: ibm-granite/granite-20b-code       # no profiles = exclude model entirely
       - providerId: watsonx
-        recommended:
-          modelId: ibm/granite-3-8b-instruct
+        recommendations:
+          - modelId: ibm/granite-3-8b-instruct
 ```
 
 #### `services/summarize/metadata.yaml`
@@ -173,38 +166,35 @@ Summarize operates over long documents. It supports all models and profiles, rec
 # Added to services/summarize/metadata.yaml
 models:
   - componentType: llm
+    recommendedProvider: vllm-spyre
     providers:
       - providerId: vllm-spyre
-        recommended:
-          modelId: ibm-granite/granite-4.1-8b-fp8
-          profile: standard
+        recommendations:
+          - modelId: ibm-granite/granite-4.1-8b-fp8
+            profile: standard
 ```
 
 #### `services/extract/metadata.yaml`
 
-Extract is a short-context, structured extraction workload validated for single-card execution. It sets the primary recommendation to `compact-4k`, overrides the recommended profile for other models to `compact-4k`, and excludes multi-card profiles:
+Extract is a short-context, structured extraction workload validated for single-card execution. It recommends `compact-4k` for all models and excludes multi-card profiles so only `compact-4k` survives:
 
 ```yaml
 # Added to services/extract/metadata.yaml
 models:
   - componentType: llm
+    recommendedProvider: vllm-spyre
     providers:
       - providerId: vllm-spyre
-        recommended:
-          modelId: ibm-granite/granite-4.1-8b-fp8
-          profile: compact-4k
-        recommendedProfiles:
+        recommendations:
+          - modelId: ibm-granite/granite-4.1-8b-fp8    # primary — pre-selected in UI
+            profile: compact-4k
           - modelId: ibm-granite/granite-3.3-8b-instruct
             profile: compact-4k
-        excludeProfiles:
+        exclusions:
           - modelId: ibm-granite/granite-4.1-8b-fp8
-            profiles:
-              - standard
-              - balanced
+            profiles: [standard, balanced]
           - modelId: ibm-granite/granite-3.3-8b-instruct
-            profiles:
-              - standard
-              - balanced
+            profiles: [standard, balanced]
 ```
 
 #### `services/translate/metadata.yaml`
@@ -215,16 +205,15 @@ Translate processes token chunks in short context on 1 card. It recommends `comp
 # Added to services/translate/metadata.yaml
 models:
   - componentType: llm
+    recommendedProvider: vllm-spyre
     providers:
       - providerId: vllm-spyre
-        recommended:
-          modelId: ibm-granite/granite-4.1-8b-fp8
-          profile: compact-4k
-        excludeProfiles:
+        recommendations:
           - modelId: ibm-granite/granite-4.1-8b-fp8
-            profiles:
-              - standard
-              - balanced
+            profile: compact-4k
+        exclusions:
+          - modelId: ibm-granite/granite-4.1-8b-fp8
+            profiles: [standard, balanced]
 ```
 
 #### `services/similarity/metadata.yaml`
@@ -235,52 +224,54 @@ Similarity depends on `embedding` and `reranker`. It provides recommendations fo
 # Added to services/similarity/metadata.yaml
 models:
   - componentType: embedding
+    recommendedProvider: vllm-cpu
     providers:
       - providerId: vllm-cpu
-        recommended:
-          modelId: ibm-granite/granite-embedding-278m-multilingual
-          profile: standard
+        recommendations:
+          - modelId: ibm-granite/granite-embedding-278m-multilingual
+            profile: standard
   - componentType: reranker
+    recommendedProvider: vllm-spyre
     providers:
       - providerId: vllm-spyre
-        recommended:
-          modelId: BAAI/bge-reranker-v2-m3
-          profile: standard
+        recommendations:
+          - modelId: BAAI/bge-reranker-v2-m3
+            profile: standard
 ```
 
 ---
 
 ## 5. How the backend uses the contract
 
-### Step A — Schema filtering, defaults, and recommendations (schema serve time)
+### Step A — Schema computation and enrichment (params serve time)
 
 When the UI requests component params for a provider in the context of a service
 (`GET /api/v1/components/{type}/providers/{id}/params?service=<serviceId>`):
 
-1. The backend reads the component provider's base schema (`values.schema.json`) containing all models in `model.oneOf`.
-2. **Apply Exclusions:**
-   - **Filter models:** Drop any `model.oneOf` entry whose `const` is listed in `excludeModels`.
-   - **Filter profiles:** For each surviving model, subtract any profiles listed under `excludeProfiles` for that `modelId` from its `x-profiles`.
-3. **Apply Recommendations & Profile Overrides:**
-   - If `recommended.modelId` is specified and not excluded, set it as the schema `model.default` and mark it with `x-recommended: true`.
-   - If `recommended.profile` is specified for that model, set it as the initial `profile.default`.
-   - Embed a `recommendedProfiles` lookup map in the returned schema metadata. When the user switches the selected model in the UI dropdown, the UI dynamically changes the pre-selected and badged profile to that model's recommended profile.
-4. **Profile Selector Visibility:**
-   - If profile filtering leaves $>1$ profile for the selected model: UI displays a profile dropdown allowing the user to accept the recommended profile or override it with another valid profile.
-   - If profile filtering leaves exactly $1$ profile: Backend omits the profile selector from the schema (auto-injected at deploy time).
-5. Returns the filtered and annotated schema to the UI.
+1. **Load base schema:** Read the provider's `values.schema.json` — all models in `model.oneOf` and all profiles in each model's `x-profiles`. This is the default: every model and every profile is available unless a subsequent step removes it.
+2. **Apply exclusions (server-side, not returned):** If `exclusions` are declared in `services/<id>/metadata.yaml`, filter in-memory:
+   - Drop any `model.oneOf` entry whose `modelId` appears in `exclusions` with no `profiles` key.
+   - For each surviving model, subtract any profiles listed under `exclusions[modelId].profiles` from its `x-profiles`.
+   - Exclusions are **never exposed** in the returned schema — the UI receives only the post-filter result.
+   - If no `exclusions` are declared, the full base schema passes through unchanged.
+3. **Annotate recommendations (returned as schema annotations):** If `recommendations` are declared in `services/<id>/metadata.yaml`, annotate the schema in-memory — **this never removes any model or profile from the schema**:
+   - First entry: set `model.default` to its `modelId`; set `"x-recommended-profile": "<profile>"` on its `model.oneOf` entry.
+   - Each subsequent entry: set `"x-recommended-profile": "<profile>"` on its `model.oneOf` entry so the UI can update the profile pre-selection when the user switches models.
+   - The UI derives the initial profile pre-selection from `x-recommended-profile` on the `model.default` entry — no separate `profile.default` is needed.
+4. **Profile selector visibility:**
+   - If a model has $>1$ surviving profile: UI renders a profile dropdown; it reads `x-recommended-profile` from the selected model's `oneOf` entry to pre-select the right profile.
+   - If a model has exactly $1$ surviving profile: Backend removes the `profile` field from the schema — it is auto-injected at deploy time without user interaction.
+5. **Return one clean enriched schema** to the UI. No separate metadata block, no raw contract data — just the standard JSON Schema shape with the above annotations baked in.
 
 ### Step B — Deployment validation and profile resolution (deploy time)
 
 When the user submits an application or service deployment:
 
-1. **Model Check:** Backend verifies that the submitted `model` is NOT in `excludeModels`. If excluded, returns `HTTP 400 Bad Request` (`MODEL_NOT_SUPPORTED_BY_SERVICE`).
-2. **Profile Check:** Backend verifies that the submitted `profile` is NOT in `excludeProfiles` for that model. If excluded, returns `HTTP 400 Bad Request` (`PROFILE_NOT_SUPPORTED_BY_SERVICE`).
-3. **User Profile Override:** If the user selected a valid non-recommended profile (e.g. user selected `balanced` instead of recommended `standard`), the user's explicit selection is honored.
-4. **Auto-Resolution / Default Injection:** If the user did not provide a `profile` (because only 1 profile remained valid, or the user submitted default parameters):
+1. **Model Check:** Backend re-reads `exclusions` from `metadata.yaml` and verifies the submitted `model` is not excluded. If it is, returns `HTTP 400 Bad Request` (`MODEL_NOT_SUPPORTED_BY_SERVICE`).
+2. **Profile Check:** Backend verifies the submitted `profile` is not in `exclusions[modelId].profiles`. If it is, returns `HTTP 400 Bad Request` (`PROFILE_NOT_SUPPORTED_BY_SERVICE`). Any valid non-excluded profile the user selected is honored, even if it differs from `x-recommended-profile`.
+3. **Auto-Resolution / Default Injection:** If the user did not provide a `profile` (because only 1 profile remained valid, or the user submitted default parameters):
    - If only 1 profile survives for that model $\rightarrow$ inject that single profile.
-   - If `recommendedProfiles` defines an override for this model $\rightarrow$ inject that recommended profile.
-   - If `recommended.profile` applies to this model $\rightarrow$ inject `recommended.profile`.
+   - If `recommendations` contains an entry for this model $\rightarrow$ inject that entry's `profile`.
    - Otherwise $\rightarrow$ inject the provider's default profile from `profiles.yaml`.
 
 ### Step C — Bundle upload validation (BYOS only)
@@ -289,11 +280,51 @@ For user-defined service bundles uploaded via `POST /api/v1/catalog/bundles`, th
 
 1. `componentType` matches one of the bundle's declared `dependencies`.
 2. `providerId` matches a known provider.
-3. Any `recommended.modelId` or `recommendedProfiles[*].modelId` exists and is NOT in `excludeModels`.
-4. Any `recommended.profile` or `recommendedProfiles[*].profile` exists in `profiles.yaml` and is NOT in `excludeProfiles`.
-5. Every entry in `excludeModels` and `excludeProfiles` references valid catalog items.
+3. `recommendedProvider` (if set) matches one of the `providerId` values in the sibling `providers` list.
+4. Every `recommendations[*].modelId` exists and does NOT appear in `exclusions` as a model-level exclusion.
+5. Every `recommendations[*].profile` exists in `profiles.yaml` and is NOT listed under `exclusions` for that model.
+6. Every entry in `exclusions` references valid catalog items.
 
-#### Implementation Go Structs
+### Enriched Schema Response Shape
+
+When `?service=<id>` is provided, the returned schema for a local provider looks like:
+
+```json
+{
+  "properties": {
+    "model": {
+      "default": "<first-recommendations-modelId>",
+      "oneOf": [
+        {
+          "const": "<recommended-model-id>",
+          "title": "<model display name>",
+          "x-recommended-profile": "<profile>",
+          "x-profiles": ["<surviving-profile>", "..."]
+        },
+        {
+          "const": "<other-model-id>",
+          "title": "<model display name>",
+          "x-recommended-profile": "<profile>",
+          "x-profiles": ["<surviving-profile>", "..."]
+        }
+      ]
+    },
+    "profile": {
+      // no default — UI reads x-recommended-profile from the selected model's oneOf entry
+      // field omitted entirely if only 1 profile survives for the selected model
+    }
+  }
+}
+```
+
+**Schema annotation reference:**
+- `model.default` — the primary recommended model; UI renders **"★ Recommended"** badge and pre-selects it.
+- `x-recommended-profile` — profile the UI pre-selects when the user picks that model (including on initial load). Present on every model in `recommendations`. No separate `profile.default` needed.
+- `x-profiles` — surviving profiles after exclusions (all profiles when no exclusions declared for that model).
+- Excluded models are absent from `model.oneOf` entirely — the UI has no visibility into what was filtered.
+- `profile` field omitted when only 1 profile survives — auto-injected at deploy time, no dropdown rendered.
+
+### Implementation Go Structs
 
 ```go
 // In internal/pkg/catalog/apiserver/services/bundle/validate/metadata/bundle.go
@@ -304,17 +335,15 @@ type ServiceMetadataYAML struct {
 }
 
 type ServiceModelContract struct {
-    ComponentType    string                    `yaml:"componentType" json:"componentType"`
-    ExcludeProviders []string                  `yaml:"excludeProviders,omitempty" json:"excludeProviders,omitempty"`
-    Providers        []ServiceProviderContract `yaml:"providers" json:"providers"`
+    ComponentType       string                    `yaml:"componentType" json:"componentType"`
+    RecommendedProvider string                    `yaml:"recommendedProvider,omitempty" json:"recommendedProvider,omitempty"`
+    Providers           []ServiceProviderContract `yaml:"providers" json:"providers"`
 }
 
 type ServiceProviderContract struct {
-    ProviderID          string                   `yaml:"providerId" json:"providerId"`
-    Recommended         *ModelRecommendation    `yaml:"recommended,omitempty" json:"recommended,omitempty"`
-    RecommendedProfiles []ModelRecommendation   `yaml:"recommendedProfiles,omitempty" json:"recommendedProfiles,omitempty"`
-    ExcludeModels       []string                 `yaml:"excludeModels,omitempty" json:"excludeModels,omitempty"`
-    ExcludeProfiles     []ModelProfileExclusions `yaml:"excludeProfiles,omitempty" json:"excludeProfiles,omitempty"`
+    ProviderID      string                `yaml:"providerId" json:"providerId"`
+    Recommendations []ModelRecommendation `yaml:"recommendations,omitempty" json:"recommendations,omitempty"`
+    Exclusions      []ModelExclusion      `yaml:"exclusions,omitempty" json:"exclusions,omitempty"`
 }
 
 type ModelRecommendation struct {
@@ -322,9 +351,9 @@ type ModelRecommendation struct {
     Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
 }
 
-type ModelProfileExclusions struct {
+type ModelExclusion struct {
     ModelID  string   `yaml:"modelId" json:"modelId"`
-    Profiles []string `yaml:"profiles" json:"profiles"`
+    Profiles []string `yaml:"profiles,omitempty" json:"profiles,omitempty"` // empty = exclude model entirely
 }
 ```
 
@@ -334,8 +363,9 @@ type ModelProfileExclusions struct {
 
 | Asset | Change |
 |---|---|
-| `assets/services/*/metadata.yaml` | Optionally add `models:` block with `recommended`, `recommendedProfiles`, and/or `excludeModels` / `excludeProfiles` |
-| Catalog backend — deploy-options endpoint | Pass `?service=<id>` to params endpoint; subtract exclusions and attach recommendations |
+| `assets/services/*/metadata.yaml` | Optionally add `models:` block with `recommendations` and/or `exclusions` |
+| Catalog backend — deploy-options endpoint | Surface `recommendedProvider` per component type in the deploy-options response |
+| Catalog backend — params endpoint | Accept `?service=<id>`; apply exclusions server-side and bake `model.default` + `x-recommended-profile` + `x-profiles` annotations into the returned schema |
 | Catalog backend — deploy handler | Validate submitted model/profile is not excluded; honor user profile override or auto-inject recommended profile |
 | Bundle upload validator — `ServiceMetadataYAML` | Add `Models []ServiceModelContract` struct and validate exclusion/recommendation references |
 | `assets/components/*/*/*/values.schema.json` | No change — remains canonical source of all models |
@@ -356,21 +386,24 @@ type ModelProfileExclusions struct {
 
 ### Schema Endpoint Changes for Local & Remote Providers
 
-Both local component params and remote connector params support the `?service=<id>` query parameter:
+Both local component params and remote connector params support the `?service=<id>` query parameter. When omitted, the raw unmodified schema is returned with no service-specific filtering or annotations.
+
+#### 0. Service-Level Deploy Options: `GET /api/v1/services/{id}/deploy-options`
+- Returns `recommendedProvider` per `componentType` in the component entry so the UI can pre-select the correct provider tab before loading params.
+- Does **not** return `exclusions` or `recommendations` — those are internal to the params computation.
 
 #### 1. Local Component Params: `GET /api/v1/components/{type}/providers/{id}/params?service=<id>`
-- Reads `models` block from `services/<id>/metadata.yaml`.
-- Strips `excludeModels` from `model.oneOf`.
-- Strips `excludeProfiles` from `x-profiles` of matching models.
-- Annotates `recommended.modelId` as `model.default` and `recommended.profile` as `profile.default`.
-- Includes `recommendedProfiles` map in schema metadata.
-- If a model has only 1 surviving profile, hides the `profile` field for that model in the UI schema.
+- Reads `exclusions` from `services/<id>/metadata.yaml`; applies them server-side (models and profiles dropped in-memory — **not returned**).
+- Reads `recommendations` from `services/<id>/metadata.yaml`; bakes annotations directly into the returned schema:
+  - `model.default` → first recommendation's `modelId` (UI badge + pre-selection)
+  - `x-recommended-profile: <profile>` on each recommended model's `oneOf` entry (UI reads this to pre-select profile on model pick)
+  - `x-profiles` on each model's `oneOf` entry reflects only surviving profiles after exclusions
+- If a model has exactly 1 surviving profile, the `profile` field is **omitted** from the schema entirely (auto-injected at deploy time).
+- Returns one clean enriched JSON Schema — the UI renders directly from it, with no second lookup needed.
 
 #### 2. Remote Connector Params: `GET /api/v1/connectors/models/providers/{id}/params?service=<id>`
-- Reads `models` block from `services/<id>/metadata.yaml`.
-- Strips `excludeModels` from `model_name.oneOf` (e.g. for `watsonx` or `hosted_vllm`).
-- Annotates `recommended.modelId` as `model_name.default` with `"x-recommended": true`.
-- If the entire provider is in `excludeProviders`, returns `403 Forbidden` (`PROVIDER_NOT_SUPPORTED_BY_SERVICE`).
+- Reads `exclusions` from `services/<id>/metadata.yaml`; drops excluded models from `model_name.oneOf` server-side (**not returned**).
+- Reads `recommendations`; annotates the first entry's `modelId` as `model_name.default`.
 
 ---
 
@@ -379,29 +412,27 @@ Both local component params and remote connector params support the `?service=<i
 ### Scenario A — Recommendation + Per-Model Override + Exclusion (Chat service)
 
 1. Provider `vllm-spyre` defines `granite-4.1-8b-fp8`, `granite-3.3-8b-instruct`, and `granite-20b-code`.
-2. `services/chat/metadata.yaml` specifies:
-   - `recommended: { modelId: granite-4.1-8b-fp8, profile: standard }`
-   - `recommendedProfiles: [{ modelId: granite-3.3-8b-instruct, profile: balanced }]`
-   - `excludeModels: [ibm-granite/granite-20b-code]`
-3. User opens Chat deploy form $\rightarrow$ UI calls `GET .../params?service=chat`.
-4. Backend filters out `granite-20b-code`.
-5. UI displays `granite-4.1-8b-fp8` pre-selected with a **"★ Recommended"** badge and profile selector pre-selected to `standard`.
-6. User switches model to `granite-3.3-8b-instruct`:
-   - UI dynamically pre-selects `balanced` (marked with **"★ Recommended"** chip for this model).
-   - User decides to override it to `standard` (4-card) $\rightarrow$ User submits `{ model: granite-3.3-8b-instruct, profile: standard }`.
-7. Backend validates `standard` is not excluded $\rightarrow$ Pass. Template renders with 4 cards.
+2. `services/chat/metadata.yaml` specifies `recommendedProvider: vllm-spyre`, two `recommendations` entries, and `exclusions: [{ modelId: ibm-granite/granite-20b-code }]`.
+3. User opens Chat deploy form → deploy-options response carries `recommendedProvider: vllm-spyre`; UI pre-selects the Spyre tab.
+4. UI calls `GET .../vllm-spyre/params?service=chat`. Backend computes the enriched schema:
+   - `granite-20b-code` dropped server-side (exclusion, no `profiles` key) — **not present in response**.
+   - `granite-4.1-8b-fp8` → `model.default`, `x-recommended-profile: standard`.
+   - `granite-3.3-8b-instruct` → `x-recommended-profile: balanced`.
+5. UI renders: `granite-4.1-8b-fp8` pre-selected with **"★ Recommended"** badge (`model.default`); profile dropdown pre-set to `standard` (from `x-recommended-profile`).
+6. User switches model to `granite-3.3-8b-instruct` → UI reads `x-recommended-profile: balanced` from that entry and pre-selects `balanced` in the profile dropdown.
+7. User overrides to `standard` and submits `{ model: granite-3.3-8b-instruct, profile: standard }`.
+8. Backend re-validates: `granite-3.3-8b-instruct` not in model exclusions, no profile exclusions declared for it → Pass. Template renders with 4 cards.
 
-### Scenario B — Recommendation + Exclusion of multi-card profiles (Extract service)
+### Scenario B — Recommendation + Profile Exclusion (Extract service)
 
-1. Model `granite-4.1-8b-fp8` defines `x-profiles: [standard, balanced, compact-4k]`.
-2. `services/extract/metadata.yaml` specifies:
-   - `recommended: { modelId: granite-4.1-8b-fp8, profile: compact-4k }`
-   - `excludeProfiles: [{ modelId: granite-4.1-8b-fp8, profiles: [standard, balanced] }]`
-3. User opens Extract deploy form $\rightarrow$ UI calls `GET .../params?service=extract`.
-4. Backend subtracts `[standard, balanced]`, leaving only `compact-4k`.
-5. Because only 1 profile survives, backend hides the profile selector dropdown.
-6. User selects `granite-4.1-8b-fp8` (shown with **"★ Recommended"** badge) and submits.
-7. Backend auto-injects `profile: compact-4k` $\rightarrow$ pod launches with 1 Spyre card.
+1. `granite-4.1-8b-fp8` in `vllm-spyre` has `x-profiles: [standard, balanced, compact-4k]`.
+2. `services/extract/metadata.yaml` specifies `recommendations: [{ modelId: granite-4.1-8b-fp8, profile: compact-4k }]` and `exclusions: [{ modelId: granite-4.1-8b-fp8, profiles: [standard, balanced] }]`.
+3. User opens Extract deploy form → UI calls `GET .../vllm-spyre/params?service=extract`. Backend computes:
+   - `standard` and `balanced` dropped from `granite-4.1-8b-fp8`'s `x-profiles` server-side — **not in response**.
+   - Returned schema: `model.default: granite-4.1-8b-fp8`, `x-recommended-profile: compact-4k`, `x-profiles: [compact-4k]`.
+   - Because only 1 profile survives, `profile` field **omitted** from schema entirely.
+4. UI shows `granite-4.1-8b-fp8` with **"★ Recommended"** badge; no profile dropdown (single profile, hidden).
+5. User submits. Backend auto-injects `profile: compact-4k` → pod launches with 1 Spyre card.
 
 ---
 
@@ -416,12 +447,10 @@ CREATE TABLE service_model_contracts (
     id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     service_id           VARCHAR(100) NOT NULL,          -- e.g. 'chat', 'extract'
     component_type       VARCHAR(50)  NOT NULL,          -- 'llm', 'embedding', 'reranker'
+    recommended_provider VARCHAR(50),                    -- e.g. 'vllm-spyre'; pre-selects provider tab in UI
     provider_id          VARCHAR(50)  NOT NULL,          -- 'vllm-spyre', 'vllm-cpu', 'watsonx'
-    recommended_model_id VARCHAR(255),                   -- e.g. 'ibm-granite/granite-4.1-8b-fp8'
-    recommended_profile  VARCHAR(100),                   -- e.g. 'standard'
-    recommended_profiles JSONB,                          -- JSON array: [{"modelId": "...", "profile": "balanced"}]
-    exclude_models       JSONB,                          -- JSON array: ["ibm-granite/granite-20b-code"]
-    exclude_profiles     JSONB,                          -- JSON array: [{"modelId": "...", "profiles": ["standard"]}]
+    recommendations      JSONB,                          -- JSON array: [{"modelId": "...", "profile": "standard"}]; first entry = primary
+    exclusions           JSONB,                          -- JSON array: [{"modelId": "...", "profiles": ["standard"]}]; no profiles key = model excluded
     is_builtin           BOOLEAN      NOT NULL DEFAULT false, -- true for seed rows from YAML
     created_by           VARCHAR(100) NOT NULL DEFAULT 'system',
     created_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),
