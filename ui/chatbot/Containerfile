@@ -12,7 +12,10 @@ RUN npm run build
 FROM registry.access.redhat.com/ubi9/nginx-126:9.8
 
 USER root
-RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && dnf clean all
+# Remove unused DNF/Python packages with unpatched CVEs (RHSA-2026:5970, RHSA-2026:2765)
+RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && \
+    dnf remove -y libcomps python3-libcomps python3-urllib3 && \
+    dnf clean all
 USER 1001
 
 COPY nginx.conf.tmpl /etc
