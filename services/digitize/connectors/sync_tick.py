@@ -415,8 +415,8 @@ async def _process_new_files(
 
             # Steps 7, 8 & 9: create DB rows, enqueue tasks, launch pipeline.
             # quota=0 / queued_for_op=0: connector tasks bypass user quota.
-            # file_checksum_dict omitted: connectors register checksums via
-            # add_connector_checksum_entry after the job completes.
+            # file_hashes omitted: connectors don't use document_checksum; they
+            # register checksums via add_connector_checksum_entry after the job completes.
             doc_id_dict = await initialize_and_launch(
                 job_id=job_id,
                 operation=OperationType.INGESTION,

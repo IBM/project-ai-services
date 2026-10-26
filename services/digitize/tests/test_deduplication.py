@@ -17,18 +17,21 @@ Coverage areas
 ──────────────
 1. models.py          – AlreadyExistsFile, DocStatus.ALREADY_EXISTS, JobDocumentSummary.message
 2. utils/jobs.py      – initialize_job_state with already_exists_files
+                      – initialize_job_state claims checksums after the document rows exist;
+                        a lost claim becomes an already_exists / skipped record
                       – get_job_document_stats counting already_exists as completed
 3. utils/db.py        – create_document with initial_status / completed_at / extra_metadata
                       – _categorize_fields recognising new metadata keys
                       – get_job / get_all_jobs populate .message for already_exists docs
                       – DatabaseStatusManager._update_job stats (already_exists = completed)
-                      – DatabaseStatusManager.update_doc_metadata triggers upsert_file_checksum
+                      – DatabaseStatusManager.update_doc_metadata leaves checksum lifecycle to db_manager
 4. api/v1/jobs.py     – 409 when ALL files already exist
                       – 202 with mixed batch (some novel, some already-exist)
-                      – file_checksum_dict passed to initialize_job_state
-                      – digitization also checks ingestion hash
-5. db/manager.py      – upsert_file_checksum (insert + on-conflict update)
-                      – find_completed_document_by_hash (match / no-match / DB error)
+                      – read-only owner lookup; novel file hashes handed to initialize_job_state
+                      – digitization also checks the ingestion owner
+5. db/manager.py      – claim_file_checksum (atomic INSERT ... ON CONFLICT DO NOTHING)
+                      – get_file_owner (read-only lookup, joins documents)
+                      – update_document checksum lifecycle (claim removed on fail+cancel)
                       – delete_document removes checksum registry row first
                       – delete_user_documents skips connector docs, wipes user checksum registry
                       – get_all_documents excludes already_exists by default
@@ -109,6 +112,29 @@ class TestDocStatusAlreadyExists:
 
     def test_round_trip(self):
         assert DocStatus("already_exists") is DocStatus.ALREADY_EXISTS
+
+
+@pytest.mark.unit
+class TestDocStatusSkipped:
+    def test_skipped_value(self):
+        assert DocStatus.SKIPPED.value == "skipped"
+
+    def test_round_trip(self):
+        assert DocStatus("skipped") is DocStatus.SKIPPED
+
+    def test_skipped_counted_as_completed_in_job_stats(self):
+        job_data = {
+            "documents": [
+                {"id": "d1", "name": "a.pdf", "status": "completed"},
+                {"id": "d2", "name": "b.pdf", "status": "skipped"},
+            ]
+        }
+        with patch("digitize.utils.jobs.get_job", return_value=job_data):
+            from digitize.utils.jobs import get_job_document_stats
+            stats = get_job_document_stats("job-1")
+
+        assert stats["completed_count"] == 2
+        assert stats["failed_count"] == 0
 
 
 @pytest.mark.unit
@@ -275,7 +301,7 @@ class TestInitializeJobStateAlreadyExists:
         meta = skipped_call[1]["extra_metadata"]
         assert meta["existing_doc_id"] == "doc-existing-1"
         assert meta["existing_doc_name"] == "old.pdf"
-        assert meta["file_hash"] == "deadbeefdeadbeefdeadbeefdeadbeef"
+        assert "file_hash" not in meta  # hash lives in document_checksum, not on the doc
 
     def test_no_already_exists_files_does_not_call_extra_create(self):
         mock_create_job = Mock()
@@ -313,6 +339,77 @@ class TestInitializeJobStateAlreadyExists:
         assert "already.pdf" in result
         assert "novel.pdf" in result
 
+    def _make_skip(self, filename="dup.pdf", **overrides):
+        from digitize.models import SkippedFile
+        kwargs = dict(
+            filename=filename,
+            existing_doc_id="doc-active-1",
+            existing_doc_name="orig.pdf",
+            existing_job_id="job-other",
+            file_hash="cafebabecafebabecafebabecafebabe",
+        )
+        kwargs.update(overrides)
+        return SkippedFile(**kwargs)
+
+    def test_skipped_doc_created_with_skipped_status_and_metadata(self):
+        mock_create_job = Mock()
+        mock_create_doc = Mock()
+
+        with patch("digitize.utils.jobs.create_job", mock_create_job), \
+             patch("digitize.utils.jobs.create_document", mock_create_doc):
+            from digitize.utils.jobs import initialize_job_state
+            result = initialize_job_state(
+                job_id="job-1",
+                operation=OperationType.INGESTION,
+                output_format=OutputFormat.JSON,
+                documents_info=["novel.pdf"],
+                skipped_files=[self._make_skip("dup.pdf")],
+            )
+
+        assert "dup.pdf" in mock_create_job.call_args[1]["documents_info"]
+        skipped_call = next(
+            c for c in mock_create_doc.call_args_list if c[1].get("doc_name") == "dup.pdf"
+        )
+        assert skipped_call[1]["initial_status"] == DocStatus.SKIPPED
+        assert skipped_call[1]["completed_at"] is not None
+        assert skipped_call[1]["extra_metadata"] == {
+            "existing_doc_id": "doc-active-1",
+            "existing_doc_name": "orig.pdf",
+            "existing_job_id": "job-other",
+        }
+        assert "dup.pdf" in result
+
+    def test_same_job_skipped_resolves_existing_doc_id_from_novel_file(self):
+        """A same-job duplicate has no doc_id up front; it must be resolved to the novel
+        file's freshly generated doc_id so delete cleanup can find the shadow row."""
+        mock_create_job = Mock()
+        mock_create_doc = Mock()
+
+        with patch("digitize.utils.jobs.create_job", mock_create_job), \
+             patch("digitize.utils.jobs.create_document", mock_create_doc):
+            from digitize.utils.jobs import initialize_job_state
+            result = initialize_job_state(
+                job_id="job-1",
+                operation=OperationType.INGESTION,
+                output_format=OutputFormat.JSON,
+                documents_info=["first.pdf"],
+                skipped_files=[
+                    self._make_skip(
+                        "second.pdf",
+                        existing_doc_id=None,
+                        existing_doc_name="first.pdf",
+                        existing_job_id=None,
+                    )
+                ],
+            )
+
+        skipped_call = next(
+            c for c in mock_create_doc.call_args_list if c[1].get("doc_name") == "second.pdf"
+        )
+        meta = skipped_call[1]["extra_metadata"]
+        assert meta["existing_doc_id"] == result["first.pdf"]
+        assert meta["existing_job_id"] == "job-1"
+
     def test_empty_already_exists_list_treated_same_as_none(self):
         mock_create_job = Mock()
         mock_create_doc = Mock()
@@ -330,6 +427,145 @@ class TestInitializeJobStateAlreadyExists:
 
         assert mock_create_doc.call_count == 1
         assert "novel.pdf" in result
+
+    # ---- checksum claims made after the document rows exist ------------------
+
+    @staticmethod
+    def _owner_doc(doc_id="owner-doc", name="orig.pdf", status="completed", job_id="owner-job"):
+        return SimpleNamespace(doc_id=doc_id, name=name, status=status, job_id=job_id)
+
+    def _run_with_claims(self, claim_results, documents_info, file_hashes, **kwargs):
+        mock_create_doc = Mock()
+        mock_dbm = Mock()
+        mock_dbm.claim_file_checksum = Mock(side_effect=claim_results)
+        with patch("digitize.utils.jobs.create_job", Mock()), \
+             patch("digitize.utils.jobs.create_document", mock_create_doc), \
+             patch("digitize.utils.jobs.db_manager", mock_dbm):
+            from digitize.utils.jobs import initialize_job_state
+            result = initialize_job_state(
+                job_id="job-1",
+                operation=OperationType.INGESTION,
+                output_format=OutputFormat.JSON,
+                documents_info=documents_info,
+                file_hashes=file_hashes,
+                **kwargs,
+            )
+        return result, mock_create_doc, mock_dbm
+
+    def test_no_file_hashes_means_no_claims(self):
+        result, _, mock_dbm = self._run_with_claims([], ["a.pdf"], None)
+        assert "a.pdf" in result
+        mock_dbm.claim_file_checksum.assert_not_called()
+
+    def test_claim_made_per_document_with_its_own_doc_id(self):
+        result, _, mock_dbm = self._run_with_claims(
+            [None, None], ["a.pdf", "b.pdf"], {"a.pdf": "ha", "b.pdf": "hb"}
+        )
+        calls = [c.args for c in mock_dbm.claim_file_checksum.call_args_list]
+        assert calls == [("ha", "ingestion", result["a.pdf"]), ("hb", "ingestion", result["b.pdf"])]
+        mock_dbm.delete_document.assert_not_called()
+
+    def test_lost_claim_to_completed_owner_becomes_already_exists(self):
+        already_exists = []
+        result, mock_create_doc, mock_dbm = self._run_with_claims(
+            [self._owner_doc()], ["a.pdf"], {"a.pdf": "ha"}, already_exists_files=already_exists
+        )
+        # The just-created document is removed and replaced by a shadow row.
+        mock_dbm.delete_document.assert_called_once()
+        assert len(already_exists) == 1
+        assert already_exists[0].existing_doc_id == "owner-doc"
+        shadow = mock_create_doc.call_args_list[-1].kwargs
+        assert shadow["initial_status"] == DocStatus.ALREADY_EXISTS
+        assert result["a.pdf"] != mock_dbm.delete_document.call_args.args[0]
+
+    def test_lost_claim_to_in_progress_owner_becomes_skipped(self):
+        skipped = []
+        result, mock_create_doc, _ = self._run_with_claims(
+            [self._owner_doc(status="in_progress")], ["a.pdf"], {"a.pdf": "ha"}, skipped_files=skipped
+        )
+        assert len(skipped) == 1
+        assert skipped[0].existing_job_id == "owner-job"
+        shadow = mock_create_doc.call_args_list[-1].kwargs
+        assert shadow["initial_status"] == DocStatus.SKIPPED
+        assert shadow["extra_metadata"]["existing_doc_id"] == "owner-doc"
+
+    def test_same_job_skipped_is_redirected_when_its_original_lost_the_claim(self):
+        skipped = [self._make_skip("second.pdf", existing_doc_id=None,
+                                   existing_doc_name="first.pdf", existing_job_id=None)]
+        _, mock_create_doc, _ = self._run_with_claims(
+            [self._owner_doc(doc_id="real-owner", name="real.pdf", job_id="other-job")],
+            ["first.pdf"], {"first.pdf": "h1"}, skipped_files=skipped,
+        )
+        second = next(
+            c.kwargs for c in mock_create_doc.call_args_list if c.kwargs.get("doc_name") == "second.pdf"
+        )
+        assert second["extra_metadata"] == {
+            "existing_doc_id": "real-owner",
+            "existing_doc_name": "real.pdf",
+            "existing_job_id": "other-job",
+        }
+
+
+@pytest.mark.unit
+class TestInitializeAndLaunchLostClaims:
+    """initialize_and_launch must not process files that lost their checksum claim."""
+
+    @staticmethod
+    def _run(tmp_path, state_side_effect):
+        import asyncio
+        staging = tmp_path / "job-1"
+        staging.mkdir()
+        for name in ("a.pdf", "b.pdf"):
+            (staging / name).write_bytes(b"x")
+
+        def fake_init(**kwargs):
+            return state_side_effect(kwargs)
+
+        enqueue = AsyncMock()
+        status_mgr = Mock()
+        with patch("digitize.utils.jobs.initialize_job_state", side_effect=fake_init), \
+             patch("digitize.utils.jobs.enqueue_conversion_tasks", enqueue), \
+             patch("digitize.utils.jobs.get_status_manager", return_value=status_mgr), \
+             patch("digitize.utils.jobs.launch_ingest_pipeline", Mock()), \
+             patch("digitize.utils.jobs.asyncio.create_task") as create_task:
+            from digitize.utils.jobs import initialize_and_launch
+            asyncio.run(initialize_and_launch(
+                job_id="job-1", operation=OperationType.INGESTION, output_format=OutputFormat.JSON,
+                filenames=["a.pdf", "b.pdf"], staging_dir=staging, quota=10, queued_for_op=0,
+                file_hashes={"a.pdf": "ha", "b.pdf": "hb"},
+            ))
+        return staging, enqueue, status_mgr, create_task
+
+    def test_files_that_lost_the_claim_are_not_enqueued_or_staged(self, tmp_path):
+        def state(kwargs):
+            # a.pdf lost its claim: initialize_job_state turned it into an already_exists record
+            kwargs["already_exists_files"].append(
+                AlreadyExistsFile(filename="a.pdf", existing_doc_id="o", existing_doc_name="a.pdf", file_hash="ha")
+            )
+            return {"a.pdf": "shadow", "b.pdf": "doc-b"}
+
+        staging, enqueue, _, create_task = self._run(tmp_path, state)
+
+        assert enqueue.call_args.kwargs["filenames"] == ["b.pdf"]
+        assert not (staging / "a.pdf").exists()
+        assert (staging / "b.pdf").exists()
+        create_task.assert_called_once()  # pipeline still launched for the winner
+
+    def test_all_files_lost_completes_job_without_launching_pipeline(self, tmp_path):
+        def state(kwargs):
+            for n in ("a.pdf", "b.pdf"):
+                kwargs["skipped_files"].append(
+                    SimpleNamespace(filename=n, existing_doc_id="o", existing_doc_name=n,
+                                    existing_job_id="j", file_hash="h")
+                )
+            return {"a.pdf": "s1", "b.pdf": "s2"}
+
+        staging, enqueue, status_mgr, create_task = self._run(tmp_path, state)
+
+        enqueue.assert_not_called()
+        create_task.assert_not_called()
+        status_mgr.update_job_progress.assert_called_once_with("", DocStatus.COMPLETED, JobStatus.COMPLETED)
+        assert not staging.exists()
 
 
 # ============================================================================
@@ -440,13 +676,8 @@ class TestCreateDocumentNewParams:
 
 @pytest.mark.unit
 class TestCategorizeFieldsNewKeys:
-    """_categorize_fields must route file_hash, existing_doc_id, existing_doc_name
+    """_categorize_fields must route existing_doc_id, existing_doc_name
     into metadata_fields, not top_level_fields."""
-
-    def test_file_hash_goes_to_metadata(self):
-        meta, top = _categorize_fields({"file_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"})
-        assert "file_hash" in meta
-        assert "file_hash" not in top
 
     def test_existing_doc_id_goes_to_metadata(self):
         meta, top = _categorize_fields({"existing_doc_id": "doc-x"})
@@ -466,10 +697,10 @@ class TestCategorizeFieldsNewKeys:
     def test_mixed_fields_split_correctly(self):
         meta, top = _categorize_fields({
             "status": DocStatus.COMPLETED,
-            "file_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+            "existing_doc_id": "doc-x",
             "pages": 5,
         })
-        assert "file_hash" in meta
+        assert "existing_doc_id" in meta
         assert "pages" in meta
         assert "status" in top
         assert "status" not in meta
@@ -499,6 +730,26 @@ class TestGetJobMessagePopulation:
         j.error = None
         j.stats = {"total_documents": 1, "completed": 1, "failed": 0, "in_progress": 0}
         return j
+
+    def test_skipped_doc_gets_message(self):
+        doc = self._make_doc_mock("skipped", "original.pdf")
+        doc.doc_metadata = {
+            "existing_doc_name": "original.pdf",
+            "existing_job_id": "job-abc",
+        }
+        mock_dm = Mock()
+        mock_dm.get_job_by_id.return_value = self._make_job_mock()
+        mock_dm.get_documents_by_job_id.return_value = [doc]
+
+        with patch("digitize.utils.db.engine", Mock()), \
+             patch("digitize.utils.db.db_manager", mock_dm):
+            result = _real_get_job("job-1")
+
+        assert result["documents"][0]["status"] == "skipped"
+        assert (
+            result["documents"][0]["message"]
+            == "Skipped: Being ingested via Job job-abc as file original.pdf"
+        )
 
     def test_already_exists_doc_gets_message(self):
         mock_dm = Mock()
@@ -549,26 +800,11 @@ class TestGetJobMessagePopulation:
 
 
 @pytest.mark.unit
-class TestUpdateDocMetadataChecksumRegistration:
-    """update_doc_metadata must call upsert_file_checksum when status is COMPLETED
-    or COMPLETED_WITH_ERRORS and file_hash is present in the update."""
+class TestUpdateDocMetadataDoesNotTouchChecksum:
+    """The checksum lifecycle is owned by DatabaseManager.update_document, so the
+    status manager must not register checksums itself."""
 
-    def test_checksum_upserted_on_completed_with_file_hash(self, mock_db_manager):
-        mock_db_manager.get_document_by_id.return_value = Mock(
-            doc_metadata={"pages": 0, "tables": 0, "timing_in_secs": {}}
-        )
-        mock_db_manager.update_document.return_value = True
-
-        from digitize.utils.db import DatabaseStatusManager
-        mgr = DatabaseStatusManager("job-1")
-        mgr.update_doc_metadata("doc-1", {
-            "status": DocStatus.COMPLETED,
-            "file_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-        })
-
-        mock_db_manager.upsert_file_checksum.assert_called_once_with("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "doc-1")
-
-    def test_checksum_not_upserted_without_file_hash(self, mock_db_manager):
+    def test_completed_update_does_not_upsert_checksum(self, mock_db_manager):
         mock_db_manager.get_document_by_id.return_value = Mock(
             doc_metadata={"pages": 0, "tables": 0, "timing_in_secs": {}}
         )
@@ -578,37 +814,8 @@ class TestUpdateDocMetadataChecksumRegistration:
         mgr = DatabaseStatusManager("job-1")
         mgr.update_doc_metadata("doc-1", {"status": DocStatus.COMPLETED, "pages": 3})
 
-        mock_db_manager.upsert_file_checksum.assert_not_called()
-
-    def test_checksum_not_upserted_when_status_not_completed(self, mock_db_manager):
-        mock_db_manager.get_document_by_id.return_value = Mock(
-            doc_metadata={"pages": 0, "tables": 0, "timing_in_secs": {}}
-        )
-        mock_db_manager.update_document.return_value = True
-
-        from digitize.utils.db import DatabaseStatusManager
-        mgr = DatabaseStatusManager("job-1")
-        mgr.update_doc_metadata("doc-1", {
-            "status": DocStatus.IN_PROGRESS,
-            "file_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-        })
-
-        mock_db_manager.upsert_file_checksum.assert_not_called()
-
-    def test_checksum_upserted_on_completed_with_errors_with_file_hash(self, mock_db_manager):
-        mock_db_manager.get_document_by_id.return_value = Mock(
-            doc_metadata={"pages": 0, "tables": 0, "timing_in_secs": {}}
-        )
-        mock_db_manager.update_document.return_value = True
-
-        from digitize.utils.db import DatabaseStatusManager
-        mgr = DatabaseStatusManager("job-1")
-        mgr.update_doc_metadata("doc-1", {
-            "status": DocStatus.COMPLETED_WITH_ERRORS,
-            "file_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-        })
-
-        mock_db_manager.upsert_file_checksum.assert_called_once_with("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", "doc-1")
+        mock_db_manager.update_document.assert_called_once()
+        mock_db_manager.claim_file_checksum.assert_not_called()
 
 
 @pytest.mark.unit
@@ -754,12 +961,17 @@ def jobs_test_client(monkeypatch, tmp_path, mock_db_operations):
     # check_quota_atomic must also be set on that replacement mock.
     mock_db_manager = Mock()
     mock_db_manager.check_quota_atomic = Mock(return_value=(True, 0))
-    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    mock_db_manager.get_file_owner = Mock(return_value=None)
     monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
 
     # Stub out dg_util helpers that touch disk / DB.
     monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
-    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+    import hashlib
+    monkeypatch.setattr(
+        jobs_router_module,
+        "generate_file_checksum",
+        Mock(side_effect=lambda content: hashlib.md5(content if isinstance(content, bytes) else str(content).encode()).hexdigest())
+    )
 
     # Stub out pipeline background tasks.
     # Must be AsyncMock — asyncio.create_task() requires a coroutine.
@@ -780,23 +992,30 @@ def jobs_test_client(monkeypatch, tmp_path, mock_db_operations):
     return TestClient(digitize_app.app)
 
 
+def _owner(doc_id, doc_name, status="completed", job_id="owner-job"):
+    """The Document owning a checksum, as returned by get_file_owner / claim_file_checksum."""
+    return SimpleNamespace(
+        doc_id=doc_id, name=doc_name, status=status, job_id=job_id, type="ingestion"
+    )
+
+
 @pytest.mark.unit
 class TestDuplicateDetectionEndpoint:
     """Tests for the hash-based already-exists detection in POST /v1/jobs."""
 
-    def _pdf(self, name="sample.pdf"):
-        return ("files", (name, b"%PDF-1.4 test", "application/pdf"))
+    def _pdf(self, name="sample.pdf", content=None):
+        if content is None:
+            content = f"%PDF-1.4 test {name}".encode()
+        return ("files", (name, content, "application/pdf"))
 
     def test_all_files_exist_returns_409(self, jobs_test_client, monkeypatch):
         import digitize.api.v1.jobs as jobs_router_module
 
-        existing = Mock()
-        existing.doc_id = "old-doc"
-        existing.name = "sample.pdf"
+        existing = _owner("old-doc", "sample.pdf")
 
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(return_value=existing)
+        mock_hash_db.get_file_owner = Mock(return_value=existing)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         response = jobs_test_client.post(
@@ -809,13 +1028,11 @@ class TestDuplicateDetectionEndpoint:
     def test_409_body_mentions_existing_doc(self, jobs_test_client, monkeypatch):
         import digitize.api.v1.jobs as jobs_router_module
 
-        existing = Mock()
-        existing.doc_id = "old-doc-id"
-        existing.name = "sample.pdf"
+        existing = _owner("old-doc-id", "sample.pdf")
 
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(return_value=existing)
+        mock_hash_db.get_file_owner = Mock(return_value=existing)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         response = jobs_test_client.post(
@@ -828,14 +1045,12 @@ class TestDuplicateDetectionEndpoint:
     def test_mixed_batch_returns_202(self, jobs_test_client, monkeypatch):
         import digitize.api.v1.jobs as jobs_router_module
 
-        existing = Mock()
-        existing.doc_id = "old-doc"
-        existing.name = "old.pdf"
+        existing = _owner("old-doc", "old.pdf")
 
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         # first file matches, second is novel
-        mock_hash_db.find_completed_document_by_hash = Mock(side_effect=[existing, None])
+        mock_hash_db.get_file_owner = Mock(side_effect=[existing, None])
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         response = jobs_test_client.post(
@@ -848,13 +1063,11 @@ class TestDuplicateDetectionEndpoint:
     def test_mixed_batch_response_has_no_warnings_key(self, jobs_test_client, monkeypatch):
         import digitize.api.v1.jobs as jobs_router_module
 
-        existing = Mock()
-        existing.doc_id = "old-doc"
-        existing.name = "old.pdf"
+        existing = _owner("old-doc", "old.pdf")
 
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(side_effect=[existing, None])
+        mock_hash_db.get_file_owner = Mock(side_effect=[existing, None])
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         response = jobs_test_client.post(
@@ -868,13 +1081,11 @@ class TestDuplicateDetectionEndpoint:
         import digitize.api.v1.jobs as jobs_router_module
         import digitize.app as digitize_app
 
-        existing = Mock()
-        existing.doc_id = "old-doc"
-        existing.name = "old.pdf"
+        existing = _owner("old-doc", "old.pdf")
 
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(side_effect=[existing, None])
+        mock_hash_db.get_file_owner = Mock(side_effect=[existing, None])
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         jobs_test_client.post(
@@ -894,7 +1105,7 @@ class TestDuplicateDetectionEndpoint:
 
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(return_value=None)
+        mock_hash_db.get_file_owner = Mock(return_value=None)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         jobs_test_client.post(
@@ -910,15 +1121,13 @@ class TestDuplicateDetectionEndpoint:
         """A file already ingested must block a digitization request of the same content."""
         import digitize.api.v1.jobs as jobs_router_module
 
-        ingested_doc = Mock()
-        ingested_doc.doc_id = "ingested-doc"
-        ingested_doc.name = "report.pdf"
+        ingested_doc = _owner("ingested-doc", "report.pdf")
 
-        # digitization-type lookup returns None; ingestion fallback returns a match
+        # the ingestion-type lookup returns a match
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(
-            side_effect=[None, ingested_doc]
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: ingested_doc if op == "ingestion" else None
         )
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -934,7 +1143,7 @@ class TestDuplicateDetectionEndpoint:
 
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(return_value=None)
+        mock_hash_db.get_file_owner = Mock(return_value=None)
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
         response = jobs_test_client.post(
@@ -943,6 +1152,380 @@ class TestDuplicateDetectionEndpoint:
         )
 
         assert response.status_code == 202
+
+    def test_within_job_duplicate_documents_silently_dropped(self, jobs_test_client, monkeypatch):
+        """Identical files submitted in the same job are deduplicated (dropped silently)."""
+        import digitize.app as digitize_app
+
+        same_content = b"%PDF-1.4 identical content"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", same_content, "application/pdf")),
+                ("files", ("doc2.pdf", same_content, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        filenames_arg = init_call.kwargs.get("filenames", [])
+        assert filenames_arg == ["doc1.pdf"]
+        assert init_call.kwargs.get("already_exists_files", []) == []
+
+    def test_within_job_duplicates_with_novel_files(self, jobs_test_client, monkeypatch):
+        """Mixed batch with duplicates within same job: duplicates dropped, distinct kept."""
+        import digitize.app as digitize_app
+
+        content_a = b"%PDF-1.4 content A"
+        content_b = b"%PDF-1.4 content B"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", content_a, "application/pdf")),
+                ("files", ("doc2.pdf", content_a, "application/pdf")),
+                ("files", ("doc3.pdf", content_b, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        filenames_arg = init_call.kwargs.get("filenames", [])
+        assert filenames_arg == ["doc1.pdf", "doc3.pdf"]
+
+    def test_within_job_duplicate_when_first_already_exists_in_db(self, jobs_test_client, monkeypatch):
+        """If doc1 exists in DB and doc2 is a duplicate of doc1 in same batch, doc2 is dropped."""
+        import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
+
+        existing = _owner("old-doc", "doc1.pdf")
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(side_effect=[existing, None])
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        content_a = b"%PDF-1.4 content A"
+        content_b = b"%PDF-1.4 content B"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", content_a, "application/pdf")),
+                ("files", ("doc2.pdf", content_a, "application/pdf")),
+                ("files", ("doc3.pdf", content_b, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        filenames_arg = init_call.kwargs.get("filenames", [])
+        assert filenames_arg == ["doc3.pdf"]
+        already_exists_arg = init_call.kwargs.get("already_exists_files", [])
+        assert len(already_exists_arg) == 1
+        assert already_exists_arg[0].filename == "doc1.pdf"
+
+    def test_within_job_duplicates_all_exist_in_db_returns_409(self, jobs_test_client, monkeypatch):
+        """If all distinct files in batch already exist in DB, returns 409."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        existing = _owner("old-doc", "doc1.pdf")
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(return_value=existing)
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        content_a = b"%PDF-1.4 content A"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", content_a, "application/pdf")),
+                ("files", ("doc2.pdf", content_a, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 409
+
+    def test_single_active_file_returns_409(self, jobs_test_client, monkeypatch):
+        """A file currently in-flight in an active job returns 409 Conflict."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        active_doc = _owner("active-doc-id", "sample.pdf", "in_progress", "active-job-id")
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(return_value=active_doc)
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[self._pdf("sample.pdf")],
+        )
+
+        assert response.status_code == 409
+        assert "active-doc-id" in response.text
+
+    def test_mixed_batch_with_active_file_returns_202(self, jobs_test_client, monkeypatch):
+        """Batch with novel file and in-flight active file accepted with 202."""
+        import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
+
+        active_doc = _owner("active-doc-id", "active.pdf", "in_progress", "active-job-id")
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(side_effect=[active_doc, None])
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[self._pdf("active.pdf"), self._pdf("novel.pdf")],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        filenames_arg = init_call.kwargs.get("filenames", [])
+        assert filenames_arg == ["novel.pdf"]
+        # In-flight duplicates are `skipped`, not `already_exists`.
+        assert init_call.kwargs.get("already_exists_files", []) == []
+        skipped_arg = init_call.kwargs.get("skipped_files", [])
+        assert len(skipped_arg) == 1
+        assert skipped_arg[0].filename == "active.pdf"
+        assert skipped_arg[0].existing_doc_id == "active-doc-id"
+        assert skipped_arg[0].existing_job_id == "active-job-id"
+
+    def test_all_files_mixed_completed_and_active_returns_409(self, jobs_test_client, monkeypatch):
+        """Batch where one file matches document_checksum (completed) and the other
+        matches an in-flight document returns 409 and reports both categories."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        completed_doc = _owner("completed-doc-id", "done.pdf", "completed", "completed-job-id")
+
+        active_doc = _owner("active-doc-id", "running.pdf", "in_progress", "active-job-id")
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(side_effect=[completed_doc, active_doc])
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[self._pdf("done.pdf"), self._pdf("running.pdf")],
+        )
+
+        assert response.status_code == 409
+        assert "Already processed" in response.text
+        assert "completed-doc-id" in response.text
+        assert "Currently being processed" in response.text
+        assert "active-doc-id" in response.text
+        assert "active-job-id" in response.text
+
+    def test_mixed_completed_active_and_novel_returns_202(self, jobs_test_client, monkeypatch):
+        """Completed + active + novel files: only the novel file is processed; the
+        completed one is recorded as already_exists and the in-flight one as skipped."""
+        import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
+
+        completed_doc = _owner("completed-doc-id", "done.pdf", "completed", "completed-job-id")
+
+        active_doc = _owner("active-doc-id", "running.pdf", "in_progress", "active-job-id")
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(side_effect=[completed_doc, active_doc, None])
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[self._pdf("done.pdf"), self._pdf("running.pdf"), self._pdf("novel.pdf")],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert init_call.kwargs.get("filenames", []) == ["novel.pdf"]
+        already_exists = {
+            f.filename: f.existing_doc_id for f in init_call.kwargs.get("already_exists_files", [])
+        }
+        skipped = {
+            f.filename: (f.existing_doc_id, f.existing_job_id)
+            for f in init_call.kwargs.get("skipped_files", [])
+        }
+        assert already_exists == {"done.pdf": "completed-doc-id"}
+        assert skipped == {"running.pdf": ("active-doc-id", "active-job-id")}
+
+    def test_same_job_duplicate_recorded_as_skipped(self, jobs_test_client):
+        """Same content under a different name in one submission is recorded as skipped,
+        pointing at the first file in the same job."""
+        import digitize.app as digitize_app
+
+        same = b"%PDF-1.4 identical"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", same, "application/pdf")),
+                ("files", ("doc2.pdf", same, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert init_call.kwargs["filenames"] == ["doc1.pdf"]
+        skipped_arg = init_call.kwargs["skipped_files"]
+        assert len(skipped_arg) == 1
+        assert skipped_arg[0].filename == "doc2.pdf"
+        assert skipped_arg[0].existing_doc_name == "doc1.pdf"
+        assert skipped_arg[0].existing_job_id == init_call.kwargs["job_id"]
+        assert init_call.kwargs["already_exists_files"] == []
+
+    def test_same_name_same_content_duplicate_dropped_silently(self, jobs_test_client):
+        """Doc ids are keyed by filename, so an identical filename+content pair can't be
+        recorded separately and is dropped silently."""
+        import digitize.app as digitize_app
+
+        same = b"%PDF-1.4 identical"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", same, "application/pdf")),
+                ("files", ("doc1.pdf", same, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert init_call.kwargs["filenames"] == ["doc1.pdf"]
+        assert init_call.kwargs["skipped_files"] == []
+
+    def test_same_job_duplicate_of_existing_doc_not_double_recorded(self, jobs_test_client, monkeypatch):
+        """If the first copy resolved to an in-flight doc elsewhere, the second copy is
+        covered by that record and is not recorded again."""
+        import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
+
+        active_doc = _owner("active-doc-id", "doc1.pdf", "in_progress", "active-job-id")
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(side_effect=[active_doc, None])
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        same = b"%PDF-1.4 identical"
+        other = b"%PDF-1.4 other"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", same, "application/pdf")),
+                ("files", ("doc2.pdf", same, "application/pdf")),
+                ("files", ("doc3.pdf", other, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert init_call.kwargs["filenames"] == ["doc3.pdf"]
+        assert [f.filename for f in init_call.kwargs["skipped_files"]] == ["doc1.pdf"]
+
+    def test_novel_file_hashes_are_passed_to_initialize(self, jobs_test_client, monkeypatch):
+        """The API only looks the owner up; the atomic claim happens in initialize_job_state,
+        which receives each novel file's hash."""
+        import hashlib
+        import digitize.app as digitize_app
+
+        content = b"%PDF-1.4 new"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion", files=[("files", ("new.pdf", content, "application/pdf"))]
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert init_call.kwargs["file_hashes"] == {"new.pdf": hashlib.md5(content).hexdigest()}
+
+    def test_duplicates_are_not_in_file_hashes(self, jobs_test_client, monkeypatch):
+        import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(side_effect=[_owner("old-doc", "old.pdf"), None])
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        jobs_test_client.post(
+            "/v1/jobs?operation=ingestion", files=[self._pdf("old.pdf"), self._pdf("new.pdf")]
+        )
+
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert list(init_call.kwargs["file_hashes"]) == ["new.pdf"]
+
+    def test_lookup_db_error_returns_500_and_creates_no_job(self, jobs_test_client, monkeypatch):
+        """A failed lookup must not be treated as 'novel'."""
+        import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(side_effect=RuntimeError("db down"))
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion", files=[self._pdf("a.pdf")]
+        )
+
+        assert response.status_code == 500
+        cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).assert_not_called()
+
+    def test_digitization_looks_up_ingestion_then_digitization(self, jobs_test_client, monkeypatch):
+        import digitize.api.v1.jobs as jobs_router_module
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(return_value=None)
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json", files=[self._pdf("r.pdf")]
+        )
+
+        assert response.status_code == 202
+        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == [
+            "ingestion", "digitization",
+        ]
+
+    def test_ingestion_ignores_digitization_owner(self, jobs_test_client, monkeypatch):
+        """A digitization of the same content must not block ingestion: ingestion only
+        consults its own (hash, 'ingestion') row."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        # Simulate the real table: only the 'digitization' key is taken.
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: _owner("dig-doc", "r.pdf", "in_progress") if op == "digitization" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion", files=[self._pdf("r.pdf")]
+        )
+
+        assert response.status_code == 202
+        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == ["ingestion"]
+
+    def test_digitization_blocked_by_in_progress_ingestion(self, jobs_test_client, monkeypatch):
+        """The reverse direction is blocked: content being ingested is not re-digitized."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: _owner("ing-doc", "r.pdf", "in_progress", "ing-job") if op == "ingestion" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json", files=[self._pdf("r.pdf")]
+        )
+
+        assert response.status_code == 409
+        assert "ing-job" in response.text
 
 
 # ============================================================================
@@ -961,89 +1544,199 @@ def _make_session_ctx(session):
     return ctx
 
 
-@pytest.mark.unit
-class TestDatabaseManagerUpsertFileChecksum:
-    """DatabaseManager.upsert_file_checksum uses INSERT … ON CONFLICT DO UPDATE."""
+def _compiled_sql(stmt) -> str:
+    """Render a SQLAlchemy statement against the PostgreSQL dialect with literal binds."""
+    from sqlalchemy.dialects import postgresql
+    return str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
 
-    def test_upsert_executes_statement(self):
-        session = MagicMock()
+
+@pytest.mark.unit
+class TestDatabaseManagerClaimFileChecksum:
+    """claim_file_checksum: one atomic INSERT ... ON CONFLICT DO NOTHING."""
+
+    def _claim(self, session):
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            DatabaseManager.upsert_file_checksum("abc", "doc-1")
+            return DatabaseManager.claim_file_checksum("abc", "ingestion", "doc-1")
 
-        session.execute.assert_called_once()
+    def test_returns_none_when_claim_won(self):
+        session = MagicMock()
+        session.execute.return_value.first.return_value = ("doc-1",)
 
-    def test_upsert_handles_db_error_without_raising(self):
+        assert self._claim(session) is None
+        session.scalar.assert_not_called()  # no owner lookup needed
+
+    def test_claim_statement_is_atomic_insert_on_conflict_do_nothing(self):
+        session = MagicMock()
+        session.execute.return_value.first.return_value = ("doc-1",)
+
+        self._claim(session)
+
+        sql = _compiled_sql(session.execute.call_args[0][0])
+        assert "INSERT INTO document_checksum" in sql
+        assert "ON CONFLICT (checksum, type) DO NOTHING" in sql
+        assert "RETURNING" in sql
+        assert session.execute.call_count == 1
+
+    def test_returns_owner_document_when_claim_lost(self):
+        owner = _owner("other-doc", "x.pdf", "in_progress", "other-job")
+        session = MagicMock()
+        session.execute.return_value.first.return_value = None
+        session.scalar.return_value = owner
+
+        result = self._claim(session)
+
+        assert result is owner
+        session.expunge.assert_called_once_with(owner)
+
+    def test_owner_is_read_from_documents_via_join(self):
+        session = MagicMock()
+        session.execute.return_value.first.return_value = None
+        session.scalar.return_value = _owner("other-doc", "x.pdf")
+
+        self._claim(session)
+
+        sql = _compiled_sql(session.scalar.call_args[0][0])
+        assert "FROM documents JOIN document_checksum ON document_checksum.doc_id = documents.doc_id" in sql
+        assert "document_checksum.checksum = 'abc'" in sql
+        assert "document_checksum.type = 'ingestion'" in sql
+
+    def test_retries_when_owner_released_between_insert_and_select(self):
+        session = MagicMock()
+        session.execute.return_value.first.side_effect = [None, ("doc-1",)]
+        session.scalar.return_value = None  # owner vanished after the conflict
+
+        assert self._claim(session) is None
+        assert session.execute.call_count == 2
+
+    def test_raises_after_repeated_vanishing_owner(self):
+        session = MagicMock()
+        session.execute.return_value.first.return_value = None
+        session.scalar.return_value = None
+
+        with pytest.raises(RuntimeError):
+            self._claim(session)
+
+    def test_db_error_propagates_so_file_is_not_treated_as_novel(self):
         from sqlalchemy.exc import SQLAlchemyError
 
         session = MagicMock()
         session.execute.side_effect = SQLAlchemyError("boom")
 
-        with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
-            from digitize.db.manager import DatabaseManager
-            # Must not propagate the error
-            DatabaseManager.upsert_file_checksum("abc", "doc-1")
+        with pytest.raises(SQLAlchemyError):
+            self._claim(session)
 
 
 @pytest.mark.unit
-class TestDatabaseManagerFindCompletedDocumentByHash:
-    """find_completed_document_by_hash returns doc / None / None-on-error."""
+class TestDocumentChecksumKeying:
+    """Ingestion and digitization claims of the same content are independent rows."""
 
-    def test_returns_none_when_not_found(self):
+    def test_primary_key_is_checksum_and_type(self):
+        from digitize.db.models import DocumentChecksum
+
+        assert [c.name for c in DocumentChecksum.__table__.primary_key.columns] == ["checksum", "type"]
+
+    def test_doc_id_keeps_foreign_key_with_cascade(self):
+        from digitize.db.models import DocumentChecksum
+
+        fks = list(DocumentChecksum.__table__.c.doc_id.foreign_keys)
+        assert [fk.target_fullname for fk in fks] == ["documents.doc_id"]
+        assert fks[0].ondelete == "CASCADE"
+
+    def test_schema_sql_primary_key_is_checksum_and_type(self):
+        from pathlib import Path
+        import digitize.db as db_pkg
+
+        sql = (Path(db_pkg.__file__).parent / "scripts" / "init_schema.sql").read_text()
+        assert "PRIMARY KEY (checksum, type)" in sql
+        assert "REFERENCES documents(doc_id) ON DELETE CASCADE" in sql
+
+
+@pytest.mark.unit
+class TestDatabaseManagerGetFileOwner:
+    def test_returns_none_when_missing(self):
         session = MagicMock()
         session.scalar.return_value = None
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            result = DatabaseManager.find_completed_document_by_hash("missing", "ingestion")
+            assert DatabaseManager.get_file_owner("abc", "ingestion") is None
 
-        assert result is None
+        session.expunge.assert_not_called()
 
-    def test_returns_document_when_found(self):
-        mock_doc = Mock()
-        mock_doc.doc_id = "d1"
-        mock_doc.job_id = "j1"
-        mock_doc.name = "found.pdf"
-        mock_doc.type = "ingestion"
-        mock_doc.status = "completed"
-        mock_doc.output_format = "json"
-        mock_doc.submitted_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        mock_doc.completed_at = datetime(2024, 1, 1, 1, tzinfo=timezone.utc)
-        mock_doc.error = None
-        mock_doc.doc_metadata = {}
-
+    def test_returns_detached_document_when_found(self):
+        doc = _owner("d1", "a.pdf")
         session = MagicMock()
-        session.scalar.return_value = mock_doc
+        session.scalar.return_value = doc
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            result = DatabaseManager.find_completed_document_by_hash("abc", "ingestion")
+            assert DatabaseManager.get_file_owner("abc", "ingestion") is doc
 
-        assert result is mock_doc
-        session.expunge.assert_called_once_with(mock_doc)
+        session.expunge.assert_called_once_with(doc)
 
-    def test_returns_none_on_db_error(self):
+    def test_query_filters_on_checksum_and_type(self):
+        session = MagicMock()
+        session.scalar.return_value = None
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
+            from digitize.db.manager import DatabaseManager
+            DatabaseManager.get_file_owner("abc", "digitization")
+
+        sql = _compiled_sql(session.scalar.call_args[0][0])
+        assert "document_checksum.checksum = 'abc'" in sql
+        assert "document_checksum.type = 'digitization'" in sql
+
+    def test_db_error_propagates(self):
         from sqlalchemy.exc import SQLAlchemyError
 
         session = MagicMock()
-        session.scalar.side_effect = SQLAlchemyError("connection lost")
+        session.scalar.side_effect = SQLAlchemyError("boom")
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            # DB errors must NOT raise — caller treats file as novel
-            result = DatabaseManager.find_completed_document_by_hash("x", "ingestion")
+            with pytest.raises(SQLAlchemyError):
+                DatabaseManager.get_file_owner("abc", "ingestion")
 
-        assert result is None
 
-    def test_query_executes_against_session(self):
+@pytest.mark.unit
+class TestDatabaseManagerUpdateDocumentChecksumLifecycle:
+    """update_document releases the checksum claim of a failed / cancelled document, same
+    transaction. Completed documents keep it; deletion cascades through the FK."""
+
+    def _update(self, status, rowcount=1):
         session = MagicMock()
-        session.scalar.return_value = None
-
+        session.execute.return_value = Mock(rowcount=rowcount)
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
             from digitize.db.manager import DatabaseManager
-            DatabaseManager.find_completed_document_by_hash("abc", "digitization")
+            ok = DatabaseManager.update_document("doc-1", status=status)
+        return ok, session
 
-        session.scalar.assert_called_once()
+    @pytest.mark.parametrize("status", [DocStatus.FAILED, DocStatus.CANCELLED])
+    def test_failed_or_cancelled_removes_checksum(self, status):
+        ok, session = self._update(status)
+
+        assert ok is True
+        assert session.execute.call_count == 2
+        sql = _compiled_sql(session.execute.call_args_list[1][0][0])
+        assert sql.startswith("DELETE FROM document_checksum")
+        assert "document_checksum.doc_id = 'doc-1'" in sql
+
+    @pytest.mark.parametrize(
+        "status",
+        [DocStatus.IN_PROGRESS, DocStatus.ACCEPTED, DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS],
+    )
+    def test_other_status_leaves_checksum_alone(self, status):
+        ok, session = self._update(status)
+
+        assert ok is True
+        assert session.execute.call_count == 1  # only the documents UPDATE
+
+    def test_missing_document_does_not_touch_checksum(self):
+        ok, session = self._update(DocStatus.FAILED, rowcount=0)
+
+        assert ok is False
+        assert session.execute.call_count == 1
 
 
 @pytest.mark.unit

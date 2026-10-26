@@ -47,11 +47,11 @@ def get_job_document_stats(job_id: str) -> dict:
     Returns:
         Dictionary containing:
         - failed_docs: List of failed document objects with id, name, status
-        - completed_docs: List of completed document objects with id, name, status (includes already_exists, excludes completed_with_errors)
+        - completed_docs: List of completed document objects with id, name, status (includes already_exists and skipped, excludes completed_with_errors)
         - completed_with_errors_docs: List of docs with status completed_with_errors
         - total_docs: Total number of documents
         - failed_count: Number of failed documents
-        - completed_count: Number of completed documents (includes already_exists, excludes completed_with_errors)
+        - completed_count: Number of completed documents (includes already_exists and skipped, excludes completed_with_errors)
         - completed_with_errors_count: Number of completed_with_errors documents
     """
     from digitize.models import DocStatus
@@ -69,6 +69,7 @@ def get_job_document_stats(job_id: str) -> dict:
         _terminal_ok = (
             DocStatus.COMPLETED.value,
             DocStatus.ALREADY_EXISTS.value,
+            DocStatus.SKIPPED.value,
         )
         completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]
         completed_with_errors_docs = [
@@ -106,6 +107,34 @@ def generate_uuid():
     return str(generated_uuid)
 
 
+# Owner statuses that mean "this content was already processed"; any other owner
+# status means it is still being processed.
+_COMPLETED_OWNER_STATUSES = (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+
+
+def build_duplicate_record(filename: str, file_hash: str, owner):
+    """
+    Describe a duplicate file given the Document that owns its content.
+
+    Returns an ``AlreadyExistsFile`` if the owner has finished, otherwise a
+    ``SkippedFile`` (the owner is still being processed).
+    """
+    if owner.status in _COMPLETED_OWNER_STATUSES:
+        return models.AlreadyExistsFile(
+            filename=filename,
+            existing_doc_id=owner.doc_id,
+            existing_doc_name=owner.name,
+            file_hash=file_hash,
+        )
+    return models.SkippedFile(
+        filename=filename,
+        existing_doc_id=owner.doc_id,
+        existing_doc_name=owner.name,
+        existing_job_id=owner.job_id,
+        file_hash=file_hash,
+    )
+
+
 def initialize_job_state(
     job_id: str,
     operation: str,
@@ -114,6 +143,8 @@ def initialize_job_state(
     job_name: Optional[str] = None,
     source: JobSource = JobSource.USER,
     already_exists_files: Optional[list] = None,   # list[AlreadyExistsFile]
+    skipped_files: Optional[list] = None,          # list[SkippedFile]
+    file_hashes: Optional[dict] = None,            # dict[str, str] (filename -> md5 hex)
 ) -> dict[str, str]:
     """
     Initialize job state with both database and file system persistence.
@@ -130,6 +161,14 @@ def initialize_job_state(
         source: Job origin — JobSource.USER (default) or JobSource.CONNECTOR
         already_exists_files: Optional list of AlreadyExistsFile entries that were
                               stripped from the batch before staging.
+        skipped_files: Optional list of SkippedFile entries — files whose content is
+                       already being processed (another job, or earlier in this job).
+        file_hashes: Optional filename -> md5 mapping (user jobs). When given, each
+                     novel document claims its (hash, operation) in document_checksum
+                     right after its row is created. A document that loses the claim
+                     (concurrent submission of the same content) is removed again and
+                     recorded as already_exists / skipped — *already_exists_files* and
+                     *skipped_files* are appended to in that case.
 
     Returns:
         dict[str, str]: Mapping of filename -> document_id
@@ -142,8 +181,10 @@ def initialize_job_state(
     # CRITICAL: Create job FIRST before documents (foreign key constraint).
     # total_documents must cover both novel files AND any already-exists files so
     # that the initial stats are accurate before the pipeline touches them.
-    all_filenames = list(documents_info) + (
-        [f.filename for f in already_exists_files] if already_exists_files else []
+    all_filenames = (
+        list(documents_info)
+        + ([f.filename for f in already_exists_files] if already_exists_files else [])
+        + ([f.filename for f in skipped_files] if skipped_files else [])
     )
     create_job(
         job_id=job_id,
@@ -167,6 +208,32 @@ def initialize_job_state(
             source=source.value,
         )
     logger.info(f"Created job {job_id} with {len(documents_info)} document(s) in database")
+
+    # Claim each novel document's content. The claim is the dedup check: of any number
+    # of concurrent submissions of the same content exactly one wins.
+    lost_claims: dict = {}  # filename -> Document that owns the content
+    if file_hashes:
+        op_key = operation.value if hasattr(operation, "value") else operation
+        already_exists_files = already_exists_files if already_exists_files is not None else []
+        skipped_files = skipped_files if skipped_files is not None else []
+        for doc in documents_info:
+            file_hash = file_hashes.get(doc)
+            if not file_hash:
+                continue
+            owner = db_manager.claim_file_checksum(file_hash, op_key, doc_id_dict[doc])
+            if owner is None:
+                continue
+            logger.info(
+                f"Job {job_id}: lost checksum claim for '{doc}' to doc_id={owner.doc_id} "
+                f"({owner.status}) — recording as duplicate"
+            )
+            db_manager.delete_document(doc_id_dict.pop(doc))
+            lost_claims[doc] = owner
+            record = build_duplicate_record(doc, file_hash, owner)
+            if isinstance(record, models.AlreadyExistsFile):
+                already_exists_files.append(record)
+            else:
+                skipped_files.append(record)
 
     # Record ALREADY_EXISTS entries for files stripped from the batch.
     # Created AFTER the job row exists (foreign key constraint).
@@ -193,7 +260,47 @@ def initialize_job_state(
                 extra_metadata={
                     "existing_doc_id": skipped.existing_doc_id,
                     "existing_doc_name": skipped.existing_doc_name,
-                    "file_hash": skipped.file_hash,
+                },
+            )
+
+    # Record SKIPPED entries: content already being processed by another job, or by an
+    # earlier file in this same job. Written directly as SKIPPED (terminal) in one insert.
+    # `existing_doc_id` is what delete_document uses to purge these shadow rows when the
+    # original document is removed, so it must always be populated.
+    if skipped_files:
+        for skipped in skipped_files:
+            skipped_doc_id = generate_uuid()
+            doc_id_dict[skipped.filename] = skipped_doc_id
+
+            # Same-job duplicate: the target is a novel file in this job, whose doc_id
+            # was only just generated above.
+            existing_doc_id = skipped.existing_doc_id or doc_id_dict.get(skipped.existing_doc_name)
+            existing_doc_name = skipped.existing_doc_name
+            existing_job_id = skipped.existing_job_id or job_id
+            # The in-batch original lost its claim race: point at the real owner instead.
+            redirect = lost_claims.get(skipped.existing_doc_name) if skipped.existing_doc_id is None else None
+            if redirect is not None:
+                existing_doc_id = redirect.doc_id
+                existing_doc_name = redirect.name
+                existing_job_id = redirect.job_id
+            logger.debug(
+                f"Recording skipped doc {skipped_doc_id} for file '{skipped.filename}' "
+                f"(being processed as '{existing_doc_name}' in job {existing_job_id})"
+            )
+            create_document(
+                doc_name=skipped.filename,
+                doc_id=skipped_doc_id,
+                job_id=job_id,
+                output_format=output_format,
+                operation=operation,
+                submitted_at=submitted_at,
+                initial_status=DocStatus.SKIPPED,
+                completed_at=submitted_at,
+                source=source.value,
+                extra_metadata={
+                    "existing_doc_id": existing_doc_id,
+                    "existing_doc_name": existing_doc_name,
+                    "existing_job_id": existing_job_id,
                 },
             )
 
@@ -289,6 +396,7 @@ _TERMINAL_DOC_STATUSES = (
     models.DocStatus.FAILED.value,
     models.DocStatus.CANCELLED.value,
     models.DocStatus.ALREADY_EXISTS.value,
+    models.DocStatus.SKIPPED.value,
 )
 
 NON_CANCELLABLE_JOB_STATUSES = (
@@ -303,7 +411,7 @@ def _cancel_job_docs(job_id: str, status_mgr, *, force: bool = False) -> None:
     """Mark documents for *job_id* as CANCELLED, then set the job to CANCELLED.
 
     When *force* is ``False`` (default) terminal documents (COMPLETED, FAILED,
-    CANCELLED, ALREADY_EXISTS) are left untouched.  Pass ``force=True`` after a
+    CANCELLED, ALREADY_EXISTS, SKIPPED) are left untouched.  Pass ``force=True`` after a
     VDB cleanup so that COMPLETED docs — whose vector chunks have just been
     removed — are also marked CANCELLED.
     """
@@ -339,6 +447,20 @@ def request_job_cancellation(job_id: str, *, clean_files: bool = False) -> None:
     logger.info(f"Job '{job_id}' marked as CANCEL_PENDING (clean_files={clean_files})")
 
 
+def _fail_unfinished_docs(job_id: str) -> None:
+    """Best-effort: mark non-terminal docs of *job_id* FAILED so they release their checksum claim."""
+    try:
+        for doc in db_manager.get_documents_by_job_id(job_id):
+            if doc.status not in _TERMINAL_DOC_STATUSES:
+                db_manager.update_document(
+                    doc.doc_id,
+                    status=DocStatus.FAILED,
+                    error="Job initialisation failed",
+                )
+    except Exception as exc:
+        logger.warning(f"Job {job_id}: could not fail unfinished documents: {exc}")
+
+
 async def initialize_and_launch(
     job_id: str,
     operation,                          # models.OperationType or str
@@ -350,8 +472,9 @@ async def initialize_and_launch(
     job_name: Optional[str] = None,
     source: Optional[JobSource] = None,
     already_exists_files: Optional[list] = None,
-    file_checksum_dict: Optional[dict] = None,
+    file_hashes: Optional[dict] = None,
     connector_id: Optional[str] = None,
+    skipped_files: Optional[list] = None,
 ) -> dict[str, str]:
     """
     Steps 7–9 of the job-creation flow, shared by the user API and the
@@ -389,10 +512,14 @@ async def initialize_and_launch(
         ``JobSource.USER`` (default) or ``JobSource.CONNECTOR``.
     already_exists_files:
         Files stripped by hash-dedup (user jobs only).
-    file_checksum_dict:
-        ``filename → md5-hex`` for novel files (user jobs only). Connector
-        jobs omit this — checksums are registered via
-        ``add_connector_checksum_entry`` after the job completes.
+    skipped_files:
+        Files stripped because the same content is already being processed
+        (user jobs only).
+    file_hashes:
+        ``filename → md5-hex`` for novel files (user jobs only). Used to claim
+        each document's content in ``document_checksum``. Connector jobs omit
+        this — checksums are registered via ``add_connector_checksum_entry``
+        after the job completes.
     connector_id:
         Owning connector UUID; ``None`` for user-submitted jobs.
 
@@ -407,6 +534,10 @@ async def initialize_and_launch(
     op_key = operation.value if hasattr(operation, "value") else operation
     resolved_source = source if source is not None else _JobSource.USER
 
+    # initialize_job_state appends to these when a file loses its checksum claim.
+    already_exists_files = list(already_exists_files) if already_exists_files else []
+    skipped_files = list(skipped_files) if skipped_files else []
+
     try:
         doc_id_dict = initialize_job_state(
             job_id=job_id,
@@ -416,26 +547,44 @@ async def initialize_and_launch(
             job_name=job_name,
             source=resolved_source,
             already_exists_files=already_exists_files,
+            skipped_files=skipped_files,
+            file_hashes=file_hashes,
         )
 
-        await enqueue_conversion_tasks(
-            job_id=job_id,
-            op_key=op_key,
-            filenames=filenames,
-            doc_id_dict=doc_id_dict,
-            staging_dir=staging_dir,
-            output_format=output_format,
-            quota=quota,
-            queued_for_op=queued_for_op,
-            connector_id=connector_id,
-        )
+        # Files that lost a claim race were turned into shadow rows: drop them from
+        # the files to process and from staging.
+        duplicate_names = {f.filename for f in already_exists_files + skipped_files}
+        winners = [f for f in filenames if f not in duplicate_names]
+        for lost in set(filenames) - set(winners):
+            (staging_dir / lost).unlink(missing_ok=True)
+
+        if winners:
+            await enqueue_conversion_tasks(
+                job_id=job_id,
+                op_key=op_key,
+                filenames=winners,
+                doc_id_dict=doc_id_dict,
+                staging_dir=staging_dir,
+                output_format=output_format,
+                quota=quota,
+                queued_for_op=queued_for_op,
+                connector_id=connector_id,
+            )
     except Exception:
         logger.error(
             f"Job {job_id}: DB initialisation or enqueue failed — "
             f"removing {len(filenames)} staged file(s)",
         )
+        _fail_unfinished_docs(job_id)
         cleanup_staging_directory(staging_dir.name, staging_dir.parent)
         raise
+
+    if not winners:
+        # Every file lost its claim race: nothing to process, the job is already final.
+        logger.info(f"Job {job_id}: all files were duplicates — nothing to process")
+        get_status_manager(job_id).update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED)
+        cleanup_staging_directory(staging_dir.name, staging_dir.parent)
+        return doc_id_dict
 
     # Step 9: fire-and-forget pipeline task.
     if op_key == OperationType.INGESTION.value:
@@ -443,7 +592,6 @@ async def initialize_and_launch(
             launch_ingest_pipeline(
                 job_id=job_id,
                 doc_id_dict=doc_id_dict,
-                file_checksum_dict=file_checksum_dict,
                 staging_dir=staging_dir,
             )
         )
@@ -490,7 +638,6 @@ async def launch_digitize_pipeline(
 async def launch_ingest_pipeline(
     job_id: str,
     doc_id_dict: dict,
-    file_checksum_dict: Optional[dict] = None,
     staging_dir: Optional[Path] = None,
 ) -> None:
     """
@@ -511,12 +658,6 @@ async def launch_ingest_pipeline(
     doc_id_dict:
         Mapping of ``filename → doc_id`` as returned by
         ``initialize_job_state()``.
-    file_checksum_dict:
-        Optional ``filename → md5-hex`` map used to store ``file_hash`` on
-        each document upon completion.  Only meaningful for user-submitted
-        jobs — used by ``find_completed_document_by_hash`` for dedup on
-        subsequent uploads.  Connector jobs omit this; connectors manage
-        their own dedup via ``add_connector_checksum_entry``.
     staging_dir:
         The staging directory to clean up after the pipeline finishes.
         Defaults to ``settings.digitize.staging_dir / job_id`` (the path
@@ -531,7 +672,7 @@ async def launch_ingest_pipeline(
     try:
         logger.info(f"🚀 Ingestion pipeline started for job: {job_id}")
         from digitize.pipeline.ingest import ingest
-        await asyncio.to_thread(ingest, resolved, job_id, doc_id_dict, file_checksum_dict)
+        await asyncio.to_thread(ingest, resolved, job_id, doc_id_dict)
         logger.info(f"Ingestion pipeline for job {job_id} completed successfully")
     except JobCancelledError:
         logger.info(f"Ingestion job {job_id} was cancelled")
