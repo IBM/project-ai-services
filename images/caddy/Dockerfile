@@ -27,7 +27,9 @@ RUN set -eux; \
     if [ -f "${PATCH_FILE}" ]; then git apply --verbose "${PATCH_FILE}"; fi; \
     go build -o /usr/bin/caddy ./cmd/caddy; \
     cd /; \
-    rm -rf /tmp/caddy; \
+    rm -rf /tmp/caddy /tmp/patches; \
+    go clean -modcache -cache -testcache; \
+    rm -rf /root/go /usr/local/go; \
     setcap cap_net_bind_service=+ep /usr/bin/caddy; \
     chmod +x /usr/bin/caddy; \
     caddy version
