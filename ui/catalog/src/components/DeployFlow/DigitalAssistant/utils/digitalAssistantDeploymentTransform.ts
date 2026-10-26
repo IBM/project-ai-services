@@ -15,6 +15,7 @@ import type {
 } from "@/types/api.types";
 import { COMPONENT_TYPES } from "@/constants";
 import { splitServiceParams } from "@/components/DeployFlow/Shared/utils/paramFilter";
+import { isKnowledgeBaseComponent } from "./knowledgeBase";
 
 /**
  * Re-nests a flat params object to match the structure of the given JSON Schema.
@@ -114,19 +115,29 @@ function buildDeploymentComponent(
   globalComponents: Record<string, ComponentConfig>,
   extraParams?: Record<string, unknown>,
 ): DeploymentComponent {
-  const providerId = componentConfig.providerId;
+  // For global components (embedding, vector store), the user's selection lives
+  // in globalComponents — use that as the authoritative source for both
+  // providerId and params so changes made in DAKnowledgeBase are reflected in
+  // the payload. The service-level componentConfig is only a fallback.
+  const isKbComponent = isKnowledgeBaseComponent(componentType, deployOptions);
+  const globalConfig = isKbComponent
+    ? globalComponents[componentType]
+    : undefined;
 
-  let params = { ...componentConfig.params, ...(extraParams || {}) };
+  const providerId = globalConfig?.providerId || componentConfig.providerId;
 
-  // For global components, merge with global component params
-  const isGlobalComponent = deployOptions.global_components.some(
-    (gc) => gc.type === componentType,
-  );
-  if (isGlobalComponent && globalComponents[componentType]) {
+  // globalConfig (user's explicit selection) must win over the service-level
+  // componentConfig which may carry a stale default-seeded model value.
+  // extraParams (inference credentials) always take highest priority.
+  let params: Record<string, unknown>;
+  if (globalConfig) {
     params = {
-      ...globalComponents[componentType].params,
-      ...params,
+      ...componentConfig.params,
+      ...globalConfig.params,
+      ...(extraParams || {}),
     };
+  } else {
+    params = { ...componentConfig.params, ...(extraParams || {}) };
   }
 
   const component: DeploymentComponent = {

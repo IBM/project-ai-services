@@ -6,6 +6,7 @@ import type { StepProps } from "../types";
 import type { ServiceConfig, ServiceConfigField } from "../../Shared/types";
 import type { ComponentConfig, DeployFormData } from "../../Shared/types";
 import { ResourceRequirementsPanel } from "../../Shared/components/ResourceRequirementsPanel";
+import { DAKnowledgeBase } from "./DAKnowledgeBase";
 import {
   SharedStepTwo,
   type SharedStepTwoServiceItem,
@@ -20,6 +21,7 @@ import type {
   DeployOptionsComponent as Component,
 } from "@/types/api.types";
 import { COMPONENT_TYPES, DEFAULT_RUNTIME } from "@/constants";
+import { isKnowledgeBaseComponent } from "../utils/knowledgeBase";
 
 type InferenceOptions = {
   options: Array<{ id: string; text: string }>;
@@ -246,9 +248,40 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
     );
   }, [deployOptions.services, providerParamsError, runtime]);
 
+  // Knowledge base (global component) schema failures. Uses the selected
+  // provider, falling back to the default so cold-open failures are surfaced.
+  const failedGlobalComponentNames = useMemo(() => {
+    return deployOptions.global_components
+      .filter((component) => {
+        const selectedProviderId =
+          formData.globalComponents[component.type]?.providerId ||
+          component.providers.find((p) => p.default)?.id ||
+          component.providers[0]?.id;
+        if (!selectedProviderId) return false;
+        return !!providerParamsError[
+          `${runtime}:${component.type}:${selectedProviderId}`
+        ];
+      })
+      .map((c) => c.name);
+  }, [
+    deployOptions.global_components,
+    formData.globalComponents,
+    providerParamsError,
+    runtime,
+  ]);
+
   useEffect(() => {
-    onComponentError?.(failedServiceNames.length > 0 || hasProviderParamsError);
-  }, [failedServiceNames, hasProviderParamsError, onComponentError]);
+    onComponentError?.(
+      failedServiceNames.length > 0 ||
+        hasProviderParamsError ||
+        failedGlobalComponentNames.length > 0,
+    );
+  }, [
+    failedServiceNames,
+    hasProviderParamsError,
+    failedGlobalComponentNames,
+    onComponentError,
+  ]);
 
   const { resources, resourcesLoading, resourcesError } = useResources(
     formData.workerName,
@@ -397,45 +430,54 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
         let rerankerComponent: Component | null = null;
 
         service.components.forEach((component) => {
-          if (!llmComponent && component.type === COMPONENT_TYPES.LLM) {
+          const isKbComponent = isKnowledgeBaseComponent(
+            component.type,
+            deployOptions,
+          );
+
+          if (
+            !llmComponent &&
+            component.type === COMPONENT_TYPES.LLM &&
+            !isKbComponent
+          ) {
             llmComponent = component as Component;
           }
           if (
             !rerankerComponent &&
-            component.type === COMPONENT_TYPES.RERANKER
+            component.type === COMPONENT_TYPES.RERANKER &&
+            !isKbComponent
           ) {
             rerankerComponent = component as Component;
           }
 
-          const isGlobalComponent = deployOptions.global_components.some(
-            (gc) => gc.type === component.type,
-          );
+          // Knowledge base components (embedding, vector store, reranker) are already shown in
+          // DAKnowledgeBase at the top of the step — skip them here so they
+          // don't appear again in each service card.
+          if (isKbComponent) return;
 
-          if (!isGlobalComponent) {
-            if (
-              component.type === COMPONENT_TYPES.LLM &&
-              deduplicatedLlmOptions.length > 0
-            ) {
-              fields.push({
-                key: component.type as keyof ServiceConfig,
-                label: component.name,
-                options: deduplicatedLlmOptions,
-                isModelFirst: true,
-              });
-              return;
-            }
-            if (
-              component.type === COMPONENT_TYPES.RERANKER &&
-              deduplicatedRerankerOptions.length > 0
-            ) {
-              fields.push({
-                key: component.type as keyof ServiceConfig,
-                label: component.name,
-                options: deduplicatedRerankerOptions,
-                isModelFirst: true,
-              });
-              return;
-            }
+          if (
+            component.type === COMPONENT_TYPES.LLM &&
+            deduplicatedLlmOptions.length > 0
+          ) {
+            fields.push({
+              key: component.type as keyof ServiceConfig,
+              label: component.name,
+              options: deduplicatedLlmOptions,
+              isModelFirst: true,
+            });
+            return;
+          }
+          if (
+            component.type === COMPONENT_TYPES.RERANKER &&
+            deduplicatedRerankerOptions.length > 0
+          ) {
+            fields.push({
+              key: component.type as keyof ServiceConfig,
+              label: component.name,
+              options: deduplicatedRerankerOptions,
+              isModelFirst: true,
+            });
+            return;
           }
 
           const providersByDisplayName = new Map<
@@ -466,10 +508,6 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
             key: component.type as keyof ServiceConfig,
             label: component.name,
             options: providers,
-            readonly: isGlobalComponent,
-            globalValue: isGlobalComponent
-              ? formData.globalComponents[component.type]?.providerId
-              : undefined,
           });
         });
 
@@ -498,7 +536,6 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
   }, [
     deployOptions,
     formData.services,
-    formData.globalComponents,
     serviceVersionOptions,
     providerParamsByType,
     serviceParamsMap,
@@ -528,6 +565,16 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
         onResourceStatusChange={onResourceStatusChange}
       />
 
+      {failedGlobalComponentNames.length > 0 && (
+        <InlineNotification
+          kind="error"
+          title={`Failed to load configurations of ${failedGlobalComponentNames.join(", ")}.`}
+          subtitle="Cancel and reopen to try again."
+          lowContrast
+          hideCloseButton
+        />
+      )}
+
       {(failedServiceNames.length > 0 || hasProviderParamsError) && (
         <InlineNotification
           kind="error"
@@ -543,6 +590,13 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
       )}
 
       <div className={styles.formSection}>
+        <DAKnowledgeBase
+          formData={formData}
+          onChange={onChange}
+          deployOptions={deployOptions}
+          providerParamsByType={providerParamsByType}
+          runtime={runtime}
+        />
         <SharedStepTwo
           services={serviceItems}
           providerParamsByType={providerParamsByType}

@@ -20,7 +20,7 @@ import type {
 } from "@/types/api.types";
 import { parseSchema, validateField } from "@/utils/schemaParser";
 import { shouldShowParam } from "../utils/paramFilter";
-import type { ComponentType } from "@/constants";
+import { COMPONENT_TYPES, type ComponentType } from "@/constants";
 
 export interface ServiceConfigCardProps {
   serviceId: string;
@@ -244,6 +244,19 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
     onApply();
   };
 
+  const backendLabel = useMemo(() => {
+    if (!inferenceComponent) return "Inference backend";
+    if (inferenceComponent.type === COMPONENT_TYPES.LLM) {
+      return "LLM inference backend";
+    }
+    const rawName = inferenceComponent.name || inferenceComponent.type || "";
+    const baseName = rawName.replace(/\s*model\s*$/i, "").trim();
+    if (!baseName) return "Backend";
+    const capitalizedBaseName =
+      baseName.charAt(0).toUpperCase() + baseName.slice(1);
+    return `${capitalizedBaseName} backend`;
+  }, [inferenceComponent]);
+
   // Compute available inference backend options based on selected model compatibility.
   // Uses llmModelsWithProviders (the model→provider map) to find which providers
   // support the currently selected model — consistent with handleLlmModelChange.
@@ -273,12 +286,13 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
       }));
 
     return {
-      label: "LLM inference backend",
+      label: backendLabel,
       options: inferenceBackendOptions,
     };
   }, [
     inferenceComponent,
     inferenceComponentType,
+    backendLabel,
     currentConfig?.components,
     llmModelsWithProviders,
   ]);
@@ -557,7 +571,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                   className={styles.serviceConfigItem}
                 >
                   <span className={styles.serviceConfigItemLabel}>
-                    LLM inference backend
+                    {backendLabel}
                   </span>
                   <span className={styles.serviceConfigItemValue}>
                     {provider.name}

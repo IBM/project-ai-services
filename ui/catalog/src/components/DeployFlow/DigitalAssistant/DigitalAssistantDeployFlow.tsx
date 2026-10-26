@@ -85,7 +85,6 @@ export const DeployFlow = ({
   onClose,
   onSubmit,
 }: BaseDeployFlowProps) => {
-  const [hasStep1SchemaError, setHasStep1SchemaError] = useState(false);
   const [hasStep2SchemaError, setHasStep2SchemaError] = useState(false);
   const [hasStep3SchemaError, setHasStep3SchemaError] = useState(false);
   // Flipped to true on the first deploy attempt when toggle is on but nothing
@@ -274,7 +273,6 @@ export const DeployFlow = ({
   const handleClose = () => {
     dispatch({ type: ACTION_TYPES.RESET_STATE });
     hasInitialized.current = false;
-    setHasStep1SchemaError(false);
     setHasStep2SchemaError(false);
     setHasStep3SchemaError(false);
     setShowStep3SelectionError(false);
@@ -335,7 +333,6 @@ export const DeployFlow = ({
   const isPrimaryDisabled =
     shellIsLoading ||
     !!error ||
-    (state.currentStep === STEP_ONE && hasStep1SchemaError) ||
     (state.currentStep === STEP_TWO &&
       (hasStep2SchemaError ||
         state.isEditing ||
@@ -381,7 +378,6 @@ export const DeployFlow = ({
           showNameError={state.showStepOneNameError}
           showWorkerError={state.showStepOneWorkerError}
           onWorkerErrorReset={handleWorkerErrorReset}
-          onComponentError={setHasStep1SchemaError}
           runtime={runtime}
           workers={workers}
           isLoadingWorkers={isLoadingWorkers}

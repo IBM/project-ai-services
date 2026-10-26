@@ -284,6 +284,52 @@
   color: $support-warning;
 }
 
+// Knowledge base section (DA step two)
+.knowledgeBase {
+  margin-bottom: $spacing-05;
+  padding: $spacing-05;
+  background-color: $layer-01;
+}
+
+.knowledgeBaseTitle {
+  @include type-style("heading-compact-02");
+  margin: 0 0 $spacing-03 0;
+}
+
+.knowledgeBaseDescription {
+  @include type-style("body-compact-01");
+  margin: 0 0 $spacing-05 0;
+}
+
+.knowledgeBaseFields {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+}
+
+.knowledgeBaseRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-06;
+
+  > * {
+    min-width: 0;
+  }
+
+  :global {
+    .cds--dropdown,
+    .cds--list-box,
+    .cds--list-box__field {
+      background-color: $field-02 !important;
+      border-bottom: 1px solid $border-strong !important;
+    }
+  }
+
+  @include breakpoint-down(lg) {
+    grid-template-columns: 1fr;
+  }
+}
+
 .serviceConfigCard {
   margin-bottom: $spacing-05;
   position: relative;
