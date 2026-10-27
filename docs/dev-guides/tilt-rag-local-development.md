@@ -24,7 +24,7 @@ The RAG images are built for `linux/ppc64le`, so they cannot run on Apple Silico
 
 | Path prefix | Backed by |
 |-------------|-----------|
-| `/llm` | IBM watsonx.ai (chat completions through LiteLLM), plus a local `/tokenize` using a Hugging Face tokenizer. |
+| `/llm` | Chat completions through LiteLLM to the provider selected with `llm_provider`: a local Ollama instance (default, via its OpenAI-compatible `/v1` API) or IBM watsonx.ai. Plus a local `/tokenize` using a Hugging Face tokenizer. |
 | `/emb` | `ibm-granite/granite-embedding-278m-multilingual` (sentence-transformers, on MPS/CPU). |
 | `/rerank` | `BAAI/bge-reranker-v2-m3` (CrossEncoder), Cohere-compatible `/v2/rerank`. |
 
@@ -34,16 +34,26 @@ The embedding and reranker models are the same ones the production templates use
 
 - [Tilt](https://docs.tilt.dev/install.html), Python 3.12, Node.js/npm
 - Podman with a running machine (`podman machine start`). Give it at least 6-8 GB: `podman machine set --memory 8192`
-- A watsonx.ai API key, URL and project ID
+- One LLM provider:
+  - **Ollama** (default): [Ollama](https://ollama.com) running on the host with the model pulled: `ollama pull granite4.1:8b`
+  - **watsonx**: a watsonx.ai API key, URL and project ID
 
 ## Run
+
+With Ollama (default):
+
+```bash
+tilt up -f Tiltfile.rag
+```
+
+With watsonx.ai:
 
 ```bash
 export WATSONX_APIKEY=<your key>          # read from the environment only, never a flag
 export WATSONX_URL=https://us-south.ml.cloud.ibm.com
 export WATSONX_PROJECT_ID=<your project id>
 
-tilt up -f Tiltfile.rag
+tilt up -f Tiltfile.rag -- --llm_provider=watsonx
 ```
 
 In the Tilt UI (http://localhost:10350), wait for the resources to turn green, trigger `rag-ingest` to index the sample document in [`hack/tilt/sample-docs`](../../hack/tilt/sample-docs), then open http://localhost:3000. To ingest PDF/DOCX files, open the digitize UI at http://localhost:4001 (API/Swagger at http://localhost:4000); documents indexed there are searchable from the chatbot. The first PDF conversion downloads the Docling layout/table models from Hugging Face.
@@ -58,8 +68,11 @@ Pass any option after `--`, for example `tilt up -f Tiltfile.rag -- --rag_ui_por
 
 | Option | Default |
 |--------|---------|
+| `llm_provider` | `$LLM_PROVIDER`, else `ollama` (`ollama` or `watsonx`) |
+| `ollama_url` | `$OLLAMA_URL`, else `http://127.0.0.1:11434/v1` |
+| `ollama_model` | `$OLLAMA_MODEL`, else `granite4.1:8b` |
 | `watsonx_url` / `watsonx_project_id` | `$WATSONX_URL` / `$WATSONX_PROJECT_ID` |
-| `watsonx_model` | `ibm/granite-4-h-small` |
+| `watsonx_model` | `$WATSONX_MODEL`, else `ibm/granite-4-h-small` |
 | `model_server_port` | `8100` |
 | `rag_chatbot_port` / `rag_similarity_port` / `rag_ui_port` | `5050` / `7070` / `3000` |
 | `opensearch_image` / `opensearch_port` / `opensearch_password` | `opensearchproject/opensearch:3.2.0` / `9200` / `AiServices@12345` |
@@ -73,7 +86,7 @@ Ports 5000 and 7000 are avoided on purpose: the macOS AirPlay Receiver listens o
 ## Limitations
 
 - Does not exercise the Podman or OpenShift deployment path.
-- `rag-ingest` handles plain text and Markdown only; use digitize for PDF/DOCX. Digitize runs Docling on CPU/MPS and is slow on large PDFs; its table summarisation calls the watsonx LLM.
+- `rag-ingest` handles plain text and Markdown only; use digitize for PDF/DOCX. Digitize runs Docling on CPU/MPS and is slow on large PDFs; its table summarisation calls the selected LLM.
 - Japanese sentence splitting needs the `ja_core_news_sm` spaCy model, which is not installed.
 
 ## Troubleshooting
@@ -82,6 +95,6 @@ Ports 5000 and 7000 are avoided on purpose: the macOS AirPlay Receiver listens o
 |---------|-------------|
 | `Address already in use` or readiness probe `403` | Another process holds the port. Change it with `--rag_chatbot_port` / `--rag_similarity_port`. |
 | `rag-model-server` stays not ready | It is still downloading or loading models. `/health` returns `loading` until done; check its log. |
-| Chat returns `LLM_UNAVAILABLE` (503) | `WATSONX_APIKEY`, `WATSONX_URL` or `WATSONX_PROJECT_ID` is not set in the environment that started Tilt. |
+| Chat returns `LLM_UNAVAILABLE` (503) | With `ollama`: Ollama is not running or the model is not pulled (check `curl http://127.0.0.1:11434/v1/models` and `ollama list`). With `watsonx`: `WATSONX_APIKEY`, `WATSONX_URL` or `WATSONX_PROJECT_ID` is not set in the environment that started Tilt. |
 | `rag-opensearch` not ready | Give the Podman machine more memory (`podman machine set --memory 8192`, then restart it). |
 | A service crashed on a missing module | Add it to `hack/tilt/requirements.txt`; `rag-python-env` reinstalls on change, then trigger the crashed resource. |

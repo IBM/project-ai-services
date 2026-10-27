@@ -5,7 +5,8 @@ The RAG services expect vLLM-style endpoints for the LLM, the embedding model an
 the reranker. This process provides them from a single port so that no
 ppc64le/vLLM containers are needed:
 
-  /llm/...     chat completions forwarded to IBM watsonx.ai (through LiteLLM),
+  /llm/...     chat completions forwarded through LiteLLM to the provider selected with
+               LLM_PROVIDER (ollama = local Ollama, watsonx = IBM watsonx.ai),
                plus a local /tokenize (Hugging Face tokenizer)
   /emb/...     /v1/embeddings + /tokenize served locally with sentence-transformers
   /rerank/...  Cohere-compatible /v2/rerank served locally with a CrossEncoder
@@ -42,15 +43,27 @@ class Config:
     rerank_model = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
     rerank_max_len = int(os.getenv("RERANK_MAX_LEN", "1024"))
 
-    # Model name the services ask for (LLM_MODEL) and the watsonx model that serves it.
-    llm_model = os.getenv("WATSONX_MODEL", "ibm/granite-4-h-small")
+    # LLM backend: "ollama" (default) or "watsonx".
+    llm_provider = os.getenv("LLM_PROVIDER", "ollama").strip().lower()
     llm_max_len = int(os.getenv("LLM_MAX_LEN", "26208"))
     # Hugging Face tokenizer used for the LLM's /tokenize (token counting only).
     llm_tokenizer = os.getenv("LLM_TOKENIZER", "ibm-granite/granite-4.1-8b")
 
+    # Ollama's OpenAI-compatible API (the API key is ignored by Ollama but must be non-empty).
+    ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1")
+    ollama_model = os.getenv("OLLAMA_MODEL", "granite4.1:8b")
+
     watsonx_url = os.getenv("WATSONX_URL", "")
     watsonx_api_key = os.getenv("WATSONX_APIKEY", "")
     watsonx_project_id = os.getenv("WATSONX_PROJECT_ID", "")
+    watsonx_model = os.getenv("WATSONX_MODEL", "ibm/granite-4-h-small")
+
+    # Model name the services ask for (LLM_MODEL) and that the selected provider serves.
+    llm_model = watsonx_model if llm_provider == "watsonx" else ollama_model
+
+
+if Config.llm_provider not in ("ollama", "watsonx"):
+    raise SystemExit(f"LLM_PROVIDER must be 'ollama' or 'watsonx', got '{Config.llm_provider}'")
 
 
 class Models:
@@ -208,7 +221,7 @@ async def rerank_documents(body: dict):
 
 
 # --------------------------------------------------------------------------- #
-# LLM: /llm  (watsonx.ai through LiteLLM)
+# LLM: /llm  (Ollama or watsonx.ai through LiteLLM, selected by LLM_PROVIDER)
 # --------------------------------------------------------------------------- #
 llm = APIRouter(prefix="/llm")
 
@@ -217,6 +230,20 @@ _LLM_PASSTHROUGH = {
     "messages", "max_tokens", "temperature", "top_p", "stop", "stream",
     "stream_options", "frequency_penalty", "presence_penalty", "seed", "response_format",
 }
+
+
+def _provider_kwargs() -> dict:
+    """LiteLLM connection arguments for the selected provider."""
+    if Config.llm_provider == "watsonx":
+        if not (Config.watsonx_url and Config.watsonx_api_key and Config.watsonx_project_id):
+            raise HTTPException(status_code=503, detail="WATSONX_URL, WATSONX_APIKEY and WATSONX_PROJECT_ID must be set")
+        return dict(
+            model=f"watsonx/{Config.llm_model}",
+            api_base=Config.watsonx_url,
+            api_key=Config.watsonx_api_key,
+            project_id=Config.watsonx_project_id,
+        )
+    return dict(model=f"openai/{Config.llm_model}", api_base=Config.ollama_url, api_key="ollama")
 
 
 @llm.get("/v1/models")
@@ -235,29 +262,19 @@ async def llm_tokenize(body: dict):
 async def chat_completions(request: Request):
     import litellm
 
-    if not (Config.watsonx_url and Config.watsonx_api_key and Config.watsonx_project_id):
-        raise HTTPException(status_code=503, detail="WATSONX_URL, WATSONX_APIKEY and WATSONX_PROJECT_ID must be set")
-
     body = await request.json()
     kwargs = {k: v for k, v in body.items() if k in _LLM_PASSTHROUGH}
     stream = bool(kwargs.get("stream"))
     if not stream:
         kwargs.pop("stream_options", None)
 
-    common = dict(
-        model=f"watsonx/{Config.llm_model}",
-        api_base=Config.watsonx_url,
-        api_key=Config.watsonx_api_key,
-        project_id=Config.watsonx_project_id,
-        drop_params=True,
-        **kwargs,
-    )
+    common = dict(**_provider_kwargs(), drop_params=True, **kwargs)
 
     if not stream:
         try:
             resp = await litellm.acompletion(**common)
         except Exception as e:
-            log.exception("watsonx chat completion failed")
+            log.exception("%s chat completion failed", Config.llm_provider)
             raise HTTPException(status_code=getattr(e, "status_code", 502) or 502, detail=str(e))
         return JSONResponse(resp.model_dump())
 
@@ -267,7 +284,7 @@ async def chat_completions(request: Request):
             async for chunk in stream_resp:
                 yield f"data: {chunk.model_dump_json()}\n\n"
         except Exception as e:
-            log.exception("watsonx streaming chat completion failed")
+            log.exception("%s streaming chat completion failed", Config.llm_provider)
             yield f"data: {json.dumps({'error': {'message': str(e)}})}\n\n"
         yield "data: [DONE]\n\n"
 

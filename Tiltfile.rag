@@ -9,7 +9,7 @@
 # The RAG images are built for linux/ppc64le, so on a Mac the services run natively:
 #   - rag-chatbot / rag-similarity : the repo's FastAPI services, run from source with --reload
 #   - rag-model-server             : hack/tilt/model_server.py, serving the vLLM-style endpoints they expect
-#                                      /llm    -> IBM watsonx.ai (remote inference) + local /tokenize
+#                                      /llm    -> Ollama (default) or IBM watsonx.ai, chosen with --llm_provider; + local /tokenize
 #                                      /emb    -> granite-embedding-278m-multilingual (local)
 #                                      /rerank -> bge-reranker-v2-m3 (local, Cohere-compatible)
 #   - rag-opensearch               : OpenSearch in Podman (multi-arch image)
@@ -19,9 +19,15 @@
 #   - rag-digitize-ui              : the digitize UI via Vite
 #   - rag-ingest                   : manual trigger, indexes .txt/.md files (quick alternative to digitize)
 #
-# Usage:
-#   export WATSONX_APIKEY=...  WATSONX_URL=https://<region>.ml.cloud.ibm.com  WATSONX_PROJECT_ID=...
+# Usage (LLM provider = ollama, the default):
+#   ollama pull granite4.1:8b          # Ollama must be running on the host
 #   tilt up -f Tiltfile.rag
+#
+# Usage (LLM provider = watsonx):
+#   export WATSONX_APIKEY=...  WATSONX_URL=https://<region>.ml.cloud.ibm.com  WATSONX_PROJECT_ID=...
+#   tilt up -f Tiltfile.rag -- --llm_provider=watsonx
+#
+# Other:
 #   tilt up -f Tiltfile.rag -- --rag_ui_port=3001      # custom parameters
 #   tilt down -f Tiltfile.rag
 #
@@ -35,9 +41,13 @@
 # Configuration Flags
 # -----------------------------------------------------------------------------
 config.define_string("python_bin", args=False)
+config.define_string("llm_provider", args=False)
+config.define_string("ollama_url", args=False)
+config.define_string("ollama_model", args=False)
 config.define_string("watsonx_url", args=False)
 config.define_string("watsonx_project_id", args=False)
 config.define_string("watsonx_model", args=False)
+# NOTE: the watsonx API key is read from the WATSONX_APIKEY environment variable, never from a flag.
 config.define_string("model_server_port", args=False)
 config.define_string("rag_chatbot_port", args=False)
 config.define_string("rag_similarity_port", args=False)
@@ -51,7 +61,6 @@ config.define_string("opensearch_image", args=False)
 config.define_string("opensearch_port", args=False)
 config.define_string("opensearch_password", args=False)
 config.define_string("rag_docs_dir", args=False)
-# NOTE: the watsonx API key is read from the WATSONX_APIKEY environment variable, never from a flag.
 
 cfg = config.parse()
 
@@ -72,10 +81,17 @@ if config.tilt_subcommand == "down":
 # Settings (local development defaults only - never use on a shared environment)
 # -----------------------------------------------------------------------------
 python_bin = str(cfg.get("python_bin", "python3"))
+llm_provider = str(cfg.get("llm_provider", os.getenv("LLM_PROVIDER", "ollama"))).strip().lower()
+if llm_provider not in ["ollama", "watsonx"]:
+    fail("llm_provider must be 'ollama' or 'watsonx', got '{}'".format(llm_provider))
+ollama_url = str(cfg.get("ollama_url", os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1")))
+ollama_model = str(cfg.get("ollama_model", os.getenv("OLLAMA_MODEL", "granite4.1:8b")))
 watsonx_url = str(cfg.get("watsonx_url", os.getenv("WATSONX_URL", "")))
 watsonx_project_id = str(cfg.get("watsonx_project_id", os.getenv("WATSONX_PROJECT_ID", "")))
-watsonx_model = str(cfg.get("watsonx_model", "ibm/granite-4-h-small"))
+watsonx_model = str(cfg.get("watsonx_model", os.getenv("WATSONX_MODEL", "ibm/granite-4-h-small")))
 watsonx_api_key = os.getenv("WATSONX_APIKEY", "")
+# Model name the services ask for (LLM_MODEL) and that the selected provider serves.
+llm_model = watsonx_model if llm_provider == "watsonx" else ollama_model
 model_server_port = int(cfg.get("model_server_port", 8100))
 # Not 5000/7000: macOS AirPlay Receiver (ControlCenter) listens on both.
 rag_chatbot_port = int(cfg.get("rag_chatbot_port", 5050))
@@ -93,9 +109,9 @@ digitize_db_port = int(cfg.get("digitize_db_port", 5433))  # not 5432: the catal
 # Local development default only (matches assets/applications/rag-cpu/podman/values.yaml).
 digitize_db_pass = str(cfg.get("digitize_db_password", "Aiservicesdb@1234"))
 
-if not (watsonx_url and watsonx_project_id and watsonx_api_key):
-    warn("Set WATSONX_URL, WATSONX_PROJECT_ID (or --watsonx_url/--watsonx_project_id) and the " +
-         "WATSONX_APIKEY environment variable; chat completions fail until they are set.")
+if llm_provider == "watsonx" and not (watsonx_url and watsonx_project_id and watsonx_api_key):
+    warn("llm_provider=watsonx: set WATSONX_URL, WATSONX_PROJECT_ID (or --watsonx_url/--watsonx_project_id) " +
+         "and the WATSONX_APIKEY environment variable; chat completions fail until they are set.")
 
 rag_venv = "hack/tilt/.venv"
 model_server_url = "http://localhost:{}".format(model_server_port)
@@ -128,7 +144,7 @@ rag_env = """
     export DISABLE_CRASH_HANDLER="1"
 """.format(
     ms=model_server_url,
-    llm_model=watsonx_model,
+    llm_model=llm_model,
     os_port=opensearch_port,
     os_pass=opensearch_pass,
     sim_port=rag_similarity_port,
@@ -203,13 +219,16 @@ local_resource(
 )
 
 # -----------------------------------------------------------------------------
-# Model server (LLM via watsonx.ai, embeddings and reranker locally)
+# Model server (LLM via Ollama or watsonx.ai, embeddings and reranker locally)
 # -----------------------------------------------------------------------------
 local_resource(
     name="rag-model-server",
     serve_cmd="""
         set -e
         export MODEL_SERVER_PORT="{port}"
+        export LLM_PROVIDER="{llm_provider}"
+        export OLLAMA_URL="{ollama_url}"
+        export OLLAMA_MODEL="{ollama_model}"
         export WATSONX_URL="{wx_url}"
         export WATSONX_PROJECT_ID="{wx_project}"
         export WATSONX_MODEL="{wx_model}"
@@ -217,6 +236,9 @@ local_resource(
         exec {venv}/bin/python hack/tilt/model_server.py
     """.format(
         port=model_server_port,
+        llm_provider=llm_provider,
+        ollama_url=ollama_url,
+        ollama_model=ollama_model,
         wx_url=watsonx_url,
         wx_project=watsonx_project_id,
         wx_model=watsonx_model,
