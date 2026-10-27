@@ -44,9 +44,6 @@ export const DAKnowledgeBase: React.FC<DAKnowledgeBaseProps> = ({
     () => getKnowledgeBaseComponents(deployOptions),
     [deployOptions],
   );
-  console.log(globalComponentModels);
-  // console.log("form data")
-  // console.log(formData)
   // Set default model selection when model options arrive and nothing is selected yet.
   useEffect(() => {
     const updates: Record<string, ComponentConfig> = {};
