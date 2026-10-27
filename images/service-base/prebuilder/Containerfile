@@ -4,7 +4,7 @@
 #
 # Note: Most packages are now available in the devpi index, reducing the need for this stage.
 # This stage is maintained for future requirements or architecture-specific builds.
-FROM registry.access.redhat.com/ubi9/ubi:9.7
+FROM registry.access.redhat.com/ubi9/ubi:9.8
 
 RUN yum install -y --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-pip git rust cargo openssl-devel libffi-devel zlib-devel && \
     yum clean all && rm -rf /var/cache/yum && \
@@ -22,19 +22,11 @@ RUN pip install --upgrade pip setuptools wheel && \
     --prefer-binary
 
 # Building torchvision wheel from source using the ppc64le build script
-RUN mkdir -p /tmp/torchvision-build && cd /tmp/torchvision-build && \
-    curl -fsSL -o torchvision_0.26.0_ubi_9.6.sh \
-      https://raw.githubusercontent.com/ppc64le/build-scripts/ee500ff26517f0dd04c929a97754192babbe6634/t/torchvision/torchvision_0.26.0_ubi_9.6.sh && \
+COPY torchvision_0.26.0_ubi_9.6.sh /tmp/torchvision-build/torchvision_0.26.0_ubi_9.6.sh
+RUN cd /tmp/torchvision-build && \
     sed -i 's|^python3 -m pip install -r requirements.txt$|python3 -m pip install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ --prefer-binary|' torchvision_0.26.0_ubi_9.6.sh && \
     bash torchvision_0.26.0_ubi_9.6.sh v0.29.0 v2.14.0 && \
     cp torchvision*.whl /wheels/ && \
     cd / && rm -rf /tmp/torchvision-build
 
-# Building wheel from source for lingua-language-detector pkg
-RUN git clone https://github.com/pemistahl/lingua-rs && \
-    cd lingua-rs && \
-    git checkout v1.8.0 && \
-    pip install maturin build && \
-    pip install . && \
-    python -m build --wheel --outdir /wheels
 
