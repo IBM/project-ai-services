@@ -280,7 +280,7 @@ async def enqueue_conversion_tasks(
 
 # How long teardown waits for the connector's jobs to reach a terminal state
 # after requesting cancellation, and how often it polls.
-TEARDOWN_JOB_WAIT_TIMEOUT_S = 600
+TEARDOWN_JOB_WAIT_TIMEOUT_S = 900
 TEARDOWN_JOB_POLL_INTERVAL_S = 2
 
 _TERMINAL_DOC_STATUSES = (
