@@ -1,10 +1,11 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=service-base
-TAG?=v0.0.35-1
+TAG?=v0.0.35-2
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman
 build:
+	cd prebuilder && $(CONTAINER_BUILDER) build -t prebuilder . && cd -
 	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 

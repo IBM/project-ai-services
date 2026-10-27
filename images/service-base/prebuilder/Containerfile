@@ -21,6 +21,14 @@ RUN pip install --upgrade pip setuptools wheel && \
     --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
     --prefer-binary
 
+# Building torchvision wheel from source using the ppc64le build script
+RUN mkdir -p /tmp/torchvision-build && cd /tmp/torchvision-build && \
+    curl -fsSL -o torchvision_0.26.0_ubi_9.6.sh \
+      https://raw.githubusercontent.com/ppc64le/build-scripts/master/t/torchvision/torchvision_0.26.0_ubi_9.6.sh && \
+    bash torchvision_0.26.0_ubi_9.6.sh v0.29.0 3.12 v2.14.0 && \
+    cp torchvision*.whl /wheels/ && \
+    cd / && rm -rf /tmp/torchvision-build
+
 # Building wheel from source for lingua-language-detector pkg
 RUN git clone https://github.com/pemistahl/lingua-rs && \
     cd lingua-rs && \
