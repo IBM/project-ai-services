@@ -347,8 +347,8 @@ class TestDeleteConnector:
     """
     The DELETE endpoint is non-blocking: it always returns 204 immediately.
 
-    Case A (SYNCING)  — mark DELETE_PENDING, return 204; tick handles teardown.
-    Case B (not SYNCING) — mark DELETE_PENDING, schedule _run_teardown, return 204.
+    Regardless of status, it marks DELETE_PENDING, schedules _run_teardown
+    (which waits for active jobs to be cancelled first) and returns 204.
 
     _run_teardown itself is exercised by TestRunTeardown below.
     """
@@ -361,8 +361,8 @@ class TestDeleteConnector:
         )
         return mock
 
-    def test_returns_204_case_b_not_syncing(self, connector_test_client, monkeypatch):
-        """Case B: not syncing → mark DELETE_PENDING, schedule teardown, return 204."""
+    def test_returns_204_not_syncing(self, connector_test_client, monkeypatch):
+        """Not syncing → mark DELETE_PENDING, schedule teardown, return 204."""
         mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_connector_by_id",
@@ -376,18 +376,20 @@ class TestDeleteConnector:
         mark_mock.assert_called_once_with(CONNECTOR_ID)
         task_mock.assert_called_once()
 
-    def test_returns_204_case_a_syncing(self, connector_test_client, monkeypatch):
-        """Case A: syncing → mark DELETE_PENDING, return 204; no teardown task created."""
+    def test_returns_204_syncing(self, connector_test_client, monkeypatch):
+        """Syncing → mark DELETE_PENDING, schedule the same single teardown task, return 204."""
         mark_mock = self._patch_mark(monkeypatch)
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.get_connector_by_id",
             Mock(return_value=_make_connector(sync_status=ConnectorStatus.SYNCING)),
         )
-        with patch("digitize.api.v1.connectors.asyncio.create_task") as task_mock:
+        def _consume_coro(coro):
+            coro.close()  # prevent "coroutine never awaited" warning
+        with patch("digitize.api.v1.connectors.asyncio.create_task", side_effect=_consume_coro) as task_mock:
             response = connector_test_client.delete(f"/v1/connectors/{CONNECTOR_ID}")
         assert response.status_code == 204
         mark_mock.assert_called_once_with(CONNECTOR_ID)
-        task_mock.assert_not_called()
+        task_mock.assert_called_once()
 
     def test_returns_404_when_not_found(self, connector_test_client, monkeypatch):
         monkeypatch.setattr(

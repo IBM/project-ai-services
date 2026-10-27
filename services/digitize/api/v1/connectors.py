@@ -297,22 +297,18 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     summary="Detach and delete a connector",
     description=(
         "Non-blocking detachment. Always returns 204 immediately. "
-        "If a sync tick is running the connector is marked delete_pending and "
-        "the tick handles teardown; otherwise teardown runs as a background task."
+        "The connector is marked delete_pending and teardown runs as a background "
+        "task that first waits for any active sync jobs to be cancelled."
     ),
     response_description="No content — teardown proceeds in the background",
 )
 async def delete_connector(connector_id: str):
     """Fast, non-blocking DELETE.
 
-    Case A — status == 'syncing':
-        Mark DELETE_PENDING. The running tick will hit _check_delete_pending at
-        its next checkpoint, cancel itself, and dispatch teardown.
-        Return 204 immediately.
-
-    Case B — status != 'syncing':
-        Mark DELETE_PENDING, dispatch asyncio.create_task(_run_teardown(...)),
-        return 204 immediately.
+    Mark DELETE_PENDING and dispatch asyncio.create_task(_run_teardown(...)),
+    then return 204 immediately. If a sync tick is running, it hits its next
+    interrupt checkpoint, cancels its active job and stops; _run_teardown waits
+    for that cancellation before cleaning anything up.
     """
     try:
         connector = db_ops.get_connector_by_id(connector_id)
@@ -323,10 +319,7 @@ async def delete_connector(connector_id: str):
             )
 
         db_ops.mark_connector_delete_pending(connector_id)
-
-        if connector.status != ConnectorStatus.SYNCING:
-            # No tick running — kick off teardown ourselves.
-            asyncio.create_task(_run_teardown(connector_id))
+        asyncio.create_task(_run_teardown(connector_id))
 
         return Response(status_code=204)
 
@@ -379,14 +372,15 @@ async def _run_teardown(connector_id: str) -> None:
     """
     Teardown for connector deletion.
 
-    Scheduled via asyncio.create_task from the delete endpoint (Case B — no
-    tick running). Awaited directly from _handle_interrupt in sync_tick
-    (Case A — tick interrupted).
+    Single entry point for connector deletion, launched via asyncio.create_task
+    from the delete endpoint (and from startup recovery for connectors left in
+    DELETE_PENDING).
 
     Steps:
-      1. Remove the scheduled job so no new ticks fire
-      2. Wait for the connector's active jobs (cancelled by the sync tick) to
-         reach a terminal state; if they don't, the connector is NOT deleted
+      1. Wait for the connector's active jobs (cancelled by the sync tick on
+         seeing DELETE_PENDING) to reach a terminal state; if they don't, the
+         connector is NOT deleted
+      2. Remove the scheduled job so no new ticks fire
       3. Snapshot checksums owned by this connector
       4. Clean up ingested documents: release checksum ownership rows and delete
          documents when this connector was their last owner (remaining count == 0)
@@ -398,18 +392,8 @@ async def _run_teardown(connector_id: str) -> None:
     logger.info(f"Starting teardown for connector {connector_id!r}")
     deletion_errors: list[str] = []
     try:
-        # Step 1: Remove the scheduled job so no new ticks fire after this point.
-        try:
-            import digitize.connectors.scheduler as _sched
-            await _sched.remove_connector_job(connector_id)
-        except Exception as sched_exc:
-            deletion_errors.append(f"Failed to remove scheduler job: {sched_exc}")
-            logger.warning(
-                f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
-            )
-
-        # Step 2: make sure active jobs (cancelled by the sync tick) actually
-        # reached a terminal state before any document is touched.  If
+        # Step 1: make sure active jobs (cancelled by the sync tick) actually
+        # reached a terminal state before anything is touched.  If
         # cancellation is stuck, keep the connector (DELETE_PENDING) rather
         # than deleting it silently and orphaning mid-flight documents.
         job_wait_error = await _wait_for_connector_jobs(connector_id)
@@ -420,6 +404,16 @@ async def _run_teardown(connector_id: str) -> None:
                 f"Skipping teardown for {connector_id!r}: {error_msg}"
             )
             return
+
+        # Step 2: Remove the scheduled job so no new ticks fire after this point.
+        try:
+            import digitize.connectors.scheduler as _sched
+            await _sched.remove_connector_job(connector_id)
+        except Exception as sched_exc:
+            deletion_errors.append(f"Failed to remove scheduler job: {sched_exc}")
+            logger.warning(
+                f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
+            )
 
         # Steps 3+4: Clean up documents ingested by this connector — release its
         # checksum ownership mappings. When this connector is the last owner of

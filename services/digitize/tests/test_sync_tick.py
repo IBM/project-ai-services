@@ -45,11 +45,9 @@ _complete_tick / _fail_tick
   - _fail_tick swallows a secondary exception from finalize_sync_log_and_update_connector
 
 _handle_interrupt
-  - None interrupt_type calls _cancel_tick and returns
-  - SYNC_CANCEL branch calls _cancel_tick and _sweep_staging_dir with correct args
-  - DELETE_CONNECTOR branch calls _cancel_tick and _run_teardown
-  - SYNC_CANCEL does not call _run_teardown
-  - DELETE_CONNECTOR does not call _sweep_staging_dir
+  - None / SYNC_CANCEL / DELETE_CONNECTOR all call _cancel_tick and _sweep_staging_dir
+  - none of them call _run_teardown (launched by the DELETE endpoint)
+  - _sweep_staging_dir receives connector_id and sync_seq
 
 _wait_for_job
   - exits immediately when job is already in terminal state
@@ -797,43 +795,28 @@ class TestInterruptTypeEnum:
 # ---------------------------------------------------------------------------
 
 class TestHandleInterrupt:
-    def test_none_interrupt_calls_cancel_tick(self):
-        with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
-             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"):
-            asyncio.run(_handle_interrupt(sync_seq=1, connector_id="conn-1", interrupt_type=None))
-        mock_cancel.assert_called_once_with(1, "conn-1")
-
-    def test_sync_cancel_calls_cancel_tick_and_sweep(self):
+    @pytest.mark.parametrize(
+        "interrupt_type",
+        [None, InterruptType.SYNC_CANCEL, InterruptType.DELETE_CONNECTOR],
+    )
+    def test_all_interrupts_cancel_tick_and_sweep(self, interrupt_type):
+        """Sync cancel, delete and None are handled identically."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
              patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep, \
              patch("digitize.settings.settings") as mock_settings:
             mock_settings.digitize.staging_dir = Path("/fake/staging")
             asyncio.run(_handle_interrupt(sync_seq=7, connector_id="conn-A",
-                                          interrupt_type=InterruptType.SYNC_CANCEL))
+                                          interrupt_type=interrupt_type))
         mock_cancel.assert_called_once_with(7, "conn-A")
         mock_sweep.assert_called_once()
 
-    def test_delete_connector_calls_cancel_tick_and_teardown(self):
-        with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
-             patch("digitize.api.v1.connectors._run_teardown",
-                   new_callable=AsyncMock) as mock_teardown:
-            asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
-                                          interrupt_type=InterruptType.DELETE_CONNECTOR))
-        mock_cancel.assert_called_once_with(3, "conn-B")
-        mock_teardown.assert_awaited_once_with("conn-B")
-
-    def test_delete_connector_does_not_call_sweep(self):
-        """DELETE_CONNECTOR must not call _sweep_staging_dir."""
-        with patch(f"{DB_MODULE}._cancel_tick"), \
-             patch("digitize.api.v1.connectors._run_teardown", new_callable=AsyncMock), \
-             patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep:
-            asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
-                                          interrupt_type=InterruptType.DELETE_CONNECTOR))
-        mock_sweep.assert_not_called()
-
-    def test_sync_cancel_does_not_call_teardown(self):
-        """SYNC_CANCEL must not call _run_teardown."""
+    @pytest.mark.parametrize(
+        "interrupt_type",
+        [None, InterruptType.SYNC_CANCEL, InterruptType.DELETE_CONNECTOR],
+    )
+    def test_interrupt_does_not_call_teardown(self, interrupt_type):
+        """Teardown is launched by the DELETE endpoint, never from the tick."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick"), \
              patch("digitize.api.v1.connectors._sweep_staging_dir"), \
@@ -842,7 +825,7 @@ class TestHandleInterrupt:
                    new_callable=AsyncMock) as mock_teardown:
             mock_settings.digitize.staging_dir = Path("/fake/staging")
             asyncio.run(_handle_interrupt(sync_seq=7, connector_id="conn-A",
-                                          interrupt_type=InterruptType.SYNC_CANCEL))
+                                          interrupt_type=interrupt_type))
         mock_teardown.assert_not_called()
 
     def test_sync_cancel_sweep_receives_connector_id_and_seq(self):

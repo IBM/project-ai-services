@@ -1224,10 +1224,11 @@ class DatabaseManager:
     @staticmethod
     def try_acquire_sync_lock(connector_id: str) -> bool:
         """
-        Atomically set status='syncing' if it is not already 'syncing'.
+        Atomically set status='syncing' if it is not already 'syncing' and the
+        connector is not 'delete pending'.
 
         Returns True if the lock was acquired, False if another tick already
-        holds it (or the connector row does not exist).
+        holds it, the connector is pending deletion, or the row does not exist.
         """
         try:
             with get_db_session() as session:
@@ -1235,7 +1236,9 @@ class DatabaseManager:
                     update(Connector)
                     .where(
                         Connector.id == connector_id,
-                        Connector.status != ConnectorStatus.SYNCING,
+                        Connector.status.notin_(
+                            [ConnectorStatus.SYNCING, ConnectorStatus.DELETE_PENDING]
+                        ),
                     )
                     .values(status=ConnectorStatus.SYNCING)
                     .returning(Connector.id)
@@ -1330,12 +1333,15 @@ class DatabaseManager:
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
-        """Set status=SYNCING and clear message on the connector row."""
+        """Set status=SYNCING and clear message on the connector row (never for DELETE_PENDING)."""
         try:
             with get_db_session() as session:
                 session.execute(
                     update(Connector)
-                    .where(Connector.id == connector_id)
+                    .where(
+                        Connector.id == connector_id,
+                        Connector.status != ConnectorStatus.DELETE_PENDING,
+                    )
                     .values(status=ConnectorStatus.SYNCING, message=None)
                 )
         except SQLAlchemyError as e:
@@ -1411,6 +1417,9 @@ class DatabaseManager:
 
         ``message`` carries error detail on failure/cancel paths and is
         cleared to NULL on a successful completion.
+
+        A connector in DELETE_PENDING is never modified, so a tick finishing
+        after a DELETE request cannot overwrite the pending deletion.
         """
         try:
             with get_db_session() as session:
@@ -1426,7 +1435,10 @@ class DatabaseManager:
                 }
                 session.execute(
                     update(Connector)
-                    .where(Connector.id == connector_id)
+                    .where(
+                        Connector.id == connector_id,
+                        Connector.status != ConnectorStatus.DELETE_PENDING,
+                    )
                     .values(**values)
                 )
         except SQLAlchemyError as e:
