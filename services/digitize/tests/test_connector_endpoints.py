@@ -411,7 +411,7 @@ class TestRunTeardown:
     ):
         """Apply the DB patches shared by most tests in this class."""
         monkeypatch.setattr(
-            "digitize.api.v1.connectors._cancel_connector_jobs_and_wait",
+            "digitize.api.v1.connectors._wait_for_connector_jobs",
             AsyncMock(return_value=job_wait_error),
         )
         monkeypatch.setattr(
@@ -570,57 +570,46 @@ class TestRunTeardown:
 
 
 @pytest.mark.asyncio
-class TestCancelConnectorJobsAndWait:
-    """Unit tests for _cancel_connector_jobs_and_wait."""
-
-    @staticmethod
-    def _job(status):
-        return SimpleNamespace(status=status)
+class TestWaitForConnectorJobs:
+    """Unit tests for _wait_for_connector_jobs."""
 
     async def test_no_active_jobs_returns_none(self):
-        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+        from digitize.api.v1.connectors import _wait_for_connector_jobs
         mock_db = Mock()
         mock_db.get_active_job_ids_for_connector = Mock(return_value=[])
-        with patch("digitize.db.manager.db_manager", mock_db), \
-             patch("digitize.utils.jobs.request_job_cancellation") as cancel_mock:
-            assert await _cancel_connector_jobs_and_wait(CONNECTOR_ID) is None
-        cancel_mock.assert_not_called()
+        with patch("digitize.db.manager.db_manager", mock_db):
+            assert await _wait_for_connector_jobs(CONNECTOR_ID) is None
 
-    async def test_requests_cancel_with_clean_files_and_waits_until_terminal(self):
-        """Active jobs get clean_files=True; CANCEL_PENDING jobs are only awaited."""
-        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+    async def test_waits_until_jobs_terminal_without_requesting_cancel(self):
+        """Teardown only polls; cancellation is the sync tick's responsibility."""
+        from digitize.api.v1.connectors import _wait_for_connector_jobs
         mock_db = Mock()
         # initial snapshot, then still-active on first poll, then terminal
         mock_db.get_active_job_ids_for_connector = Mock(
             side_effect=[["job-a", "job-b"], ["job-a", "job-b"], []]
         )
-        mock_db.get_job_by_id = Mock(
-            side_effect=lambda jid: self._job("in_progress" if jid == "job-a" else "cancel_pending")
-        )
         with patch("digitize.db.manager.db_manager", mock_db), \
              patch("digitize.utils.jobs.request_job_cancellation") as cancel_mock, \
              patch("digitize.api.v1.connectors._TEARDOWN_JOB_POLL_INTERVAL_S", 0):
-            assert await _cancel_connector_jobs_and_wait(CONNECTOR_ID) is None
-        cancel_mock.assert_called_once_with("job-a", clean_files=True)
+            assert await _wait_for_connector_jobs(CONNECTOR_ID) is None
+        cancel_mock.assert_not_called()
 
     async def test_times_out_when_jobs_never_terminal(self):
-        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+        from digitize.api.v1.connectors import _wait_for_connector_jobs
         mock_db = Mock()
         mock_db.get_active_job_ids_for_connector = Mock(return_value=["job-stuck"])
-        mock_db.get_job_by_id = Mock(return_value=self._job("cancel_pending"))
         with patch("digitize.db.manager.db_manager", mock_db), \
-             patch("digitize.utils.jobs.request_job_cancellation"), \
              patch("digitize.api.v1.connectors._TEARDOWN_JOB_POLL_INTERVAL_S", 0), \
              patch("digitize.api.v1.connectors._TEARDOWN_JOB_WAIT_TIMEOUT_S", 0):
-            result = await _cancel_connector_jobs_and_wait(CONNECTOR_ID)
+            result = await _wait_for_connector_jobs(CONNECTOR_ID)
         assert result is not None and "job-stuck" in result
 
     async def test_db_error_is_not_treated_as_terminal(self):
-        from digitize.api.v1.connectors import _cancel_connector_jobs_and_wait
+        from digitize.api.v1.connectors import _wait_for_connector_jobs
         mock_db = Mock()
         mock_db.get_active_job_ids_for_connector = Mock(return_value=None)
         with patch("digitize.db.manager.db_manager", mock_db):
-            result = await _cancel_connector_jobs_and_wait(CONNECTOR_ID)
+            result = await _wait_for_connector_jobs(CONNECTOR_ID)
         assert result is not None
 
 

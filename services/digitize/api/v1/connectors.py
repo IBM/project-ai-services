@@ -344,28 +344,23 @@ _TEARDOWN_JOB_WAIT_TIMEOUT_S = 600
 _TEARDOWN_JOB_POLL_INTERVAL_S = 2
 
 
-async def _cancel_connector_jobs_and_wait(connector_id: str) -> Optional[str]:
+async def _wait_for_connector_jobs(connector_id: str) -> Optional[str]:
     """
-    Request cancellation of every non-terminal job owned by *connector_id* and
-    wait until all of them have reached a terminal state.
+    Wait until every non-terminal job owned by *connector_id* has reached a
+    terminal state.
+
+    Cancellation is NOT requested here — the sync tick requests it when it
+    catches the interrupt (see ``_wait_for_job`` in sync_tick).
 
     Returns ``None`` once no active job remains, or an error message if the
     jobs could not be verified as terminal within the timeout (stuck/crashed
     cancellation) so the caller can refuse to finish the teardown.
     """
     from digitize.db.manager import db_manager
-    from digitize.models import JobStatus
-    from digitize.utils.jobs import request_job_cancellation
 
     job_ids = db_manager.get_active_job_ids_for_connector(connector_id)
     if job_ids is None:
         return "could not determine active jobs"
-
-    for job_id in job_ids:
-        job = db_manager.get_job_by_id(job_id)
-        # CANCEL_PENDING: cancellation already requested — just wait for it.
-        if job is not None and job.status != JobStatus.CANCEL_PENDING.value:
-            request_job_cancellation(job_id, clean_files=True)
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _TEARDOWN_JOB_WAIT_TIMEOUT_S
@@ -392,8 +387,8 @@ async def _run_teardown(connector_id: str) -> None:
 
     Steps:
       1. Remove the scheduled job so no new ticks fire
-      2. Cancel the connector's active jobs and wait for them to reach a
-         terminal state; if they don't, the connector is NOT deleted
+      2. Wait for the connector's active jobs (cancelled by the sync tick) to
+         reach a terminal state; if they don't, the connector is NOT deleted
       3. Snapshot checksums owned by this connector
       4. Remove ownership rows; delete documents when last owner
       5. Delete docs created for this connector that no connector owns
@@ -414,11 +409,11 @@ async def _run_teardown(connector_id: str) -> None:
                 f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
             )
 
-        # Step 2: cancel active jobs and make sure they actually reached a
-        # terminal state before any document is touched.  If cancellation is
-        # stuck, keep the connector (DELETE_PENDING) rather than deleting it
-        # silently and orphaning mid-flight documents.
-        job_wait_error = await _cancel_connector_jobs_and_wait(connector_id)
+        # Step 2: make sure active jobs (cancelled by the sync tick) actually
+        # reached a terminal state before any document is touched.  If
+        # cancellation is stuck, keep the connector (DELETE_PENDING) rather
+        # than deleting it silently and orphaning mid-flight documents.
+        job_wait_error = await _wait_for_connector_jobs(connector_id)
         if job_wait_error:
             error_msg = f"Failed to delete connector, error: {job_wait_error}"
             db_ops.set_connector_message(connector_id, error_msg)
