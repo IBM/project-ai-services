@@ -11,6 +11,19 @@ from common.misc_utils import get_logger
 logger = get_logger("validation")
 
 
+def sanitize_basename(raw: str) -> str:
+    """Reduce a client-supplied filename to a safe basename.
+
+    Strips all directory components. Falls back to ``"uploaded_file"`` when the
+    result is empty or a directory reference (``"."`` / ``".."``), e.g. for
+    inputs such as ``"abc.txt/."`` or ``"abc.txt/"``.
+    """
+    basename = os.path.basename(raw)
+    if basename in {"", ".", ".."}:
+        basename = "uploaded_file"
+    return basename
+
+
 def safe_filename(raw: str, job_dir: Path) -> Path:
     """Return a Path strictly inside *job_dir* for a client-supplied multipart filename.
 
@@ -34,11 +47,12 @@ def safe_filename(raw: str, job_dir: Path) -> Path:
     Raises:
         ValueError: if the resolved path escapes *job_dir*.
     """
-    basename = os.path.basename(raw) or "uploaded_file"
+    basename = sanitize_basename(raw)
     target = (job_dir / basename).resolve()
     if not target.is_relative_to(job_dir.resolve()):
         raise ValueError(f"Illegal filename rejected: {raw!r}")
     return target
+
 
 _ALLOWED_EXTENSIONS = frozenset({"txt", "md"})
 

@@ -34,12 +34,12 @@ from __future__ import annotations
 
 import asyncio
 from enum import Enum
-from pathlib import Path
 from typing import Optional
 
 from pydantic import ValidationError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, validate_document_file
+from common.validation_utils import safe_filename, sanitize_basename
 from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.settings import settings
 from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
@@ -371,9 +371,10 @@ async def _process_new_files(
 
         try:
             for remote_path, checksum in batch:
-                filename = Path(remote_path).name
+                filename = sanitize_basename(remote_path)
+                local_path = safe_filename(remote_path, batch_dir)
                 local_checksum = await asyncio.to_thread(
-                    scanner.download_to, remote_path, batch_dir / filename
+                    scanner.download_to, remote_path, local_path
                 )
                 if not scanner.verify_integrity(local_checksum, checksum):
                     logger.warning(
@@ -382,14 +383,14 @@ async def _process_new_files(
                     )
                     continue
                 try:
-                    file_bytes = (batch_dir / filename).read_bytes()
+                    file_bytes = local_path.read_bytes()
                     validate_document_file(filename, file_bytes)
                 except ValueError as val_exc:
                     logger.warning(
                         f"Invalid file {remote_path!r} in connector "
                         f"{connector_id!r}; skipping file: {val_exc}"
                     )
-                    (batch_dir / filename).unlink(missing_ok=True)
+                    local_path.unlink(missing_ok=True)
                     invalid_files.append(remote_path)
                     continue
                 filename_to_checksum[filename] = checksum
