@@ -477,7 +477,7 @@ async def _process_new_files(
 
 async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None:
     """Remove orphaned checksum rows and delete documents that lose their last owner."""
-    from digitize.api.v1.connectors import _cleanup_connector_documents
+    from digitize.utils.connectors import cleanup_connector_documents as _cleanup_connector_documents
 
     (
         checksum_removal_failures,
@@ -523,7 +523,7 @@ async def _handle_interrupt(
     )
     _cancel_tick(sync_seq, connector_id)
 
-    from digitize.api.v1.connectors import _sweep_staging_dir
+    from digitize.utils.connectors import sweep_staging_dir as _sweep_staging_dir
     from digitize.settings import settings
     _sweep_staging_dir(
         connector_id,

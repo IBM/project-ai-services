@@ -437,9 +437,9 @@ class TestRunTeardown:
         """remaining_owner_count == 0 → document is deleted."""
         doc_delete_mock = Mock(return_value=True)
         self._patch_common(monkeypatch, checksums=["abc123"], remove_return=(0, "doc-0001"))
-        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+        with patch("digitize.utils.connectors.best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir"):
-                with patch("digitize.api.v1.connectors._get_unregistered_connector_docs", return_value=[]):
+                with patch("digitize.utils.connectors.get_unregistered_connector_docs", return_value=[]):
                     from digitize.api.v1.connectors import _run_teardown
                     await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_called_once_with("doc-0001")
@@ -448,9 +448,9 @@ class TestRunTeardown:
         """remaining_owner_count > 0 → doc must NOT be deleted."""
         doc_delete_mock = Mock(return_value=True)
         self._patch_common(monkeypatch, checksums=["abc123"], remove_return=(2, "doc-0001"))
-        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+        with patch("digitize.utils.connectors.best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir"):
-                with patch("digitize.api.v1.connectors._get_unregistered_connector_docs", return_value=[]):
+                with patch("digitize.utils.connectors.get_unregistered_connector_docs", return_value=[]):
                     from digitize.api.v1.connectors import _run_teardown
                     await _run_teardown(CONNECTOR_ID)
         doc_delete_mock.assert_not_called()
@@ -463,10 +463,10 @@ class TestRunTeardown:
         """Unregistered docs returned by _get_unregistered_connector_docs must be deleted."""
         doc_delete_mock = Mock(return_value=True)
         self._patch_common(monkeypatch, checksums=[], remove_return=(0, None))
-        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+        with patch("digitize.utils.connectors.best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir"):
                 with patch(
-                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    "digitize.utils.connectors.get_unregistered_connector_docs",
                     return_value=["inflight-doc-1", "inflight-doc-2"],
                 ):
                     from digitize.api.v1.connectors import _run_teardown
@@ -479,10 +479,10 @@ class TestRunTeardown:
         """Empty unregistered list → _best_effort_delete_document not called via step 5."""
         doc_delete_mock = Mock(return_value=True)
         self._patch_common(monkeypatch, checksums=[], remove_return=(0, None))
-        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+        with patch("digitize.utils.connectors.best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir"):
                 with patch(
-                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    "digitize.utils.connectors.get_unregistered_connector_docs",
                     return_value=[],
                 ):
                     from digitize.api.v1.connectors import _run_teardown
@@ -500,10 +500,10 @@ class TestRunTeardown:
             "digitize.api.v1.connectors.db_ops.set_connector_message", set_msg_mock
         )
         self._patch_common(monkeypatch, checksums=[], remove_return=(0, None))
-        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+        with patch("digitize.utils.connectors.best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir", return_value=True):
                 with patch(
-                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    "digitize.utils.connectors.get_unregistered_connector_docs",
                     return_value=["bad-doc-1"],
                 ):
                     from digitize.api.v1.connectors import _run_teardown
@@ -519,10 +519,10 @@ class TestRunTeardown:
         """
         doc_delete_mock = Mock(return_value=True)
         self._patch_common(monkeypatch, checksums=["cs1"], remove_return=(0, "reg-doc-1"))
-        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+        with patch("digitize.utils.connectors.best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir"):
                 with patch(
-                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    "digitize.utils.connectors.get_unregistered_connector_docs",
                     return_value=["inflight-doc-1"],
                 ):
                     from digitize.api.v1.connectors import _run_teardown
@@ -555,10 +555,10 @@ class TestRunTeardown:
         monkeypatch.setattr(
             "digitize.api.v1.connectors.db_ops.remove_connector_checksum_entry", remove_checksum_mock
         )
-        with patch("digitize.api.v1.connectors._best_effort_delete_document", doc_delete_mock):
+        with patch("digitize.utils.connectors.best_effort_delete_document", doc_delete_mock):
             with patch("digitize.api.v1.connectors._sweep_staging_dir") as sweep_mock:
                 with patch(
-                    "digitize.api.v1.connectors._get_unregistered_connector_docs",
+                    "digitize.utils.connectors.get_unregistered_connector_docs",
                     return_value=["inflight-doc-1"],
                 ):
                     from digitize.api.v1.connectors import _run_teardown
@@ -592,7 +592,7 @@ class TestWaitForConnectorJobs:
         )
         with patch("digitize.db.manager.db_manager", mock_db), \
              patch("digitize.utils.jobs.request_job_cancellation") as cancel_mock, \
-             patch("digitize.api.v1.connectors._TEARDOWN_JOB_POLL_INTERVAL_S", 0):
+             patch("digitize.utils.connectors.TEARDOWN_JOB_POLL_INTERVAL_S", 0):
             assert await _wait_for_connector_jobs(CONNECTOR_ID) is None
         cancel_mock.assert_not_called()
 
@@ -601,8 +601,8 @@ class TestWaitForConnectorJobs:
         mock_db = Mock()
         mock_db.get_active_job_ids_for_connector = Mock(return_value=["job-stuck"])
         with patch("digitize.db.manager.db_manager", mock_db), \
-             patch("digitize.api.v1.connectors._TEARDOWN_JOB_POLL_INTERVAL_S", 0), \
-             patch("digitize.api.v1.connectors._TEARDOWN_JOB_WAIT_TIMEOUT_S", 0):
+             patch("digitize.utils.connectors.TEARDOWN_JOB_POLL_INTERVAL_S", 0), \
+             patch("digitize.utils.connectors.TEARDOWN_JOB_WAIT_TIMEOUT_S", 0):
             result = await _wait_for_connector_jobs(CONNECTOR_ID)
         assert result is not None and "job-stuck" in result
 

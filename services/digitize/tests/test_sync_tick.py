@@ -395,7 +395,7 @@ class TestProcessNewFiles:
 # _delete_orphans  (async)
 # ---------------------------------------------------------------------------
 
-_CLEANUP_CONNECTOR_DOCUMENTS = "digitize.api.v1.connectors._cleanup_connector_documents"
+_CLEANUP_CONNECTOR_DOCUMENTS = "digitize.utils.connectors.cleanup_connector_documents"
 
 
 class TestDeleteOrphans:
@@ -803,7 +803,7 @@ class TestHandleInterrupt:
         """Sync cancel, delete and None are handled identically."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
-             patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep, \
+             patch("digitize.utils.connectors.sweep_staging_dir") as mock_sweep, \
              patch("digitize.settings.settings") as mock_settings:
             mock_settings.digitize.staging_dir = Path("/fake/staging")
             asyncio.run(_handle_interrupt(sync_seq=7, connector_id="conn-A",
@@ -819,7 +819,7 @@ class TestHandleInterrupt:
         """Teardown is launched by the DELETE endpoint, never from the tick."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick"), \
-             patch("digitize.api.v1.connectors._sweep_staging_dir"), \
+             patch("digitize.utils.connectors.sweep_staging_dir"), \
              patch("digitize.settings.settings") as mock_settings, \
              patch("digitize.api.v1.connectors._run_teardown",
                    new_callable=AsyncMock) as mock_teardown:
@@ -832,7 +832,7 @@ class TestHandleInterrupt:
         """_sweep_staging_dir must be called with connector_id and sync_seq keyword."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick"), \
-             patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep, \
+             patch("digitize.utils.connectors.sweep_staging_dir") as mock_sweep, \
              patch("digitize.settings.settings") as mock_settings:
             fake_staging = Path("/fake/staging")
             mock_settings.digitize.staging_dir = fake_staging
