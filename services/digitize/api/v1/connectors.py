@@ -46,6 +46,7 @@ from digitize.connectors.encryption import (
     safe_connection_details,
 )
 import digitize.utils.db as db_ops
+from digitize.utils.jobs import TEARDOWN_JOB_WAIT_TIMEOUT_S, TEARDOWN_JOB_POLL_INTERVAL_S
 from digitize.exceptions import SyncLocked, SyncNotFound
 from digitize.settings import settings
 
@@ -338,12 +339,6 @@ async def delete_connector(connector_id: str):
         )
 
 
-# How long teardown waits for the connector's jobs to reach a terminal state
-# after requesting cancellation, and how often it polls.
-_TEARDOWN_JOB_WAIT_TIMEOUT_S = 600
-_TEARDOWN_JOB_POLL_INTERVAL_S = 2
-
-
 async def _wait_for_connector_jobs(connector_id: str) -> Optional[str]:
     """
     Wait until every non-terminal job owned by *connector_id* has reached a
@@ -363,7 +358,7 @@ async def _wait_for_connector_jobs(connector_id: str) -> Optional[str]:
         return "could not determine active jobs"
 
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + _TEARDOWN_JOB_WAIT_TIMEOUT_S
+    deadline = loop.time() + TEARDOWN_JOB_WAIT_TIMEOUT_S
     while True:
         job_ids = db_manager.get_active_job_ids_for_connector(connector_id)
         if job_ids is not None and not job_ids:
@@ -371,10 +366,10 @@ async def _wait_for_connector_jobs(connector_id: str) -> Optional[str]:
         if loop.time() >= deadline:
             return (
                 "job cancellation did not complete in "
-                f"{_TEARDOWN_JOB_WAIT_TIMEOUT_S}s"
+                f"{TEARDOWN_JOB_WAIT_TIMEOUT_S}s"
                 + (f" for job(s): {', '.join(job_ids)}" if job_ids else "")
             )
-        await asyncio.sleep(_TEARDOWN_JOB_POLL_INTERVAL_S)
+        await asyncio.sleep(TEARDOWN_JOB_POLL_INTERVAL_S)
 
 
 async def _run_teardown(connector_id: str) -> None:
