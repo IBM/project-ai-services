@@ -25,7 +25,8 @@ RUN pip install --upgrade pip setuptools wheel && \
 RUN mkdir -p /tmp/torchvision-build && cd /tmp/torchvision-build && \
     curl -fsSL -o torchvision_0.26.0_ubi_9.6.sh \
       https://raw.githubusercontent.com/ppc64le/build-scripts/master/t/torchvision/torchvision_0.26.0_ubi_9.6.sh && \
-    bash torchvision_0.26.0_ubi_9.6.sh v0.29.0 3.12 v2.14.0 && \
+    sed -i 's|^python3 -m pip install -r requirements.txt$|python3 -m pip install -r requirements.txt --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ --prefer-binary|' torchvision_0.26.0_ubi_9.6.sh && \
+    bash torchvision_0.26.0_ubi_9.6.sh v0.29.0 v2.14.0 && \
     cp torchvision*.whl /wheels/ && \
     cd / && rm -rf /tmp/torchvision-build
 
