@@ -32,8 +32,10 @@ const (
 	catalogSvcChat       = "chat"
 	catalogSvcDigitize   = "digitize"
 	catalogSvcSimilarity = "similarity"
+	catalogSvcSummarize  = "summarize"
 	endpointTypeAPI      = "api"
 	endpointTypeUI       = "ui"
+	endpointTypeMCP      = "mcp"
 )
 
 // Service name substrings used to identify catalog URLs in 'application info' output.
@@ -43,10 +45,14 @@ const (
 const (
 	svcChatBotBackend  = "chat-bot-backend"
 	svcChatBotUI       = "chat-bot-ui"
+	svcChatBotMCP      = "chat-bot-mcp"
 	svcDigitizeBackend = "digitize-backend"
+	svcDigitizeMCP     = "digitize-mcp"
 	svcSimilarityAPI   = "similarity-api"
+	svcSimilarityMCP   = "similarity-mcp"
 	svcSummarizeAPI    = "summarize-api"
 	svcExtractAPI      = "extract-api"
+	svcSummarizeMCP    = "summarize-mcp"
 )
 
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
@@ -256,6 +262,18 @@ func (e AppEndpoints) DigitizeURL() string { return e[catalogSvcDigitize][endpoi
 
 // SimilarityURL returns the similarity service API URL.
 func (e AppEndpoints) SimilarityURL() string { return e[catalogSvcSimilarity][endpointTypeAPI] }
+
+// ChatMCPURL returns the chat service MCP URL.
+func (e AppEndpoints) ChatMCPURL() string { return e[catalogSvcChat][endpointTypeMCP] }
+
+// DigitizeMCPURL returns the digitize service MCP URL.
+func (e AppEndpoints) DigitizeMCPURL() string { return e[catalogSvcDigitize][endpointTypeMCP] }
+
+// SimilarityMCPURL returns the similarity service MCP URL.
+func (e AppEndpoints) SimilarityMCPURL() string { return e[catalogSvcSimilarity][endpointTypeMCP] }
+
+// SummarizeMCPURL returns the summarize service MCP URL.
+func (e AppEndpoints) SummarizeMCPURL() string { return e[catalogSvcSummarize][endpointTypeMCP] }
 
 // CatalogGetApplicationEndpoints fetches endpoint URLs for a named application via the catalog REST API.
 func CatalogGetApplicationEndpoints(appName string) (AppEndpoints, error) {
@@ -501,6 +519,30 @@ func ExtractCatalogSummarizeURL(infoOutput string) string {
 // ExtractExtractURL parses the 'application info' output for the entity extraction service URL.
 func ExtractExtractURL(infoOutput string) string {
 	return extractURLBySubstring(infoOutput, svcExtractAPI)
+}
+
+// ExtractChatMCPURL extracts the chat-bot MCP sidecar URL from 'application info' output.
+// The hostname always contains "chat-bot-mcp" for the catalog (podman) path.
+func ExtractChatMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcChatBotMCP)
+}
+
+// ExtractDigitizeMCPURL extracts the digitize MCP sidecar URL from 'application info' output.
+// The hostname always contains "digitize-mcp" for the catalog (podman) path.
+func ExtractDigitizeMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcDigitizeMCP)
+}
+
+// ExtractSimilarityMCPURL extracts the similarity MCP sidecar URL from 'application info' output.
+// The hostname always contains "similarity-mcp" for the catalog (podman) path.
+func ExtractSimilarityMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcSimilarityMCP)
+}
+
+// ExtractSummarizeMCPURL extracts the summarize MCP sidecar URL from 'application info' output.
+// The hostname always contains "summarize-mcp" for the catalog (podman) path.
+func ExtractSummarizeMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcSummarizeMCP)
 }
 
 // getOpenShiftRouteURLs fetches OpenShift routes for the given application namespace
