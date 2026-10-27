@@ -398,6 +398,7 @@ func (h *DatasourceHandler) ListApplicationDatasources(c *gin.Context) {
 //	@Success		207		{object}	models.ConnectDatasourcesResponse	"One or more datasources failed to connect"
 //	@Failure		400		{object}	ErrorResponse						"Invalid request body"
 //	@Failure		401		{object}	ErrorResponse						"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse						"User doesn't own this application"
 //	@Failure		404		{object}	ErrorResponse						"Application or datasource not found"
 //	@Failure		422		{object}	ErrorResponse						"No eligible running service found"
 //	@Failure		500		{object}	ErrorResponse						"Internal Server Error"
@@ -407,6 +408,16 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: fmt.Sprintf("Invalid application ID: %v", err),
+		})
+
+		return
+	}
+
+	// Extract authenticated user from context.
+	userID := c.GetString(middleware.CtxUserIDKey)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error: "Unauthorized: user ID not found in context",
 		})
 
 		return
@@ -436,7 +447,7 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 		datasourceIDs = append(datasourceIDs, id)
 	}
 
-	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, datasourceIDs)
+	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, userID, datasourceIDs)
 	if err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
 			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
@@ -526,6 +537,7 @@ func (h *DatasourceHandler) GetApplicationDatasource(c *gin.Context) {
 //	@Success		204				"Datasource disconnected successfully"
 //	@Failure		400				{object}	ErrorResponse	"Invalid application or datasource ID"
 //	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403				{object}	ErrorResponse	"User doesn't own this application"
 //	@Failure		404				{object}	ErrorResponse	"Datasource not connected to this application"
 //	@Failure		502				{object}	ErrorResponse	"Downstream Digitize service returned an error"
 //	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
@@ -549,7 +561,17 @@ func (h *DatasourceHandler) DisconnectDatasourcesFromApplication(c *gin.Context)
 		return
 	}
 
-	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, datasourceID); err != nil {
+	// Extract authenticated user from context.
+	userID := c.GetString(middleware.CtxUserIDKey)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error: "Unauthorized: user ID not found in context",
+		})
+
+		return
+	}
+
+	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, userID, datasourceID); err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
 			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
 

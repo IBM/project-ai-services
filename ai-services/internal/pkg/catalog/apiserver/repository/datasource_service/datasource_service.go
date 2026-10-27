@@ -489,12 +489,29 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 // This method is the single reusable core for both:
 //   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect)
 //   - the app-creation flow where datasources are pre-attached at deploy time.
-func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
-	// Resolve eligible services once — shared across all datasources.
-	linkedServices, err := s.eligibleServicesForApp(ctx, applicationID)
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+	// Verify application exists and ownership.
+	app, err := s.appRepo.GetByID(ctx, applicationID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to load application: %w", err)
 	}
+
+	if app == nil {
+		return nil, &ValidationError{
+			Code:    http.StatusNotFound,
+			Message: fmt.Sprintf("application %s not found", applicationID),
+		}
+	}
+
+	if userID != "" && app.CreatedBy != userID {
+		return nil, &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: "user does not own this application",
+		}
+	}
+
+	// Resolve eligible services once — shared across all datasources.
+	linkedServices := s.eligibleServicesForApp(ctx, app)
 
 	if len(linkedServices) == 0 {
 		return nil, &ValidationError{
@@ -568,19 +585,7 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 
 // eligibleServicesForApp returns the subset of services in applicationID whose catalog
 // entry has AcceptsDatasource == true and which have a registered api-type endpoint.
-func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicationID uuid.UUID) ([]dbrepo.LinkedServiceRow, error) {
-	app, err := s.appRepo.GetByID(ctx, applicationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load application: %w", err)
-	}
-
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("application %s not found", applicationID),
-		}
-	}
-
+func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, app *dbmodels.Application) []dbrepo.LinkedServiceRow {
 	var eligible []dbrepo.LinkedServiceRow
 
 	for _, svc := range app.Services {
@@ -606,7 +611,7 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 		})
 	}
 
-	return eligible, nil
+	return eligible
 }
 
 // loadConnector fetches the connector by ID (with credentials). Returns a typed ValidationError on 404.
@@ -859,8 +864,8 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 //     is actually connected. Return 404 if no rows are found.
 //  4. For each confirmed row, call DELETE /v1/connectors/{id} on the Digitize endpoint,
 //     then remove the service_dependency row.
-func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, datasourceID uuid.UUID) error {
-	// Step 1: verify application exists.
+func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error {
+	// Step 1: verify application exists and ownership.
 	app, err := s.appRepo.GetByID(ctx, applicationID)
 	if err != nil {
 		return fmt.Errorf("failed to load application: %w", err)
@@ -870,6 +875,13 @@ func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Con
 		return &ValidationError{
 			Code:    http.StatusNotFound,
 			Message: fmt.Sprintf("application %s not found", applicationID),
+		}
+	}
+
+	if userID != "" && app.CreatedBy != userID {
+		return &ValidationError{
+			Code:    http.StatusForbidden,
+			Message: "user does not own this application",
 		}
 	}
 

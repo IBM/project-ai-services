@@ -84,6 +84,16 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 		return
 	}
 
+	// Extract user ID from auth context
+	userID := c.GetString(middleware.CtxUserIDKey)
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{
+			Error: "Unauthorized: user ID not found in context",
+		})
+
+		return
+	}
+
 	// Build request
 	req := repository.ListApplicationsRequest{
 		Page:           page,
@@ -91,6 +101,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 		DeploymentType: deploymentType,
 		CatalogID:      catalogID,
 		Search:         search,
+		CreatedBy:      userID,
 	}
 
 	// Call service layer
