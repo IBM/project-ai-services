@@ -432,19 +432,11 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 		return
 	}
 
-	// Parse each string UUID into uuid.UUID.
-	datasourceIDs := make([]uuid.UUID, 0, len(req.DatasourceIDs))
-	for _, idStr := range req.DatasourceIDs {
-		id, parseErr := uuid.Parse(idStr)
-		if parseErr != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
-				Error: fmt.Sprintf("Invalid datasource ID %q: %v", idStr, parseErr),
-			})
+	datasourceIDs, parseErr := parseDatasourceIDs(req.DatasourceIDs)
+	if parseErr != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: parseErr.Error()})
 
-			return
-		}
-
-		datasourceIDs = append(datasourceIDs, id)
+		return
 	}
 
 	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, userID, datasourceIDs)
@@ -470,6 +462,23 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusMultiStatus, resp)
+}
+
+// parseDatasourceIDs converts a slice of string UUIDs to []uuid.UUID.
+// Returns an error describing the first invalid entry, if any.
+func parseDatasourceIDs(ids []string) ([]uuid.UUID, error) {
+	out := make([]uuid.UUID, 0, len(ids))
+
+	for _, idStr := range ids {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid datasource ID %q: %v", idStr, err)
+		}
+
+		out = append(out, id)
+	}
+
+	return out, nil
 }
 
 // GetApplicationDatasource godoc
