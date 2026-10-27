@@ -122,10 +122,40 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `similarity-tests` | Similarity API health and `/v1/similarity-search` behavior |
 | `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
+| `mcp-tests` | **Umbrella label** — all MCP sidecar tests (health checks + tools/list). Podman-only. |
+| `mcp-health` | MCP `/health` endpoint checks for chat, digitize, and similarity sidecars |
+| `mcp-tools` | MCP `tools/list` checks — verifies each sidecar loaded its OpenAPI spec and registered tools |
 | `failure-test` | **Umbrella label** — all negative-path tests across bootstrap, catalog, and similarity. **Skipped by default** unless `--run-failure-tests` is passed; use `--label-filter="failure-test"` to further narrow once unlocked |
 | `bootstrap-failure` | Bootstrap domain failure tests only (`bootstrap_failure_test.go`) — requires `--run-failure-tests` |
 | `catalog-failure` | Catalog domain failure tests only (`catalog_failure_test.go`) — requires `--run-failure-tests` |
 | `similarity-failure` | Similarity domain failure tests only (`similarity_failure_test.go`) — requires `--run-failure-tests` |
+
+### Running MCP Sidecar Tests
+
+The MCP sidecar tests verify that the `mcp-sidecar` container deployed alongside
+each service (chat, digitize, similarity) is healthy and that its OpenAPI spec
+loaded correctly by exercising the `tools/list` MCP endpoint.
+
+**Prerequisites**
+
+- A running RAG application (podman runtime) with all services healthy.
+
+```bash
+# Run all MCP tests (health + tools/list) — deploys a fresh app automatically
+make test TEST_ARGS="--label-filter=mcp-tests --timeout=45m" APP_RUNTIME=podman
+
+# Run only /health endpoint checks
+make test TEST_ARGS="--label-filter=mcp-health --timeout=10m" APP_NAME=<appname> APP_RUNTIME=podman
+
+# Run only tools/list checks
+make test TEST_ARGS="--label-filter=mcp-tools --timeout=10m" APP_NAME=<appname> APP_RUNTIME=podman
+
+# Using ginkgo CLI directly
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+ginkgo -r -tags "$TAGS" \
+  --label-filter="mcp-tests" --timeout=45m \
+  ./tests/e2e -- --runtime=podman
+```
 
 ### Running Summarization Tests Only
 
