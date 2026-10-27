@@ -419,11 +419,16 @@ async def _run_teardown(connector_id: str) -> None:
         # checksum ownership mappings. When this connector is the last owner of
         # a checksum (remaining owner count drops to 0), the underlying document
         # is deleted; if other connectors still share the checksum, the document
-        # is preserved.
+        # is preserved. Docs created for this connector's batches that no
+        # connector owns (mid-flight or cancelled docs that never reached
+        # add_connector_checksum_entry) are also deleted; safe now that all jobs
+        # are terminal.
         owned_checksums = db_ops.list_connector_checksums(connector_id)
-        checksum_removal_failures, doc_deletion_failures = _cleanup_connector_documents(
-            connector_id, owned_checksums
-        )
+        (
+            checksum_removal_failures,
+            doc_deletion_failures,
+            unregistered_doc_failures,
+        ) = _cleanup_connector_documents(connector_id, owned_checksums)
         if checksum_removal_failures:
             deletion_errors.append(
                 f"checksum removal failed for {len(checksum_removal_failures)} checksum(s)"
@@ -432,23 +437,12 @@ async def _run_teardown(connector_id: str) -> None:
             deletion_errors.append(
                 f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
             )
-
-        # Step 5: delete docs created for this connector's batches that no
-        # connector owns, e.g. mid-flight or cancelled docs that never reached
-        # add_connector_checksum_entry.  Safe now that all jobs are terminal.
-        unregistered_doc_ids = _get_unregistered_connector_docs(connector_id)
-        if unregistered_doc_ids:
-            logger.info(
-                f"Connector {connector_id!r}: cleaning up {len(unregistered_doc_ids)} "
-                f"unregistered document(s)"
+        for doc_id in unregistered_doc_failures:
+            deletion_errors.append(
+                f"unregistered document deletion failed for doc_id={doc_id!r}"
             )
-        for doc_id in unregistered_doc_ids:
-            if not _best_effort_delete_document(doc_id):
-                deletion_errors.append(
-                    f"unregistered document deletion failed for doc_id={doc_id!r}"
-                )
 
-        # Step 6: sweep any residual batch staging directories
+        # Step 5: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
             deletion_errors.append("staging directory sweep failed")
 
@@ -458,7 +452,7 @@ async def _run_teardown(connector_id: str) -> None:
             logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
-        # Step 7: delete the connector row (cascades to connector_sync_logs)
+        # Step 6: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
@@ -478,9 +472,10 @@ async def _run_teardown(connector_id: str) -> None:
 def _cleanup_connector_documents(
     connector_id: str,
     checksums: list[str] | set[str],
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
     """
-    Clean up documents ingested by *connector_id* for the given *checksums*.
+    Clean up documents ingested by *connector_id* for the given *checksums*,
+    plus any unregistered documents created for the connector.
 
     For each checksum:
       1. Removes the `(checksum, connector_id)` ownership mapping in the database.
@@ -489,6 +484,10 @@ def _cleanup_connector_documents(
          underlying ingested document is deleted via `_best_effort_delete_document`.
          If other connectors still reference the checksum (`remaining > 0`),
          the document is preserved.
+
+    Afterwards, documents created for this connector that no connector owns
+    (see `_get_unregistered_connector_docs`, e.g. mid-flight or cancelled docs
+    that never reached ``add_connector_checksum_entry``) are also deleted.
 
     Iterates all *checksums*, accumulating failures rather than stopping on the
     first error so that as many documents/checksums as possible are cleaned up in one pass.
@@ -499,9 +498,12 @@ def _cleanup_connector_documents(
         Checksums for which ``remove_connector_checksum_entry`` raised.
     doc_deletion_failures:
         Checksums whose associated document could not be deleted (best-effort).
+    unregistered_doc_failures:
+        doc_ids of unregistered documents that could not be deleted.
     """
     checksum_removal_failures: list[str] = []
     doc_deletion_failures: list[str] = []
+    unregistered_doc_failures: list[str] = []
     for checksum in checksums:
         try:
             remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
@@ -515,7 +517,17 @@ def _cleanup_connector_documents(
                 f"{connector_id!r}: {exc}",
                 exc_info=True,
             )
-    return checksum_removal_failures, doc_deletion_failures
+    unregistered_doc_ids = _get_unregistered_connector_docs(connector_id)
+    if unregistered_doc_ids:
+        logger.info(
+            f"Connector {connector_id!r}: cleaning up {len(unregistered_doc_ids)} "
+            f"unregistered document(s)"
+        )
+    for doc_id in unregistered_doc_ids:
+        if not _best_effort_delete_document(doc_id):
+            unregistered_doc_failures.append(doc_id)
+
+    return checksum_removal_failures, doc_deletion_failures, unregistered_doc_failures
 
 
 def _get_unregistered_connector_docs(connector_id: str) -> list[str]:

@@ -479,7 +479,11 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None
     """Remove orphaned checksum rows and delete documents that lose their last owner."""
     from digitize.api.v1.connectors import _cleanup_connector_documents
 
-    checksum_removal_failures, doc_deletion_failures = await asyncio.to_thread(
+    (
+        checksum_removal_failures,
+        doc_deletion_failures,
+        unregistered_doc_failures,
+    ) = await asyncio.to_thread(
         _cleanup_connector_documents, connector_id, orphan_checksums
     )
     if checksum_removal_failures:
@@ -489,6 +493,10 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None
     if doc_deletion_failures:
         raise RuntimeError(
             f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
+        )
+    if unregistered_doc_failures:
+        raise RuntimeError(
+            f"unregistered document deletion failed for {len(unregistered_doc_failures)} document(s)"
         )
 
 
