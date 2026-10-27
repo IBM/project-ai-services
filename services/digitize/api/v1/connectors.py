@@ -46,7 +46,10 @@ from digitize.connectors.encryption import (
     safe_connection_details,
 )
 import digitize.utils.db as db_ops
-from digitize.utils.jobs import TEARDOWN_JOB_WAIT_TIMEOUT_S, TEARDOWN_JOB_POLL_INTERVAL_S
+from digitize.utils.jobs import (
+    TEARDOWN_JOB_WAIT_TIMEOUT_S as _TEARDOWN_JOB_WAIT_TIMEOUT_S,
+    TEARDOWN_JOB_POLL_INTERVAL_S as _TEARDOWN_JOB_POLL_INTERVAL_S,
+)
 from digitize.exceptions import SyncLocked, SyncNotFound
 from digitize.settings import settings
 
@@ -358,7 +361,7 @@ async def _wait_for_connector_jobs(connector_id: str) -> Optional[str]:
         return "could not determine active jobs"
 
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + TEARDOWN_JOB_WAIT_TIMEOUT_S
+    deadline = loop.time() + _TEARDOWN_JOB_WAIT_TIMEOUT_S
     while True:
         job_ids = db_manager.get_active_job_ids_for_connector(connector_id)
         if job_ids is not None and not job_ids:
@@ -366,10 +369,10 @@ async def _wait_for_connector_jobs(connector_id: str) -> Optional[str]:
         if loop.time() >= deadline:
             return (
                 "job cancellation did not complete in "
-                f"{TEARDOWN_JOB_WAIT_TIMEOUT_S}s"
+                f"{_TEARDOWN_JOB_WAIT_TIMEOUT_S}s"
                 + (f" for job(s): {', '.join(job_ids)}" if job_ids else "")
             )
-        await asyncio.sleep(TEARDOWN_JOB_POLL_INTERVAL_S)
+        await asyncio.sleep(_TEARDOWN_JOB_POLL_INTERVAL_S)
 
 
 async def _run_teardown(connector_id: str) -> None:
@@ -385,7 +388,8 @@ async def _run_teardown(connector_id: str) -> None:
       2. Wait for the connector's active jobs (cancelled by the sync tick) to
          reach a terminal state; if they don't, the connector is NOT deleted
       3. Snapshot checksums owned by this connector
-      4. Remove ownership rows; delete documents when last owner
+      4. Clean up ingested documents: release checksum ownership rows and delete
+         documents when this connector was their last owner (remaining count == 0)
       5. Delete docs created for this connector that no connector owns
          (never registered in connector_document_checksum)
       6. Sweep residual batch staging directories
@@ -417,9 +421,13 @@ async def _run_teardown(connector_id: str) -> None:
             )
             return
 
-        # Steps 3+4: remove checksum ownership; delete orphaned documents
+        # Steps 3+4: Clean up documents ingested by this connector — release its
+        # checksum ownership mappings. When this connector is the last owner of
+        # a checksum (remaining owner count drops to 0), the underlying document
+        # is deleted; if other connectors still share the checksum, the document
+        # is preserved.
         owned_checksums = db_ops.list_connector_checksums(connector_id)
-        checksum_removal_failures, doc_deletion_failures = _remove_checksums(
+        checksum_removal_failures, doc_deletion_failures = _cleanup_connector_documents(
             connector_id, owned_checksums
         )
         if checksum_removal_failures:
@@ -473,16 +481,23 @@ async def _run_teardown(connector_id: str) -> None:
         db_ops.set_connector_message(connector_id, f"Unexpected error during teardown: {exc}")
 
 
-def _remove_checksums(
+def _cleanup_connector_documents(
     connector_id: str,
     checksums: list[str] | set[str],
 ) -> tuple[list[str], list[str]]:
     """
-    Remove checksum ownership rows for *connector_id* and delete any document
-    that loses its last owner.
+    Clean up documents ingested by *connector_id* for the given *checksums*.
+
+    For each checksum:
+      1. Removes the `(checksum, connector_id)` ownership mapping in the database.
+      2. Checks the remaining owner count for that checksum across other connectors.
+      3. If no other connector owns the checksum (`remaining == 0`), the
+         underlying ingested document is deleted via `_best_effort_delete_document`.
+         If other connectors still reference the checksum (`remaining > 0`),
+         the document is preserved.
 
     Iterates all *checksums*, accumulating failures rather than stopping on the
-    first error so that as many checksums as possible are cleaned up in one pass.
+    first error so that as many documents/checksums as possible are cleaned up in one pass.
 
     Returns
     -------

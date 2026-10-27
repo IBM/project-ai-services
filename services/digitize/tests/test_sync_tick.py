@@ -397,37 +397,37 @@ class TestProcessNewFiles:
 # _delete_orphans  (async)
 # ---------------------------------------------------------------------------
 
-_REMOVE_CHECKSUMS = "digitize.api.v1.connectors._remove_checksums"
+_CLEANUP_CONNECTOR_DOCUMENTS = "digitize.api.v1.connectors._cleanup_connector_documents"
 
 
 class TestDeleteOrphans:
     def test_deletes_doc_when_last_owner(self):
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])) as mock_rm:
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [])) as mock_rm:
             asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
 
         mock_rm.assert_called_once_with("c1", {"ck_orphan"})
 
     def test_skips_doc_deletion_when_other_owners_remain(self):
-        # doc deletion decisions live inside _remove_checksums; _delete_orphans
+        # doc deletion decisions live inside _cleanup_connector_documents; _delete_orphans
         # just raises on non-empty failure lists — a clean return means success
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])):
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [])):
             asyncio.run(_delete_orphans("c1", {"ck_shared"}))  # no exception
 
     def test_raises_when_remove_raises(self):
-        # _remove_checksums accumulates failures and returns them; _delete_orphans
+        # _cleanup_connector_documents accumulates failures and returns them; _delete_orphans
         # turns a non-empty checksum_removal_failures list into a RuntimeError
-        with patch(_REMOVE_CHECKSUMS, return_value=(["ck_orphan"], [])):
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=(["ck_orphan"], [])):
             with pytest.raises(RuntimeError, match="checksum removal failed"):
                 asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
 
     def test_processes_multiple_checksums(self):
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])) as mock_rm:
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [])) as mock_rm:
             asyncio.run(_delete_orphans("c1", {"ck1", "ck2"}))
 
         mock_rm.assert_called_once_with("c1", {"ck1", "ck2"})
 
     def test_empty_orphan_set(self):
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])) as mock_rm:
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [])) as mock_rm:
             asyncio.run(_delete_orphans("c1", set()))
         mock_rm.assert_called_once_with("c1", set())
 
