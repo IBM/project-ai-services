@@ -563,6 +563,14 @@
   }
 }
 
+// One custom component per row: [model | backend], credentials below.
+.componentRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-06;
+}
+
 .readonlyField {
   :global {
     .cds--text-input,
@@ -587,7 +595,8 @@
     max-width: 100%;
   }
 
-  .serviceConfigFieldRow {
+  .serviceConfigFieldRow,
+  .componentRow {
     grid-template-columns: 1fr;
   }
 }

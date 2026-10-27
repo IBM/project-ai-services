@@ -868,7 +868,10 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                 // (same single-dropdown pattern as vector store).
                 const hasModelOptions = field.options.length > 0;
                 return (
-                  <Fragment key={`${String(field.key)}-custom`}>
+                  <div
+                    key={`${String(field.key)}-custom`}
+                    className={styles.componentRow}
+                  >
                     {/* Model dropdown — only when model options exist */}
                     {hasModelOptions && (
                       <div>
@@ -957,7 +960,6 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
 
                       return credentialKeys.length > 0 ? (
                         <>
-                          <div />
                           <div className={styles.fullWidth}>
                             <h4 className={styles.cloudCredentialsTitle}>
                               {selectedBackendItem?.text
@@ -1018,7 +1020,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
                         </>
                       ) : null;
                     })()}
-                  </Fragment>
+                  </div>
                 );
               }
 
