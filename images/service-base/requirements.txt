@@ -125,7 +125,7 @@ sympy==1.14.0
 tabulate==0.10.0
 tokenizers==0.23.3
 torch==2.14.0
-torchvision==0.29.0
+torchvision==0.29.0a0
 tqdm==4.70.1
 transformers==5.20.2
 tree-sitter==0.26.0
