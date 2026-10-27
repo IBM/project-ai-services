@@ -9,7 +9,7 @@ import {
 import { NavLink } from "react-router";
 import { useRef, useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { ROUTES } from "@/constants";
+import { ROUTES, PAGE_TITLES } from "@/constants";
 import { fetchDataSourceConnectors } from "@/api/connectors.api";
 import styles from "./Navbar.module.scss";
 
@@ -75,16 +75,16 @@ const Navbar = (props: NavbarProps) => {
       >
         <SideNavItems>
           <SideNavMenuItem as={NavLink} to={ROUTES.DIGITAL_ASSISTANTS}>
-            Digital assistants
+            {PAGE_TITLES.DIGITAL_ASSISTANTS}
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to={ROUTES.SERVICES}>
-            Services
+            {PAGE_TITLES.SERVICES}
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to={ROUTES.CONNECTORS}>
             <div className={styles.navItemContent}>
-              <span>Connectors</span>
+              <span>{PAGE_TITLES.CONNECTORS}</span>
               {offlineCount !== null && offlineCount > 0 && (
                 <Tag type="red" size="sm" className={styles.badge}>
                   {offlineCount}
@@ -94,13 +94,13 @@ const Navbar = (props: NavbarProps) => {
           </SideNavMenuItem>
 
           <SideNavMenuItem as={NavLink} to={ROUTES.WORKER_RESOURCES}>
-            Worker resources
+            {PAGE_TITLES.WORKER_RESOURCES}
           </SideNavMenuItem>
 
           <SideNavDivider />
 
           <SideNavMenuItem as={NavLink} to={ROUTES.USE_CASE_REFERENCES}>
-            Use case references
+            {PAGE_TITLES.USE_CASE_REFERENCES}
           </SideNavMenuItem>
         </SideNavItems>
       </SideNav>
