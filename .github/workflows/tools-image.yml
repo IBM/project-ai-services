@@ -5,12 +5,14 @@ on:
       - 'images/tools/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/tools/**'
       - .github/workflows/tools-image.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
@@ -40,14 +42,14 @@ jobs:
 
       - name: Publish tools image
         working-directory: images/tools
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
   create-manifest:
     name: Create Multi-Arch Manifest
     needs: build-publish-image
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

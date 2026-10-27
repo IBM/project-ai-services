@@ -5,12 +5,14 @@ on:
       - 'images/service-base/**'
     branches:
       - main
+      - 'release-*'
   pull_request:
     paths:
       - 'images/service-base/**'
       - .github/workflows/service-base.yml
     branches:
       - main
+      - 'release-*'
 
 env:
   ICR_REGISTRY: icr.io
@@ -32,7 +34,7 @@ jobs:
 
       - name: Publish service-base image
         working-directory: images/service-base
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-'))
         run: |
           make push REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
