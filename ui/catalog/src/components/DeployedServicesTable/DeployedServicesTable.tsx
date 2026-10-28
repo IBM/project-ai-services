@@ -26,6 +26,7 @@ import {
 } from "@carbon/react";
 import { Deploy } from "@carbon/icons-react";
 import styles from "./DeployedServices.module.scss";
+import { DEPLOYMENT_STATUS } from "@/constants";
 import type { DeployedServicesRow } from "./types";
 import {
   ACTION_TYPES,
@@ -150,9 +151,9 @@ const DeployedServicesTable = ({
   // row is in a transitional state (Deploying or Deleting).
   const hasTransitionalRow = state.rowsData.some(
     (row) =>
-      row.status === "Deploying" ||
-      row.status === "Deleting" ||
-      row.status === "Downloading",
+      row.status === DEPLOYMENT_STATUS.DEPLOYING ||
+      row.status === DEPLOYMENT_STATUS.DELETING ||
+      row.status === DEPLOYMENT_STATUS.DOWNLOADING,
   );
   const hasTransitionalRowRef = useRef(hasTransitionalRow);
   hasTransitionalRowRef.current = hasTransitionalRow;
