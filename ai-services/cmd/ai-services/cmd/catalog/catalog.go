@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/bundle"
+	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 )
 
 // CatalogCmd returns the cobra command for managing the AI Services catalog service, including subcommands for the API server.
@@ -17,6 +18,8 @@ deploy them, and handle service metadata`,
 			return cmd.Help()
 		},
 	}
+
+	common.ConfigureNamespaceFlag(catalogCMD)
 
 	catalogCMD.AddCommand(NewAPIServerCmd())
 	catalogCMD.AddCommand(NewConfigureCmd())

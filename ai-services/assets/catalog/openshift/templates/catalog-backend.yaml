@@ -21,7 +21,7 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
         ai-services.io/component: catalog-backend
     spec:
-      serviceAccountName: ai-services-catalog-sa
+      serviceAccountName: {{ .Release.Namespace }}-catalog-sa
       automountServiceAccountToken: true
       initContainers:
         - name: db-migration
@@ -81,6 +81,7 @@ spec:
             - --admin-username=admin
             - --admin-password-hash=$(ADMIN_PASSWORD)
             - --runtime={{ .Values.backend.runtime }}
+            - --namespace={{ .Release.Namespace }}
             - --workergateway-port={{ .Values.backend.workerGatewayPort }}
           env:
             - name: ADMIN_PASSWORD

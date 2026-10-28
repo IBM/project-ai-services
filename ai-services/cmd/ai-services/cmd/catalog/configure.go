@@ -175,7 +175,7 @@ func runConfigure(ctx context.Context) error {
 
 	case types.RuntimeTypeOpenShift:
 		opts := catalogUtils.OpenShiftConfigureOptions{
-			Namespace:       catalogConstants.CatalogAppName,
+			Namespace:       catalogConstants.CatalogNamespace,
 			Timeout:         timeout,
 			SkipLocalWorker: skipLocalWorkerFlag,
 		}

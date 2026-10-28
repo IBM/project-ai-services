@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
@@ -17,7 +18,7 @@ import (
 
 // Uninstall removes all worker components deployed by `worker join`.
 func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
-	namespace := workerconstants.WorkerAppName
+	namespace := catalogconstants.CatalogNamespace
 
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, namespace)
 	if err != nil {
