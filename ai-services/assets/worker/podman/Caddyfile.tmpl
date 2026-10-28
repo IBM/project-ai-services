@@ -7,11 +7,6 @@
 }
 
 :443 {
-	@tokenize {
-		path /tokenize /tokenize/*
-	}
-	respond @tokenize "Forbidden" 403
-
 	# Seed the routes array so it is never empty at startup.
 	handle /internal/health {
 		# @id internal-health
