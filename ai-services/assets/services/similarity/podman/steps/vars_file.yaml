@@ -2,3 +2,7 @@ containers:
   - name: "similarity-api-{{ .InstanceSlug }}-similarity-api"
     format: ".Status"
     alias: API_STATUS
+
+  - name: "similarity-api-{{ .InstanceSlug }}-mcp-sidecar"
+    format: ".Status"
+    alias: MCP_STATUS

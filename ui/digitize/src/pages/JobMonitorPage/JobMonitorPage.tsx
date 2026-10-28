@@ -1,4 +1,4 @@
-import { useReducer, useEffect } from 'react';
+import { useReducer, useEffect } from "react";
 import {
   DataTable,
   DataTableSkeleton,
@@ -24,25 +24,46 @@ import {
   TextInput,
   InlineLoading,
   Tooltip,
-} from '@carbon/react';
-import { SidePanel, NoDataEmptyState } from '@carbon/ibm-products';
-import { Download, Renew, Add, CheckmarkFilled, InProgress, ErrorFilled, TrashCan, Close } from '@carbon/icons-react';
-import { useTheme } from '../../contexts/useTheme';
-import { getAllJobs, getJobById, uploadDocuments, deleteJob, cancelJob, Job } from '../../services/api';
-import IngestSidePanel from '../../components/IngestSidePanel';
-import { calculateDuration } from '../../utils/dateUtils';
-import { exportToCSV, validateFilename } from '../../utils/csvExport';
-import { JOB_STATUS, DOC_STATUS, JOB_OPERATION, JOB_TYPE_DISPLAY } from '../../constants/jobConstants';
-import styles from './JobMonitorPage.module.scss';
+} from "@carbon/react";
+import { SidePanel, NoDataEmptyState } from "@carbon/ibm-products";
+import {
+  Download,
+  Renew,
+  Add,
+  CheckmarkFilled,
+  InProgress,
+  ErrorFilled,
+  TrashCan,
+  Close,
+} from "@carbon/icons-react";
+import { useTheme } from "../../contexts/useTheme";
+import {
+  getAllJobs,
+  getJobById,
+  uploadDocuments,
+  deleteJob,
+  cancelJob,
+  Job,
+} from "../../services/api";
+import IngestSidePanel from "../../components/IngestSidePanel";
+import { calculateDuration } from "../../utils/dateUtils";
+import { exportToCSV, validateFilename } from "../../utils/csvExport";
+import {
+  JOB_STATUS,
+  DOC_STATUS,
+  JOB_OPERATION,
+  JOB_TYPE_DISPLAY,
+} from "../../constants/jobConstants";
+import styles from "./JobMonitorPage.module.scss";
 
 interface NotificationStatus {
   show: boolean;
-  kind: 'success' | 'error' | 'info';
+  kind: "success" | "error" | "info";
   title: string;
   subtitle?: string;
 }
 
-export type ExportStatus = 'idle' | 'exporting' | 'success' | 'error';
+export type ExportStatus = "idle" | "exporting" | "success" | "error";
 
 interface JobMonitorState {
   jobs: Job[];
@@ -73,38 +94,38 @@ interface JobMonitorState {
 }
 
 type JobMonitorAction =
-  | { type: 'SET_JOBS'; payload: { jobs: Job[]; totalItems: number } }
-  | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SET_PAGE'; payload: number }
-  | { type: 'SET_PAGE_SIZE'; payload: number }
-  | { type: 'SET_SELECTED_JOB'; payload: Job | null }
-  | { type: 'SET_SIDE_PANEL_OPEN'; payload: boolean }
-  | { type: 'SET_SEARCH_VALUE'; payload: string }
-  | { type: 'SET_INGEST_SIDE_PANEL_OPEN'; payload: boolean }
-  | { type: 'SET_UPLOAD_STATUS'; payload: NotificationStatus }
-  | { type: 'SET_DELETE_STATUS'; payload: NotificationStatus }
-  | { type: 'SET_CANCEL_STATUS'; payload: NotificationStatus }
-  | { type: 'HIDE_UPLOAD_STATUS' }
-  | { type: 'HIDE_DELETE_STATUS' }
-  | { type: 'HIDE_CANCEL_STATUS' }
-  | { type: 'ADD_CANCELLING_ID'; payload: string }
-  | { type: 'REMOVE_CANCELLING_ID'; payload: string }
-  | { type: 'OPEN_DELETE_MODAL'; payload: string }
-  | { type: 'CLOSE_DELETE_MODAL' }
-  | { type: 'CLOSE_DELETE_MODAL_KEEP_JOB' }
-  | { type: 'SET_CONFIRMED'; payload: boolean }
-  | { type: 'SHOW_ERROR'; payload: { message: string; jobName?: string } }
-  | { type: 'HIDE_ERROR' }
-  | { type: 'SET_IS_DELETING'; payload: boolean }
-  | { type: 'DELETE_JOB'; payload: string }
-  | { type: 'UPDATE_JOB_STATUS'; payload: { jobId: string; status: string } }
-  | { type: 'OPEN_EXPORT_DIALOG' }
-  | { type: 'CLOSE_EXPORT_DIALOG' }
-  | { type: 'SET_CSV_FILENAME'; payload: string }
-  | { type: 'SET_EXPORT_STATUS'; payload: ExportStatus }
-  | { type: 'SET_EXPORT_ERROR'; payload: string }
-  | { type: 'CLEAR_EXPORT_ERROR' }
-  | { type: 'SET_INGEST_SUBMITTING'; payload: boolean };
+  | { type: "SET_JOBS"; payload: { jobs: Job[]; totalItems: number } }
+  | { type: "SET_LOADING"; payload: boolean }
+  | { type: "SET_PAGE"; payload: number }
+  | { type: "SET_PAGE_SIZE"; payload: number }
+  | { type: "SET_SELECTED_JOB"; payload: Job | null }
+  | { type: "SET_SIDE_PANEL_OPEN"; payload: boolean }
+  | { type: "SET_SEARCH_VALUE"; payload: string }
+  | { type: "SET_INGEST_SIDE_PANEL_OPEN"; payload: boolean }
+  | { type: "SET_UPLOAD_STATUS"; payload: NotificationStatus }
+  | { type: "SET_DELETE_STATUS"; payload: NotificationStatus }
+  | { type: "SET_CANCEL_STATUS"; payload: NotificationStatus }
+  | { type: "HIDE_UPLOAD_STATUS" }
+  | { type: "HIDE_DELETE_STATUS" }
+  | { type: "HIDE_CANCEL_STATUS" }
+  | { type: "ADD_CANCELLING_ID"; payload: string }
+  | { type: "REMOVE_CANCELLING_ID"; payload: string }
+  | { type: "OPEN_DELETE_MODAL"; payload: string }
+  | { type: "CLOSE_DELETE_MODAL" }
+  | { type: "CLOSE_DELETE_MODAL_KEEP_JOB" }
+  | { type: "SET_CONFIRMED"; payload: boolean }
+  | { type: "SHOW_ERROR"; payload: { message: string; jobName?: string } }
+  | { type: "HIDE_ERROR" }
+  | { type: "SET_IS_DELETING"; payload: boolean }
+  | { type: "DELETE_JOB"; payload: string }
+  | { type: "UPDATE_JOB_STATUS"; payload: { jobId: string; status: string } }
+  | { type: "OPEN_EXPORT_DIALOG" }
+  | { type: "CLOSE_EXPORT_DIALOG" }
+  | { type: "SET_CSV_FILENAME"; payload: string }
+  | { type: "SET_EXPORT_STATUS"; payload: ExportStatus }
+  | { type: "SET_EXPORT_ERROR"; payload: string }
+  | { type: "CLEAR_EXPORT_ERROR" }
+  | { type: "SET_INGEST_SUBMITTING"; payload: boolean };
 
 const initialState: JobMonitorState = {
   jobs: [],
@@ -114,187 +135,192 @@ const initialState: JobMonitorState = {
   totalItems: 0,
   selectedJob: null,
   isSidePanelOpen: false,
-  searchValue: '',
+  searchValue: "",
   isIngestSidePanelOpen: false,
-  uploadStatus: { show: false, kind: 'info', title: '' },
-  deleteStatus: { show: false, kind: 'info', title: '' },
-  cancelStatus: { show: false, kind: 'info', title: '' },
+  uploadStatus: { show: false, kind: "info", title: "" },
+  deleteStatus: { show: false, kind: "info", title: "" },
+  cancelStatus: { show: false, kind: "info", title: "" },
   showDeleteModal: false,
   cancellingIds: new Set<string>(),
   jobToDelete: null,
   isConfirmed: false,
   toastOpen: false,
-  errorMessage: '',
-  errorJobName: '',
+  errorMessage: "",
+  errorJobName: "",
   isDeleting: false,
   isExportDialogOpen: false,
-  csvFileName: '',
-  exportStatus: 'idle',
-  exportErrorMessage: '',
+  csvFileName: "",
+  exportStatus: "idle",
+  exportErrorMessage: "",
   isIngestSubmitting: false,
 };
 
 const jobMonitorReducer = (
   state: JobMonitorState,
-  action: JobMonitorAction
+  action: JobMonitorAction,
 ): JobMonitorState => {
   switch (action.type) {
-    case 'SET_JOBS':
+    case "SET_JOBS":
       return {
         ...state,
         jobs: action.payload.jobs,
         totalItems: action.payload.totalItems,
       };
-    case 'SET_LOADING':
+    case "SET_LOADING":
       return {
         ...state,
         loading: action.payload,
       };
-    case 'SET_PAGE':
+    case "SET_PAGE":
       return {
         ...state,
         page: action.payload,
       };
-    case 'SET_PAGE_SIZE':
+    case "SET_PAGE_SIZE":
       return {
         ...state,
         pageSize: action.payload,
       };
-    case 'SET_SELECTED_JOB':
+    case "SET_SELECTED_JOB":
       return {
         ...state,
         selectedJob: action.payload,
       };
-    case 'SET_SIDE_PANEL_OPEN':
+    case "SET_SIDE_PANEL_OPEN":
       return {
         ...state,
         isSidePanelOpen: action.payload,
       };
-    case 'SET_SEARCH_VALUE':
+    case "SET_SEARCH_VALUE":
       return {
         ...state,
         searchValue: action.payload,
       };
-    case 'SET_INGEST_SIDE_PANEL_OPEN':
+    case "SET_INGEST_SIDE_PANEL_OPEN":
       return {
         ...state,
         isIngestSidePanelOpen: action.payload,
       };
-    case 'SET_UPLOAD_STATUS':
+    case "SET_UPLOAD_STATUS":
       return {
         ...state,
         uploadStatus: action.payload,
       };
-    case 'SET_DELETE_STATUS':
+    case "SET_DELETE_STATUS":
       return {
         ...state,
         deleteStatus: action.payload,
       };
-    case 'SET_CANCEL_STATUS':
+    case "SET_CANCEL_STATUS":
       return {
         ...state,
         cancelStatus: action.payload,
       };
-    case 'HIDE_UPLOAD_STATUS':
+    case "HIDE_UPLOAD_STATUS":
       return {
         ...state,
-        uploadStatus: { show: false, kind: 'info', title: '' },
+        uploadStatus: { show: false, kind: "info", title: "" },
       };
-    case 'HIDE_DELETE_STATUS':
+    case "HIDE_DELETE_STATUS":
       return {
         ...state,
-        deleteStatus: { show: false, kind: 'info', title: '' },
+        deleteStatus: { show: false, kind: "info", title: "" },
       };
-    case 'HIDE_CANCEL_STATUS':
+    case "HIDE_CANCEL_STATUS":
       return {
         ...state,
-        cancelStatus: { show: false, kind: 'info', title: '' },
+        cancelStatus: { show: false, kind: "info", title: "" },
       };
-    case 'ADD_CANCELLING_ID':
-      return { ...state, cancellingIds: new Set(state.cancellingIds).add(action.payload) };
-    case 'REMOVE_CANCELLING_ID': {
+    case "ADD_CANCELLING_ID":
+      return {
+        ...state,
+        cancellingIds: new Set(state.cancellingIds).add(action.payload),
+      };
+    case "REMOVE_CANCELLING_ID": {
       const next = new Set(state.cancellingIds);
       next.delete(action.payload);
       return { ...state, cancellingIds: next };
     }
-    case 'OPEN_DELETE_MODAL':
+    case "OPEN_DELETE_MODAL":
       return {
         ...state,
         jobToDelete: action.payload,
         showDeleteModal: true,
         toastOpen: false,
       };
-    case 'CLOSE_DELETE_MODAL':
+    case "CLOSE_DELETE_MODAL":
       return {
         ...state,
         showDeleteModal: false,
         isConfirmed: false,
         jobToDelete: null,
       };
-    case 'CLOSE_DELETE_MODAL_KEEP_JOB':
+    case "CLOSE_DELETE_MODAL_KEEP_JOB":
       return {
         ...state,
         showDeleteModal: false,
         isConfirmed: false,
       };
-    case 'SET_CONFIRMED':
+    case "SET_CONFIRMED":
       return { ...state, isConfirmed: action.payload };
-    case 'DELETE_JOB':
+    case "DELETE_JOB":
       return {
         ...state,
         jobs: state.jobs.filter((j) => j.job_id !== action.payload),
         showDeleteModal: false,
         isConfirmed: false,
       };
-    case 'UPDATE_JOB_STATUS':
+    case "UPDATE_JOB_STATUS":
       return {
         ...state,
         jobs: state.jobs.map((j) =>
-          j.job_id === action.payload.jobId ? { ...j, status: action.payload.status } : j
+          j.job_id === action.payload.jobId
+            ? { ...j, status: action.payload.status }
+            : j,
         ),
       };
-    case 'SHOW_ERROR':
+    case "SHOW_ERROR":
       return {
         ...state,
         errorMessage: action.payload.message,
-        errorJobName: action.payload.jobName ?? '',
+        errorJobName: action.payload.jobName ?? "",
         toastOpen: true,
         isDeleting: false,
       };
-    case 'HIDE_ERROR':
+    case "HIDE_ERROR":
       return {
         ...state,
         toastOpen: false,
         jobToDelete: null,
-        errorJobName: '',
+        errorJobName: "",
       };
-    case 'SET_IS_DELETING':
+    case "SET_IS_DELETING":
       return { ...state, isDeleting: action.payload };
-    case 'OPEN_EXPORT_DIALOG':
+    case "OPEN_EXPORT_DIALOG":
       return {
         ...state,
         isExportDialogOpen: true,
-        csvFileName: '',
-        exportErrorMessage: '',
-        exportStatus: 'idle',
+        csvFileName: "",
+        exportErrorMessage: "",
+        exportStatus: "idle",
       };
-    case 'CLOSE_EXPORT_DIALOG':
+    case "CLOSE_EXPORT_DIALOG":
       return {
         ...state,
         isExportDialogOpen: false,
       };
-    case 'SET_CSV_FILENAME':
+    case "SET_CSV_FILENAME":
       return { ...state, csvFileName: action.payload };
-    case 'SET_EXPORT_STATUS':
+    case "SET_EXPORT_STATUS":
       return { ...state, exportStatus: action.payload };
-    case 'SET_EXPORT_ERROR':
+    case "SET_EXPORT_ERROR":
       return {
         ...state,
         exportErrorMessage: action.payload,
       };
-    case 'CLEAR_EXPORT_ERROR':
-      return { ...state, exportErrorMessage: '' };
-    case 'SET_INGEST_SUBMITTING':
+    case "CLEAR_EXPORT_ERROR":
+      return { ...state, exportErrorMessage: "" };
+    case "SET_INGEST_SUBMITTING":
       return { ...state, isIngestSubmitting: action.payload };
     default:
       return state;
@@ -302,14 +328,14 @@ const jobMonitorReducer = (
 };
 
 const headers = [
-  { key: 'job_name', header: 'Job Name' },
-  { key: 'type', header: 'Type' },
-  { key: 'status', header: 'Status' },
-  { key: 'started', header: 'Started' },
-  { key: 'duration', header: 'Duration' },
-  { key: 'view_action', header: '' },
-  { key: 'cancel_action', header: '' },
-  { key: 'delete_action', header: '' },
+  { key: "job_name", header: "Job Name" },
+  { key: "type", header: "Type" },
+  { key: "status", header: "Status" },
+  { key: "started", header: "Started" },
+  { key: "duration", header: "Duration" },
+  { key: "view_action", header: "" },
+  { key: "cancel_action", header: "" },
+  { key: "delete_action", header: "" },
 ];
 
 const getStatusIcon = (status: string) => {
@@ -364,10 +390,10 @@ const getDocStatusIcon = (status: string) => {
 const getTypeTagStyle = (type: string) => {
   switch (type) {
     case JOB_TYPE_DISPLAY.DIGITIZATION:
-      return 'cool-gray';
+      return "cool-gray";
     case JOB_TYPE_DISPLAY.INGESTION:
     default:
-      return 'gray';
+      return "gray";
   }
 };
 
@@ -376,16 +402,16 @@ const JobMonitorPage = () => {
   const [state, dispatch] = useReducer(jobMonitorReducer, initialState);
 
   const fetchJobs = async () => {
-    dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: "SET_LOADING", payload: true });
     try {
       const offset = (state.page - 1) * state.pageSize;
       const response = await getAllJobs({
         limit: state.pageSize,
         offset: offset,
       });
-      
+
       dispatch({
-        type: 'SET_JOBS',
+        type: "SET_JOBS",
         payload: {
           jobs: response.data || [],
           totalItems: response.pagination?.total || 0,
@@ -393,28 +419,37 @@ const JobMonitorPage = () => {
       });
     } catch (error: any) {
       // Handle 5xx server errors with appropriate user-facing messages
-      if (error.response && error.response.status >= 500 && error.response.status < 600) {
-        const errorMessage = error.response.status === 503
-          ? 'The service is temporarily unavailable. Please try again in a few moments.'
-          : 'A server error occurred while fetching jobs. Please try again later.';
+      if (
+        error.response &&
+        error.response.status >= 500 &&
+        error.response.status < 600
+      ) {
+        const errorMessage =
+          error.response.status === 503
+            ? "The service is temporarily unavailable. Please try again in a few moments."
+            : "A server error occurred while fetching jobs. Please try again later.";
 
         dispatch({
-          type: 'SHOW_ERROR',
+          type: "SHOW_ERROR",
           payload: {
             message: errorMessage,
           },
         });
-      } else if (error.code === 'ECONNABORTED' || error.message === 'Network Error') {
+      } else if (
+        error.code === "ECONNABORTED" ||
+        error.message === "Network Error"
+      ) {
         // Handle network/timeout errors
         dispatch({
-          type: 'SHOW_ERROR',
+          type: "SHOW_ERROR",
           payload: {
-            message: 'Unable to connect to the server. Please check your network connection and try again.',
+            message:
+              "Unable to connect to the server. Please check your network connection and try again.",
           },
         });
       }
     } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
+      dispatch({ type: "SET_LOADING", payload: false });
     }
   };
 
@@ -422,16 +457,16 @@ const JobMonitorPage = () => {
     fetchJobs();
     const interval = setInterval(fetchJobs, 10000);
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.page, state.pageSize]);
 
   const handleViewDetails = async (jobId: string) => {
     try {
       const jobDetails = await getJobById(jobId);
-      dispatch({ type: 'SET_SELECTED_JOB', payload: jobDetails });
-      dispatch({ type: 'SET_SIDE_PANEL_OPEN', payload: true });
+      dispatch({ type: "SET_SELECTED_JOB", payload: jobDetails });
+      dispatch({ type: "SET_SIDE_PANEL_OPEN", payload: true });
     } catch (error) {
-      console.error('Error fetching job details:', error);
+      console.error("Error fetching job details:", error);
     }
   };
 
@@ -439,27 +474,32 @@ const JobMonitorPage = () => {
     operation: string,
     outputFormat: string,
     files: File[],
-    jobName: string
+    jobName: string,
   ) => {
     try {
       dispatch({
-        type: 'SET_UPLOAD_STATUS',
+        type: "SET_UPLOAD_STATUS",
         payload: {
           show: true,
-          kind: 'info',
-          title: 'Uploading documents...',
+          kind: "info",
+          title: "Uploading documents...",
           subtitle: `Uploading ${files.length} file(s)`,
         },
       });
 
-      const response = await uploadDocuments(files, operation, outputFormat, jobName);
+      const response = await uploadDocuments(
+        files,
+        operation,
+        outputFormat,
+        jobName,
+      );
 
       dispatch({
-        type: 'SET_UPLOAD_STATUS',
+        type: "SET_UPLOAD_STATUS",
         payload: {
           show: true,
-          kind: 'success',
-          title: 'Documents uploaded successfully',
+          kind: "success",
+          title: "Documents uploaded successfully",
           subtitle: `Job ID: ${response.job_id}`,
         },
       });
@@ -467,38 +507,42 @@ const JobMonitorPage = () => {
       // Refresh jobs list after successful upload
       setTimeout(() => {
         fetchJobs();
-        dispatch({ type: 'HIDE_UPLOAD_STATUS' });
+        dispatch({ type: "HIDE_UPLOAD_STATUS" });
       }, 3000);
     } catch (error: any) {
-      console.error('Error uploading documents:', error);
+      console.error("Error uploading documents:", error);
 
       // 409 Conflict — ALL files are duplicates, no job was created
       if (error.response?.status === 409) {
-        const detail = error.response?.data?.detail || 'All submitted files have already been ingested.';
+        const detail =
+          error.response?.data?.detail ||
+          "All submitted files have already been ingested.";
         dispatch({
-          type: 'SET_UPLOAD_STATUS',
+          type: "SET_UPLOAD_STATUS",
           payload: {
             show: true,
-            kind: 'error',
-            title: 'All files are duplicates — no job created',
+            kind: "error",
+            title: "All files are duplicates — no job created",
             subtitle: detail,
           },
         });
         setTimeout(() => {
-          dispatch({ type: 'HIDE_UPLOAD_STATUS' });
+          dispatch({ type: "HIDE_UPLOAD_STATUS" });
         }, 8000);
         // Re-throw so IngestSidePanel shows the inline error
         throw new Error(detail);
       }
-      
+
       // Handle FastAPI validation errors (422) which return detail as an array
-      let errorMessage = 'An error occurred';
+      let errorMessage = "An error occurred";
       if (error.response?.data?.detail) {
         const detail = error.response.data.detail;
         if (Array.isArray(detail)) {
           // FastAPI validation error format
-          errorMessage = detail.map((err: any) => err.msg || JSON.stringify(err)).join(', ');
-        } else if (typeof detail === 'string') {
+          errorMessage = detail
+            .map((err: any) => err.msg || JSON.stringify(err))
+            .join(", ");
+        } else if (typeof detail === "string") {
           errorMessage = detail;
         }
       } else if (error.response?.data?.message) {
@@ -506,20 +550,20 @@ const JobMonitorPage = () => {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       dispatch({
-        type: 'SET_UPLOAD_STATUS',
+        type: "SET_UPLOAD_STATUS",
         payload: {
           show: true,
-          kind: 'error',
-          title: 'Upload failed',
+          kind: "error",
+          title: "Upload failed",
           subtitle: errorMessage,
         },
       });
 
       // Hide error after 5 seconds
       setTimeout(() => {
-        dispatch({ type: 'HIDE_UPLOAD_STATUS' });
+        dispatch({ type: "HIDE_UPLOAD_STATUS" });
       }, 5000);
 
       throw error;
@@ -529,88 +573,95 @@ const JobMonitorPage = () => {
   const handleDeleteConfirm = async () => {
     if (!state.jobToDelete) return;
 
-    const jobName = getJobName(state.jobs.find((j) => j.job_id === state.jobToDelete)!);
-    dispatch({ type: 'SET_IS_DELETING', payload: true });
+    const jobName = getJobName(
+      state.jobs.find((j) => j.job_id === state.jobToDelete)!,
+    );
+    dispatch({ type: "SET_IS_DELETING", payload: true });
 
     try {
       await deleteJob(state.jobToDelete);
-      dispatch({ type: 'DELETE_JOB', payload: state.jobToDelete });
-      
+      dispatch({ type: "DELETE_JOB", payload: state.jobToDelete });
+
       // Show success notification
       dispatch({
-        type: 'SET_DELETE_STATUS',
+        type: "SET_DELETE_STATUS",
         payload: {
           show: true,
-          kind: 'success',
-          title: 'Job deleted successfully',
+          kind: "success",
+          title: "Job deleted successfully",
           subtitle: `"${jobName}" has been removed`,
         },
       });
 
       // Hide success notification after 3 seconds
       setTimeout(() => {
-        dispatch({ type: 'HIDE_DELETE_STATUS' });
+        dispatch({ type: "HIDE_DELETE_STATUS" });
       }, 3000);
 
       fetchJobs();
-      
+
       // Close modal and clear state on success
-      dispatch({ type: 'SET_IS_DELETING', payload: false });
-      dispatch({ type: 'CLOSE_DELETE_MODAL' });
+      dispatch({ type: "SET_IS_DELETING", payload: false });
+      dispatch({ type: "CLOSE_DELETE_MODAL" });
     } catch (error: any) {
-      const msg = error.response?.data?.detail || error.message || 'Failed deleting job';
-      
+      const msg =
+        error.response?.data?.detail || error.message || "Failed deleting job";
+
       // Show error notification
       dispatch({
-        type: 'SET_DELETE_STATUS',
+        type: "SET_DELETE_STATUS",
         payload: {
           show: true,
-          kind: 'error',
-          title: 'Failed to delete job',
+          kind: "error",
+          title: "Failed to delete job",
           subtitle: `${jobName}: ${msg}`,
         },
       });
-      
+
       // Close modal but keep jobToDelete for retry
-      dispatch({ type: 'SET_IS_DELETING', payload: false });
-      dispatch({ type: 'CLOSE_DELETE_MODAL_KEEP_JOB' });
+      dispatch({ type: "SET_IS_DELETING", payload: false });
+      dispatch({ type: "CLOSE_DELETE_MODAL_KEEP_JOB" });
     }
   };
 
   const handleCancelJob = async (jobId: string) => {
-    dispatch({ type: 'ADD_CANCELLING_ID', payload: jobId });
+    dispatch({ type: "ADD_CANCELLING_ID", payload: jobId });
     try {
       await cancelJob(jobId);
       // Optimistically update the job row to cancel_pending immediately
-      dispatch({ type: 'UPDATE_JOB_STATUS', payload: { jobId, status: JOB_STATUS.CANCEL_PENDING } });
       dispatch({
-        type: 'SET_CANCEL_STATUS',
+        type: "UPDATE_JOB_STATUS",
+        payload: { jobId, status: JOB_STATUS.CANCEL_PENDING },
+      });
+      dispatch({
+        type: "SET_CANCEL_STATUS",
         payload: {
           show: true,
-          kind: 'success',
-          title: 'Job cancelled successfully',
+          kind: "success",
+          title: "Job cancelled successfully",
         },
       });
       setTimeout(() => {
-        dispatch({ type: 'HIDE_CANCEL_STATUS' });
+        dispatch({ type: "HIDE_CANCEL_STATUS" });
       }, 3000);
       fetchJobs();
     } catch (error: any) {
-      const msg = error.response?.data?.detail || error.message || 'Failed to cancel job';
+      const msg =
+        error.response?.data?.detail || error.message || "Failed to cancel job";
       dispatch({
-        type: 'SET_CANCEL_STATUS',
+        type: "SET_CANCEL_STATUS",
         payload: {
           show: true,
-          kind: 'error',
-          title: 'Failed to cancel job',
+          kind: "error",
+          title: "Failed to cancel job",
           subtitle: msg,
         },
       });
       setTimeout(() => {
-        dispatch({ type: 'HIDE_CANCEL_STATUS' });
+        dispatch({ type: "HIDE_CANCEL_STATUS" });
       }, 5000);
     } finally {
-      dispatch({ type: 'REMOVE_CANCELLING_ID', payload: jobId });
+      dispatch({ type: "REMOVE_CANCELLING_ID", payload: jobId });
     }
   };
 
@@ -628,7 +679,9 @@ const JobMonitorPage = () => {
   };
 
   const getJobType = (job: Job) => {
-    return job.operation === JOB_OPERATION.INGESTION ? JOB_TYPE_DISPLAY.INGESTION : JOB_TYPE_DISPLAY.DIGITIZATION;
+    return job.operation === JOB_OPERATION.INGESTION
+      ? JOB_TYPE_DISPLAY.INGESTION
+      : JOB_TYPE_DISPLAY.DIGITIZATION;
   };
 
   const getJobStatus = (job: Job) => {
@@ -637,7 +690,9 @@ const JobMonitorPage = () => {
       case JOB_STATUS.COMPLETED:
         return isIngestion ? JOB_STATUS.INGESTED : JOB_STATUS.DIGITIZED;
       case JOB_STATUS.FAILED:
-        return isIngestion ? JOB_STATUS.INGESTION_ERROR : JOB_STATUS.DIGITIZATION_ERROR;
+        return isIngestion
+          ? JOB_STATUS.INGESTION_ERROR
+          : JOB_STATUS.DIGITIZATION_ERROR;
       case JOB_STATUS.IN_PROGRESS:
         return isIngestion ? JOB_STATUS.INGESTING : JOB_STATUS.DIGITIZING;
       case JOB_STATUS.COMPLETED_WITH_ERRORS:
@@ -654,7 +709,7 @@ const JobMonitorPage = () => {
     if (job.status === JOB_STATUS.FAILED && job.error) {
       return job.error;
     }
-    return 'Error message goes here';
+    return "Error message goes here";
   };
 
   const handleExportCSV = async () => {
@@ -663,7 +718,7 @@ const JobMonitorPage = () => {
 
     if (validationError) {
       dispatch({
-        type: 'SET_EXPORT_ERROR',
+        type: "SET_EXPORT_ERROR",
         payload: validationError,
       });
       return;
@@ -671,15 +726,15 @@ const JobMonitorPage = () => {
 
     if (filteredJobs.length === 0) {
       dispatch({
-        type: 'SET_EXPORT_ERROR',
-        payload: 'No data available to export',
+        type: "SET_EXPORT_ERROR",
+        payload: "No data available to export",
       });
       return;
     }
 
     dispatch({
-      type: 'SET_EXPORT_STATUS',
-      payload: 'exporting',
+      type: "SET_EXPORT_STATUS",
+      payload: "exporting",
     });
 
     try {
@@ -689,15 +744,15 @@ const JobMonitorPage = () => {
         type: getJobType(job),
         status: getJobStatus(job),
         started: job.submitted_at
-          ? new Date(job.submitted_at).toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
+          ? new Date(job.submitted_at).toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
               hour12: true,
             })
-          : 'N/A',
+          : "N/A",
         duration: calculateDuration(job.submitted_at, job.completed_at),
       }));
 
@@ -705,40 +760,44 @@ const JobMonitorPage = () => {
         filename,
         headers,
         rows: exportRows,
-        excludeColumns: ['view_action', 'cancel_action', 'delete_action'],
+        excludeColumns: ["view_action", "cancel_action", "delete_action"],
       });
 
       dispatch({
-        type: 'SET_EXPORT_STATUS',
-        payload: 'success',
+        type: "SET_EXPORT_STATUS",
+        payload: "success",
       });
     } catch (error: any) {
       dispatch({
-        type: 'SET_EXPORT_STATUS',
-        payload: 'error',
+        type: "SET_EXPORT_STATUS",
+        payload: "error",
       });
 
       dispatch({
-        type: 'SET_EXPORT_ERROR',
-        payload: error.message || 'An error occurred while exporting the CSV file. Please try again.',
+        type: "SET_EXPORT_ERROR",
+        payload:
+          error.message ||
+          "An error occurred while exporting the CSV file. Please try again.",
       });
     }
   };
 
   const filteredJobs = state.jobs.filter((job) => {
-    if (state.searchValue === '') return true;
+    if (state.searchValue === "") return true;
     const jobName = getJobName(job).toLowerCase();
     const jobType = getJobType(job).toLowerCase();
     const jobStatus = getJobStatus(job).toLowerCase();
-    return jobName.includes(state.searchValue.toLowerCase()) ||
-           jobType.includes(state.searchValue.toLowerCase()) ||
-           jobStatus.includes(state.searchValue.toLowerCase());
+    return (
+      jobName.includes(state.searchValue.toLowerCase()) ||
+      jobType.includes(state.searchValue.toLowerCase()) ||
+      jobStatus.includes(state.searchValue.toLowerCase())
+    );
   });
 
   const rows = filteredJobs.map((job) => {
     const jobStatus = getJobStatus(job);
-    const hasError = job.status === 'failed';
-    
+    const hasError = job.status === "failed";
+
     return {
       id: job.job_id,
       job_name: getJobName(job),
@@ -770,15 +829,15 @@ const JobMonitorPage = () => {
         </div>
       ),
       started: job.submitted_at
-        ? new Date(job.submitted_at).toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
+        ? new Date(job.submitted_at).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
             hour12: true,
           })
-        : 'N/A',
+        : "N/A",
       duration: calculateDuration(job.submitted_at, job.completed_at),
       view_action: (
         <Button
@@ -789,17 +848,20 @@ const JobMonitorPage = () => {
           View details
         </Button>
       ),
-      cancel_action: (job.status === JOB_STATUS.ACCEPTED || job.status === JOB_STATUS.IN_PROGRESS) ? (
-        <Button
-          hasIconOnly
-          kind="ghost"
-          size="sm"
-          renderIcon={Close}
-          iconDescription="Cancel job"
-          disabled={state.cancellingIds.has(job.job_id)}
-          onClick={() => handleCancelJob(job.job_id)}
-        />
-      ) : null,
+      cancel_action:
+        job.source !== "connector" &&
+        (job.status === JOB_STATUS.ACCEPTED ||
+          job.status === JOB_STATUS.IN_PROGRESS) ? (
+          <Button
+            hasIconOnly
+            kind="ghost"
+            size="sm"
+            renderIcon={Close}
+            iconDescription="Cancel job"
+            disabled={state.cancellingIds.has(job.job_id)}
+            onClick={() => handleCancelJob(job.job_id)}
+          />
+        ) : null,
       delete_action: (
         <Button
           hasIconOnly
@@ -807,7 +869,9 @@ const JobMonitorPage = () => {
           size="sm"
           renderIcon={TrashCan}
           iconDescription="Delete"
-          onClick={() => dispatch({ type: 'OPEN_DELETE_MODAL', payload: job.job_id })}
+          onClick={() =>
+            dispatch({ type: "OPEN_DELETE_MODAL", payload: job.job_id })
+          }
         />
       ),
     };
@@ -827,14 +891,18 @@ const JobMonitorPage = () => {
               aria-label="close notification"
               kind="error"
               closeOnEscape
-              title={state.errorJobName ? `Delete job ${state.errorJobName} failed` : 'Error loading jobs'}
+              title={
+                state.errorJobName
+                  ? `Delete job ${state.errorJobName} failed`
+                  : "Error loading jobs"
+              }
               subtitle={state.errorMessage}
               onActionButtonClick={() => {
-                dispatch({ type: 'HIDE_ERROR' });
+                dispatch({ type: "HIDE_ERROR" });
                 fetchJobs();
               }}
               onCloseButtonClick={() => {
-                dispatch({ type: 'HIDE_ERROR' });
+                dispatch({ type: "HIDE_ERROR" });
               }}
               lowContrast
             />
@@ -847,14 +915,14 @@ const JobMonitorPage = () => {
               kind={state.uploadStatus.kind}
               title={state.uploadStatus.title}
               subtitle={state.uploadStatus.subtitle}
-              onClose={() => dispatch({ type: 'HIDE_UPLOAD_STATUS' })}
-              timeout={state.uploadStatus.kind === 'success' ? 3000 : 0}
+              onClose={() => dispatch({ type: "HIDE_UPLOAD_STATUS" })}
+              timeout={state.uploadStatus.kind === "success" ? 3000 : 0}
             />
           </div>
         )}
 
         {/* Delete Error Notification with Retry */}
-        {state.deleteStatus.show && state.deleteStatus.kind === 'error' && (
+        {state.deleteStatus.show && state.deleteStatus.kind === "error" && (
           <div className={styles.notificationWrapper}>
             <ActionableNotification
               actionButtonLabel="Try again"
@@ -864,14 +932,17 @@ const JobMonitorPage = () => {
               title={state.deleteStatus.title}
               subtitle={state.deleteStatus.subtitle}
               onActionButtonClick={() => {
-                dispatch({ type: 'HIDE_DELETE_STATUS' });
+                dispatch({ type: "HIDE_DELETE_STATUS" });
                 // Re-open the delete modal with the last job
                 if (state.jobToDelete) {
-                  dispatch({ type: 'OPEN_DELETE_MODAL', payload: state.jobToDelete });
+                  dispatch({
+                    type: "OPEN_DELETE_MODAL",
+                    payload: state.jobToDelete,
+                  });
                 }
               }}
               onCloseButtonClick={() => {
-                dispatch({ type: 'HIDE_DELETE_STATUS' });
+                dispatch({ type: "HIDE_DELETE_STATUS" });
               }}
               lowContrast
             />
@@ -879,7 +950,7 @@ const JobMonitorPage = () => {
         )}
 
         {/* Cancel Status Notification */}
-        {state.cancelStatus.show && state.cancelStatus.kind === 'error' && (
+        {state.cancelStatus.show && state.cancelStatus.kind === "error" && (
           <div className={styles.notificationWrapper}>
             <ActionableNotification
               actionButtonLabel="Dismiss"
@@ -888,31 +959,35 @@ const JobMonitorPage = () => {
               closeOnEscape
               title={state.cancelStatus.title}
               subtitle={state.cancelStatus.subtitle}
-              onActionButtonClick={() => dispatch({ type: 'HIDE_CANCEL_STATUS' })}
-              onCloseButtonClick={() => dispatch({ type: 'HIDE_CANCEL_STATUS' })}
+              onActionButtonClick={() =>
+                dispatch({ type: "HIDE_CANCEL_STATUS" })
+              }
+              onCloseButtonClick={() =>
+                dispatch({ type: "HIDE_CANCEL_STATUS" })
+              }
               lowContrast
             />
           </div>
         )}
-        {state.cancelStatus.show && state.cancelStatus.kind === 'success' && (
+        {state.cancelStatus.show && state.cancelStatus.kind === "success" && (
           <div className={styles.notificationWrapper}>
             <ToastNotification
               kind="success"
               title={state.cancelStatus.title}
-              onClose={() => dispatch({ type: 'HIDE_CANCEL_STATUS' })}
+              onClose={() => dispatch({ type: "HIDE_CANCEL_STATUS" })}
               timeout={3000}
             />
           </div>
         )}
 
         {/* Delete Success Notification */}
-        {state.deleteStatus.show && state.deleteStatus.kind === 'success' && (
+        {state.deleteStatus.show && state.deleteStatus.kind === "success" && (
           <div className={styles.notificationWrapper}>
             <ToastNotification
               kind="success"
               title={state.deleteStatus.title}
               subtitle={state.deleteStatus.subtitle}
-              onClose={() => dispatch({ type: 'HIDE_DELETE_STATUS' })}
+              onClose={() => dispatch({ type: "HIDE_DELETE_STATUS" })}
               timeout={3000}
             />
           </div>
@@ -954,7 +1029,12 @@ const JobMonitorPage = () => {
                         <TableToolbarSearch
                           persistent
                           placeholder="Search"
-                          onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH_VALUE', payload: value || '' })}
+                          onChange={(_e: any, value?: string) =>
+                            dispatch({
+                              type: "SET_SEARCH_VALUE",
+                              payload: value || "",
+                            })
+                          }
                           value={state.searchValue}
                         />
                         <Button
@@ -963,7 +1043,9 @@ const JobMonitorPage = () => {
                           renderIcon={Download}
                           iconDescription="Download"
                           tooltipPosition="bottom"
-                          onClick={() => dispatch({ type: 'OPEN_EXPORT_DIALOG' })}
+                          onClick={() =>
+                            dispatch({ type: "OPEN_EXPORT_DIALOG" })
+                          }
                         />
                         <Button
                           kind="ghost"
@@ -977,7 +1059,12 @@ const JobMonitorPage = () => {
                         <Button
                           kind="primary"
                           renderIcon={Add}
-                          onClick={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: true })}
+                          onClick={() =>
+                            dispatch({
+                              type: "SET_INGEST_SIDE_PANEL_OPEN",
+                              payload: true,
+                            })
+                          }
                         >
                           Create
                         </Button>
@@ -999,7 +1086,10 @@ const JobMonitorPage = () => {
                       <TableBody>
                         {rows.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={headers.length} className={styles.emptyStateCell}>
+                            <TableCell
+                              colSpan={headers.length}
+                              className={styles.emptyStateCell}
+                            >
                               <NoDataEmptyState
                                 illustrationTheme="light"
                                 size="lg"
@@ -1010,11 +1100,15 @@ const JobMonitorPage = () => {
                           </TableRow>
                         ) : (
                           rows.map((row) => {
-                            const { key: rowKey, ...rowProps } = getRowProps({ row });
+                            const { key: rowKey, ...rowProps } = getRowProps({
+                              row,
+                            });
                             return (
                               <TableRow key={rowKey} {...rowProps}>
                                 {row.cells.map((cell) => (
-                                  <TableCell key={cell.id}>{cell.value}</TableCell>
+                                  <TableCell key={cell.id}>
+                                    {cell.value}
+                                  </TableCell>
                                 ))}
                               </TableRow>
                             );
@@ -1029,8 +1123,11 @@ const JobMonitorPage = () => {
                         pageSizes={[10, 25, 50, 100]}
                         totalItems={state.totalItems}
                         onChange={({ page, pageSize }) => {
-                          dispatch({ type: 'SET_PAGE', payload: page });
-                          dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
+                          dispatch({ type: "SET_PAGE", payload: page });
+                          dispatch({
+                            type: "SET_PAGE_SIZE",
+                            payload: pageSize,
+                          });
                         }}
                         itemsPerPageText="Items per page:"
                       />
@@ -1045,17 +1142,21 @@ const JobMonitorPage = () => {
         {/* Ingest Side Panel */}
         <IngestSidePanel
           open={state.isIngestSidePanelOpen}
-          onClose={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: false })}
+          onClose={() =>
+            dispatch({ type: "SET_INGEST_SIDE_PANEL_OPEN", payload: false })
+          }
           onSubmit={handleIngestSubmit}
           onSubmittingChange={(isSubmitting) =>
-            dispatch({ type: 'SET_INGEST_SUBMITTING', payload: isSubmitting })
+            dispatch({ type: "SET_INGEST_SUBMITTING", payload: isSubmitting })
           }
         />
 
         {/* Job Details Side Panel */}
         <SidePanel
           open={state.isSidePanelOpen}
-          onRequestClose={() => dispatch({ type: 'SET_SIDE_PANEL_OPEN', payload: false })}
+          onRequestClose={() =>
+            dispatch({ type: "SET_SIDE_PANEL_OPEN", payload: false })
+          }
           title="Job Details"
           slideIn
           selectorPageContent=".jobMonitorPage"
@@ -1067,19 +1168,25 @@ const JobMonitorPage = () => {
             <div className={styles.sidePanelContent}>
               <div className={styles.sidePanelSection}>
                 <h6 className={styles.sectionLabel}>Job ID</h6>
-                <p className={styles.sectionValue}>{state.selectedJob.job_id}</p>
+                <p className={styles.sectionValue}>
+                  {state.selectedJob.job_id}
+                </p>
               </div>
 
               <div className={styles.sidePanelSection}>
                 <h6 className={styles.sectionLabel}>Operation</h6>
-                <p className={styles.sectionValue}>{state.selectedJob.operation}</p>
+                <p className={styles.sectionValue}>
+                  {state.selectedJob.operation}
+                </p>
               </div>
 
               <div className={styles.sidePanelSection}>
                 <h6 className={styles.sectionLabel}>Status</h6>
                 <div className={styles.statusCell}>
                   {getStatusIcon(getJobStatus(state.selectedJob))}
-                  <span className={styles.statusText}>{getJobStatus(state.selectedJob)}</span>
+                  <span className={styles.statusText}>
+                    {getJobStatus(state.selectedJob)}
+                  </span>
                 </div>
               </div>
 
@@ -1087,16 +1194,19 @@ const JobMonitorPage = () => {
                 <h6 className={styles.sectionLabel}>Submitted At</h6>
                 <p className={styles.sectionValue}>
                   {state.selectedJob.submitted_at
-                    ? new Date(state.selectedJob.submitted_at).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        second: '2-digit',
-                        hour12: true,
-                      })
-                    : 'N/A'}
+                    ? new Date(state.selectedJob.submitted_at).toLocaleString(
+                        "en-US",
+                        {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                          second: "2-digit",
+                          hour12: true,
+                        },
+                      )
+                    : "N/A"}
                 </p>
               </div>
 
@@ -1104,15 +1214,18 @@ const JobMonitorPage = () => {
                 <div className={styles.sidePanelSection}>
                   <h6 className={styles.sectionLabel}>Completed At</h6>
                   <p className={styles.sectionValue}>
-                    {new Date(state.selectedJob.completed_at).toLocaleString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      second: '2-digit',
-                      hour12: true,
-                    })}
+                    {new Date(state.selectedJob.completed_at).toLocaleString(
+                      "en-US",
+                      {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                        second: "2-digit",
+                        hour12: true,
+                      },
+                    )}
                   </p>
                 </div>
               )}
@@ -1123,19 +1236,27 @@ const JobMonitorPage = () => {
                   <div className={styles.statsGrid}>
                     <div className={styles.statItem}>
                       <span className={styles.statLabel}>Total Documents:</span>
-                      <span className={styles.statValue}>{state.selectedJob.stats.total_documents}</span>
+                      <span className={styles.statValue}>
+                        {state.selectedJob.stats.total_documents}
+                      </span>
                     </div>
                     <div className={styles.statItem}>
                       <span className={styles.statLabel}>Completed:</span>
-                      <span className={styles.statValue}>{state.selectedJob.stats.completed}</span>
+                      <span className={styles.statValue}>
+                        {state.selectedJob.stats.completed}
+                      </span>
                     </div>
                     <div className={styles.statItem}>
                       <span className={styles.statLabel}>Failed:</span>
-                      <span className={styles.statValue}>{state.selectedJob.stats.failed}</span>
+                      <span className={styles.statValue}>
+                        {state.selectedJob.stats.failed}
+                      </span>
                     </div>
                     <div className={styles.statItem}>
                       <span className={styles.statLabel}>In Progress:</span>
-                      <span className={styles.statValue}>{state.selectedJob.stats.in_progress}</span>
+                      <span className={styles.statValue}>
+                        {state.selectedJob.stats.in_progress}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1143,12 +1264,15 @@ const JobMonitorPage = () => {
 
               <div className={styles.sidePanelSection}>
                 <h6 className={styles.sectionLabel}>Documents</h6>
-                {state.selectedJob.documents && state.selectedJob.documents.length > 0 ? (
+                {state.selectedJob.documents &&
+                state.selectedJob.documents.length > 0 ? (
                   <div className={styles.documentsList}>
                     {state.selectedJob.documents.map((doc, idx) => (
                       <div key={idx} className={styles.documentItem}>
                         <div className={styles.documentInfo}>
-                          <span className={styles.documentName}>{doc.name}</span>
+                          <span className={styles.documentName}>
+                            {doc.name}
+                          </span>
                           <div className={styles.documentStatus}>
                             {getDocStatusIcon(doc.status)}
                             <span className={styles.statusText}>
@@ -1184,29 +1308,32 @@ const JobMonitorPage = () => {
           primaryButtonText="Delete"
           secondaryButtonText="Cancel"
           primaryButtonDisabled={!state.isConfirmed}
-          onRequestClose={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })}
+          onRequestClose={() => dispatch({ type: "CLOSE_DELETE_MODAL" })}
           onRequestSubmit={handleDeleteConfirm}
         >
           <p>
-            Deleting a job permanently removes it from the system. This action cannot be undone.
+            Deleting a job permanently removes it from the system. This action
+            cannot be undone.
           </p>
           <div>
-            <CheckboxGroup
-              legendText="Confirm job to be deleted"
-            >
+            <CheckboxGroup legendText="Confirm job to be deleted">
               <Checkbox
                 id="checkbox-delete-job"
                 labelText={
                   <strong>
                     {state.jobToDelete
-                      ? getJobName(state.jobs.find((j) => j.job_id === state.jobToDelete)!)
-                      : ''}
+                      ? getJobName(
+                          state.jobs.find(
+                            (j) => j.job_id === state.jobToDelete,
+                          )!,
+                        )
+                      : ""}
                   </strong>
                 }
                 checked={state.isConfirmed}
                 onChange={(_, { checked }) =>
                   dispatch({
-                    type: 'SET_CONFIRMED',
+                    type: "SET_CONFIRMED",
                     payload: checked,
                   })
                 }
@@ -1220,16 +1347,16 @@ const JobMonitorPage = () => {
           open={state.isExportDialogOpen}
           size="sm"
           modalHeading="Export as CSV"
-          passiveModal={state.exportStatus !== 'idle'}
+          passiveModal={state.exportStatus !== "idle"}
           preventCloseOnClickOutside
-          {...(state.exportStatus === 'idle' && {
-            primaryButtonText: 'Export',
-            secondaryButtonText: 'Cancel',
+          {...(state.exportStatus === "idle" && {
+            primaryButtonText: "Export",
+            secondaryButtonText: "Cancel",
             onRequestSubmit: handleExportCSV,
           })}
-          onRequestClose={() => dispatch({ type: 'CLOSE_EXPORT_DIALOG' })}
+          onRequestClose={() => dispatch({ type: "CLOSE_EXPORT_DIALOG" })}
         >
-          {state.exportStatus === 'idle' && (
+          {state.exportStatus === "idle" && (
             <TextInput
               id="csv-file-name"
               labelText="File name"
@@ -1238,22 +1365,26 @@ const JobMonitorPage = () => {
               invalidText={state.exportErrorMessage}
               onChange={(e) => {
                 dispatch({
-                  type: 'SET_CSV_FILENAME',
+                  type: "SET_CSV_FILENAME",
                   payload: e.target.value,
                 });
-                dispatch({ type: 'CLEAR_EXPORT_ERROR' });
+                dispatch({ type: "CLEAR_EXPORT_ERROR" });
               }}
             />
           )}
 
-          {state.exportStatus === 'exporting' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {state.exportStatus === "exporting" && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
               <InlineLoading status="active" description="Exporting..." />
             </div>
           )}
 
-          {state.exportStatus === 'success' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {state.exportStatus === "success" && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
               <InlineLoading
                 status="finished"
                 description="The file has been exported"
@@ -1261,8 +1392,10 @@ const JobMonitorPage = () => {
             </div>
           )}
 
-          {state.exportStatus === 'error' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {state.exportStatus === "error" && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
               <InlineLoading
                 status="error"
                 description={state.exportErrorMessage}

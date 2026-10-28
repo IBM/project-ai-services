@@ -23,3 +23,9 @@ type Worker struct {
 	RegisteredAt   string            `json:"registered_at"`
 	UpdatedAt      string            `json:"updated_at"`
 }
+
+// WorkerListResponse represents the response for listing workers.
+type WorkerListResponse struct {
+	Data       []Worker           `json:"data"`
+	Pagination PaginationMetadata `json:"pagination"`
+}

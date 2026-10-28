@@ -21,6 +21,12 @@ var ErrConnectorInUse = errors.New("connector is in use")
 // ErrConnectorNotFound is returned when a connector cannot be located by its ID.
 var ErrConnectorNotFound = errors.New("connector not found")
 
+// connectorStatusPriority ranks connectors for listing: offline first, then connected.
+var connectorStatusPriority = buildStatusPriorityCase("status",
+	[]string{string(models.ConnectorStatusOffline)},
+	[]string{string(models.ConnectorStatusConnected)},
+)
+
 // ConnectorFilters defines optional filters and pagination parameters for List queries.
 // All fields are optional at the repository level; omitted fields are not included in the
 // WHERE clause. Callers that scope queries to a specific type (e.g. ListDatasources, which
@@ -324,7 +330,8 @@ func (r *connectorRepo) GetCount(ctx context.Context, filters *ConnectorFilters)
 func (r *connectorRepo) buildListQuery(filters *ConnectorFilters) (string, []interface{}) {
 	where, args := buildWhereClause(filters)
 
-	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors` + where + ` ORDER BY created_at DESC`
+	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors` + where +
+		` ORDER BY ` + connectorStatusPriority + `, created_at DESC`
 
 	if filters != nil {
 		if filters.Limit > 0 {
