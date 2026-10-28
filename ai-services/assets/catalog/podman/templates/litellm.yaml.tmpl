@@ -80,8 +80,6 @@ spec:
           value: "True"
         - name: LITELLM_DATABASE_CONNECTION_RETRIES
           value: "{{ .Values.litellm.dbConnectionRetries }}"
-        - name: LITELLM_LOG
-          value: "DEBUG"
       ports:
         - containerPort: 4000
           protocol: TCP
