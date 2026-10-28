@@ -16,7 +16,7 @@ cryptography==50.0.0
 defusedxml==0.7.1
 dill==0.4.1
 distro==1.9.0
-dnspython==2.8.0
+dnspython==2.9.0
 doclang==0.8.0
 docling==2.142.0
 docling-core==2.104.0
