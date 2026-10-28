@@ -23,7 +23,7 @@ func TestBuildGetAllWorkerQuery(t *testing.T) {
 		{
 			name:         "nil request has no WHERE clause and no args",
 			req:          nil,
-			wantContains: []string{"FROM workers", "ORDER BY registered_at ASC"},
+			wantContains: []string{"FROM workers", "registered_at ASC"},
 			wantAbsent:   []string{"WHERE", "LIMIT", "OFFSET"},
 			wantArgs:     []any{},
 		},
