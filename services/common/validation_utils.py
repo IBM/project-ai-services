@@ -1,3 +1,4 @@
+import os
 import unicodedata
 from pathlib import Path
 
@@ -8,6 +9,50 @@ from common.llm_utils import tokenize_with_llm
 from common.misc_utils import get_logger
 
 logger = get_logger("validation")
+
+
+def sanitize_basename(raw: str) -> str:
+    """Reduce a client-supplied filename to a safe basename.
+
+    Strips all directory components. Falls back to ``"uploaded_file"`` when the
+    result is empty or a directory reference (``"."`` / ``".."``), e.g. for
+    inputs such as ``"abc.txt/."`` or ``"abc.txt/"``.
+    """
+    basename = os.path.basename(raw)
+    if basename in {"", ".", ".."}:
+        basename = "uploaded_file"
+    return basename
+
+
+def safe_filename(raw: str, job_dir: Path) -> Path:
+    """Return a Path strictly inside *job_dir* for a client-supplied multipart filename.
+
+    FastAPI, Starlette, and python-multipart do not normalise ``UploadFile.filename``,
+    so traversal sequences such as ``../other-job/evil.txt`` or absolute paths like
+    ``/tmp/evil.txt`` reach the application verbatim (CWE-22, HackerOne #4119721).
+
+    This function:
+    1. Reduces *raw* to its basename via ``os.path.basename``, which strips every
+       directory component on both POSIX and Windows regardless of separator style.
+    2. Resolves the result and asserts it remains a descendant of *job_dir* as a
+       belt-and-suspenders guard for any OS-specific edge case the basename strip misses.
+
+    Args:
+        raw:     The raw filename string from ``UploadFile.filename``.
+        job_dir: The server-controlled staging directory for the current job.
+
+    Returns:
+        A ``Path`` object pointing to ``job_dir / <basename>``.
+
+    Raises:
+        ValueError: if the resolved path escapes *job_dir*.
+    """
+    basename = sanitize_basename(raw)
+    target = (job_dir / basename).resolve()
+    if not target.is_relative_to(job_dir.resolve()):
+        raise ValueError(f"Illegal filename rejected: {raw!r}")
+    return target
+
 
 _ALLOWED_EXTENSIONS = frozenset({"txt", "md"})
 

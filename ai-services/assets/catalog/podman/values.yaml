@@ -4,7 +4,7 @@ ui:
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.439
+  image: icr.io/ai-services-cicd/ai-services:v0.0.447
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false
@@ -41,3 +41,17 @@ caddy:
   sslCertContent: ""
   # Populated from the private key content specified via '--ssl-key' during catalog configuration
   sslKeyContent: ""
+
+litellm:
+  image: "icr.io/ai-services-cicd/litellm:v1.106.4-0"
+  # @generate:password length=32, special=false
+  masterKey: ""
+  # @generate:password length=64, special=false
+  saltKey: ""
+  dbConnectionRetries: "20"
+  db:
+    image: icr.io/ai-services-cicd/postgres:18-6
+    database: "litellm"
+    user: "postgres"
+    # @generate:password length=32, special=false
+    password: ""
