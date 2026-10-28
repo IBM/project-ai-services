@@ -256,21 +256,8 @@ func (s *ApplicationServiceBase) UpdateApplication(ctx context.Context, id uuid.
 		}
 	}
 
-	app, err := s.AppRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: ErrMsgApplicationNotFound,
-		}
-	}
-	if app.CreatedBy != userID {
-		return nil, &ValidationError{
-			Code:    http.StatusForbidden,
-			Message: ErrMsgUserNotOwner,
-		}
+	if _, err := LoadAppWithOwnership(ctx, s.AppRepo, id, userID); err != nil {
+		return nil, err
 	}
 
 	err = s.AppRepo.UpdateDeploymentName(ctx, id, newName)
@@ -1320,15 +1307,9 @@ func loadApplicationPods(ctx context.Context, rt runtime.Runtime, appID string) 
 // validateForDeletion fetches the application and validates that the requesting
 // user owns it and it is not already being deleted. Returns the app model on success.
 func (s *ApplicationServiceBase) validateForDeletion(ctx context.Context, id uuid.UUID, user string) (*models.Application, error) {
-	app, err := s.AppRepo.GetByID(ctx, id)
+	app, err := LoadAppWithOwnership(ctx, s.AppRepo, id, user)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{Code: http.StatusNotFound, Message: ErrMsgApplicationNotFound}
-	}
-	if app.CreatedBy != user {
-		return nil, &ValidationError{Code: http.StatusForbidden, Message: ErrMsgUserNotOwner}
+		return nil, err
 	}
 	if app.Status == models.ApplicationStatusDeleting {
 		return nil, &ValidationError{Code: http.StatusConflict, Message: ErrMsgApplicationAlreadyDeleting}

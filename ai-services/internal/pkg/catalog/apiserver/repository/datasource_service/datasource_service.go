@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	appservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/application_service"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -491,7 +492,7 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 //   - the app-creation flow where datasources are pre-attached at deploy time.
 func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
 	// Verify application exists and ownership.
-	app, err := s.loadAppWithOwnership(ctx, applicationID, userID)
+	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -839,31 +840,6 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 	}, nil
 }
 
-// loadAppWithOwnership fetches the application by ID and enforces that userID (when non-empty)
-// matches the stored created_by value. Returns a *ValidationError for 404 / 403.
-func (s *DatasourceService) loadAppWithOwnership(ctx context.Context, applicationID uuid.UUID, userID string) (*dbmodels.Application, error) {
-	app, err := s.appRepo.GetByID(ctx, applicationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load application: %w", err)
-	}
-
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("application %s not found", applicationID),
-		}
-	}
-
-	if userID != "" && app.CreatedBy != userID {
-		return nil, &ValidationError{
-			Code:    http.StatusForbidden,
-			Message: "user does not own this application",
-		}
-	}
-
-	return app, nil
-}
-
 // DisconnectDatasourcesFromApplication removes a single datasource connector from each
 // service it is connected to within the given application, then removes the
 // service_dependency rows.
@@ -877,7 +853,7 @@ func (s *DatasourceService) loadAppWithOwnership(ctx context.Context, applicatio
 //     then remove the service_dependency row.
 func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error {
 	// Step 1: verify application exists and ownership.
-	app, err := s.loadAppWithOwnership(ctx, applicationID, userID)
+	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
 		return err
 	}
