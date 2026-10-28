@@ -21,6 +21,7 @@ from fastapi import HTTPException, UploadFile
 
 from common.error_utils import APIError, ErrorCode
 from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
+from common.validation_utils import safe_filename
 from extract.db.manager import db_repo
 from extract.settings import settings
 from extract.state import concurrency_limiter
@@ -90,7 +91,7 @@ def stage_uploaded_file(job_id: str, file: UploadFile) -> Path:
     job_dir.mkdir(parents=True, exist_ok=True)
 
     filename = file.filename or "uploaded_file"
-    staged_path = job_dir / filename
+    staged_path = safe_filename(filename, job_dir)
 
     try:
         with open(staged_path, "wb") as fh:
@@ -116,7 +117,7 @@ def stage_multiple_files(job_id: str, files: List[UploadFile]) -> List[Path]:
     try:
         for file in files:
             filename = file.filename or "uploaded_file"
-            staged_path = job_dir / filename
+            staged_path = safe_filename(filename, job_dir)
             with open(staged_path, "wb") as fh:
                 shutil.copyfileobj(file.file, fh)
             staged.append(staged_path)

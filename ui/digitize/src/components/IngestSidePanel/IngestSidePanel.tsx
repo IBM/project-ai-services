@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   TextInput,
   RadioButtonGroup,
@@ -7,14 +7,19 @@ import {
   FileUploaderItem,
   InlineNotification,
   ToastNotification,
-} from '@carbon/react';
-import { SidePanel } from '@carbon/ibm-products';
-import styles from './IngestSidePanel.module.scss';
+} from "@carbon/react";
+import { SidePanel } from "@carbon/ibm-products";
+import styles from "./IngestSidePanel.module.scss";
 
 interface IngestSidePanelProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (operation: string, outputFormat: string, files: File[], jobName: string) => Promise<void>;
+  onSubmit: (
+    operation: string,
+    outputFormat: string,
+    files: File[],
+    jobName: string,
+  ) => Promise<void>;
   onSubmittingChange?: (isSubmitting: boolean) => void;
 }
 
@@ -22,22 +27,27 @@ interface FileItem {
   uuid: string;
   name: string;
   filesize: number;
-  status: 'edit' | 'complete' | 'uploading';
+  status: "edit" | "complete" | "uploading";
   iconDescription: string;
   invalid: boolean;
   file: File;
 }
 
 let lastId = 0;
-function uid(prefix = 'file') {
+function uid(prefix = "file") {
   lastId++;
   return `${prefix}-${lastId}`;
 }
 
-const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: IngestSidePanelProps) => {
-  const [jobName, setJobName] = useState('');
-  const [operation, setOperation] = useState('ingestion');
-  const [outputFormat, setOutputFormat] = useState('json');
+const IngestSidePanel = ({
+  open,
+  onClose,
+  onSubmit,
+  onSubmittingChange,
+}: IngestSidePanelProps) => {
+  const [jobName, setJobName] = useState("");
+  const [operation, setOperation] = useState("ingestion");
+  const [outputFormat, setOutputFormat] = useState("json");
   const [fileItems, setFileItems] = useState<FileItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,7 +66,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
           inputRef.current.focus();
         }
       }, 200);
-      
+
       return () => clearTimeout(timer);
     }
   }, [open]);
@@ -68,8 +78,8 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
         uuid: uid(),
         name: file.name,
         filesize: file.size,
-        status: 'edit' as const,
-        iconDescription: 'Delete file',
+        status: "edit" as const,
+        iconDescription: "Delete file",
         invalid: false,
         file: file,
       }));
@@ -77,23 +87,26 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
     }
   }, []);
 
-  const handleFileDelete = useCallback((_event: any, { uuid }: { uuid: string }) => {
-    if (isSubmitting) return; // Prevent deletion during submission
-    setFileItems((prev) => prev.filter((item) => item.uuid !== uuid));
-  }, [isSubmitting]);
+  const handleFileDelete = useCallback(
+    (_event: any, { uuid }: { uuid: string }) => {
+      if (isSubmitting) return; // Prevent deletion during submission
+      setFileItems((prev) => prev.filter((item) => item.uuid !== uuid));
+    },
+    [isSubmitting],
+  );
 
   const handleSubmit = async () => {
     setError(null);
-    
+
     if (!jobName.trim()) {
-      setError('Please enter a job name');
+      setError("Please enter a job name");
       return;
     }
     if (fileItems.length === 0) {
-      setError('Please upload at least one file');
+      setError("Please upload at least one file");
       return;
     }
-    
+
     setIsSubmitting(true);
     onSubmittingChange?.(true);
     try {
@@ -101,7 +114,11 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
       await onSubmit(operation, outputFormat, files, jobName);
       handleClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred during submission');
+      setError(
+        err instanceof Error
+          ? err.message
+          : "An error occurred during submission",
+      );
     } finally {
       setIsSubmitting(false);
       onSubmittingChange?.(false);
@@ -110,9 +127,9 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
 
   const handleClose = () => {
     if (isSubmitting) return; // Prevent closing while submitting
-    setJobName('');
-    setOperation('ingestion');
-    setOutputFormat('json');
+    setJobName("");
+    setOperation("ingestion");
+    setOutputFormat("json");
     setFileItems([]);
     setError(null);
     setIsSubmitting(false);
@@ -126,14 +143,14 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
       title="Trigger a job"
       actions={[
         {
-          kind: 'secondary',
-          label: 'Cancel',
+          kind: "secondary",
+          label: "Cancel",
           onClick: handleClose,
           disabled: isSubmitting,
         },
         {
-          kind: 'primary',
-          label: isSubmitting ? 'Submitting...' : 'Submit',
+          kind: "primary",
+          label: isSubmitting ? "Submitting..." : "Submit",
           onClick: handleSubmit,
           disabled: isSubmitting,
         },
@@ -151,7 +168,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
             timeout={0}
             lowContrast
             hideCloseButton
-            style={{ marginBottom: '1rem' }}
+            style={{ marginBottom: "1rem" }}
           />
         )}
 
@@ -164,7 +181,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
             onCloseButtonClick={() => setError(null)}
             lowContrast
             hideCloseButton={false}
-            style={{ marginBottom: '1rem' }}
+            style={{ marginBottom: "1rem" }}
           />
         )}
 
@@ -182,8 +199,8 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
             }}
             ref={setInputRef}
             required
-            invalid={error?.includes('job name')}
-            invalidText={error?.includes('job name') ? error : ''}
+            invalid={error?.includes("job name")}
+            invalidText={error?.includes("job name") ? error : ""}
             disabled={isSubmitting}
           />
         </div>
@@ -213,7 +230,7 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
         </div>
 
         {/* Output Format Radio Buttons - Only show for Digitization only */}
-        {operation === 'digitization' && (
+        {operation === "digitization" && (
           <div className={styles.formGroup}>
             <label className={styles.formLabel}>Output format</label>
             <RadioButtonGroup
@@ -250,16 +267,19 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
           <strong className={styles.fileUploaderLabel}>Upload files</strong>
           <p className={styles.fileUploaderDescription}>
             Supported file types are .pdf and .docx.
-            <br /><br />
-            Supported languages are English, German, French, Italian and Japanese.
-            <br /><br />
+            <br />
+            <br />
+            Supported languages are English, German, French, Italian and
+            Japanese.
+            <br />
+            <br />
             Supported contents are text and tables.
           </p>
           <FileUploaderButton
             labelText="Upload"
             buttonKind="tertiary"
             size="md"
-            accept={['.pdf', '.docx']}
+            accept={[".pdf", ".docx"]}
             multiple
             onChange={handleFileAdd}
             disableLabelChanges
@@ -280,8 +300,15 @@ const IngestSidePanel = ({ open, onClose, onSubmit, onSubmittingChange }: Ingest
             ))}
           </div>
           {fileItems.length > 0 && (
-            <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--cds-text-secondary)' }}>
-              {fileItems.length} file{fileItems.length !== 1 ? 's' : ''} selected
+            <div
+              style={{
+                marginTop: "0.5rem",
+                fontSize: "0.875rem",
+                color: "var(--cds-text-secondary)",
+              }}
+            >
+              {fileItems.length} file{fileItems.length !== 1 ? "s" : ""}{" "}
+              selected
             </div>
           )}
         </div>

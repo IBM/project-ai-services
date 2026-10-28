@@ -21,6 +21,12 @@ var ErrConnectorInUse = errors.New("connector is in use")
 // ErrConnectorNotFound is returned when a connector cannot be located by its ID.
 var ErrConnectorNotFound = errors.New("connector not found")
 
+// connectorStatusPriority ranks connectors for listing: offline first, then connected.
+var connectorStatusPriority = buildStatusPriorityCase("status",
+	[]string{string(models.ConnectorStatusOffline)},
+	[]string{string(models.ConnectorStatusConnected)},
+)
+
 // ConnectorFilters defines optional filters and pagination parameters for List queries.
 // All fields are optional at the repository level; omitted fields are not included in the
 // WHERE clause. Callers that scope queries to a specific type (e.g. ListDatasources, which
@@ -29,6 +35,7 @@ type ConnectorFilters struct {
 	Type     string                 // Optional: filter by connector type (e.g. "datasource")
 	Status   models.ConnectorStatus // Optional: filter by connector status
 	Provider string                 // Optional: filter by provider identifier (e.g. "object_storage", "file_system")
+	Search   string                 // Optional: case-insensitive substring search on connector name
 	Limit    int                    // Optional: maximum number of records to return
 	Offset   int                    // Optional: number of records to skip
 }
@@ -272,8 +279,11 @@ func (r *connectorRepo) GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid
 	return result, nil
 }
 
+// connectorSearchColumns defines the columns searched when a ?q= term is provided.
+var connectorSearchColumns = []string{"name"}
+
 // buildWhereClause constructs the WHERE clause string and positional arguments from the
-// status and provider filters.
+// provided filters.
 func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 	args := []interface{}{}
 	whereClauses := []string{}
@@ -290,6 +300,9 @@ func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 		if filters.Provider != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("provider = $%d", len(args)+1))
 			args = append(args, filters.Provider)
+		}
+		if filters.Search != "" {
+			whereClauses = append(whereClauses, buildSearchClause(connectorSearchColumns, &args, filters.Search))
 		}
 	}
 
@@ -317,7 +330,8 @@ func (r *connectorRepo) GetCount(ctx context.Context, filters *ConnectorFilters)
 func (r *connectorRepo) buildListQuery(filters *ConnectorFilters) (string, []interface{}) {
 	where, args := buildWhereClause(filters)
 
-	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors` + where + ` ORDER BY created_at DESC`
+	query := `SELECT ` + nonSensitiveColumns + ` FROM connectors` + where +
+		` ORDER BY ` + connectorStatusPriority + `, created_at DESC`
 
 	if filters != nil {
 		if filters.Limit > 0 {

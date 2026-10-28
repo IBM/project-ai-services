@@ -17,6 +17,7 @@ import time
 import functools
 import requests
 from typing import Callable, TypeVar, Any, Optional, Tuple, Type
+import paramiko
 from opensearchpy import OpenSearchException, ConnectionError as OSConnectionError, TransportError
 from common.misc_utils import get_logger, DoclingConversionError
 
@@ -88,6 +89,12 @@ def is_retryable_error(exception: Exception, allow_local_retries: bool = False) 
         ]):
             return True
     
+    # SSH / SFTP errors (paramiko.SSHException retryable except AuthenticationException)
+    if isinstance(exception, paramiko.SSHException):
+        if isinstance(exception, paramiko.AuthenticationException):
+            return False
+        return True
+
     # Docling conversion errors (always retryable when they occur)
     if isinstance(exception, DoclingConversionError):
         return True
