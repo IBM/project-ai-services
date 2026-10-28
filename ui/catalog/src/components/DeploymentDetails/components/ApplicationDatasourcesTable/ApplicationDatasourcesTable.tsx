@@ -155,7 +155,6 @@ const ApplicationDatasourcesTable = ({
     try {
       await removeApplicationDatasource(applicationId, state.selectedRowId);
       dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
-      dispatch({ type: "SHARED_SET_CONFIRM_VALUE", payload: "" });
       await loadDatasources();
     } catch (err) {
       const msg =

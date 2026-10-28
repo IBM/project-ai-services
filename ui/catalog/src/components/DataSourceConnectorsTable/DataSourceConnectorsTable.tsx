@@ -192,7 +192,6 @@ const DataSourceConnectorsTable = ({
     try {
       await deleteDataSourceConnector(state.selectedRowId);
       dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
-      dispatch({ type: "SHARED_SET_CONFIRM_VALUE", payload: "" });
       await loadConnectors();
     } catch (err) {
       const msg =
