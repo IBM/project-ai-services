@@ -34,7 +34,7 @@ import {
   InProgress,
   ErrorFilled,
   TrashCan,
-  Close,
+  CloseOutline,
 } from "@carbon/icons-react";
 import { useTheme } from "../../contexts/useTheme";
 import {
@@ -872,7 +872,7 @@ const JobMonitorPage = () => {
             hasIconOnly
             kind="ghost"
             size="sm"
-            renderIcon={Close}
+            renderIcon={CloseOutline}
             iconDescription="Cancel"
             disabled={state.cancellingIds.has(job.job_id)}
             onClick={() =>
