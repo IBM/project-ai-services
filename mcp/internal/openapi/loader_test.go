@@ -1,11 +1,14 @@
 package openapi
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestIsURL(t *testing.T) {
@@ -150,6 +153,131 @@ func TestLoadFromURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// shortenFetchRetry makes loadFromURLWithRetry fast for tests and restores the
+// defaults afterwards
+func shortenFetchRetry(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	origTimeout, origInitial, origMax := fetchRetryTimeout, fetchInitialBackoff, fetchMaxBackoff
+	fetchRetryTimeout, fetchInitialBackoff, fetchMaxBackoff = timeout, 5*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() {
+		fetchRetryTimeout, fetchInitialBackoff, fetchMaxBackoff = origTimeout, origInitial, origMax
+	})
+}
+
+func TestLoadFromURLWithRetry(t *testing.T) {
+	t.Run("retries 5xx until the service is ready", func(t *testing.T) {
+		shortenFetchRetry(t, 5*time.Second)
+
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) < 3 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			content, _ := os.ReadFile("testdata/minimal.yaml")
+			w.WriteHeader(http.StatusOK)
+			w.Write(content)
+		}))
+		defer server.Close()
+
+		data, err := loadFromURLWithRetry(server.URL+"/openapi.json", false)
+		if err != nil {
+			t.Fatalf("loadFromURLWithRetry() error = %v", err)
+		}
+		if len(data) == 0 {
+			t.Error("loadFromURLWithRetry() returned empty data")
+		}
+		if got := calls.Load(); got != 3 {
+			t.Errorf("loadFromURLWithRetry() made %d requests, want 3", got)
+		}
+	})
+
+	t.Run("retries connection refused until the service is listening", func(t *testing.T) {
+		shortenFetchRetry(t, 5*time.Second)
+
+		// Reserve a port, then release it so the first attempts are refused
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("failed to reserve port: %v", err)
+		}
+		addr := listener.Addr().String()
+		listener.Close()
+
+		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			content, _ := os.ReadFile("testdata/minimal.yaml")
+			w.WriteHeader(http.StatusOK)
+			w.Write(content)
+		}))
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			l, err := net.Listen("tcp", addr)
+			if err != nil {
+				return
+			}
+			server.Listener = l
+			server.Start()
+		}()
+		defer server.Close()
+
+		if _, err := loadFromURLWithRetry("http://"+addr+"/openapi.json", false); err != nil {
+			t.Fatalf("loadFromURLWithRetry() error = %v", err)
+		}
+	})
+
+	t.Run("gives up after the retry timeout", func(t *testing.T) {
+		shortenFetchRetry(t, 100*time.Millisecond)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer server.Close()
+
+		start := time.Now()
+		if _, err := loadFromURLWithRetry(server.URL+"/openapi.json", false); err == nil {
+			t.Fatal("loadFromURLWithRetry() should fail when the service never becomes ready")
+		}
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Errorf("loadFromURLWithRetry() took %s, want it to stop near the 100ms timeout", elapsed)
+		}
+	})
+
+	t.Run("does not retry 4xx", func(t *testing.T) {
+		shortenFetchRetry(t, 5*time.Second)
+
+		var calls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer server.Close()
+
+		if _, err := loadFromURLWithRetry(server.URL+"/openapi.json", false); err == nil {
+			t.Fatal("loadFromURLWithRetry() should fail on 404")
+		}
+		if got := calls.Load(); got != 1 {
+			t.Errorf("loadFromURLWithRetry() made %d requests, want 1", got)
+		}
+	})
+
+	t.Run("does not retry TLS verification failures", func(t *testing.T) {
+		shortenFetchRetry(t, 5*time.Second)
+
+		var calls atomic.Int32
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+		}))
+		defer server.Close()
+
+		start := time.Now()
+		if _, err := loadFromURLWithRetry(server.URL+"/openapi.json", false); err == nil {
+			t.Fatal("loadFromURLWithRetry() should fail against a self-signed certificate")
+		}
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Errorf("loadFromURLWithRetry() took %s, want an immediate failure", elapsed)
+		}
+	})
 }
 
 func TestLoadDescription(t *testing.T) {

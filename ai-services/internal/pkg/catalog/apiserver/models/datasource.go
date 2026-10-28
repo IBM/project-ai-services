@@ -223,6 +223,7 @@ type ListDatasourcesRequest struct {
 	PageSize int
 	Status   string
 	Provider string
+	Search   string // Optional: case-insensitive substring search on datasource name
 }
 
 // ApplicationDatasourceItem is one entry in the GET /api/v1/applications/:id/datasources list.
@@ -256,12 +257,13 @@ type ApplicationDatasourceListResponse struct {
 	Pagination types.PaginationMetadata    `json:"pagination"`
 }
 
-// ListApplicationDatasourcesRequest carries validated pagination params for the
+// ListApplicationDatasourcesRequest carries validated pagination and filter params for the
 // application-scoped datasource list endpoint.
 type ListApplicationDatasourcesRequest struct {
 	ApplicationID string
 	Page          int
 	PageSize      int
+	Search        string // Optional: case-insensitive substring search on datasource name
 }
 
 // ConnectDatasourceRequest is the payload sent to the downstream Digitize service.

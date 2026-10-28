@@ -184,7 +184,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 	// is built; they are never forwarded to the caller.
 	connector, err := s.connectorRepo.GetByID(ctx, id, true)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: "datasource not found",
@@ -245,7 +245,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 func (s *DatasourceService) GetDatasourceApplications(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceApplicationsResponse, error) {
 	// Step 1: existence check — fetch without credentials (no metadata needed here).
 	if _, err := s.connectorRepo.GetByID(ctx, id, false); err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: "datasource not found",
@@ -304,6 +304,7 @@ func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.L
 		Type:     catalogconstants.ConnectorTypeDatasource,
 		Status:   dbmodels.ConnectorStatus(req.Status),
 		Provider: req.Provider,
+		Search:   req.Search,
 		Limit:    req.PageSize,
 		Offset:   (req.Page - 1) * req.PageSize,
 	}
@@ -612,7 +613,7 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 func (s *DatasourceService) loadConnector(ctx context.Context, datasourceID uuid.UUID) (*dbmodels.Connector, error) {
 	connector, err := s.connectorRepo.GetByID(ctx, datasourceID, true)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: fmt.Sprintf("datasource %s not found", datasourceID),
@@ -806,7 +807,7 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 	// Step 2: verify the datasource connector exists (credentials not needed for this response).
 	connector, err := s.connectorRepo.GetByID(ctx, datasourceID, false)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: fmt.Sprintf("datasource %s not found", datasourceID),
@@ -1222,7 +1223,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 
 	// Resolve the service base URL and call GET /v1/connectors with the caller's pagination
 	// params. The service response is authoritative for both the page content and total count.
-	baseURL, servicePage := s.fetchServiceConnectors(ctx, proxy, appID, allConnectorIDs, req.PageSize, offset)
+	baseURL, servicePage := s.fetchServiceConnectors(ctx, proxy, appID, allConnectorIDs, req.PageSize, offset, req.Search)
 
 	// The service pod may still return a connector with status="delete pending" after
 	// DisconnectDatasourcesFromApplication has removed its service_dependencies row but
@@ -1265,7 +1266,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 // Only rows belonging to appID are considered when selecting the base URL, preventing a
 // mismatch when the same connector is linked to multiple applications.
 // Returns an empty-page result when no endpoint is found or the call fails.
-func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy httpproxy.HTTPProxier, appID uuid.UUID, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy httpproxy.HTTPProxier, appID uuid.UUID, connectorIDs []uuid.UUID, limit, offset int, search string) (string, catalogclient.ServiceConnectorPage) {
 	empty := catalogclient.ServiceConnectorPage{ByID: make(map[string]apimodels.ConnectorItem)}
 
 	if len(connectorIDs) == 0 {
@@ -1296,7 +1297,7 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy ht
 		return "", empty
 	}
 
-	page, err := catalogclient.NewServiceClient(proxy, baseURL).ListConnectors(ctx, limit, offset)
+	page, err := catalogclient.NewServiceClient(proxy, baseURL).ListConnectors(ctx, limit, offset, search)
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to list connectors from service at %s: %v", baseURL, err)
 

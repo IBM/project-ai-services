@@ -103,19 +103,32 @@ COMPONENTS = {
         ("ai-services/assets/services/summarize/podman/values.yaml", "postgres"),
         ("ai-services/assets/services/summarize/openshift/values.yaml", "postgres"),
         ("ai-services/assets/services/digitize/podman/values.yaml", "postgres"),
-        ("ai-services/assets/services/digitize/openshift/values.yaml", "postgres")
+        ("ai-services/assets/services/digitize/openshift/values.yaml", "postgres"),
+        ("ai-services/assets/services/extract/podman/values.yaml", "postgres"),
+        ("ai-services/assets/services/extract/openshift/values.yaml", "postgres"),
+        ("ai-services/assets/services/translate/podman/values.yaml", "postgres"),
+        ("ai-services/assets/services/translate/openshift/values.yaml", "postgres")
     ],
     "images/litellm/Makefile": [
         ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "litellm"),
     ],
     "images/caddy/Makefile": [
         ("ai-services/assets/catalog/podman/values.yaml", "caddy"),
+        ("ai-services/assets/worker/podman/values.yaml", "caddy"),
     ],
     "mcp/Makefile": [
         ("ai-services/assets/services/chat/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/chat/openshift/values.yaml", "mcp"),
         ("ai-services/assets/services/digitize/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/digitize/openshift/values.yaml", "mcp"),
         ("ai-services/assets/services/similarity/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/similarity/openshift/values.yaml", "mcp"),
         ("ai-services/assets/services/summarize/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/summarize/openshift/values.yaml", "mcp"),
+        ("ai-services/assets/services/translate/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/translate/openshift/values.yaml", "mcp"),
+        ("ai-services/assets/services/extract/podman/values.yaml", "mcp"),
+        ("ai-services/assets/services/extract/openshift/values.yaml", "mcp"),
     ],
 }
 

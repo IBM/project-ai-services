@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import JSONResponse, Response
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
+from common.validation_utils import sanitize_basename
 
 from extract.db.manager import db_repo
 from extract.models import (
@@ -101,7 +102,7 @@ def _resolve_schema_name(schema_name: str):
     "",
     response_model=ExtractionResponse,
     status_code=200,
-    tags=["extraction"],
+    tags=["extraction", "MCP"],
     summary="Synchronous extraction",
     description=(
         "Extract structured data from plain text against a registered schema in a "
@@ -329,7 +330,7 @@ async def extract_sync(request: Request, body: ExtractionRequest) -> JSONRespons
         "- `job_name` (optional): Human-readable label for the job\n"
         "\nEither `schema_id` or `schema_name` or `json_schema` or `json_example` must be provided.\n"
     ),
-    tags=["jobs"],
+    tags=["jobs", "MCP"],
     openapi_extra={
         "requestBody": {
             "required": True,
@@ -430,17 +431,20 @@ async def create_extract_job(
         source_type = (ext or "").lstrip(".")
         validated.append((file.filename, source_type))
 
-    # Duplicate filename check
+    # Duplicate filename check — compare sanitized basenames, since that is the
+    # name each file is staged under (e.g. "file.txt" and "../other/file.txt"
+    # would otherwise collide on disk).
     filenames_seen: set[str] = set()
     for idx, (filename, _) in enumerate(validated):
-        if filename in filenames_seen:
+        safe_name = sanitize_basename(filename)
+        if safe_name in filenames_seen:
             msg = (
                 f"Duplicate filename detected at index {idx}: {filename!r}. "
                 "All file names must be unique within a batch."
             )
             logger.error(msg)
             APIError.raise_error(ErrorCode.DUPLICATE_FILE, msg)
-        filenames_seen.add(filename)
+        filenames_seen.add(safe_name)
 
     # Content validation — collect all failures before rejecting
     for idx, file in enumerate(files):
@@ -660,7 +664,7 @@ async def list_extract_jobs(
     description=(
         "Retrieve the full status of a specific extraction job.\n\n"
     ),
-    tags=["jobs"],
+    tags=["jobs", "MCP"],
 )
 async def get_extract_job(job_id: str) -> JobDetailResponse:
     """Retrieve the full status and detail metadata of a specific extraction job."""
@@ -743,7 +747,7 @@ async def get_extract_job(job_id: str) -> JobDetailResponse:
         "- **404** if the job or document does not exist.\n"
         "- **200** with the result payload once the document is `completed`."
     ),
-    tags=["jobs"],
+    tags=["jobs", "MCP"],
 )
 async def get_document_result(job_id: str, doc_id: str):
     """Retrieve the extraction result for one document in a batch job."""
