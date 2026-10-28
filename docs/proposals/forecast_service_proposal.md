@@ -29,7 +29,7 @@ The service follows the architectural patterns established by the digitize, tran
 It also introduces three things that no existing service has:
 
 - A **training worker that runs as a subprocess** of the API, one at a time, with its own process group, time limit and memory limit.
-- A **Triton pod** in explicit model-control mode, sharing a repository volume with the API pod. The API owns every interaction with Triton.
+- A **Triton pod** in explicit model-control mode, sharing a repository volume with the API pod. The API owns every interaction with Triton. Triton is a Catalog component deployed like vLLM ([Section 9](#9-triton-inference-server--component-and-deployment)).
 - A **second, restricted database role** for the worker, with column-level grants.
 
 ### 1.1 Concept-to-Design Mapping
@@ -120,7 +120,7 @@ graph LR
     subgraph DEP ["Catalog deployment (Forecast service + Triton installed together)"]
         direction LR
         subgraph TR ["Triton Inference Server (CPU, ONNX Runtime)"]
-            BE["HTTP 8000 / gRPC 8001<br/>model fc_forecast_id<br/>repository API, explicit mode<br/>(load / unload)"]
+            BE["HTTP 8000 / gRPC 8001<br/>one model per forecaster version<br/>repository API, explicit mode<br/>(load / unload)"]
         end
         subgraph FS ["Forecast Service (port 8500)"]
             direction LR
@@ -644,7 +644,290 @@ sequenceDiagram
 
 ---
 
-## 9. Configuration
+## 9. Triton Inference Server — Component and Deployment
+
+This section specifies how Triton becomes a Catalog **component**, the way vLLM is today, how it is deployed on Podman and OpenShift, and how the Forecast service and Triton share the model repository volume. Sections 2.2, 4 and 8 define *who* talks to Triton and *when*; this section defines *what is deployed* and *how the files get there*.
+
+> **Status of the facts below.** Everything that describes the Catalog (asset layout, dependency wiring, volume labels, image collection) was checked against the current `ai-services` code and the vLLM, OpenSearch and digitize assets. Everything that describes Triton or the ppc64le image has not been run on the target image and must be proven there before implementation.
+
+### 9.1 Catalog assets
+
+```
+ai-services/assets/components/ml_inference/triton-cpu/
+├── metadata.yaml                      # type: component, component_type: ml_inference
+├── podman/
+│   ├── metadata.yaml                  # pod template list and resource requirements
+│   ├── values.yaml                    # image and defaults
+│   ├── values.schema.json             # no user parameters (empty properties)
+│   └── templates/
+│       └── triton-server.yaml.tmpl
+└── openshift/
+    ├── Chart.yaml
+    ├── metadata.yaml
+    ├── values.yaml
+    ├── values.schema.json
+    └── templates/
+        ├── triton-deployment.yaml
+        ├── triton-service.yaml
+        └── triton-repository-pvc.yaml
+```
+
+The directory is named after the component type, as `llm/` and `embedding/` are. (`vector_db/opensearch` shows that the directory and the `component_type` need not match.)
+
+**`metadata.yaml`** (same fields as `llm/vllm-cpu/metadata.yaml`):
+
+```yaml
+type: component
+id: triton-cpu
+version: "1.0.0"
+name: "Triton Inference Server (CPU)"
+description: "Serves ONNX forecasters over the KServe v2 protocol on CPU"
+component_type: ml_inference
+component_name: "Inference server"
+default: true
+```
+
+**`podman/metadata.yaml`:**
+
+```yaml
+name: triton
+version: "1.0.0"
+podTemplateExecutions:
+  - [triton-server.yaml.tmpl]
+resources:
+  cpu: 0        # TBD (DEV)
+  memory: 0     # TBD (DEV), bytes
+  storage: 0    # TBD (DEV), bytes: size of the repository volume
+```
+
+The three resource values are **to be provided by DEV**, as for the rest of this document (Section 1, Scope notes). The Catalog uses them for its capacity check.
+
+**`podman/values.yaml`:**
+
+```yaml
+image: <registry>/tritonserver-ppc64le:<pinned tag>
+```
+
+The image must be a **pinned tag mirrored into the project registry**, the way `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` is. The `quay.io/powercloud/tritonserver:latest` image used in the POC is not acceptable for a product, because `latest` is not reproducible. The Catalog collects images from the rendered templates, so the Triton image appears automatically in the application's image list (`GET /api/v1/services/:id/images`) and in air-gapped image mirroring.
+
+**Parameters.** The component takes **no user parameters**. One constraint on naming: the Catalog's model download step (`extractModelsFromParams`) treats any component *parameter* whose key contains `model` as a Hugging Face model name to download. No Triton parameter may use such a key (for example `modelRepository`), or deployment will try to download it. This applies to request parameters only, not to keys in `values.yaml`.
+
+**Wiring in the Forecast service's `metadata.yaml`:**
+
+```yaml
+dependencies:
+  - id: ml_inference
+```
+
+The service gets its endpoint the same way digitize gets `llm`: the deployer takes the Triton pod's name as `host` and the first container's first `containerPort` as `port`, and merges them, plus `instanceSlug`, into the service values. The Forecast template then uses:
+
+```yaml
+env:
+  - name: TRITON_URL
+    value: "http://{{ .Values.ml_inference.host }}:{{ .Values.ml_inference.port }}"
+  - name: MODEL_REPO_PATH
+    value: /models
+```
+
+**Triton's first `containerPort` must therefore be the HTTP port (8000).** The deployer picks the first port of the first container; if gRPC were listed first, the Forecast service would be given the gRPC port.
+
+### 9.2 Podman deployment
+
+The deployment order is fixed by the Catalog: all components are deployed first, then the services, then routes are registered. Triton is therefore running before the Forecast service starts. "Running" is not "ready", and the Forecast service must tolerate a Triton that is still starting (Section 9.4).
+
+**`podman/templates/triton-server.yaml.tmpl`:**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "triton-{{ .InstanceSlug }}"
+  labels:
+    ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/volume: "triton-repo-{{ .InstanceSlug }}"
+spec:
+  restartPolicy: always
+  volumes:
+    - name: repository
+      persistentVolumeClaim:
+        claimName: "triton-repo-{{ .InstanceSlug }}"
+  containers:
+    - name: triton
+      image: "{{ .Values.image }}"
+      args:
+        - tritonserver
+        - --model-repository=/models
+        - --model-control-mode=explicit
+        - --strict-readiness=false
+        - --exit-on-error=false
+        - --http-port=8000
+        - --grpc-port=8001
+        - --metrics-port=8002
+      ports:
+        - containerPort: 8000     # must be first: the deployer gives this port to consumers
+        - containerPort: 8001
+        - containerPort: 8002
+      livenessProbe:
+        httpGet:
+          path: /v2/health/live
+          port: 8000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 6
+      resources:
+        requests:
+          memory: "<TBD (DEV)>"
+        limits:
+          memory: "<TBD (DEV)>"
+      volumeMounts:
+        - mountPath: /models:z
+          name: repository
+          readOnly: true
+```
+
+Why each flag:
+
+| Flag | Reason |
+|:--|:--|
+| `--model-repository=/models` | The volume root is the repository. Triton starts with an empty repository. |
+| `--model-control-mode=explicit` | Nothing is loaded until the Forecast API asks (Section 2.2). Triton also never loads a half-written directory on its own. |
+| `--strict-readiness=false` | With the default, Triton reports not-ready if **any** model failed to load. One bad forecaster would then make the whole server unready. The Forecast API checks per-model state itself. |
+| `--exit-on-error=false` | A failed model load must not take the server down. |
+| No `--load-model` | Reloading after a Triton restart is the Forecast API's job (Section 9.4), driven by the database. |
+| gRPC and metrics ports kept | The Forecast service uses HTTP only. gRPC (8001) and metrics (8002) stay available for later use and are not published. |
+
+**What is deliberately absent from the template:**
+
+- **No `ai-services.io/routes` and no `ai-services.io/ports`.** Without them the Catalog does not register the pod with Caddy and does not publish a host port. Triton is reachable only from other pods of the application, by pod name. This is how the design in Section 2.2 ("only the API talks to Triton") is enforced rather than just stated.
+- **No secret and no API-key volume.** Triton has no authentication to configure.
+- **No Spyre annotations and no `/dev/shm` volume.** Inference is on CPU with ONNX Runtime.
+
+### 9.3 The shared repository volume
+
+#### Ownership and naming
+
+| Item | Value |
+|:--|:--|
+| Podman volume name | `triton-repo-<slug>`, where `<slug>` is the Triton component's instance slug |
+| Created by | `podman kube play` of whichever pod references it first. The Triton pod is deployed first. |
+| Referenced by | The Triton pod (`readOnly: true`, `/models`) and the Forecast pod (read-write, `/models`) |
+| Name known to the Forecast pod through | `.Values.ml_inference.instanceSlug`, exactly as the extract service builds `vllm-secret-{{ .Values.llm.instanceSlug }}` |
+| Cleanup | Listed in the **Triton** pod's `ai-services.io/volume` label only. When the component is deleted without `--keep-data`, the Catalog deletes the volume. The Forecast pod must **not** list it, or two pods would claim one volume. |
+
+**Forecast pod additions** (the Forecast template is otherwise unchanged by this section):
+
+```yaml
+spec:
+  securityContext:
+    runAsUser: <forecast uid>      # same mechanism as the postgres (26) and opensearch (1000) templates
+    fsGroup:  <forecast gid>
+  volumes:
+    - name: repository
+      persistentVolumeClaim:
+        claimName: "triton-repo-{{ .Values.ml_inference.instanceSlug }}"
+  containers:
+    - name: forecast-api
+      volumeMounts:
+        - mountPath: /models:z
+          name: repository
+```
+
+`:z` is appended to the mount path in the same way as the vLLM and embedding templates, so that SELinux relabels the volume with a shared label that both pods can use.
+
+#### Layout
+
+```
+/models/                                  volume root = Triton's --model-repository
+├── .staging/<job_id>/                    worker scratch for an atomic publish (same filesystem)
+├── <forecaster>_v<N>/                    one Triton model per forecaster version
+│   ├── config.pbtxt
+│   └── 1/
+│       └── model.onnx
+└── <forecaster>_v<N+1>/ ...
+```
+
+**One Triton model per forecaster version.** The Triton model name is `<forecaster name>_v<version>` (`forecasters.name` and `forecasters.version`), and its single Triton version is always `1`. This follows from how Triton works and from Section 2.2:
+
+- Triton's unload call acts on a **whole model with all its versions**. There is no call to unload one version of a model.
+- The service keeps several versions per connector and retires the oldest while the newest keeps serving.
+- Making each forecaster version its own Triton model turns "load a forecaster", "unload a forecaster" and "delete its directory" into three operations on one directory, with no effect on the other versions.
+- It also makes a version switch safe: the new version is loaded and `ready` **before** the old one is unloaded, so there is no gap.
+
+`forecasters.name` therefore has to be safe as a directory name and as a Triton model name. The proposal does not say how a forecaster name is generated; this is an open question (Section 11).
+
+#### Who writes what
+
+| Actor | Allowed on the volume | Never |
+|:--|:--|:--|
+| Worker subprocess (runs as the Forecast container's user) | Creates `.staging/<job_id>/`, writes `model.onnx` and `config.pbtxt` there, then **renames** the directory to `<forecaster>_v<N>/` | Deletes anything; touches a directory that already has a `ready` row |
+| Forecast API (same container) | Deletes `<forecaster>_v<N>/` for rows that are `retiring`; deletes leftover `.staging/` and directories with no live row at boot (Section 9.4) | Writes model files |
+| Triton | Reads | Writes. The mount is read-only. |
+
+The rename is atomic because `.staging/` and the model directories are on the same volume. Triton can only ever see a complete directory, and in explicit mode it does not look at a directory until it is told to load it.
+
+#### Permissions
+
+Two requirements, whatever mechanism provides them:
+
+1. **The Forecast container's user can create, rename and delete under `/models`.** The postgres and opensearch templates solve the same problem for their volumes with `runAsUser` and `fsGroup` in the pod's `securityContext`; the Forecast pod does the same.
+2. **Triton's user can read what the Forecast user writes.** The Forecast service creates directories as `0755` and files as `0644` (an explicit `umask 022` for the worker and API processes). Triton's user is whatever the ppc64le image runs as; it is not assumed to match the Forecast user.
+
+Both depend on how the image's user and rootless Podman interact and must be verified on the ppc64le image before implementation.
+
+### 9.4 Model lifecycle against Triton
+
+This is the Triton-facing half of Sections 8.1 and 8.2. Triton is addressed over HTTP at `TRITON_URL`.
+
+| Step | Triton call | Notes |
+|:--|:--|:--|
+| Load a staged forecaster | `POST /v2/repository/models/<model>/load` | Returns when the model has loaded or failed. The API then reads `POST /v2/repository/index` for the model's `state` and `reason`. The row becomes `ready` only when the state is `READY`. |
+| Run a forecast | `POST /v2/models/<model>/infer` | `<model>` is that of the connector's newest `ready` forecaster. |
+| Unload a retiring forecaster | `POST /v2/repository/models/<model>/unload` | The API then waits for `UNAVAILABLE` in the index before it deletes the directory, so a file is never removed under a loaded model. |
+| Readiness of the server | `GET /v2/health/ready` | Used by `GET /health` (Section 6.3). |
+| State of all models | `POST /v2/repository/index` | Used for load and unload checks and for reconciliation. |
+
+**Reconciliation.** Explicit mode means Triton forgets every loaded model when it restarts, and the pod has `restartPolicy: always`. The database says what should be loaded (Section 2.2), so the API reconciles on boot and on every runner tick (`RUNNER_TICK_SECONDS`):
+
+1. Wait for `GET /v2/health/ready`, for up to `TRITON_STARTUP_WAIT_S`, with backoff. The Forecast API must still start, answer `/health` and accept connectors while Triton is down (Section 6.3).
+2. Read `/v2/repository/index`.
+3. For every `ready` row whose model is not `READY` in Triton, call `load`.
+4. For every `staged` row, `load` it and promote it to `ready` (the normal activation).
+5. For every `retiring` row, `unload`, then delete the directory, then mark it `deleted`.
+
+During the gap between a Triton restart and step 3, a forecast request returns `503 TRITON_UNAVAILABLE`. The gap is at most one runner tick plus the load time.
+
+**Boot cleanup (API only).** At startup the API removes `.staging/*` (leftovers of a killed worker) and any `<forecaster>_v<N>/` directory that has no `staged`, `ready` or `retiring` row. This extends the existing boot-time recovery scan; the worker still never deletes.
+
+**Load failure.** If Triton returns an error, the row stays `staged`, the `reason` from the index is logged with the job id, and the next tick retries. What happens after repeated failures is an open question (Section 11).
+
+**`config.pbtxt`.** The worker writes it next to `model.onnx`. It is generated, never hand-edited. Its tensor definitions come from the ONNX export, which is outside this document; the service-owned parts are fixed:
+
+```
+name: "<forecaster>_v<N>"
+backend: "onnxruntime"
+max_batch_size: <TBD>
+instance_group [ { kind: KIND_CPU, count: 1 } ]
+# input / output tensor entries: produced by the ONNX export, one per input column in input_schema
+```
+
+### 9.5 OpenShift deployment
+
+The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and the service charts do, rather than a KServe `InferenceService` as `llm/vllm-cpu` does. The reason is that KServe's runtime model loads a model from a storage URI at deploy time, whereas here models arrive after the pod is up and are controlled through Triton's repository API.
+
+| Object | Purpose |
+|:--|:--|
+| `Deployment` `triton` | One replica, strategy `Recreate`. Same image, args and probes as Section 9.2. Adds a `readinessProbe` on `/v2/health/ready` (OpenShift honours readiness; with `--strict-readiness=false` it does not depend on any model). Mounts the PVC read-only at `/models`. |
+| `Service` `triton` | ClusterIP, port 8000 (and 8001, 8002). Not exposed through a `Route`. The Forecast chart uses `http://triton:8000`. |
+| `PersistentVolumeClaim` `triton-repository` | Owned by the Triton chart, with `helm.sh/resource-policy: keep`, like `digitize-cache`. Mounted read-write by the Forecast Deployment and read-only by Triton. |
+
+- **Access mode.** `ReadWriteMany`, as `digitize-cache` already uses. With `ReadWriteOnce` both pods would have to run on the same node; if the storage class does not offer RWX, that needs a pod affinity from the Forecast Deployment to the Triton pod. The storage class and size are to be provided by DEV.
+- **Namespace.** The Catalog derives one namespace per application, so the fixed PVC name `triton-repository` is unique per application.
+- **Permissions.** OpenShift assigns the `fsGroup` from the namespace's range under the default SCC, so no `runAsUser` is set. Both pods get the same `fsGroup`, which satisfies requirement 1 in Section 9.3; requirement 2 (group-readable files) still applies.
+
+---
+
+## 10. Configuration
 
 | Variable                              | Description                                                                                                                   | Default                          |
 |:--------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:---------------------------------|
@@ -653,6 +936,9 @@ sequenceDiagram
 | `DATA_DIR`                            | Read-only root of CSV training files. CSV paths in jobs are relative to it.                                                   | `/data`                          |
 | `DB_ENCRYPTION_KEY`                   | 32-byte AES-256-GCM key for connector secrets. Required by the API and passed to the worker.                                  | —                                |
 | `TRITON_URL`                          | Triton endpoint used for model control and inference.                                                                         | —                                |
+| `TRITON_STARTUP_WAIT_S`               | How long the API waits for Triton to report ready at boot and on reconciliation before continuing without it.                  | `120`                            |
+| `TRITON_LOAD_TIMEOUT_S`               | Timeout for one `load` or `unload` call and for the wait on the model's state.                                                 | `120`                            |
+| `TRITON_INFER_TIMEOUT_S`              | Timeout for one inference request forwarded to Triton.                                                                         | `30`                             |
 | `FORECASTER_RETENTION_COUNT`          | Forecasters kept per `connector_id`. When there are more, the oldest of that connector is unloaded from Triton, then deleted. | `1`                              |
 | `TRAINING_SCHEDULE`                   | Cron expression (5 fields) for scheduled training. Each run queues a job per connector. Unset means no scheduled training.    | —                                |
 | `RUNNER_TICK_SECONDS`                 | Interval of the runner, scheduler and forecaster-activator tick.                                                              | `5`                              |
@@ -667,11 +953,15 @@ sequenceDiagram
 
 ---
 
-## 10. Open Questions
+## 11. Open Questions
 
 These are undecided and need an answer before or during implementation.
 
 1. **Promotion gate.** Whether a forecaster from a scheduled run must beat or match the current one on its validation metric before it becomes `ready`. The design activates every successful training.
 2. **Resource sizing.** CPU, memory, scratch and volume sizes, and expected training duration for the target dataset sizes, are to be provided by DEV. They set `WORKER_MEMORY_LIMIT_MB` and `MAX_TRAINING_ROWS`.
+3. **Forecaster naming.** How `forecasters.name` is generated is not specified. Section 9.3 needs it to be safe as a directory name and as a Triton model name (for example lower-case letters, digits, `-` and `_`), and unique per connector.
+4. **Repeated load failure.** A `staged` forecaster whose `load` keeps failing is retried every tick. Whether it should become terminal after N attempts (a new state or `deleted`), and whether its directory should then be removed, is undecided.
+5. **Loss of the repository volume.** If the volume is lost while the database survives, `ready` rows have no files. Whether reconciliation should mark them `deleted` and queue a retrain is undecided.
+6. **Repository storage on OpenShift.** The storage class, access mode (`ReadWriteMany` assumed) and size for `triton-repository` on ppc64le are to be provided by DEV.
 
 ---
