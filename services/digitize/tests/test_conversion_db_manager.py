@@ -404,3 +404,139 @@ class TestCheckQuotaAtomic:
         assert count == 0
 
 
+
+@pytest.mark.unit
+class TestDeleteDocument:
+    """delete_document must also drop ConversionTask rows for the same doc_id."""
+
+    def test_delete_document_drops_conversion_tasks(self, session):
+        """Deleting a document removes its conversion_task rows in the same session."""
+        from digitize.db.manager import DatabaseManager
+
+        # The four execute calls expected (in order):
+        #   1. DELETE DocumentChecksum
+        #   2. DELETE Document (shadow/already_exists)
+        #   3. DELETE ConversionTask
+        #   4. DELETE Document (the document itself) — rowcount=1 → True
+        session.execute.side_effect = [
+            Mock(rowcount=0),  # checksum purge
+            Mock(rowcount=0),  # shadow docs purge
+            Mock(rowcount=1),  # conversion_tasks purge
+            Mock(rowcount=1),  # document delete
+        ]
+
+        result = DatabaseManager.delete_document("doc-1")
+
+        assert result is True
+        assert session.execute.call_count == 4
+
+    def test_delete_document_succeeds_with_no_conversion_tasks(self, session):
+        """Works correctly when there are no conversion_tasks for the document."""
+        from digitize.db.manager import DatabaseManager
+
+        session.execute.side_effect = [
+            Mock(rowcount=0),  # checksum purge
+            Mock(rowcount=0),  # shadow docs purge
+            Mock(rowcount=0),  # conversion_tasks (none found)
+            Mock(rowcount=1),  # document delete
+        ]
+
+        result = DatabaseManager.delete_document("doc-2")
+
+        assert result is True
+        assert session.execute.call_count == 4
+
+    def test_delete_document_returns_false_when_doc_not_found(self, session):
+        """Returns False when the document row itself does not exist."""
+        from digitize.db.manager import DatabaseManager
+
+        session.execute.side_effect = [
+            Mock(rowcount=0),  # checksum purge
+            Mock(rowcount=0),  # shadow docs purge
+            Mock(rowcount=0),  # conversion_tasks purge
+            Mock(rowcount=0),  # document delete — not found
+        ]
+
+        result = DatabaseManager.delete_document("ghost-doc")
+
+        assert result is False
+        assert session.execute.call_count == 4
+
+
+def _compiled_sql(session) -> str:
+    """Compile the statement passed to session.scalars() to a SQL string."""
+    stmt = session.scalars.call_args[0][0]
+    return str(stmt.compile(compile_kwargs={"literal_binds": True}))
+
+
+@pytest.mark.unit
+class TestGetUnregisteredConnectorDocIds:
+    """get_unregistered_connector_doc_ids returns docs no connector owns."""
+
+    def test_returns_doc_ids_from_query(self, session):
+        from digitize.db.manager import DatabaseManager
+
+        session.scalars.return_value = Mock(all=Mock(return_value=["d1", "d2"]))
+
+        assert DatabaseManager.get_unregistered_connector_doc_ids("c1") == ["d1", "d2"]
+
+    def test_query_checks_ownership_across_all_connectors(self, session):
+        """A doc co-owned by another connector must not be returned, so the
+        ownership check must not be scoped to this connector_id."""
+        from digitize.db.manager import DatabaseManager
+
+        DatabaseManager.get_unregistered_connector_doc_ids("c1")
+
+        sql = _compiled_sql(session)
+        assert "NOT (EXISTS" in sql
+        assert "connector_document_checksum.doc_id = conversion_tasks.doc_id" in sql
+        assert "connector_document_checksum.connector_id" not in sql
+        assert "conversion_tasks.connector_id = 'c1'" in sql
+
+    def test_query_does_not_filter_on_job_status(self, session):
+        """Teardown waits for jobs to be terminal, so mid-flight docs are included."""
+        from digitize.db.manager import DatabaseManager
+
+        DatabaseManager.get_unregistered_connector_doc_ids("c1")
+
+        assert "jobs" not in _compiled_sql(session)
+
+    def test_db_error_returns_empty_list(self, session):
+        from sqlalchemy.exc import SQLAlchemyError
+        from digitize.db.manager import DatabaseManager
+
+        session.scalars.side_effect = SQLAlchemyError("boom")
+
+        assert DatabaseManager.get_unregistered_connector_doc_ids("c1") == []
+
+
+@pytest.mark.unit
+class TestGetActiveJobIdsForConnector:
+    """get_active_job_ids_for_connector returns non-terminal jobs of a connector."""
+
+    def test_returns_job_ids_from_query(self, session):
+        from digitize.db.manager import DatabaseManager
+
+        session.scalars.return_value = Mock(all=Mock(return_value=["j1"]))
+
+        assert DatabaseManager.get_active_job_ids_for_connector("c1") == ["j1"]
+
+    def test_query_filters_on_active_statuses_and_connector(self, session):
+        from digitize.db.manager import DatabaseManager
+
+        DatabaseManager.get_active_job_ids_for_connector("c1")
+
+        sql = _compiled_sql(session)
+        assert "conversion_tasks.connector_id = 'c1'" in sql
+        for status in ("accepted", "in_progress", "cancel_pending"):
+            assert f"'{status}'" in sql
+        assert "'completed'" not in sql
+
+    def test_db_error_returns_none_not_empty(self, session):
+        """A failed query must be distinguishable from 'no active jobs'."""
+        from sqlalchemy.exc import SQLAlchemyError
+        from digitize.db.manager import DatabaseManager
+
+        session.scalars.side_effect = SQLAlchemyError("boom")
+
+        assert DatabaseManager.get_active_job_ids_for_connector("c1") is None

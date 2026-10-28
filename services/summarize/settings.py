@@ -78,6 +78,14 @@ class SummarizationConfig(BaseSettings):
         description="Temperature for summarization generation",
     )
 
+    summarization_seed: int | None = Field(
+        default=None,
+        ge=0,
+        description="Random seed for deterministic summarization output. "
+                    "When set, vLLM uses this seed for reproducible sampling. "
+                    "Combine with temperature=0.0 for fully deterministic results.",
+    )
+
     summarization_stop_words: str = Field(
         default="",
         description="Stop words for summarization (comma-separated)",
