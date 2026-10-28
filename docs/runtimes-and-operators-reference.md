@@ -56,7 +56,7 @@ Once the subscriptions are healthy, the following Red Hat OpenShift AI (RHOAI / 
 
 ---
 
-## 3. Supported Dependency Matrix (OpenShift)
+## 3. OpenShift Support Matrix
 
 The table below lists the OpenShift cluster versions supported by each AI Services binary release line (`vX.Y.x`). Using a cluster version outside the supported range for your AI Services version is not supported.
 
