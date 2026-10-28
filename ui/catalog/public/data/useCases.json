@@ -219,7 +219,7 @@
       "description": "Centralize and unify on-demand access to AI models through APIs, eliminating the need to manage AI infrastructure manually. Enable developers to quickly integrate scalable inferencing capabilities based upon a variety of models into applications and business processes.",
       "creator": "IBM",
       "domain": "IT operations",
-      "architectures": ["Model management"],
+      "services": ["Model management"],
       "assets": ["Client stories and testimonials"],
       "tag": ["Model management"],
       "clientStories": [
