@@ -81,6 +81,8 @@ interface JobMonitorState {
   showDeleteModal: boolean;
   jobToDelete: string | null;
   cancellingIds: Set<string>;
+  jobToCancel: string | null;
+  isCancelConfirmed: boolean;
   isConfirmed: boolean;
   toastOpen: boolean;
   errorMessage: string;
@@ -113,6 +115,9 @@ type JobMonitorAction =
   | { type: "OPEN_DELETE_MODAL"; payload: string }
   | { type: "CLOSE_DELETE_MODAL" }
   | { type: "CLOSE_DELETE_MODAL_KEEP_JOB" }
+  | { type: "OPEN_CANCEL_MODAL"; payload: string }
+  | { type: "CLOSE_CANCEL_MODAL" }
+  | { type: "SET_CANCEL_CONFIRMED"; payload: boolean }
   | { type: "SET_CONFIRMED"; payload: boolean }
   | { type: "SHOW_ERROR"; payload: { message: string; jobName?: string } }
   | { type: "HIDE_ERROR" }
@@ -143,6 +148,8 @@ const initialState: JobMonitorState = {
   showDeleteModal: false,
   cancellingIds: new Set<string>(),
   jobToDelete: null,
+  jobToCancel: null,
+  isCancelConfirmed: false,
   isConfirmed: false,
   toastOpen: false,
   errorMessage: "",
@@ -261,6 +268,16 @@ const jobMonitorReducer = (
         showDeleteModal: false,
         isConfirmed: false,
       };
+    case "OPEN_CANCEL_MODAL":
+      return {
+        ...state,
+        jobToCancel: action.payload,
+        isCancelConfirmed: false,
+      };
+    case "CLOSE_CANCEL_MODAL":
+      return { ...state, jobToCancel: null, isCancelConfirmed: false };
+    case "SET_CANCEL_CONFIRMED":
+      return { ...state, isCancelConfirmed: action.payload };
     case "SET_CONFIRMED":
       return { ...state, isConfirmed: action.payload };
     case "DELETE_JOB":
@@ -857,9 +874,11 @@ const JobMonitorPage = () => {
             kind="ghost"
             size="sm"
             renderIcon={Close}
-            iconDescription="Cancel job"
+            iconDescription="Cancel"
             disabled={state.cancellingIds.has(job.job_id)}
-            onClick={() => handleCancelJob(job.job_id)}
+            onClick={() =>
+              dispatch({ type: "OPEN_CANCEL_MODAL", payload: job.job_id })
+            }
           />
         ) : null,
       delete_action: (
@@ -1334,6 +1353,53 @@ const JobMonitorPage = () => {
                 onChange={(_, { checked }) =>
                   dispatch({
                     type: "SET_CONFIRMED",
+                    payload: checked,
+                  })
+                }
+              />
+            </CheckboxGroup>
+          </div>
+        </Modal>
+
+        {/* Cancel Confirmation Modal */}
+        <Modal
+          open={state.jobToCancel !== null}
+          danger
+          size="sm"
+          modalLabel="Cancel Job"
+          modalHeading="Confirm cancel"
+          primaryButtonText="Cancel job"
+          secondaryButtonText="Close"
+          primaryButtonDisabled={!state.isCancelConfirmed}
+          onRequestClose={() => dispatch({ type: "CLOSE_CANCEL_MODAL" })}
+          onRequestSubmit={() => {
+            const jobId = state.jobToCancel;
+            dispatch({ type: "CLOSE_CANCEL_MODAL" });
+            if (jobId) handleCancelJob(jobId);
+          }}
+        >
+          <p>
+            Cancelling a job stops its processing. This action cannot be undone.
+          </p>
+          <div>
+            <CheckboxGroup legendText="Confirm job to be cancelled">
+              <Checkbox
+                id="checkbox-cancel-job"
+                labelText={
+                  <strong>
+                    {state.jobToCancel
+                      ? getJobName(
+                          state.jobs.find(
+                            (j) => j.job_id === state.jobToCancel,
+                          )!,
+                        )
+                      : ""}
+                  </strong>
+                }
+                checked={state.isCancelConfirmed}
+                onChange={(_, { checked }) =>
+                  dispatch({
+                    type: "SET_CANCEL_CONFIRMED",
                     payload: checked,
                   })
                 }
