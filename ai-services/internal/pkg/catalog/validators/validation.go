@@ -2,6 +2,7 @@ package validators
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -32,8 +33,8 @@ func (e *ValidationError) Error() string {
 // ApplicationValidator handles validation of application deployment requests.
 type ApplicationValidator struct {
 	provider *catalog.CatalogProvider
-	// connectorRepo is optional; when set, ValidateConnectorRefs performs DB-level
-	// existence and status checks. When nil, only catalog-level rules are enforced.
+	// connectorRepo is required to validate connector refs; ValidateConnectorRefs performs
+	// DB-level existence and status checks and returns an error if it is nil.
 	connectorRepo dbrepo.ConnectorRepository
 }
 
@@ -408,8 +409,8 @@ func (v *ApplicationValidator) ValidateServices(ctx context.Context, services []
 //   - The same ID must not appear more than once within a single service's connectors list;
 //     otherwise returns 400.
 //
-// Pass a nil connectorRepo to skip the DB look-up (e.g. in unit tests that only exercise
-// catalog validation). In that case only the catalog-level rules are enforced.
+// A nil connectorRepo is an error when the service carries connector refs, since the DB-level
+// checks cannot be performed.
 func (v *ApplicationValidator) ValidateConnectorRefs(
 	ctx context.Context,
 	service apimodels.Service,
@@ -418,6 +419,10 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 ) error {
 	if len(service.Connectors) == 0 {
 		return nil
+	}
+
+	if connectorRepo == nil {
+		return errors.New("connector repository is not configured; cannot validate connector refs")
 	}
 
 	seenIDs := make(map[string]bool, len(service.Connectors))
@@ -432,7 +437,7 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 }
 
 // validateOneConnectorRef validates a single ConnectorRef entry: deduplication, catalog-level
-// guard, UUID format, and (when connectorRepo is non-nil) DB-level existence/type/status checks.
+// guard, UUID format, and DB-level existence/type/status checks.
 func (v *ApplicationValidator) validateOneConnectorRef(
 	ctx context.Context,
 	ref apimodels.ConnectorRef,
@@ -465,15 +470,11 @@ func (v *ApplicationValidator) validateOneConnectorRef(
 		}
 	}
 
-	if connectorRepo == nil {
-		return nil
-	}
-
 	return validateConnectorInDB(ctx, connectorID, ref, serviceCatalogID, connectorRepo)
 }
 
 // validateConnectorInDB performs the DB-level existence, type, and status checks for a
-// single connector ref. It is called only when connectorRepo is non-nil.
+// single connector ref.
 func validateConnectorInDB(
 	ctx context.Context,
 	connectorID uuid.UUID,
