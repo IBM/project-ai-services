@@ -79,7 +79,7 @@ class SummarizationConfig(BaseSettings):
     )
 
     summarization_seed: int | None = Field(
-        default=42,
+        default=None,
         ge=0,
         description="Random seed for deterministic summarization output. "
                     "When set, vLLM uses this seed for reproducible sampling. "
