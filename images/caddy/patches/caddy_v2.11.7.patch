@@ -1,5 +1,5 @@
 diff --git a/go.mod b/go.mod
-index 6ae91703..a1dc7ca2 100644
+index 6ae91703..28b148af 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -43,11 +43,11 @@ require (
@@ -18,6 +18,15 @@ index 6ae91703..a1dc7ca2 100644
  	golang.org/x/time v0.16.0
  	gopkg.in/yaml.v3 v3.0.1
  )
+@@ -67,7 +67,7 @@ require (
+ 	github.com/dlclark/regexp2/v2 v2.8.0 // indirect
+ 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
+ 	github.com/go-jose/go-jose/v3 v3.0.5 // indirect
+-	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
++	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
+ 	github.com/google/certificate-transparency-go v1.3.3 // indirect
+ 	github.com/google/go-tpm v0.9.8 // indirect
+ 	github.com/google/go-tspi v0.3.0 // indirect
 @@ -169,8 +169,8 @@ require (
  	go.opentelemetry.io/otel/trace v1.46.0
  	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
@@ -30,9 +39,20 @@ index 6ae91703..a1dc7ca2 100644
  	google.golang.org/protobuf v1.36.12 // indirect
  	howett.net/plist v1.0.1 // indirect
 diff --git a/go.sum b/go.sum
-index 03e883a8..597cfff9 100644
+index 03e883a8..bd175402 100644
 --- a/go.sum
 +++ b/go.sum
+@@ -159,8 +159,8 @@ github.com/go-chi/chi/v5 v5.3.2 h1:5YQkICvTCSZ25hoRsyJazN0scjzKGiu4VAUc7H1o1nY=
+ github.com/go-chi/chi/v5 v5.3.2/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
+ github.com/go-jose/go-jose/v3 v3.0.5 h1:BLLJWbC4nMZOfuPVxoZIxeYsn6Nl2r1fITaJ78UQlVQ=
+ github.com/go-jose/go-jose/v3 v3.0.5/go.mod h1:5b+7YgP7ZICgJDBdfjZaIt+H/9L9T/YQrVfLAMboGkQ=
+-github.com/go-jose/go-jose/v4 v4.1.5 h1:RjgjO2LOtWOJKUC5wpwY9LR3B3vwVAz6JS2YHfYU6eA=
+-github.com/go-jose/go-jose/v4 v4.1.5/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
++github.com/go-jose/go-jose/v4 v4.1.6 h1:sNRkftxFJxwsILiQukqp5z83QBSmntVwmgRY7AqBDO4=
++github.com/go-jose/go-jose/v4 v4.1.6/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
+ github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
+ github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
+ github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
 @@ -470,8 +470,8 @@ golang.org/x/crypto v0.19.0/go.mod h1:Iy9bg/ha4yyC70EfRS8jz+B6ybOBKMaSxLj6P6oBDf
  golang.org/x/crypto v0.23.0/go.mod h1:CKFgDieR+mRhux2Lsu27y0fO304Db0wZe70UKqHu0v8=
  golang.org/x/crypto v0.32.0/go.mod h1:ZnnJkOaASj8g0AjIduWNlq2NRxL0PlBrbKVyZ6V/Ugc=
@@ -99,3 +119,4 @@ index 03e883a8..597cfff9 100644
  golang.org/x/time v0.16.0 h1:vMb6ptszcQMkcwiRTAuNNU50gom6++Q/6gY2hDM6VDE=
  golang.org/x/time v0.16.0/go.mod h1:rVKOqvZeKvrDKTQiAHJ7wmwP0RzleSphoEA9RcdLA0s=
  golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
+ 
