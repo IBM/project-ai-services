@@ -4,9 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'services/*'
-      - 'ui/*'
-      - 'ai-services/assets/**/values.yaml'
+      - 'services/**'
+      - 'ui/**'
+      - 'ai-services/**'
+      - 'images/**'
       - .github/workflows/check-image-names.yml
       - .github/workflows/bump-makefile-version.yml
       - .github/scripts/check_image_names.py
