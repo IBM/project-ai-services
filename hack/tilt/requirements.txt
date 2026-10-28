@@ -1,0 +1,46 @@
+# Python dependencies for running the RAG stack locally under Tilt (macOS/arm64 friendly).
+# Installed into hack/tilt/.venv by the Tiltfile. Local development only.
+
+# --- model server (hack/tilt/model_server.py) ---
+fastapi
+uvicorn
+sentence-transformers
+transformers
+torch
+litellm
+
+# --- RAG services run natively: chatbot + similarity (subset of images/service-base/requirements.txt) ---
+cohere==7.0.3
+requests
+httpx
+numpy
+pydantic
+pydantic-settings
+opensearch-py
+uvloop
+httptools
+orjson
+psutil
+python-dotenv
+lingua-language-detector
+tqdm
+# Imported by common/lang_utils.py. The Japanese spaCy model (ja_core_news_sm) is intentionally not
+# installed, so Japanese sentence splitting is unavailable locally; all other languages work.
+spacy
+sentence-splitter
+
+# --- digitize service (services/digitize) ---
+docling
+docling-core
+python-docx
+pdfplumber
+pdfminer.six
+pypdfium2
+rapidfuzz
+python-multipart
+psycopg2-binary
+SQLAlchemy==2.0.49
+apscheduler[sqlalchemy]==3.11.3
+boto3
+paramiko
+cryptography

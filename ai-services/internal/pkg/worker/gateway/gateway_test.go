@@ -79,6 +79,10 @@ func (r *fakeWorkerRepo) Delete(_ context.Context, id uuid.UUID) (bool, error) {
 	return true, nil
 }
 
+func (r *fakeWorkerRepo) GetCount(_ context.Context, _ *repository.ListWorkersRequest) (int, error) {
+	return len(r.workers), nil
+}
+
 func (r *fakeWorkerRepo) GetAll(_ context.Context, _ *repository.ListWorkersRequest) ([]models.Worker, error) {
 	out := make([]models.Worker, 0, len(r.workers))
 	for _, w := range r.workers {

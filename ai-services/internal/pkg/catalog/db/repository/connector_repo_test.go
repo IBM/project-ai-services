@@ -121,7 +121,7 @@ func TestConnectorBuildListQuery_NoFilters(t *testing.T) {
 
 	query, args := repo.buildListQuery(nil)
 
-	assert.Equal(t, "SELECT "+nonSensitiveColumns+" FROM connectors ORDER BY created_at DESC", query)
+	assert.Equal(t, "SELECT "+nonSensitiveColumns+" FROM connectors ORDER BY "+connectorStatusPriority+", created_at DESC", query)
 	assert.Empty(t, args)
 }
 
