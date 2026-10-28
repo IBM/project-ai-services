@@ -82,12 +82,16 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 		return
 	}
 
+	// Extract user ID from auth context
+	userID := c.GetString(middleware.CtxUserIDKey)
+
 	// Build request
 	req := repository.ListApplicationsRequest{
 		Page:           page,
 		PageSize:       pageSize,
 		DeploymentType: deploymentType,
 		CatalogID:      catalogID,
+		CreatedBy:      userID,
 	}
 
 	// Call service layer
