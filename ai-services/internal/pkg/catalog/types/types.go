@@ -173,6 +173,14 @@ type Component struct {
 	Default       bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
 }
 
+// Model is one entry in a provider's models.yaml.
+type Model struct {
+	ID          string `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
+	Default     bool   `yaml:"default" json:"default"`         // whether this is the default model for the provider
+	Title       string `yaml:"title" json:"title"`             // short display name
+	Description string `yaml:"description" json:"description"` // markdown description
+}
+
 // ComponentSummary represents a component for list API responses.
 type ComponentSummary struct {
 	ID            string `json:"id"`

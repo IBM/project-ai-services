@@ -365,6 +365,13 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 		return nil, fmt.Errorf("failed to parse schema: %w", err)
 	}
 
+	// Models are defined once in the provider-root models.yaml and injected into the schema's model field.
+	models, err := loadModelsFromFile(itemFS, componentPath)
+	if err != nil {
+		return nil, err
+	}
+	injectModelsIntoSchema(schema, models)
+
 	return schema, nil
 }
 
