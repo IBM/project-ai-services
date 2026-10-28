@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   scan:
-    runs-on: ubuntu-24.04-ppc64le
+    runs-on: ubuntu-24.04-ppc64le-p10
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
