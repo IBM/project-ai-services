@@ -10,10 +10,12 @@ if [ -z "${1:-}" ]; then
 fi
 
 VERSION="$1"
-URL="https://raw.githubusercontent.com/BerriAI/litellm/refs/tags/v${VERSION}/pyproject.toml"
-TOML_FILE="pyproject.toml"
-BACKUP_FILE="pyproject.toml.bkp"
+BASE_URL="https://raw.githubusercontent.com/BerriAI/litellm/refs/tags/v${VERSION}"
 PATCH_FILE="pyproject-toml.patch"
+
+TOML_FILES=(
+    "pyproject.toml"
+)
 
 # ---------------------------------------------------------------------------
 # 1. Packages that are unavailable on ppc64le — add platform_machine marker
@@ -25,116 +27,125 @@ PPC64LE_EXCLUDE_PACKAGES=(
 
 # ---------------------------------------------------------------------------
 # 2. Extra packages to inject at the end of the [proxy] extras list
-#    Format: one package specifier per entry, e.g. "prisma>=0.11.0,<1.0"
+#    Format: one package specifier per entry, e.g. "certifi>=2026.10.19"
 # ---------------------------------------------------------------------------
 EXTRA_PACKAGES=(
     "certifi>=2026.10.19"
     "filelock>=4.2.1"
+    "dnspython>=2.9.0"
 )
 
 # ---------------------------------------------------------------------------
-# 3. Package version bumps — replace the upstream minimum with our minimum
-#    Format: "package_prefix|old_floor|new_floor"
-#    e.g. "starlette>=|1.0.1|1.3.1" rewrites starlette>=1.0.1,... → starlette>=1.3.1,...
+# 3. Package version bumps — replace upstream specifier with our specifier
+#    Format: "old_specifier|new_specifier"
 # ---------------------------------------------------------------------------
 VERSION_BUMPS=(
-    "aiohttp>=|3.14.2|3.14.4"
-    "starlette>=|1.0.1|1.3.1"
-    "PyJWT>=|2.13.0|2.14.0"
-    "python-multipart>=|0.0.27|0.0.30"
-    "tornado>=|6.5.8|6.5.9"
+    'requires-python = ">=3.10|requires-python = ">=3.11'
+    'mcp>=1.28.1,<2.0|mcp>=1.30.0,<2.0'
+    'aiohttp>=3.14.2,<4.0|aiohttp>=3.14.4,<4.0'
 )
 
 # ---------------------------------------------------------------------------
 
 echo "=================================================="
-echo "Step 1: Downloading pyproject.toml (v${VERSION})..."
+echo "Step 1: Downloading pyproject.toml files (v${VERSION})..."
 echo "=================================================="
 
-curl -fsSL "$URL" -o "$TOML_FILE"
+for REL_PATH in "${TOML_FILES[@]}"; do
+    mkdir -p "$(dirname "$REL_PATH")"
+    URL="${BASE_URL}/${REL_PATH}"
+    curl --connect-timeout 10 --max-time 30 -fsSL "$URL" -o "$REL_PATH"
 
-if [ ! -s "$TOML_FILE" ]; then
-    echo "Error: Failed to download $TOML_FILE."
-    exit 1
-fi
-
-echo "Successfully downloaded $TOML_FILE."
-cp "$TOML_FILE" "$BACKUP_FILE"
+    if [ ! -s "$REL_PATH" ]; then
+        echo "Error: Failed to download $REL_PATH."
+        exit 1
+    fi
+    echo "Successfully downloaded $REL_PATH."
+    cp "$REL_PATH" "${REL_PATH}.bkp"
+done
 echo ""
 
 echo "=================================================="
 echo "Step 2: Adding ppc64le platform_machine markers..."
 echo "=================================================="
 
-for PKG in "${PPC64LE_EXCLUDE_PACKAGES[@]}"; do
-    if grep -q "$PKG" "$TOML_FILE"; then
-        echo "Patching: $PKG"
-        sed -i -E '/'"$PKG"'/ {
-            /;/ s/("[^"]+)(".*)/\1 and platform_machine != '\''ppc64le'\''\2/
-            /;/! s/("[^"]+)(".*)/\1; platform_machine != '\''ppc64le'\''\2/
-        }' "$TOML_FILE"
-    else
-        echo "Skipping (not found): $PKG"
-    fi
+if [ "${#PPC64LE_EXCLUDE_PACKAGES[@]}" -gt 0 ]; then
+for REL_PATH in "${TOML_FILES[@]}"; do
+    for PKG in "${PPC64LE_EXCLUDE_PACKAGES[@]}"; do
+        if grep -q "$PKG" "$REL_PATH"; then
+            echo "Patching in $REL_PATH: $PKG"
+            sed -i -E '/'"$PKG"'/ {
+                /;/ s/("[^"]+)(".*)/\1 and platform_machine != '\''ppc64le'\''\2/
+                /;/! s/("[^"]+)(".*)/\1; platform_machine != '\''ppc64le'\''\2/
+            }' "$REL_PATH"
+        fi
+    done
 done
+fi
 echo ""
 
 echo "=================================================="
 echo "Step 3: Injecting extra packages into [proxy]..."
 echo "=================================================="
 
-for PKG in "${EXTRA_PACKAGES[@]}"; do
-    # Only inject if not already present in the proxy block (idempotent).
-    # Use awk to scope the check to proxy = [...] only, so a match in another
-    # block (e.g. extra_proxy) doesn't suppress the injection.
-    if awk '/^proxy = \[/{in_proxy=1} /^\]/{in_proxy=0} in_proxy && index($0, "'"$PKG"'"){found=1} END{exit !found}' "$TOML_FILE"; then
-        echo "Already present in proxy block, skipping: $PKG"
-    else
-        echo "Injecting: $PKG"
-        # Insert before the ] that closes the proxy = [...] extras list.
-        # The proxy block starts with "proxy = [" and its closing ] is the
-        # first bare ] after that marker — use awk with a state flag.
-        awk -v pkg="    \"${PKG}\"," '
-            /^proxy = \[/ { in_proxy = 1 }
-            in_proxy && /^\]/ {
-                print pkg
-                in_proxy = 0
-            }
-            { print }
-        ' "$TOML_FILE" > "$TOML_FILE.tmp"
-        mv "$TOML_FILE.tmp" "$TOML_FILE"
+if [ "${#EXTRA_PACKAGES[@]}" -gt 0 ]; then
+for REL_PATH in "${TOML_FILES[@]}"; do
+    if grep -q '^proxy = \[' "$REL_PATH"; then
+        for PKG in "${EXTRA_PACKAGES[@]}"; do
+            if awk '/^proxy = \[/{in_proxy=1} /^\]/{in_proxy=0} in_proxy && index($0, "'"$PKG"'"){found=1} END{exit !found}' "$REL_PATH"; then
+                echo "Already present in $REL_PATH proxy block, skipping: $PKG"
+            else
+                echo "Injecting into $REL_PATH: $PKG"
+                awk -v pkg="    \"${PKG}\"," '
+                    /^proxy = \[/ { in_proxy = 1 }
+                    in_proxy && /^\]/ {
+                        print pkg
+                        in_proxy = 0
+                    }
+                    { print }
+                ' "$REL_PATH" > "$REL_PATH.tmp"
+                mv "$REL_PATH.tmp" "$REL_PATH"
+            fi
+        done
     fi
 done
+fi
 echo ""
 
 echo "=================================================="
 echo "Step 4: Applying package version bumps..."
 echo "=================================================="
 
-for BUMP in "${VERSION_BUMPS[@]}"; do
-    PKG_PREFIX="${BUMP%%|*}"
-    REST="${BUMP#*|}"
-    OLD_VER="${REST%%|*}"
-    NEW_VER="${REST##*|}"
-    if grep -q "${PKG_PREFIX}${OLD_VER}" "$TOML_FILE"; then
-        echo "Bumping: ${PKG_PREFIX}${OLD_VER} → ${PKG_PREFIX}${NEW_VER}"
-        sed -i "s|${PKG_PREFIX}${OLD_VER}|${PKG_PREFIX}${NEW_VER}|g" "$TOML_FILE"
-    else
-        echo "WARNING: '${PKG_PREFIX}${OLD_VER}' not found — upstream may have already changed this version."
-    fi
+if [ "${#VERSION_BUMPS[@]}" -gt 0 ]; then
+for REL_PATH in "${TOML_FILES[@]}"; do
+    for BUMP in "${VERSION_BUMPS[@]}"; do
+        OLD_STR="${BUMP%%|*}"
+        NEW_STR="${BUMP#*|}"
+        if grep -q "${OLD_STR}" "$REL_PATH"; then
+            echo "Bumping in $REL_PATH: ${OLD_STR} → ${NEW_STR}"
+            sed -i "s|${OLD_STR}|${NEW_STR}|g" "$REL_PATH"
+        else
+            echo "WARNING: '${OLD_STR}' not found in $REL_PATH — upstream may have already changed this."
+        fi
+    done
 done
+fi
 echo ""
 
 echo "=================================================="
 echo "Step 5: Generating patch file..."
 echo "=================================================="
 
-diff -u --label "a/pyproject.toml" "$BACKUP_FILE" \
-        --label "b/pyproject.toml" "$TOML_FILE" \
-    > "$PATCH_FILE" || true
+> "$PATCH_FILE"
+for REL_PATH in "${TOML_FILES[@]}"; do
+    diff -u --label "a/${REL_PATH}" "${REL_PATH}.bkp" \
+            --label "b/${REL_PATH}" "${REL_PATH}" \
+        >> "$PATCH_FILE" || true
+    rm -f "${REL_PATH}" "${REL_PATH}.bkp"
+done
+
 echo "Patch file generated: ${PATCH_FILE}"
 echo ""
-rm -f "$TOML_FILE" "$BACKUP_FILE"
 
 echo "=================================================="
 echo "Process complete! Generated patch:"
