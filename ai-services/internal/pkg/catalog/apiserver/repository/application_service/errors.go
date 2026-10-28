@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 )
 
 // Error message constants for application operations.

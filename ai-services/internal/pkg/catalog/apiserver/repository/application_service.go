@@ -32,7 +32,6 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 // outside that package (e.g. datasource_service) can use repository.LoadAppWithOwnership.
 var LoadAppWithOwnership = appservice.LoadAppWithOwnership
 
-
 // NewApplicationService creates the appropriate ApplicationServiceInterface implementation
 // based on the runtime type. It is the single construction point for the apiserver.
 //
