@@ -415,13 +415,6 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 
 	// Extract authenticated user from context.
 	userID := c.GetString(middleware.CtxUserIDKey)
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, ErrorResponse{
-			Error: "Unauthorized: user ID not found in context",
-		})
-
-		return
-	}
 
 	var req models.ConnectDatasourcesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -572,13 +565,6 @@ func (h *DatasourceHandler) DisconnectDatasourcesFromApplication(c *gin.Context)
 
 	// Extract authenticated user from context.
 	userID := c.GetString(middleware.CtxUserIDKey)
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, ErrorResponse{
-			Error: "Unauthorized: user ID not found in context",
-		})
-
-		return
-	}
 
 	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, userID, datasourceID); err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
