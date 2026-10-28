@@ -590,9 +590,8 @@ const JobMonitorPage = () => {
   const handleDeleteConfirm = async () => {
     if (!state.jobToDelete) return;
 
-    const jobName = getJobName(
-      state.jobs.find((j) => j.job_id === state.jobToDelete)!,
-    );
+    const job = state.jobs.find((j) => j.job_id === state.jobToDelete);
+    const jobName = job ? getJobName(job) : state.jobToDelete;
     dispatch({ type: "SET_IS_DELETING", payload: true });
 
     try {
@@ -895,6 +894,14 @@ const JobMonitorPage = () => {
       ),
     };
   });
+
+  const jobToDelete = state.jobToDelete
+    ? state.jobs.find((j) => j.job_id === state.jobToDelete)
+    : undefined;
+
+  const jobToCancel = state.jobToCancel
+    ? state.jobs.find((j) => j.job_id === state.jobToCancel)
+    : undefined;
 
   return (
     <Theme theme={effectiveTheme}>
@@ -1340,13 +1347,9 @@ const JobMonitorPage = () => {
                 id="checkbox-delete-job"
                 labelText={
                   <strong>
-                    {state.jobToDelete
-                      ? getJobName(
-                          state.jobs.find(
-                            (j) => j.job_id === state.jobToDelete,
-                          )!,
-                        )
-                      : ""}
+                    {jobToDelete
+                      ? getJobName(jobToDelete)
+                      : (state.jobToDelete ?? "")}
                   </strong>
                 }
                 checked={state.isConfirmed}
@@ -1387,13 +1390,9 @@ const JobMonitorPage = () => {
                 id="checkbox-cancel-job"
                 labelText={
                   <strong>
-                    {state.jobToCancel
-                      ? getJobName(
-                          state.jobs.find(
-                            (j) => j.job_id === state.jobToCancel,
-                          )!,
-                        )
-                      : ""}
+                    {jobToCancel
+                      ? getJobName(jobToCancel)
+                      : (state.jobToCancel ?? "")}
                   </strong>
                 }
                 checked={state.isCancelConfirmed}
