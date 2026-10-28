@@ -5,5 +5,6 @@ export const ROUTES = {
   SERVICES: "/services",
   CONNECTORS: "/connectors",
   WORKER_RESOURCES: "/worker-resources",
+  MODELS: "/models",
   USE_CASE_REFERENCES: "/use-case-references",
 } as const;
