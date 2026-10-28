@@ -115,8 +115,9 @@ const WorkerResourcesTable = ({
       try {
         const response = await fetchWorkerResources(page, pageSize);
         const rows = response.data.map(transformWorkerToRow);
+        const totalItems = response.pagination.total_items;
 
-        const totalPages = Math.max(1, Math.ceil(response.total / pageSize));
+        const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
         if (page > totalPages) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
@@ -126,7 +127,7 @@ const WorkerResourcesTable = ({
 
         dispatch({
           type: ACTION_TYPES.FETCH_WORKERS_SUCCESS,
-          payload: { rows, total: response.total },
+          payload: { rows, total: totalItems },
         });
       } catch (error) {
         const errorMessage =

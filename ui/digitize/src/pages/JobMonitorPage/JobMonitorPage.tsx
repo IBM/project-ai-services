@@ -849,8 +849,9 @@ const JobMonitorPage = () => {
         </Button>
       ),
       cancel_action:
-        job.status === JOB_STATUS.ACCEPTED ||
-        job.status === JOB_STATUS.IN_PROGRESS ? (
+        job.source !== "connector" &&
+        (job.status === JOB_STATUS.ACCEPTED ||
+          job.status === JOB_STATUS.IN_PROGRESS) ? (
           <Button
             hasIconOnly
             kind="ghost"
