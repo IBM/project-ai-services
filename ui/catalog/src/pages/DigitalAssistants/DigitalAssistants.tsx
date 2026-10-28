@@ -29,6 +29,7 @@ import {
 } from "@carbon/react";
 import { Deploy } from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
+import { DEPLOYMENT_STATUS } from "@/constants";
 import type { DigitalAssistantRow } from "./types";
 import {
   ACTION_TYPES,
@@ -140,13 +141,27 @@ const DigitalAssistantsPage = () => {
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
 
+  // hasTransitionalRow activates the additional 5-second poll whenever any
+  // row is in a transitional state (Deploying / Deleting / Downloading).
+  const hasTransitionalRow = state.rowsData.some(
+    (row) =>
+      row.status === DEPLOYMENT_STATUS.DEPLOYING ||
+      row.status === DEPLOYMENT_STATUS.DELETING ||
+      row.status === DEPLOYMENT_STATUS.DOWNLOADING,
+  );
+  const hasTransitionalRowRef = useRef(hasTransitionalRow);
+  hasTransitionalRowRef.current = hasTransitionalRow;
+
   const loadApplications = useCallback(
     async (page = pageRef.current, pageSize = pageSizeRef.current) => {
       if (!catalogId) {
         return;
       }
 
-      dispatch({ type: "SHARED_SET_LOADING", payload: true });
+      // Skip the skeleton while rows are transitional so polling updates statuses in place
+      if (!hasTransitionalRowRef.current) {
+        dispatch({ type: "SHARED_SET_LOADING", payload: true });
+      }
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
@@ -189,15 +204,6 @@ const DigitalAssistantsPage = () => {
   );
 
   // Mount fetch + 2-minute auto-refresh interval (shared hook).
-  // hasTransitionalRow activates the additional 5-second poll whenever any
-  // row is in a transitional state (Deploying / Deleting / Downloading).
-  const hasTransitionalRow = state.rowsData.some(
-    (row) =>
-      row.status === "Deploying" ||
-      row.status === "Deleting" ||
-      row.status === "Downloading",
-  );
-
   useAutoRefresh({
     fetchFn: loadApplications,
     hasData: state.rowsData.length > 0,
