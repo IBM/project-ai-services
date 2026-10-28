@@ -14,7 +14,6 @@ caddy:
   adminPort: ""
   httpsPort: ""
   privateIngressPort: "8443"
-  privateEgressPort: "8080"
   # caddyFileContent: Generated from the 'Caddyfile.tmpl' template
   caddyFileContent: ""
   # Populated from the certificate content specified via '--ssl-cert' during worker configuration
