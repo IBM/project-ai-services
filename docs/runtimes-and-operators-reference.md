@@ -16,7 +16,7 @@ This section serves as an executive quick-reference for the core components and 
 | :--- | :--- | :--- | :--- |
 | **vLLM (IBM Spyre AIU)** | Podman & OpenShift | `v3.5.0` (Red Hat AI Inference) | `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0` |
 | **vLLM (CPU-Only)** | Podman | `v0.28.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` |
-| **vLLM (CPU-Only)** | OpenShift | `v0.19.1` | `icr.io/ppc64le-oss/vllm-ppc64le:0.19.1` |
+| **vLLM (CPU-Only)** | OpenShift | `v0.28.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` |
 | **IBM Spyre Operator** | OpenShift | `stable-v1.3` (v1.3.1) | Managed via Subscription |
 | **Red Hat OpenShift AI (RHOAI)** | OpenShift | `stable-3.5` (v3.5.0) | Managed via Subscription |
 
@@ -50,9 +50,23 @@ Once the subscriptions are healthy, the following Red Hat OpenShift AI (RHOAI / 
    - Configures `default-dsc` with the **KServe** component enabled (`managementState: Managed`) to manage ServingRuntimes.
 3. **`ServingRuntime` Custom Resources:**
    - **`spyre-temp`**: ServingRuntime for vLLM on Spyre AIU cards using `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0`.
-   - **`cpu-temp`**: ServingRuntime for vLLM on CPU using `icr.io/ppc64le-oss/vllm-ppc64le:0.19.1`.
+   - **`cpu-temp`**: ServingRuntime for vLLM on CPU using `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0`.
 4. **`InferenceService` (KServe):**
    - Creates the model predictor pods, mapping them to the specific `ServingRuntime` and applying resources/limits requests (e.g. `ibm.com/spyre_pf` requests/limits).
+
+---
+
+## 3. OpenShift Support Matrix
+
+The table below lists the OpenShift cluster versions supported by each AI Services binary release line (`vX.Y.x`). Using a cluster version outside the supported range for your AI Services version is not supported.
+
+| AI Services Version | Supported OpenShift Cluster Version |
+| :--- | :--- |
+| `v0.3.x` | `v4.16` – `v4.21` |
+| `v0.4.x` | `v4.18` – `v4.22` |
+| `v0.5.x` | `v4.18` – `v4.22` |
+
+> **Note:** This matrix is informational. The AI Services binary does not enforce these ranges at runtime.
 
 ---
 
