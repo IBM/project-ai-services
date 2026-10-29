@@ -17,6 +17,7 @@ import (
 type ApplicationFilters struct {
 	DeploymentType string // Optional: filter by deployment_type ("architectures" or "services")
 	CatalogID      string // Optional: filter by catalog_id (e.g., "rag", "chat", "digitize")
+	CreatedBy      string // Optional: filter by created_by (owner)
 	Limit          int    // Optional: number of records to return (for pagination)
 	Offset         int    // Optional: number of records to skip (for pagination)
 }
@@ -93,6 +94,11 @@ func (r *applicationRepo) buildGetAllQuery(filters *ApplicationFilters) (string,
 		if filters.CatalogID != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("a.catalog_id = $%d", len(args)+1))
 			args = append(args, filters.CatalogID)
+		}
+
+		if filters.CreatedBy != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.created_by = $%d", len(args)+1))
+			args = append(args, filters.CreatedBy)
 		}
 	}
 
@@ -218,6 +224,18 @@ func (r *applicationRepo) GetCount(ctx context.Context, filters *ApplicationFilt
 			query += fmt.Sprintf(" WHERE a.catalog_id = $%d", argIndex)
 		}
 		args = append(args, filters.CatalogID)
+		argIndex++
+		whereAdded = true
+	}
+
+	// Add created_by filter if provided
+	if filters != nil && filters.CreatedBy != "" {
+		if whereAdded {
+			query += fmt.Sprintf(" AND a.created_by = $%d", argIndex)
+		} else {
+			query += fmt.Sprintf(" WHERE a.created_by = $%d", argIndex)
+		}
+		args = append(args, filters.CreatedBy)
 	}
 
 	var count int
