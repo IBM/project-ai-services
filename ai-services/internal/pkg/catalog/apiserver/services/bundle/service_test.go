@@ -92,6 +92,9 @@ func (m *mockComponentRepo) Insert(_ context.Context, _ *models.Component) error
 func (m *mockComponentRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.Component, error) {
 	panic("unexpected")
 }
+func (m *mockComponentRepo) GetByName(_ context.Context, _ string) (*models.Component, error) {
+	panic("unexpected")
+}
 func (m *mockComponentRepo) GetAll(_ context.Context) ([]models.Component, error) {
 	panic("unexpected")
 }

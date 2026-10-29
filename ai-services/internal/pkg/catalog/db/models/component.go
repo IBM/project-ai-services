@@ -11,6 +11,9 @@ import (
 // such as LLM servers, embedding models, vector databases, etc.
 type Component struct {
 	ID        uuid.UUID        `json:"id"`
+	Name      string           `json:"name,omitempty"`
+	CreatedBy string           `json:"created_by,omitempty"`
+	WorkerID  *uuid.UUID       `json:"worker_id,omitempty"`
 	Type      string           `json:"type"`     // e.g., "llm", "embedding", "vector_db", "reranker"
 	Provider  string           `json:"provider"` // e.g., "vllm-cpu", "vllm-spyre"
 	Status    ComponentStatus  `json:"status"`
