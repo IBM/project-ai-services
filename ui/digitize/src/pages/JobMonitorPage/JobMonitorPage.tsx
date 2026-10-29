@@ -53,6 +53,7 @@ import {
   DOC_STATUS,
   JOB_OPERATION,
   JOB_TYPE_DISPLAY,
+  NON_TERMINAL_STATUSES,
 } from "../../constants/jobConstants";
 import styles from "./JobMonitorPage.module.scss";
 
@@ -413,13 +414,6 @@ const getTypeTagStyle = (type: string) => {
       return "gray";
   }
 };
-
-const NON_TERMINAL_STATUSES = new Set<string>([
-  JOB_STATUS.ACCEPTED,
-  JOB_STATUS.IN_PROGRESS,
-  JOB_STATUS.CANCEL_PENDING,
-  JOB_STATUS.CANCELLING,
-]);
 
 const JobMonitorPage = () => {
   const { effectiveTheme } = useTheme();
