@@ -497,18 +497,6 @@ class RAGConfig(BaseSettings):
         description="Maximum tokens allocated for conversation history",
     )
 
-    initial_system_token_overhead: int = Field(
-        default=100,
-        gt=0,
-        description="Estimated tokens for initial system message",
-    )
-
-    rag_system_token_overhead: int = Field(
-        default=200,
-        gt=0,
-        description="Estimated tokens for RAG system message (excluding context)",
-    )
-
     llm_validate_custom_system_prompt: bool = Field(
         default=True,
         description="Enable/disable LLM-based validation for custom system prompts"

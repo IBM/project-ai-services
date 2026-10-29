@@ -192,11 +192,6 @@ class VectorStoreConfig(BaseSettings):
         description="OpenSearch number of shards",
     )
 
-    local_cache_dir: str = Field(
-        default="/var/cache",
-        description="Local cache directory for vector store operations",
-    )
-
 
 class Settings(BaseSettings):
     """Main settings class combining all common configuration sections."""

@@ -39,12 +39,6 @@ class DigitizeConfig(BaseSettings):
         description="Number of workers for document processing",
     )
 
-    heavy_doc_convert_worker_size: int = Field(
-        default=2,
-        ge=1,
-        description="Number of workers for heavy document conversion",
-    )
-
     heavy_doc_page_threshold: int = Field(
         default=500,
         ge=1,
