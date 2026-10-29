@@ -136,7 +136,7 @@ func (d *PodmanDeployer) ExecuteDeployment(
 // prepareDeployment pulls images, downloads models, and transitions the
 // application status to Deploying. It is a prerequisite for all deploy steps.
 func (d *PodmanDeployer) prepareDeployment(ctx context.Context, plan *DeploymentPlan) error {
-	baseDir, err := d.fetchBaseDir(ctx)
+	baseDir, err := podmanutils.FetchBaseDir(ctx, d.runtime)
 	if err != nil {
 		return err
 	}
@@ -798,10 +798,6 @@ func (d *PodmanDeployer) getBaseDir() string {
 	}
 
 	return utils.GetBaseDir()
-}
-
-func (d *PodmanDeployer) fetchBaseDir(ctx context.Context) (string, error) {
-	return podmanutils.FetchBaseDir(ctx, d.runtime)
 }
 
 // registerApplicationRoutes registers routes for all services with Caddy proxy and updates endpoints in database.
