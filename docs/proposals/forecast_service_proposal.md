@@ -4,7 +4,7 @@
 
 This document proposes the design and implementation of the **Forecast** microservice for the AI-Services platform. The service trains machine-learning forecasters on tabular data from IBMi Db2, serves them for prediction with a confidence score, and retires the oldest ones under a retention policy.
 
-Training is triggered by creating a connector. When a user submits a Db2 for i connector on Catalog, Catalog calls `POST /v1/connectors` on this service. The call carries the connection details and the details of the training job: the table, a target column, input columns, and optionally a forecast type, an algorithm and a row selection. The service stores the connector and queues the training job.
+Training is triggered by creating a connector. When a user submits a Db2 for i connector on Catalog, Catalog calls `POST /v1/connectors` on this service. The call carries the connection details and the details of the training job: the table, a target column, the input columns, and optionally a validation metric. AutoGluon chooses the algorithm. The service stores the connector and queues the training job.
 
 When the job succeeds, the user calls the **forecast** endpoint (`POST /v1/forecast/{connector_id}`) on the resulting forecaster. Training also runs on a schedule (`TRAINING_SCHEDULE`), and each scheduled run trains a new forecaster. A trained forecaster is never updated. Training uses **AutoGluon**. The trained AutoGluon model is exported to **ONNX** and served by **NVIDIA Triton Inference Server** on CPU. Training is asynchronous. Prediction is synchronous and proxied through the service to Triton.
 
@@ -23,7 +23,7 @@ The service follows the architectural patterns established by the digitize, tran
 - PostgreSQL (`forecast_metadata` database) for durable metadata, initialized by an idempotent init container.
 - Single-replica deployment.
 - Boot-time recovery scan that marks interrupted jobs as failed and cleans up leftovers.
-- A recurring scheduler inside the API process (digitize uses APScheduler for its connector sync).
+- APScheduler inside the API process, with a persistent SQLAlchemy job store, as digitize uses it for its connector sync.
 - A connector API with allowlist-encrypted credentials, as in digitize.
 
 It also introduces three things that no existing service has:
@@ -34,17 +34,18 @@ It also introduces three things that no existing service has:
 
 ### 1.1 Concept-to-Design Mapping
 
-| Concept                    | Design realization                                                                                                                                                                                |
-|:---------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Source of training data    | A table read through the stored connector (`connector_id`), named in the `POST /v1/connectors` call that created the job.                                                                         |
-| Connector                  | A row in `connectors` managed by `/v1/connectors`: type, connection details, secrets encrypted. No scanner and no sync.                                                                           |
-| Inputs and target          | `feature_columns` (one or more; omitted means all columns except the target) and `target_column` (exactly one).                                                                                   |
-| Training run               | A **worker subprocess** spawned by the API: data loader → AutoGluon → ONNX export → write to the shared volume.                                                                                   |
-| Trained forecaster         | A row in `forecasters` plus a version directory on the shared repository volume. The version number is the job's `jobs.seq`.                                                                      |
-| Forecaster serving         | Triton in explicit model-control mode, on CPU. The API loads and unloads versions through Triton's model-control calls.                                                                           |
-| Prediction with confidence | `POST /v1/forecast/{connector_id}` — the API validates rows against the stored input schema, calls Triton, and returns a prediction and a `confidence` per row.                                   |
-| Retention                  | A new forecaster is `staged`, loaded into Triton, then marked `ready`. When a connector has more than `FORECASTER_RETENTION_COUNT` forecasters, its oldest is unloaded from Triton, then deleted. |
-| Versioning                 | `jobs.seq` (identity column) is the version. API path prefix `/v1/` versions the API itself.                                                                                                      |
+| Concept                    | Design realization                                                                                                                                                                                                                                      |
+|:---------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Source of training data    | A table read through the stored connector (`connector_id`), named in the `POST /v1/connectors` call that created the job.                                                                                                                               |
+| Connector                  | A row in `connectors` managed by `/v1/connectors`: type, connection details, secrets encrypted. No scanner and no sync.                                                                                                                                 |
+| Inputs and target          | `feature_columns` (one or more, each with an optional type) and `target_column` (exactly one).                                                                                                                                                          |
+| Scheduling                 | APScheduler in the API process, one job per connector, with its job store in PostgreSQL. A one-off job runs the first training and a cron job (`TRAINING_SCHEDULE`, UTC) runs the later ones.                                                           |
+| Training run               | A **worker subprocess** spawned by the API: data loader → AutoGluon → ONNX export → write to the shared volume.                                                                                                                                         |
+| Trained forecaster         | A row in `forecasters` plus a directory `fc_<connector_id>_<version>` on the shared repository volume. The version is the job's `jobs.seq`.                                                                                                             |
+| Forecaster serving         | Triton in explicit model-control mode, on CPU. The API loads and unloads each forecaster as a Triton model of its own, through model-control calls.                                                                                                     |
+| Prediction with confidence | `POST /v1/forecast/{connector_id}` — the API validates rows against the stored input columns, calls Triton, and returns a prediction and a `confidence` per row.                                                                                        |
+| Retention                  | A new forecaster is loaded into Triton, then recorded as `ready`. When a connector has more than `FORECASTER_RETENTION_COUNT` `ready` forecasters, its oldest is set to `retiring`, unloaded from Triton, deleted from the volume and marked `deleted`. |
+| Versioning                 | `jobs.seq` (identity column) is the version. API path prefix `/v1/` versions the API itself.                                                                                                                                                            |
 
 ---
 
@@ -58,39 +59,51 @@ It also introduces three things that no existing service has:
 - **Killable.** AutoGluon trains with child processes and large memory use. The API starts the worker in its **own process group** and kills the whole group on timeout, so nothing keeps running.
 - **Crash isolation from the event loop.** A worker that crashes or is killed by the kernel does not take the API's event loop with it, and the API can read the exit status.
 - **Why not threads or a process pool.** AutoGluon and ONNX export are CPU- and memory-heavy, and AutoGluon forks. A subprocess per job gives a clean memory release at exit and a unit that can be killed.
-- **The loader is part of this subprocess.** Reading the source is the first step of the worker, not a separate component, so every job gets a fresh, isolated read and a manifest of what it read.
+- **The loader is part of this subprocess.** Reading the source is the first step of the worker, not a separate component, so every job gets a fresh, isolated read, and its result records how many rows it read.
 
-**Trade-off — shared fate.** The API and the training run share one container, so they share its memory limit and its lifecycle. Training memory pressure can hurt the API, and an API redeploy kills a running training job. The worker therefore runs with a memory cap (`WORKER_MEMORY_LIMIT_MB`) and a time limit, and startup recovery fails any job that was running when the container stopped.
+**Trade-off — shared fate.** The API and the training run share one container, so they share its memory limit and its lifecycle. Training memory pressure can hurt the API, and an API redeploy kills a running training job. The worker therefore runs with a memory cap (`WORKER_MEMORY_LIMIT_MB`) and a time limit, and startup recovery fails any job that was queued or running when the container stopped.
 
-### 2.2 Decision — The API owns all Triton interaction and all deletion
+### 2.2 Decision — The Forecast API owns all Triton interaction and all deletion
 
 **Decision: only the API process talks to Triton, and only the API deletes forecaster files.**
 
 - Triton runs in **explicit model-control mode**. Nothing is loaded until the API loads it. After a Triton restart, the API's startup step loads every `ready` row.
 - The **database, not the volume, says what should be loaded.** A directory on the volume with no `ready` row is never served.
-- The worker only **creates** new version directories. The API only **deletes** directories whose row is `retiring`. The two never write to the same directory.
-- Retention is by count, per connector. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired: unloaded from Triton first, then deleted. Forecasters of other connectors are not affected.
+- The worker only **creates** a forecaster's directory, by writing a temporary directory on the same volume and renaming it, so the directory appears whole or not at all. The worker only **deletes** directories whose row is `retiring`, and the temporary directory of a job that failed.
+- The API writes the `forecasters` row only after Triton has loaded the forecaster. A row is therefore always `ready`, `retiring` or `deleted`, and the worker has no write grant on `forecasters`.
+- Retention is by count, per connector, and runs after each successful load. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired in this order: its row becomes `retiring`, it is unloaded from Triton, its directory is deleted, and its row becomes `deleted`. The row is kept. Forecasters of other connectors are not affected.
 
 ### 2.3 Decision — Single worker, enforced twice
 
-**Decision: one training job runs at a time.** Other jobs wait as `queued`. Jobs created by `POST /v1/connectors` and scheduled jobs share the same queue.
+**Decision: one training job runs at a time.** Other jobs wait as `queued`. The first training of a connector and its scheduled trainings share the same queue.
 
-- The runner in the API process spawns a subprocess only when none is running. This guard lives in the API process, so the API pod must run with `replicas: 1`.
+- Every run is started by an APScheduler job. The job function takes an in-process `asyncio.Lock` before it marks its row `running`, so runs go one at a time, in the order they asked for the lock. A run waits for the lock with its `jobs` row `queued`. This guard lives in the API process, so the API pod must run with `replicas: 1`.
 - The database enforces the same rule: a unique partial index allows at most one `running` row (the `idx_jobs_single_running` index). If the in-process guard is ever wrong, the second claim fails instead of starting a second trainer.
 
 ### 2.4 Decision — `jobs.seq` is the forecaster version
 
-An identity column on `jobs` provides the version. The worker never picks a version number, versions never collide, and they increase with submission order. A failed job leaves a gap in the sequence, which is harmless. A composite foreign key ties `(job_id, version, name)` in `forecasters` to `(id, seq, forecaster_name)` in `jobs`, so the database rejects a forecaster row whose version or name does not match its job.
+An identity column on `jobs` provides the version. The worker never picks a version number, versions never collide, and they increase with submission order. A failed job leaves a gap in the sequence, which is harmless. The forecaster is named `fc_<connector_id>_<version>`. That name is its directory on the volume and its model name in Triton, so every forecaster is loaded and unloaded on its own and Triton's own model version is always `1`.
 
 ### 2.5 Decision — Connectors are stored records; there is no scanner
 
 **Decision: the service has a connector CRUD API and a `connectors` table, and nothing more.** A connector holds the connection details of one source database, with secrets encrypted. The training job created with it names it by `connector_id`. The scanner, background sync and sync history that digitize attaches to a connector are not part of this service.
 
 - **Same pattern as digitize.** Create, list, get, partial update and delete, with an allowlist of safe fields. Every other field is encrypted with AES-256-GCM (`DB_ENCRYPTION_KEY`) and never returned.
-- **No credentials in jobs.** A job carries only `connector_id`. Credentials are not in the request, in `jobs`, in logs or in the manifest.
+- **No credentials in jobs.** A job carries only `connector_id`. Credentials are not in the request, in `jobs`, in logs or in the job result.
 - **The worker reads and decrypts.** It runs the loader as its first step, reads the connector row with a `SELECT`-only grant and decrypts it with the key the API passes in. Nothing reads the source database outside a job.
 - **Rotation is an update.** Each job reads the connector when it runs, so changing a password with `PUT /v1/connectors/{id}` applies to the next job.
 - **Referential safety.** A connector cannot be deleted while a `queued` or `running` job uses it. Finished jobs keep their rows with `connector_id` set to `NULL`.
+
+### 2.6 Decision — APScheduler starts every training run
+
+**Decision: APScheduler, inside the API process, starts every training run, both the first one and the scheduled ones.** There is no polling runner.
+
+- **Same library as digitize.** An `AsyncIOScheduler` with a `SQLAlchemyJobStore` on the service's PostgreSQL database, in a `scheduler` schema that the init container creates. APScheduler is pinned to the version digitize uses. The persistent store keeps the schedules across restarts.
+- **One job per connector.** Creating a connector registers a one-off job that fires at once for the first training and, when `TRAINING_SCHEDULE` is set, a cron job for the later ones. The cron runs in UTC. When `TRAINING_SCHEDULE` is unset, only the first training runs.
+- **What a fired job does.** A cron run first checks that the connector has no `queued` or `running` job, and inserts its own `queued` row. The first run uses the row that `POST /v1/connectors` inserted. The job then waits for the lock, marks the row `running`, spawns the worker and waits for it. On success it loads the forecaster into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `failed` and deletes the temporary directory that the worker left.
+- **Retry of the worker step.** If the worker fails, the job function runs it again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `running` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the temporary directory before the next attempt. The worker exits with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, an unknown table or column, no rows, or more than `MAX_TRAINING_ROWS` rows), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `failed` with the last error, and the number of attempts is recorded in `result`. Only the worker step is retried. The Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
+- **Missed runs are skipped.** The jobs use a short misfire grace time, so a late run is skipped instead of run late. A run missed while the API was down, or skipped because the connector still has a `queued` or `running` job, is logged with the reason.
+- **Startup.** The API registers a cron job only for a connector that has none, and updates it when `TRAINING_SCHEDULE` has changed, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that were `queued` or `running` when the API stopped are marked `failed` by the boot recovery.
 
 ---
 
@@ -120,15 +133,16 @@ graph LR
     subgraph DEP ["Catalog deployment (Forecast service + Triton installed together)"]
         direction LR
         subgraph TR ["Triton Inference Server (CPU, ONNX Runtime)"]
-            BE["HTTP 8000 / gRPC 8001<br/>one model per forecaster version<br/>repository API, explicit mode<br/>(load / unload)"]
+            BE["HTTP 8000 / gRPC 8001<br/>one model per forecaster<br/>fc_{connector_id}_{version}<br/>repository API, explicit mode<br/>(load / unload)"]
         end
         subgraph FS ["Forecast Service (port 8500)"]
             direction LR
             API["REST API<br/>/v1/forecast"]
-            SCH["Scheduler<br/>"]
+            SCH["APScheduler<br/>(one job per connector)"]
             TW["Training Worker"]
-            API -->|"spawn (runner tick)"| TW
-            SCH -->|"queue job when due"| PG
+            API -->|"spawn"| TW
+            SCH -->|"fire job"| API
+            SCH <-->|"job store (scheduler schema)"| PG
             API <--> PG
             TW <--> PG
         end
@@ -145,71 +159,19 @@ graph LR
     CAT -->|"POST /v1/connectors<br/>(connection + training details)"| API
     U -->|"/v1/forecast<br/>/v1/connectors"| FS
     API -->|"forward forecast request<br/>(inference)"| TR
-    API -->|"load_model (new version)<br/>unload_model (oldest per connector, retention)"| TR
+    API -->|"load_model (new forecaster)<br/>unload_model (oldest per connector, retention)"| TR
     FS -->|"mount rw: write ONNX + config.pbtxt"| MD
     TR ---|"mount ro: read models"| MD
 ```
 
 **Key interactions:**
 
-- The **API pod** hosts the REST API, the job runner (scheduling, timeouts, failure detection), the scheduler tick (queues a job for each connector when `TRAINING_SCHEDULE` is due) and the forecaster activator (Triton load/unload, retention, deletion).
-- The **worker subprocess** owns the training work only. It has no polling loop. It reads its job, loads the data, trains, writes a version directory and a `staged` forecaster row, and exits.
+- The **API pod** hosts the REST API and **APScheduler**. Each connector has a job that APScheduler fires for the first training and, when `TRAINING_SCHEDULE` is set, on that schedule. The fired job runs the whole pipeline: it queues the run, spawns the worker, enforces the time limit and detects failure, then loads the forecaster into Triton, records it and applies retention (unload, deletion).
+- The **worker subprocess** owns the training work only. It has no polling loop. It reads its job, loads the data, trains, writes the forecaster's directory to the volume, records its result on the job row, and exits.
 - The **Triton pod** and the API pod mount the same repository volume. The API pod needs write access because the API deletes old versions, so the mount is a regular shared mount rather than a read-only one.
-- The **Postgres pod** holds `connectors`, `jobs` and `forecasters`. The API connects as the DB owner. The worker connects as a restricted role.
+- The **Postgres pod** holds `connectors`, `training_configs`, `jobs` and `forecasters`, and APScheduler's job store in the `scheduler` schema. The API connects as the DB owner. The worker connects as a restricted role.
 - The service is exposed externally on **port 8500** (configurable). This avoids the ports used by digitize (4000/4001), summarize (6000), similarity (7000), translate (9000) and extract (9500).
 - The service depends on three things beyond itself: PostgreSQL, Triton, and the data source.
-
-### 4.1 Database Tables
-
-The Postgres database `forecast_metadata` has three tables. Only the main columns are listed.
-
-**`connectors`**
-
-| Column       | Description                                                                      |
-|:-------------|:---------------------------------------------------------------------------------|
-| `id`         | Primary key (UUID).                                                              |
-| `name`       | Unique, human-readable name.                                                     |
-| `type`       | Connector type, such as `db2_for_i`.                                             |
-| `config`     | Connection details. Safe fields in plaintext, secret fields encrypted.           |
-| `created_at` | UTC creation time.                                                               |
-| `updated_at` | UTC time of the last update.                                                     |
-
-**`jobs`**
-
-| Column            | Description                                                                                                  |
-|:------------------|:-------------------------------------------------------------------------------------------------------------|
-| `id`              | Primary key (UUID).                                                                                          |
-| `seq`             | Identity column. Its value is the forecaster version.                                                        |
-| `connector_id`    | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.         |
-| `forecaster_name` | Name of the forecaster that the job produces.                                                                |
-| `training`        | The `training` object of the request: schema, table, target column and the optional fields.                  |
-| `status`          | `queued`, `running`, `completed` or `failed`.                                                                |
-| `error`           | Failure reason. Empty unless the job failed.                                                                 |
-| `created_at`      | UTC time at which the job was queued.                                                                        |
-| `started_at`      | UTC time at which the job started running.                                                                   |
-| `finished_at`     | UTC time at which the job completed or failed.                                                               |
-
-**`forecasters`**
-
-| Column          | Description                                                                                         |
-|:----------------|:----------------------------------------------------------------------------------------------------|
-| `id`            | Primary key (UUID).                                                                                 |
-| `job_id`        | The job that trained the forecaster.                                                                |
-| `version`       | The `seq` of that job.                                                                              |
-| `name`          | The `forecaster_name` of that job.                                                                  |
-| `status`        | `staged`, `ready`, `retiring` or `deleted`.                                                         |
-| `forecast_type` | The forecast type used for training.                                                                |
-| `target_column` | The column the forecaster predicts.                                                                 |
-| `input_schema`  | The input columns and their types.                                                                  |
-| `classes`       | Class labels for a classification forecaster. Empty otherwise.                                      |
-| `metrics`       | Validation metric name and score, and the training time.                                            |
-| `created_at`    | UTC time at which the forecaster was staged.                                                        |
-
-**Constraints.**
-
-- `idx_jobs_single_running`: a unique partial index that allows at most one `running` job.
-- A composite foreign key ties `(job_id, version, name)` in `forecasters` to `(id, seq, forecaster_name)` in `jobs`.
-- A CHECK constraint on `jobs` requires a `queued` or `running` job to keep its `connector_id`.
 
 ---
 
@@ -251,18 +213,14 @@ The forecast endpoints are keyed by `connector_id`, because each connector is tr
 
 #### GET /v1/forecast/{connector_id} — List the Forecasters of a Connector
 
-Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any version that is `staged` or `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
+Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
 
-| Field in each `data` item | Description                                                                                       |
-|:--------------------------|:--------------------------------------------------------------------------------------------------|
-| `version`                 | The version number (the `jobs.seq` of the training job).                                          |
-| `status`                  | `staged` (trained, not loaded), `ready` (loaded and served) or `retiring` (being unloaded).       |
-| `forecast_type`           | The forecast type used for training, either the requested one or the one chosen automatically.    |
-| `target_column`           | The column the forecaster predicts.                                                               |
-| `input_schema`            | The input columns and their types. Rows sent to `POST /v1/forecast/{connector_id}` must match it. |
-| `classes`                 | The class labels for a classification forecaster. Absent otherwise.                               |
-| `metrics`                 | The validation metric name and score, and the training time in seconds.                           |
-| `created_at`              | UTC timestamp at which the version was staged.                                                    |
+| Field in each `data` item | Description                                                                                                                       |
+|:--------------------------|:----------------------------------------------------------------------------------------------------------------------------------|
+| `version`                 | The version number (the `jobs.seq` of the training job).                                                                          |
+| `status`                  | `ready` (loaded and served) or `retiring` (being unloaded).                                                                       |
+| `metrics`                 | The validation metric name and score, and the training time in seconds.                                                           |
+| `created_at`              | UTC timestamp at which the forecaster was loaded.                                                                                 |
 
 **Sample response (200):**
 
@@ -273,12 +231,9 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
         {
             "version": 12,
             "status": "ready",
-            "forecast_type": "classification",
-            "target_column": "DELIVERY_LATE",
-            "input_schema": {"REGION": "string", "QUANTITY": "integer", "UNIT_PRICE": "number"},
-            "classes": ["N", "Y"],
             "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
             "created_at": "2026-10-26T09:12:00Z"
+            "error": "NONE"
         }
     ]
 }
@@ -292,13 +247,13 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 
 #### POST /v1/forecast/{connector_id} — Run a Forecast
 
-Runs the connector's newest `ready` forecaster on the rows in the request. The service validates the rows against the stored `input_schema`, forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
+Runs the connector's newest `ready` forecaster on the rows in the request. The service validates the rows against the connector's input columns (`forecast_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
 **Content-Type:** `application/json`
 
-| Field       | Type  | Required | Description                                                                                                          |
-|:------------|:------|:---------|:---------------------------------------------------------------------------------------------------------------------|
-| `instances` | array | Yes      | One or more rows. Each row is an object that has a value for every input column in `input_schema` and no other keys. |
+| Field       | Type  | Required | Description                                                                                                         |
+|:------------|:------|:---------|:--------------------------------------------------------------------------------------------------------------------|
+| `instances` | array | Yes      | One or more rows. Each row is an object that has a value for every input column of the connector and no other keys. |
 
 **Sample request:**
 
@@ -341,8 +296,6 @@ curl -X POST http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90
 
 A connector stores the connection details of one source database, with its secrets encrypted. The training job created with it refers to it by `connector_id`. The endpoints follow `services/digitize/api/v1/connectors.py`: create, list, get, partial update and delete, with the allowlist encryption of `connectors/encryption.py`.
 
-> **The `db2_for_i` type and its fields are a proposal.** They have not been checked against a Db2 for i driver, and the real field names and default port depend on the driver chosen.
-
 **What is in scope and what is not.** The scope here is the connector **API and its table**. There is no scanner, no sync, no sync history and no per-connector sync schedule. Scheduled training is separate and is set by `TRAINING_SCHEDULE`. Nothing reads the source database until a training job runs, and then the loader inside the worker does it. A connector therefore has no `status`, no `last_sync_at` and no file counters, which digitize's connectors have.
 
 **Connector types.** `type` is validated against a fixed list. The first type is `db2_for_i`. Adding a database means adding its type, its required fields and its safe fields to the allowlist, and a driver in the loader.
@@ -367,12 +320,13 @@ A connector stores the connection details of one source database, with its secre
 
 **`training` object:**
 
-| Field             | Type   | Required | Description                                                                                    |
-|:------------------|:-------|:---------|:-----------------------------------------------------------------------------------------------|
-| `schema`          | string | Yes      | Schema that holds the table.                                                                   |
-| `table`           | string | Yes      | Table to train on.                                                                             |
-| `target_column`   | string | Yes      | The column to predict. Exactly one.                                                            |
-| `feature_columns` | array  | No       | The input columns. Omitted means all columns except the target.                                |
+| Field               | Type   | Required | Description                                                                                                                                                                   |
+|:--------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `schema`            | string | Yes      | Schema that holds the table.                                                                                                                                                  |
+| `table`             | string | Yes      | Table to train on.                                                                                                                                                            |
+| `target_column`     | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
+| `forecast_columns`   | array  | Yes      | The input columns. Each is an object with a `name` and, where AutoGluon needs it, a `type` (`string`, `integer` or `number`). The forecast endpoint checks rows against them. |
+| `validation_metric` | string | No       | The metric AutoGluon validates on. Omitted means AutoGluon's default for the target.                                                                                          |
 
 **Sample request:**
 
@@ -392,7 +346,13 @@ curl -X POST http://localhost:8500/v1/connectors \
         "training": {
           "schema": "SALES",
           "table": "ORDERS",
-          "target_column": "DELIVERY_LATE"
+          "target_column": "DELIVERY_LATE",
+          "forecast_columns": [
+            {"name": "REGION", "type": "string"},
+            {"name": "QUANTITY", "type": "integer"},
+            {"name": "UNIT_PRICE", "type": "number"}
+          ],
+          "validation_metric": "accuracy"
         }
       }'
 ```
@@ -405,7 +365,7 @@ curl -X POST http://localhost:8500/v1/connectors \
 }
 ```
 
-Duplicate checks run before the insert: a repeated `id` or `name` returns `409`. The call returns `201` once the connector is stored and the training job is queued. Training continues asynchronously.
+Duplicate checks run before the insert: a repeated `id` or `name` returns `409`. The call returns `201` once the connector, its training details and the training job are stored. It also registers the APScheduler jobs: a one-off job that starts the first training at once and, when `TRAINING_SCHEDULE` is set, a cron job for the later ones. Training continues asynchronously.
 
 | Status                                | Description                                                                                                                                                         |
 |:--------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -451,6 +411,9 @@ Returns the list item plus `connection_details` limited to the safe fields and `
     "name": "prod-sales-db",
     "type": "db2_for_i",
     "connection_details": {"host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro"},
+    "model_training_status": "TRAINING"
+    "last_trained_at": "2026-10-26T08:55:00Z"
+    "errors": [{"2026-10-26T08:55:00Z": "COULD NOT FETCH DATA"}, ...]
     "created_at": "2026-10-26T08:55:00Z",
     "updated_at": "2026-10-26T08:55:00Z"
 }
@@ -460,20 +423,19 @@ Returns the list item plus `connection_details` limited to the safe fields and `
 
 **Developer use only.** Returns training and availability metrics for one connector, for debugging and capacity checks. The fields can change without notice and are not part of the stable API.
 
-| Field                            | Description                                          |
-|:---------------------------------|:-----------------------------------------------------|
-| `versions.ready`                 | Versions that are loaded in Triton and served.       |
-| `versions.staged`                | Versions that are trained but not yet loaded.        |
-| `training.jobs_completed`        | Number of completed training jobs for the connector. |
-| `training.jobs_failed`           | Number of failed training jobs for the connector.    |
-| `training.last_job_status`       | `queued`, `running`, `completed` or `failed`.        |
-| `training.last_duration_seconds` | Training time of the last finished job.              |
-| `training.last_completed_at`     | UTC timestamp at which the last job completed.       |
+| Field                            | Description                                         |
+|:---------------------------------|:----------------------------------------------------|
+| `versions.ready`                 | Versions that are loaded in Triton and served.      |
+| `training.jobs_completed`        | Completed runs among the connector's retained runs. |
+| `training.jobs_failed`           | Failed runs among the connector's retained runs.    |
+| `training.last_job_status`       | `queued`, `running`, `completed` or `failed`.       |
+| `training.last_duration_seconds` | Training time of the last finished job.             |
+| `training.last_completed_at`     | UTC timestamp at which the last job completed.      |
 
 ```json
 {
     "connector_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-    "versions": {"ready": [12], "staged": []},
+    "versions": {"ready": [12]},
     "training": {
         "jobs_completed": 5,
         "jobs_failed": 1,
@@ -534,7 +496,69 @@ Returns `200` when the API can reach PostgreSQL and `503` when it cannot. The re
 
 ---
 
-## 7. Data Loader
+## 7. Database Tables
+
+The Postgres database `forecast_metadata` has four tables. Only the main columns are listed. APScheduler's job store table is kept separately, in the `scheduler` schema.
+
+**`connectors`**
+
+| Column       | Description                                                            |
+|:-------------|:-----------------------------------------------------------------------|
+| `id`         | Primary key (UUID).                                                    |
+| `name`       | Unique, human-readable name.                                           |
+| `type`       | Connector type, such as `db2_for_i`.                                   |
+| `config`     | Connection details. Safe fields in plaintext, secret fields encrypted. |
+| `created_at` | UTC creation time.                                                     |
+| `updated_at` | UTC time of the last update.                                           |
+
+**`training_configs`**
+
+| Column              | Description                                                                |
+|:--------------------|:---------------------------------------------------------------------------|
+| `connector_id`      | Primary key. Foreign key to `connectors`.                                  |
+| `source_schema`     | Schema that holds the table.                                               |
+| `source_table`      | Table to train on.                                                         |
+| `target_column`     | The column to predict.                                                     |
+| `forecast_columns`   | The input columns, each with a name and, where AutoGluon needs it, a type. |
+| `validation_metric` | The metric AutoGluon validates on. Empty means AutoGluon's default.        |
+| `created_at`        | UTC time at which the row was stored.                                      |
+
+**`jobs`**
+
+| Column         | Description                                                                                                                                                                                                                                            |
+|:---------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `id`           | Primary key (UUID).                                                                                                                                                                                                                                    |
+| `seq`          | Identity column. Its value is the forecaster version.                                                                                                                                                                                                  |
+| `connector_id` | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.                                                                                                                                                   |
+| `status`       | `queued`, `running`, `completed` or `failed`.                                                                                                                                                                                                          |
+| `error`        | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
+| `result`       | Written when training finishes. The worker writes the algorithm AutoGluon chose, the validation metric and score, the training time in seconds and the rows read. The API adds the number of attempts used. On a failed job only the attempts are set. |
+| `created_at`   | UTC time at which the job was queued.                                                                                                                                                                                                                  |
+| `started_at`   | UTC time at which the job started running.                                                                                                                                                                                                             |
+| `finished_at`  | UTC time at which the job completed or failed.                                                                                                                                                                                                         |
+
+**`forecast`**
+
+| Column       | Description                                                                                                      |
+|:-------------|:-----------------------------------------------------------------------------------------------------------------|
+| `id`         | Primary key (UUID).                                                                                              |
+| `job_id`     | Foreign key to the job that trained the forecaster. Set to `NULL` when run history deletes that job.             |
+| `version`    | The `seq` of that job.                                                                                           |
+| `name`       | `fc_<connector_id>_<version>`. Unique. It is also the directory name on the volume and the model name in Triton. |
+| `status`     | `ready`, `retiring` or `deleted`.                                                                                |
+| `metrics`    | Validation metric name and score, and the training time. Copied from the job's `result`.                         |
+| `created_at` | UTC time at which the forecaster was loaded and recorded.                                                        |
+
+**Constraints.**
+
+- `idx_jobs_single_running`: a unique partial index that allows at most one `running` job.
+- `forecasters.name` is unique.
+- A CHECK constraint on `jobs` requires a `queued` or `running` job to keep its `connector_id`.
+- `forecasters.job_id` is `ON DELETE SET NULL`, so deleting an old job does not delete its forecaster.
+
+**Run history.** The `jobs` table is also the run history. Each finished job keeps its `status`, `error`, timestamps (the time taken is `finished_at - started_at`) and `result` (algorithm, validation metric and score, training time, rows read, attempts). After each run finishes, the API keeps the newest `FORECASTER_RETENTION_COUNT` finished jobs (`completed` or `failed`) of that `connector_id` and deletes the older ones. `queued` and `running` jobs are never deleted. The details a forecaster needs to be served live in its own `metrics`, so they survive the deletion of its job.
+
+## 8. Data Loader
 
 The loader is **new code that runs inside the worker**, as its first step. There is no separate scanner component and no background sync: the connector API only stores connection details, and the loader reads them when a job runs. It reads from a database table, applies the row selection, and writes a dataset to local scratch.
 
@@ -543,18 +567,17 @@ The loader is **new code that runs inside the worker**, as its first step. There
 | IBM i Db2 via **Mapepire** | `db2i` | 1 (in scope) | Pure-Python websocket client; no JVM, no JT400. Works on ppc64le images without extra native packages. **The** Db2 for i path for this service. |
 | IBM i Db2 via JT400/JDBC | `db2i_jdbc` | Not planned | Existing `Db2iConnector` (port 446) needs OpenJDK + `jaydebeapi`. Only revisit if the Mapepire server cannot be installed on target partitions. |
 | CSV file | `csv` | Stretch | Not planned, will be taken up if current scope is achieved ahead of time. |
-| Oracle, EDB | `oracle`, `edb` | Future | `oracle_connector.py` exists but the factory raises `NotImplementedError`. Not designed here. |
 
-### 7.1 Database source
+### 8.1 Database source
 
-- The worker reads the job's connector row (`jobs.connector_id`) with its read-only grant, decrypts the secret fields with `DB_ENCRYPTION_KEY` and connects with the result. A connector that no longer exists or cannot be decrypted fails the job with an error that names the connector and never contains a secret.
+- The worker reads the job's connector row (`jobs.connector_id`) and the connector's `training_configs` row with its read-only grant, decrypts the secret fields with `DB_ENCRYPTION_KEY` and connects with the result. A connector that no longer exists or cannot be decrypted fails the job with an error that names the connector and never contains a secret.
 - The session is opened **read-only** with a statement timeout where the database supports it. Authentication and network failures raise distinct errors so the job error tells the user which one occurred.
 - The query is built from the validated `schema`, `table`, columns and `row_selection` of the `training` object.
 - Rows are streamed with a server-side cursor in fixed-size chunks, inside one read-only transaction at the highest isolation level the database offers, so the snapshot is consistent.
 - Every user-supplied identifier is quoted through the driver's identifier API, never concatenated into SQL. Raw SQL is not accepted as a source.
 - The account named in the connector should be read-only. The read-only session is a second control; the account is the stronger one.
 
-### 7.2 Stretch: CSV file connector
+### 8.2 Stretch: CSV file connector
 
 Not part of the committed scope. Sketch only, so the Phase 1 contract does not preclude it:
 
@@ -565,16 +588,17 @@ Not part of the committed scope. Sketch only, so the Phase 1 contract does not p
 
 ---
 
-## 8. Sequence
+## 9. Sequence
 
-### 8.1 Sequence — create connector, first training, forecast (model load)
+### 9.1 Sequence — create connector, first training, forecast (model load)
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant C as Catalog
     participant U as Client
-    participant A as API + runner
+    participant A as API
+    participant P as APScheduler
     participant DB as PostgreSQL
     participant W as Worker subprocess
     participant S as Source (Db2 for i)
@@ -582,64 +606,75 @@ sequenceDiagram
     participant T as Triton
 
     C->>A: POST /v1/connectors (connection + training details)
-    A->>DB: insert connector, insert job (queued, seq assigned)
+    A->>DB: insert connector, training config and job (queued, seq assigned)
+    A->>P: add one-off job (fires now), and a cron job if TRAINING_SCHEDULE is set
     A-->>C: 201 connector id
 
-    Note over A: runner tick, no worker running
-    A->>DB: claim oldest queued job, status = running
+    P->>A: fire job (connector_id)
+    Note over A: wait for the in-process lock, one training at a time
+    A->>DB: job status = running
     A->>W: spawn (own process group, time and memory limits)
-    W->>DB: read job spec, read connector row, decrypt its secrets
+    W->>DB: read job, training config and connector row, decrypt its secrets
     W->>S: read-only query with the connector's details, stream rows
     W->>W: AutoGluon training, ONNX export
-    W->>V: write model.onnx and config.pbtxt to a temp dir, rename to version dir
-    W->>DB: insert forecasters row (staged), write manifest and metrics
-    W-->>A: exit 0
-    A->>DB: job status = completed
 
-    alt worker fails, is killed or times out
+    alt worker exits 0
+        W->>V: write model.onnx and config.pbtxt to a temp dir, rename to fc_{connector_id}_{version}
+        W->>DB: write job result (validation score, training time, rows read)
+        W-->>A: exit 0
+        A->>T: load_model fc_{connector_id}_{version}
+        T-->>A: ready
+        A->>DB: insert forecasters row (ready), job status = completed
+    else worker fails, is killed or times out
         W-->>A: non-zero exit, or killed with its process group
-        A->>DB: job status = failed (no forecasters row is made ready)
+        Note over A: run the worker again after TRAINING_RETRY_DELAY_SECONDS, up to TRAINING_MAX_ATTEMPTS attempts, unless the exit code says the failure would repeat
+        A->>V: delete the temp dir if the worker did not
+        A->>DB: job status = failed
     end
 
-    Note over A: forecaster activator
-    A->>DB: find staged forecasters
-    A->>T: load_model (Triton model control)
-    T-->>A: ready
-    A->>DB: forecaster status = ready
-
     U->>A: POST /v1/forecast/{connector_id}
-    A->>DB: resolve newest ready forecaster, read input_schema and classes
-    A->>A: validate rows against input_schema
-    A->>T: forward forecast request (inference)
+    A->>DB: resolve newest ready forecaster, read the connector's input columns
+    A->>A: validate rows against the input columns
+    A->>T: forward forecast request to fc_{connector_id}_{version}
     T-->>A: outputs (prediction, class probabilities)
     A-->>U: 200 predictions with confidence
 ```
 
-### 8.2 Sequence — scheduled training and retention (model unload)
+### 9.2 Sequence — scheduled training and retention (model unload)
 
 A client never asks for an unload. The API unloads and deletes the oldest forecaster of a connector when retention requires it. The API calls Triton's model-control API, and the client only calls the forecast API.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as API + runner + scheduler tick
+    participant P as APScheduler
+    participant A as API
     participant DB as PostgreSQL
-    participant W as Worker subprocess
     participant V as Repository volume
     participant T as Triton
 
-    Note over A: TRAINING_SCHEDULE is due
-    A->>DB: for each connector with no queued or running job: insert job (queued, training details copied from its latest job)
+    Note over P: cron job of a connector is due (TRAINING_SCHEDULE, UTC)
+    P->>A: fire job (connector_id)
+    A->>DB: does the connector have a queued or running job?
 
-    Note over A,W: same steps as the first training: claim, spawn, train, stage, load_model
-    A->>DB: forecaster status = ready
+    alt a job is queued or running
+        A->>A: skip the run, log the reason
+    else no active job
+        A->>DB: insert job (queued, seq assigned)
+        Note over A,V: same steps as the first training: wait for the lock, spawn the worker, train, write to the volume, load_model
+        A->>DB: insert forecasters row (ready)
 
-    A->>DB: connector has more than FORECASTER_RETENTION_COUNT forecasters
-    A->>DB: oldest forecaster of that connector: status = retiring
-    A->>T: unload_model (oldest)
-    T-->>A: unloaded
-    A->>V: delete oldest version dir
-    A->>DB: forecaster status = deleted
+        A->>DB: count the connector's ready forecasters
+        opt more than FORECASTER_RETENTION_COUNT
+            A->>DB: oldest ready forecaster of that connector: status = retiring
+            A->>T: unload_model fc_{connector_id}_{oldest version}
+            T-->>A: unloaded
+            A->>V: delete the oldest forecaster dir
+            A->>DB: forecaster status = deleted
+        end
+    end
+
+    Note over P,A: a run missed while the API was down is skipped, and a listener logs the reason
 ```
 
 ---
@@ -929,27 +964,28 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 
 ## 10. Configuration
 
-| Variable                              | Description                                                                                                                   | Default                          |
-|:--------------------------------------|:------------------------------------------------------------------------------------------------------------------------------|:---------------------------------|
-| `MODEL_REPO_PATH`                     | Root of the shared repository volume (Triton model repository).                                                               | `/models`                        |
-| `SCRATCH_DIR`                         | Local training scratch, not shared.                                                                                           | `/var/cache/forecast/scratch`    |
-| `DATA_DIR`                            | Read-only root of CSV training files. CSV paths in jobs are relative to it.                                                   | `/data`                          |
-| `DB_ENCRYPTION_KEY`                   | 32-byte AES-256-GCM key for connector secrets. Required by the API and passed to the worker.                                  | —                                |
-| `TRITON_URL`                          | Triton endpoint used for model control and inference.                                                                         | —                                |
+| Variable                              | Description                                                                                                                                                                             | Default                          |
+|:--------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------|
+| `MODEL_REPO_PATH`                     | Root of the shared repository volume (Triton model repository).                                                                                                                         | `/models`                        |
+| `SCRATCH_DIR`                         | Local training scratch, not shared.                                                                                                                                                     | `/var/cache/forecast/scratch`    |
+| `DATA_DIR`                            | Read-only root of CSV training files. CSV paths in jobs are relative to it.                                                                                                             | `/data`                          |
+| `DB_ENCRYPTION_KEY`                   | 32-byte AES-256-GCM key for connector secrets. Required by the API and passed to the worker.                                                                                            | —                                |
+| `TRITON_URL`                          | Triton endpoint used for model control and inference.                                                                                                                                   | —                                |
 | `TRITON_STARTUP_WAIT_S`               | How long the API waits for Triton to report ready at boot and on reconciliation before continuing without it.                  | `120`                            |
 | `TRITON_LOAD_TIMEOUT_S`               | Timeout for one `load` or `unload` call and for the wait on the model's state.                                                 | `120`                            |
 | `TRITON_INFER_TIMEOUT_S`              | Timeout for one inference request forwarded to Triton.                                                                         | `30`                             |
-| `FORECASTER_RETENTION_COUNT`          | Forecasters kept per `connector_id`. When there are more, the oldest of that connector is unloaded from Triton, then deleted. | `1`                              |
-| `TRAINING_SCHEDULE`                   | Cron expression (5 fields) for scheduled training. Each run queues a job per connector. Unset means no scheduled training.    | —                                |
-| `RUNNER_TICK_SECONDS`                 | Interval of the runner, scheduler and forecaster-activator tick.                                                              | `5`                              |
-| `DEFAULT_TIME_LIMIT_SECONDS`          | Time limit applied to each training job.                                                                                      | `1800`                           |
-| `MAX_QUEUED_JOBS`                     | Queued jobs accepted before `POST /v1/connectors` returns `429`.                                                              | `10`                             |
-| `MAX_TRAINING_ROWS`                   | Largest row count a job may train on (after the row selection).                                                               | `10000000`                       |
-| `LOADER_CHUNK_ROWS`                   | Rows per chunk when streaming the source to scratch.                                                                          | `100000`                         |
-| `WORKER_MEMORY_LIMIT_MB`              | Hard memory cap applied to the worker subprocess. Must be below the container limit.                                          | — (to be set after benchmarking) |
-| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection for the API (`forecast_metadata`).                                                                        | —                                |
-| `WORKER_POSTGRES_USER/PASSWORD`       | Credentials of the restricted `forecast_worker` role, passed to the subprocess.                                               | —                                |
-| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`    | SQLAlchemy connection pool.                                                                                                   | `5` / `5`                        |
+| `FORECASTER_RETENTION_COUNT`          | Forecasters kept per `connector_id`. When there are more, the oldest of that connector is unloaded from Triton, then deleted. Also the number of finished runs kept per `connector_id`. | `1`                              |
+| `TRAINING_SCHEDULE`                   | Cron expression (5 fields, UTC) for scheduled training, applied per connector. Unset means only the first training runs.                                                                | —                                |
+| `DEFAULT_TIME_LIMIT_SECONDS`          | Time limit applied to each training job.                                                                                                                                                | `1800`                           |
+| `TRAINING_MAX_ATTEMPTS`               | Attempts of the worker step per job, the first one included. `1` means no retry. A failure that the worker marks as permanent is not retried.                                           | `2`                              |
+| `TRAINING_RETRY_DELAY_SECONDS`        | Wait between two attempts of the same job. The job keeps the lock during the wait.                                                                                                      | `60`                             |
+| `MAX_QUEUED_JOBS`                     | Queued jobs accepted before `POST /v1/connectors` returns `429`.                                                                                                                        | `10`                             |
+| `MAX_TRAINING_ROWS`                   | Largest row count a job may train on (after the row selection).                                                                                                                         | `10000000`                       |
+| `LOADER_CHUNK_ROWS`                   | Rows per chunk when streaming the source to scratch.                                                                                                                                    | `100000`                         |
+| `WORKER_MEMORY_LIMIT_MB`              | Hard memory cap applied to the worker subprocess. Must be below the container limit.                                                                                                    | — (to be set after benchmarking) |
+| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection for the API (`forecast_metadata`).                                                                                                                                  | —                                |
+| `WORKER_POSTGRES_USER/PASSWORD`       | Credentials of the restricted `forecast_worker` role, passed to the subprocess.                                                                                                         | —                                |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`    | SQLAlchemy connection pool.                                                                                                                                                             | `5` / `5`                        |
 
 ---
 
@@ -959,9 +995,7 @@ These are undecided and need an answer before or during implementation.
 
 1. **Promotion gate.** Whether a forecaster from a scheduled run must beat or match the current one on its validation metric before it becomes `ready`. The design activates every successful training.
 2. **Resource sizing.** CPU, memory, scratch and volume sizes, and expected training duration for the target dataset sizes, are to be provided by DEV. They set `WORKER_MEMORY_LIMIT_MB` and `MAX_TRAINING_ROWS`.
-3. **Forecaster naming.** How `forecasters.name` is generated is not specified. Section 9.3 needs it to be safe as a directory name and as a Triton model name (for example lower-case letters, digits, `-` and `_`), and unique per connector.
-4. **Repeated load failure.** A `staged` forecaster whose `load` keeps failing is retried every tick. Whether it should become terminal after N attempts (a new state or `deleted`), and whether its directory should then be removed, is undecided.
-5. **Loss of the repository volume.** If the volume is lost while the database survives, `ready` rows have no files. Whether reconciliation should mark them `deleted` and queue a retrain is undecided.
-6. **Repository storage on OpenShift.** The storage class, access mode (`ReadWriteMany` assumed) and size for `triton-repository` on ppc64le are to be provided by DEV.
+3. **Loss of the repository volume.** If the volume is lost while the database survives, `ready` rows have no files. Whether reconciliation should mark them `deleted` and queue a retrain is undecided.
+4. **Connector Deletion** If a DB2 connector already connected to a forecast service is deleted, what should be done to the existing schedule/forecast models.
 
 ---
