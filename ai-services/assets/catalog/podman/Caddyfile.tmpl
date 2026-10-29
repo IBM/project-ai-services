@@ -17,7 +17,7 @@
 }
 
 # Private ingress for service-to-service traffic (mTLS enforced)
-:8443 {
+:9443 {
 	handle /internal/health {
 		# @id internal-private-health
 		respond "OK" 200
