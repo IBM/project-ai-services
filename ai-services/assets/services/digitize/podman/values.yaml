@@ -6,13 +6,13 @@ digitize:
   dbEncryptionKey: ""
 
 digitizeUi:
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.41
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.42
 
 postgres:
-  image: icr.io/ai-services-cicd/postgres:18-7
+  image: icr.io/ai-services-cicd/postgres:18-8
   username: "postgres"
   # @generate:password
   password: ""
 mcp:
-  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.7
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.8
   port: "4002"
