@@ -105,6 +105,36 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 - **Missed runs are skipped.** The jobs use a short misfire grace time, so a late run is skipped instead of run late. A run missed while the API was down, or skipped because the connector still has a `queued` or `running` job, is logged with the reason.
 - **Startup.** The API registers a cron job only for a connector that has none, and updates it when `TRAINING_SCHEDULE` has changed, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that were `queued` or `running` when the API stopped are marked `failed` by the boot recovery.
 
+```mermaid
+flowchart TD
+    POST["POST /v1/connectors<br/>store connector, training config and job (queued)"] --> REG["register APScheduler jobs:<br/>one-off (fires now), cron if TRAINING_SCHEDULE is set"]
+    REG --> ONE["one-off job fires"]
+    REG -.->|"later, only if TRAINING_SCHEDULE is set"| CRON["cron job fires"]
+
+    CRON --> ACTIVE{"connector has a<br/>queued or running job?"}
+    ACTIVE -- yes --> SKIP["skip the run, log the reason"]
+    ACTIVE -- no --> INS["insert job row (queued)"]
+
+    ONE --> LOCK
+    INS --> LOCK["wait for the in-process lock<br/>(row stays queued)"]
+    LOCK --> RUN["job status = running, attempt = 1"]
+    RUN --> SPAWN["spawn worker: python -m forecast.worker job_id<br/>own process group, time and memory limits"]
+    SPAWN --> EXIT{"worker result"}
+
+    EXIT -- "exit 0" --> LOAD["API: load_model fc_connector_version into Triton"]
+    LOAD --> REC["insert forecasters row (ready)<br/>job status = completed"]
+    REC --> RET["apply forecaster retention"]
+    RET --> PRUNE
+
+    EXIT -- "permanent failure code" --> FAIL
+    EXIT -- "other non-zero exit, killed or timed out" --> MORE{"attempts left?<br/>TRAINING_MAX_ATTEMPTS"}
+    MORE -- yes --> WAIT["delete temp dir<br/>wait TRAINING_RETRY_DELAY_SECONDS<br/>attempt + 1"]
+    WAIT --> SPAWN
+    MORE -- no --> FAIL["delete temp dir<br/>job status = failed, jobs.error set, attempts added to jobs.result"]
+    FAIL --> PRUNE["prune old finished jobs of the connector"]
+    PRUNE --> REL["release the lock"]
+```
+
 ---
 
 ## 3. Non-Goals
@@ -322,7 +352,6 @@ A connector stores the connection details of one source database, with its secre
 
 | Field               | Type   | Required | Description                                                                                                                                                                   |
 |:--------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `schema`            | string | Yes      | Schema that holds the table.                                                                                                                                                  |
 | `table`             | string | Yes      | Table to train on.                                                                                                                                                            |
 | `target_column`     | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
 | `forecast_columns`   | array  | Yes      | The input columns. Each is an object with a `name` and, where AutoGluon needs it, a `type` (`string`, `integer` or `number`). The forecast endpoint checks rows against them. |
@@ -344,7 +373,6 @@ curl -X POST http://localhost:8500/v1/connectors \
           "password": "********"
         },
         "training": {
-          "schema": "SALES",
           "table": "ORDERS",
           "target_column": "DELIVERY_LATE",
           "forecast_columns": [
@@ -679,13 +707,13 @@ sequenceDiagram
 
 ---
 
-## 9. Triton Inference Server — Component and Deployment
+## 10. Triton Inference Server — Component and Deployment
 
 This section specifies how Triton becomes a Catalog **component**, the way vLLM is today, how it is deployed on Podman and OpenShift, and how the Forecast service and Triton share the model repository volume. Sections 2.2, 4 and 8 define *who* talks to Triton and *when*; this section defines *what is deployed* and *how the files get there*.
 
 > **Status of the facts below.** Everything that describes the Catalog (asset layout, dependency wiring, volume labels, image collection) was checked against the current `ai-services` code and the vLLM, OpenSearch and digitize assets. Everything that describes Triton or the ppc64le image has not been run on the target image and must be proven there before implementation.
 
-### 9.1 Catalog assets
+### 10.1 Catalog assets
 
 ```
 ai-services/assets/components/ml_inference/triton-cpu/
@@ -766,7 +794,7 @@ env:
 
 **Triton's first `containerPort` must therefore be the HTTP port (8000).** The deployer picks the first port of the first container; if gRPC were listed first, the Forecast service would be given the gRPC port.
 
-### 9.2 Podman deployment
+### 10.2 Podman deployment
 
 The deployment order is fixed by the Catalog: all components are deployed first, then the services, then routes are registered. Triton is therefore running before the Forecast service starts. "Running" is not "ready", and the Forecast service must tolerate a Triton that is still starting (Section 9.4).
 
@@ -838,7 +866,7 @@ Why each flag:
 - **No secret and no API-key volume.** Triton has no authentication to configure.
 - **No Spyre annotations and no `/dev/shm` volume.** Inference is on CPU with ONNX Runtime.
 
-### 9.3 The shared repository volume
+### 10.3 The shared repository volume
 
 #### Ownership and naming
 
@@ -910,7 +938,7 @@ Two requirements, whatever mechanism provides them:
 
 Both depend on how the image's user and rootless Podman interact and must be verified on the ppc64le image before implementation.
 
-### 9.4 Model lifecycle against Triton
+### 10.4 Model lifecycle against Triton
 
 This is the Triton-facing half of Sections 8.1 and 8.2. Triton is addressed over HTTP at `TRITON_URL`.
 
@@ -946,7 +974,7 @@ instance_group [ { kind: KIND_CPU, count: 1 } ]
 # input / output tensor entries: produced by the ONNX export, one per input column in input_schema
 ```
 
-### 9.5 OpenShift deployment
+### 10.5 OpenShift deployment
 
 The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and the service charts do, rather than a KServe `InferenceService` as `llm/vllm-cpu` does. The reason is that KServe's runtime model loads a model from a storage URI at deploy time, whereas here models arrive after the pod is up and are controlled through Triton's repository API.
 
@@ -962,7 +990,7 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 
 ---
 
-## 10. Configuration
+## 11. Configuration
 
 | Variable                              | Description                                                                                                                                                                             | Default                          |
 |:--------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------|
@@ -989,7 +1017,7 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 
 ---
 
-## 11. Open Questions
+## 12. Open Questions
 
 These are undecided and need an answer before or during implementation.
 
