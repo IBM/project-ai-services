@@ -13,6 +13,7 @@ from functools import partial
 from pathlib import Path
 
 from common.misc_utils import get_logger, cleanup_staging_directory
+from common.validation_utils import safe_filename
 from digitize.models import DocumentContentResponse, OutputFormat
 from digitize.settings import settings
 
@@ -55,7 +56,7 @@ class StorageManager:
         loop = asyncio.get_running_loop()
 
         for filename, content in zip(filenames, file_contents):
-            target = staging_path / filename
+            target = safe_filename(filename, staging_path)
             try:
                 await loop.run_in_executor(
                     None,

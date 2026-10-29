@@ -126,3 +126,18 @@ func TestBuildGetAllQuery_PaginationArgs(t *testing.T) {
 	assert.Contains(t, query, "LIMIT $2")
 	assert.Contains(t, query, "OFFSET $3")
 }
+
+// TestBuildApplicationWhereClauses_CreatedByFilter verifies that buildApplicationWhereClauses
+// produces the correct created_by clause and bound argument.
+func TestBuildApplicationWhereClauses_CreatedByFilter(t *testing.T) {
+	filters := &ApplicationFilters{
+		CreatedBy: "test-user-id",
+	}
+
+	clauses, args := buildApplicationWhereClauses(filters)
+
+	require.Len(t, clauses, 1)
+	require.Len(t, args, 1)
+	assert.Equal(t, "a.created_by = $1", clauses[0])
+	assert.Equal(t, "test-user-id", args[0])
+}

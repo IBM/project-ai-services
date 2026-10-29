@@ -18,6 +18,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import JSONResponse, Response
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import cleanup_staging_directory, get_llm_endpoint, get_logger
+from common.validation_utils import sanitize_basename
 
 from extract.db.manager import db_repo
 from extract.models import (
@@ -430,17 +431,20 @@ async def create_extract_job(
         source_type = (ext or "").lstrip(".")
         validated.append((file.filename, source_type))
 
-    # Duplicate filename check
+    # Duplicate filename check — compare sanitized basenames, since that is the
+    # name each file is staged under (e.g. "file.txt" and "../other/file.txt"
+    # would otherwise collide on disk).
     filenames_seen: set[str] = set()
     for idx, (filename, _) in enumerate(validated):
-        if filename in filenames_seen:
+        safe_name = sanitize_basename(filename)
+        if safe_name in filenames_seen:
             msg = (
                 f"Duplicate filename detected at index {idx}: {filename!r}. "
                 "All file names must be unique within a batch."
             )
             logger.error(msg)
             APIError.raise_error(ErrorCode.DUPLICATE_FILE, msg)
-        filenames_seen.add(filename)
+        filenames_seen.add(safe_name)
 
     # Content validation — collect all failures before rejecting
     for idx, file in enumerate(files):

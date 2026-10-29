@@ -2,3 +2,7 @@ containers:
   - name: "translate-api-{{ .InstanceSlug }}-translate-api"
     format: ".Status"
     alias: API_STATUS
+
+  - name: "translate-api-{{ .InstanceSlug }}-mcp-sidecar"
+    format: ".Status"
+    alias: MCP_STATUS

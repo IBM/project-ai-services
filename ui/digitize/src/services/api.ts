@@ -42,6 +42,7 @@ export interface Job {
   job_id: string;
   job_name?: string;
   operation: string;
+  source?: string;
   status: string;
   submitted_at?: string;
   completed_at?: string;

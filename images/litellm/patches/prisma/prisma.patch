@@ -1,0 +1,11 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 77afa5e..a339284 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -83,3 +83,6 @@ opt-level = 's' # Optimize for size.
+ [profile.profiling]
+ inherits = "release"
+ debug = true
++
++[patch.crates-io]
++ring = { path = "/build/ring-0.16.20" }

@@ -4,6 +4,8 @@ The root [`Tiltfile`](../../Tiltfile) runs the AI Services Catalog (PostgreSQL, 
 
 > **Local development only.** Every credential and key listed below is a publicly documented default. Never use them on a shared or real environment.
 
+To run the RAG chatbot on macOS (independent of the catalog), see [RAG on macOS with Tilt](tilt-rag-local-development.md).
+
 ## Prerequisites
 
 - [Tilt](https://docs.tilt.dev/install.html), Go, Node.js/npm

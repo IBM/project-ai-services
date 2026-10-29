@@ -173,7 +173,7 @@ class TestChunkFailureHandling:
 
         chunks = ["chunk A", "chunk B"]
 
-        def fake_query(llm_endpoint, messages, model, max_tokens, temperature):
+        def fake_query(llm_endpoint, messages, model, max_tokens, temperature, **kwargs):
             return {"error": "Model overloaded"}, 10, 0
 
         import summarize.app as app_module
@@ -201,7 +201,7 @@ class TestChunkFailureHandling:
         chunks = ["chunk X", "chunk Y", "chunk Z"]
         call_count = 0
 
-        def fake_query(llm_endpoint, messages, model, max_tokens, temperature):
+        def fake_query(llm_endpoint, messages, model, max_tokens, temperature, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 3:
@@ -310,7 +310,7 @@ class TestChunkFailureHandling:
 
         chunks = ["chunk one", "chunk two"]
 
-        def fake_query(llm_endpoint, messages, model, max_tokens, temperature):
+        def fake_query(llm_endpoint, messages, model, max_tokens, temperature, **kwargs):
             return "Good summary.", 10, 5
 
         import summarize.app as app_module
@@ -338,7 +338,7 @@ class TestChunkFailureHandling:
 
         chunks = ["chunk I", "chunk II"]
 
-        def fake_query(llm_endpoint, messages, model, max_tokens, temperature):
+        def fake_query(llm_endpoint, messages, model, max_tokens, temperature, **kwargs):
             return {"error": "bad request"}, 10, 0
 
         mock_build_merge = Mock()

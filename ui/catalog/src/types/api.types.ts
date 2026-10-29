@@ -436,9 +436,7 @@ export interface WorkerApiResponse {
 
 export interface WorkerListResponse {
   data: WorkerApiResponse[];
-  total: number;
-  page: number;
-  page_size: number;
+  pagination: PaginationMetadata;
 }
 
 export interface WorkerRegisterResponse {
