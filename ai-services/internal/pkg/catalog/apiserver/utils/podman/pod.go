@@ -17,9 +17,6 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 )
 
-// minRouteParts is the minimum number of ":"-separated parts in a route entry (port and route type).
-const minRouteParts = 2
-
 // RenderAndParsePodTemplate renders a pod template and parses it into a PodSpec.
 func RenderAndParsePodTemplate(
 	podTemplate *template.Template,
@@ -79,8 +76,10 @@ func DeployPodmanPod(ctx context.Context, rt runtime.Runtime, podSpec *podmodels
 	return nil
 }
 
-// ExtractPodEndpointInfo extracts host (pod name) and port from a deployed pod spec.
-func ExtractPodEndpointInfo(ctx context.Context, podSpec *podmodels.PodSpec) (*EndpointInfo, error) {
+// ExtractPodEndpoint extracts the internal host (pod name) and port from a component pod spec.
+// It reads directly from the container port declarations, which is the authoritative source
+// for component-to-service communication. Components do not declare ai-services.io/routes.
+func ExtractPodEndpoint(ctx context.Context, podSpec *podmodels.PodSpec) (*EndpointInfo, error) {
 	if podSpec == nil {
 		return nil, fmt.Errorf("pod spec is nil")
 	}
@@ -90,23 +89,13 @@ func ExtractPodEndpointInfo(ctx context.Context, podSpec *podmodels.PodSpec) (*E
 		return nil, fmt.Errorf("pod name is empty")
 	}
 
-	endpoints := ExtractPodEndpoints(podSpec)
-
 	var targetPort string
-	if port, ok := endpoints["api"]; ok {
-		targetPort = port
-	} else if port, ok := endpoints["http"]; ok {
-		targetPort = port
-	} else {
-		for _, port := range endpoints {
-			targetPort = port
-
-			break
-		}
+	if len(podSpec.Spec.Containers) > 0 && len(podSpec.Spec.Containers[0].Ports) > 0 {
+		targetPort = fmt.Sprintf("%d", podSpec.Spec.Containers[0].Ports[0].ContainerPort)
 	}
 
 	if targetPort == "" {
-		return nil, fmt.Errorf("no port found in pod annotations for %s", podName)
+		return nil, fmt.Errorf("no port found in pod spec for %s", podName)
 	}
 
 	endpoint := fmt.Sprintf("%s:%s", podName, targetPort)
@@ -118,33 +107,6 @@ func ExtractPodEndpointInfo(ctx context.Context, podSpec *podmodels.PodSpec) (*E
 		Domain:   podName,
 		Port:     targetPort,
 	}, nil
-}
-
-// ExtractPodEndpoints parses the ai-services.io/routes annotation from a pod spec.
-// Returns a map of route names/types to container ports.
-func ExtractPodEndpoints(podSpec *podmodels.PodSpec) map[string]string {
-	endpoints := make(map[string]string)
-
-	if podSpec == nil || podSpec.Annotations == nil {
-		return endpoints
-	}
-
-	routesAnnotation, ok := podSpec.Annotations["ai-services.io/routes"]
-	if !ok || routesAnnotation == "" {
-		return endpoints
-	}
-
-	routes := strings.Split(routesAnnotation, ",")
-	for _, route := range routes {
-		parts := strings.Split(strings.TrimSpace(route), ":")
-		if len(parts) >= minRouteParts {
-			port := parts[0]
-			routeType := parts[len(parts)-1]
-			endpoints[routeType] = port
-		}
-	}
-
-	return endpoints
 }
 
 // FetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations.

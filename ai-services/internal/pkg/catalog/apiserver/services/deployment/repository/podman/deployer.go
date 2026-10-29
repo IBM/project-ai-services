@@ -766,7 +766,7 @@ func (d *PodmanDeployer) deployPodTemplate(
 	if exists {
 		logger.InfofCtx(ctx, "Pod '%s' already exists, skipping deployment\n", podSpec.Name)
 
-		return d.extractPodEndpoints(&podSpec), podSpec.Name, routes, nil
+		return d.extractInternalEndpoint(&podSpec), podSpec.Name, routes, nil
 	}
 
 	// Deploy using rendered bytes directly (same as components)
@@ -776,11 +776,12 @@ func (d *PodmanDeployer) deployPodTemplate(
 
 	logger.InfofCtx(ctx, "Service template '%s' deployed successfully\n", podTemplateName)
 
-	return d.extractPodEndpoints(&podSpec), podSpec.Name, routes, nil
+	return d.extractInternalEndpoint(&podSpec), podSpec.Name, routes, nil
 }
 
-// extractPodEndpoints extracts endpoint information from a pod specification.
-func (d *PodmanDeployer) extractPodEndpoints(podSpec *podmodels.PodSpec) map[string]string {
+// extractInternalEndpoint returns {"host": podName, "port": firstContainerPort} for a service pod.
+// Used to build the service's internal URL after its own pod is deployed.
+func (d *PodmanDeployer) extractInternalEndpoint(podSpec *podmodels.PodSpec) map[string]string {
 	endpoints := make(map[string]string)
 	endpoints["host"] = podSpec.Name
 
@@ -895,7 +896,7 @@ func (d *PodmanDeployer) registerServiceRoutes(
 	return nil
 }
 
-// buildInternalEndpointURL constructs http://host:port from the map returned by extractPodEndpoints.
+// buildInternalEndpointURL constructs http://host:port from the map returned by extractInternalEndpoint.
 // Returns an empty string when host is missing.
 func buildInternalEndpointURL(endpoints map[string]string) string {
 	host := endpoints["host"]
