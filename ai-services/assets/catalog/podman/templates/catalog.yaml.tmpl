@@ -154,9 +154,6 @@ spec:
           mountPath: /run/containers/auth.json
           subPath: auth.json
           readOnly: true
-        - name: iommu-groups
-          mountPath: /sys/kernel/iommu_groups
-          readOnly: true
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
         - name: gateway-pki
@@ -177,7 +174,6 @@ spec:
           mountPath: /data/catalog-bundles
       resources:
         requests:
-          podman.io/device=/dev/vfio: 4
           memory: "1Gi"
         limits:
           memory: "1Gi"
@@ -191,10 +187,6 @@ spec:
     - name: podman-auth
       secret:
         secretName: podman-auth-secret
-    - name: iommu-groups
-      hostPath:
-        path: /sys/kernel/iommu_groups
-        type: Directory
     - name: ai-services-data
       hostPath:
         path: {{ .BaseDir }}
