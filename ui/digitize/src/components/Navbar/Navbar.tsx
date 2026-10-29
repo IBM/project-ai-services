@@ -32,6 +32,13 @@ const Navbar = ({ isSideNavOpen, setIsSideNavOpen }: NavbarProps) => {
         aria-label="Side navigation"
         expanded={isSideNavOpen}
         isFixedNav
+        // isRail keeps the collapsed 3rem rail interactive: without it Carbon
+        // (>= 1.119) marks a collapsed fixed nav as `inert` and sets
+        // tabIndex=-1 on its links. Hover/focus expansion is disabled because
+        // expansion is driven by the header menu button.
+        isRail
+        addMouseListeners={false}
+        addFocusListeners={false}
         isChildOfHeader={false}
         ref={navRef}
       >
