@@ -1,6 +1,6 @@
 REGISTRY ?= icr.io/ai-services-private
 IMAGE = chatbot-ui
-TAG ?= v0.0.60
+TAG ?= v0.0.61
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER?=podman
