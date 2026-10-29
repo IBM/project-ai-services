@@ -68,7 +68,7 @@ async def _validate_files(
     },
     summary="Create async jobs to upload and process documents",
     description=(
-        "Upload documents (PDF or DOCX) for processing. Supports two operation types:\n\n"
+        "Upload documents (PDF, DOCX, or HTML) for processing. Supports two operation types:\n\n"
         "- **ingestion**: Process and index documents into vector database for semantic search\n"
         "- **digitization**: Convert document to text/markdown/JSON format (single file only)\n\n"
         "The operation runs asynchronously in the background. "
@@ -95,7 +95,7 @@ async def _validate_files(
                                     "type": "string",
                                     "format": "binary",
                                 },
-                                "description": "Document files (PDF or DOCX) to process",
+                                "description": "Document files (PDF, DOCX, or HTML) to process",
                             },
                         },
                     }
@@ -107,7 +107,7 @@ async def _validate_files(
 async def create_job(
     files: List[UploadFile] = File(
         ...,
-        description="Document files (PDF or DOCX) to process",
+        description="Document files (PDF, DOCX, or HTML) to process",
     ),
     operation: models.OperationType = Query(
         models.OperationType.INGESTION,

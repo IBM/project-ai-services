@@ -293,7 +293,7 @@ tags_metadata = [
 app = FastAPI(
     title="Digitize Documents Service",
     description=(
-        "Document digitization and ingestion API for processing PDF and DOCX files "
+        "Document digitization and ingestion API for processing PDF, DOCX, and HTML files "
         "into searchable content. "
         "Supports both digitization (converting documents to text/markdown/JSON) and "
         "ingestion (processing and indexing documents into a vector database for "
