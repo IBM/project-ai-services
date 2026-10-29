@@ -156,7 +156,7 @@ func validateCertifiedBy(certifiedBy string) error {
 		if !isAllowedCertifiedByRune(r) {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
-				Message: fmt.Sprintf("metadata.yaml: 'certified_by' contains an unsupported character %q", r),
+				Message: fmt.Sprintf("metadata.yaml: 'certified_by' contains an unsupported character %q (allowed: letters, digits, space and . , & ' - _ ( ))", r),
 			}
 		}
 	}
@@ -174,6 +174,7 @@ func validateCertifiedBy(certifiedBy string) error {
 				Message: "metadata.yaml: 'certified_by' must not be \"IBM\"",
 			}
 		}
+
 		return &validators.ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: "metadata.yaml: 'certified_by' must not contain compatibility characters",
