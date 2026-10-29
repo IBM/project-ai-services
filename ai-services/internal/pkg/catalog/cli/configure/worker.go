@@ -81,13 +81,16 @@ func RegisterLocalWorkerIfNeeded(ctx context.Context, mtlsSecretExists bool, c *
 	return registerLocalWorker(ctx, c)
 }
 
-// ValidateSkipLocalWorker enforces that --skip-local-worker cannot be
-// changed on a re-run. It infers what the original run used from the catalog DB:
+// ValidateSkipLocalWorker enforces that --skip-local-worker cannot be set to
+// true on a re-run when a local worker is already registered in the catalog DB.
 //
-//   - local worker registered → original run had --skip-local-worker=false
-//   - local worker absent     → original run had --skip-local-worker=true
+// When the local worker is absent from the DB (exists=false) the run state is
+// ambiguous — the previous run may have used --skip-local-worker=true, or it
+// may have failed before worker registration completed. In both cases there is
+// no live worker state to corrupt, so any flag value is permitted.
 //
-// An error is returned when the current flag value contradicts that state.
+// An error is returned only when exists=true && skipLocalWorker=true, i.e. a
+// registered worker would be orphaned by switching to skip mode.
 // This function is a no-op on a fresh install (isReinstall=false).
 func ValidateSkipLocalWorker(ctx context.Context, c *catalogclient.Client, isReinstall bool, skipLocalWorker bool) error {
 	if !isReinstall {
@@ -103,9 +106,10 @@ func ValidateSkipLocalWorker(ctx context.Context, c *catalogclient.Client, isRei
 	// from a previous run and must not influence this decision.
 	exists := findLocalWorker(workers, false)
 
-	// exists == true  → original flag was false (local worker was joined)
-	// exists == false → original flag was true  (local worker was skipped)
-	if skipLocalWorker == exists {
+	// Block only when a registered worker exists and the user wants to skip it.
+	// When exists=false the state is ambiguous (failed run vs. original skip),
+	// so we always allow to avoid blocking a legitimate retry.
+	if exists && skipLocalWorker {
 		return fmt.Errorf("--skip-local-worker flag cannot be changed on re-run; to change this setting, uninstall and re-run catalog configure")
 	}
 
