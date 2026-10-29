@@ -882,7 +882,7 @@ const JobMonitorPage = () => {
             dispatch({ type: "OPEN_CANCEL_MODAL", payload: job.job_id })
           }
         />
-      ) : !isNonTerminal ? (
+      ) : !isConnector && !isNonTerminal ? (
         <Button
           hasIconOnly
           kind="ghost"
@@ -1373,7 +1373,7 @@ const JobMonitorPage = () => {
           size="sm"
           modalLabel="Cancel Job"
           modalHeading="Confirm cancel"
-          primaryButtonText="Cancel job"
+          primaryButtonText="Cancel"
           secondaryButtonText="Close"
           primaryButtonDisabled={!state.isCancelConfirmed}
           onRequestClose={() => dispatch({ type: "CLOSE_CANCEL_MODAL" })}
