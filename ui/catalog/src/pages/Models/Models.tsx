@@ -6,7 +6,7 @@ const Models = () => {
   return (
     <div className={styles.modelsContainer}>
       <PageHeader
-        title="AI Models"
+        title="Models"
         subtitle="Manage foundation AI models and deployed inference instances across IBM Power worker nodes."
         className={styles.pageHeader}
       />
@@ -16,8 +16,8 @@ const Models = () => {
           contained={false}
           className={styles.tabList}
         >
-          <Tab>Deployed Models</Tab>
-          <Tab>Model Catalog</Tab>
+          <Tab>Deployments</Tab>
+          <Tab>Catalog</Tab>
         </TabList>
         <TabPanels>
           <TabPanel />
