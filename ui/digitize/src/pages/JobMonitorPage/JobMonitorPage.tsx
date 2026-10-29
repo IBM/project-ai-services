@@ -352,8 +352,7 @@ const headers = [
   { key: "started", header: "Started" },
   { key: "duration", header: "Duration" },
   { key: "view_action", header: "" },
-  { key: "cancel_action", header: "" },
-  { key: "delete_action", header: "" },
+  { key: "row_action", header: "" },
 ];
 
 const getStatusIcon = (status: string) => {
@@ -777,7 +776,7 @@ const JobMonitorPage = () => {
         filename,
         headers,
         rows: exportRows,
-        excludeColumns: ["view_action", "cancel_action", "delete_action"],
+        excludeColumns: ["view_action", "row_action"],
       });
 
       dispatch({
@@ -871,7 +870,7 @@ const JobMonitorPage = () => {
           View details
         </Button>
       ),
-      cancel_action: isCancellable ? (
+      row_action: isCancellable ? (
         <Button
           hasIconOnly
           kind="ghost"
@@ -883,8 +882,7 @@ const JobMonitorPage = () => {
             dispatch({ type: "OPEN_CANCEL_MODAL", payload: job.job_id })
           }
         />
-      ) : null,
-      delete_action: !isNonTerminal ? (
+      ) : !isNonTerminal ? (
         <Button
           hasIconOnly
           kind="ghost"
