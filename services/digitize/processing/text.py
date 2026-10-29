@@ -1,9 +1,10 @@
 """
-Text processing: extraction from PDF and DOCX converted documents.
+Text processing: extraction from PDF, DOCX, and HTML converted documents.
 
 Responsibilities:
 - process_text      — PDF text extraction with TOC / font-size header levels
 - process_text_docx — DOCX text extraction with TOC / fallback header levels
+- process_text_html — HTML text extraction with heading level mapping
 """
 
 import json
@@ -19,6 +20,33 @@ excluded_labels = {
 }
 
 
+def _build_structured_text(converted_doc, src_path, out_path, resolve_header, page_count):
+    """Shared by process_text_docx / process_text_html (page-less formats).
+
+    resolve_header(text_obj, last_level) -> (header_text, new_last_level)
+    """
+    t0 = time.time()
+    if not converted_doc.texts:
+        logger.debug(f"No text content found in '{src_path}'")
+        out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
+        return page_count, 0.0
+
+    out, last_level = [], 0
+    for text_obj in converted_doc.texts:
+        if text_obj.label in excluded_labels:
+            continue
+        text = text_obj.text
+        label = text_obj.label
+        if label in ("section_header", "title"):
+            text, last_level = resolve_header(text_obj, last_level)
+            label = "section_header"
+        out.append({"label": label, "text": text, "page": None, "font_size": None})
+
+    process_time = time.time() - t0
+    out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return page_count, process_time
+
+
 def process_text_docx(converted_doc, docx_path, out_path):
     """
     Process text content from DOCX files.
@@ -28,11 +56,6 @@ def process_text_docx(converted_doc, docx_path, out_path):
     from digitize.parsing.docx import get_docx_toc, estimate_docx_page_count
 
     page_count = 0
-    process_time = 0.0
-
-    # Initialize TocHeaders to get the Table of Contents (TOC)
-    t0 = time.time()
-
     toc_headers = None
     try:
         toc_headers = get_docx_toc(docx_path)
@@ -40,60 +63,41 @@ def process_text_docx(converted_doc, docx_path, out_path):
     except Exception as e:
         logger.debug(f"No TOC found or failed to load TOC: {e}")
 
-    # --- Text Extraction ---
-    if not converted_doc.texts:
-        logger.debug(f"No text content found in '{docx_path}'")
-        out_path.write_text(json.dumps([], indent=2), encoding="utf-8")
-        return page_count, process_time
+    def resolve(text_obj, last_level):
+        header_text = text_obj.text
+        text_content = text_obj.text.strip()
+        if toc_headers:
+            header_prefix = get_matching_header_lvl(toc_headers, text_content)
+            if header_prefix:
+                header_text = f"{header_prefix} {text_content}"
+                last_level = len(header_prefix.strip())
+                logger.debug(f"DOCX header '{text_content[:50]}...' matched TOC level {last_level}")
+            else:
+                new_header_level = last_level + 1
+                header_text = f"{'#' * new_header_level} {text_content}"
+                last_level = new_header_level
+                logger.debug(f"DOCX header '{text_content[:50]}...' assigned level {new_header_level}")
+        return header_text, last_level
 
-    structured_output = []
-    last_header_level = 0
-    for text_obj in converted_doc.texts:
-        label = text_obj.label
-        if label in excluded_labels:
-            continue
+    return _build_structured_text(converted_doc, docx_path, out_path, resolve, page_count)
 
-        # Check if it's a section header
-        if label == "section_header":
-            # For DOCX files, use TOC for heading levels
-            page_no = None
-            header_text = text_obj.text
-            text_content = text_obj.text.strip()
 
-            # Check if we have TOC for this header
-            if toc_headers:
-                header_prefix = get_matching_header_lvl(toc_headers, text_content)
-                if header_prefix:
-                    # Use TOC level
-                    header_text = f"{header_prefix} {text_content}"
-                    last_header_level = len(header_prefix.strip())
-                    logger.debug(f"DOCX header '{text_content[:50]}...' matched TOC level {last_header_level}")
-                else:
-                    # No TOC match, use previous level + 1
-                    new_header_level = last_header_level + 1
-                    header_text = f"{'#' * new_header_level} {text_content}"
-                    logger.debug(f"DOCX header '{text_content[:50]}...' assigned level {new_header_level}")
+def process_text_html(converted_doc, html_path, out_path):
+    """
+    Process text content from HTML files.
+    Extracts structured text and maps HTML headings to markdown-style hashes.
+    """
+    import math
+    from digitize.parsing.docx import CHARS_PER_PAGE
 
-            structured_output.append({
-                "label": label,
-                "text": header_text,
-                "page": page_no,
-                "font_size": None
-            })
-        else:
-            # For non-header elements
-            page_no = None
-            structured_output.append({
-                "label": label,
-                "text": text_obj.text,
-                "page": page_no,
-                "font_size": None
-            })
+    def resolve(text_obj, last_level):
+        # Docling: <h1> -> label "title"; <hN> (N>=2) -> section_header level N-1
+        level = 1 if text_obj.label == "title" else getattr(text_obj, "level", 1) + 1
+        return f"{'#' * level} {text_obj.text.strip()}", level
 
-    process_time = time.time() - t0
-    out_path.write_text(json.dumps(structured_output, indent=2), encoding="utf-8")
-
-    return page_count, process_time
+    chars = sum(len(t.text) for t in converted_doc.texts) if converted_doc.texts else 0
+    page_count = max(1, math.ceil(chars / CHARS_PER_PAGE))
+    return _build_structured_text(converted_doc, html_path, out_path, resolve, page_count)
 
 
 def process_text(converted_doc, doc_path, out_path):

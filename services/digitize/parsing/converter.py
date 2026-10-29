@@ -212,7 +212,8 @@ def get_doc_converter():
     doc_converter = DocumentConverter(
         allowed_formats=[
             InputFormat.PDF,
-            InputFormat.DOCX
+            InputFormat.DOCX,
+            InputFormat.HTML,
         ],
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )

@@ -80,6 +80,14 @@ class TestGetDocumentPageCount:
         
         assert result == 20
 
+    def test_get_page_count_for_html(self):
+        """Test page count for HTML files returns 1."""
+        assert get_document_page_count("document.html") == 1
+
+    def test_get_page_count_for_html_uppercase(self):
+        """Test page count for HTML files with uppercase extension returns 1."""
+        assert get_document_page_count("document.HTML") == 1
+
     def test_get_page_count_for_unknown_extension(self):
         """Test page count for unknown file extension returns 0."""
         result = get_document_page_count("document.txt")
