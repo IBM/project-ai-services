@@ -155,6 +155,8 @@ func (r *componentRepo) GetByName(ctx context.Context, name string) (*models.Com
 }
 
 // scanComponent scans a component row and unmarshals JSON fields.
+//
+//nolint:funlen // scanning all component columns is inherently long
 func scanComponent(rows pgx.Rows) (*models.Component, error) {
 	var (
 		component     models.Component
