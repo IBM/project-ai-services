@@ -82,3 +82,22 @@ func RemoveDirContents(dir string) error {
 
 	return nil
 }
+
+// CreateTempFile writes content to a new temporary file whose name matches pattern
+// (e.g. "extract-text-*.txt") and returns its path. The caller must remove the file.
+func CreateTempFile(pattern, content string) (string, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	defer func() { _ = f.Close() }()
+
+	if _, err := f.WriteString(content); err != nil {
+		_ = os.Remove(f.Name())
+
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	return f.Name(), nil
+}

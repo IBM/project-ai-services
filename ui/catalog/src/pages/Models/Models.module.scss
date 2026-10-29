@@ -1,0 +1,36 @@
+@use "carbonTokens" as *;
+
+.modelsContainer {
+  background-color: var(--cds-layer-02);
+}
+
+.pageHeader {
+  background-color: var(--cds-layer-01);
+  margin-bottom: 0;
+  border: none !important ;
+
+  :global(.c4p--page-header__last-row-buffer) {
+    border-bottom: none;
+  }
+
+  :global(.cds--grid) {
+    margin: 0;
+  }
+}
+
+.tabList {
+  @include type-style("heading-compact-01");
+  margin: 0;
+  background-color: var(--cds-layer-01);
+  padding-left: $spacing-06;
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+
+  :global(.cds--tabs__nav-item),
+  :global(.cds--tabs__nav-link) {
+    border-bottom: 2px solid var(--cds-border-subtle-01);
+  }
+
+  :global(.cds--tabs__nav-item--selected) {
+    border-bottom: 3px solid var(--cds-border-interactive);
+  }
+}

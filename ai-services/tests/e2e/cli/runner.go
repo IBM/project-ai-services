@@ -46,6 +46,7 @@ const (
 	svcDigitizeBackend = "digitize-backend"
 	svcSimilarityAPI   = "similarity-api"
 	svcSummarizeAPI    = "summarize-api"
+	svcExtractAPI      = "extract-api"
 )
 
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
@@ -495,6 +496,11 @@ func ExtractSimilarityAPIURL(infoOutput string) string {
 // of human-readable title changes in info.md.
 func ExtractCatalogSummarizeURL(infoOutput string) string {
 	return extractURLBySubstring(infoOutput, svcSummarizeAPI)
+}
+
+// ExtractExtractURL parses the 'application info' output for the entity extraction service URL.
+func ExtractExtractURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcExtractAPI)
 }
 
 // getOpenShiftRouteURLs fetches OpenShift routes for the given application namespace
