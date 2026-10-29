@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useDeploymentDatasourceSupport } from "./hooks/useDeploymentDatasourceSupport";
 import {
   Grid,
@@ -8,14 +8,12 @@ import {
   SideNavLink,
   Tag,
   ProgressBar,
-  Button,
-  IconButton,
-  TextInput,
   SkeletonText,
   SkeletonPlaceholder,
   ToastNotification,
 } from "@carbon/react";
 import ApplicationDatasourcesTable from "./components/ApplicationDatasourcesTable";
+import { InlineEditableTitle } from "@/components";
 import { PageHeader, ProductiveCard } from "@carbon/ibm-products";
 import {
   ArrowLeft,
@@ -24,7 +22,6 @@ import {
   PauseOutline,
   ErrorFilled,
   InProgress,
-  Edit,
   DiamondFill,
 } from "@carbon/icons-react";
 import type {
@@ -85,27 +82,8 @@ const DeploymentDetails = ({
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
-  const [editedName, setEditedName] = useState(deployment.name);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
   const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
-  const nameInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setEditedName(deployment.name);
-    setSaveError("");
-    setIsEditingName(false);
-  }, [deployment.name]);
-
-  useEffect(() => {
-    if (isEditingName) {
-      nameInputRef.current?.focus();
-      nameInputRef.current?.select();
-    }
-  }, [isEditingName]);
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -413,54 +391,16 @@ const DeploymentDetails = ({
     return Math.round((used / allocated) * 100);
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    setSaveError("");
-
-    try {
-      await api.put(APPLICATION_ENDPOINTS.UPDATE_APPLICATION(deployment.id), {
-        name: editedName,
-      });
-      onNameUpdate?.(editedName);
-      setSaveSuccess(true);
-      setIsEditingName(false);
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Failed to update deployment name";
-      setSaveError(errorMessage);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setEditedName(deployment.name);
-    setSaveError("");
-    setIsEditingName(false);
+  // Persists the edited deployment name and notifies the parent
+  const handleNameSave = async (newName: string) => {
+    await api.put(APPLICATION_ENDPOINTS.UPDATE_APPLICATION(deployment.id), {
+      name: newName,
+    });
+    onNameUpdate?.(newName);
   };
 
   return (
     <>
-      {saveSuccess && (
-        <ToastNotification
-          kind="success"
-          title="Name updated successfully"
-          timeout={5000}
-          onClose={() => setSaveSuccess(false)}
-          className={styles.toastNotification}
-        />
-      )}
-      {saveError && (
-        <ToastNotification
-          kind="error"
-          title="Failed to update name"
-          subtitle={saveError}
-          onClose={() => setSaveError("")}
-          className={styles.toastNotification}
-        />
-      )}
       {datasourceSupportError && (
         <ToastNotification
           kind="error"
@@ -480,12 +420,7 @@ const DeploymentDetails = ({
               title: deploymentSource,
               label: (
                 <span
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    cursor: "pointer",
-                  }}
+                  className={styles.breadcrumbLabel}
                   onClick={(e) => {
                     e.preventDefault();
                     onBack();
@@ -500,82 +435,14 @@ const DeploymentDetails = ({
           breadcrumbOverflowAriaLabel="Show more breadcrumbs"
           title={{
             content: (
-              <div
-                aria-label={
-                  isEditingName ? "Edit deployment name" : deployment.name
-                }
-              >
-                {isEditingName ? (
-                  <Grid className={styles.inlineEditRow} narrow>
-                    <Column sm={4} md={4} lg={8}>
-                      <TextInput
-                        ref={nameInputRef}
-                        id="deployment-name-inline"
-                        labelText="Deployment name"
-                        hideLabel
-                        size="md"
-                        value={editedName}
-                        onChange={(e) => {
-                          setEditedName(e.target.value);
-                          setSaveError("");
-                        }}
-                        disabled={isSaving}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") void handleSave();
-                          if (e.key === "Escape") handleCancel();
-                        }}
-                      />
-                    </Column>
-                    <Column
-                      sm={2}
-                      md={2}
-                      lg={2}
-                      className={styles.inlineEditButtonCol}
-                    >
-                      <Button
-                        kind="secondary"
-                        size="md"
-                        onClick={handleCancel}
-                        disabled={isSaving}
-                        className={styles.inlineEditButton}
-                      >
-                        Cancel
-                      </Button>
-                    </Column>
-                    <Column
-                      sm={2}
-                      md={2}
-                      lg={2}
-                      className={styles.inlineEditButtonCol}
-                    >
-                      <Button
-                        kind="tertiary"
-                        size="md"
-                        onClick={() => void handleSave()}
-                        disabled={isSaving || !editedName.trim()}
-                        className={styles.inlineEditButton}
-                      >
-                        {isSaving ? "Saving..." : "Save"}
-                      </Button>
-                    </Column>
-                  </Grid>
-                ) : (
-                  <div className={styles.titleRow}>
-                    <span>{deployment.name}</span>
-                    <IconButton
-                      label="Edit deployment name"
-                      kind="ghost"
-                      size="md"
-                      align="right"
-                      onClick={() => setIsEditingName(true)}
-                    >
-                      <Edit size={16} />
-                    </IconButton>
-                  </div>
-                )}
-              </div>
+              <InlineEditableTitle
+                id="deployment-name-inline"
+                label="Deployment name"
+                value={deployment.name}
+                onSave={handleNameSave}
+              />
             ),
-            asText: "",
+            asText: deployment.name,
             breadcrumbContent: deployment.name,
           }}
           subtitle={
@@ -693,11 +560,7 @@ const DeploymentDetails = ({
                             <div key={index} className={styles.resourceItem}>
                               <SkeletonText lineCount={1} width="30%" />
                               <SkeletonPlaceholder
-                                style={{
-                                  width: "100%",
-                                  height: "0.5rem",
-                                  marginTop: "1rem",
-                                }}
+                                className={styles.resourceSkeletonBar}
                               />
                               <div className={styles.resourceStats}>
                                 <SkeletonText lineCount={1} width="35%" />
