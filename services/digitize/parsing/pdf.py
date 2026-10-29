@@ -42,10 +42,11 @@ def get_pdf_page_count(file_path):
 
 def get_document_page_count(file_path: str) -> int:
     """
-    Get page count for a document file (PDF or DOCX).
+    Get page count for a document file (PDF, DOCX, or HTML).
 
     For PDF files, returns actual page count.
     For DOCX files, returns estimated page count based on content.
+    For HTML files, returns 1 (HTML has no pagination; single-pass conversion).
 
     Args:
         file_path: Path to the document file
@@ -64,6 +65,9 @@ def get_document_page_count(file_path: str) -> int:
         elif file_ext == '.docx':
             # Use DOCX utility to estimate page count
             return estimate_docx_page_count(file_path)
+
+        elif file_ext == '.html':
+            return 1
 
         else:
             logger.warning(f"Unknown file extension {file_ext} for {file_path}")

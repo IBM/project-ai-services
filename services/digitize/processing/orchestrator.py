@@ -40,7 +40,7 @@ from digitize.processing.language import (
     get_header_level,
 )
 from digitize.processing.tables import process_table
-from digitize.processing.text import process_text, process_text_docx
+from digitize.processing.text import process_text, process_text_docx, process_text_html
 from digitize.settings import settings
 
 logger = get_logger("processing.orchestrator")
@@ -473,6 +473,8 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
         file_ext = Path(doc_path).suffix.lower()
         if file_ext == '.docx':
             page_count, process_time = process_text_docx(converted_doc, doc_path, processed_text_json_path)
+        elif file_ext == '.html':
+            page_count, process_time = process_text_html(converted_doc, doc_path, processed_text_json_path)
         else:
             page_count, process_time = process_text(converted_doc, doc_path, processed_text_json_path)
         timings["process_text"] = process_time
