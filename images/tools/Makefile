@@ -43,6 +43,9 @@ manifest:
 		$(CONTAINER_BUILDER) manifest add $(CREDS_ARG) $(MANIFEST_TAG) docker://$(BASE_REF):$(TAG)-$$arch; \
 	done
 	$(CONTAINER_BUILDER) manifest push $(CREDS_ARG) --all $(MANIFEST_TAG) docker://$(MANIFEST_TAG)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) manifest push $(CREDS_ARG) --all $(MANIFEST_TAG) docker://$(BASE_REF):$(BRANCH_TAG)
+endif
 .PHONY: manifest
 
 image-tag:

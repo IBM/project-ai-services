@@ -15,6 +15,10 @@ build:
 
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(IMAGE_TAG)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) tag $(IMAGE_TAG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+endif
 .PHONY: push
 
 image-tag:

@@ -46,6 +46,10 @@ build-container:
 # Push container image
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) tag $(REGISTRY)/$(IMAGE):$(TAG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+endif
 
 # Build binary for a specific OS/ARCH
 # Usage: make binary GOOS=linux GOARCH=ppc64le

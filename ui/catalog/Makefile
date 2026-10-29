@@ -14,6 +14,10 @@ build:
 
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(FULL_IMAGE)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) tag $(FULL_IMAGE) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+endif
 
 run:
 	$(CONTAINER_BUILDER) run -d \
