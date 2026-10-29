@@ -62,19 +62,21 @@
 ### Frontend Components
 
 #### 1. **App.jsx**
+
 - Root component
 - Manages routing with React Router
 - Applies IBM Carbon theme (g100)
 - Renders header and content area
 
 #### 2. **HomePage.jsx**
+
 - Main page component
 - Contains tabbed interface
 - Manages state for refresh triggers
 - Coordinates between child components
 
-
 #### 3. **IngestSidePanel.jsx**
+
 - Manages document upload interface
 - Supports job creation for both ingestion and digitization operations
 - Configurable output format selection (JSON, Markdown, Text)
@@ -82,6 +84,7 @@
 - Integrated with JobMonitor for seamless workflow
 
 #### 4. **JobMonitor.jsx**
+
 - Displays job list in a data table
 - Pagination support
 - Integrates IngestSidePanel for document upload and job creation
@@ -90,6 +93,7 @@
 - Job details modal
 
 #### 5. **DocumentList.jsx**
+
 - Document listing with search
 - Pagination support
 - Document content viewer (modal)
@@ -99,6 +103,7 @@
 ### API Service Layer
 
 **src/services/api.js**
+
 - Centralized API client using axios
 - Base URL configuration
 - Request/response interceptors
@@ -167,16 +172,19 @@ Display content or refresh list
 ## State Management
 
 ### Local Component State
+
 - Each component manages its own state using React hooks
 - `useState`, `useReducer` for local data (files, loading, errors)
 - `useEffect` for side effects (API calls, subscriptions)
 
 ### Shared State
+
 - Refresh triggers passed from HomePage to child components
 - Upload success callback from IngestSidePanel propagates state changes to JobMonitor
 - Side panel open/close state managed by JobMonitor
 
 ### Future Considerations
+
 - Consider Redux/Context API for complex state
 - Add WebSocket for real-time job updates
 - Implement optimistic UI updates
@@ -184,17 +192,20 @@ Display content or refresh list
 ## Styling Architecture
 
 ### IBM Carbon Design System
+
 - Uses Carbon's theming system
 - G100 (dark) theme applied globally
 - Carbon components provide consistent styling
 
 ### Custom Styles (App.scss)
+
 - SCSS for preprocessing
 - Imports Carbon's SCSS modules
 - Custom utility classes
 - Responsive design breakpoints
 
 ### Component Styles
+
 - Inline styles for dynamic values
 - Carbon utility classes for spacing/layout
 - Scoped styles when needed
@@ -202,11 +213,13 @@ Display content or refresh list
 ## API Integration
 
 ### Proxy Configuration
+
 - Vite dev server proxies `/v1` to backend
 - Avoids CORS issues in development
 - Production requires proper CORS setup
 
 ### Error Handling
+
 - Try-catch blocks in all API calls
 - User-friendly error messages
 - HTTP status code handling
@@ -215,6 +228,7 @@ Display content or refresh list
 ### Request/Response Format
 
 **Upload Request:**
+
 ```javascript
 FormData with:
 - files: File[]
@@ -223,6 +237,7 @@ FormData with:
 ```
 
 **Standard Response:**
+
 ```javascript
 {
   data: [...],
@@ -237,11 +252,13 @@ FormData with:
 ## Security Considerations
 
 ### Current Implementation
+
 - No authentication (development only)
 - Client-side validation
 - HTTPS recommended for production
 
 ### Production Recommendations
+
 - Add JWT/OAuth authentication
 - Implement RBAC (Role-Based Access Control)
 - Add CSRF protection
@@ -252,12 +269,14 @@ FormData with:
 ## Performance Optimization
 
 ### Current Optimizations
+
 - Pagination for large lists
 - Lazy loading of document content
 - Debounced search
 - Efficient re-renders with React keys
 
 ### Future Optimizations
+
 - Virtual scrolling for large tables
 - Image lazy loading
 - Code splitting
@@ -267,6 +286,7 @@ FormData with:
 ## Deployment Architecture
 
 ### Development
+
 ```
 npm run dev → Vite Dev Server (Port 4001)
               ↓ Proxy
@@ -274,6 +294,7 @@ npm run dev → Vite Dev Server (Port 4001)
 ```
 
 ### Production
+
 ```
 npm run build → Static files in dist/
                 ↓
@@ -285,6 +306,7 @@ npm run build → Static files in dist/
 ## Technology Stack
 
 ### Frontend
+
 - **React 18**: UI library
 - **IBM Carbon Design System**: Component library
 - **React Router**: Client-side routing
@@ -293,6 +315,7 @@ npm run build → Static files in dist/
 - **Sass**: CSS preprocessing
 
 ### Backend (Existing)
+
 - **FastAPI**: Python web framework
 - **Docling**: Document processing
 - **OpenSearch**: Vector database
@@ -301,12 +324,14 @@ npm run build → Static files in dist/
 ## Extension Points
 
 ### Adding New Features
+
 1. Create component in `src/components/`
 2. Add API method in `src/services/api.js`
 3. Add route in `src/App.jsx` if needed
 4. Update navigation/tabs
 
 ### Customization
+
 - Theme: Modify `src/App.scss`
 - Components: Extend Carbon components
 - API: Add interceptors in `api.js`
@@ -315,18 +340,21 @@ npm run build → Static files in dist/
 ## Testing Strategy
 
 ### Unit Tests (Recommended)
+
 - Component rendering
 - User interactions
 - API service methods
 - Utility functions
 
 ### Integration Tests (Recommended)
+
 - Component interactions
 - API integration
 - Routing
 - Form submissions
 
 ### E2E Tests (Recommended)
+
 - Complete user flows
 - IngestSidePanel → Upload → JobMonitor → DocumentList workflow
 - Error scenarios (invalid files, network failures)
@@ -335,10 +363,12 @@ npm run build → Static files in dist/
 ## Monitoring & Logging
 
 ### Current Implementation
+
 - Console logging for errors
 - Browser DevTools for debugging
 
 ### Production Recommendations
+
 - Error tracking (Sentry, LogRocket)
 - Analytics (Google Analytics, Mixpanel)
 - Performance monitoring (Web Vitals)

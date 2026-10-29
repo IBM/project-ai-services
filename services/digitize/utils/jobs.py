@@ -278,6 +278,11 @@ async def enqueue_conversion_tasks(
 
     db_manager.create_conversion_tasks_batch(tasks)
 
+# How long teardown waits for the connector's jobs to reach a terminal state
+# after requesting cancellation, and how often it polls.
+TEARDOWN_JOB_WAIT_TIMEOUT_S = 900
+TEARDOWN_JOB_POLL_INTERVAL_S = 2
+
 _TERMINAL_DOC_STATUSES = (
     models.DocStatus.COMPLETED.value,
     models.DocStatus.COMPLETED_WITH_ERRORS.value,

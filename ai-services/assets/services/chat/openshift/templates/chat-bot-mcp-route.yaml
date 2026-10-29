@@ -1,0 +1,24 @@
+{{- if .Values.mcp.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: "chat-bot-mcp"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/endpoint-type: mcp
+  annotations:
+    # MCP Streamable HTTP holds requests open for the length of a tool call,
+    # which can run past the router's 30s default
+    haproxy.router.openshift.io/timeout: {{ .Values.mcp.routeTimeout | quote }}
+spec:
+  port:
+    targetPort: {{ .Values.mcp.port }}
+  to:
+    kind: Service
+    name: "chat-bot-backend"
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+{{- end }}
