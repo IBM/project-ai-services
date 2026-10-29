@@ -414,6 +414,13 @@ const getTypeTagStyle = (type: string) => {
   }
 };
 
+const NON_TERMINAL_STATUSES = new Set<string>([
+  JOB_STATUS.ACCEPTED,
+  JOB_STATUS.IN_PROGRESS,
+  JOB_STATUS.CANCEL_PENDING,
+  JOB_STATUS.CANCELLING,
+]);
+
 const JobMonitorPage = () => {
   const { effectiveTheme } = useTheme();
   const [state, dispatch] = useReducer(jobMonitorReducer, initialState);
@@ -813,6 +820,12 @@ const JobMonitorPage = () => {
   const rows = filteredJobs.map((job) => {
     const jobStatus = getJobStatus(job);
     const hasError = job.status === "failed";
+    const isConnector = job.source === "connector";
+    const isNonTerminal = NON_TERMINAL_STATUSES.has(job.status as any);
+    const isCancellable =
+      !isConnector &&
+      (job.status === JOB_STATUS.ACCEPTED ||
+        job.status === JOB_STATUS.IN_PROGRESS);
 
     return {
       id: job.job_id,
@@ -864,23 +877,20 @@ const JobMonitorPage = () => {
           View details
         </Button>
       ),
-      cancel_action:
-        job.source !== "connector" &&
-        (job.status === JOB_STATUS.ACCEPTED ||
-          job.status === JOB_STATUS.IN_PROGRESS) ? (
-          <Button
-            hasIconOnly
-            kind="ghost"
-            size="sm"
-            renderIcon={CloseOutline}
-            iconDescription="Cancel"
-            disabled={state.cancellingIds.has(job.job_id)}
-            onClick={() =>
-              dispatch({ type: "OPEN_CANCEL_MODAL", payload: job.job_id })
-            }
-          />
-        ) : null,
-      delete_action: (
+      cancel_action: isCancellable ? (
+        <Button
+          hasIconOnly
+          kind="ghost"
+          size="sm"
+          renderIcon={CloseOutline}
+          iconDescription="Cancel"
+          disabled={state.cancellingIds.has(job.job_id)}
+          onClick={() =>
+            dispatch({ type: "OPEN_CANCEL_MODAL", payload: job.job_id })
+          }
+        />
+      ) : null,
+      delete_action: !isNonTerminal ? (
         <Button
           hasIconOnly
           kind="ghost"
@@ -891,7 +901,7 @@ const JobMonitorPage = () => {
             dispatch({ type: "OPEN_DELETE_MODAL", payload: job.job_id })
           }
         />
-      ),
+      ) : null,
     };
   });
 
