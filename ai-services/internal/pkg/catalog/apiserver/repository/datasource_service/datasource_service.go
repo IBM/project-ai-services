@@ -137,17 +137,12 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	// Phase 4: derive sensitive fields from the provider's schema.json and encrypt.
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	sensitiveFields, err := SensitiveFieldsForProvider(ctx, s.catalogProvider, req.ProviderID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", req.ProviderID, err)
+		return nil, err
 	}
 
-	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
-	}
-
-	encryptedParams, err := encryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
+	encryptedParams, err := encryptSensitiveFields(req.Params, sensitiveFields, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -201,17 +196,10 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 		providerName = catalogConn.Name
 	}
 
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, connector.Provider)
+	sensitiveFields, err := SensitiveFieldsForProvider(ctx, s.catalogProvider, connector.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", connector.Provider, err)
+		return nil, err
 	}
-
-	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
-	}
-
-	sensitiveFields := catalogutils.SensitiveFieldsFromSchema(schema)
 
 	// Steps 3–4: fetch linked applications and enrich each with live Digitize sync state.
 	applications, err := s.buildConnectedApplications(ctx, id)
@@ -621,17 +609,38 @@ func (s *DatasourceService) loadConnector(ctx context.Context, datasourceID uuid
 // decryptedConnectionDetails loads the provider schema and returns the connector metadata
 // with all sensitive (format:"password") fields decrypted in-memory.
 func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, connector *dbmodels.Connector) (map[string]any, error) {
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, connector.Provider)
+	sensitiveFields, err := SensitiveFieldsForProvider(ctx, s.catalogProvider, connector.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", connector.Provider, err)
+		return nil, err
+	}
+
+	return catalogutils.DecryptSensitiveFields(connector.Metadata, sensitiveFields, s.encryptionKey)
+}
+
+// providerSchema loads and decodes the schema.json of the given datasource provider.
+func providerSchema(ctx context.Context, catalogProvider *catalog.CatalogProvider, providerID string) (map[string]any, error) {
+	rawSchema, err := catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for provider %q: %w", providerID, err)
 	}
 
 	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
+		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", providerID, err)
 	}
 
-	return catalogutils.DecryptSensitiveFields(connector.Metadata, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
+	return schema, nil
+}
+
+// SensitiveFieldsForProvider loads the provider schema and derives the set of
+// sensitive (format: "password") field keys. Used by Create, Get, Decrypt and the connector sync job.
+func SensitiveFieldsForProvider(ctx context.Context, catalogProvider *catalog.CatalogProvider, providerID string) (map[string]bool, error) {
+	schema, err := providerSchema(ctx, catalogProvider, providerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return catalogutils.SensitiveFieldsFromSchema(schema), nil
 }
 
 // sendToService POSTs the connector payload to a single eligible service and records the
@@ -714,14 +723,9 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 	}
 
 	// Phase 2: load provider schema to derive updatable and sensitive fields.
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, existing.Provider)
+	schema, err := providerSchema(ctx, s.catalogProvider, existing.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", existing.Provider, err)
-	}
-
-	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", existing.Provider, err)
+		return nil, err
 	}
 
 	updatable := catalogutils.UpdatableFieldsFromSchema(schema)
