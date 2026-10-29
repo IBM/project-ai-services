@@ -175,7 +175,16 @@ func FetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 	return spyreCards, spyreCardContainerMap, nil
 }
 
-// JoinPCIAddresses formats a slice of PCI addresses into a comma-separated string.
+// JoinPCIAddresses formats a slice of PCI addresses into the space-separated string expected by
+// the AIU_PCIE_IDS env var. Addresses discovered on the host may carry trailing whitespace
+// (e.g. a newline from `ls`), which is trimmed so it cannot corrupt the separator.
 func JoinPCIAddresses(pciList []string) string {
-	return strings.Join(pciList, ",")
+	trimmed := make([]string, 0, len(pciList))
+	for _, addr := range pciList {
+		if addr = strings.TrimSpace(addr); addr != "" {
+			trimmed = append(trimmed, addr)
+		}
+	}
+
+	return strings.Join(trimmed, " ")
 }
