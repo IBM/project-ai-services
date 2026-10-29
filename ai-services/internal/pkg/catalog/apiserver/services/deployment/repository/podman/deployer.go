@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -15,36 +14,26 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
+	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
-	clipodman "github.com/project-ai-services/ai-services/internal/pkg/cli/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/image"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
-	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/payload"
-	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
 // ComponentInfo holds the information derived from a deployed component.
-type ComponentInfo struct {
-	Endpoint string
-	Domain   string
-	Port     string
-	Model    string
-}
+type ComponentInfo = podmanutils.EndpointInfo
 
 // Type aliases for deployment plan types.
 type (
@@ -229,37 +218,14 @@ func (d *PodmanDeployer) extractModelsFromParams(params map[string]any, modelSet
 	}
 }
 
-// downloadModels downloads all models in the provided set.
-// For remote workers the command is forwarded over the gRPC stream; the worker
-// resolves AI_SERVICES_BASE_DIR from its own environment to find the models
-// directory. For local deployments helpers.DownloadModelContainer is called
-// directly with the local models path.
+// downloadModels downloads all models in the provided set using the shared podmanutils helper.
 func (d *PodmanDeployer) downloadModels(ctx context.Context, modelSet map[string]bool) error {
-	if rt, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		for modelName := range modelSet {
-			logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
-			_, err := rt.Send(ctx, workerpb.CommandType_COMMAND_TYPE_DOWNLOAD_MODEL, payload.DownloadModel{
-				Model: modelName,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to download model %s: %w", modelName, err)
-			}
-		}
-
-		return nil
-	}
-
-	modelsPath := utils.GetModelsPath()
-
+	models := make([]string, 0, len(modelSet))
 	for modelName := range modelSet {
-		logger.InfofCtx(ctx, "Downloading model: %s\n", modelName)
-
-		if err := helpers.DownloadModelContainer(ctx, modelName, modelsPath); err != nil {
-			return fmt.Errorf("failed to download model %s: %w", modelName, err)
-		}
+		models = append(models, modelName)
 	}
 
-	return nil
+	return podmanutils.DownloadModels(ctx, d.runtime, models)
 }
 
 // pullImagesForDeployment pulls all container images required for components and services.
@@ -352,25 +318,15 @@ func (d *PodmanDeployer) extractImagesFromService(ctx context.Context, svc *Serv
 	return nil
 }
 
-// pullImages pulls only missing images from the provided set using the runtime.
+// pullImages pulls only missing images from the provided set using the shared podmanutils helper.
 // Images that are already present locally are skipped.
 func (d *PodmanDeployer) pullImages(ctx context.Context, imageSet map[string]bool) error {
-	// Convert map to slice
 	images := make([]string, 0, len(imageSet))
 	for img := range imageSet {
 		images = append(images, img)
 	}
 
-	// Use the image package's IfNotPresent method
-	imgHelper := &image.Images{
-		Runtime: d.runtime,
-	}
-
-	if err := imgHelper.IfNotPresent(ctx, images); err != nil {
-		return fmt.Errorf("failed to pull images: %w", err)
-	}
-
-	return nil
+	return podmanutils.PullImages(ctx, d.runtime, images)
 }
 
 // deployComponents deploys all components concurrently.
@@ -428,7 +384,7 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 
 	logger.InfofCtx(ctx, "Component %s loaded: %s\n", component.ID, component.Name)
 
-	if err := d.deployComponentPods(ctx, comp, metadata, tmpls, comp.CatalogPath, plan); err != nil {
+	if err := d.deployComponentPods(ctx, comp, metadata, tmpls, plan); err != nil {
 		return fmt.Errorf("failed to deploy component pods: %w", err)
 	}
 
@@ -546,58 +502,27 @@ func (d *PodmanDeployer) updateServiceValuesWithEndpoint(
 }
 
 // deployComponentPods deploys all pods for a component and extracts endpoint information.
+// The rendering, Spyre env injection and pod creation are shared with the model deployment
+// path via podmanutils.DeployComponentPods.
 func (d *PodmanDeployer) deployComponentPods(
 	ctx context.Context,
 	comp *ComponentPlan,
 	metadata *templates.AppMetadata,
 	tmpls map[string]*template.Template,
-	componentPath string,
 	plan *DeploymentPlan,
 ) error {
-	// Use the loaded Values from the component plan (includes defaults from values.yaml + overrides)
-	values := comp.Values
-
-	// Initialize component endpoints map to store extracted endpoint info
-	componentEndpoints := make(map[string]any)
-
-	// If PodTemplateExecutions is defined, use it for ordered deployment
-	if len(metadata.PodTemplateExecutions) > 0 {
-		// Execute each pod template in the component following the defined order
-		for _, layer := range metadata.PodTemplateExecutions {
-			for _, podTemplateName := range layer {
-				// Prepare initialParams for the template
-				initialParams := map[string]any{
-					"InstanceSlug": catalogutils.GenerateInstanceSlug(comp.DatabaseID.String()),
-					"TemplateID":   comp.DatabaseID,
-					"BaseDir":      d.getBaseDir(),
-					"Values":       values,
-					"env":          map[string]map[string]string{},
-				}
-
-				// Pass componentEndpoints to collect endpoint info, use component type as ID
-				if err := d.deployComponentTemplate(ctx, podTemplateName, tmpls, plan, initialParams, componentEndpoints, comp.ComponentType); err != nil {
-					return fmt.Errorf("failed to deploy pod template %s: %w", podTemplateName, err)
-				}
-			}
-		}
-	} else {
-		// If no PodTemplateExecutions defined, deploy all templates
-		logger.InfofCtx(ctx, "No PodTemplateExecutions defined for %s, deploying all templates\n", componentPath)
-		for templateName := range tmpls {
-			// Prepare initialParams for the template
-			initialParams := map[string]any{
-				"InstanceSlug": catalogutils.GenerateInstanceSlug(comp.DatabaseID.String()),
-				"TemplateID":   comp.DatabaseID,
-				"BaseDir":      d.getBaseDir(),
-				"Values":       values,
-				"env":          map[string]map[string]string{},
-			}
-
-			// Pass componentEndpoints to collect endpoint info, use component type as ID
-			if err := d.deployComponentTemplate(ctx, templateName, tmpls, plan, initialParams, componentEndpoints, comp.ComponentType); err != nil {
-				return fmt.Errorf("failed to deploy pod template %s: %w", templateName, err)
-			}
-		}
+	componentEndpoints, err := podmanutils.DeployComponentPods(ctx, podmanutils.ComponentPodsParams{
+		Runtime:       d.runtime,
+		ComponentID:   comp.DatabaseID,
+		ComponentType: comp.ComponentType,
+		Values:        comp.Values,
+		Metadata:      metadata,
+		Templates:     tmpls,
+		SpyrePool:     plan.SpyreCardPool,
+		BaseDir:       d.getBaseDir(),
+	})
+	if err != nil {
+		return err
 	}
 
 	// Store extracted endpoints in the component plan for use by services
@@ -788,191 +713,9 @@ func (d *PodmanDeployer) buildInitialParams(applicationID uuid.UUID, databaseID 
 	}
 }
 
-// deployComponentTemplate deploys a component pod template.
-// This is a generic method to deploy all component templates with Spyre card support.
-// The serviceParams map is updated with the component's endpoint information (host and port).
-func (d *PodmanDeployer) deployComponentTemplate(
-	ctx context.Context,
-	podTemplateName string,
-	tmpls map[string]*template.Template,
-	plan *DeploymentPlan,
-	initialParams map[string]any,
-	serviceParams map[string]any,
-	componentID string,
-) error {
-	logger.InfofCtx(ctx, "Deploying component template '%s'...\n", podTemplateName)
-
-	podTemplate, ok := tmpls[podTemplateName]
-	if !ok {
-		return fmt.Errorf("pod template '%s' not found", podTemplateName)
-	}
-
-	// Render and parse initial template
-	podSpec, err := d.renderAndParsePodTemplate(podTemplate, podTemplateName, initialParams)
-	if err != nil {
-		return err
-	}
-
-	// Get environment parameters and render final template
-	finalPodSpec, renderedBytes, err := d.renderFinalPodTemplate(ctx, podTemplate, podTemplateName, initialParams, podSpec, plan)
-	if err != nil {
-		return err
-	}
-
-	if strings.TrimSpace(string(renderedBytes)) == "" {
-		// skip deploy if there is nothing to apply
-		return nil
-	}
-
-	// Check if pod already exists
-	if exists, err := d.runtime.PodExists(ctx, finalPodSpec.Name); err != nil {
-		return fmt.Errorf("failed to check pod existence: %w", err)
-	} else if exists {
-		logger.InfofCtx(ctx, "Pod '%s' already exists, skipping deployment\n", podSpec.Name)
-
-		return nil
-	}
-
-	// Deploy the pod using rendered bytes directly
-	if err := d.deployPodSpec(ctx, finalPodSpec, renderedBytes, podTemplateName); err != nil {
-		return err
-	}
-
-	logger.InfofCtx(ctx, "Component template '%s' deployed successfully\n", podTemplateName)
-
-	// Update service params with endpoint information
-	d.updateServiceParamsWithEndpoint(ctx, serviceParams, componentID, finalPodSpec)
-
-	return nil
-}
-
-// renderAndParsePodTemplate renders a pod template and parses it into a PodSpec.
-func (d *PodmanDeployer) renderAndParsePodTemplate(
-	podTemplate *template.Template,
-	templateName string,
-	params map[string]any,
-) (*podmodels.PodSpec, error) {
-	var rendered bytes.Buffer
-	if err := podTemplate.Execute(&rendered, params); err != nil {
-		return nil, fmt.Errorf("failed to render template %s: %w", templateName, err)
-	}
-
-	var podSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(rendered.Bytes(), &podSpec); err != nil {
-		return nil, fmt.Errorf("failed to parse rendered pod spec: %w", err)
-	}
-
-	return &podSpec, nil
-}
-
-// renderFinalPodTemplate renders the final pod template with environment parameters.
-// Returns both the PodSpec (for metadata) and the rendered bytes (for deployment).
-func (d *PodmanDeployer) renderFinalPodTemplate(
-	ctx context.Context,
-	podTemplate *template.Template,
-	templateName string,
-	initialParams map[string]any,
-	podSpec *podmodels.PodSpec,
-	plan *DeploymentPlan,
-) (*podmodels.PodSpec, []byte, error) {
-	env, err := d.getEnvParamsForComponent(ctx, podSpec, plan)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get env params: %w", err)
-	}
-
-	// Always set/overwrite the env to ensure Spyre card PCI addresses are included
-	initialParams["env"] = env
-
-	var finalRendered bytes.Buffer
-	if err := podTemplate.Execute(&finalRendered, initialParams); err != nil {
-		return nil, nil, fmt.Errorf("failed to render template %s with env: %w", templateName, err)
-	}
-
-	renderedBytes := finalRendered.Bytes()
-
-	// Parse into PodSpec for metadata (annotations, name, etc.) but don't use it for deployment
-	var finalPodSpec podmodels.PodSpec
-	if err := k8syaml.Unmarshal(renderedBytes, &finalPodSpec); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse final rendered pod spec: %w", err)
-	}
-
-	return &finalPodSpec, renderedBytes, nil
-}
-
 // deployPodSpec deploys a pod using the rendered YAML bytes directly.
 func (d *PodmanDeployer) deployPodSpec(ctx context.Context, podSpec *podmodels.PodSpec, renderedBytes []byte, templateName string) error {
-	// Use the rendered bytes directly instead of marshaling PodSpec
-
-	reader := bytes.NewReader(renderedBytes)
-	podAnnotations := specs.FetchPodAnnotations(*podSpec)
-	podDeployOptions := clipodman.ConstructPodDeployOptions(podAnnotations)
-
-	if err := clipodman.DeployPodAndReadinessCheck(ctx, d.runtime, podSpec, templateName, reader, podDeployOptions); err != nil {
-		return fmt.Errorf("failed to deploy pod: %w", err)
-	}
-
-	return nil
-}
-
-// updateServiceParamsWithEndpoint updates service parameters with component endpoint information.
-func (d *PodmanDeployer) updateServiceParamsWithEndpoint(
-	ctx context.Context,
-	serviceParams map[string]any,
-	componentID string,
-	podSpec *podmodels.PodSpec,
-) {
-	if serviceParams == nil || componentID == "" {
-		return
-	}
-
-	componentInfo, err := d.extractComponentEndpointInfo(ctx, podSpec)
-	if err != nil {
-		logger.ErrorfCtx(ctx, "Failed to extract component endpoint info: %v\n", err)
-
-		return
-	}
-
-	if componentInfo != nil {
-		componentEndpoint := map[string]any{
-			"host": componentInfo.Domain,
-			"port": componentInfo.Port,
-		}
-		serviceParams[componentID] = componentEndpoint
-		logger.InfofCtx(ctx, "Updated service params with component '%s' endpoint: %s:%s\n",
-			componentID, componentInfo.Domain, componentInfo.Port)
-	}
-}
-
-// extractComponentEndpointInfo extracts host (pod name) and port from a deployed pod spec.
-func (d *PodmanDeployer) extractComponentEndpointInfo(ctx context.Context, podSpec *podmodels.PodSpec) (*ComponentInfo, error) {
-	if podSpec == nil {
-		return nil, fmt.Errorf("pod spec is nil")
-	}
-
-	// Use pod name as the host (for pod-to-pod communication)
-	host := podSpec.Name
-	if host == "" {
-		return nil, fmt.Errorf("pod name is empty")
-	}
-
-	// Extract port from the first container's first exposed port
-	var port string
-	if len(podSpec.Spec.Containers) > 0 {
-		container := podSpec.Spec.Containers[0]
-		if len(container.Ports) > 0 {
-			// Use the container port (not host port) for internal communication
-			port = fmt.Sprintf("%d", container.Ports[0].ContainerPort)
-		}
-	}
-
-	if port == "" {
-		logger.InfofCtx(ctx, "No port found in pod spec for '%s'\n", host)
-	}
-
-	return &ComponentInfo{
-		Domain: host,
-		Port:   port,
-	}, nil
+	return podmanutils.DeployPodmanPod(ctx, d.runtime, podSpec, renderedBytes, templateName)
 }
 
 // deployPodTemplate deploys a single pod template for a service and returns endpoint information and routes.
@@ -1048,84 +791,6 @@ func (d *PodmanDeployer) extractPodEndpoints(podSpec *podmodels.PodSpec) map[str
 	return endpoints
 }
 
-// fetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations.
-func (d *PodmanDeployer) fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
-	var spyreCards int
-	spyreCardContainerMap := map[string]int{}
-
-	isSpyreCardAnnotation := func(annotation string) (string, bool) {
-		matches := vars.SpyreCardAnnotationRegex.FindStringSubmatch(annotation)
-		if matches == nil {
-			return "", false
-		}
-
-		return matches[1], true
-	}
-
-	for annotationKey, val := range annotations {
-		if containerName, ok := isSpyreCardAnnotation(annotationKey); ok {
-			valInt, err := strconv.Atoi(val)
-			if err != nil {
-				return 0, spyreCardContainerMap, fmt.Errorf("failed to convert to int. Provided val: %s is not of int type", val)
-			}
-			spyreCardContainerMap[containerName] = valInt
-			spyreCards += valInt
-		}
-	}
-
-	return spyreCards, spyreCardContainerMap, nil
-}
-
-// joinPCIAddresses joins a slice of PCI address strings with a space separator.
-func joinPCIAddresses(addrs []string) string {
-	return strings.Join(addrs, " ")
-}
-
-// getEnvParamsForComponent returns environment parameters for a component including Spyre card PCI addresses.
-func (d *PodmanDeployer) getEnvParamsForComponent(ctx context.Context, podSpec *podmodels.PodSpec, plan *DeploymentPlan) (map[string]map[string]string, error) {
-	env := make(map[string]map[string]string)
-
-	// Get container names from pod spec
-	for _, container := range podSpec.Spec.Containers {
-		env[container.Name] = make(map[string]string)
-	}
-
-	// Fetch Spyre card requirements from annotations
-	spyreCards, spyreCardContainerMap, err := d.fetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
-	if err != nil {
-		return env, err
-	}
-
-	if spyreCards == 0 {
-		return env, nil
-	}
-
-	if plan.SpyreCardPool == nil {
-		return env, fmt.Errorf("spyre cards required but pool was not populated during planning")
-	}
-
-	// Allocate PCI addresses to containers that need them
-	for containerName, spyreCount := range spyreCardContainerMap {
-		if spyreCount == 0 {
-			continue
-		}
-
-		// Allocate addresses from the pool (thread-safe)
-		allocatedAddresses, err := plan.SpyreCardPool.Allocate(spyreCount)
-		if err != nil {
-			return env, fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
-		}
-
-		pciAddressStr := joinPCIAddresses(allocatedAddresses)
-		env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
-
-		logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
-			spyreCount, containerName, podSpec.Name, pciAddressStr)
-	}
-
-	return env, nil
-}
-
 // getBaseDir returns the base directory for deployment artifacts.
 func (d *PodmanDeployer) getBaseDir() string {
 	if d.baseDir != "" {
@@ -1136,19 +801,7 @@ func (d *PodmanDeployer) getBaseDir() string {
 }
 
 func (d *PodmanDeployer) fetchBaseDir(ctx context.Context) (string, error) {
-	if remoteRT, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
-		baseDir, err := remoteRT.GetBaseDir(ctx)
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve base directory on worker %q: %w", remoteRT.WorkerName(), err)
-		}
-		if strings.TrimSpace(baseDir) == "" {
-			return "", fmt.Errorf("worker %q returned empty base directory", remoteRT.WorkerName())
-		}
-
-		return baseDir, nil
-	}
-
-	return utils.GetBaseDir(), nil
+	return podmanutils.FetchBaseDir(ctx, d.runtime)
 }
 
 // registerApplicationRoutes registers routes for all services with Caddy proxy and updates endpoints in database.
