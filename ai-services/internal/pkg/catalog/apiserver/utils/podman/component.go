@@ -122,7 +122,7 @@ func deployComponentTemplate(ctx context.Context, p ComponentPodsParams, templat
 
 // recordComponentEndpoint stores the pod host and port under the component type key.
 func recordComponentEndpoint(ctx context.Context, endpoints map[string]any, componentType string, podSpec *podmodels.PodSpec) {
-	info, err := ExtractPodEndpointInfo(ctx, podSpec)
+	info, err := ExtractPodEndpoint(ctx, podSpec)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Failed to extract component endpoint info: %v\n", err)
 
