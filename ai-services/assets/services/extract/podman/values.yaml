@@ -11,7 +11,7 @@ postgres:
   password: ""
 
 mcp:
-  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.8
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.9
   port: "9501"
 
 # Made with Bob
