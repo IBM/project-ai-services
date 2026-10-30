@@ -154,6 +154,10 @@ const defaultHelmTimeout = 20 * time.Minute
 //
 //nolint:gocognit,cyclop,funlen // large switch is unavoidable for a flat dispatch table
 func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, cmd *workerpb.Command) ([]byte, error) {
+	if data, handled, err := handleMock(rt, cmd); handled {
+		return data, err
+	}
+
 	p := cmd.GetPayload()
 
 	switch cmd.GetType() {

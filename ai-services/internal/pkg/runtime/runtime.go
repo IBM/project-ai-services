@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
@@ -56,7 +57,15 @@ func (f *RuntimeFactory) GetRuntimeType() types.RuntimeType {
 }
 
 // CreateRuntime creates a runtime instance based on the specified type.
+// When AI_SERVICES_MOCK_RUNTIME=true an in-memory mock of the requested type is
+// returned instead, for developing without a real Podman/OpenShift backend.
 func CreateRuntime(runtimeType types.RuntimeType, namespace string) (Runtime, error) {
+	if mock.Enabled() && runtimeType.Valid() {
+		logger.Infof("Initializing mock %s runtime (%s=true)\n", runtimeType, mock.EnvMockRuntime)
+
+		return mock.New(runtimeType), nil
+	}
+
 	switch runtimeType {
 	case types.RuntimeTypePodman:
 		logger.Debugf("Initializing Podman runtime\n")

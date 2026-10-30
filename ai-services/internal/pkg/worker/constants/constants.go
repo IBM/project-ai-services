@@ -33,6 +33,10 @@ const (
 	// uninstall packages.
 	WorkerTLSDir = "/data/worker-tls"
 
+	// WorkerTLSDirEnv overrides WorkerTLSDir when set (local development only,
+	// e.g. running the worker natively on macOS where /data is read-only).
+	WorkerTLSDirEnv = "WORKER_TLS_DIR"
+
 	// GatewayPKIDir is the mount path inside the catalog container where gateway
 	// PKI files (CA key/cert, server key/cert) are persisted. Backed by the
 	// gateway-pki podman PVC. Single source of truth shared between gateway and

@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -311,6 +312,12 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		// ── Build Caddy proxy router (Podman only) ──────────────────────
 		// Must happen after Setup so the Caddy pod is running and its admin port
 		// is discoverable. For OpenShift workers routes are managed natively.
+		if mock.Enabled() {
+			pr = workercaddy.NewInMemoryProxyRouter()
+
+			break
+		}
+
 		pr, err = workercaddy.NewProxyRouter(ctx)
 		if err != nil {
 			return fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
