@@ -1,19 +1,58 @@
 - id: ibm-granite/granite-3.3-8b-instruct
-  default: false
-  title: granite-3.3-8b-instruct
-  description: |-
-    An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
-
-    **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
-
-    **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.
+  name: Granite 3.3 8B Instruct
+  description: "An 8b-parameter instruction-tuned LLM for reasoning, summarization, and tool-use."
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
 
 - id: ibm-granite/granite-4.1-8b-fp8
+  name: Granite 4.1 8B FP8
   default: true
-  title: granite-4.1-8b-fp8
-  description: |-
-    An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
-
-    **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
-
-    **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.
+  description: "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks."
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
