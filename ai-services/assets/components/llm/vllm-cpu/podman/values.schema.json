@@ -3,11 +3,6 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "model": {
-      "type": "string",
-      "title": "Large language model (LLM)",
-      "description": "Large language model (LLM)"
-    },
     "apiKey": {
       "type": "string",
       "title": "API key (optional)",
