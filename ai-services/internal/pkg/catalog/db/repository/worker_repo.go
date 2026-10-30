@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,10 +35,10 @@ var workerStatusPriority = buildStatusPriorityCase("status",
 var workerSearchColumns = []string{"name"}
 
 // ListWorkersRequest carries the parameters for listing workers.
-// Pagination fields (Page, PageSize) may be added here in future without
-// touching the DB layer.
 type ListWorkersRequest struct {
 	Search string // Optional: case-insensitive substring search on the worker name
+	Limit  int    // Optional: maximum number of records to return (for pagination)
+	Offset int    // Optional: number of records to skip (for pagination)
 }
 
 // WorkerRepository defines the interface for worker data operations.
@@ -48,6 +49,8 @@ type WorkerRepository interface {
 	Update(ctx context.Context, id uuid.UUID, update WorkerUpdate) error
 	// Delete removes a worker by ID. Returns (false, nil) if no row matched.
 	Delete(ctx context.Context, id uuid.UUID) (bool, error)
+	// GetCount returns the total number of worker rows matching the request.
+	GetCount(ctx context.Context, req *ListWorkersRequest) (int, error)
 	// GetAll returns all worker rows matching the request, ordered by registered_at ascending.
 	GetAll(ctx context.Context, req *ListWorkersRequest) ([]models.Worker, error)
 	// GetByID returns the worker with the given UUID, or (nil, nil) if not found.
@@ -156,18 +159,61 @@ func (r *workerRepo) Delete(ctx context.Context, id uuid.UUID) (bool, error) {
 	return tag.RowsAffected() > 0, nil
 }
 
-// buildGetAllWorkerQuery constructs the SQL query and arguments for GetAll.
-func buildGetAllWorkerQuery(req *ListWorkersRequest) (string, []interface{}) {
-	query := `SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at FROM workers`
+// buildWorkerWhereClauses builds the shared WHERE clauses and positional arguments for worker filter queries.
+// It is used by both buildGetAllWorkerQuery and GetCount to guarantee consistent filtering.
+func buildWorkerWhereClauses(req *ListWorkersRequest) ([]string, []interface{}) {
 	args := []interface{}{}
+	whereClauses := []string{}
 
 	if req != nil && req.Search != "" {
-		query += " WHERE " + buildSearchClause(workerSearchColumns, &args, req.Search)
+		whereClauses = append(whereClauses, buildSearchClause(workerSearchColumns, &args, req.Search))
+	}
+
+	return whereClauses, args
+}
+
+// buildGetAllWorkerQuery constructs the SQL query and positional arguments for GetAll.
+func buildGetAllWorkerQuery(req *ListWorkersRequest) (string, []interface{}) {
+	whereClauses, args := buildWorkerWhereClauses(req)
+
+	query := `SELECT id, name, runtime_type, status, message, last_heartbeat, metadata, registered_at, updated_at FROM workers`
+
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
 	query += " ORDER BY " + workerStatusPriority + ", registered_at ASC"
 
+	if req != nil {
+		if req.Limit > 0 {
+			query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+			args = append(args, req.Limit)
+		}
+		if req.Offset > 0 {
+			query += fmt.Sprintf(" OFFSET $%d", len(args)+1)
+			args = append(args, req.Offset)
+		}
+	}
+
 	return query, args
+}
+
+// GetCount returns the total number of worker rows matching the request.
+// Used for pagination metadata.
+func (r *workerRepo) GetCount(ctx context.Context, req *ListWorkersRequest) (int, error) {
+	query := `SELECT COUNT(*) FROM workers`
+	whereClauses, args := buildWorkerWhereClauses(req)
+
+	if len(whereClauses) > 0 {
+		query += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	var count int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count workers: %w", err)
+	}
+
+	return count, nil
 }
 
 // scanWorkerRow scans a single worker row into a Worker model.

@@ -7,7 +7,7 @@ IMAGE=litellm
 # 4. Run update-checksums to regenerate the checksums
 LITELLM_VERSION?=1.106.4
 LITELLM_SHA256?=dc58da933f25e8efec12348a4821b71e15e358d97093821576073fee37c49589
-IMAGE_REVISION?=0
+IMAGE_REVISION?=1
 PYTHON_VERSION?=3.14
 # Node.js version for baking Prisma CLI — Active LTS version
 NODE_VERSION?=24.21.0
@@ -73,6 +73,10 @@ build:
 
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) tag $(REGISTRY)/$(IMAGE):$(TAG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+endif
 .PHONY: push
 
 image-tag:

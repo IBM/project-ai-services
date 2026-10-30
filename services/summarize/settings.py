@@ -78,6 +78,14 @@ class SummarizationConfig(BaseSettings):
         description="Temperature for summarization generation",
     )
 
+    summarization_seed: int | None = Field(
+        default=None,
+        ge=0,
+        description="Random seed for deterministic summarization output. "
+                    "When set, vLLM uses this seed for reproducible sampling. "
+                    "Combine with temperature=0.0 for fully deterministic results.",
+    )
+
     summarization_stop_words: str = Field(
         default="",
         description="Stop words for summarization (comma-separated)",
@@ -130,12 +138,6 @@ class SummarizationConfig(BaseSettings):
         description="User prompt for summarization without target length",
     )
 
-    table_summary_max_tokens: int = Field(
-        default=1024,
-        ge=0,
-        description="Maximum tokens for table summarization",
-    )
-    
     summarization_levels: SummarizationLevelsConfig = Field(
         default_factory=SummarizationLevelsConfig,
         description="Configuration for different summarization abstraction levels",

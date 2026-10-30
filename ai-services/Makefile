@@ -1,7 +1,7 @@
-REGISTRY ?= icr.io/ai-services-private
-IMAGE = ai-services
-TAG ?= v0.0.444
-CONTAINER_BUILDER ?= podman
+REGISTRY?=icr.io/ai-services-private
+IMAGE=ai-services
+TAG?=v0.0.461
+CONTAINER_BUILDER?=podman
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 GO := go
@@ -109,6 +109,10 @@ build:
 
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) tag $(REGISTRY)/$(IMAGE):$(TAG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+endif
 .PHONY: push
 
 test:

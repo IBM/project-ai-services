@@ -45,4 +45,12 @@ export const JOB_TYPE_DISPLAY = {
   DIGITIZATION: "Digitization only",
 } as const;
 
+// Non-terminal job statuses — job is still active/transitioning, delete not allowed
+export const NON_TERMINAL_STATUSES = new Set<string>([
+  JOB_STATUS.ACCEPTED,
+  JOB_STATUS.IN_PROGRESS,
+  JOB_STATUS.CANCEL_PENDING,
+  JOB_STATUS.CANCELLING,
+]);
+
 // Made with Bob

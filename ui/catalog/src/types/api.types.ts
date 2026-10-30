@@ -261,7 +261,7 @@ export interface ApplicationDetailsApiResponse {
     type: string;
     catalog_id: string;
     version: string;
-    components: Array<{
+    components?: Array<{
       type: string;
       provider: {
         id: string;
@@ -436,9 +436,7 @@ export interface WorkerApiResponse {
 
 export interface WorkerListResponse {
   data: WorkerApiResponse[];
-  total: number;
-  page: number;
-  page_size: number;
+  pagination: PaginationMetadata;
 }
 
 export interface WorkerRegisterResponse {

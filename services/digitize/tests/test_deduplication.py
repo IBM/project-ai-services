@@ -487,11 +487,12 @@ class TestGetJobMessagePopulation:
         m.doc_metadata = {"existing_doc_name": existing_doc_name} if existing_doc_name else {}
         return m
 
-    def _make_job_mock(self):
+    def _make_job_mock(self, source="user"):
         j = Mock()
         j.job_id = "job-1"
         j.job_name = None
         j.operation = "ingestion"
+        j.source = source
         j.status = "completed"
         j.submitted_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
         j.completed_at = datetime(2024, 1, 1, 1, tzinfo=timezone.utc)
@@ -530,6 +531,21 @@ class TestGetJobMessagePopulation:
             result = _real_get_job("job-1")
 
         assert result["documents"][0]["message"] is None
+
+    @pytest.mark.parametrize(
+        "db_source, expected",
+        [("user", "user"), ("connector", "connector"), (None, "user")],
+    )
+    def test_source_is_returned(self, db_source, expected):
+        mock_dm = Mock()
+        mock_dm.get_job_by_id.return_value = self._make_job_mock(source=db_source)
+        mock_dm.get_documents_by_job_id.return_value = []
+
+        with patch("digitize.utils.db.engine", Mock()), \
+             patch("digitize.utils.db.db_manager", mock_dm):
+            result = _real_get_job("job-1")
+
+        assert result["source"] == expected
 
 
 @pytest.mark.unit

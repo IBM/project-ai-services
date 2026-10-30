@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=tools
-TAG?=0.15
+TAG?=0.16
 SR_COMMIT=2a57a3a4b14d23981b4add77670bcea90cf69d77
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
@@ -43,6 +43,9 @@ manifest:
 		$(CONTAINER_BUILDER) manifest add $(CREDS_ARG) $(MANIFEST_TAG) docker://$(BASE_REF):$(TAG)-$$arch; \
 	done
 	$(CONTAINER_BUILDER) manifest push $(CREDS_ARG) --all $(MANIFEST_TAG) docker://$(MANIFEST_TAG)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) manifest push $(CREDS_ARG) --all $(MANIFEST_TAG) docker://$(BASE_REF):$(BRANCH_TAG)
+endif
 .PHONY: manifest
 
 image-tag:

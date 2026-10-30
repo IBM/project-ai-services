@@ -2,6 +2,7 @@ package bundlemetadata_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	bundlemetadata "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle/validate/metadata"
@@ -207,13 +208,36 @@ func TestParseRootMetadata_CertifiedBy(t *testing.T) {
 		{name: "service/IBM upper", yaml: svcBase + "certified_by: IBM\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
 		{name: "service/ibm lower", yaml: svcBase + "certified_by: ibm\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
 		{name: "service/Ibm mixed", yaml: svcBase + "certified_by: Ibm\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		{name: "service/padded IBM", yaml: svcBase + "certified_by: \" IBM \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not be \"IBM\""},
+		{name: "service/full-width IBM", yaml: svcBase + "certified_by: \"ＩＢＭ\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not be \"IBM\""},
+		{name: "service/spaced I B M", yaml: svcBase + "certified_by: I B M\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not be \"IBM\""},
+		{name: "service/dotted I.B.M", yaml: svcBase + "certified_by: I.B.M\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not be \"IBM\""},
+		{name: "service/zero-width space", yaml: svcBase + "certified_by: \"IBM\\u200B\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
+		{name: "service/bidi override", yaml: svcBase + "certified_by: \"\\u202EMBI\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
+		{name: "service/newline", yaml: svcBase + "certified_by: \"Acme\\nCorp\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
+		{name: "service/disallowed symbol", yaml: svcBase + "certified_by: Acme/Corp\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
+		{name: "service/too long", yaml: svcBase + "certified_by: " + strings.Repeat("a", 65) + "\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not exceed 64 characters"},
+		{name: "service/trailing space", yaml: svcBase + "certified_by: \"Acme Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
+		{name: "service/repeated and trailing spaces", yaml: svcBase + "certified_by: \"Acme  Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
+		{name: "service/leading space", yaml: svcBase + "certified_by: \" Acme Corp\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
+		{name: "service/full-width letters", yaml: svcBase + "certified_by: \"Ａcme\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "compatibility characters"},
+		{name: "service/non-breaking space", yaml: svcBase + "certified_by: \"Acme\\u00A0Corp\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
 		// service — allowed
+		{name: "service/max length", yaml: svcBase + "certified_by: " + strings.Repeat("a", 64) + "\n"},
+		{name: "service/unicode name", yaml: svcBase + "certified_by: Müller & Söhne (EU)\n"},
 		{name: "service/empty (absent)", yaml: svcBase},
 		{name: "service/Acme Corp", yaml: svcBase + "certified_by: Acme Corp\n"},
 		// component — rejected
 		{name: "component/IBM upper", yaml: compBase + "certified_by: IBM\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
 		{name: "component/ibm lower", yaml: compBase + "certified_by: ibm\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
 		{name: "component/IBM mixed", yaml: compBase + "certified_by: iBM\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "'certified_by' must not be \"IBM\""},
+		{name: "component/zero-width space", yaml: compBase + "certified_by: \"IBM\\u200B\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "unsupported character"},
+		{name: "component/padded IBM", yaml: compBase + "certified_by: \" IBM \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not be \"IBM\""},
+		{name: "component/full-width letters", yaml: compBase + "certified_by: \"Ａcme\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "compatibility characters"},
+		{name: "component/too long", yaml: compBase + "certified_by: " + strings.Repeat("a", 65) + "\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "must not exceed 64 characters"},
+		{name: "component/leading space", yaml: compBase + "certified_by: \" Acme Corp\"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
+		{name: "component/trailing space", yaml: compBase + "certified_by: \"Acme Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
+		{name: "component/repeated and trailing spaces", yaml: compBase + "certified_by: \"Acme  Corp \"\n", wantErrCode: http.StatusUnprocessableEntity, wantErrMsg: "leading, trailing or repeated spaces"},
 		// component — allowed
 		{name: "component/empty (absent)", yaml: compBase},
 		{name: "component/Acme Corp", yaml: compBase + "certified_by: Acme Corp\n"},

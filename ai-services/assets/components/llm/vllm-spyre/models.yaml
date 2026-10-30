@@ -1,0 +1,19 @@
+- id: ibm-granite/granite-3.3-8b-instruct
+  default: false
+  title: granite-3.3-8b-instruct
+  description: |-
+    An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
+
+    **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
+
+    **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.
+
+- id: ibm-granite/granite-4.1-8b-fp8
+  default: true
+  title: granite-4.1-8b-fp8
+  description: |-
+    An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
+
+    **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
+
+    **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.

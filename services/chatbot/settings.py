@@ -497,18 +497,6 @@ class RAGConfig(BaseSettings):
         description="Maximum tokens allocated for conversation history",
     )
 
-    initial_system_token_overhead: int = Field(
-        default=100,
-        gt=0,
-        description="Estimated tokens for initial system message",
-    )
-
-    rag_system_token_overhead: int = Field(
-        default=200,
-        gt=0,
-        description="Estimated tokens for RAG system message (excluding context)",
-    )
-
     llm_validate_custom_system_prompt: bool = Field(
         default=True,
         description="Enable/disable LLM-based validation for custom system prompts"
@@ -654,10 +642,12 @@ class RAGConfig(BaseSettings):
                 logger.info(f"Custom system_prompt detected as: {detected_lang}")
                 
                 if self.llm_validate_custom_system_prompt:
+                    created_temp_session = False
                     try:
                         from chatbot.prompt_validator import validate_prompt_with_llm
                         if misc_utils.SESSION is None:
                             create_llm_session(pool_maxsize=1)
+                            created_temp_session = True
                         
                         validation_result = validate_prompt_with_llm(
                             self.system_prompt,
@@ -681,6 +671,13 @@ class RAGConfig(BaseSettings):
                         )
                     except Exception as e:
                         logger.warning(f"Error during LLM validation: {e}. Proceeding with basic validation only.")
+                    finally:
+                        if created_temp_session and misc_utils.SESSION is not None:
+                            try:
+                                misc_utils.SESSION.close()
+                            except Exception:
+                                pass
+                            misc_utils.SESSION = None
 
                 if detected_lang == LanguageCodes.GERMAN:
                     self.german.system_prompt = self.system_prompt
