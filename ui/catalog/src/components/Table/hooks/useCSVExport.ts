@@ -10,10 +10,19 @@ interface UseCSVExportOptions<TRow extends Record<string, unknown>> {
   csvFileName: string;
   totalItems: number;
   search: string;
-  searchFields: (keyof TRow)[];
+  searchFields?: (keyof TRow)[];
   visibleColumns: Record<string, boolean>;
   headers: TableHeaders;
-
+  /**
+   * Set to `true` when search is handled server-side. `fetchAllRows` is then
+   * expected to forward the search term to the API, so the client-side
+   * `filterRowsBySearch` step is skipped to avoid double-filtering.
+   *
+   * Defaults to `false` (client-side filtering) to preserve existing behavior
+   * and ensure other tables that still rely on client-side search continue to
+   * work without breaking.
+   */
+  serverSideSearch?: boolean;
   fetchAllRows: () => Promise<TRow[]>;
   dispatch: (action: SharedTableAction) => void;
 }
@@ -22,9 +31,10 @@ export function useCSVExport<TRow extends Record<string, unknown>>({
   csvFileName,
   totalItems,
   search,
-  searchFields,
+  searchFields = [],
   visibleColumns,
   headers,
+  serverSideSearch = false,
   fetchAllRows,
   dispatch,
 }: UseCSVExportOptions<TRow>) {
@@ -52,8 +62,13 @@ export function useCSVExport<TRow extends Record<string, unknown>>({
     try {
       const allRows = await fetchAllRows();
 
-      // Apply search filter to exported data (matches the in-table filter)
-      const filteredRows = filterRowsBySearch(allRows, search, searchFields);
+      // For server-side search, `fetchAllRows` already returns filtered data
+      // from the API — skip client-side filtering to avoid double-filtering.
+      // Other tables across the application still rely on client-side filtering,
+      // so we conditionally keep client-side filtering when serverSideSearch is false.
+      const filteredRows = serverSideSearch
+        ? allRows
+        : filterRowsBySearch(allRows, search, searchFields);
       // Only export visible, non-actions columns
       const visibleHeaders = getToggleableHeaders(headers).filter(
         (h) => visibleColumns[h.key] === true,
@@ -91,6 +106,7 @@ export function useCSVExport<TRow extends Record<string, unknown>>({
     searchFields,
     visibleColumns,
     headers,
+    serverSideSearch,
     fetchAllRows,
     dispatch,
   ]);
