@@ -9,7 +9,6 @@ docker build -f Dockerfile -t rag-frontend .
 
 docker run --network="host" -p 3000:3000 rag-frontend:latest
 
-
 # Getting Started with Vite and React
 
 This project was built with Vite and uses @vitejs/plugin-react for a fast development experience.
@@ -32,12 +31,15 @@ It bundles React and your other assets into optimized, minified files for the be
 The build output is ready to be deployed.
 
 ### `npm run preview`
+
 Serves the production build locally.
 After running npm run build, use this command to test your production output before deploying.
 Open http://localhost:3010 to view the production build.
 
-## Dependency Overrides
+## Known Dependency Notes
 
-- `proxy-addr`: `proxy-addr` is coming from `express` (its latest version `5.2.1` is used) which pins it at `^2.0.7`. An `overrides` entry is used to upgrade `proxy-addr` to `^2.0.8` to remediate CVE-2026-90711. This can be removed once upstream publishes a fixed version.
-- `qs`: `qs` is coming from `body-parser` (its latest version is used) which pins it at `6.15.2`, which in turn comes from `express` (also the latest available version). An `overrides` entry is used to upgrade `qs` to `^6.16.0` to remediate PVR0865005 / CVE-2026-82417. This can be removed once upstream publishes fixed versions.
-- `source-map-js`: `source-map-js` is a transitive dependency pulled in by `sass` and `postcss`. Both pin it at `^1.2.1`, which resolves to `1.2.1` on a fresh install. The `overrides` entry forces it to `^1.2.2` to pick up the security fix released in that version. This can be removed once `sass` and `postcss` raise their own floor to `>=1.2.2`.
+### `qs` override in `package.json`
+
+`qs` is a transitive dependency of `express` and `body-parser`, whose declared ranges (`^6.16.x`) still allow older releases. The `overrides` block enforces `qs@^6.17.1` so a regenerated lockfile cannot resolve to an older version.
+
+**Remove this override once `express` and `body-parser` raise their own `qs` minimum to `^6.17.1` or higher.**

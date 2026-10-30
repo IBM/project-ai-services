@@ -1,6 +1,6 @@
 REGISTRY?=icr.io/ai-services-private
 IMAGE=ai-services-mcp
-TAG?=v0.0.6
+TAG?=v0.0.8
 CONTAINER_BUILDER?=podman
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
@@ -46,6 +46,10 @@ build-container:
 # Push container image
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(TAG)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) tag $(REGISTRY)/$(IMAGE):$(TAG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+endif
 
 # Build binary for a specific OS/ARCH
 # Usage: make binary GOOS=linux GOARCH=ppc64le

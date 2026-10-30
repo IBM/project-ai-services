@@ -35,16 +35,6 @@ var PDFSummaryKeywords = []string{"artificial intelligence", "machine learning",
 // SetAppRuntime is a no-op placeholder required by the test suite interface.
 func SetAppRuntime(string) {}
 
-// httpConfigForTimeout returns an HTTP client config with the given timeout.
-// Connection pooling is disabled — each summarization call uses a short-lived client.
-func httpConfigForTimeout(timeout time.Duration) common.HTTPClientConfig {
-	return common.HTTPClientConfig{
-		Timeout:            timeout,
-		InsecureSkipVerify: true,
-		PoolConnections:    false,
-	}
-}
-
 // GetTestTXTPath returns the absolute path to sample_txt.txt.
 func GetTestTXTPath() string {
 	_, filename, _, ok := runtime.Caller(0)
@@ -62,16 +52,6 @@ type JobCreatedResponse struct {
 	JobID string `json:"job_id"`
 }
 
-// JobStatus is the lifecycle state of a summarization job.
-type JobStatus string
-
-const (
-	JobStatusAccepted   JobStatus = "accepted"
-	JobStatusInProgress JobStatus = "in_progress"
-	JobStatusCompleted  JobStatus = "completed"
-	JobStatusFailed     JobStatus = "failed"
-)
-
 // DocumentInfo describes the document attached to a job.
 type DocumentInfo struct {
 	Name   string `json:"name"`
@@ -88,14 +68,14 @@ type JobMetadata struct {
 
 // JobDetailResponse represents the response when getting job details.
 type JobDetailResponse struct {
-	JobID       string       `json:"job_id"`
-	JobName     *string      `json:"job_name,omitempty"`
-	Status      JobStatus    `json:"status"`
-	SubmittedAt string       `json:"submitted_at"`
-	CompletedAt *string      `json:"completed_at"`
-	Document    DocumentInfo `json:"document"`
-	Error       *string      `json:"error"`
-	Metadata    *JobMetadata `json:"metadata,omitempty"`
+	JobID       string           `json:"job_id"`
+	JobName     *string          `json:"job_name,omitempty"`
+	Status      common.JobStatus `json:"status"`
+	SubmittedAt string           `json:"submitted_at"`
+	CompletedAt *string          `json:"completed_at"`
+	Document    DocumentInfo     `json:"document"`
+	Error       *string          `json:"error"`
+	Metadata    *JobMetadata     `json:"metadata,omitempty"`
 }
 
 // JobResultResponse represents the response when getting a job result.
@@ -105,17 +85,10 @@ type JobResultResponse struct {
 	Usage map[string]interface{} `json:"usage"`
 }
 
-// PaginationInfo holds page metadata for list responses.
-type PaginationInfo struct {
-	Total  int `json:"total"`
-	Limit  int `json:"limit"`
-	Offset int `json:"offset"`
-}
-
 // JobsListResponse represents the response when listing summarization jobs.
 type JobsListResponse struct {
-	Pagination PaginationInfo      `json:"pagination"`
-	Data       []JobDetailResponse `json:"data"`
+	Pagination common.PaginationInfo `json:"pagination"`
+	Data       []JobDetailResponse   `json:"data"`
 }
 
 // HealthCheckResponse represents the health check response.
@@ -201,17 +174,12 @@ func buildJobCreateURL(baseURL, level, jobName string, stream bool) string {
 
 // doGET sends a GET request and returns the response body and status code.
 func doGET(ctx context.Context, url string) ([]byte, int, error) {
-	return common.DoGET(ctx, url, httpConfigForTimeout(getCallTimeout))
+	return common.DoGET(ctx, url, common.HTTPConfigForTimeout(getCallTimeout))
 }
 
 // doPOST sends a POST request with the given body and content type.
 func doPOST(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	return common.DoPOST(ctx, url, body, contentType, httpConfigForTimeout(postCallTimeout))
-}
-
-// doDELETE sends a DELETE request.
-func doDELETE(ctx context.Context, url string) ([]byte, int, error) {
-	return common.DoDELETE(ctx, url, httpConfigForTimeout(getCallTimeout))
+	return common.DoPOST(ctx, url, body, contentType, common.HTTPConfigForTimeout(postCallTimeout))
 }
 
 // ── Service operations ────────────────────────────────────────────────────────
@@ -269,7 +237,7 @@ func CreateJobWithFile(ctx context.Context, baseURL, filePath, level, jobName st
 //
 //nolint:cyclop
 func CreateJobWithText(ctx context.Context, baseURL, text, level, jobName string, stream bool) (*JobCreatedResponse, error) {
-	tmpFile, err := createTempTextFile(text)
+	tmpFile, err := common.CreateTempFile("summarize-text-*.txt", text)
 	if err != nil {
 		return nil, err
 	}
@@ -277,24 +245,6 @@ func CreateJobWithText(ctx context.Context, baseURL, text, level, jobName string
 	defer func() { _ = os.Remove(tmpFile) }()
 
 	return CreateJobWithFile(ctx, baseURL, tmpFile, level, jobName, stream)
-}
-
-// createTempTextFile writes text to a temporary .txt file and returns its path.
-func createTempTextFile(text string) (string, error) {
-	f, err := os.CreateTemp("", "summarize-text-*.txt")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
-	}
-
-	defer func() { _ = f.Close() }()
-
-	if _, err := f.WriteString(text); err != nil {
-		_ = os.Remove(f.Name())
-
-		return "", fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	return f.Name(), nil
 }
 
 // JobResult pairs a completed job's detail with its extracted summary text.
@@ -401,49 +351,13 @@ func GetJobResult(ctx context.Context, baseURL, jobID string) (*JobResultRespons
 	return &result, nil
 }
 
-// WaitForJobCompletion polls job status until it reaches completed or failed.
-//
-//nolint:cyclop
+// WaitForJobCompletion polls job status until it reaches a terminal state.
 func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout time.Duration) (*JobDetailResponse, error) {
-	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("timed out waiting for job %s", jobID)
-			}
-
-			detail, err := GetJobDetail(ctx, baseURL, jobID)
-			if err != nil {
-				logger.Warningf("[SUMMARIZE] get job detail failed: %v", err)
-
-				continue
-			}
-
-			logger.Infof("[SUMMARIZE] job %s status: %s", jobID, detail.Status)
-
-			switch detail.Status {
-			case JobStatusCompleted:
-				return detail, nil
-			case JobStatusFailed:
-				errMsg := "unknown error"
-				if detail.Error != nil {
-					errMsg = *detail.Error
-				}
-
-				return detail, fmt.Errorf("job failed: %s", errMsg)
-			case JobStatusAccepted, JobStatusInProgress:
-				continue
-			default:
-				return detail, fmt.Errorf("unexpected job status: %s", detail.Status)
-			}
-		}
-	}
+	return common.WaitForJob(ctx, jobID,
+		common.JobPollConfig{Timeout: timeout, Interval: pollInterval, LogPrefix: "SUMMARIZE"},
+		func(ctx context.Context) (*JobDetailResponse, error) { return GetJobDetail(ctx, baseURL, jobID) },
+		func(d *JobDetailResponse) common.JobState { return common.JobState{Status: d.Status, Error: d.Error} },
+	)
 }
 
 // ListJobs calls GET /v1/summarize/jobs with optional status and name filters.
@@ -475,13 +389,8 @@ func ListJobs(ctx context.Context, baseURL string, limit, offset int, status, jo
 
 // deleteJobWithURL sends DELETE to url and accepts 200 or 204 as success.
 func deleteJobWithURL(ctx context.Context, url, logMsg string) error {
-	_, statusCode, err := doDELETE(ctx, url)
-	if err != nil {
+	if err := common.DeleteURL(ctx, url, common.HTTPConfigForTimeout(getCallTimeout)); err != nil {
 		return err
-	}
-
-	if statusCode != http.StatusOK && statusCode != http.StatusNoContent {
-		return fmt.Errorf("unexpected status %d", statusCode)
 	}
 
 	logger.Infof("[SUMMARIZE] %s", logMsg)
@@ -532,7 +441,7 @@ func CreateJobExpectingError(ctx context.Context, baseURL, filePath, level, jobN
 //
 //nolint:cyclop
 func CreateJobWithTextExpectingError(ctx context.Context, baseURL, text, level, jobName string, stream bool) (*ErrorResponse, int, error) {
-	tmpFile, err := createTempTextFile(text)
+	tmpFile, err := common.CreateTempFile("summarize-text-*.txt", text)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -699,7 +608,6 @@ func SummarizeTextWithLength(ctx context.Context, baseURL, text string, length i
 
 	return resp, nil
 }
-
 
 // SummarizeFile calls POST /v1/summarize with a multipart file upload.
 // level is an optional form field ("brief" | "standard" | "detailed").

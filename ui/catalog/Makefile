@@ -1,6 +1,6 @@
 REGISTRY ?= icr.io/ai-services-private
 IMAGE ?= catalog-ui
-TAG ?= v0.0.98
+TAG ?= v0.0.106
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
 
 CONTAINER_BUILDER ?= podman
@@ -14,6 +14,10 @@ build:
 
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(FULL_IMAGE)
+ifneq ($(strip $(BRANCH_TAG)),)
+	$(CONTAINER_BUILDER) tag $(FULL_IMAGE) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(REGISTRY)/$(IMAGE):$(BRANCH_TAG)
+endif
 
 run:
 	$(CONTAINER_BUILDER) run -d \

@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.98
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.106
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.435
+  image: icr.io/ai-services-cicd/ai-services:v0.0.456
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false
@@ -21,7 +21,7 @@ backend:
 
 db:
   port: ""
-  image: icr.io/ai-services-cicd/postgres:18-7
+  image: icr.io/ai-services-cicd/postgres:18-8
   user: "postgres"
   database: "ai_services"
   password: ""
@@ -32,12 +32,27 @@ db:
       memory: "1Gi"
 
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.7-0
+  image: icr.io/ai-services-cicd/caddy:v2.11.7-2
   adminPort: ""
   httpsPort: ""
+  privateIngressPort: "9443"
   # caddyFileContent: Generated from the 'Caddyfile.tmpl' template
   caddyFileContent: ""
   # Populated from the certificate content specified via '--ssl-cert' during catalog configuration
   sslCertContent: ""
   # Populated from the private key content specified via '--ssl-key' during catalog configuration
   sslKeyContent: ""
+
+litellm:
+  image: "icr.io/ai-services-cicd/litellm:v1.106.4-1"
+  # @generate:password length=32, special=false
+  masterKey: ""
+  # @generate:password length=64, special=false
+  saltKey: ""
+  dbConnectionRetries: "20"
+  db:
+    image: icr.io/ai-services-cicd/postgres:18-6
+    database: "litellm"
+    user: "postgres"
+    # @generate:password length=32, special=false
+    password: ""
