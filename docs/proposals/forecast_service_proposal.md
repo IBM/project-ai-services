@@ -75,10 +75,9 @@ It also introduces three things that no existing service has:
 
 ### 2.3 Decision — Single worker, enforced twice
 
-**Decision: one training job runs at a time.** Other jobs wait as `queued`. The first training of a connector and its scheduled trainings share the same queue.
+**Decision: one training job runs at a time.**
 
-- Every run is started by an APScheduler job. The job function takes an in-process `asyncio.Lock` before it marks its row `running`, so runs go one at a time, in the order they asked for the lock. A run waits for the lock with its `jobs` row `queued`. This guard lives in the API process, so the API pod must run with `replicas: 1`.
-- The database enforces the same rule: a unique partial index allows at most one `running` row (the `idx_jobs_single_running` index). If the in-process guard is ever wrong, the second claim fails instead of starting a second trainer.
+- Every run is started by an APScheduler job. In case of multiple jobs started for the same connector, the newest queued job is skipped and the event is logged. In the future, we will manage multiple jobs with a queue and a lock.
 
 ### 2.4 Decision — `jobs.seq` is the forecaster version
 
@@ -99,10 +98,10 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 
 - **Same library as digitize.** An `AsyncIOScheduler` with a `SQLAlchemyJobStore` on the service's PostgreSQL database, in a `scheduler` schema that the init container creates. APScheduler is pinned to the version digitize uses. The persistent store keeps the schedules across restarts.
 - **One job per connector.** Creating a connector registers a one-off job that fires at once for the first training and, when `TRAINING_SCHEDULE` is set, a cron job for the later ones. The cron runs in UTC. When `TRAINING_SCHEDULE` is unset, only the first training runs.
-- **What a fired job does.** A cron run first checks that the connector has no `queued` or `running` job, and inserts its own `queued` row. The first run uses the row that `POST /v1/connectors` inserted. The job then waits for the lock, marks the row `running`, spawns the worker and waits for it. On success it loads the forecaster into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `failed` and deletes the temporary directory that the worker left.
+- **What a fired job does.** A cron run spawns the worker and waits for it. On success it loads the forecaster into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `failed` and deletes the temporary directory that the worker left.
 - **Retry of the worker step.** If the worker fails, the job function runs it again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `running` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the temporary directory before the next attempt. The worker exits with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, an unknown table or column, no rows, or more than `MAX_TRAINING_ROWS` rows), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `failed` with the last error, and the number of attempts is recorded in `result`. Only the worker step is retried. The Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
 - **Missed runs are skipped.** The jobs use a short misfire grace time, so a late run is skipped instead of run late. A run missed while the API was down, or skipped because the connector still has a `queued` or `running` job, is logged with the reason.
-- **Startup.** The API registers a cron job only for a connector that has none, and updates it when `TRAINING_SCHEDULE` has changed, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that were `queued` or `running` when the API stopped are marked `failed` by the boot recovery.
+- **Startup.** The API registers a cron job only for a connector that has none, and updates it when `TRAINING_SCHEDULE` has changed, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that are in `running` state when the API stopped are marked `failed` by the boot recovery.
 
 ```mermaid
 flowchart TD
@@ -110,13 +109,12 @@ flowchart TD
     REG --> ONE["one-off job fires"]
     REG -.->|"later, only if TRAINING_SCHEDULE is set"| CRON["cron job fires"]
 
-    CRON --> ACTIVE{"connector has a<br/>queued or running job?"}
+    CRON --> ACTIVE{"connector has a<br/>running job?"}
     ACTIVE -- yes --> SKIP["skip the run, log the reason"]
     ACTIVE -- no --> INS["insert job row (queued)"]
 
-    ONE --> LOCK
-    INS --> LOCK["wait for the in-process lock<br/>(row stays queued)"]
-    LOCK --> RUN["job status = running, attempt = 1"]
+    ONE --> RUN
+    INS --> RUN["job status = running, attempt = 1"]
     RUN --> SPAWN["spawn worker: python -m forecast.worker job_id<br/>own process group, time and memory limits"]
     SPAWN --> EXIT{"worker result"}
 
@@ -131,7 +129,6 @@ flowchart TD
     WAIT --> SPAWN
     MORE -- no --> FAIL["delete temp dir<br/>job status = failed, jobs.error set, attempts added to jobs.result"]
     FAIL --> PRUNE["prune old finished jobs of the connector"]
-    PRUNE --> REL["release the lock"]
 ```
 
 ---
@@ -1021,5 +1018,14 @@ These are undecided and need an answer before or during implementation.
 2. **Resource sizing.** CPU, memory, scratch and volume sizes, and expected training duration for the target dataset sizes, are to be provided by DEV. They set `WORKER_MEMORY_LIMIT_MB` and `MAX_TRAINING_ROWS`.
 3. **Loss of the repository volume.** If the volume is lost while the database survives, `ready` rows have no files. Whether reconciliation should mark them `deleted` and queue a retrain is undecided.
 4. **Connector Deletion** If a DB2 connector already connected to a forecast service is deleted, what should be done to the existing schedule/forecast models.
+
+---
+
+## 13. Future Enhancements
+
+These are the items we don not have in scope for the initial release of the service and plan on taking up in the future
+
+1. **CSV Support** Allowing training using data gathered from CSV file(s)
+2. **Multi-Connector Support** Allowing multiple connectors to be served using the same forecast service instance. This would entail using locks for training to ensure that only a single training job runs at one time.
 
 ---
