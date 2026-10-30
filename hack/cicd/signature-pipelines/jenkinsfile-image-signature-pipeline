@@ -17,14 +17,15 @@ pipeline {
             description: 'IAM api key to push image to icr registry (overrides icr-iam-creds credential when set)'
         )
         string(
-            name: 'ADDITIONAL_IMAGE',
+            name: 'SIGNATURE_ONLY_IMAGES',
             defaultValue: '',
-            description: 'Comma-separated list of additional fully-qualified image references to sign (e.g. icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le). These images are signed only — they are not built or pushed by this pipeline.'
+            description: 'Space-separated list of additional fully-qualified image references to sign (e.g. icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le). These images are signed only, they are not built or pushed by this pipeline.'
         )
         text(
-            name: 'SKIP_IMAGE_LIST',
+            name: 'EXCLUDED_IMAGES',
             defaultValue: '',
-            description: '''List of images to skip building (one per line). Available image names:
+            description: '''List of images to exclude from building and signing (separated by spaces or new lines). Available image names:
+  service-base
   chatbot-service
   digitize-service
   extract-service
@@ -74,65 +75,145 @@ pipeline {
             }
         }
 
-        stage('Build chatbot service') {
-            when { expression { !isImageSkipped('chatbot-service') } }
-            steps {
-                script {
-                    env.ICR_SERVICES_CHATBOT_IMAGE = buildAndPublishImage('services/chatbot/', 'chatbot-service')
+        stage('Build Base Images') {
+            parallel {
+                stage('Build service-base') {
+                    when { expression { !isImageSkipped('service-base') } }
+                    steps {
+                        script {
+                            env.ICR_SERVICE_BASE_IMAGE = buildAndPublishImage('images/service-base/', 'service-base')
+                        }
+                    }
+                }
+
+                stage('Build Caddy') {
+                    when { expression { !isImageSkipped('caddy') } }
+                    steps {
+                        script {
+                            env.ICR_CADDY_IMAGE = buildAndPublishImage('images/caddy/', 'caddy')
+                        }
+                    }
+                }
+
+                stage('Build litellm') {
+                    when { expression { !isImageSkipped('litellm') } }
+                    steps {
+                        script {
+                            env.ICR_LITELLM_IMAGE = buildAndPublishImage('images/litellm/', 'litellm')
+                        }
+                    }
+                }
+
+                stage('Build postgres') {
+                    when { expression { !isImageSkipped('postgres') } }
+                    steps {
+                        script {
+                            env.ICR_POSTGRES_IMAGE = buildAndPublishImage('images/postgres/', 'postgres')
+                        }
+                    }
+                }
+
+                stage('Build AI Services') {
+                    when { expression { !isImageSkipped('ai-services') } }
+                    steps {
+                        script {
+                            env.ICR_AI_SERVICES_IMAGE = buildAndPublishImage('ai-services', 'ai-services')
+                        }
+                    }
+                }
+
+                stage('Build AI Services MCP') {
+                    when { expression { !isImageSkipped('ai-services-mcp') } }
+                    steps {
+                        script {
+                            env.ICR_AI_SERVICES_MCP_IMAGE = buildAndPublishImage('mcp/', 'ai-services-mcp')
+                        }
+                    }
+                }
+
+                stage('Build UI Catalog') {
+                    when { expression { !isImageSkipped('catalog-ui') } }
+                    steps {
+                        script {
+                            env.ICR_UI_CATALOG_IMAGE = buildAndPublishImage('ui/catalog', 'catalog-ui')
+                        }
+                    }
+                }
+
+                stage('Build UI Digitize') {
+                    when { expression { !isImageSkipped('digitize-ui') } }
+                    steps {
+                        script {
+                            env.ICR_UI_DIGITIZE_IMAGE = buildAndPublishImage('ui/digitize', 'digitize-ui')
+                        }
+                    }
+                }
+
+                stage('Build UI Chatbot') {
+                    when { expression { !isImageSkipped('chatbot-ui') } }
+                    steps {
+                        script {
+                            env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'chatbot-ui')
+                        }
+                    }
                 }
             }
         }
 
-        stage('Build digitize service') {
-            when { expression { !isImageSkipped('digitize-service') } }
-            steps {
-                script {
-                    env.ICR_SERVICES_DIGITIZE_IMAGE = buildAndPublishImage('services/digitize/', 'digitize-service')
+        stage('Build Services') {
+            parallel {
+                stage('Build chatbot service') {
+                    when { expression { !isImageSkipped('chatbot-service') } }
+                    steps {
+                        script {
+                            env.ICR_SERVICES_CHATBOT_IMAGE = buildAndPublishImage('services/chatbot/', 'chatbot-service')
+                        }
+                    }
                 }
-            }
-        }
 
-        stage('Build summarize service') {
-            when { expression { !isImageSkipped('summarize-service') } }
-            steps {
-                script {
-                    env.ICR_SERVICES_SUMMARIZE_IMAGE = buildAndPublishImage('services/summarize/', 'summarize-service')
+                stage('Build digitize service') {
+                    when { expression { !isImageSkipped('digitize-service') } }
+                    steps {
+                        script {
+                            env.ICR_SERVICES_DIGITIZE_IMAGE = buildAndPublishImage('services/digitize/', 'digitize-service')
+                        }
+                    }
                 }
-            }
-        }
 
-        stage('Build similarity service') {
-            when { expression { !isImageSkipped('similarity-service') } }
-            steps {
-                script {
-                    env.ICR_SERVICES_SIMILARITY_IMAGE = buildAndPublishImage('services/similarity/', 'similarity-service')
+                stage('Build summarize service') {
+                    when { expression { !isImageSkipped('summarize-service') } }
+                    steps {
+                        script {
+                            env.ICR_SERVICES_SUMMARIZE_IMAGE = buildAndPublishImage('services/summarize/', 'summarize-service')
+                        }
+                    }
                 }
-            }
-        }
 
-        stage('Build Caddy') {
-            when { expression { !isImageSkipped('caddy') } }
-            steps {
-                script {
-                    env.ICR_CADDY_IMAGE = buildAndPublishImage('images/caddy/', 'caddy')
+                stage('Build similarity service') {
+                    when { expression { !isImageSkipped('similarity-service') } }
+                    steps {
+                        script {
+                            env.ICR_SERVICES_SIMILARITY_IMAGE = buildAndPublishImage('services/similarity/', 'similarity-service')
+                        }
+                    }
                 }
-            }
-        }
 
-        stage('Build litellm') {
-            when { expression { !isImageSkipped('litellm') } }
-            steps {
-                script {
-                    env.ICR_LITELLM_IMAGE = buildAndPublishImage('images/litellm/', 'litellm')
+                stage('Build extract service') {
+                    when { expression { !isImageSkipped('extract-service') } }
+                    steps {
+                        script {
+                            env.ICR_SERVICES_EXTRACT_IMAGE = buildAndPublishImage('services/extract/', 'extract-service')
+                        }
+                    }
                 }
-            }
-        }
 
-        stage('Build postgres') {
-            when { expression { !isImageSkipped('postgres') } }
-            steps {
-                script {
-                    env.ICR_POSTGRES_IMAGE = buildAndPublishImage('images/postgres/', 'postgres')
+                stage('Build translate service') {
+                    when { expression { !isImageSkipped('translate-service') } }
+                    steps {
+                        script {
+                            env.ICR_SERVICES_TRANSLATE_IMAGE = buildAndPublishImage('services/translate/', 'translate-service')
+                        }
+                    }
                 }
             }
         }
@@ -142,7 +223,6 @@ pipeline {
             agent { label 'shared-x86-centos9' }
             steps {
                 script {
-                    sh 'rm -rf project-ai-services'
                     checkoutRepository()
                     env.ICR_TOOL_IMAGE_AMD = buildAndPublishImage('images/tools/', 'tools')
                 }
@@ -174,68 +254,6 @@ pipeline {
             steps {
                 script {
                     env.ICR_TOOL_IMAGE = createToolsManifest()
-                }
-            }
-        }
-
-        stage('Build AI Services') {
-            when { expression { !isImageSkipped('ai-services') } }
-            steps {
-                script {
-                    env.ICR_AI_SERVICES_IMAGE = buildAndPublishImage('ai-services', 'ai-services')
-                }
-            }
-        }
-
-        stage('Build UI Catalog') {
-            when { expression { !isImageSkipped('catalog-ui') } }
-            steps {
-                script {
-                    env.ICR_UI_CATALOG_IMAGE = buildAndPublishImage('ui/catalog', 'catalog-ui')
-                }
-            }
-        }
-
-        stage('Build UI Digitize') {
-            when { expression { !isImageSkipped('digitize-ui') } }
-            steps {
-                script {
-                    env.ICR_UI_DIGITIZE_IMAGE = buildAndPublishImage('ui/digitize', 'digitize-ui')
-                }
-            }
-        }
-        stage('Build extract service') {
-            when { expression { !isImageSkipped('extract-service') } }
-            steps {
-                script {
-                    env.ICR_SERVICES_EXTRACT_IMAGE = buildAndPublishImage('services/extract/', 'extract-service')
-                }
-            }
-        }
-
-        stage('Build translate service') {
-            when { expression { !isImageSkipped('translate-service') } }
-            steps {
-                script {
-                    env.ICR_SERVICES_TRANSLATE_IMAGE = buildAndPublishImage('services/translate/', 'translate-service')
-                }
-            }
-        }
-
-        stage('Build UI Chatbot') {
-            when { expression { !isImageSkipped('chatbot-ui') } }
-            steps {
-                script {
-                    env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'chatbot-ui')
-                }
-            }
-        }
-
-        stage('Build AI Services MCP') {
-            when { expression { !isImageSkipped('ai-services-mcp') } }
-            steps {
-                script {
-                    env.ICR_AI_SERVICES_MCP_IMAGE = buildAndPublishImage('mcp/', 'ai-services-mcp')
                 }
             }
         }
@@ -330,13 +348,12 @@ pipeline {
 
 
 /**
- * Returns true if the given imageName is present in the SKIP_IMAGE_LIST parameter.
- * SKIP_IMAGE_LIST is a newline-separated list of image names to skip.
+ * Returns true if the given imageName is present in the EXCLUDED_IMAGES parameter.
+ * EXCLUDED_IMAGES is a list of image names to exclude, separated by spaces and/or new lines.
  */
 def isImageSkipped(String imageName) {
-    return params.SKIP_IMAGE_LIST
-        .tokenize('\n')
-        .collect { it.trim() }
+    return params.EXCLUDED_IMAGES
+        .tokenize()
         .contains(imageName)
 }
 
@@ -398,6 +415,11 @@ def buildAndPublishImage(String imagePath, String imageName) {
     }
 
     println "Makefile path: ${makeFilePath}"
+
+    if (!fileExists("${makeFilePath}/Makefile")) {
+        echo "Makefile not found at ${makeFilePath}/Makefile, skipping build and publish for ${imageName}"
+        return null
+    }
 
     def tag = sh(script: "make --no-print-directory -C ${makeFilePath} image-tag SERVICE=${serviceName}", returnStdout: true).trim()
     def icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
@@ -515,6 +537,7 @@ def generateImageList() {
     echo "Generating image list for signing..."
 
     def images = [
+        env.ICR_SERVICE_BASE_IMAGE,
         env.ICR_SERVICES_CHATBOT_IMAGE,
         env.ICR_SERVICES_DIGITIZE_IMAGE,
         env.ICR_SERVICES_EXTRACT_IMAGE,
@@ -532,12 +555,12 @@ def generateImageList() {
         env.ICR_AI_SERVICES_MCP_IMAGE
     ].findAll { it != null }
 
-    // Append any additional images supplied via the ADDITIONAL_IMAGE parameter
-    def additionalImages = params.ADDITIONAL_IMAGE?.toString()?.trim()
-    if (additionalImages) {
-        def extras = additionalImages.tokenize(',').collect { it.trim() }.findAll { it }
+    // Append any signature-only images supplied via the SIGNATURE_ONLY_IMAGES parameter
+    def signatureOnlyImages = params.SIGNATURE_ONLY_IMAGES?.toString()?.trim()
+    if (signatureOnlyImages) {
+        def extras = signatureOnlyImages.tokenize().findAll { it }
         images.addAll(extras)
-        echo "Adding ${extras.size()} additional image(s) for signing: ${extras}"
+        echo "Adding ${extras.size()} signature-only image(s) for signing: ${extras}"
     }
 
     def imageList = images.join('\n') + '\n'
