@@ -26,6 +26,11 @@
             - Korean
             - Chinese
             - Arabic
+  default_profile: standard
+  profiles:
+    - standard
+    - balanced
+    - compact-4k
 
 - id: ibm-granite/granite-4.1-8b-fp8
   name: Granite 4.1 8B FP8
@@ -56,3 +61,8 @@
             - Korean
             - Chinese
             - Arabic
+  default_profile: standard
+  profiles:
+    - standard
+    - balanced
+    - compact-4k

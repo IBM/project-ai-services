@@ -22,3 +22,6 @@
         - title: "Languages"
           values:
             - Multilingual (100+ languages)
+  default_profile: standard
+  profiles:
+    - standard

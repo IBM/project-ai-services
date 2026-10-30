@@ -26,6 +26,9 @@
             - Korean
             - Chinese
             - Arabic
+  default_profile: standard
+  profiles:
+    - standard
 
 - id: ibm-granite/granite-4.1-8b
   name: Granite 4.1 8B
@@ -56,3 +59,6 @@
             - Korean
             - Chinese
             - Arabic
+  default_profile: standard
+  profiles:
+    - standard
