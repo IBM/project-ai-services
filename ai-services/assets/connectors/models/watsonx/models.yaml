@@ -3,6 +3,7 @@
   description: "A 32B parameter long-context instruct model finetuned from Granite-4.0-H-Small-Base, powering tasks such as summarization, text classification, text extraction, question-answering, RAG, code-related tasks, function-calling, and multilingual dialog."
   license: Apache-2.0
   certified_by: IBM
+  component_type: llm
   about:
     - title: "Model strengths"
       sections:

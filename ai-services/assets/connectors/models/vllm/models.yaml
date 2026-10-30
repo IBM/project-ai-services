@@ -3,6 +3,7 @@
   description: "An 8b-parameter instruction-tuned LLM for reasoning, summarization, and tool-use."
   license: Apache-2.0
   certified_by: IBM
+  component_type: llm
   about:
     - title: "Model strengths"
       sections:
@@ -32,6 +33,7 @@
   description: "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks."
   license: Apache-2.0
   certified_by: IBM
+  component_type: llm
   about:
     - title: "Model strengths"
       sections:
@@ -61,6 +63,7 @@
   description: "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks."
   license: Apache-2.0
   certified_by: IBM
+  component_type: llm
   about:
     - title: "Model strengths"
       sections:
@@ -90,6 +93,7 @@
   description: "A multilingual, cross-encoder-based reranker model used to improve retrieval quality by scoring and ranking candidate documents."
   license: MIT
   certified_by: BAAI
+  component_type: reranker
   about:
     - title: "Model strengths"
       sections:
@@ -119,6 +123,7 @@
   description: "A 278M parameter multilingual embedding model for semantic search and document retrieval across 100+ languages."
   license: Apache-2.0
   certified_by: IBM
+  component_type: embedding
   about:
     - title: "Model strengths"
       sections:
