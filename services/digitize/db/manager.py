@@ -387,88 +387,72 @@ class DatabaseManager:
 
 
     @staticmethod
-    def upsert_file_checksum(checksum: str, doc_id: str) -> None:
-        """
-        Insert or ignore a (checksum, doc_id) pair into document_checksum.
-
-        Called once a document reaches COMPLETED status so that subsequent
-        uploads of the same content can be detected via find_completed_document_by_hash.
-
-        Args:
-            checksum: MD5 hex digest string.
-            doc_id: The completed document's primary key.
-        """
-        try:
-            with get_db_session() as session:
-                stmt = (
-                    pg_insert(DocumentChecksum)
-                    .values(checksum=checksum, doc_id=doc_id)
-                    .on_conflict_do_update(
-                        index_elements=["checksum"],
-                        set_={"doc_id": doc_id},
-                    )
-                )
-                session.execute(stmt)
-                logger.debug(f"Upserted checksum registry: checksum={checksum[:20]}... doc_id={doc_id}")
-        except SQLAlchemyError as e:
-            logger.error(f"DB error upserting checksum for {checksum[:20]}...: {e}", exc_info=True)
+    def _select_checksum_owner(session, checksum: str, operation: str) -> Optional[Document]:
+        """Return the Document owning (checksum, operation), detached, or None."""
+        owner = session.scalar(
+            select(Document)
+            .join(DocumentChecksum, DocumentChecksum.doc_id == Document.doc_id)
+            .where(
+                DocumentChecksum.checksum == checksum,
+                DocumentChecksum.type == operation,
+            )
+        )
+        if owner is not None:
+            # Eagerly load attributes before the session closes.
+            _ = (owner.doc_id, owner.job_id, owner.name, owner.type, owner.status)
+            session.expunge(owner)
+        return owner
 
     @staticmethod
-    def find_completed_document_by_hash(
-        file_hash: str,
-        operation: str = "ingestion",
-    ) -> Optional[Document]:
+    def get_file_owner(checksum: str, operation: str) -> Optional[Document]:
         """
-        Find the completed document of the given operation type with a matching
-        file hash, using the document_checksum lookup table.
+        Look up the document that owns a (checksum, operation) pair without claiming it.
 
-        Only documents with status='completed' and the specified type are considered.
-        Failed and in-progress documents are deliberately excluded so that a previous
-        failed attempt does not prevent re-processing of the same file.
+        Raises on database failure: a failed lookup must not be treated as "novel".
+        """
+        with get_db_session() as session:
+            return DatabaseManager._select_checksum_owner(session, checksum, operation)
 
-        Args:
-            file_hash: MD5 hex digest string.
-            operation: Document type to match — 'ingestion' or 'digitization'.
+    @staticmethod
+    def claim_file_checksum(checksum: str, operation: str, doc_id: str) -> Optional[Document]:
+        """
+        Atomically claim a (checksum, operation) pair for an existing document.
+
+        Performs ``INSERT ... ON CONFLICT (checksum, type) DO NOTHING RETURNING``
+        in a single statement, so of any number of concurrent submissions of the
+        same content exactly one wins. The document row must already exist
+        (``document_checksum.doc_id`` is a foreign key).
 
         Returns:
-            The matching Document ORM object (attributes eagerly loaded and
-            expunged from session), or None if no completed duplicate exists.
+            ``None`` if the claim was won. Otherwise the owning Document (detached).
+
+        Raises:
+            SQLAlchemyError: on database failure. Unlike a plain lookup, a failed
+            claim must not be treated as "novel" — that would reopen the race.
         """
-        try:
-            with get_db_session() as session:
-                stmt = (
-                    select(Document)
-                    .join(
-                        DocumentChecksum,
-                        DocumentChecksum.doc_id == Document.doc_id,
-                    )
-                    .where(
-                        DocumentChecksum.checksum == file_hash,
-                        Document.type == operation,
-                        Document.status == DocStatus.COMPLETED.value,
-                    )
-                    .limit(1)
-                )
-                doc = session.scalar(stmt)
-                if doc:
-                    # Eagerly load all attributes before session closes to prevent
-                    # DetachedInstanceError in the caller.
-                    _ = (
-                        doc.doc_id, doc.job_id, doc.name, doc.type,
-                        doc.status, doc.source, doc.output_format,
-                        doc.submitted_at, doc.completed_at, doc.error, doc.doc_metadata,
-                    )
-                    session.expunge(doc)
+        with get_db_session() as session:
+            # The owner can be released (its document failed) between our conflicting
+            # INSERT and the SELECT below; if so, simply try to claim again.
+            for _ in range(3):
+                won = session.execute(
+                    pg_insert(DocumentChecksum)
+                    .values(checksum=checksum, type=operation, doc_id=doc_id)
+                    .on_conflict_do_nothing(index_elements=["checksum", "type"])
+                    .returning(DocumentChecksum.doc_id)
+                ).first()
+                if won is not None:
                     logger.debug(
-                        f"Duplicate detected: file_hash={file_hash[:20]}... "
-                        f"matches doc_id={doc.doc_id}"
+                        f"Claimed checksum {checksum[:20]}... ({operation}) for doc_id={doc_id}"
                     )
-                return doc
-        except SQLAlchemyError as e:
-            logger.error(f"DB error in hash lookup for {file_hash[:20]}...: {e}", exc_info=True)
-            # Do NOT raise — a lookup failure must not block ingestion.
-            # If the DB is unavailable the caller treats the file as novel.
-            return None
+                    return None
+
+                owner = DatabaseManager._select_checksum_owner(session, checksum, operation)
+                if owner is not None:
+                    return owner
+
+            raise RuntimeError(
+                f"Could not claim or read checksum {checksum[:20]}... ({operation})"
+            )
 
 
     @staticmethod
@@ -502,9 +486,13 @@ class DatabaseManager:
                 if status:
                     filters.append(Document.status == status)
                 else:
-                    # Exclude already_exists docs from the global listing — they are
-                    # job-scoped audit records, not real ingested documents.
-                    filters.append(Document.status != DocStatus.ALREADY_EXISTS.value)
+                    # Exclude already_exists / skipped docs from the global listing — they
+                    # are job-scoped audit records, not real ingested documents.
+                    filters.append(
+                        Document.status.notin_(
+                            [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                        )
+                    )
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 if exclude_connector_sourced:
@@ -608,6 +596,12 @@ class DatabaseManager:
                 result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
+                    # A failed / cancelled document must not keep owning its content,
+                    # or the file could never be re-submitted. Same transaction.
+                    if status in (DocStatus.FAILED, DocStatus.CANCELLED):
+                        session.execute(
+                            delete(DocumentChecksum).where(DocumentChecksum.doc_id == doc_id)
+                        )
                     return True
                 else:
                     logger.warning(f"Document not found for update: {doc_id}")
@@ -627,9 +621,9 @@ class DatabaseManager:
         Also removes:
         - The checksum registry entry (so the hash can be re-registered on
           re-ingestion of the same file).
-        - Any 'already_exists' shadow documents whose metadata points to this
-          doc_id as their existing_doc_id, since those placeholder rows have
-          no meaning once the original document is gone.
+        - Any 'already_exists' / 'skipped' shadow documents whose metadata points
+          to this doc_id as their existing_doc_id, since those placeholder rows
+          have no meaning once the original document is gone.
         - Any conversion_tasks rows that reference this doc_id.
 
         Args:
@@ -646,10 +640,11 @@ class DatabaseManager:
                     delete(DocumentChecksum).where(DocumentChecksum.doc_id == doc_id)
                 )
 
-                # Remove any already_exists shadow docs that reference this document.
-                # These placeholder rows are created when a duplicate file is submitted;
-                # their metadata stores the original doc_id under 'existing_doc_id'.
-                # Once the original is deleted they become stale, so clean them up too.
+                # Remove any already_exists / skipped shadow docs that reference this
+                # document. These placeholder rows are created when a duplicate file is
+                # submitted; their metadata stores the original doc_id under
+                # 'existing_doc_id'. Once the original is deleted they become stale, so
+                # clean them up too.
                 session.execute(
                     delete(Document).where(
                         Document.doc_metadata["existing_doc_id"].as_string() == doc_id
@@ -741,7 +736,7 @@ class DatabaseManager:
                     delete(DocumentChecksum).where(DocumentChecksum.doc_id.in_(doc_ids))
                 )
 
-                # Remove already_exists shadow docs that reference any of these docs.
+                # Remove already_exists / skipped shadow docs that reference any of these docs.
                 session.execute(
                     delete(Document).where(
                         Document.doc_metadata["existing_doc_id"].as_string().in_(doc_ids)

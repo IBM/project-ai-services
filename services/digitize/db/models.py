@@ -166,7 +166,8 @@ class Document(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('accepted', 'in_progress', 'digitized', 'processed',"
-            " 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists', 'cancelled')",
+            " 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists', 'skipped',"
+            " 'cancelled')",
             name="chk_doc_status"
         ),
         CheckConstraint(
@@ -191,10 +192,14 @@ class Document(Base):
 
 class DocumentChecksum(Base):
     """
-    Registry table that maps a checksum to the authoritative completed
-    Document row for that content.
+    Registry table that maps a (checksum, type) pair to the Document row that
+    owns that content, used for duplicate detection.
 
     Maps to the 'document_checksum' table in PostgreSQL.
+
+    A row is claimed atomically (DatabaseManager.claim_file_checksum) once the
+    document row exists, and removed when the document fails or is cancelled
+    (DatabaseManager.update_document).
 
     The FK to documents(doc_id) ON DELETE CASCADE means registry entries are
     automatically removed when the referenced document is deleted, preventing
@@ -203,6 +208,7 @@ class DocumentChecksum(Base):
     __tablename__ = "document_checksum"
 
     checksum: Mapped[str] = mapped_column(Text, primary_key=True)
+    type: Mapped[str] = mapped_column(String(50), primary_key=True)
     doc_id: Mapped[str] = mapped_column(
         Text,
         ForeignKey("documents.doc_id", ondelete="CASCADE"),
@@ -211,7 +217,10 @@ class DocumentChecksum(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<DocumentChecksum(checksum='{self.checksum[:20]}...', doc_id='{self.doc_id}')>"
+        return (
+            f"<DocumentChecksum(checksum='{self.checksum[:20]}...', type='{self.type}', "
+            f"doc_id='{self.doc_id}')>"
+        )
 
 
 class Connector(Base):

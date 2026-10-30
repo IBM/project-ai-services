@@ -52,6 +52,7 @@ class TestEnums:
             "completed_with_errors",
             "failed",
             "already_exists",
+            "skipped",
             "cancelled"
         }
 

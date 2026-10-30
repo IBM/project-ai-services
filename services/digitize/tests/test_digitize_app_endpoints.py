@@ -46,16 +46,21 @@ def digitize_test_client(monkeypatch, tmp_path, mock_db_operations):
     # check_quota_atomic returns (quota_ok=True, queued_count=0) by default → always admitted.
     mock_db_manager.check_quota_atomic = Mock(return_value=(True, 0))
     mock_db_manager.create_conversion_task = Mock(return_value=None)
-    # find_completed_document_by_hash returns None → every file is treated as novel.
-    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    # get_file_owner returns None → no owner, every file is treated as novel.
+    mock_db_manager.get_file_owner = Mock(return_value=None)
     monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
 
     # Stub out page count inside dg_util so enqueue_conversion_tasks doesn't read disk.
     monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
     # Stub out enqueue_conversion_tasks so tests don't insert DB rows.
     monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())
-    # Stub out hash generation so tests don't need real file content.
-    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+    # Stub out hash generation to hash content dynamically.
+    import hashlib
+    monkeypatch.setattr(
+        jobs_router_module,
+        "generate_file_checksum",
+        Mock(side_effect=lambda content: hashlib.md5(content if isinstance(content, bytes) else str(content).encode()).hexdigest())
+    )
 
     # Stub out pipeline background tasks so TestClient doesn't execute them.
     # Must be AsyncMock — asyncio.create_task() requires a coroutine.
@@ -270,31 +275,28 @@ class TestCreateJobs:
     def test_mixed_batch_returns_202_without_warnings(self, digitize_test_client, monkeypatch):
         """202 response for a mixed batch contains only job_id — no warnings field.
 
-        One file already exists in the DB (find_completed_document_by_hash returns a
-        match); the second is novel.  The endpoint must accept the job (202).
+        One file already exists in the DB (get_file_owner returns a completed
+        owner); the second is novel.  The endpoint must accept the job (202).
         Skipped files are recorded directly on the job's document list with status
         'already_exists'; the response body carries no warnings.
         """
         import digitize.api.v1.jobs as jobs_router_module
 
-        existing_doc = Mock()
-        existing_doc.doc_id = "existing-doc-id"
-        existing_doc.name = "old.pdf"
+        existing_doc = SimpleNamespace(
+            doc_id="existing-doc-id", name="old.pdf", job_id="old-job", status="completed"
+        )
 
         # First file already exists; second is novel.
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
-        mock_hash_db.find_completed_document_by_hash = Mock(
-            side_effect=[existing_doc, None]
-        )
+        mock_hash_db.get_file_owner = Mock(side_effect=[existing_doc, None])
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
-        pdf_header = b"%PDF-1.4 test"
         response = digitize_test_client.post(
             "/v1/jobs?operation=ingestion",
             files=[
-                ("files", ("old.pdf", pdf_header, "application/pdf")),
-                ("files", ("new.pdf", pdf_header, "application/pdf")),
+                ("files", ("old.pdf", b"%PDF-1.4 old", "application/pdf")),
+                ("files", ("new.pdf", b"%PDF-1.4 new", "application/pdf")),
             ],
         )
 
