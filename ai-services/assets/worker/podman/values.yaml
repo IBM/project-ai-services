@@ -1,5 +1,5 @@
 worker:
-  image: icr.io/ai-services-cicd/ai-services:v0.0.460
+  image: icr.io/ai-services-cicd/ai-services:v0.0.461
   runtime: "podman"
   token: ""
   gatewayAddr: ""
@@ -10,7 +10,7 @@ worker:
     authFileContent: ""
 
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.7-2
+  image: icr.io/ai-services-cicd/caddy:v2.11.7-3
   adminPort: ""
   httpsPort: ""
   privateIngressPort: "9443"
