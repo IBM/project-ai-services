@@ -284,9 +284,8 @@ const DeploymentDetails = ({
 
         const transformedEndpoints: DeployIntegrationEndpoints[] =
           deploymentServices.map((service) => {
-            const endpoints = service.endpoints ?? [];
-            const uiEndpoint = endpoints.find((e) => e.type === "ui");
-            const apiEndpoint = endpoints.find((e) => e.type === "api");
+            const uiEndpoint = service.endpoints.find((e) => e.type === "ui");
+            const apiEndpoint = service.endpoints.find((e) => e.type === "api");
             const serviceDescription =
               serviceMetadataById[service.catalog_id]?.description ??
               `${service.type} service`;
@@ -300,7 +299,7 @@ const DeploymentDetails = ({
               apiDocumentation: apiEndpoint?.url
                 ? `${apiEndpoint.url}/docs`
                 : "",
-              interactiveAPIs: endpoints
+              interactiveAPIs: service.endpoints
                 .filter((endpoint) => endpoint.type === "ui")
                 .map((endpoint) => endpoint.url),
             };
@@ -914,17 +913,13 @@ const DeploymentDetails = ({
                             <span
                               className={styles.integrationEndpointDetailValue}
                             >
-                              {integrationEndpointsData.baseURL ? (
-                                <a
-                                  href={integrationEndpointsData.baseURL}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  {integrationEndpointsData.baseURL}
-                                </a>
-                              ) : (
-                                "-"
-                              )}
+                              <a
+                                href={integrationEndpointsData.baseURL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {integrationEndpointsData.baseURL}
+                              </a>
                             </span>
                           </div>
 
