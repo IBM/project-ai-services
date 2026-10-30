@@ -107,13 +107,15 @@ const ApplicationDatasourcesTable = ({
   debouncedSearchRef.current = debouncedSearch;
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Flips to true after the very first successful fetch. Used by showSkeleton
+  // so that all subsequent loads use the dimming overlay instead of the full skeleton.
+  const hasEverLoadedRef = useRef(false);
 
   const loadDatasources = useCallback(
     async (
       page = pageRef.current,
       pageSize = pageSizeRef.current,
       search = debouncedSearchRef.current,
-      options?: { signal?: AbortSignal },
     ) => {
       // Cancel previous pending requests
       if (abortControllerRef.current) {
@@ -131,17 +133,18 @@ const ApplicationDatasourcesTable = ({
           page,
           pageSize,
           search,
-          { signal: options?.signal ?? controller.signal },
+          { signal: controller.signal },
         );
 
         const totalPages = pagination.total_pages ?? 1;
         if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          void loadDatasources(totalPages, pageSize, search, options);
+          void loadDatasources(totalPages, pageSize, search);
           return;
         }
 
+        hasEverLoadedRef.current = true;
         dispatch({
           type: ACTION_TYPES.FETCH_DATASOURCES_SUCCESS,
           payload: { rows, total: pagination.total_items },
@@ -172,6 +175,24 @@ const ApplicationDatasourcesTable = ({
   );
 
   const isFirstMount = useRef(true);
+
+  // After a remove or connect mutation, if a search is active the normal
+  // loadDatasources call returns a filtered total
+  // This fires a background page=1 page_size=1 call (no search) to
+  // read the unfiltered total_items and show "No data" badge
+  const refreshUnfilteredCount = useCallback(async () => {
+    if (!debouncedSearchRef.current) return;
+    try {
+      const { pagination } = await fetchApplicationDatasources(
+        applicationId,
+        1,
+        1,
+      );
+      onDatasourceCountChangeRef.current?.(pagination.total_items);
+    } catch {
+      // Non-critical background call — ignore errors silently
+    }
+  }, [applicationId]);
 
   // Trigger search on debounced term changes (resetting page to 1)
   useEffect(() => {
@@ -211,6 +232,7 @@ const ApplicationDatasourcesTable = ({
       dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
       dispatch({ type: ACTION_TYPES.SET_CONFIRM_TEXT, payload: "" });
       await loadDatasources();
+      void refreshUnfilteredCount();
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Failed to remove data source";
@@ -220,10 +242,10 @@ const ApplicationDatasourcesTable = ({
     }
   };
 
-  // Mount fetch + optional 2-minute auto-refresh (paused during delete flow)
+  // Mount fetch + 2-minute auto-refresh.
   useAutoRefresh({
     fetchFn: loadDatasources,
-    hasData: state.rowsData.length > 0,
+    hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
   });
 
@@ -242,9 +264,11 @@ const ApplicationDatasourcesTable = ({
     headers: HEADERS,
     serverSideSearch: true,
     fetchAllRows: async () => {
+      // Use state.search.trim() (the immediate input value) so the export
+      // always reflects what the user sees in the search box
       const rows = await fetchAllApplicationDatasources(
         applicationId,
-        debouncedSearch,
+        state.search.trim(),
       );
       return rows as unknown as Record<string, unknown>[];
     },
@@ -264,7 +288,8 @@ const ApplicationDatasourcesTable = ({
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
-  const showSkeleton = state.isLoading && !debouncedSearch;
+  // Show the full skeleton only on the very first load
+  const showSkeleton = state.isLoading && !hasEverLoadedRef.current;
 
   return (
     <>
@@ -448,8 +473,12 @@ const ApplicationDatasourcesTable = ({
               onConnected={() => {
                 setIsConnectModalOpen(false);
                 void loadDatasources();
+                void refreshUnfilteredCount();
               }}
-              onPartialConnect={() => void loadDatasources()}
+              onPartialConnect={() => {
+                void loadDatasources();
+                void refreshUnfilteredCount();
+              }}
             />
 
             {/* Remove data source modal */}
