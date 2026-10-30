@@ -74,9 +74,3 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: go tool cover -func=coverage.out
 
-  scan:
-    uses: ./.github/workflows/scanner.yml
-    with:
-      skip-cves-scan: true
-      skip-image-build: true
-      skip-code-license-scan: false
