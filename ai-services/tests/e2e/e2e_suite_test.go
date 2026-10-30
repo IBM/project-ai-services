@@ -4053,6 +4053,203 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 
+	ginkgo.Context("MCP Sidecar Tests", ginkgo.Label("mcp-tests"), func() {
+		// MCP sidecars are registered as Caddy routes with type="mcp" only on the
+		// podman catalog path.  Skip the entire context on any other runtime.
+		ginkgo.BeforeEach(func() {
+			if appRuntime != "podman" {
+				ginkgo.Skip("[MCP] MCP sidecar tests are podman-only — skipping for runtime: " + appRuntime)
+			}
+		})
+
+		// resolveInfoOutput calls 'application info' once with a short timeout
+		// and is used by the health-check specs to get the current URL list.
+		resolveInfoOutput := func() string {
+			infoCtx, infoCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer infoCancel()
+			out, err := cli.ApplicationInfo(infoCtx, cfg, appName, appRuntime)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[MCP] application info failed")
+
+			return out
+		}
+
+		// validateMCPHealth is the shared assertion for a single sidecar's /health.
+		// mcpURL may be the full MCP endpoint (e.g. https://host/mcp) or just the
+		// base URL (https://host).  /health is always served at the root, so strip
+		// any trailing /mcp path before appending /health.
+		validateMCPHealth := func(mcpURL, label string) {
+			gomega.Expect(mcpURL).NotTo(gomega.BeEmpty(),
+				"[MCP] %s MCP URL not found in application info — sidecar may not be deployed", label)
+
+			baseURL := strings.TrimSuffix(mcpURL, "/mcp")
+			url := baseURL + "/health"
+			healthCtx, healthCancel := context.WithTimeout(context.Background(), mcpRequestTimeout)
+			defer healthCancel()
+	
+			req, err := http.NewRequestWithContext(healthCtx, http.MethodGet, url, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[MCP] failed to build request for %s", url)
+	
+			resp, err := common.GetHTTPClient(common.HTTPClientConfig{
+				Timeout:            mcpRequestTimeout,
+				InsecureSkipVerify: true,
+			}).Do(req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[MCP] GET %s failed", url)
+			defer func() { _ = resp.Body.Close() }()
+
+			gomega.Expect(resp.StatusCode).To(gomega.Equal(http.StatusOK),
+				"[MCP] %s /health returned HTTP %d", label, resp.StatusCode)
+
+			var body struct {
+				Status    string `json:"status"`
+				Transport string `json:"transport"`
+				SDK       string `json:"sdk"`
+				Version   string `json:"version"`
+			}
+			gomega.Expect(json.NewDecoder(resp.Body).Decode(&body)).To(gomega.Succeed(),
+				"[MCP] %s /health response body could not be decoded", label)
+
+			gomega.Expect(body.Status).To(gomega.Equal("ok"),
+				"[MCP] %s sidecar health status is not 'ok'", label)
+			gomega.Expect(body.Transport).To(gomega.Equal("streamable-http"),
+				"[MCP] %s sidecar transport is not 'streamable-http'", label)
+			gomega.Expect(body.SDK).NotTo(gomega.BeEmpty(),
+				"[MCP] %s sidecar health response missing 'sdk' field", label)
+			gomega.Expect(body.Version).NotTo(gomega.BeEmpty(),
+				"[MCP] %s sidecar health response missing 'version' field", label)
+
+			logger.Infof("[MCP] %s sidecar healthy at %s (sdk=%s version=%s)",
+				label, baseURL, body.SDK, body.Version)
+		}
+
+		// health checks
+
+		ginkgo.It("chat MCP sidecar /health returns ok",
+			ginkgo.Label("spyre-dependent", "mcp-health"),
+			func() {
+				infoOutput := resolveInfoOutput()
+				validateMCPHealth(cli.ExtractChatMCPURL(infoOutput), "chat")
+			})
+
+		ginkgo.It("digitize MCP sidecar /health returns ok",
+			ginkgo.Label("spyre-dependent", "mcp-health"),
+			func() {
+				infoOutput := resolveInfoOutput()
+				validateMCPHealth(cli.ExtractDigitizeMCPURL(infoOutput), "digitize")
+			})
+
+		ginkgo.It("similarity MCP sidecar /health returns ok",
+			ginkgo.Label("spyre-dependent", "mcp-health"),
+			func() {
+				infoOutput := resolveInfoOutput()
+				validateMCPHealth(cli.ExtractSimilarityMCPURL(infoOutput), "similarity")
+			})
+
+		ginkgo.It("summarize MCP sidecar /health returns ok",
+			ginkgo.Label("spyre-dependent", "mcp-health", "summarization-tests"),
+			func() {
+				if templateName != "summarize" && templateName != "rag" {
+					ginkgo.Skip("[MCP] summarize MCP sidecar only present in summarize/rag templates")
+				}
+				infoOutput := resolveInfoOutput()
+				validateMCPHealth(cli.ExtractSummarizeMCPURL(infoOutput), "summarize")
+			})
+
+		// ── TC-5: MCP endpoint existence in the Catalog API ──────────────────
+		//
+		// Verifies that the podman deployer wrote type=mcp endpoints to the
+		// catalog database for each service — so tooling can discover MCP URLs
+		// via the Catalog REST API without parsing CLI output.
+
+		ginkgo.It("Catalog API returns type=mcp endpoints for all services",
+			ginkgo.Label("spyre-dependent", "mcp-catalog"),
+			func() {
+				endpoints, err := cli.CatalogGetApplicationEndpoints(appName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+					"[MCP] failed to fetch application endpoints from catalog API")
+
+				type check struct{ label, url string }
+
+				checks := []check{
+					{"chat", endpoints.ChatMCPURL()},
+					{"digitize", endpoints.DigitizeMCPURL()},
+					{"similarity", endpoints.SimilarityMCPURL()},
+				}
+				if templateName == "summarize" || templateName == "rag" {
+					checks = append(checks, check{"summarize", endpoints.SummarizeMCPURL()})
+				}
+
+				for _, c := range checks {
+					gomega.Expect(c.url).NotTo(gomega.BeEmpty(),
+						"[MCP] Catalog API missing type=mcp endpoint for %s service", c.label)
+					logger.Infof("[MCP] Catalog API endpoint verified: %s → %s", c.label, c.url)
+				}
+			})
+
+		// ── TC-6 through TC-8: tools/list checks ─────────────────────────────
+		//
+		// Sends MCP initialize + tools/list to each sidecar and asserts that at
+		// least one tool is registered with a name and inputSchema.  A passing
+		// /health check does not guarantee the OpenAPI spec loaded correctly —
+		// this spec does.
+
+		validateMCPToolsList := func(mcpURL, label string) {
+			gomega.Expect(mcpURL).NotTo(gomega.BeEmpty(),
+				"[MCP] %s MCP URL not found in application info — sidecar may not be deployed", label)
+
+			endpoint := mcpURL
+			if !strings.HasSuffix(endpoint, "/mcp") {
+				endpoint = strings.TrimSuffix(endpoint, "/") + "/mcp"
+			}
+
+			tools, err := mcpToolsForEndpoint(endpoint)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+				"[MCP] %s: tools/list handshake failed", label)
+			gomega.Expect(tools).NotTo(gomega.BeEmpty(),
+				"[MCP] %s: tools/list returned 0 tools — OpenAPI spec may not have loaded", label)
+
+			logger.Infof("[MCP] %s: %d tool(s) registered", label, len(tools))
+			for _, tool := range tools {
+				name, _ := tool["name"].(string)
+				gomega.Expect(name).NotTo(gomega.BeEmpty(),
+					"[MCP] %s: tool entry has empty name: %v", label, tool)
+				gomega.Expect(tool["inputSchema"]).NotTo(gomega.BeNil(),
+					"[MCP] %s: tool %q missing inputSchema", label, name)
+				logger.Infof("[MCP] %s:   tool=%q", label, name)
+			}
+		}
+
+		ginkgo.It("chat MCP sidecar tools/list returns registered tools",
+			ginkgo.Label("spyre-dependent", "mcp-tools"),
+			func() {
+				infoOutput := resolveInfoOutput()
+				validateMCPToolsList(cli.ExtractChatMCPURL(infoOutput), "chat")
+			})
+
+		ginkgo.It("digitize MCP sidecar tools/list returns registered tools",
+			ginkgo.Label("spyre-dependent", "mcp-tools"),
+			func() {
+				infoOutput := resolveInfoOutput()
+				validateMCPToolsList(cli.ExtractDigitizeMCPURL(infoOutput), "digitize")
+			})
+
+		ginkgo.It("similarity MCP sidecar tools/list returns registered tools",
+			ginkgo.Label("spyre-dependent", "mcp-tools"),
+			func() {
+				infoOutput := resolveInfoOutput()
+				validateMCPToolsList(cli.ExtractSimilarityMCPURL(infoOutput), "similarity")
+			})
+
+		ginkgo.It("summarize MCP sidecar tools/list returns registered tools",
+			ginkgo.Label("spyre-dependent", "mcp-tools", "summarization-tests"),
+			func() {
+				if templateName != "summarize" && templateName != "rag" {
+					ginkgo.Skip("[MCP] summarize MCP sidecar only present in summarize/rag templates")
+				}
+				infoOutput := resolveInfoOutput()
+				validateMCPToolsList(cli.ExtractSummarizeMCPURL(infoOutput), "summarize")
+			})
+	})
+
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
 		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests"), func() {
 			if providedAppName != "" {
