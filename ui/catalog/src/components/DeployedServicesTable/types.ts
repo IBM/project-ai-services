@@ -68,15 +68,6 @@ export const HEADERS: DataTableHeader[] = [
   { header: "", key: "actions" },
 ];
 
-// Status Column sort order
-export const STATUS_SORT_ORDER: Record<string, number> = {
-  Downloading: 1,
-  Deploying: 2,
-  Deleting: 3,
-  Error: 4,
-  Running: 5,
-};
-
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
@@ -143,12 +134,7 @@ function ownCases(state: AppState, action: AppAction): AppState {
         page: 1,
       };
     case ACTION_TYPES.DEPLOYED_SERVICES_SET_ROWS_DATA:
-      return {
-        ...state,
-        rowsData: action.payload.sort(
-          (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
-        ),
-      };
+      return { ...state, rowsData: action.payload };
     default:
       return state;
   }
