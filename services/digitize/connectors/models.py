@@ -162,7 +162,7 @@ class ConnectorCreateRequest(BaseModel):
     @classmethod
     def validate_allowed_extensions(cls, v: List[str]) -> List[str]:
         normalised = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in v]
-        supported = {".pdf", ".docx"}
+        supported = {".pdf", ".docx", ".html"}
         unsupported = [e for e in normalised if e not in supported]
         if unsupported:
             raise ValueError(
@@ -207,6 +207,21 @@ class ConnectorUpdateRequest(BaseModel):
         None,
         description="Partial connection details — only supplied keys are overwritten",
     )
+
+    @field_validator("allowed_extensions")
+    @classmethod
+    def validate_allowed_extensions(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return v
+        normalised = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in v]
+        supported = {".pdf", ".docx", ".html"}
+        unsupported = [e for e in normalised if e not in supported]
+        if unsupported:
+            raise ValueError(
+                f"Unsupported extension(s): {unsupported!r}. "
+                f"Supported extensions: {sorted(supported)}"
+            )
+        return normalised
 
     model_config = {
         "json_schema_extra": {

@@ -682,3 +682,78 @@ class TestSplitJapaneseSentences:
         result = _split_japanese_sentences("Power10はIBMのプロセッサです。16コアを搭載しています。")
         assert result == ["Power10はIBMのプロセッサです。", "16コアを搭載しています。"]
 
+
+@pytest.mark.unit
+class TestValidateDocumentFile:
+    """Tests for validate_document_file in common.misc_utils."""
+
+    def test_validate_valid_pdf(self):
+        from common.misc_utils import validate_document_file
+        content = b"%PDF-1.4 test content"
+        validate_document_file("sample.pdf", content)
+
+    def test_validate_valid_docx(self):
+        from common.misc_utils import validate_document_file
+        content = b"PK\x03\x04\x14\x00..."
+        validate_document_file("sample.docx", content)
+
+    def test_validate_valid_html(self):
+        from common.misc_utils import validate_document_file
+        content = b"<!DOCTYPE html><html><body><h1>Title</h1></body></html>"
+        validate_document_file("sample.html", content)
+
+    def test_validate_valid_html_with_bom(self):
+        from common.misc_utils import validate_document_file
+        content = b"\xef\xbb\xbf<html><body>Hello</body></html>"
+        validate_document_file("sample.html", content)
+
+    def test_validate_valid_html_with_leading_whitespace(self):
+        from common.misc_utils import validate_document_file
+        content = b"   \n\t<html><body>Hello</body></html>"
+        validate_document_file("sample.html", content)
+
+    def test_validate_empty_filename_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="File must have a filename"):
+            validate_document_file("", b"%PDF-1.4")
+
+    def test_validate_exception_content_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="Failed to read file"):
+            validate_document_file("sample.pdf", IOError("disk error"))
+
+    def test_validate_non_bytes_content_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="Invalid file content"):
+            validate_document_file("sample.pdf", "string content")
+
+    def test_validate_empty_bytes_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="File is empty"):
+            validate_document_file("sample.pdf", b"")
+
+    def test_validate_unsupported_extension_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="Only PDF, DOCX, and HTML files are allowed"):
+            validate_document_file("sample.txt", b"plain text")
+
+    def test_validate_invalid_pdf_signature_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="invalid PDF format"):
+            validate_document_file("sample.pdf", b"NOTAPDF")
+
+    def test_validate_invalid_docx_signature_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="invalid DOCX format"):
+            validate_document_file("sample.docx", b"NOTADOCX")
+
+    def test_validate_html_invalid_utf8_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="not valid UTF-8"):
+            validate_document_file("sample.html", b"\xff\xfe\x00\x00invalid")
+
+    def test_validate_html_not_starting_with_tag_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="invalid HTML format"):
+            validate_document_file("sample.html", b"This is just plain text without brackets")
+

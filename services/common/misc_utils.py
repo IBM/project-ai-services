@@ -327,14 +327,14 @@ def verify_checksum(file, checksum_file):
 
 def validate_document_file(filename: str, content) -> None:
     """
-    Validate a document file (PDF or DOCX) with comprehensive checks.
+    Validate a document file (PDF, DOCX, or HTML) with comprehensive checks.
 
     Performs validation checks:
     1. Filename exists
     2. Content was read successfully (not an Exception)
     3. Content is not empty
-    4. File has .pdf or .docx extension
-    5. File content matches expected format (magic bytes check)
+    4. File has .pdf, .docx, or .html extension
+    5. File content matches expected format (magic bytes check for PDF/DOCX, UTF-8 leading '<' for HTML)
 
     Args:
         filename: Name of the file
@@ -362,13 +362,13 @@ def validate_document_file(filename: str, content) -> None:
         raise ValueError(f"File is empty: {filename}")
 
     # Validate extension and format
-    allowed_extensions = {'.pdf', '.docx'}
+    allowed_extensions = {'.pdf', '.docx', '.html'}
     file_ext = Path(filename).suffix.lower()
 
     if file_ext not in allowed_extensions:
-        raise ValueError(f"Only PDF and DOCX files are allowed. Invalid file: {filename}")
+        raise ValueError(f"Only PDF, DOCX, and HTML files are allowed. Invalid file: {filename}")
 
-    # Validate file signatures (magic bytes)
+    # Validate file signatures / content
     if file_ext == '.pdf':
         pdf_signature = b'%PDF'
         if not content.startswith(pdf_signature):
@@ -380,6 +380,14 @@ def validate_document_file(filename: str, content) -> None:
         docx_signature = b'PK\x03\x04'
         if not content.startswith(docx_signature):
             raise ValueError(f"File has .docx extension but invalid DOCX format: {filename}")
+
+    elif file_ext == '.html':
+        try:
+            text = content.decode('utf-8-sig').lstrip()
+        except UnicodeDecodeError:
+            raise ValueError(f"File has .html extension but is not valid UTF-8: {filename}")
+        if not text.startswith('<'):
+            raise ValueError(f"File has .html extension but invalid HTML format: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
     """Return the set of files from original_files that have not yet been processed."""
