@@ -1,0 +1,139 @@
+- id: ibm-granite/granite-3.3-8b-instruct
+  name: Granite 3.3 8B Instruct
+  description: "An 8b-parameter instruction-tuned LLM for reasoning, summarization, and tool-use."
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+
+- id: ibm-granite/granite-4.1-8b
+  name: Granite 4.1 8B
+  description: "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks."
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+
+- id: ibm-granite/granite-4.1-8b-fp8
+  name: Granite 4.1 8B FP8
+  description: "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks."
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+
+- id: BAAI/bge-reranker-v2-m3
+  name: BGE Reranker v2 M3
+  description: "A multilingual, cross-encoder-based reranker model used to improve retrieval quality by scoring and ranking candidate documents."
+  license: MIT
+  certified_by: BAAI
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Contextual reasoning
+            - Accurate response generation across a wide range of natural language tasks from summarization and question answering to prompt-driven workflows
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+            - And 90+ more
+
+- id: ibm-granite/granite-embedding-278m-multilingual
+  name: Granite Embedding 278M Multilingual
+  description: "A 278M parameter multilingual embedding model for semantic search and document retrieval across 100+ languages."
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Excellent multilingual support
+            - Efficient 278M parameter model
+            - Strong performance across diverse languages
+        - title: "Use cases"
+          values:
+            - Cross-lingual semantic search
+            - Multilingual document retrieval
+            - International content matching
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - Multilingual (100+ languages)

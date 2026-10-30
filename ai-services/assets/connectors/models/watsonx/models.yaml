@@ -1,0 +1,31 @@
+- id: ibm/granite-4-h-small
+  name: Granite 4 H Small
+  description: "A 32B parameter long-context instruct model finetuned from Granite-4.0-H-Small-Base, powering tasks such as summarization, text classification, text extraction, question-answering, RAG, code-related tasks, function-calling, and multilingual dialog."
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Improved instruction following
+            - Tool-calling capabilities
+            - Natural conversation
+            - Strong reasoning
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - German
+            - Spanish
+            - French
+            - Japanese
+            - Portuguese
+            - Arabic
+            - Czech
+            - Italian
+            - Korean
+            - Dutch
+            - Chinese
