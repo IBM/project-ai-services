@@ -4,6 +4,11 @@
   "additionalProperties": false,
   "required": ["watsonxApiKey", "watsonxProjectId", "watsonxUrl"],
   "properties": {
+    "model": {
+      "type": "string",
+      "title": "Large language model (LLM)",
+      "description": "Chat/Instruct model name for WatsonX"
+    },
     "watsonxApiKey": {
       "type": "string",
       "title": "API key",

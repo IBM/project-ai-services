@@ -330,7 +330,7 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 	}
 
 	// Verify component exists and get its path
-	component, err := p.LoadComponent(componentType, providerID)
+	_, err = p.LoadComponent(componentType, providerID)
 	if err != nil {
 		return nil, fmt.Errorf("component provider not found: %w", err)
 	}
@@ -370,7 +370,7 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 	if err != nil {
 		return nil, err
 	}
-	injectModelsIntoSchema(schema, models, component.ComponentName)
+	injectModelsIntoSchema(schema, models)
 
 	return schema, nil
 }

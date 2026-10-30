@@ -175,31 +175,10 @@ type Component struct {
 
 // Model is one entry in a provider's models.yaml.
 type Model struct {
-	ID             string     `yaml:"id" json:"id"`                                               // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
-	Name           string     `yaml:"name" json:"name"`                                           // display name
-	Description    string     `yaml:"description" json:"description"`                             // short description
-	Default        bool       `yaml:"default,omitempty" json:"default,omitempty"`                 // whether this is the provider's default model
-	License        string     `yaml:"license,omitempty" json:"license,omitempty"`                 // license identifier, e.g. "Apache-2.0"
-	CertifiedBy    string     `yaml:"certified_by,omitempty" json:"certified_by,omitempty"`       // organisation that certified the model
-	About          *yaml.Node `yaml:"-" json:"-"`                                                 // detailed info (strengths, supported languages, ...), same shape as a service's about
-	DefaultProfile string     `yaml:"default_profile,omitempty" json:"default_profile,omitempty"` // ID of the profile used when none is requested
-	Profiles       []string   `yaml:"profiles,omitempty" json:"profiles,omitempty"`               // IDs of the profiles supported by this model
-}
-
-// UnmarshalYAML extracts the 'about' node manually, mirroring Service, so its
-// structure and ordering are preserved.
-func (m *Model) UnmarshalYAML(value *yaml.Node) error {
-	type Alias Model
-	aux := (*Alias)(m)
-
-	aux.About = nil
-	if err := value.Decode(aux); err != nil {
-		return err
-	}
-
-	m.About = extractAboutNode(value)
-
-	return nil
+	ID          string `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
+	Default     bool   `yaml:"default" json:"default"`         // whether this is the default model for the provider
+	Title       string `yaml:"title" json:"title"`             // short display name
+	Description string `yaml:"description" json:"description"` // markdown description
 }
 
 // ComponentSummary represents a component for list API responses.
