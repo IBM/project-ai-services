@@ -27,3 +27,6 @@
             - Chinese
             - Arabic
             - And 90+ more
+  default_profile: standard
+  profiles:
+    - standard
