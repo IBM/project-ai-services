@@ -1,4 +1,5 @@
 - id: ibm/granite-4-h-small
+  name: Granite 4 H Small
   default: true
   title: granite-4-h-small
   description: |-
@@ -7,3 +8,31 @@
     **Model strengths**: Improved instruction following, tool-calling capabilities, natural conversation, strong reasoning, and enterprise-grade accuracy.
 
     **Supported Languages**: English, German, Spanish, French, Japanese, Portuguese, Arabic, Czech, Italian, Korean, Dutch, and Chinese. Users may finetune for additional languages.
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Improved instruction following
+            - Tool-calling capabilities
+            - Natural conversation
+            - Strong reasoning
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - German
+            - Spanish
+            - French
+            - Japanese
+            - Portuguese
+            - Arabic
+            - Czech
+            - Italian
+            - Korean
+            - Dutch
+            - Chinese

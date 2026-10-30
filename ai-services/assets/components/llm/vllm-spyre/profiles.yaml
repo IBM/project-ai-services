@@ -1,0 +1,38 @@
+- id: standard
+  default: true
+  name: "Standard"
+  description: "4 cards, 200 GiB RAM, 32k context"
+  params:
+    resources:
+      memory: 214748364800 # 200Gi in bytes
+      accelerators:
+        ibm.com/spyre_pf: 4
+    maxModelLen: 32768
+    maxBatchSize: 32
+    shmSize: "2Gi"
+
+- id: balanced
+  default: false
+  name: "Balanced"
+  description: "2 cards, 150 GiB RAM, 8k context"
+  params:
+    resources:
+      memory: 161061273600 # 150Gi in bytes
+      accelerators:
+        ibm.com/spyre_pf: 2
+    maxModelLen: 8192
+    maxBatchSize: 32
+    shmSize: "2Gi"
+
+- id: compact-4k
+  default: false
+  name: "Compact 4k"
+  description: "1 card, 100 GiB RAM, 4k context"
+  params:
+    resources:
+      memory: 107374182400 # 100Gi in bytes
+      accelerators:
+        ibm.com/spyre_pf: 1
+    maxModelLen: 4096
+    maxBatchSize: 32
+    shmSize: "2Gi"
