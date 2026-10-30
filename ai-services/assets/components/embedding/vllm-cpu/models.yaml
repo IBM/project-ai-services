@@ -1,7 +1,13 @@
 - id: ibm-granite/granite-embedding-278m-multilingual
   name: Granite Embedding 278M Multilingual
   default: true
-  description: "A 278M parameter multilingual embedding model for semantic search and document retrieval across 100+ languages."
+  title: granite-embedding-278m-multilingual
+  description: |-
+    **Languages:** Multilingual (100+ languages)
+
+    **Use Cases:** Cross-lingual semantic search, Multilingual document retrieval, International content matching
+
+    **Strengths:** Excellent multilingual support, Efficient 278M parameter model, Strong performance across diverse languages
   license: Apache-2.0
   certified_by: IBM
   about:

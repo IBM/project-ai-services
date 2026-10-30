@@ -2,5 +2,11 @@
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
   "additionalProperties": false,
-  "properties": {}
+  "properties": {
+    "model": {
+      "type": "string",
+      "title": "Reranker model",
+      "description": "Reranker model"
+    }
+  }
 }
