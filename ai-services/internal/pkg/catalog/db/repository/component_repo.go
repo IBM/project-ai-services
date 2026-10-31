@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -18,6 +19,8 @@ type ComponentRepository interface {
 	Insert(ctx context.Context, component *models.Component) error
 	// GetByID retrieves a component by ID.
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Component, error)
+	// GetByName retrieves a component by its unique name (case-insensitive).
+	GetByName(ctx context.Context, name string) (*models.Component, error)
 	// GetAll retrieves all components from the database.
 	GetAll(ctx context.Context) ([]models.Component, error)
 	// GetByType retrieves all components of a specific type.
@@ -45,10 +48,12 @@ func NewComponentRepository(pool *pgxpool.Pool) ComponentRepository {
 }
 
 // Insert creates a new component in the database.
+const componentColumns = "id, name, created_by, worker_id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at"
+
 func (r *componentRepo) Insert(ctx context.Context, component *models.Component) error {
 	query := `
-		INSERT INTO components (id, type, provider, status, message, endpoints, version, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO components (id, name, created_by, worker_id, type, provider, status, message, endpoints, version, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING created_at, updated_at
 	`
 
@@ -80,6 +85,9 @@ func (r *componentRepo) Insert(ctx context.Context, component *models.Component)
 		ctx,
 		query,
 		component.ID,
+		sql.NullString{String: component.Name, Valid: component.Name != ""},
+		sql.NullString{String: component.CreatedBy, Valid: component.CreatedBy != ""},
+		component.WorkerID,
 		component.Type,
 		component.Provider,
 		component.Status,
@@ -99,21 +107,73 @@ func (r *componentRepo) Insert(ctx context.Context, component *models.Component)
 // GetByID retrieves a component by ID.
 func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Component, error) {
 	query := `
-		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
+		SELECT ` + componentColumns + `
 		FROM components
 		WHERE id = $1
 	`
 
+	rows, err := r.pool.Query(ctx, query, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get component: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to get component: %w", err)
+		}
+
+		return nil, nil
+	}
+
+	return scanComponent(rows)
+}
+
+// GetByName retrieves a component by its unique name (case-insensitive).
+func (r *componentRepo) GetByName(ctx context.Context, name string) (*models.Component, error) {
+	query := `
+		SELECT ` + componentColumns + `
+		FROM components
+		WHERE LOWER(name) = LOWER($1)
+	`
+
+	rows, err := r.pool.Query(ctx, query, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get component by name: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to get component by name: %w", err)
+		}
+
+		return nil, nil
+	}
+
+	return scanComponent(rows)
+}
+
+// scanComponent scans a component row and unmarshals JSON fields.
+//
+//nolint:funlen // scanning all component columns is inherently long
+func scanComponent(rows pgx.Rows) (*models.Component, error) {
 	var (
 		component     models.Component
+		name          sql.NullString
+		createdBy     sql.NullString
+		workerID      *uuid.UUID
 		endpointsJSON []byte
 		metadataJSON  []byte
 		version       sql.NullString
 		message       sql.NullString
 	)
 
-	err := r.pool.QueryRow(ctx, query, id).Scan(
+	err := rows.Scan(
 		&component.ID,
+		&name,
+		&createdBy,
+		&workerID,
 		&component.Type,
 		&component.Provider,
 		&component.Status,
@@ -124,57 +184,19 @@ func (r *componentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Comp
 		&component.CreatedAt,
 		&component.UpdatedAt,
 	)
-
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, nil
-		}
-
-		return nil, fmt.Errorf("failed to get component: %w", err)
-	}
-
-	if version.Valid {
-		component.Version = version.String
-	}
-
-	if message.Valid {
-		component.Message = message.String
-	}
-
-	if len(endpointsJSON) > 0 {
-		var endpoints []map[string]any
-		if err := json.Unmarshal(endpointsJSON, &endpoints); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal endpoints: %w", err)
-		}
-		component.Endpoints = endpoints
-	}
-
-	if len(metadataJSON) > 0 {
-		var metadata map[string]any
-		if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-		}
-		component.Metadata = metadata
-	}
-
-	return &component, nil
-}
-
-// scanComponent scans a component row and unmarshals JSON fields.
-func scanComponent(rows pgx.Rows) (*models.Component, error) {
-	var (
-		component     models.Component
-		endpointsJSON []byte
-		metadataJSON  []byte
-		version       sql.NullString
-		message       sql.NullString
-	)
-
-	err := rows.Scan(&component.ID, &component.Type, &component.Provider, &component.Status, &message,
-		&endpointsJSON, &version, &metadataJSON, &component.CreatedAt, &component.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan component: %w", err)
 	}
+
+	if name.Valid {
+		component.Name = name.String
+	}
+
+	if createdBy.Valid {
+		component.CreatedBy = createdBy.String
+	}
+
+	component.WorkerID = workerID
 
 	if version.Valid {
 		component.Version = version.String
@@ -206,7 +228,7 @@ func scanComponent(rows pgx.Rows) (*models.Component, error) {
 // GetAll retrieves all components from the database.
 func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) {
 	query := `
-		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
+		SELECT ` + componentColumns + `
 		FROM components
 		ORDER BY created_at DESC
 	`
@@ -236,7 +258,7 @@ func (r *componentRepo) GetAll(ctx context.Context) ([]models.Component, error) 
 // GetByType retrieves all components of a specific type.
 func (r *componentRepo) GetByType(ctx context.Context, componentType string) ([]models.Component, error) {
 	query := `
-		SELECT id, type, provider, status, message, endpoints, version, metadata, created_at, updated_at
+		SELECT ` + componentColumns + `
 		FROM components
 		WHERE type = $1
 		ORDER BY created_at DESC
@@ -304,7 +326,7 @@ func (r *componentRepo) Update(ctx context.Context, component *models.Component)
 	).Scan(&component.UpdatedAt)
 
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 
