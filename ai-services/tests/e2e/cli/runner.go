@@ -38,6 +38,7 @@ const (
 	svcSummarizeAPI    = "summarize-api"
 	svcExtractAPI      = "extract-api"
 	svcSummarizeMCP    = "summarize-mcp"
+	svcTranslateAPI    = "translate-api"
 )
 
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
@@ -451,6 +452,15 @@ func ExtractSimilarityMCPURL(infoOutput string) string {
 // The hostname always contains "summarize-mcp" for the catalog (podman) path.
 func ExtractSummarizeMCPURL(infoOutput string) string {
 	return extractURLBySubstring(infoOutput, svcSummarizeMCP)
+}
+
+// ExtractCatalogTranslateURL parses the 'application info' output for the translate service URL.
+//
+// Actual output line:
+//
+//	"- Translate API is available to use at https://translate-api-<slug>.<domain>."
+func ExtractCatalogTranslateURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcTranslateAPI)
 }
 
 // getOpenShiftRouteURLs fetches OpenShift routes for the given application namespace
