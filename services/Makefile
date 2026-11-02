@@ -16,7 +16,7 @@ endif
 include $(SERVICE_MAKEFILE)
 
 build:
-	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) $(CREDS_ARG) -f $(SERVICE)/Containerfile -t $(REGISTRY)/$(IMAGE):$(TAG) .
+	$(CONTAINER_BUILDER) build $(call image_labels,$(SERVICE)/Containerfile) $(CREDS_ARG) -f $(SERVICE)/Containerfile -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
 push:

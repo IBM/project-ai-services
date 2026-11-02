@@ -6,7 +6,7 @@ CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGIST
 
 CONTAINER_BUILDER?=podman
 build:
-	cd prebuilder && $(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t prebuilder . && cd -
+	cd prebuilder && $(CONTAINER_BUILDER) build $(call image_labels,prebuilder/Containerfile) -t prebuilder . && cd -
 	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 

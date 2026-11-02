@@ -28,19 +28,8 @@ RUN dnf install -y git ca-certificates && \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
-# Image provenance labels (populated via --build-arg, see hack/image-labels.mk)
-ARG GIT_REPO=https://github.com/ibm/project-ai-services
-ARG GIT_COMMIT=unknown
-ARG BUILD_DATE=unknown
-LABEL org.opencontainers.image.source="${GIT_REPO}" \
-      org.opencontainers.image.revision="${GIT_COMMIT}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
-      org.opencontainers.image.title="PostgreSQL" \
-      org.opencontainers.image.vendor="IBM" \
-      org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.description="PostgreSQL 18 database on UBI 9 Minimal" \
-      com.github.project-ai-services.containerfile="images/postgres/Dockerfile" \
-      com.github.project-ai-services.containerfile.url="${GIT_REPO}/blob/${GIT_COMMIT}/images/postgres/Dockerfile"
+LABEL org.opencontainers.image.title="PostgreSQL" \
+      org.opencontainers.image.description="PostgreSQL 18 database on UBI 9 Minimal"
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 

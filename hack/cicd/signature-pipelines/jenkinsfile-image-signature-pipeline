@@ -463,8 +463,13 @@ EOF
                     --rm \
                     -t ${env.ICR_REGISTRY}/${imageName}:${tag} \
                     --provenance=false \
-                    --build-arg GIT_COMMIT=\$(git rev-parse HEAD) \
-                    --build-arg BUILD_DATE=\$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+                    --label org.opencontainers.image.source=https://github.com/ibm/project-ai-services \
+                    --label org.opencontainers.image.revision=\$(git rev-parse HEAD) \
+                    --label org.opencontainers.image.created=\$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+                    --label org.opencontainers.image.vendor=IBM \
+                    --label org.opencontainers.image.licenses=Apache-2.0 \
+                    --label com.github.project-ai-services.containerfile=${imagePath}Containerfile \
+                    --label com.github.project-ai-services.containerfile.url=https://github.com/ibm/project-ai-services/blob/\$(git rev-parse HEAD)/${imagePath}Containerfile \
                     -f Containerfile \
                     . \
                     --push

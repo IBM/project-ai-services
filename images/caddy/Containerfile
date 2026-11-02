@@ -31,21 +31,10 @@ RUN set -eux; \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
-# Image provenance labels (populated via --build-arg, see hack/image-labels.mk)
-ARG GIT_REPO=https://github.com/ibm/project-ai-services
-ARG GIT_COMMIT=unknown
-ARG BUILD_DATE=unknown
 ARG CADDY_VERSION=v2.11.7
-LABEL org.opencontainers.image.source="${GIT_REPO}" \
-      org.opencontainers.image.revision="${GIT_COMMIT}" \
-      org.opencontainers.image.created="${BUILD_DATE}" \
+LABEL org.opencontainers.image.title="Caddy" \
       org.opencontainers.image.version="${CADDY_VERSION}" \
-      org.opencontainers.image.title="Caddy" \
-      org.opencontainers.image.vendor="IBM" \
-      org.opencontainers.image.licenses="Apache-2.0" \
-      org.opencontainers.image.description="A powerful, enterprise-ready, open source web server with automatic HTTPS written in Go" \
-      com.github.project-ai-services.containerfile="images/caddy/Containerfile" \
-      com.github.project-ai-services.containerfile.url="${GIT_REPO}/blob/${GIT_COMMIT}/images/caddy/Containerfile"
+      org.opencontainers.image.description="A powerful, enterprise-ready, open source web server with automatic HTTPS written in Go"
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 

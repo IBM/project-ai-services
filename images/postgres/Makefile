@@ -1,4 +1,5 @@
 include ../../hack/image-labels.mk
+CONTAINERFILE = Dockerfile
 REGISTRY?=icr.io/ai-services-private
 IMAGE=postgres
 TAG?=18-8
