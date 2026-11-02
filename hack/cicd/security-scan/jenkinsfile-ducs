@@ -161,10 +161,10 @@ pipeline {
 
     post {
         success {
-            archiveArtifacts artifacts: 'ducs-reports/full-compact-cve-correlation-report-*.csv', fingerprint: true
+            archiveArtifacts artifacts: "ducs-reports/full-compact-cve-correlation-report-${env.BUILD_NUMBER}.csv", fingerprint: true
         }
         always {
-            archiveArtifacts artifacts: 'ducs-scan.log', allowEmptyArchive: true
+            cleanWs()
         }
     }
 }
