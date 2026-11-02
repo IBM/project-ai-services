@@ -1,37 +1,25 @@
 pipeline {
     agent { label 'shared-x86-centos9' }
 
-    triggers {
-        // Run once a week, on Monday around 02:00
-        cron('H 2 * * 1')
-    }
-
     parameters {
         string(
             name: 'BRANCH',
-            defaultValue: 'main',
-            description: 'Branch name where we have to run the scan'
+            description: 'Branch name used to look up the tags of the images to be scanned'
         )
         string(
-            name: 'ICR_REGISTRY',
-            defaultValue: 'icr.io/ai-services-cicd',
-            description: 'Registry where images will be pushed'
+            name: 'SCAN_IMAGES',
+            description: 'Overrides list of images which is going to be scanned by DUCS scanner'
         )
         string(
-            name: 'IMAGES_LIST',
-            defaultValue: '',
-            description: 'Space separated list of images for which we need to trigger the scan. If empty, the list is generated from the repo.'
-        )
-        string(
-            name: 'ADDITIONAL_IMAGES',
-            defaultValue: 'icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le',
-            description: 'Space separated list of extra images (full reference, e.g. icr.io/ns/image:tag) to append to the final scan list.'
+            name: 'APPEND_IMAGES',
+            description: 'Add additional images for scanning by DUCS tool (ex: icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le)'
         )
     }
 
     environment {
         AI_SERVICES_REPO_URL = 'https://github.com/IBM/project-ai-services.git'
         REPO_DIR = 'project-ai-services'
+        ICR_REGISTRY = 'icr.io/ai-services-cicd'
 
         CONTROL_GROUP = credentials('mend-ws-product-name')
         SCAN_TYPE = 'prod'
@@ -50,16 +38,15 @@ pipeline {
         stage('List Images') {
             steps {
                 script {
-                    if (params.IMAGES_LIST?.trim()) {
-                        env.SCAN_IMAGES = params.IMAGES_LIST.trim()
-                        echo "Using images from IMAGES_LIST: ${env.SCAN_IMAGES}"
+                    if (params.SCAN_IMAGES?.trim()) {
+                        env.SCAN_IMAGES = params.SCAN_IMAGES.trim()
+                        echo "Using images from SCAN_IMAGES: ${env.SCAN_IMAGES}"
                     } else {
                         generateImageList()
                     }
 
-                    if (params.ADDITIONAL_IMAGES?.trim()) {
-                        env.SCAN_IMAGES = "${env.SCAN_IMAGES} ${params.ADDITIONAL_IMAGES.trim()}"
-                        echo "Appended ADDITIONAL_IMAGES: ${params.ADDITIONAL_IMAGES.trim()}"
+                    if (params.APPEND_IMAGES?.trim()) {
+                        env.SCAN_IMAGES = "${env.SCAN_IMAGES} ${params.APPEND_IMAGES.trim()}"
                     }
                     echo "Final images to scan: ${env.SCAN_IMAGES}"
                 }
@@ -165,10 +152,8 @@ pipeline {
                     fi
 
                     echo "CVE report: ${REPORT_PATH}"
-                    # Branch names may contain '/', which is not valid in a file name
-                    BRANCH_NAME="$(echo "${BRANCH}" | tr '/' '-')"
                     mkdir -p ducs-reports
-                    cp "${REPORT_PATH}" "ducs-reports/${BRANCH_NAME}-full-compact-cve-correlation-report.csv"
+                    cp "${REPORT_PATH}" "ducs-reports/full-compact-cve-correlation-report-${BUILD_NUMBER}.csv"
                 '''
             }
         }
@@ -176,7 +161,7 @@ pipeline {
 
     post {
         success {
-            archiveArtifacts artifacts: 'ducs-reports/*-full-compact-cve-correlation-report.csv', fingerprint: true
+            archiveArtifacts artifacts: 'ducs-reports/full-compact-cve-correlation-report-*.csv', fingerprint: true
         }
         always {
             archiveArtifacts artifacts: 'ducs-scan.log', allowEmptyArchive: true
@@ -200,7 +185,6 @@ def generateImageList() {
     // resolved via the shared services/Makefile (make -C services image-tag SERVICE=<name>).
     def output = ''
     dir(env.REPO_DIR) {
-        withEnv(["ICR_REGISTRY=${params.ICR_REGISTRY}"]) {
         output = sh(returnStdout: true, script: '''#!/bin/bash
             set -euo pipefail
 
@@ -216,12 +200,11 @@ def generateImageList() {
                 echo "${image}:${tag}"
             done
         ''').trim()
-        }
     }
 
     def images = []
     for (line in output.readLines()) {
-        def imageWithTag = "${params.ICR_REGISTRY}/${line.trim()}"
+        def imageWithTag = "${env.ICR_REGISTRY}/${line.trim()}"
         images.add(imageWithTag)
         echo "Adding image for scan: ${imageWithTag}"
     }
