@@ -4,17 +4,7 @@ pipeline {
     parameters {
         string(
             name: 'VERSION',
-            description: 'Version to sign (e.g., v0.2.0-rc.1)'
-        )
-        string(
-            name: 'ICR_REGISTRY',
-            defaultValue: 'icr.io/ai-services-cicd',
-            description: 'Registry where images will be pushed'
-        )
-        password(
-            name: 'ICR_REGISTRY_PASSWORD',
-            defaultValue: '',
-            description: 'IAM api key to push image to icr registry (overrides icr-iam-creds credential when set)'
+            description: 'Version used to get the image tags to generate signatures for (e.g., v0.4.0)'
         )
         string(
             name: 'SIGNATURE_ONLY_IMAGES',
@@ -57,6 +47,7 @@ pipeline {
         
         // Registry configuration
         REGISTRY = 'docker-na.artifactory.swg-devops.com'
+        ICR_REGISTRY = 'icr.io/ai-services-cicd'
         AI_SERVICES_REPO_URL = 'https://github.com/IBM/project-ai-services.git'
         
         // Garasign configuration
@@ -310,11 +301,19 @@ pipeline {
                     }
                 }
 
-                stage('Sign Images') {
+                stage('Generate Signatures') {
                     steps {
                         script {
                             cosignLogin()
                             signImages()
+                        }
+                    }
+                }
+
+                stage('Verify Signatures') {
+                    steps {
+                        script {
+                            verifyImageSignatures()
                         }
                     }
                 }
@@ -373,9 +372,9 @@ def checkoutRepository() {
 
 
 /**
- * Resolves the effective ICR password (pipeline input takes precedence over the stored
- * credential), exposes ICR_USERNAME and ICR_PASSWORD as environment variables for the
- * given closure, and ensures the password is masked in console logs via withCredentials.
+ * Exposes ICR_USERNAME and ICR_PASSWORD (from the icr-iam-creds credential) as environment
+ * variables for the given closure, and ensures the password is masked in console logs via
+ * withCredentials.
  *
  * Usage:
  *   withIcrCredentials { sh 'docker login icr.io -u $ICR_USERNAME -p $ICR_PASSWORD' }
@@ -384,23 +383,9 @@ def withIcrCredentials(Closure body) {
     withCredentials([usernamePassword(
         credentialsId: 'icr-iam-creds',
         usernameVariable: 'ICR_USERNAME',
-        passwordVariable: 'ICR_CREDS_PASSWORD'
+        passwordVariable: 'ICR_PASSWORD'
     )]) {
-        def inputPassword = params.ICR_REGISTRY_PASSWORD?.toString()?.trim()
-
-        // If a pipeline input password was supplied, use it — Jenkins masks password
-        // parameters automatically in logs. Otherwise fall back to the stored credential
-        // (already masked by the outer withCredentials binding).
-        if (inputPassword) {
-            withEnv(["ICR_PASSWORD=${inputPassword}"]) {
-                println 'Overriding icr creds'
-                body()
-            }
-        } else {
-            withEnv(["ICR_PASSWORD=${env.ICR_CREDS_PASSWORD}"]) {
-                body()
-            }
-        }
+        body()
     }
 }
 
@@ -422,16 +407,17 @@ def buildAndPublishImage(String imagePath, String imageName) {
     }
 
     def tag = sh(script: "make --no-print-directory -C ${makeFilePath} image-tag SERVICE=${serviceName}", returnStdout: true).trim()
-    def icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+    def icrImage = "${env.ICR_REGISTRY}/${imageName}:${tag}"
 
     println "Image path: ${icrImage}"
 
+    // Run the Makefile build and push targets to publish the image to ICR
     withIcrCredentials {
         sh """
-            make --no-print-directory -C ${makeFilePath} build SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+            make --no-print-directory -C ${makeFilePath} build SERVICE=${serviceName} REGISTRY=${env.ICR_REGISTRY} \\
                 REGISTRY_USER=\$ICR_USERNAME \\
                 REGISTRY_PASSWORD=\$ICR_PASSWORD
-            make --no-print-directory -C ${makeFilePath} push SERVICE=${serviceName} REGISTRY=${params.ICR_REGISTRY} \\
+            make --no-print-directory -C ${makeFilePath} push SERVICE=${serviceName} REGISTRY=${env.ICR_REGISTRY} \\
                 REGISTRY_USER=\$ICR_USERNAME \\
                 REGISTRY_PASSWORD=\$ICR_PASSWORD
         """
@@ -451,7 +437,7 @@ def buildToolArmImage(String imagePath, String imageName) {
             returnStdout: true
         ).trim()
         def tag = "${toolVersion}-arm64"
-        icrImage = "${params.ICR_REGISTRY}/${imageName}:${tag}"
+        icrImage = "${env.ICR_REGISTRY}/${imageName}:${tag}"
 
         withIcrCredentials {
             // Setup buildx for multi-arch builds
@@ -475,7 +461,7 @@ EOF
                 DOCKER_CONFIG=${WORKSPACE} docker buildx build \
                     --platform linux/arm64 \
                     --rm \
-                    -t ${params.ICR_REGISTRY}/${imageName}:${tag} \
+                    -t ${env.ICR_REGISTRY}/${imageName}:${tag} \
                     --provenance=false \
                     -f Containerfile \
                     . \
@@ -496,7 +482,7 @@ def createToolsManifest() {
         withIcrCredentials {
             sh """
                 make manifest \
-                    REGISTRY=${params.ICR_REGISTRY} \
+                    REGISTRY=${env.ICR_REGISTRY} \
                     REGISTRY_USER=\$ICR_USERNAME \
                     REGISTRY_PASSWORD=\$ICR_PASSWORD
             """
@@ -505,7 +491,7 @@ def createToolsManifest() {
                 script: "awk -F '=' '/TAG\\?/{print \$2}' Makefile",
                 returnStdout: true
             ).trim()
-            manifestImage = "${params.ICR_REGISTRY}/tools:${tag}"
+            manifestImage = "${env.ICR_REGISTRY}/tools:${tag}"
 
             echo "✓ Created manifest: ${manifestImage}"
         }
@@ -659,6 +645,26 @@ def signImages() {
         done < ${HOME_DIR}/certs/images.txt
         
         echo "✓ All images signed successfully"
+    """
+}
+
+def verifyImageSignatures() {
+    echo "Verifying image signatures with Cosign..."
+
+    sh """
+        set +x
+
+        while IFS= read -r image; do
+            if [ -n "\$image" ]; then
+                echo "Verifying signature for image: \$image"
+                cosign verify \
+                    --key ${DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR}/cosign.pub \
+                    --insecure-ignore-tlog=true \
+                    \$image
+            fi
+        done < ${HOME_DIR}/certs/images.txt
+
+        echo "✓ All image signatures verified successfully"
     """
 }
 
