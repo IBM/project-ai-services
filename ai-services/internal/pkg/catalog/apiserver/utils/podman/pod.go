@@ -105,9 +105,8 @@ func ExtractPodEndpoint(ctx context.Context, podSpec *podmodels.PodSpec) (*Endpo
 		podName, endpoint, podName, targetPort)
 
 	return &EndpointInfo{
-		Endpoint: endpoint,
-		Domain:   podName,
-		Port:     targetPort,
+		Domain: podName,
+		Port:   targetPort,
 	}, nil
 }
 

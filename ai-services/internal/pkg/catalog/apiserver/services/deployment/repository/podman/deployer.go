@@ -710,11 +710,6 @@ func (d *PodmanDeployer) buildInitialParams(applicationID uuid.UUID, databaseID 
 	}
 }
 
-// deployPodSpec deploys a pod using the rendered YAML bytes directly.
-func (d *PodmanDeployer) deployPodSpec(ctx context.Context, podSpec *podmodels.PodSpec, renderedBytes []byte, templateName string) error {
-	return podmanutils.DeployPodmanPod(ctx, d.runtime, podSpec, renderedBytes, templateName)
-}
-
 // deployPodTemplate deploys a single pod template for a service and returns endpoint information and routes.
 func (d *PodmanDeployer) deployPodTemplate(
 	ctx context.Context,
@@ -767,7 +762,7 @@ func (d *PodmanDeployer) deployPodTemplate(
 	}
 
 	// Deploy using rendered bytes directly (same as components)
-	if err := d.deployPodSpec(ctx, &podSpec, renderedBytes, podTemplateName); err != nil {
+	if err := podmanutils.DeployPodmanPod(ctx, d.runtime, &podSpec, renderedBytes, podTemplateName); err != nil {
 		return nil, "", "", err
 	}
 
