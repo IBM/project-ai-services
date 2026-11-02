@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY ?= icr.io/ai-services-private
 IMAGE ?= digitize-ui
 TAG ?= v0.0.43
@@ -8,7 +9,7 @@ CONTAINER_BUILDER ?= podman
 FULL_IMAGE := $(REGISTRY)/$(IMAGE):$(TAG)
 
 build:
-	$(CONTAINER_BUILDER) build -t $(FULL_IMAGE) .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(FULL_IMAGE) .
 .PHONY: build
 
 push:

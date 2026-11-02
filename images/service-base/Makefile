@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 IMAGE=service-base
 TAG?=v0.0.46
@@ -5,8 +6,8 @@ CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGIST
 
 CONTAINER_BUILDER?=podman
 build:
-	cd prebuilder && $(CONTAINER_BUILDER) build -t prebuilder . && cd -
-	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) .
+	cd prebuilder && $(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t prebuilder . && cd -
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
 push:

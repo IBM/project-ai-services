@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 IMAGE=postgres
 TAG?=18-8
@@ -8,7 +9,7 @@ IMAGE_TAG := $(REGISTRY)/$(IMAGE):$(TAG)
 
 CONTAINER_BUILDER?=podman
 build:
-	$(CONTAINER_BUILDER) build -t $(IMAGE_TAG) .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(IMAGE_TAG) .
 .PHONY: build
 
 push:

@@ -33,6 +33,20 @@ RUN CGO_ENABLED=0 go build \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+# Image provenance labels (populated via --build-arg, see hack/image-labels.mk)
+ARG GIT_REPO=https://github.com/ibm/project-ai-services
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+LABEL org.opencontainers.image.source="${GIT_REPO}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.title="AI Services" \
+      org.opencontainers.image.vendor="IBM" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.description="AI Services CLI and catalog API for deploying and managing AI services" \
+      com.github.project-ai-services.containerfile="ai-services/Containerfile" \
+      com.github.project-ai-services.containerfile.url="${GIT_REPO}/blob/${GIT_COMMIT}/ai-services/Containerfile"
+
 # Install pciutils for lspci command (required for Spyre card detection)
 RUN microdnf install -y pciutils && \
     microdnf clean all
