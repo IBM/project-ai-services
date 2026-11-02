@@ -40,6 +40,8 @@ var (
 	sslKeyPath  string
 	// HTTPS port flag for catalog configure command.
 	httpsPort int
+	// Private ingress port flag for catalog configure command.
+	privateIngressPort int
 	// WorkerGateway port — always active, defaults to 9191.
 	workerGatewayPort int
 	// Reset podman auth secret for catalog configure command.
@@ -54,7 +56,8 @@ var (
 )
 
 const (
-	defaultHTTPSPort = 443
+	defaultHTTPSPort          = 443
+	defaultPrivateIngressPort = 9443
 )
 
 var configureCmd = &cobra.Command{
@@ -79,8 +82,8 @@ Note: --workergateway-port is supported for podman runtime only (default 9191).`
 	 # Configure with a custom worker gateway port (podman only)
 	 ai-services catalog configure --runtime podman --workergateway-port 9191
 
-	 # Configure with custom HTTPS port
-	 ai-services catalog configure --runtime podman --https-port 8443`,
+	 # Configure with custom HTTPS port and custom private ingress port
+	 ai-services catalog configure --runtime podman --https-port 8443 --private-ingress-port 9443`,
 	Args: cobra.NoArgs,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
@@ -138,7 +141,7 @@ func init() {
 func buildCatalogFlagValidator() *flagvalidator.FlagValidator {
 	return common.BuildFlagValidator(
 		[]string{constants.ResetPasswordFlag, constants.SkipLocalWorkerFlag},
-		[]string{constants.WorkerGatewayPortFlag, constants.BaseDirFlag, constants.HTTPSPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag, constants.ResetPodmanAuthFlag, constants.ResetSSLCertFlag},
+		[]string{constants.WorkerGatewayPortFlag, constants.BaseDirFlag, constants.HTTPSPortFlag, constants.PrivateIngressPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag, constants.ResetPodmanAuthFlag, constants.ResetSSLCertFlag},
 		[]string{constants.TimeoutFlag},
 	)
 }
@@ -162,13 +165,14 @@ func runConfigure(ctx context.Context) error {
 		}
 
 		opts := catalogUtils.PodmanConfigureOptions{
-			BaseDir:           aiServicesDir,
-			DomainName:        domainName,
-			SSLCertPath:       catalogUtils.SanitizeFilePath(sslCertPath),
-			SSLKeyPath:        catalogUtils.SanitizeFilePath(sslKeyPath),
-			HttpsPort:         httpsPort,
-			WorkerGatewayPort: workerGatewayPort,
-			SkipLocalWorker:   skipLocalWorkerFlag,
+			BaseDir:            aiServicesDir,
+			DomainName:         domainName,
+			SSLCertPath:        catalogUtils.SanitizeFilePath(sslCertPath),
+			SSLKeyPath:         catalogUtils.SanitizeFilePath(sslKeyPath),
+			HttpsPort:          httpsPort,
+			PrivateIngressPort: privateIngressPort,
+			WorkerGatewayPort:  workerGatewayPort,
+			SkipLocalWorker:    skipLocalWorkerFlag,
 		}
 
 		return catalogPodman.DeployCatalog(ctx, opts)
@@ -202,6 +206,11 @@ func validateConfigureFlags() error {
 		if httpsPort < 1 || httpsPort > 65535 {
 			return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
 		}
+
+		// Validate Private Ingress port range
+		if privateIngressPort < 1 || privateIngressPort > 65535 {
+			return fmt.Errorf("invalid private ingress port %d: must be between 1 and 65535", privateIngressPort)
+		}
 	}
 
 	return nil
@@ -234,7 +243,7 @@ func initConfigureCommonFlags() {
 }
 
 func initConfigurePodmanFlags() {
-	common.ConfigurePodmanDeployFlags(configureCmd, &baseDir, &httpsPort, defaultHTTPSPort, &sslCertPath, &sslKeyPath, &domainName)
+	common.ConfigurePodmanDeployFlags(configureCmd, &baseDir, &httpsPort, defaultHTTPSPort, &privateIngressPort, defaultPrivateIngressPort, &sslCertPath, &sslKeyPath, &domainName)
 	common.ConfigurePodmanResetFlags(configureCmd, &resetPodmanAuthFlag, &resetCertificateFlag)
 
 	configureCmd.Flags().IntVar(

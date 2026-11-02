@@ -29,8 +29,9 @@ import (
 )
 
 const (
-	defaultJoinHTTPSPort = 443
-	hostAliasSplitParts  = 2
+	defaultJoinHTTPSPort          = 443
+	defaultJoinPrivateIngressPort = 9443
+	hostAliasSplitParts           = 2
 )
 
 // Flag variables for the worker join command.
@@ -41,12 +42,13 @@ var (
 	skipChecks  []string
 
 	// podman flags.
-	baseDir     string
-	httpsPort   int
-	domainName  string
-	sslCertPath string
-	sslKeyPath  string
-	addHosts    []string
+	baseDir            string
+	httpsPort          int
+	privateIngressPort int
+	domainName         string
+	sslCertPath        string
+	sslKeyPath         string
+	addHosts           []string
 )
 
 var cmd = &cobra.Command{
@@ -110,7 +112,7 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 func buildWorkerFlagValidator() *flagvalidator.FlagValidator {
 	return cmdcommon.BuildFlagValidator(
 		[]string{constants.TokenFlag},
-		[]string{constants.BaseDirFlag, constants.HTTPSPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag},
+		[]string{constants.BaseDirFlag, constants.HTTPSPortFlag, constants.PrivateIngressPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag},
 		nil,
 	)
 }
@@ -122,6 +124,10 @@ func validateWorkerJoinFlags(ctx context.Context) error {
 
 	if httpsPort < 1 || httpsPort > 65535 {
 		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
+	}
+
+	if privateIngressPort < 1 || privateIngressPort > 65535 {
+		return fmt.Errorf("invalid private ingress port %d: must be between 1 and 65535", privateIngressPort)
 	}
 
 	if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
@@ -228,18 +234,19 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 			CommonWorkerOptions: workertypes.CommonWorkerOptions{
 				HostAliases: parseAddHosts(addHosts),
 			},
-			BaseDir:     baseDir,
-			HTTPSPort:   httpsPort,
-			DomainName:  domainName,
-			SSLCertPath: sslCertPath,
-			SSLKeyPath:  sslKeyPath,
+			BaseDir:            baseDir,
+			HTTPSPort:          httpsPort,
+			PrivateIngressPort: privateIngressPort,
+			DomainName:         domainName,
+			SSLCertPath:        sslCertPath,
+			SSLKeyPath:         sslKeyPath,
 		},
 		RuntimeType: runtimeType,
 	})
 }
 
 // configureFlags registers the flags shared by the join and grpcstream
-// commands: --token, --runtime, --basedir, --https-port,
+// commands: --token, --runtime, --basedir, --https-port, --private-ingress-port,
 // --ssl-cert, and --ssl-key.
 // requireToken controls whether --token is marked as a required flag.
 func configureFlags(c *cobra.Command, requireToken bool) {
@@ -258,7 +265,7 @@ func configureFlags(c *cobra.Command, requireToken bool) {
 }
 
 func initJoinPodmanFlags(c *cobra.Command) {
-	cmdcommon.ConfigurePodmanDeployFlags(c, &baseDir, &httpsPort, defaultJoinHTTPSPort, &sslCertPath, &sslKeyPath, &domainName)
+	cmdcommon.ConfigurePodmanDeployFlags(c, &baseDir, &httpsPort, defaultJoinHTTPSPort, &privateIngressPort, defaultJoinPrivateIngressPort, &sslCertPath, &sslKeyPath, &domainName)
 
 	c.Flags().StringArrayVar(&addHosts, constants.AddHostFlag, nil,
 		"Add an extra entry to the worker pod's /etc/hosts (repeatable).\n"+

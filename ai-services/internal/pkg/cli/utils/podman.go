@@ -287,11 +287,12 @@ func LoadCertificatesToCaddy(ctx context.Context, caddyCtx *caddy.Context, sslCe
 
 // PodmanOptions carries the env needed to restart pod.
 type PodmanOptions struct {
-	BaseDir           string
-	HTTPSPort         int
-	DomainName        string
-	GatewayAddr       string
-	WorkerGatewayPort int
+	BaseDir            string
+	HTTPSPort          int
+	PrivateIngressPort int
+	DomainName         string
+	GatewayAddr        string
+	WorkerGatewayPort  int
 }
 
 // ExtractPodConfigFromEnv populates PodmanOptions from the container environment variables.
@@ -306,6 +307,10 @@ func ExtractPodConfigFromEnv(env map[string]string, opts *PodmanOptions) {
 
 	if value, ok := env["CADDY_HTTPS_PORT"]; ok {
 		opts.HTTPSPort, _ = strconv.Atoi(value)
+	}
+
+	if value, ok := env["CADDY_PRIVATE_INGRESS_PORT"]; ok {
+		opts.PrivateIngressPort, _ = strconv.Atoi(value)
 	}
 
 	if value, ok := env["GATEWAY_ADDR"]; ok {
