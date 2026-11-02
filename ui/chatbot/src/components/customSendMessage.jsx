@@ -1,7 +1,6 @@
 import { UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
-import { DEFAULT_CONFIG } from '../config/chatbotConfig.js';
 
 const DEFAULT_STREAM_ERROR_MESSAGE =
   '⚠️ Error occurred during active stream. Please contact System Administrator.';
@@ -126,19 +125,7 @@ async function customSendMessage(
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
-    // Make the streaming request using OpenAI client with withResponse to access headers
-    const { data: stream, response } = await client.chat.completions
-      .create(payload)
-      .withResponse();
-
-    // Extract rephrased query from response headers.
-    // The server percent-encodes the value (urllib.parse.quote) so that
-    // non-Latin-1 characters (e.g. Japanese) are safe to transport in
-    // HTTP headers.  Decode it back here before use.
-    const rawRephrasedQuery = response.headers.get('x-rephrased-query');
-    const rephrasedQuery = rawRephrasedQuery
-      ? decodeURIComponent(rawRephrasedQuery)
-      : userInput;
+    const stream = await client.chat.completions.create(payload);
 
     instance.updateIsMessageLoadingCounter('decrease');
 
