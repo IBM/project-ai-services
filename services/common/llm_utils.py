@@ -135,7 +135,10 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
     if not all_prompts:
+        logger.info(f"No tables to summarize for '{doc_path}'")
         return [], [], {}
+
+    logger.info(f"Summarizing {len(all_prompts)} table chunk(s) for '{doc_path}' (max_tokens={max_tokens})")
 
     results: list[tuple[str, bool]] = [("No summary.", False)] * len(all_prompts)
     summaries: list[str] = []
@@ -159,7 +162,10 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
                 idx = pending.pop(fut)
                 try:
                     results[idx] = fut.result()
-                    logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
+                    logger.info(
+                        f"Summarized table chunk {idx + 1}/{len(all_prompts)} from '{doc_path}' "
+                        f"(keep={results[idx][1]}, summary_chars={len(results[idx][0])})"
+                    )
                 except Exception as e:
                     error_msg = f"Failed to process table {idx}: {str(e)}"
                     logger.error(error_msg)
@@ -184,6 +190,10 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
         summaries.append(summary)
         decisions.append(decision)
 
+    logger.info(
+        f"Table summarization done for '{doc_path}': {len(summaries)} chunk(s), "
+        f"{sum(decisions)} kept, {len(failures)} failed"
+    )
     return summaries, decisions, failures
 
 def get_vllm_headers(api_key: str | None = None):

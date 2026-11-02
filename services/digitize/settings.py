@@ -90,6 +90,20 @@ class DigitizeConfig(BaseSettings):
         description="Overlap tokens between chunks",
     )
 
+    table_chunk_max_tokens: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "Approximate max tokens of table markdown (caption + header + rows) per row-group chunk "
+            "sent for summarization. Large tables are split into chunks that each repeat the caption "
+            "and header. The keyword-enriched prompt expands each cell into its own sentence, so the "
+            "summary is ~3-5x longer than the input; 200 keeps the summary within the 1024-token "
+            "English summarization limit (1024 / 4 ~= 256) so cells are not truncated. Lower it "
+            "(~150) if summaries are cut off; raise it (up to ~250) if chunks are too fragmented. "
+            "Tokens are estimated from characters (~3 chars/token), so the real count can differ by 20-30%."
+        ),
+    )
+
     # Document conversion parameters
     doc_chunk_size: int = Field(
         default=100,
@@ -174,6 +188,16 @@ class TableSummaryConfig(BaseSettings):
                 - If the table has multiple rows/columns, describe each one
                 - Preserve all technical terms, version numbers, and specific details exactly as shown
 
+                KEYWORD-SEARCHABLE SUMMARY RULES (the summary is indexed for keyword and semantic search):
+                - Start with the table caption/title (if any) and list EVERY column header exactly as written
+                - For EVERY row, write a self-contained sentence that repeats the row label(s) AND the column header for EACH value,
+                  e.g. "<row label> - <column header>: <value>". Never give a value without its row label and column header
+                - Reuse the exact keywords from the table: entity/row names, categories, regions, years and periods (e.g. FY22),
+                  metrics, units, abbreviations, codes and numbers, spelled exactly as in the table
+                - Repeat entity names in each sentence instead of using pronouns or phrases like "the same" or "see above"
+                - Preserve the relationships between data: which value belongs to which row, column, period and metric (e.g. actual vs. target/plan)
+                - Do NOT round, aggregate, merge or skip any value, and never write "and so on" or "etc."
+
                 2. Decide if the table is relevant for a knowledge base:
                 - Relevant: contains factual, instructional, or explanatory info useful for answering questions.
                 - Irrelevant: personal info, disclaimers, administrative notes, or unrelated commentary.
@@ -194,7 +218,19 @@ class TableSummaryConfig(BaseSettings):
                 | Power10   | 16    | 8 TB   |
 
                 Output:
-                Summary: The table presents technical specifications for the Power10 processor. The processor configuration includes 16 cores for parallel processing capabilities. The memory capacity supports up to 8 TB (terabytes) of RAM, providing substantial memory resources for enterprise workloads and data-intensive applications.
+                Summary: The table presents technical specifications for the Power10 processor, with columns Processor, Cores and Memory. Processor Power10 - Cores: 16 cores for parallel processing capabilities. Processor Power10 - Memory: 8 TB (terabytes) of RAM, providing substantial memory resources for enterprise workloads and data-intensive applications.
+                Decision: yes
+
+                Positive example with periods (relevant):
+                Table:
+                Table 2: Ridership by corridor
+                | Corridor  | Metric | FY21 | FY22 |
+                |-----------|--------|------|------|
+                | Northeast | Actual | 10.1 | 12.4 |
+                | Northeast | Target | 11.0 | 12.0 |
+
+                Output:
+                Summary: Table 2: Ridership by corridor, with columns Corridor, Metric, FY21 and FY22. Corridor Northeast - Metric Actual - FY21: 10.1. Corridor Northeast - Metric Actual - FY22: 12.4. Corridor Northeast - Metric Target - FY21: 11.0. Corridor Northeast - Metric Target - FY22: 12.0.
                 Decision: yes
 
                 Negative example (irrelevant):
@@ -235,6 +271,16 @@ class TableSummaryConfig(BaseSettings):
                 - Seien Sie äußerst gründlich und umfassend - streben Sie maximale Detailtiefe an
                 - Wenn die Tabelle mehrere Zeilen/Spalten hat, beschreiben Sie jede einzelne
                 - Bewahren Sie alle Fachbegriffe, Versionsnummern und spezifischen Details genau wie angegeben
+
+                REGELN FÜR EINE STICHWORT-DURCHSUCHBARE ZUSAMMENFASSUNG (die Zusammenfassung wird für die Stichwort- und semantische Suche indexiert):
+                - Beginnen Sie mit der Tabellenüberschrift/dem Titel (falls vorhanden) und nennen Sie JEDE Spaltenüberschrift genau wie geschrieben
+                - Schreiben Sie für JEDE Zeile einen eigenständigen Satz, der die Zeilenbezeichnung(en) UND die Spaltenüberschrift für JEDEN Wert wiederholt,
+                  z. B. "<Zeilenbezeichnung> - <Spaltenüberschrift>: <Wert>". Nennen Sie niemals einen Wert ohne Zeilenbezeichnung und Spaltenüberschrift
+                - Verwenden Sie die exakten Stichwörter aus der Tabelle: Entitäts-/Zeilennamen, Kategorien, Regionen, Jahre und Zeiträume,
+                  Kennzahlen, Einheiten, Abkürzungen, Codes und Zahlen, genau wie in der Tabelle geschrieben
+                - Wiederholen Sie Entitätsnamen in jedem Satz, statt Pronomen oder Formulierungen wie "dasselbe" oder "siehe oben" zu verwenden
+                - Bewahren Sie die Beziehungen zwischen den Daten: welcher Wert zu welcher Zeile, Spalte, welchem Zeitraum und welcher Kennzahl gehört (z. B. Ist vs. Soll/Plan)
+                - Runden, aggregieren, verschmelzen oder überspringen Sie KEINE Werte und schreiben Sie niemals "usw." oder "und so weiter"
 
                 2. Entscheiden Sie, ob die Tabelle für eine Wissensdatenbank relevant ist:
                 - Relevant: enthält sachliche, instruktive oder erklärende Informationen, die zur Beantwortung von Fragen nützlich sind.
@@ -298,6 +344,16 @@ class TableSummaryConfig(BaseSettings):
                 - Se la tabella ha più righe/colonne, descrivi ciascuna di esse
                 - Mantieni invariati tutti i termini tecnici, i numeri di versione e i dettagli specifici così come appaiono
 
+                REGOLE PER UN RIASSUNTO RICERCABILE PER PAROLE CHIAVE (il riassunto viene indicizzato per la ricerca per parole chiave e semantica):
+                - Inizia con la didascalia/il titolo della tabella (se presente) ed elenca OGNI intestazione di colonna esattamente come scritta
+                - Per OGNI riga scrivi una frase autonoma che ripete l'etichetta della riga E l'intestazione di colonna per OGNI valore,
+                  ad es. "<etichetta riga> - <intestazione colonna>: <valore>". Non indicare mai un valore senza etichetta di riga e intestazione di colonna
+                - Riutilizza le parole chiave esatte della tabella: nomi di entità/righe, categorie, regioni, anni e periodi,
+                  metriche, unità, abbreviazioni, codici e numeri, scritti esattamente come nella tabella
+                - Ripeti i nomi delle entità in ogni frase invece di usare pronomi o espressioni come "lo stesso" o "vedi sopra"
+                - Preserva le relazioni tra i dati: quale valore appartiene a quale riga, colonna, periodo e metrica (ad es. effettivo vs. obiettivo/piano)
+                - NON arrotondare, aggregare, unire né omettere alcun valore e non scrivere mai "eccetera" o "e così via"
+
                 2. Decidi se la tabella è rilevante per una base di conoscenza:
                 - Rilevante: contiene informazioni fattuali, istruttive o esplicative utili per rispondere a domande.
                 - Irrilevante: informazioni personali, esclusioni di responsabilità, note amministrative o commenti non pertinenti.
@@ -359,6 +415,16 @@ class TableSummaryConfig(BaseSettings):
                 - Soyez extrêmement minutieux et exhaustif : visez un niveau de détail maximal
                 - Si le tableau comporte plusieurs lignes/colonnes, décrivez chacune d'elles
                 - Conservez exactement tous les termes techniques, numéros de version et détails spécifiques tels qu'ils apparaissent
+
+                RÈGLES POUR UN RÉSUMÉ RECHERCHABLE PAR MOTS-CLÉS (le résumé est indexé pour la recherche par mots-clés et sémantique) :
+                - Commencez par la légende/le titre du tableau (le cas échéant) et listez CHAQUE en-tête de colonne exactement tel qu'écrit
+                - Pour CHAQUE ligne, écrivez une phrase autonome qui répète le libellé de la ligne ET l'en-tête de colonne pour CHAQUE valeur,
+                  par ex. "<libellé de ligne> - <en-tête de colonne> : <valeur>". N'indiquez jamais une valeur sans libellé de ligne ni en-tête de colonne
+                - Réutilisez les mots-clés exacts du tableau : noms d'entités/de lignes, catégories, régions, années et périodes,
+                  indicateurs, unités, abréviations, codes et nombres, écrits exactement comme dans le tableau
+                - Répétez les noms d'entités dans chaque phrase au lieu d'utiliser des pronoms ou des expressions comme "idem" ou "voir ci-dessus"
+                - Préservez les relations entre les données : quelle valeur appartient à quelle ligne, colonne, période et indicateur (par ex. réel vs. objectif/prévision)
+                - N'arrondissez, n'agrégez, ne fusionnez et n'omettez AUCUNE valeur, et n'écrivez jamais "etc."
 
                 2. Décidez si le tableau est pertinent pour une base de connaissances :
                 - Pertinent : contient des informations factuelles, instructives ou explicatives utiles pour répondre à des questions.
@@ -425,6 +491,16 @@ class TableSummaryConfig(BaseSettings):
                 - 極めて徹底的かつ包括的に行い、最大限の詳細を目指してください
                 - 表に複数の行/列がある場合は、それぞれを説明してください
                 - 技術用語、バージョン番号、および特定の詳細はすべてそのまま保持してください
+
+                キーワード検索可能な要約のルール（要約はキーワード検索とセマンティック検索のためにインデックス化されます）：
+                - 表のキャプション/タイトル（ある場合）から始め、すべての列見出しを表記どおりに列挙してください
+                - すべての行について、各値ごとに行ラベルと列見出しを繰り返す、単独で意味が通じる文を書いてください。
+                  例：「<行ラベル> - <列見出し>：<値>」。行ラベルと列見出しのない値を単独で記述しないでください
+                - 表中の正確なキーワードを再利用してください：エンティティ名/行名、カテゴリ、地域、年度・期間、
+                  指標、単位、略語、コード、数値を表の表記どおりに記述してください
+                - 代名詞や「同上」「上記参照」のような表現を使わず、各文でエンティティ名を繰り返してください
+                - データ間の関係を保持してください：どの値がどの行、列、期間、指標に属するか（例：実績と目標/計画）
+                - 値を丸めたり、集約したり、統合したり、省略したりしないでください。「など」「等」で済ませないでください
 
                 2. 表がナレッジベースに関連しているかどうかを判断してください：
                 - 関連あり：質問への回答に役立つ事実的、説明的、または解説的な情報を含んでいる。

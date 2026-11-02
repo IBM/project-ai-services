@@ -8,13 +8,16 @@ Responsibilities:
 - is_table_continuation — fuzzy matching of headers across pages
 - merge_markdown_tables — combine tables by dropping duplicate setup rows
 - merge_consecutive_tables — merge tables spanning consecutive pages
+- split_markdown_table_into_row_chunks — split large tables into self-contained row-group chunks
 """
 
 import json
+import math
 import threading
 import time
 import re
 from pathlib import Path
+from typing import Callable
 from rapidfuzz import fuzz
 
 from common.lang_utils import LanguageCodes, get_prompt_for_language
@@ -261,9 +264,106 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None):
+def _is_separator_line(line: str) -> bool:
+    """True for a markdown table separator row such as ``|---|:---:|``."""
+    return '|' in line and '-' in line and not any(c.isalnum() for c in line)
+
+def _estimate_tokens(text: str) -> int:
+    """Cheap token estimate (~3 characters per token) that avoids a tokenizer call per table row."""
+    return math.ceil(len(text) / 3)
+
+def split_markdown_table_into_row_chunks(
+    markdown_table: str,
+    caption: str = "",
+    max_tokens: int = 200,
+    count_tokens_fn: Callable[[str], int] | None = None,
+) -> list[str]:
+    """Split a markdown table into row-group chunks that each fit in ``max_tokens``.
+
+    Every chunk is self-contained: the caption (when it is not already part of the
+    table text), the header row(s) and the separator row are repeated at the top of
+    each chunk, followed by a contiguous group of data rows. A table that already
+    fits in ``max_tokens`` is returned as a single chunk. Rows are never split; a
+    single row larger than the budget is emitted on its own chunk.
+
+    Args:
+        markdown_table: Markdown formatted table string.
+        caption: Table caption, repeated in every chunk when non-empty.
+        max_tokens: Maximum tokens per chunk (caption + header + rows).
+        count_tokens_fn: Callable returning the token count for a string.
+            Defaults to a character based estimate (~3 chars per token).
+
+    Returns:
+        List of markdown chunk strings (empty if the table is empty).
+    """
+    if not markdown_table or not markdown_table.strip():
+        logger.info("Row chunking skipped: empty markdown table")
+        return []
+
+    if count_tokens_fn is None:
+        count_tokens_fn = _estimate_tokens
+
+    lines = [line.strip() for line in markdown_table.strip().split('\n') if line.strip()]
+    sep_idx = next((i for i, line in enumerate(lines) if _is_separator_line(line)), -1)
+
+    if sep_idx >= 0:
+        header_lines = lines[:sep_idx + 1]
+        row_lines = lines[sep_idx + 1:]
+    else:
+        logger.info("Row chunking: no separator row found, treating every line as a data row without header")
+        header_lines = []
+        row_lines = lines
+
+    caption = (caption or "").strip()
+    preamble_lines = list(header_lines)
+    if caption and caption.lower() not in markdown_table.lower():
+        preamble_lines.insert(0, caption)
+    preamble = "\n".join(preamble_lines)
+    preamble_tokens = count_tokens_fn(preamble) if preamble else 0
+
+    def _assemble(rows: list[str]) -> str:
+        return "\n".join(([preamble] if preamble else []) + rows)
+
+    row_tokens = [count_tokens_fn(row) for row in row_lines]
+    total_tokens = preamble_tokens + sum(row_tokens)
+    logger.info(
+        f"Row chunking: caption='{caption[:60]}', header_lines={len(header_lines)}, "
+        f"data_rows={len(row_lines)}, total_tokens={total_tokens}, max_tokens={max_tokens}"
+    )
+
+    if not row_lines or total_tokens <= max_tokens:
+        logger.info("Row chunking: table fits in a single chunk, no split needed")
+        return [_assemble(row_lines)]
+
+    chunks: list[str] = []
+    current_rows: list[str] = []
+    current_tokens = preamble_tokens
+    for row, tokens in zip(row_lines, row_tokens):
+        if current_rows and current_tokens + tokens > max_tokens:
+            chunks.append(_assemble(current_rows))
+            logger.info(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
+            current_rows = []
+            current_tokens = preamble_tokens
+        if not current_rows and preamble_tokens + tokens > max_tokens:
+            logger.warning(
+                f"Row chunking: a single row (~{preamble_tokens + tokens} tokens incl. header) "
+                f"exceeds max_tokens={max_tokens}; emitting it as its own chunk"
+            )
+        current_rows.append(row)
+        current_tokens += tokens
+
+    if current_rows:
+        chunks.append(_assemble(current_rows))
+        logger.info(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
+
+    logger.info(f"Row chunking: split {len(row_lines)} rows into {len(chunks)} chunks")
+    return chunks
+
+def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None, table_chunk_max_tokens: int = 200):
     """Extract, process, and summarize tables found in a document.
 
+    Large tables are split into row-group chunks (header and caption repeated) so each
+    chunk is summarized separately and every row keeps its keywords in the index.
     Saves the extracted tables and their LLM-generated summaries to a JSON file.
     """
     table_count = 0
@@ -273,12 +373,14 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
      # --- Table Extraction ---
     if not converted_doc.tables:
-        logger.debug(f"No tables found in '{doc_path}'")
+        logger.info(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time, {}
 
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
+
+    logger.info(f"Extracting {len(converted_doc.tables)} tables from '{doc_path}'")
 
     # Lazy import to avoid circular dependency
     from digitize.parsing.docx import recover_table_caption_from_body_context
@@ -322,14 +424,30 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
     logger.debug(f"Merging cross-page tables for '{doc_path}'")
     merged_table_dict = merge_consecutive_tables(table_dict)
-
-    table_markdowns = [merged_table_dict[key]["markdown"] for key in sorted(merged_table_dict)]
-    table_captions_list = [merged_table_dict[key]["caption"] for key in sorted(merged_table_dict)]
-    table_page_numbers = (
-        [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
-        if not is_docx
-        else [None] * len(merged_table_dict)
+    logger.info(
+        f"Table merge for '{doc_path}': {len(table_dict)} extracted -> {len(merged_table_dict)} after cross-page merge"
     )
+
+    # Split each (merged) table into row-group chunks; each chunk repeats the caption and
+    # header so it can be summarized on its own. Chunks inherit caption and page number.
+    table_markdowns = []
+    table_captions_list = []
+    table_page_numbers = []
+    for key in sorted(merged_table_dict):
+        entry = merged_table_dict[key]
+        page_num = None if is_docx else entry["page_number"]
+        row_chunks = split_markdown_table_into_row_chunks(
+            entry["markdown"], entry["caption"], max_tokens=table_chunk_max_tokens,
+        )
+        logger.info(
+            f"Table {key} (page {page_num}) of '{doc_path}' -> {len(row_chunks)} row chunk(s) "
+            f"(max ~{table_chunk_max_tokens} tokens each)"
+        )
+        for chunk_md in row_chunks:
+            table_markdowns.append(chunk_md)
+            table_captions_list.append(entry["caption"])
+            table_page_numbers.append(page_num)
+    logger.info(f"Summarizing {len(table_markdowns)} table chunk(s) for '{doc_path}'")
 
     # Select appropriate prompt and max_tokens based on document language (lingua ISO format: 'EN', 'DE', etc.)
     prompt_templates = {
@@ -351,9 +469,9 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     }
     selected_max_tokens = max_tokens_config.get(document_language, settings.table_summary.english.max_tokens)
 
-    logger.debug(
+    logger.info(
         f"Using language prompt {document_language} and max_tokens ({selected_max_tokens}) "
-        f"for table summarization"
+        f"for table summarization of '{doc_path}'"
     )
 
     if stop_event and stop_event.is_set():
@@ -381,5 +499,9 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     table_count = len(filtered_table_dicts)
     out_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
     process_time = time.time() - t0
+    logger.info(
+        f"Processed tables for '{doc_path}': kept {table_count}/{len(table_markdowns)} chunks "
+        f"(failures={len(failures)}) in {process_time:.2f}s, saved to {out_path}"
+    )
 
     return table_count, process_time, failures
