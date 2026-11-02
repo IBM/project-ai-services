@@ -27,7 +27,19 @@ pipeline {
     }
 
     stages {
+        stage('Validate Parameters') {
+            steps {
+                script {
+                    if (!params.BRANCH?.trim() && !params.SCAN_IMAGES?.trim()) {
+                        error 'Either BRANCH or SCAN_IMAGES must be provided'
+                    }
+                }
+            }
+        }
+
         stage('Clone AI Services') {
+            // The repo is only needed to discover images, so skip it when BRANCH is not set
+            when { expression { params.BRANCH?.trim() } }
             steps {
                 script {
                     checkoutRepository()
@@ -35,7 +47,7 @@ pipeline {
             }
         }
 
-        stage('List Images') {
+        stage('Scan Images List') {
             steps {
                 script {
                     if (params.SCAN_IMAGES?.trim()) {
