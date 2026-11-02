@@ -222,6 +222,21 @@ def generateImageList() {
         }
     }
 
+    // Add opensearch image to the list; the first reference found under ai-services/assets is used
+    def opensearchImage = ''
+    dir(env.REPO_DIR) {
+        opensearchImage = sh(returnStdout: true, script: '''#!/bin/bash
+            set -euo pipefail
+
+            grep -rhoE "${ICR_REGISTRY}/opensearch:[^[:space:]]+" ai-services/assets | sed -n '1p' || true
+        ''').trim()
+    }
+    if (!opensearchImage) {
+        error 'opensearch image not found in ai-services/assets'
+    }
+    images.add(opensearchImage)
+    echo "Adding opensearch image for scan: ${opensearchImage}"
+
     if (images.isEmpty()) {
         error 'No images discovered from Makefiles'
     }
