@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -37,6 +38,60 @@ var translateBaseURL string
 type rawJobGetFn func(ctx context.Context, baseURL, jobID string) ([]byte, int, error)
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// waitForTranslateURL polls 'application info' until the translate-api URL is present
+// or the timeout fires (which fails the spec). Returns the URL.
+func waitForTranslateURL(logPrefix string, timeout time.Duration) string {
+	pollCtx, pollCancel := context.WithTimeout(context.Background(), timeout)
+	defer pollCancel()
+
+	const pollInterval = 15 * time.Second
+
+	for {
+		infoOut, infoErr := cli.ApplicationInfo(pollCtx, cfg, appName, appRuntime)
+		if infoErr != nil {
+			logger.Warningf("[%s] application info error while polling for translate URL: %v", logPrefix, infoErr)
+		} else if url := cli.ExtractCatalogTranslateURL(infoOut); url != "" {
+			return url
+		}
+
+		logger.Infof("[%s] translate-api URL not yet present - retrying in %s", logPrefix, pollInterval)
+
+		select {
+		case <-pollCtx.Done():
+			ginkgo.Fail(fmt.Sprintf("[%s] Timed out waiting for translate-api URL for app %q", logPrefix, appName))
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// waitForTranslateHealthy polls /health until the service reports healthy
+// or the timeout fires (which fails the spec).
+func waitForTranslateHealthy(logPrefix, baseURL string, timeout time.Duration) {
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), timeout)
+	defer healthCancel()
+
+	const pollInterval = 15 * time.Second
+
+	logger.Infof("[%s] Waiting for translate-api to be healthy at %s/health", logPrefix, baseURL)
+
+	for {
+		err := translation.HealthCheck(healthCtx, baseURL)
+		if err == nil {
+			logger.Infof("[%s] translate-api is healthy", logPrefix)
+
+			return
+		}
+
+		logger.Infof("[%s] translate-api not yet healthy (%v) - retrying in %s", logPrefix, err, pollInterval)
+
+		select {
+		case <-healthCtx.Done():
+			ginkgo.Fail(fmt.Sprintf("[%s] Timed out waiting for translate-api at %s - last error: %v", logPrefix, baseURL, err))
+		case <-time.After(pollInterval):
+		}
+	}
+}
 
 // translateCtx skips the spec when no translate URL is known, otherwise returns a context limited to d.
 func translateCtx(d time.Duration) (context.Context, context.CancelFunc) {
@@ -145,12 +200,17 @@ func expectRunningOrDone(get rawJobGetFn) {
 
 // ── Translation test suite ────────────────────────────────────────────────────
 
-var _ = ginkgo.Describe("Translation Service E2E Tests", ginkgo.Ordered, ginkgo.Label("translation-tests"), func() {
-
+// translationSpecs holds the translation specs. It is registered as a Context inside the
+// ordered "AI Services End-to-End Tests" Describe (see e2e_suite_test.go) so the specs run
+// after application creation and before teardown.
+func translationSpecs() {
 	// ── BeforeAll: resolve translateBaseURL ───────────────────────────────────
 	ginkgo.BeforeAll(func() {
-		// 1. Prefer an explicit env var for CI environments where the service
-		//    is already running independently of the CLI deploy flow.
+		if templateName != "translate" {
+			ginkgo.Skip(fmt.Sprintf("Skipping translation tests - template is '%s', not 'translate'", templateName))
+		}
+
+		// TRANSLATE_URL lets CI point at a service that runs independently of the CLI deploy flow.
 		if url := os.Getenv("TRANSLATE_URL"); url != "" {
 			translateBaseURL = url
 			logger.Infof("[TRANSLATE] Using TRANSLATE_URL from env: %s", translateBaseURL)
@@ -158,22 +218,16 @@ var _ = ginkgo.Describe("Translation Service E2E Tests", ginkgo.Ordered, ginkgo.
 			return
 		}
 
-		// 2. Otherwise extract it from 'application info' when a translate app is deployed.
-		if translateBaseURL == "" && appName != "" && templateName == "translate" {
-			infoCtx, infoCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer infoCancel()
-
-			if infoOut, infoErr := cli.ApplicationInfo(infoCtx, cfg, appName, appRuntime); infoErr == nil {
-				translateBaseURL = cli.ExtractCatalogTranslateURL(infoOut)
-			}
-		}
+		// Refresh the catalog session before any CLI call (token TTL may have elapsed).
+		loginCtx, loginCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		catalogLoginWithDiscovery(loginCtx, true)
+		loginCancel()
 
 		if translateBaseURL == "" {
-			logger.Warningf("[TRANSLATE] translateBaseURL is empty — translation specs will be skipped. " +
-				"Set TRANSLATE_URL env var or deploy with --template translate.")
-		} else {
-			logger.Infof("[TRANSLATE] Using translateBaseURL: %s", translateBaseURL)
+			translateBaseURL = waitForTranslateURL("TRANSLATE", 10*time.Minute)
 		}
+		logger.Infof("[TRANSLATE] Using translateBaseURL: %s", translateBaseURL)
+		waitForTranslateHealthy("TRANSLATE", translateBaseURL, 15*time.Minute)
 	})
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -428,4 +482,4 @@ var _ = ginkgo.Describe("Translation Service E2E Tests", ginkgo.Ordered, ginkgo.
 				expectNotFound(translation.GetJobResultDownloadRaw, unknownUUID)
 			})
 	})
-})
+}

@@ -618,7 +618,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
-		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog configure - using existing application")
 			}
@@ -642,7 +642,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Infof("[TEST] Catalog service is running. Backend URL (from info): %s", catalogBackendURL)
 			}
 		})
-		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog info - using existing application")
 			}
@@ -677,7 +677,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infoln("[TEST] Catalog info output validated successfully!")
 		})
-		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "catalog-login", "mcp-tests"), func() {
+		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-login", "mcp-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog login - using existing application")
 			}
@@ -792,7 +792,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				// Extract URLs from existing application
 				ctx, cancel := withTimeout(5 * time.Minute)
@@ -4494,8 +4494,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			})
 	})
 
+	ginkgo.Context("Translation Service E2E Tests", ginkgo.Label("translation-tests"), translationSpecs)
+
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
-		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				// The app was provided by the caller - do not delete it so the
 				// caller can inspect or reuse it after the run.
@@ -4511,7 +4513,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[TEST] Application %s deleted successfully", appName)
 		})
-		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "catalog-logout", "mcp-tests"), func() {
+		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-logout", "mcp-tests"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog logout only supported for podman runtime")
 			}
