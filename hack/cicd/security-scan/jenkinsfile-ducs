@@ -175,7 +175,8 @@ pipeline {
         success {
             archiveArtifacts artifacts: "ducs-reports/full-compact-cve-correlation-report-${env.BUILD_NUMBER}.csv", fingerprint: true
         }
-        always {
+        // 'cleanup' runs after every other post condition, so the report is archived first
+        cleanup {
             cleanWs()
         }
     }
