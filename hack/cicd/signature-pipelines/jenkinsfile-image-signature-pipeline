@@ -22,6 +22,7 @@ pipeline {
   summarize-service
   similarity-service
   translate-service
+  forecast-service
   caddy
   litellm
   postgres
@@ -245,6 +246,77 @@ pipeline {
             steps {
                 script {
                     env.ICR_TOOL_IMAGE = createToolsManifest()
+                }
+            }
+        }
+
+        stage('Build AI Services') {
+            when { expression { !isImageSkipped('ai-services') } }
+            steps {
+                script {
+                    env.ICR_AI_SERVICES_IMAGE = buildAndPublishImage('ai-services', 'ai-services')
+                }
+            }
+        }
+
+        stage('Build UI Catalog') {
+            when { expression { !isImageSkipped('catalog-ui') } }
+            steps {
+                script {
+                    env.ICR_UI_CATALOG_IMAGE = buildAndPublishImage('ui/catalog', 'catalog-ui')
+                }
+            }
+        }
+
+        stage('Build UI Digitize') {
+            when { expression { !isImageSkipped('digitize-ui') } }
+            steps {
+                script {
+                    env.ICR_UI_DIGITIZE_IMAGE = buildAndPublishImage('ui/digitize', 'digitize-ui')
+                }
+            }
+        }
+        stage('Build extract service') {
+            when { expression { !isImageSkipped('extract-service') } }
+            steps {
+                script {
+                    env.ICR_SERVICES_EXTRACT_IMAGE = buildAndPublishImage('services/extract/', 'extract-service')
+                }
+            }
+        }
+
+        stage('Build translate service') {
+            when { expression { !isImageSkipped('translate-service') } }
+            steps {
+                script {
+                    env.ICR_SERVICES_TRANSLATE_IMAGE = buildAndPublishImage('services/translate/', 'translate-service')
+                }
+            }
+        }
+
+        stage('Build forecast service') {
+            when { expression { !isImageSkipped('forecast-service') } }
+            steps {
+                script {
+                    env.ICR_SERVICES_FORECAST_IMAGE = buildAndPublishImage('services/forecast/', 'forecast-service')
+                }
+            }
+        }
+
+        stage('Build UI Chatbot') {
+            when { expression { !isImageSkipped('chatbot-ui') } }
+            steps {
+                script {
+                    env.ICR_UI_CHATBOT_IMAGE = buildAndPublishImage('ui/chatbot', 'chatbot-ui')
+                }
+            }
+        }
+
+        stage('Build AI Services MCP') {
+            when { expression { !isImageSkipped('ai-services-mcp') } }
+            steps {
+                script {
+                    env.ICR_AI_SERVICES_MCP_IMAGE = buildAndPublishImage('mcp/', 'ai-services-mcp')
                 }
             }
         }
@@ -530,6 +602,7 @@ def generateImageList() {
         env.ICR_SERVICES_SUMMARIZE_IMAGE,
         env.ICR_SERVICES_SIMILARITY_IMAGE,
         env.ICR_SERVICES_TRANSLATE_IMAGE,
+        env.ICR_SERVICES_FORECAST_IMAGE,
         env.ICR_UI_CATALOG_IMAGE,
         env.ICR_UI_DIGITIZE_IMAGE,
         env.ICR_UI_CHATBOT_IMAGE,
