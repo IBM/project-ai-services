@@ -202,11 +202,24 @@ def generateImageList() {
         ''').trim()
     }
 
+    // The tools image is tagged per platform (<tag>-<platform>) and make only prints the tag
+    // of the agent's platform, so add an entry for every supported platform.
+    def toolsPlatforms = ['amd64', 'arm64', 'ppc64le']
+
     def images = []
-    for (line in output.readLines()) {
-        def imageWithTag = "${env.ICR_REGISTRY}/${line.trim()}"
-        images.add(imageWithTag)
-        echo "Adding image for scan: ${imageWithTag}"
+    for (imageName in output.readLines()) {
+        if (imageName.trim().startsWith('tools:')) {
+            def tagPrefix = imageName.trim().substring(0, imageName.trim().lastIndexOf('-'))
+            for (platform in toolsPlatforms) {
+                def imagePath = "${env.ICR_REGISTRY}/${tagPrefix}-${platform}"
+                images.add(imagePath)
+                echo "Adding image for scan: ${imagePath}"
+            }
+        } else {
+            def imagePath = "${env.ICR_REGISTRY}/${imageName.trim()}"
+            images.add(imagePath)
+            echo "Adding image for scan: ${imagePath}"
+        }
     }
 
     if (images.isEmpty()) {
