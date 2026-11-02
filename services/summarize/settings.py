@@ -138,12 +138,6 @@ class SummarizationConfig(BaseSettings):
         description="User prompt for summarization without target length",
     )
 
-    table_summary_max_tokens: int = Field(
-        default=1024,
-        ge=0,
-        description="Maximum tokens for table summarization",
-    )
-    
     summarization_levels: SummarizationLevelsConfig = Field(
         default_factory=SummarizationLevelsConfig,
         description="Configuration for different summarization abstraction levels",

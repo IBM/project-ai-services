@@ -53,13 +53,6 @@ export const HEADERS: DataTableHeader[] = [
   { header: "", key: "actions" },
 ];
 
-// Status column sort order — disconnected/pending float to the top
-export const STATUS_SORT_ORDER: Record<WorkerStatus, number> = {
-  disconnected: 1,
-  pending: 2,
-  ready: 3,
-};
-
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
@@ -102,11 +95,7 @@ function ownCases(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         ...setLoading(false),
-        rowsData: [...action.payload.rows].sort(
-          (a, b) =>
-            STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status] ||
-            a.name.localeCompare(b.name),
-        ),
+        rowsData: action.payload.rows,
         totalItems: action.payload.total,
         fetchError: null,
       };

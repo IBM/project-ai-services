@@ -26,6 +26,9 @@
     "typescript": "~5.9.3",
     "vite": "^8.3.5"
   },
+  "overrides": {
+    "qs": "^6.17.1"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
