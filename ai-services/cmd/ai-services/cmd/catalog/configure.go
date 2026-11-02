@@ -194,22 +194,20 @@ func runConfigure(ctx context.Context) error {
 func validateConfigureFlags() error {
 	// Podman-only validations
 	if vars.RuntimeFactory.GetRuntimeType() == types.RuntimeTypePodman {
-		if workerGatewayPort < 1 || workerGatewayPort > 65535 {
-			return fmt.Errorf("invalid workergateway-port %d: must be between 1 and 65535", workerGatewayPort)
+		if err := common.ValidatePort(workerGatewayPort, "workergateway-port"); err != nil {
+			return err
 		}
 
 		if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
 			return err
 		}
 
-		// Validate HTTPS port range
-		if httpsPort < 1 || httpsPort > 65535 {
-			return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
+		if err := common.ValidatePort(httpsPort, "HTTPS port"); err != nil {
+			return err
 		}
 
-		// Validate Private Ingress port range
-		if privateIngressPort < 1 || privateIngressPort > 65535 {
-			return fmt.Errorf("invalid private ingress port %d: must be between 1 and 65535", privateIngressPort)
+		if err := common.ValidatePort(privateIngressPort, "private ingress port"); err != nil {
+			return err
 		}
 	}
 

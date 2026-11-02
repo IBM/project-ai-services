@@ -3,17 +3,18 @@ package utils
 import (
 	"testing"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestExtractPodConfigFromEnv(t *testing.T) {
 	env := map[string]string{
-		"AI_SERVICES_BASE_DIR":       "/var/lib/ai-services",
-		"DOMAIN_SUFFIX":              "example.com",
-		"CADDY_HTTPS_PORT":           "8443",
-		"CADDY_PRIVATE_INGRESS_PORT": "9444",
-		"GATEWAY_ADDR":               "gateway.example.com:9191",
-		"WORKER_GATEWAY_PORT":        "9191",
+		"AI_SERVICES_BASE_DIR":               "/var/lib/ai-services",
+		proxy.DomainSuffixEnvVar:             "example.com",
+		proxy.CaddyHTTPSPortEnvVar:           "8443",
+		proxy.CaddyPrivateIngressPortEnvVar: "9444",
+		"GATEWAY_ADDR":                       "gateway.example.com:9191",
+		"WORKER_GATEWAY_PORT":                "9191",
 	}
 
 	var opts PodmanOptions

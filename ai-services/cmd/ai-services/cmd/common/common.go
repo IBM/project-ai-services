@@ -20,6 +20,19 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+const (
+	minPort = 1
+	maxPort = 65535
+)
+
+// ValidatePort validates that a port number is within the valid TCP/UDP range (1-65535).
+func ValidatePort(port int, name string) error {
+	if port < minPort || port > maxPort {
+		return fmt.Errorf("invalid %s %d: must be between %d and %d", name, port, minPort, maxPort)
+	}
+	return nil
+}
+
 // InitAndValidateRuntimeFlag validates the runtime flag value, initialises
 // vars.RuntimeFactory, and checks platform support. It must be called in
 // PreRunE before any code that reads vars.RuntimeFactory.

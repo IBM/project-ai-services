@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -301,15 +302,15 @@ func ExtractPodConfigFromEnv(env map[string]string, opts *PodmanOptions) {
 		opts.BaseDir = value
 	}
 
-	if value, ok := env["DOMAIN_SUFFIX"]; ok {
+	if value, ok := env[proxy.DomainSuffixEnvVar]; ok {
 		opts.DomainName = value
 	}
 
-	if value, ok := env["CADDY_HTTPS_PORT"]; ok {
+	if value, ok := env[proxy.CaddyHTTPSPortEnvVar]; ok {
 		opts.HTTPSPort, _ = strconv.Atoi(value)
 	}
 
-	if value, ok := env["CADDY_PRIVATE_INGRESS_PORT"]; ok {
+	if value, ok := env[proxy.CaddyPrivateIngressPortEnvVar]; ok {
 		opts.PrivateIngressPort, _ = strconv.Atoi(value)
 	}
 

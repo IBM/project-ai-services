@@ -122,12 +122,12 @@ func validateWorkerJoinFlags(ctx context.Context) error {
 		return fmt.Errorf("required flag(s) %q not set", constants.TokenFlag)
 	}
 
-	if httpsPort < 1 || httpsPort > 65535 {
-		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
+	if err := cmdcommon.ValidatePort(httpsPort, "HTTPS port"); err != nil {
+		return err
 	}
 
-	if privateIngressPort < 1 || privateIngressPort > 65535 {
-		return fmt.Errorf("invalid private ingress port %d: must be between 1 and 65535", privateIngressPort)
+	if err := cmdcommon.ValidatePort(privateIngressPort, "private ingress port"); err != nil {
+		return err
 	}
 
 	if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
