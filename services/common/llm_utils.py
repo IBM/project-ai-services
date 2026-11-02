@@ -514,6 +514,7 @@ def query_vllm_summarize(
     model: str,
     max_tokens: int,
     temperature: float,
+    seed: int | None = None,
 ):
     """Send a non-streaming summarization request to vLLM and return the response content and token counts."""
     from summarize.settings import settings as summarize_settings
@@ -528,6 +529,8 @@ def query_vllm_summarize(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
+    if seed is not None:
+        payload["seed"] = seed
     if stop_words:
         payload["stop"] = stop_words
 
@@ -556,6 +559,7 @@ def query_vllm_summarize_stream(
     model: str,
     max_tokens: int,
     temperature: float,
+    seed: int | None = None,
 ):
     """Stream a summarization request to vLLM, yielding raw SSE lines."""
     from summarize.settings import settings as summarize_settings
@@ -571,6 +575,8 @@ def query_vllm_summarize_stream(
         "temperature": temperature,
         "stream": True,
     }
+    if seed is not None:
+        payload["seed"] = seed
     if stop_words:
         payload["stop"] = stop_words
 

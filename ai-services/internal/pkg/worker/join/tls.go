@@ -31,6 +31,17 @@ const (
 	caCertFile  = "ca.crt"
 )
 
+// workerTLSDir returns the directory holding the worker's mTLS material.
+// It defaults to workerconstants.WorkerTLSDir and can be overridden with the
+// WORKER_TLS_DIR env var (local development only).
+func workerTLSDir() string {
+	if dir := os.Getenv(workerconstants.WorkerTLSDirEnv); dir != "" {
+		return dir
+	}
+
+	return workerconstants.WorkerTLSDir
+}
+
 func generateKeyAndCSR() (keyPEM, csrPEM []byte, err error) {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

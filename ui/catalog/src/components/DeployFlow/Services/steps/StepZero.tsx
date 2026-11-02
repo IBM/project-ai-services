@@ -89,10 +89,12 @@ export const StepZero: React.FC<StepZeroProps> = ({
                   )}
                   <div className={styles.serviceTileContent}>
                     <h3 className={styles.serviceTileName}>{service.name}</h3>
-                    <div className={styles.certifiedBadge}>
-                      <Badge size={16} />
-                      <span>IBM certified</span>
-                    </div>
+                    {service.certified_by && (
+                      <div className={styles.certifiedBadge}>
+                        <Badge size={16} />
+                        <span>{service.certified_by} certified</span>
+                      </div>
+                    )}
                     <p className={styles.serviceTileDescription}>
                       {service.description}
                     </p>

@@ -429,7 +429,7 @@ async def create_extract_job(
             logger.error(msg)
             APIError.raise_error(ErrorCode.UNSUPPORTED_FILE_TYPE, msg)
         source_type = (ext or "").lstrip(".")
-        validated.append((file.filename, source_type))
+        validated.append((sanitize_basename(file.filename), source_type))
 
     # Duplicate filename check — compare sanitized basenames, since that is the
     # name each file is staged under (e.g. "file.txt" and "../other/file.txt"

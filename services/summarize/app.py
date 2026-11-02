@@ -256,6 +256,7 @@ async def handle_summarize(
                 model=llm_model,
                 max_tokens=max_tokens,
                 temperature=settings.summarize.summarization_temperature,
+                seed=settings.summarize.summarization_seed,
             )
         except Exception as e:
             logger.error(f"LLM call failed with error: {e}")
@@ -282,6 +283,7 @@ async def handle_summarize(
             model=llm_model,
             max_tokens=max_tokens,
             temperature=settings.summarize.summarization_temperature,
+            seed=settings.summarize.summarization_seed,
         )
         logger.info(f"Input tokens: {in_tokens}, output tokens: {out_tokens}")
         elapsed_ms = int((time.time() - start) * 1000)
@@ -601,13 +603,14 @@ async def process_summarization_job(job_id: str, level):
                     model=llm_model,
                     max_tokens=max_tokens,
                     temperature=settings.summarize.summarization_temperature,
+                    seed=settings.summarize.summarization_seed,
                 )
-            
+
             if isinstance(result, dict) and "error" in result:
                 raise Exception(f"LLM error: {result.get('error', 'Unknown error')}")
-            
+
             summary = trim_to_last_sentence(result) if isinstance(result, str) else ""
-            
+
             # Token usage
             total_input_tokens = in_tokens
             total_output_tokens = out_tokens
@@ -759,6 +762,7 @@ async def process_summarization_job(job_id: str, level):
                                 model=llm_model,
                                 max_tokens=chunk_info['max_tokens'],
                                 temperature=settings.summarize.summarization_temperature,
+                                seed=settings.summarize.summarization_seed,
                             )
                         
                         if isinstance(chunk_result, dict) and "error" in chunk_result:
@@ -866,6 +870,7 @@ async def process_summarization_job(job_id: str, level):
                     model=llm_model,
                     max_tokens=merge_max_tokens,
                     temperature=settings.summarize.summarization_temperature,
+                    seed=settings.summarize.summarization_seed,
                 )
             
             if isinstance(merge_result, dict) and "error" in merge_result:

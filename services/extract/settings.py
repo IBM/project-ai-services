@@ -37,18 +37,6 @@ class ExtractionConfig(BaseSettings):
         ),
     )
 
-    max_examples: int = Field(
-        default=5,
-        ge=1,
-        description="Maximum number of few-shot examples per schema",
-    )
-
-    max_custom_prompt_chars: int = Field(
-        default=2000,
-        ge=1,
-        description="Maximum character length for the custom_prompt field",
-    )
-
     # Context-window budget at registration time (Section 5.1.2 of proposal)
     context_schema_share: float = Field(
         default=0.7,
