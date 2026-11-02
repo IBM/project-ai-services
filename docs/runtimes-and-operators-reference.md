@@ -17,8 +17,8 @@ This section serves as an executive quick-reference for the core components and 
 | **vLLM (IBM Spyre AIU)** | Podman & OpenShift | `v3.5.0` (Red Hat AI Inference) | `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0` |
 | **vLLM (CPU-Only)** | Podman | `v0.28.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` |
 | **vLLM (CPU-Only)** | OpenShift | `v0.28.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` |
-| **IBM Spyre Operator** | OpenShift | `stable-v1.3` (v1.3.1) | Managed via Subscription |
-| **Red Hat OpenShift AI (RHOAI)** | OpenShift | `stable-3.5` (v3.5.0) | Managed via Subscription |
+| **IBM Spyre Operator** | OpenShift | `stable-v1.4` (v1.4.0) | Managed via Subscription |
+| **Red Hat OpenShift AI (RHOAI)** | OpenShift | `stable-3.5` (v3.5.2) | Managed via Subscription |
 
 ---
 
@@ -32,8 +32,8 @@ All operators are declared in the AI Services prerequisites at `ai-services/asse
 
 | Operator Name | Subscription Key | Namespace | Channel | Starting CSV | Catalog Source | Source Namespace |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **IBM Spyre Operator** | `spyre-operator` | `spyre-operator` | `stable-v1.3` | `spyre-operator.v1.3.1` | `certified-operators` | `openshift-marketplace` |
-| **Red Hat OpenShift AI (RHODS)** | `rhods-operator` | `redhat-ods-operator` | `stable-3.5` | `rhods-operator.3.5.0` | `redhat-operators` | `openshift-marketplace` |
+| **IBM Spyre Operator** | `spyre-operator` | `spyre-operator` | `stable-v1.4` | `spyre-operator.v1.4.0` | `certified-operators` | `openshift-marketplace` |
+| **Red Hat OpenShift AI (RHODS)** | `rhods-operator` | `redhat-ods-operator` | `stable-3.5` | `rhods-operator.3.5.2` | `redhat-operators` | `openshift-marketplace` |
 | **OpenShift Service Mesh 3.x** | `servicemeshoperator3` | `openshift-operators` | `stable` | *Latest stable* | `redhat-operators` | `openshift-marketplace` |
 | **Node Feature Discovery (NFD)** | `nfd` | `openshift-nfd` | `stable` | *Latest stable* | `redhat-operators` | `openshift-marketplace` |
 | **Secondary Scheduler** | `openshift-secondary-scheduler-operator` | `openshift-secondary-scheduler-operator` | `stable` | *Latest stable* | `redhat-operators` | `openshift-marketplace` |
