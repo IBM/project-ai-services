@@ -31,6 +31,7 @@ pipeline {
   summarize-service
   similarity-service
   translate-service
+  forecast-service
   caddy
   litellm
   postgres
@@ -218,6 +219,15 @@ pipeline {
             steps {
                 script {
                     env.ICR_SERVICES_TRANSLATE_IMAGE = buildAndPublishImage('services/translate/', 'translate-service')
+                }
+            }
+        }
+
+        stage('Build forecast service') {
+            when { expression { !isImageSkipped('forecast-service') } }
+            steps {
+                script {
+                    env.ICR_SERVICES_FORECAST_IMAGE = buildAndPublishImage('services/forecast/', 'forecast-service')
                 }
             }
         }
@@ -521,6 +531,7 @@ def generateImageList() {
         env.ICR_SERVICES_SUMMARIZE_IMAGE,
         env.ICR_SERVICES_SIMILARITY_IMAGE,
         env.ICR_SERVICES_TRANSLATE_IMAGE,
+        env.ICR_SERVICES_FORECAST_IMAGE,
         env.ICR_UI_CATALOG_IMAGE,
         env.ICR_UI_DIGITIZE_IMAGE,
         env.ICR_UI_CHATBOT_IMAGE,
