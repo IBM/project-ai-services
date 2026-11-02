@@ -528,17 +528,17 @@ func (s *ApplicationServiceBase) InsertDeploymentRecords(
 // resolveWorkerID returns the database ID of the worker the plan deploys to.
 // Every deployment goes through a worker (the local worker is used for local deployments).
 // WorkerName is always set by the CLI since the --worker flag defaults to workerconstants.LocalWorkerName.
-func (s *ApplicationServiceBase) resolveWorkerID(plan *deployment.DeploymentPlan) (uuid.UUID, error) {
+func (s *ApplicationServiceBase) resolveWorkerID(plan *deployment.DeploymentPlan) (*uuid.UUID, error) {
 	if plan.WorkerName == "" {
-		return uuid.Nil, fmt.Errorf("worker name is required for application deployment; use --worker to specify a worker (default: %q)", workerconstants.LocalWorkerName)
+		return nil, fmt.Errorf("worker name is required for application deployment; use --worker to specify a worker (default: %q)", workerconstants.LocalWorkerName)
 	}
 
 	dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName)
 	if !ok {
-		return uuid.Nil, fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", plan.WorkerName)
+		return nil, fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", plan.WorkerName)
 	}
 
-	return dbID, nil
+	return &dbID, nil
 }
 
 // insertApplicationRecord inserts the application record into the database.
@@ -546,7 +546,7 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 	ctx context.Context,
 	plan *deployment.DeploymentPlan,
 	createdBy string,
-	workerID uuid.UUID,
+	workerID *uuid.UUID,
 ) error {
 	app := &models.Application{
 		ID:             plan.ApplicationID,
@@ -557,7 +557,7 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 		Message:        "Initializing deployment",
 		Version:        plan.Version,
 		CreatedBy:      createdBy,
-		WorkerID:       &workerID,
+		WorkerID:       workerID,
 	}
 
 	if err := s.AppRepo.Insert(ctx, app); err != nil {
@@ -572,7 +572,7 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 	ctx context.Context,
 	plan *deployment.DeploymentPlan,
 	createdBy string,
-	workerID uuid.UUID,
+	workerID *uuid.UUID,
 ) (map[string]uuid.UUID, error) {
 	componentIDMap := make(map[string]uuid.UUID)
 	scopedProvider, err := s.Provider.WithRuntime(plan.RuntimeType)
@@ -597,7 +597,7 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 			Version:   comp.Version,
 			Metadata:  metadata,
 			CreatedBy: createdBy,
-			WorkerID:  &workerID,
+			WorkerID:  workerID,
 		}
 
 		if err := s.ComponentRepo.Insert(ctx, component); err != nil {

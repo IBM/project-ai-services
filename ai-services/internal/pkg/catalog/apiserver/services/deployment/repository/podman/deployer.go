@@ -32,9 +32,6 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 )
 
-// ComponentInfo holds the information derived from a deployed component.
-type ComponentInfo = podmanutils.EndpointInfo
-
 // Type aliases for deployment plan types.
 type (
 	DeploymentPlan = deploymenttypes.DeploymentPlan

@@ -128,6 +128,9 @@ func recordComponentEndpoint(ctx context.Context, endpoints map[string]any, comp
 
 		return
 	}
+	if info == nil {
+		return
+	}
 
 	endpoints[componentType] = map[string]any{
 		"host": info.Domain,

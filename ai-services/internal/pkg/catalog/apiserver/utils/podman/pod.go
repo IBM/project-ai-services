@@ -78,7 +78,7 @@ func DeployPodmanPod(ctx context.Context, rt runtime.Runtime, podSpec *podmodels
 
 // ExtractPodEndpoint extracts the internal host (pod name) and port from a component pod spec.
 // It reads directly from the container port declarations, which is the authoritative source
-// for component-to-service communication. Components do not declare ai-services.io/routes.
+// for component-to-service communication. Returns (nil, nil) if the pod does not declare any container port.
 func ExtractPodEndpoint(ctx context.Context, podSpec *podmodels.PodSpec) (*EndpointInfo, error) {
 	if podSpec == nil {
 		return nil, fmt.Errorf("pod spec is nil")
@@ -95,7 +95,9 @@ func ExtractPodEndpoint(ctx context.Context, podSpec *podmodels.PodSpec) (*Endpo
 	}
 
 	if targetPort == "" {
-		return nil, fmt.Errorf("no port found in pod spec for %s", podName)
+		logger.InfofCtx(ctx, "No container port found in pod spec for %s, skipping endpoint extraction\n", podName)
+
+		return nil, nil
 	}
 
 	endpoint := fmt.Sprintf("%s:%s", podName, targetPort)
