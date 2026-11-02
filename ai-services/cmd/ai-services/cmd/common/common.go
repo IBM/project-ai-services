@@ -30,6 +30,7 @@ func ValidatePort(port int, name string) error {
 	if port < minPort || port > maxPort {
 		return fmt.Errorf("invalid %s %d: must be between %d and %d", name, port, minPort, maxPort)
 	}
+
 	return nil
 }
 
