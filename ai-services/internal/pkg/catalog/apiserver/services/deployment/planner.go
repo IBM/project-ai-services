@@ -10,11 +10,11 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/params"
+	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
@@ -281,43 +281,21 @@ func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(ctx context.Context, 
 
 	logger.InfofCtx(ctx, "Total Spyre cards required: %d\n", totalRequired)
 
-	// Find available Spyre cards via the worker pod over gRPC.
-	pciAddresses, err := p.findFreeSpyreCards(ctx, workerName)
-	if err != nil {
-		return fmt.Errorf("failed to find free Spyre cards: %w", err)
-	}
-
-	availableCount := len(pciAddresses)
-	logger.InfofCtx(ctx, "Available Spyre cards: %d\n", availableCount)
-
-	// Validate we have enough Spyre cards
-	if availableCount < totalRequired {
-		return fmt.Errorf("insufficient Spyre cards: required %d, available %d", totalRequired, availableCount)
-	}
-
-	// Create pool with available addresses and store in plan
-	plan.SpyreCardPool = &types.SpyreCardPool{
-		Addresses: pciAddresses,
-	}
-
-	return nil
-}
-
-// findFreeSpyreCards sends FIND_FREE_SPYRE_CARDS over the gRPC stream to the
-// named worker pod (local or remote) so the worker host probes /dev/vfio —
-// the API server never touches hardware directly.
-func (p *DeploymentPlanner) findFreeSpyreCards(ctx context.Context, workerName string) ([]string, error) {
+	// Discover free Spyre cards via the worker over gRPC (the API server never touches hardware
+	// directly) and build the allocation pool using the shared podmanutils helper.
 	rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(p.runtimeType)).CreateRemote(workerName, p.workerRegistry, "")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create remote runtime for worker %q: %w", workerName, err)
+		return fmt.Errorf("failed to create remote runtime for worker %q: %w", workerName, err)
 	}
 
-	remoteRT, ok := rt.(*remoteruntime.RemoteRuntime)
-	if !ok {
-		return nil, fmt.Errorf("unexpected runtime type for worker %q", workerName)
+	pool, err := podmanutils.NewSpyreCardPool(ctx, rt, totalRequired)
+	if err != nil {
+		return err
 	}
 
-	return remoteRT.FindFreeSpyreCards(ctx)
+	plan.SpyreCardPool = pool
+
+	return nil
 }
 
 // getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component.
