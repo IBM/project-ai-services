@@ -9,12 +9,12 @@ import (
 	"github.com/google/uuid"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	podmodels "github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
@@ -181,17 +181,23 @@ func GetEnvParams(ctx context.Context, podSpec *podmodels.PodSpec, pool *deploym
 	return env, nil
 }
 
+// BaseDirProvider represents any runtime capable of reporting its base directory on the target host
+// (e.g. RemoteRuntime querying over gRPC, or a MockRuntime in tests).
+type BaseDirProvider interface {
+	GetBaseDir(ctx context.Context) (string, error)
+}
+
 // FetchBaseDir resolves the base directory used for deployment artifacts on the target host.
-// For remote workers it is queried over gRPC (the worker's own AI_SERVICES_BASE_DIR); for a
-// local runtime the control-plane value is used.
+// For runtimes implementing BaseDirProvider (such as RemoteRuntime) it is queried dynamically;
+// otherwise the control-plane base directory is used as a fallback.
 func FetchBaseDir(ctx context.Context, rt runtime.Runtime) (string, error) {
-	if remoteRT, ok := rt.(*remoteruntime.RemoteRuntime); ok {
-		baseDir, err := remoteRT.GetBaseDir(ctx)
+	if provider, ok := rt.(BaseDirProvider); ok {
+		baseDir, err := provider.GetBaseDir(ctx)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve base directory on worker %q: %w", remoteRT.WorkerName(), err)
+			return "", fmt.Errorf("failed to resolve base directory: %w", err)
 		}
 		if strings.TrimSpace(baseDir) == "" {
-			return "", fmt.Errorf("worker %q returned empty base directory", remoteRT.WorkerName())
+			return "", fmt.Errorf("runtime returned empty base directory")
 		}
 
 		return baseDir, nil
@@ -200,16 +206,27 @@ func FetchBaseDir(ctx context.Context, rt runtime.Runtime) (string, error) {
 	return utils.GetBaseDir(), nil
 }
 
-// NewSpyreCardPool discovers the free Spyre cards on the target host and returns a pool of them.
-// Discovery is sent over the gRPC CommandStream, so rt must be a RemoteRuntime (this covers both
-// the local worker and remote workers). Callers must only call this when required > 0.
-func NewSpyreCardPool(ctx context.Context, rt runtime.Runtime, required int) (*deploymenttypes.SpyreCardPool, error) {
-	remoteRT, ok := rt.(*remoteruntime.RemoteRuntime)
-	if !ok {
-		return nil, fmt.Errorf("runtime does not support Spyre card discovery (type %T)", rt)
-	}
+// SpyreDiscoverer represents any runtime capable of discovering free Spyre cards
+// (e.g. RemoteRuntime querying over gRPC, or a MockRuntime in tests).
+type SpyreDiscoverer interface {
+	FindFreeSpyreCards(ctx context.Context) ([]string, error)
+}
 
-	pciAddresses, err := remoteRT.FindFreeSpyreCards(ctx)
+// NewSpyreCardPool discovers the free Spyre cards on the target host and returns a pool of them.
+// Discovery is delegated to the runtime when it implements SpyreDiscoverer (e.g. RemoteRuntime
+// querying over gRPC, or a MockRuntime in tests), otherwise falling back to local host discovery.
+// Callers must only call this when required > 0.
+func NewSpyreCardPool(ctx context.Context, rt runtime.Runtime, required int) (*deploymenttypes.SpyreCardPool, error) {
+	var (
+		pciAddresses []string
+		err          error
+	)
+
+	if discoverer, ok := rt.(SpyreDiscoverer); ok {
+		pciAddresses, err = discoverer.FindFreeSpyreCards(ctx)
+	} else {
+		pciAddresses, err = helpers.FindFreeSpyreCards(ctx)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to find free Spyre cards: %w", err)
 	}
