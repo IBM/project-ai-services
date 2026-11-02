@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	apirepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -156,22 +158,46 @@ func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 //	@Description	Returns all registered workers, their current status, human-readable message, and connected application IDs.
 //	@Tags			Workers
 //	@Produce		json
-//	@Param			q	query		string					false	"Case-insensitive substring search on worker name"
-//	@Success		200	{array}		catalogtypes.Worker		"List of workers"
-//	@Failure		500	{object}	map[string]interface{}	"Internal error"
 //	@Security		BearerAuth
+//	@Param			page		query		int								false	"Page number (1-indexed)"				default(1)
+//	@Param			page_size	query		int								false	"Number of items per page (max: 100)"	default(20)
+//	@Param			q			query		string							false	"Case-insensitive substring search on worker name"
+//	@Success		200			{object}	catalogtypes.WorkerListResponse	"List of workers with pagination"
+//	@Failure		400			{object}	ErrorResponse					"Invalid query parameters"
+//	@Failure		401			{object}	ErrorResponse					"Unauthorized"
+//	@Failure		500			{object}	ErrorResponse					"Internal error"
 //	@Router			/workers [get]
 func (h *WorkerHandler) ListWorkers(c *gin.Context) {
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+
+	page, pageSize, err := apirepo.ValidatePaginationParams(page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
 	ctx := c.Request.Context()
 
 	req := &repository.ListWorkersRequest{
 		Search: c.Query("q"),
+		Limit:  pageSize,
+		Offset: (page - 1) * pageSize,
+	}
+
+	totalCount, err := h.reg.GetCount(ctx, req)
+	if err != nil {
+		logger.ErrorfCtx(ctx, "worker handler: failed to count workers: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to count workers"})
+
+		return
 	}
 
 	workers, err := h.reg.List(ctx, req)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "worker handler: failed to list workers: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list workers"})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to list workers"})
 
 		return
 	}
@@ -179,17 +205,37 @@ func (h *WorkerHandler) ListWorkers(c *gin.Context) {
 	appIDMap, err := h.fetchAppIDs(ctx, workers)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "worker handler: failed to fetch application IDs for workers: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch application IDs"})
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to fetch application IDs"})
 
 		return
 	}
 
+	c.JSON(http.StatusOK, buildWorkerListResponse(workers, appIDMap, page, pageSize, totalCount))
+}
+
+// buildWorkerListResponse converts workers into the paginated API response.
+func buildWorkerListResponse(workers []models.Worker, appIDMap map[uuid.UUID][]uuid.UUID, page, pageSize, totalCount int) catalogtypes.WorkerListResponse {
 	result := make([]catalogtypes.Worker, len(workers))
 	for i, w := range workers {
 		result[i] = toAPIWorker(w, appIDMap[w.ID])
 	}
 
-	c.JSON(http.StatusOK, result)
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = (totalCount + pageSize - 1) / pageSize
+	}
+
+	return catalogtypes.WorkerListResponse{
+		Data: result,
+		Pagination: catalogtypes.PaginationMetadata{
+			Page:       page,
+			PageSize:   pageSize,
+			TotalItems: totalCount,
+			TotalPages: totalPages,
+			HasNext:    page < totalPages,
+			HasPrev:    page > 1,
+		},
+	}
 }
 
 // GetWorker godoc

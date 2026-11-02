@@ -149,6 +149,54 @@ ginkgo -r -tags "$TAGS" \
   ./tests/e2e -- --app-name=<appname> --template=summarize --runtime=podman
 ```
 
+## Running Entity Extraction Tests
+
+The Entity Extraction Tests validate the `extract-api` service end-to-end, covering both the synchronous extraction API (`POST /v1/extract`) and the asynchronous jobs API (`POST /v1/extract/jobs`).
+
+The suite manages the full application lifecycle: it runs `catalog configure`, `catalog login`, creates a fresh `extract-app-<runID>`, runs all extraction specs, then deletes the app.
+
+### Prerequisites
+
+- Registry credentials must be set so the suite can pull the extract service image.
+- `CATALOG_PASSWORD` must be set — the suite runs `catalog configure` and `catalog login` automatically.
+- The Ginkgo CLI version must match the module version (`v2.28.1`). Install with:
+
+```bash
+go install github.com/onsi/ginkgo/v2/ginkgo@v2.28.1
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
+### Environment variables
+
+```bash
+# Required
+export CATALOG_PASSWORD="<your-catalog-admin-password>"
+export REGISTRY_URL="icr.io"
+export REGISTRY_USER_NAME="<your-icr-username>"
+export REGISTRY_PASSWORD="<your-icr-api-key>"
+
+# Optional — defaults to true (self-signed certs)
+export CATALOG_INSECURE=true
+
+# Optional — override default extract service port (default: 9500)
+# export EXTRACT_PORT=9500
+```
+
+### Commands to Run Entity Extraction Tests
+
+```bash
+# Using make (recommended — build tags applied automatically)
+make test TEST_ARGS="--label-filter=extraction-tests --timeout=3h" APP_RUNTIME=podman
+
+# Using ginkgo CLI directly (from ai-services/)
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+ginkgo -r --procs=1 -tags "$TAGS" \
+  --label-filter="extraction-tests" \
+  --timeout=3h --v \
+  ./tests/e2e \
+  -- -template=extract -runtime=podman
+```
+
 ## Running Golden Dataset Validation Independently
 
 The RAG Golden Dataset Validation can be executed independently from the full E2E lifecycle. This allows validating an already running RAG application without creating or deleting an application during the test run.

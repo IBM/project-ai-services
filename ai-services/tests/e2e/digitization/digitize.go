@@ -99,15 +99,8 @@ type JobStatusResponse struct {
 
 // JobsListResponse represents the response when listing jobs.
 type JobsListResponse struct {
-	Data       []JobStatusResponse `json:"data"`
-	Pagination PaginationInfo      `json:"pagination"`
-}
-
-// PaginationInfo represents pagination metadata.
-type PaginationInfo struct {
-	Total  int `json:"total"`
-	Limit  int `json:"limit"`
-	Offset int `json:"offset"`
+	Data       []JobStatusResponse   `json:"data"`
+	Pagination common.PaginationInfo `json:"pagination"`
 }
 
 // DocumentDetailResponse represents a document returned by both the list and detail endpoints (same JSON shape).
@@ -129,8 +122,8 @@ type DocumentListItem = DocumentDetailResponse
 
 // DocumentsListResponse represents the response when listing documents.
 type DocumentsListResponse struct {
-	Data       []DocumentListItem `json:"data"`
-	Pagination PaginationInfo     `json:"pagination"`
+	Data       []DocumentListItem    `json:"data"`
+	Pagination common.PaginationInfo `json:"pagination"`
 }
 
 // DocumentContentResponse represents the document content.

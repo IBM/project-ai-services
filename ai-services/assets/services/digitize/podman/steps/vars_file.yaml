@@ -6,3 +6,7 @@ containers:
   - name: "digitize-{{ .InstanceSlug }}-backend-server"
     format: ".Status"
     alias: API_STATUS
+
+  - name: "digitize-{{ .InstanceSlug }}-mcp-sidecar"
+    format: ".Status"
+    alias: MCP_STATUS

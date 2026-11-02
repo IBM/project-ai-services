@@ -281,6 +281,15 @@ func (r *Registry) List(ctx context.Context, req *repository.ListWorkersRequest)
 	return r.repo.GetAll(ctx, req)
 }
 
+// GetCount returns the total number of worker rows matching the request from the database.
+func (r *Registry) GetCount(ctx context.Context, req *repository.ListWorkersRequest) (int, error) {
+	if r.repo == nil {
+		return 0, nil
+	}
+
+	return r.repo.GetCount(ctx, req)
+}
+
 // Get returns the in-memory entry for a connected worker, or false if not found.
 func (r *Registry) Get(workerName string) (*WorkerEntry, bool) {
 	r.mu.RLock()

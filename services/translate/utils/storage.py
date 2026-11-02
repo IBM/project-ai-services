@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from common.misc_utils import get_logger
+from common.validation_utils import safe_filename
 from translate.settings import settings
 
 logger = get_logger("storage")
@@ -54,7 +55,7 @@ class StorageManager:
         staging_path = settings.translate.staging_dir / job_id
         staging_path.mkdir(parents=True, exist_ok=True)
 
-        target = staging_path / filename
+        target = safe_filename(filename, staging_path)
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(

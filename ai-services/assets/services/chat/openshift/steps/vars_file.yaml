@@ -9,8 +9,15 @@ containers:
     format: ".Status"
     alias: API_STATUS
 
+  - name: "mcp-sidecar"
+    workload: "chat-bot-api"
+    format: ".Status"
+    alias: MCP_STATUS
+
 hosts:
   - fetch: UI_URL
     type: ui
   - fetch: API_URL
     type: api
+  - fetch: MCP_URL
+    type: mcp

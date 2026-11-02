@@ -40,3 +40,23 @@ func buildSearchClause(columns []string, args *[]interface{}, term string) strin
 
 	return "(" + strings.Join(clauses, " OR ") + ")"
 }
+
+// buildStatusPriorityCase builds a SQL CASE expression that ranks rows by status
+// group for use in ORDER BY. Statuses in groups[0] rank first (0), groups[1]
+// next (1), and so on; any unlisted status ranks last.
+// Status values must be trusted constants (they are inlined, not bound).
+func buildStatusPriorityCase(column string, groups ...[]string) string {
+	var sb strings.Builder
+
+	sb.WriteString("CASE " + column)
+
+	for rank, statuses := range groups {
+		for _, s := range statuses {
+			fmt.Fprintf(&sb, " WHEN '%s' THEN %d", s, rank)
+		}
+	}
+
+	fmt.Fprintf(&sb, " ELSE %d END", len(groups))
+
+	return sb.String()
+}

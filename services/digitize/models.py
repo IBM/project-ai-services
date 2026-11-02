@@ -136,6 +136,7 @@ class JobState(BaseModel):
     job_id: str
     job_name: Optional[str] = None
     operation: str
+    source: str = "user"
     status: JobStatus
     submitted_at: str
     completed_at: Optional[str] = None

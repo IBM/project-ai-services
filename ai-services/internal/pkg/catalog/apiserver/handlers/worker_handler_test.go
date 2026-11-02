@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"github.com/stretchr/testify/assert"
@@ -69,10 +72,32 @@ func (r *mockWorkerRepo) Delete(_ context.Context, id uuid.UUID) (bool, error) {
 	return true, nil
 }
 
-func (r *mockWorkerRepo) GetAll(_ context.Context, _ *repository.ListWorkersRequest) ([]models.Worker, error) {
+func (r *mockWorkerRepo) GetCount(_ context.Context, req *repository.ListWorkersRequest) (int, error) {
+	workers, err := r.GetAll(context.Background(), &repository.ListWorkersRequest{Search: req.Search})
+	if err != nil {
+		return 0, err
+	}
+	return len(workers), nil
+}
+
+func (r *mockWorkerRepo) GetAll(_ context.Context, req *repository.ListWorkersRequest) ([]models.Worker, error) {
 	out := make([]models.Worker, 0, len(r.workers))
 	for _, w := range r.workers {
+		if req != nil && req.Search != "" && !strings.Contains(strings.ToLower(w.Name), strings.ToLower(req.Search)) {
+			continue
+		}
 		out = append(out, *w)
+	}
+	if req != nil && (req.Offset > 0 || req.Limit > 0) {
+		start := req.Offset
+		if start > len(out) {
+			return []models.Worker{}, nil
+		}
+		end := len(out)
+		if req.Limit > 0 && start+req.Limit < end {
+			end = start + req.Limit
+		}
+		return out[start:end], nil
 	}
 	return out, nil
 }
@@ -120,8 +145,8 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 		checkBody      func(t *testing.T, w *httptest.ResponseRecorder)
 	}{
 		{
-			name: "success - new worker registered",
-			body: `{"worker_name": "worker-1"}`,
+			name:           "success - new worker registered",
+			body:           `{"worker_name": "worker-1"}`,
 			wantStatusCode: http.StatusCreated,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp createWorkerResp
@@ -139,7 +164,7 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 				_, err = reg.Register(context.Background(), "worker-ready", "podman", nil)
 				require.NoError(t, err)
 			},
-			body: `{"worker_name": "worker-ready"}`,
+			body:           `{"worker_name": "worker-ready"}`,
 			wantStatusCode: http.StatusConflict,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp map[string]string
@@ -157,7 +182,7 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 				require.NoError(t, err)
 				reg.Disconnect(context.Background(), "worker-disc")
 			},
-			body: `{"worker_name": "worker-disc"}`,
+			body:           `{"worker_name": "worker-disc"}`,
 			wantStatusCode: http.StatusCreated,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp createWorkerResp
@@ -173,7 +198,7 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 				_, err := reg.Preregister(context.Background(), "worker-pending")
 				require.NoError(t, err)
 			},
-			body: `{"worker_name": "worker-pending"}`,
+			body:           `{"worker_name": "worker-pending"}`,
 			wantStatusCode: http.StatusCreated,
 			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
 				var resp createWorkerResp
@@ -228,6 +253,115 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 			if tt.checkBody != nil {
 				tt.checkBody(t, w)
 			}
+		})
+	}
+}
+
+func TestWorkerHandler_ListWorkers_Pagination(t *testing.T) {
+	repo := newMockWorkerRepo()
+	for i := 1; i <= 5; i++ {
+		w := &models.Worker{
+			ID:          uuid.New(),
+			Name:        fmt.Sprintf("worker-%d", i),
+			RuntimeType: models.WorkerRuntimeTypePodman,
+			Status:      models.WorkerStatusReady,
+		}
+		_ = repo.Upsert(context.Background(), w)
+	}
+
+	reg := registry.New(repo)
+	handler := NewWorkerHandler(reg, repo, types.RuntimeTypePodman, 9191)
+	router := setupWorkerRouter(handler)
+
+	tests := []struct {
+		name           string
+		query          string
+		wantStatusCode int
+		wantCount      int
+		wantPage       int
+		wantPageSize   int
+		wantTotalItems int
+		wantTotalPages int
+		wantHasNext    bool
+		wantHasPrev    bool
+	}{
+		{
+			name:           "default pagination",
+			query:          "",
+			wantStatusCode: http.StatusOK,
+			wantCount:      5,
+			wantPage:       1,
+			wantPageSize:   20,
+			wantTotalItems: 5,
+			wantTotalPages: 1,
+		},
+		{
+			name:           "custom page size and page",
+			query:          "?page=1&page_size=2",
+			wantStatusCode: http.StatusOK,
+			wantCount:      2,
+			wantPage:       1,
+			wantPageSize:   2,
+			wantTotalItems: 5,
+			wantTotalPages: 3,
+			wantHasNext:    true,
+		},
+		{
+			name:           "page 2",
+			query:          "?page=2&page_size=2",
+			wantStatusCode: http.StatusOK,
+			wantCount:      2,
+			wantPage:       2,
+			wantPageSize:   2,
+			wantTotalItems: 5,
+			wantTotalPages: 3,
+			wantHasNext:    true,
+			wantHasPrev:    true,
+		},
+		{
+			name:           "search with pagination",
+			query:          "?q=worker-1&page=1&page_size=10",
+			wantStatusCode: http.StatusOK,
+			wantCount:      1,
+			wantPage:       1,
+			wantPageSize:   10,
+			wantTotalItems: 1,
+			wantTotalPages: 1,
+		},
+		{
+			name:           "invalid page param",
+			query:          "?page=-1",
+			wantStatusCode: http.StatusBadRequest,
+		},
+		{
+			name:           "invalid page_size param exceeding max",
+			query:          "?page_size=101",
+			wantStatusCode: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, "/api/v1/workers"+tt.query, nil)
+			require.NoError(t, err)
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			require.Equal(t, tt.wantStatusCode, w.Code)
+			if tt.wantStatusCode != http.StatusOK {
+				return
+			}
+
+			var resp catalogtypes.WorkerListResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Len(t, resp.Data, tt.wantCount)
+			assert.Equal(t, tt.wantPage, resp.Pagination.Page)
+			assert.Equal(t, tt.wantPageSize, resp.Pagination.PageSize)
+			assert.Equal(t, tt.wantTotalItems, resp.Pagination.TotalItems)
+			assert.Equal(t, tt.wantTotalPages, resp.Pagination.TotalPages)
+			assert.Equal(t, tt.wantHasNext, resp.Pagination.HasNext)
+			assert.Equal(t, tt.wantHasPrev, resp.Pagination.HasPrev)
 		})
 	}
 }

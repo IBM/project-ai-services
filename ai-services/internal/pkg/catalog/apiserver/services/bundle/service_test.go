@@ -164,6 +164,19 @@ func TestProcessBundle_InvalidMetadataYAML(t *testing.T) {
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'version' is required")
 }
+func TestProcessBundle_SpoofedCertifiedBy(t *testing.T) {
+	repo := &mockBundleRepo{
+		getActiveByCatalogID: func(_ context.Context, _, _ string) (*models.CatalogBundle, error) {
+			return nil, nil
+		},
+	}
+	svc := NewBundleService(repo, nil, nil, nil)
+
+	meta := "id: svc\ntype: service\nname: n\ndescription: d\nversion: 1.0.0\nstandalone: true\nabout:\n  - s\ncertified_by: \"IBM\\u200B\"\n"
+	archive := buildArchive(t, map[string]string{"metadata.yaml": meta}, true)
+	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "unsupported character")
+}
 
 func TestProcessBundle_ConflictReturns409(t *testing.T) {
 	existingID := uuid.New()
@@ -322,6 +335,13 @@ func TestReplaceBundle_InvalidMetadataYAML(t *testing.T) {
 	archive := buildArchive(t, map[string]string{"metadata.yaml": "id: my-service\ntype: service\n"}, true)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'version' is required")
+}
+func TestReplaceBundle_SpoofedCertifiedBy(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	meta := "id: my-service\ntype: service\nname: n\ndescription: d\nversion: 2.0.0\nstandalone: true\nabout:\n  - s\ncertified_by: \"IBM\\u200B\"\n"
+	archive := buildArchive(t, map[string]string{"metadata.yaml": meta}, true)
+	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "unsupported character")
 }
 
 func TestReplaceBundle_CatalogIDMismatch(t *testing.T) {

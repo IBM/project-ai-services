@@ -6,3 +6,7 @@ containers:
   - name: "chat-bot-{{ .InstanceSlug }}-backend-server"
     format: ".Status"
     alias: API_STATUS
+
+  - name: "chat-bot-{{ .InstanceSlug }}-mcp-sidecar"
+    format: ".Status"
+    alias: MCP_STATUS
