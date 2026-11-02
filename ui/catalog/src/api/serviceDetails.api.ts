@@ -34,5 +34,3 @@ export async function fetchServiceDetails(
   );
   return response.data;
 }
-
-// Made with Bob

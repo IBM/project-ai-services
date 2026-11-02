@@ -33,7 +33,7 @@ import (
 // which is the single method called after a successful deployment. This narrow interface
 // breaks the import cycle between the application_service and repository packages.
 type DatasourceConnector interface {
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
 }
 
 // ValidationError represents a validation error with HTTP status code.
@@ -45,6 +45,8 @@ type ListApplicationsRequest struct {
 	PageSize       int
 	DeploymentType string
 	CatalogID      string
+	Search         string // Optional: case-insensitive substring search on the application name
+	CreatedBy      string // Optional: filter by created_by (owner)
 }
 
 // DeleteApplicationResponse is the response body for a delete application request.
@@ -254,21 +256,8 @@ func (s *ApplicationServiceBase) UpdateApplication(ctx context.Context, id uuid.
 		}
 	}
 
-	app, err := s.AppRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: ErrMsgApplicationNotFound,
-		}
-	}
-	if app.CreatedBy != userID {
-		return nil, &ValidationError{
-			Code:    http.StatusForbidden,
-			Message: ErrMsgUserNotOwner,
-		}
+	if _, err := LoadAppWithOwnership(ctx, s.AppRepo, id, userID); err != nil {
+		return nil, err
 	}
 
 	err = s.AppRepo.UpdateDeploymentName(ctx, id, newName)
@@ -677,6 +666,8 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 	filters := &dbrepo.ApplicationFilters{
 		DeploymentType: req.DeploymentType,
 		CatalogID:      req.CatalogID,
+		Search:         req.Search,
+		CreatedBy:      req.CreatedBy,
 		Limit:          req.PageSize,
 		Offset:         (req.Page - 1) * req.PageSize,
 	}
@@ -861,7 +852,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 	// datasource connectors that were specified in the create request.
 	// Failures here do NOT revert the Running status — the deployment succeeded; only
 	// the connector attachment is partial. Errors are logged for operator visibility.
-	s.attachConnectorsPostDeploy(ctx, plan.ApplicationID, req.Services)
+	s.attachConnectorsPostDeploy(ctx, plan.ApplicationID, req.CreatedBy, req.Services)
 	logger.InfolnCtx(ctx, fmt.Sprintf("Post-deploy connector attachment completed for application %s", plan.ApplicationName))
 }
 
@@ -869,7 +860,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 // UUIDs found in the create request's service connector refs. It is a best-effort operation:
 // failures are logged but do not affect the application's Running status. No-op when
 // DatasourceService is nil or when no service in the request carries connector refs.
-func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context, applicationID uuid.UUID, services []apimodels.Service) {
+func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context, applicationID uuid.UUID, userID string, services []apimodels.Service) {
 	if s.DatasourceService == nil {
 		logger.WarningfCtx(ctx, "DatasourceService is nil; skipping post-deploy connector attachment for application %s", applicationID)
 
@@ -883,7 +874,7 @@ func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context,
 		return
 	}
 
-	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, datasourceIDs)
+	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "post-deploy connector attachment failed for application %s: %v", applicationID, err)
 
@@ -1316,15 +1307,9 @@ func loadApplicationPods(ctx context.Context, rt runtime.Runtime, appID string) 
 // validateForDeletion fetches the application and validates that the requesting
 // user owns it and it is not already being deleted. Returns the app model on success.
 func (s *ApplicationServiceBase) validateForDeletion(ctx context.Context, id uuid.UUID, user string) (*models.Application, error) {
-	app, err := s.AppRepo.GetByID(ctx, id)
+	app, err := LoadAppWithOwnership(ctx, s.AppRepo, id, user)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{Code: http.StatusNotFound, Message: ErrMsgApplicationNotFound}
-	}
-	if app.CreatedBy != user {
-		return nil, &ValidationError{Code: http.StatusForbidden, Message: ErrMsgUserNotOwner}
+		return nil, err
 	}
 	if app.Status == models.ApplicationStatusDeleting {
 		return nil, &ValidationError{Code: http.StatusConflict, Message: ErrMsgApplicationAlreadyDeleting}

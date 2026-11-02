@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Iterator, Optional
@@ -9,6 +10,7 @@ from typing import Iterator, Optional
 import paramiko
 
 from common.misc_utils import get_logger
+from common.retry_utils import retry_on_transient_error
 from digitize.connectors.scanners.base_scanner import BaseScanner
 from digitize.connectors.scanners.config import SSHConnectorConfig
 from digitize.connectors.scanners.hashing import HashingWriter
@@ -34,14 +36,7 @@ class SSHScanner(BaseScanner):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
-            ssh.connect(
-                hostname=self._cfg.host,
-                port=self._cfg.port,
-                username=self._cfg.username,
-                pkey=pkey,
-                look_for_keys=False,
-                allow_agent=False,
-            )
+            self._connect_ssh(ssh, pkey)
         except (paramiko.AuthenticationException, paramiko.SSHException, OSError) as exc:
             raise ConnectionError(
                 f"[ssh_scanner] Cannot connect to {self._cfg.host}:{self._cfg.port} "
@@ -98,6 +93,10 @@ class SSHScanner(BaseScanner):
         self._require_connected()
         logger.debug("[ssh_scanner] Downloading sftp://%s%s → %s",
                      self._cfg.host, remote_path, local_path)
+        return self._download_file(remote_path, local_path)
+
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, retryable_exceptions=(IOError, OSError, paramiko.SSHException), allow_local_retries=True)
+    def _download_file(self, remote_path: str, local_path: Path) -> str:
         with open(local_path, "wb") as fh:
             writer = HashingWriter(fh)
             self._sftp.getfo(remote_path, writer)
@@ -106,8 +105,16 @@ class SSHScanner(BaseScanner):
                      local_path.name, local_md5[:12], local_path.stat().st_size)
         return local_md5
 
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, retryable_exceptions=(IOError, OSError, paramiko.SSHException), allow_local_retries=True)
     def _remote_md5(self, remote_file_path: str) -> str:
-        _, stdout, stderr = self._ssh.exec_command(f'md5sum "{remote_file_path}"')
+        cmd = (
+            f'md5sum "{remote_file_path}" 2>/dev/null || '
+            f'openssl dgst -md5 "{remote_file_path}" 2>/dev/null || '
+            f'md5 "{remote_file_path}" 2>/dev/null || '
+            f'csum -h MD5 "{remote_file_path}" 2>/dev/null || '
+            f'{{ echo "No md5 utility found" >&2; exit 127; }}'
+        )
+        _, stdout, stderr = self._ssh.exec_command(cmd)
         output = stdout.read().decode().strip()
         error_output = stderr.read().decode().strip()
         exit_status = stdout.channel.recv_exit_status()
@@ -116,20 +123,44 @@ class SSHScanner(BaseScanner):
                 f"[ssh_scanner] Failed to compute md5 for {remote_file_path!r}: "
                 f"stdout={output!r} stderr={error_output!r}"
             )
-        return output.split()[0]
+        match = re.search(r"\b[a-fA-F0-9]{32}\b", output)
+        if not match:
+            raise RuntimeError(
+                f"[ssh_scanner] Could not parse md5 checksum from output for {remote_file_path!r}: "
+                f"stdout={output!r}"
+            )
+        return match.group(0).lower()
+
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, retryable_exceptions=(IOError, OSError, paramiko.SSHException), allow_local_retries=True)
+    def _listdir_attr(self, path: str):
+        return self._sftp.listdir_attr(path)
 
     def _walk_remote_tree(self, path: str) -> Iterator[str]:
         try:
-            entries = self._sftp.listdir_attr(path)
-        except IOError as exc:
+            entries = self._listdir_attr(path)
+        except (IOError, OSError, paramiko.SSHException) as exc:
             logger.warning("[ssh_scanner] Cannot list %r: %s", path, exc)
             return
         for entry in entries:
             full_path = path.rstrip("/") + "/" + entry.filename
-            if stat.S_ISDIR(entry.st_mode):
+            # Some SFTP servers return st_mode with bits outside the 16-bit
+            # mode_t range (or None); mask to the low 16 bits so
+            # stat.S_ISDIR() cannot raise OverflowError.
+            if stat.S_ISDIR((entry.st_mode or 0) & 0xFFFF):
                 yield from self._walk_remote_tree(full_path)
             else:
                 yield full_path
+
+    @retry_on_transient_error(max_retries=3, initial_delay=1.0, retryable_exceptions=(OSError, paramiko.SSHException), allow_local_retries=True)
+    def _connect_ssh(self, ssh: paramiko.SSHClient, pkey: paramiko.PKey) -> None:
+        ssh.connect(
+            hostname=self._cfg.host,
+            port=self._cfg.port,
+            username=self._cfg.username,
+            pkey=pkey,
+            look_for_keys=False,
+            allow_agent=False,
+        )
 
     def _require_connected(self) -> None:
         if self._sftp is None or self._ssh is None:

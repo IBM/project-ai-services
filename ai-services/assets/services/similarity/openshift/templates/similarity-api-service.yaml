@@ -15,3 +15,9 @@ spec:
       port: 7000
       targetPort: 7000
       protocol: TCP
+    {{- if .Values.mcp.enabled }}
+    - name: mcp
+      port: {{ .Values.mcp.port }}
+      targetPort: {{ .Values.mcp.port }}
+      protocol: TCP
+    {{- end }}

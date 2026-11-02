@@ -90,6 +90,7 @@ def _job_to_state(job) -> JobState:
 @router.post(
     "",
     status_code=status.HTTP_202_ACCEPTED,
+    tags=["MCP"],
     response_model=JobCreatedResponse,
     response_description="Job accepted. Poll the returned job_id for status.",
     summary="Submit a file for async translation",
@@ -279,6 +280,7 @@ async def list_jobs(
 
 @router.get(
     "/{job_id}",
+    tags=["MCP"],
     response_model=JobDetailResponse,
     response_description="Full job status, phase metadata, and timestamps.",
     summary="Get job details",
@@ -305,6 +307,7 @@ async def get_job(job_id: str) -> JobDetailResponse:
 
 @router.get(
     "/{job_id}/result",
+    tags=["MCP"],
     response_model=JobResultResponse,
     response_description="Translation result with metadata and token usage.",
     summary="Get translation result",

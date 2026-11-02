@@ -34,10 +34,18 @@ export function transformConnectorToRow(
 export async function fetchDataSourceConnectors(
   page = 1,
   pageSize = 20,
+  status?: string,
 ): Promise<DataSourceConnectorsListResponse> {
+  const params: Record<string, string | number> = {
+    page,
+    page_size: pageSize,
+  };
+  if (status) {
+    params.status = status;
+  }
   const res = await api.get<DataSourceConnectorsListResponse>(
     CONNECTORS_ENDPOINTS.LIST_CONNECTORS,
-    { params: { page, page_size: pageSize } },
+    { params },
   );
   return res.data;
 }

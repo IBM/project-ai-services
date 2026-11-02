@@ -1,0 +1,445 @@
+# -*- mode: Python -*-
+
+# =============================================================================
+# Tiltfile.rag - RAG stack (chatbot + similarity + UI) for macOS / local development
+# =============================================================================
+#
+# Standalone: it does not use the catalog (no catalog DB, backend or UI).
+#
+# The RAG images are built for linux/ppc64le, so on a Mac the services run natively:
+#   - rag-chatbot / rag-similarity : the repo's FastAPI services, run from source with --reload
+#   - rag-model-server             : hack/tilt/model_server.py, serving the vLLM-style endpoints they expect
+#                                      /llm    -> Ollama (default) or IBM watsonx.ai, chosen with --llm_provider; + local /tokenize
+#                                      /emb    -> granite-embedding-278m-multilingual (local)
+#                                      /rerank -> bge-reranker-v2-m3 (local, Cohere-compatible)
+#   - rag-opensearch               : OpenSearch in Podman (multi-arch image)
+#   - rag-chatbot-ui               : the chatbot UI via Vite
+#   - rag-digitize-db / -db-init   : dedicated PostgreSQL (Podman, port 5433) + schema for the digitize service
+#   - rag-digitize                 : the digitize API (PDF/DOCX ingestion into OpenSearch), run from source
+#   - rag-digitize-ui              : the digitize UI via Vite
+#   - rag-ingest                   : manual trigger, indexes .txt/.md files (quick alternative to digitize)
+#
+# Usage (LLM provider = ollama, the default):
+#   ollama pull granite4.1:8b          # Ollama must be running on the host
+#   tilt up -f Tiltfile.rag
+#
+# Usage (LLM provider = watsonx):
+#   export WATSONX_APIKEY=...  WATSONX_URL=https://<region>.ml.cloud.ibm.com  WATSONX_PROJECT_ID=...
+#   tilt up -f Tiltfile.rag -- --llm_provider=watsonx
+#
+# Other:
+#   tilt up -f Tiltfile.rag -- --rag_ui_port=3001      # custom parameters
+#   tilt down -f Tiltfile.rag
+#
+# If you also run the catalog Tiltfile at the same time, give one of them another Tilt UI port
+# (e.g. `tilt up -f Tiltfile.rag --port 10351`).
+#
+# See docs/dev-guides/tilt-rag-local-development.md
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Configuration Flags
+# -----------------------------------------------------------------------------
+config.define_string("python_bin", args=False)
+config.define_string("llm_provider", args=False)
+config.define_string("ollama_url", args=False)
+config.define_string("ollama_model", args=False)
+config.define_string("watsonx_url", args=False)
+config.define_string("watsonx_project_id", args=False)
+config.define_string("watsonx_model", args=False)
+# NOTE: the watsonx API key is read from the WATSONX_APIKEY environment variable, never from a flag.
+config.define_string("model_server_port", args=False)
+config.define_string("rag_chatbot_port", args=False)
+config.define_string("rag_similarity_port", args=False)
+config.define_string("rag_ui_port", args=False)
+config.define_string("digitize_port", args=False)
+config.define_string("digitize_ui_port", args=False)
+config.define_string("digitize_db_image", args=False)
+config.define_string("digitize_db_port", args=False)
+config.define_string("digitize_db_password", args=False)
+config.define_string("opensearch_image", args=False)
+config.define_string("opensearch_port", args=False)
+config.define_string("opensearch_password", args=False)
+config.define_string("rag_docs_dir", args=False)
+
+cfg = config.parse()
+
+# -----------------------------------------------------------------------------
+# Cleanup on `tilt down`
+# -----------------------------------------------------------------------------
+# `tilt down` only deletes Kubernetes objects, so remove the OpenSearch container and its volume here.
+# The Python venv (hack/tilt/.venv) is kept on purpose: it is large and slow to recreate.
+if config.tilt_subcommand == "down":
+    local(
+        "podman rm -f rag-opensearch rag-digitize-db >/dev/null 2>&1 || true; "
+        + "podman volume rm -f rag-opensearch-data rag-digitize-db-data >/dev/null 2>&1 || true; "
+        + "rm -rf hack/tilt/.data",
+        quiet=True,
+    )
+
+# -----------------------------------------------------------------------------
+# Settings (local development defaults only - never use on a shared environment)
+# -----------------------------------------------------------------------------
+python_bin = str(cfg.get("python_bin", "python3"))
+llm_provider = str(cfg.get("llm_provider", os.getenv("LLM_PROVIDER", "ollama"))).strip().lower()
+if llm_provider not in ["ollama", "watsonx"]:
+    fail("llm_provider must be 'ollama' or 'watsonx', got '{}'".format(llm_provider))
+ollama_url = str(cfg.get("ollama_url", os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1")))
+ollama_model = str(cfg.get("ollama_model", os.getenv("OLLAMA_MODEL", "granite4.1:8b")))
+watsonx_url = str(cfg.get("watsonx_url", os.getenv("WATSONX_URL", "")))
+watsonx_project_id = str(cfg.get("watsonx_project_id", os.getenv("WATSONX_PROJECT_ID", "")))
+watsonx_model = str(cfg.get("watsonx_model", os.getenv("WATSONX_MODEL", "ibm/granite-4-h-small")))
+watsonx_api_key = os.getenv("WATSONX_APIKEY", "")
+# Model name the services ask for (LLM_MODEL) and that the selected provider serves.
+llm_model = watsonx_model if llm_provider == "watsonx" else ollama_model
+model_server_port = int(cfg.get("model_server_port", 8100))
+# Not 5000/7000: macOS AirPlay Receiver (ControlCenter) listens on both.
+rag_chatbot_port = int(cfg.get("rag_chatbot_port", 5050))
+rag_similarity_port = int(cfg.get("rag_similarity_port", 7070))
+rag_ui_port = int(cfg.get("rag_ui_port", 3000))
+opensearch_img = str(cfg.get("opensearch_image", "docker.io/opensearchproject/opensearch:3.2.0"))
+opensearch_port = int(cfg.get("opensearch_port", 9200))
+# Local development default only (matches assets/applications/rag-cpu/podman/values.yaml).
+opensearch_pass = str(cfg.get("opensearch_password", "AiServices@12345"))
+rag_docs_dir = str(cfg.get("rag_docs_dir", ""))
+digitize_port = int(cfg.get("digitize_port", 4000))
+digitize_ui_port = int(cfg.get("digitize_ui_port", 4001))
+digitize_db_img = str(cfg.get("digitize_db_image", "docker.io/library/postgres:16-alpine"))
+digitize_db_port = int(cfg.get("digitize_db_port", 5433))  # not 5432: the catalog Tiltfile uses it
+# Local development default only (matches assets/applications/rag-cpu/podman/values.yaml).
+digitize_db_pass = str(cfg.get("digitize_db_password", "Aiservicesdb@1234"))
+
+if llm_provider == "watsonx" and not (watsonx_url and watsonx_project_id and watsonx_api_key):
+    warn("llm_provider=watsonx: set WATSONX_URL, WATSONX_PROJECT_ID (or --watsonx_url/--watsonx_project_id) " +
+         "and the WATSONX_APIKEY environment variable; chat completions fail until they are set.")
+
+rag_venv = "hack/tilt/.venv"
+model_server_url = "http://localhost:{}".format(model_server_port)
+
+# Environment shared by every process that uses services/common (same variables as the
+# podman pod templates in ai-services/assets/applications/rag-cpu/podman/templates).
+rag_env = """
+    export PYTHONPATH="$(pwd)/services"
+    export LLM_ENDPOINT="{ms}/llm"
+    export LLM_MODEL="{llm_model}"
+    export LLM_MAX_MODEL_LEN="26208"
+    export LLM_MAX_BATCH_SIZE="32"
+    export EMB_ENDPOINT="{ms}/emb"
+    export EMB_MODEL="ibm-granite/granite-embedding-278m-multilingual"
+    export EMB_MAX_MODEL_LEN="512"
+    export RERANKER_ENDPOINT="{ms}/rerank"
+    export RERANKER_MODEL="BAAI/bge-reranker-v2-m3"
+    export OPENSEARCH_HOST="localhost"
+    export OPENSEARCH_PORT="{os_port}"
+    export OPENSEARCH_DB_PREFIX="RAG_DB"
+    export OPENSEARCH_INDEX_NAME="RAG_INDEX"
+    export OPENSEARCH_USERNAME="admin"
+    export OPENSEARCH_PASSWORD="{os_pass}"
+    export OPENSEARCH_NUM_SHARDS="1"
+    export LOG_LEVEL="INFO"
+    export CHATBOT_SEARCH_MODE="hybrid"
+    export CHATBOT_NUM_CHUNKS_POST_RERANKER="3"
+    export CHATBOT_RERANK="true"
+    export CHATBOT_SIMILARITY_SERVICE_URL="http://localhost:{sim_port}"
+    export DISABLE_CRASH_HANDLER="1"
+""".format(
+    ms=model_server_url,
+    llm_model=llm_model,
+    os_port=opensearch_port,
+    os_pass=opensearch_pass,
+    sim_port=rag_similarity_port,
+)
+
+# -----------------------------------------------------------------------------
+# Quick links
+# -----------------------------------------------------------------------------
+local_resource(
+    name="quick-links",
+    cmd="""
+        echo "RAG Chatbot UI  : http://localhost:{ui}"
+        echo "Chatbot API     : http://localhost:{chat}"
+        echo "Similarity API  : http://localhost:{sim}"
+        echo "Digitize UI     : http://localhost:{dui}"
+        echo "Digitize API    : http://localhost:{dapi}"
+        echo "Ingest sample docs: trigger the 'rag-ingest' resource"
+    """.format(ui=rag_ui_port, chat=rag_chatbot_port, sim=rag_similarity_port,
+               dui=digitize_ui_port, dapi=digitize_port),
+    labels=["quick-links"],
+    links=[
+        link("http://localhost:{}".format(rag_ui_port), "RAG Chatbot UI"),
+        link("http://localhost:{}".format(rag_chatbot_port), "Chatbot API (Swagger)"),
+        link("http://localhost:{}".format(rag_similarity_port), "Similarity API (Swagger)"),
+        link("http://localhost:{}".format(digitize_ui_port), "Digitize UI"),
+        link("http://localhost:{}".format(digitize_port), "Digitize API (Swagger)"),
+    ],
+)
+
+# -----------------------------------------------------------------------------
+# Python environment (created once; torch makes the first run slow)
+# -----------------------------------------------------------------------------
+local_resource(
+    name="rag-python-env",
+    cmd="""
+        set -e
+        if [ ! -x {venv}/bin/python ]; then
+            {py} -m venv {venv}
+        fi
+        {venv}/bin/pip install -q -r hack/tilt/requirements.txt
+    """.format(venv=rag_venv, py=python_bin),
+    deps=["hack/tilt/requirements.txt"],
+    labels=["rag", "setup"],
+)
+
+# -----------------------------------------------------------------------------
+# OpenSearch (vector store)
+# -----------------------------------------------------------------------------
+local_resource(
+    name="rag-opensearch",
+    serve_cmd="""
+        podman rm -f rag-opensearch 2>/dev/null || true
+        podman run --rm --name rag-opensearch \
+            -p {port}:9200 \
+            -e discovery.type=single-node \
+            -e OPENSEARCH_INITIAL_ADMIN_PASSWORD='{password}' \
+            -e OPENSEARCH_JAVA_OPTS='-Xms1g -Xmx1g' \
+            -v rag-opensearch-data:/usr/share/opensearch/data \
+            {image}
+    """.format(port=opensearch_port, password=opensearch_pass, image=opensearch_img),
+    labels=["rag", "vector-store"],
+    readiness_probe=probe(
+        initial_delay_secs=20,
+        period_secs=5,
+        timeout_secs=10,
+        exec=exec_action([
+            "podman", "exec", "rag-opensearch",
+            "curl", "-fsk", "-u", "admin:" + opensearch_pass,
+            "https://localhost:9200/_cluster/health",
+        ]),
+    ),
+)
+
+# -----------------------------------------------------------------------------
+# Model server (LLM via Ollama or watsonx.ai, embeddings and reranker locally)
+# -----------------------------------------------------------------------------
+local_resource(
+    name="rag-model-server",
+    serve_cmd="""
+        set -e
+        export MODEL_SERVER_PORT="{port}"
+        export LLM_PROVIDER="{llm_provider}"
+        export OLLAMA_URL="{ollama_url}"
+        export OLLAMA_MODEL="{ollama_model}"
+        export WATSONX_URL="{wx_url}"
+        export WATSONX_PROJECT_ID="{wx_project}"
+        export WATSONX_MODEL="{wx_model}"
+        # WATSONX_APIKEY is inherited from the environment that started Tilt.
+        exec {venv}/bin/python hack/tilt/model_server.py
+    """.format(
+        port=model_server_port,
+        llm_provider=llm_provider,
+        ollama_url=ollama_url,
+        ollama_model=ollama_model,
+        wx_url=watsonx_url,
+        wx_project=watsonx_project_id,
+        wx_model=watsonx_model,
+        venv=rag_venv,
+    ),
+    deps=["hack/tilt/model_server.py"],
+    resource_deps=["rag-python-env"],
+    labels=["rag", "models"],
+    readiness_probe=probe(
+        initial_delay_secs=5,
+        period_secs=5,
+        http_get=http_get_action(port=model_server_port, path="/health"),
+    ),
+)
+
+# -----------------------------------------------------------------------------
+# Similarity API
+# -----------------------------------------------------------------------------
+local_resource(
+    name="rag-similarity",
+    serve_cmd="""
+        set -e
+        {env}
+        export PORT="{port}"
+        cd services
+        exec ../{venv}/bin/python -m uvicorn similarity.app:app \
+            --host 0.0.0.0 --port {port} --reload \
+            --reload-dir similarity --reload-dir common
+    """.format(env=rag_env, port=rag_similarity_port, venv=rag_venv),
+    resource_deps=["rag-opensearch", "rag-model-server"],
+    labels=["rag", "backend"],
+    links=[link("http://localhost:{}".format(rag_similarity_port), "Similarity API (Swagger)")],
+    readiness_probe=probe(
+        initial_delay_secs=5,
+        period_secs=5,
+        http_get=http_get_action(port=rag_similarity_port, path="/health"),
+    ),
+)
+
+# -----------------------------------------------------------------------------
+# Chatbot API
+# -----------------------------------------------------------------------------
+local_resource(
+    name="rag-chatbot",
+    serve_cmd="""
+        set -e
+        {env}
+        export PORT="{port}"
+        cd services
+        exec ../{venv}/bin/python -m uvicorn chatbot.app:app \
+            --host 0.0.0.0 --port {port} --reload \
+            --reload-dir chatbot --reload-dir common
+    """.format(env=rag_env, port=rag_chatbot_port, venv=rag_venv),
+    resource_deps=["rag-opensearch", "rag-model-server", "rag-similarity"],
+    labels=["rag", "backend"],
+    links=[link("http://localhost:{}".format(rag_chatbot_port), "Chatbot API (Swagger)")],
+    readiness_probe=probe(
+        initial_delay_secs=5,
+        period_secs=5,
+        http_get=http_get_action(port=rag_chatbot_port, path="/health"),
+    ),
+)
+
+# -----------------------------------------------------------------------------
+# Chatbot UI (Vite dev server; vite.tilt.config.js routes to chatbot/similarity like nginx does)
+# -----------------------------------------------------------------------------
+local_resource(
+    name="rag-chatbot-ui",
+    serve_cmd="""
+        set -e
+        cd ui/chatbot
+        if [ ! -d node_modules ]; then
+            echo "Installing npm dependencies..."
+            npm install
+        fi
+        export RAG_CHATBOT_URL="http://localhost:{chatbot}"
+        export RAG_SIMILARITY_URL="http://localhost:{similarity}"
+        exec npx vite --config vite.tilt.config.js --host 0.0.0.0 --port {ui}
+    """.format(chatbot=rag_chatbot_port, similarity=rag_similarity_port, ui=rag_ui_port),
+    resource_deps=["rag-chatbot"],
+    labels=["rag", "frontend"],
+    links=[link("http://localhost:{}".format(rag_ui_port), "RAG Chatbot UI")],
+    readiness_probe=probe(
+        initial_delay_secs=3,
+        period_secs=5,
+        http_get=http_get_action(port=rag_ui_port, path="/"),
+    ),
+)
+
+# -----------------------------------------------------------------------------
+# Digitize: PostgreSQL + schema, API and UI
+# -----------------------------------------------------------------------------
+# Environment of the digitize API (same variables as templates/digitize.yaml.tmpl).
+# The cache directory (staging + digitized output) lives in hack/tilt/.data and is removed on `tilt down`.
+digitize_env = rag_env + """
+    export POSTGRES_HOST="localhost"
+    export POSTGRES_PORT="{db_port}"
+    export POSTGRES_DB="digitize_metadata"
+    export POSTGRES_USER="postgres"
+    export POSTGRES_PASSWORD="{db_pass}"
+    export DB_POOL_SIZE="5"
+    export DB_MAX_OVERFLOW="5"
+    # Local development key only (same default as values.yaml).
+    export DB_ENCRYPTION_KEY="B374A26A71490437AA024E4FADD5B497"
+    export CACHE_DIR="$(pwd)/hack/tilt/.data/cache"
+    export LOCAL_CACHE_DIR="$(pwd)/hack/tilt/.data/cache"
+    mkdir -p "$CACHE_DIR"
+""".format(db_port=digitize_db_port, db_pass=digitize_db_pass)
+
+local_resource(
+    name="rag-digitize-db",
+    serve_cmd="""
+        podman rm -f rag-digitize-db 2>/dev/null || true
+        podman run --rm --name rag-digitize-db \
+            -p {port}:5432 \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD='{password}' \
+            -e POSTGRES_DB=postgres \
+            -v rag-digitize-db-data:/var/lib/postgresql/data \
+            {image}
+    """.format(port=digitize_db_port, password=digitize_db_pass, image=digitize_db_img),
+    labels=["digitize", "database"],
+    readiness_probe=probe(
+        initial_delay_secs=5,
+        period_secs=3,
+        exec=exec_action(["podman", "exec", "rag-digitize-db", "pg_isready", "-U", "postgres"]),
+    ),
+)
+
+# Creates the digitize_metadata database and its schema (idempotent).
+local_resource(
+    name="rag-digitize-db-init",
+    cmd="""
+        set -e
+        {env}
+        cd services
+        ../{venv}/bin/python digitize/db/scripts/init_db.py
+    """.format(env=digitize_env, venv=rag_venv),
+    deps=["services/digitize/db/scripts"],
+    resource_deps=["rag-digitize-db", "rag-python-env"],
+    labels=["digitize", "setup"],
+)
+
+# Docling downloads its layout/table models from Hugging Face on the first PDF conversion.
+local_resource(
+    name="rag-digitize",
+    serve_cmd="""
+        set -e
+        {env}
+        export PORT="{port}"
+        cd services
+        exec ../{venv}/bin/python -m uvicorn digitize.app:app \
+            --host 0.0.0.0 --port {port} --reload \
+            --reload-dir digitize --reload-dir common
+    """.format(env=digitize_env, port=digitize_port, venv=rag_venv),
+    resource_deps=["rag-digitize-db-init", "rag-opensearch", "rag-model-server"],
+    labels=["digitize", "backend"],
+    links=[link("http://localhost:{}".format(digitize_port), "Digitize API (Swagger)")],
+    readiness_probe=probe(
+        initial_delay_secs=10,
+        period_secs=5,
+        timeout_secs=5,
+        http_get=http_get_action(port=digitize_port, path="/health"),
+    ),
+)
+
+local_resource(
+    name="rag-digitize-ui",
+    serve_cmd="""
+        set -e
+        cd ui/digitize
+        if [ ! -d node_modules ]; then
+            echo "Installing npm dependencies..."
+            npm install
+        fi
+        export VITE_PORT="{ui}"
+        export VITE_API_TARGET="http://localhost:{api}"
+        exec npx vite --host 0.0.0.0 --port {ui}
+    """.format(ui=digitize_ui_port, api=digitize_port),
+    resource_deps=["rag-digitize"],
+    labels=["digitize", "frontend"],
+    links=[link("http://localhost:{}".format(digitize_ui_port), "Digitize UI")],
+    readiness_probe=probe(
+        initial_delay_secs=3,
+        period_secs=5,
+        http_get=http_get_action(port=digitize_ui_port, path="/"),
+    ),
+)
+
+# -----------------------------------------------------------------------------
+# Ingest .txt/.md files into the vector store (manual: click "trigger" in the Tilt UI)
+# -----------------------------------------------------------------------------
+local_resource(
+    name="rag-ingest",
+    cmd="""
+        set -e
+        {env}
+        exec {venv}/bin/python hack/tilt/ingest.py "{docs}"
+    """.format(env=rag_env, venv=rag_venv, docs=rag_docs_dir or "hack/tilt/sample-docs"),
+    resource_deps=["rag-opensearch", "rag-model-server"],
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    auto_init=False,
+    labels=["rag", "ingest"],
+)

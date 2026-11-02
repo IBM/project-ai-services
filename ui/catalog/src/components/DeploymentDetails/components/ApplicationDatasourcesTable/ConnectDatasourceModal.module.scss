@@ -1,25 +1,24 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
+@use "carbonTokens" as *;
 
 .description {
-  @include type.type-style("body-long-01");
-  margin-bottom: spacing.$spacing-06;
+  @include type-style("body-long-01");
+  margin-bottom: $spacing-06;
 }
 
 .notification {
-  margin-bottom: spacing.$spacing-05;
+  margin-bottom: $spacing-05;
   max-inline-size: none;
 }
 
 .fieldWrapper {
-  margin-bottom: spacing.$spacing-05;
+  margin-bottom: $spacing-05;
 }
 
 .selectedTags {
   display: flex;
   flex-wrap: wrap;
-  gap: spacing.$spacing-02;
-  margin-top: spacing.$spacing-03;
+  gap: $spacing-02;
+  margin-top: $spacing-03;
 }
 
 .tag {
@@ -29,5 +28,5 @@
 
 .errorList {
   // Spacing override only — UnorderedList handles markers and typography.
-  margin-top: spacing.$spacing-02;
+  margin-top: $spacing-02;
 }

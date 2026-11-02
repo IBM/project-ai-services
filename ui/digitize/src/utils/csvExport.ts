@@ -13,7 +13,7 @@ export interface CSVExportOptions {
  * Escapes CSV values by wrapping them in quotes and escaping internal quotes
  */
 const escapeCSV = (value: unknown): string => {
-  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
 };
 
 /**
@@ -21,30 +21,30 @@ const escapeCSV = (value: unknown): string => {
  */
 const extractTextContent = (value: any): string => {
   if (value === null || value === undefined) {
-    return '';
+    return "";
   }
-  
+
   // If it's a React element, try to extract text content
-  if (typeof value === 'object' && value.props) {
+  if (typeof value === "object" && value.props) {
     // Handle common patterns like status cells with icons and text
     if (value.props.children) {
-      const children = Array.isArray(value.props.children) 
-        ? value.props.children 
+      const children = Array.isArray(value.props.children)
+        ? value.props.children
         : [value.props.children];
-      
+
       return children
         .map((child: any) => {
-          if (typeof child === 'string') return child;
-          if (typeof child === 'number') return String(child);
+          if (typeof child === "string") return child;
+          if (typeof child === "number") return String(child);
           if (child?.props?.children) return extractTextContent(child);
-          return '';
+          return "";
         })
         .filter(Boolean)
-        .join(' ')
+        .join(" ")
         .trim();
     }
   }
-  
+
   return String(value);
 };
 
@@ -57,12 +57,12 @@ export const exportToCSV = (options: CSVExportOptions): void => {
   const { filename, headers, rows, excludeColumns = [] } = options;
 
   if (rows.length === 0) {
-    throw new Error('No data available to export');
+    throw new Error("No data available to export");
   }
 
   // Filter out excluded columns
   const exportableHeaders = headers.filter(
-    (h) => !excludeColumns.includes(h.key)
+    (h) => !excludeColumns.includes(h.key),
   );
 
   // Create CSV header row
@@ -74,18 +74,18 @@ export const exportToCSV = (options: CSVExportOptions): void => {
       const value = row[h.key];
       const textContent = extractTextContent(value);
       return escapeCSV(textContent);
-    })
+    }),
   );
 
   // Combine headers and rows
-  const csv = [csvHeaders, ...csvRows].map((r) => r.join(',')).join('\n');
+  const csv = [csvHeaders, ...csvRows].map((r) => r.join(",")).join("\n");
 
   // Create blob and download
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
+  const link = document.createElement("a");
   link.href = url;
-  link.download = `${filename.replace(/\.[^/.]+$/, '')}.csv`;
+  link.download = `${filename.replace(/\.[^/.]+$/, "")}.csv`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -99,18 +99,18 @@ export const exportToCSV = (options: CSVExportOptions): void => {
  */
 export const validateFilename = (filename: string): string => {
   const trimmed = filename.trim();
-  
+
   if (!trimmed) {
-    return 'Provide a valid file name';
+    return "Provide a valid file name";
   }
-  
+
   // Check for invalid characters
   const invalidChars = /[<>:"/\\|?*]/;
   if (invalidChars.test(trimmed)) {
-    return 'Filename contains invalid characters';
+    return "Filename contains invalid characters";
   }
-  
-  return '';
+
+  return "";
 };
 
 // Made with Bob

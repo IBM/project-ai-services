@@ -5,7 +5,7 @@ import { Badge } from "@carbon/icons-react";
 import {
   fetchServiceDetails,
   type AboutSection,
-} from "@/services/serviceDetails.api";
+} from "@/api/serviceDetails.api";
 import { transformServiceDetails } from "@/utils/serviceDetailsTransform";
 import { formatVersion } from "@/utils/string";
 import { useServiceDetailsStore } from "@/store/serviceDetails.store";
@@ -166,8 +166,8 @@ const renderAboutSection = (aboutSection: AboutSection, index: number) => {
           </div>
         )}
 
-        {/* Render sections with values arrays */}
-        {aboutSection.sections.some((s) => s.values) && (
+        {/* Render sections with values arrays or url/cta buttons */}
+        {aboutSection.sections.some((s) => s.values || s.url) && (
           <div
             className={
               aboutSection.sections.length === 2

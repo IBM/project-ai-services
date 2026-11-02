@@ -1,0 +1,8 @@
+apiVersion: v2
+name: custom-chatbot
+description: A Helm chart for deploying the Custom Chatbot service on OpenShift
+type: application
+
+# Both needs to be incremented each time when we make a new AI Services binary release
+version: 1.0.0
+appVersion: "1.0.0"

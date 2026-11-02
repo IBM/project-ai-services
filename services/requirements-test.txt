@@ -47,7 +47,7 @@ paramiko==5.0.0
 pypdfium2==5.9.0
 pdfplumber==0.11.9
 RapidFuzz==3.14.5
-docling==2.95.0
+docling==2.132.0
 sentence-splitter==1.4
 spacy==3.8.7
 # Japanese model only — requires sudachipy + sudachidict-core for the SudachiPy tokeniser

@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .AppName }}--litellm"
+  labels:
+    ai-services.io/application: "{{ .AppName }}"
+    ai-services.io/template: "{{ .AppTemplateName }}"
+    ai-services.io/version: "{{ .Version }}"
+    ai-services.io/secret: "litellm-secret,litellm-db-secret"
+    ai-services.io/secret-skip-cleanup: "true"
+    ai-services.io/volume: "litellm-secret,litellm-db-secret,litellm-db-data"
+    ai-services.io/volume-skip-cleanup: "true"
+  annotations:
+    ai-services.io/routes: "4000:litellm-api:api"
+spec:
+  restartPolicy: always
+  containers:
+    # ----------------------------------------------------
+    # Container 1: PostgreSQL Database
+    # ----------------------------------------------------
+    - name: litellm-db
+      image: "{{ .Values.litellm.db.image }}"
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          export POSTGRES_PASSWORD=$(cat /etc/secret/litellm-db-secret/db-password)
+          exec docker-entrypoint.sh postgres
+      env:
+        - name: POSTGRES_DB
+          value: "{{ .Values.litellm.db.database }}"
+        - name: POSTGRES_USER
+          value: "{{ .Values.litellm.db.user }}"
+      livenessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - pg_isready -U {{ .Values.litellm.db.user }} -d {{ .Values.litellm.db.database }}
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - pg_isready -U {{ .Values.litellm.db.user }} -d {{ .Values.litellm.db.database }}
+        initialDelaySeconds: 10
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "512Mi"
+        limits:
+          memory: "1Gi"
+      volumeMounts:
+        - name: litellm-db-data
+          mountPath: /var/lib/postgresql/data:z
+        - name: litellm-db-secret
+          mountPath: /etc/secret/litellm-db-secret
+          readOnly: true
+
+    # ----------------------------------------------------
+    # Container 2: LiteLLM Proxy
+    # ----------------------------------------------------
+    - name: litellm-proxy
+      image: "{{ .Values.litellm.image }}"
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          export LITELLM_MASTER_KEY=$(cat /etc/secret/litellm-secret/master-key)
+          export LITELLM_SALT_KEY=$(cat /etc/secret/litellm-secret/salt-key)
+          export DB_PASSWORD=$(cat /etc/secret/litellm-db-secret/db-password)
+          export DATABASE_URL="postgresql://{{ .Values.litellm.db.user }}:${DB_PASSWORD}@localhost:5432/{{ .Values.litellm.db.database }}"
+          exec litellm --port 4000
+      env:
+        - name: STORE_MODEL_IN_DB
+          value: "True"
+        - name: LITELLM_DATABASE_CONNECTION_RETRIES
+          value: "{{ .Values.litellm.dbConnectionRetries }}"
+      ports:
+        - containerPort: 4000
+          protocol: TCP
+      livenessProbe:
+        httpGet:
+          path: /health/liveness
+          port: 4000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /health/readiness
+          port: 4000
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      resources:
+        requests:
+          memory: "2Gi"
+        limits:
+          memory: "4Gi"
+      volumeMounts:
+        - name: litellm-secret
+          mountPath: /etc/secret/litellm-secret
+          readOnly: true
+        - name: litellm-db-secret
+          mountPath: /etc/secret/litellm-db-secret
+          readOnly: true
+
+  volumes:
+    - name: litellm-db-data
+      persistentVolumeClaim:
+        claimName: litellm-db-data
+    - name: litellm-secret
+      secret:
+        secretName: litellm-secret
+    - name: litellm-db-secret
+      secret:
+        secretName: litellm-db-secret

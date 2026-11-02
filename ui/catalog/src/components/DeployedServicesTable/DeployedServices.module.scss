@@ -1,10 +1,7 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/theme";
-@use "@carbon/react/scss/breakpoint" as *;
+@use "carbonTokens" as *;
 
 .tableContent {
-  padding: spacing.$spacing-07;
+  padding: $spacing-07;
 
   :global(.cds--data-table) {
     width: 100%;
@@ -41,7 +38,7 @@
 }
 
 .noDataContent {
-  padding: spacing.$spacing-07;
+  padding: $spacing-07;
 }
 
 .tableColumn {

@@ -1,0 +1,77 @@
+# Service identification
+id: custom-chatbot
+name: "Custom Chatbot"
+version: "1.0.0"
+description: "A lightweight conversational AI service with a built-in chat UI and FastAPI backend. Supports multi-turn conversations with in-memory session history, streaming responses, and interactive API docs (/docs)."
+type: service
+
+# Certification and support
+certified_by: "ISV"
+
+# Dependencies on other components
+dependencies:
+  - id: llm
+
+standalone: true
+
+# About field containing detailed service information
+about:
+  - title: "Service details"
+    sections:
+      - title: "Version"
+        value: "1.0.0"
+      - title: "Large language model (LLM)"
+        value: "granite-3.3-8b-instruct"
+      - title: "Inference backend"
+        values:
+          - "RedHat AI Inference with Spyre"
+          - "AI Inference on CPU"
+          - "IBM watsonx.ai on IBM Cloud"
+
+  - title: "Inputs and outputs"
+    sections:
+      - title: "Inputs"
+        values:
+          - "User message (string, required)"
+          - "session_id (string, optional): Resume an existing conversation"
+          - "system_prompt (string, optional): Override the default system instruction"
+          - "stream (boolean, optional): Stream the reply token-by-token, default false"
+          - "reset (boolean, optional): Clear history before sending, default false"
+      - title: "Outputs"
+        values:
+          - "Assistant reply"
+          - "session_id for conversation continuity"
+          - "Full conversation history"
+
+  - title: "Dependencies and integration"
+    sections:
+      - title: "External dependencies"
+        values:
+          - "Inferencing endpoint compatible with OpenAI API (required for LLM-based chat)"
+
+  - title: "Content and format support"
+    sections:
+      - title: "Languages"
+        values:
+          - "English"
+      - title: "Content"
+        values:
+          - "Text"
+          - "Code"
+
+  - title: "Expected resource consumption"
+    sections:
+      - title: "per 5 concurrent users"
+        values:
+          - title: "Compute"
+            value: "500m CPU"
+          - title: "Memory"
+            value: "512 MB"
+          - title: "Storage"
+            value: "0 GB (no persistent storage)"
+
+  - title: "Assets"
+    sections:
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"

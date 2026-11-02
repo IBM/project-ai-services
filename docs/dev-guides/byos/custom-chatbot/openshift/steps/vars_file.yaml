@@ -1,0 +1,16 @@
+containers:
+  - name: "custom-chatbot"
+    workload: "custom-chatbot"
+    format: ".Status"
+    alias: UI_STATUS
+
+  - name: "custom-chatbot"
+    workload: "custom-chatbot"
+    format: ".Status"
+    alias: API_STATUS
+
+hosts:
+  - fetch: UI_URL
+    type: ui
+  - fetch: API_URL
+    type: api

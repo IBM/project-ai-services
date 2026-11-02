@@ -1,11 +1,9 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/theme";
+@use "carbonTokens" as *;
 
 // ── Panel body ───────────────────────────────────────────────────────────────
 
 .content {
-  padding: spacing.$spacing-06 0;
+  padding: $spacing-06 0;
 }
 
 // ── Section ──────────────────────────────────────────────────────────────────
@@ -13,7 +11,7 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: spacing.$spacing-05;
+  gap: $spacing-05;
 }
 
 .statusTag {
@@ -21,28 +19,29 @@
 }
 
 .sectionTitle {
-  @include type.type-style("heading-02");
-  color: theme.$text-primary;
+  @include type-style("heading-02");
+  color: $text-primary;
   margin: 0;
 }
 
 .divider {
   border: none;
-  border-top: 1px solid theme.$border-subtle-00;
-  margin: 0;
+  border-top: 1px solid $border-subtle-00;
+  margin-block: 0;
+  margin-inline: calc(-1 * $spacing-05);
 }
 
 // ── Read-only field ──────────────────────────────────────────────────────────
 
 .fieldLabel {
-  @include type.type-style("label-01");
-  color: theme.$text-secondary;
-  margin-bottom: spacing.$spacing-02;
+  @include type-style("label-01");
+  color: $text-secondary;
+  margin-bottom: $spacing-02;
 }
 
 .fieldValue {
-  @include type.type-style("body-compact-01");
-  color: theme.$text-primary;
+  @include type-style("body-compact-01");
+  color: $text-primary;
 }
 
 .field {
@@ -81,20 +80,20 @@
 // "Last sync" column — fixed width using Carbon spacing token so the column
 // sits close to the name column rather than stretching to the far right.
 .lastSyncCol {
-  width: spacing.$spacing-11; // 80 px
+  width: $spacing-11; // 80 px
   white-space: nowrap;
 }
 
 // Name cell: service type subtitle below the link
 .serviceTypeName {
-  @include type.type-style("label-01");
-  color: theme.$text-secondary;
+  @include type-style("label-01");
+  color: $text-secondary;
 }
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
 .skeletonContent {
-  padding: spacing.$spacing-06 0;
+  padding: $spacing-06 0;
 }
 
 .serviceTag {

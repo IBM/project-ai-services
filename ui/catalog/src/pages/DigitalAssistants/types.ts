@@ -40,10 +40,7 @@ export interface AppState extends BaseTableState<DigitalAssistantRow> {
   showDeploymentDetails: boolean;
   /** Section to open in DeploymentDetails when navigating from the overflow menu */
   deploymentDefaultSection:
-    | "details"
-    | "services"
-    | "integration"
-    | "datasources";
+    "details" | "services" | "integration" | "datasources";
   // DA-specific: launch endpoint error toast
   launchErrorToastOpen: boolean;
   launchErrorToastMessage: string;

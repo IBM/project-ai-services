@@ -51,6 +51,7 @@ func NewApplicationHandler(appService repository.ApplicationServiceInterface) *A
 //	@Param			page_size		query		int		false	"Number of items per page (max: 100)"	default(20)
 //	@Param			deployment_type	query		string	false	"Filter by deployment type: 'architectures' or 'services'"
 //	@Param			catalog_id		query		string	false	"Filter by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')"
+//	@Param			q				query		string	false	"Case-insensitive substring search on application name"
 //	@Success		200				{object}	types.ApplicationListResponse
 //	@Failure		400				{object}	ErrorResponse	"Invalid query parameters"
 //	@Failure		401				{object}	ErrorResponse	"Unauthorized"
@@ -72,6 +73,7 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 	// Parse filter parameters
 	deploymentType := c.Query("deployment_type")
 	catalogID := c.Query("catalog_id")
+	search := c.Query("q")
 
 	// Validate deployment_type if provided
 	if deploymentType != "" && deploymentType != string(dbmodels.DeploymentTypeArchitectures) && deploymentType != string(dbmodels.DeploymentTypeServices) {
@@ -82,12 +84,17 @@ func (h *ApplicationHandler) ListApplications(c *gin.Context) {
 		return
 	}
 
+	// Extract user ID from auth context
+	userID := c.GetString(middleware.CtxUserIDKey)
+
 	// Build request
 	req := repository.ListApplicationsRequest{
 		Page:           page,
 		PageSize:       pageSize,
 		DeploymentType: deploymentType,
 		CatalogID:      catalogID,
+		Search:         search,
+		CreatedBy:      userID,
 	}
 
 	// Call service layer

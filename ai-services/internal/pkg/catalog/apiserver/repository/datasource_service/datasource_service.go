@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	appservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/application_service"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -146,7 +147,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}
 
-	encryptedParams, err := encryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
+	encryptedParams, err := catalogutils.EncryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -184,7 +185,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 	// is built; they are never forwarded to the caller.
 	connector, err := s.connectorRepo.GetByID(ctx, id, true)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: "datasource not found",
@@ -245,7 +246,7 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 func (s *DatasourceService) GetDatasourceApplications(ctx context.Context, id uuid.UUID) (*apimodels.DatasourceApplicationsResponse, error) {
 	// Step 1: existence check — fetch without credentials (no metadata needed here).
 	if _, err := s.connectorRepo.GetByID(ctx, id, false); err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: "datasource not found",
@@ -304,6 +305,7 @@ func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.L
 		Type:     catalogconstants.ConnectorTypeDatasource,
 		Status:   dbmodels.ConnectorStatus(req.Status),
 		Provider: req.Provider,
+		Search:   req.Search,
 		Limit:    req.PageSize,
 		Offset:   (req.Page - 1) * req.PageSize,
 	}
@@ -441,43 +443,6 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 	return applications, nil
 }
 
-// encryptSensitiveFields returns a copy of params where every key listed in
-// sensitiveKeys has its string value replaced with an AES-256-GCM ciphertext.
-// encryptionKey is the AES-256 secret injected at service construction time (DB_ENCRYPTION_KEY).
-func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool, encryptionKey string) (map[string]any, error) {
-	if len(sensitiveKeys) == 0 {
-		return params, nil
-	}
-
-	if encryptionKey == "" {
-		return nil, fmt.Errorf("encryption key is not configured (DB_ENCRYPTION_KEY must be set)")
-	}
-
-	result := make(map[string]any, len(params))
-	for k, v := range params {
-		if sensitiveKeys[k] {
-			plaintext, ok := v.(string)
-			if !ok {
-				return nil, &ValidationError{
-					Code:    http.StatusBadRequest,
-					Message: fmt.Sprintf("sensitive field %q must be a string value", k),
-				}
-			}
-
-			ciphertext, err := catalogutils.Encrypt(plaintext, encryptionKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to encrypt field %q: %w", k, err)
-			}
-
-			result[k] = ciphertext
-		} else {
-			result[k] = v
-		}
-	}
-
-	return result, nil
-}
-
 // ConnectDatasourcesToApplication links one or more datasource connectors to every eligible
 // service (AcceptsDatasource == true) in the given application.
 //
@@ -488,12 +453,15 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 // This method is the single reusable core for both:
 //   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect)
 //   - the app-creation flow where datasources are pre-attached at deploy time.
-func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
-	// Resolve eligible services once — shared across all datasources.
-	linkedServices, err := s.eligibleServicesForApp(ctx, applicationID)
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+	// Verify application exists and ownership.
+	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
 		return nil, err
 	}
+
+	// Resolve eligible services once — shared across all datasources.
+	linkedServices := s.eligibleServicesForApp(ctx, app)
 
 	if len(linkedServices) == 0 {
 		return nil, &ValidationError{
@@ -567,19 +535,7 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 
 // eligibleServicesForApp returns the subset of services in applicationID whose catalog
 // entry has AcceptsDatasource == true and which have a registered api-type endpoint.
-func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicationID uuid.UUID) ([]dbrepo.LinkedServiceRow, error) {
-	app, err := s.appRepo.GetByID(ctx, applicationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load application: %w", err)
-	}
-
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("application %s not found", applicationID),
-		}
-	}
-
+func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, app *dbmodels.Application) []dbrepo.LinkedServiceRow {
 	var eligible []dbrepo.LinkedServiceRow
 
 	for _, svc := range app.Services {
@@ -605,14 +561,14 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 		})
 	}
 
-	return eligible, nil
+	return eligible
 }
 
 // loadConnector fetches the connector by ID (with credentials). Returns a typed ValidationError on 404.
 func (s *DatasourceService) loadConnector(ctx context.Context, datasourceID uuid.UUID) (*dbmodels.Connector, error) {
 	connector, err := s.connectorRepo.GetByID(ctx, datasourceID, true)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: fmt.Sprintf("datasource %s not found", datasourceID),
@@ -806,7 +762,7 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 	// Step 2: verify the datasource connector exists (credentials not needed for this response).
 	connector, err := s.connectorRepo.GetByID(ctx, datasourceID, false)
 	if err != nil {
-		if err == dbrepo.ErrConnectorNotFound {
+		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
 			return nil, &ValidationError{
 				Code:    http.StatusNotFound,
 				Message: fmt.Sprintf("datasource %s not found", datasourceID),
@@ -858,18 +814,11 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 //     is actually connected. Return 404 if no rows are found.
 //  4. For each confirmed row, call DELETE /v1/connectors/{id} on the Digitize endpoint,
 //     then remove the service_dependency row.
-func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, datasourceID uuid.UUID) error {
-	// Step 1: verify application exists.
-	app, err := s.appRepo.GetByID(ctx, applicationID)
+func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error {
+	// Step 1: verify application exists and ownership.
+	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to load application: %w", err)
-	}
-
-	if app == nil {
-		return &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("application %s not found", applicationID),
-		}
+		return err
 	}
 
 	// Step 2: verify datasource exists.
@@ -968,7 +917,7 @@ func (s *DatasourceService) persistAndPropagate(
 	sensitiveFields map[string]bool,
 	updatable map[string]bool,
 ) (*apimodels.UpdateDatasourceResponse, error) {
-	encryptedMerged, err := encryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
+	encryptedMerged, err := catalogutils.EncryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -1222,7 +1171,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 
 	// Resolve the service base URL and call GET /v1/connectors with the caller's pagination
 	// params. The service response is authoritative for both the page content and total count.
-	baseURL, servicePage := s.fetchServiceConnectors(ctx, proxy, appID, allConnectorIDs, req.PageSize, offset)
+	baseURL, servicePage := s.fetchServiceConnectors(ctx, proxy, appID, allConnectorIDs, req.PageSize, offset, req.Search)
 
 	// The service pod may still return a connector with status="delete pending" after
 	// DisconnectDatasourcesFromApplication has removed its service_dependencies row but
@@ -1265,7 +1214,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 // Only rows belonging to appID are considered when selecting the base URL, preventing a
 // mismatch when the same connector is linked to multiple applications.
 // Returns an empty-page result when no endpoint is found or the call fails.
-func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy httpproxy.HTTPProxier, appID uuid.UUID, connectorIDs []uuid.UUID, limit, offset int) (string, catalogclient.ServiceConnectorPage) {
+func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy httpproxy.HTTPProxier, appID uuid.UUID, connectorIDs []uuid.UUID, limit, offset int, search string) (string, catalogclient.ServiceConnectorPage) {
 	empty := catalogclient.ServiceConnectorPage{ByID: make(map[string]apimodels.ConnectorItem)}
 
 	if len(connectorIDs) == 0 {
@@ -1296,7 +1245,7 @@ func (s *DatasourceService) fetchServiceConnectors(ctx context.Context, proxy ht
 		return "", empty
 	}
 
-	page, err := catalogclient.NewServiceClient(proxy, baseURL).ListConnectors(ctx, limit, offset)
+	page, err := catalogclient.NewServiceClient(proxy, baseURL).ListConnectors(ctx, limit, offset, search)
 	if err != nil {
 		logger.WarningfCtx(ctx, "failed to list connectors from service at %s: %v", baseURL, err)
 

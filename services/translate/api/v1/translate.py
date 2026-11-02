@@ -41,6 +41,7 @@ router = APIRouter()
 @router.post(
     "",
     status_code=status.HTTP_200_OK,
+    tags=["MCP"],
     response_model=SyncTranslateResponse,
     response_description="Translated text with source/target language and token usage.",
     summary="Translate plain text (synchronous)",

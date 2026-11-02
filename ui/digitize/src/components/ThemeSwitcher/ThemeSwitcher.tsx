@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
-import { HeaderGlobalAction } from '@carbon/react';
-import { Asleep, Light, Laptop } from '@carbon/icons-react';
-import type { CarbonIconType } from '@carbon/icons-react';
-import { useTheme } from '@contexts/useTheme';
-import styles from './ThemeSwitcher.module.scss';
+import { useState, useRef, useEffect } from "react";
+import { HeaderGlobalAction } from "@carbon/react";
+import { Asleep, Light, Laptop } from "@carbon/icons-react";
+import type { CarbonIconType } from "@carbon/icons-react";
+import { useTheme } from "@contexts/useTheme";
+import styles from "./ThemeSwitcher.module.scss";
 
-type ThemeValue = 'system' | 'light' | 'dark';
+type ThemeValue = "system" | "light" | "dark";
 
 interface ThemeOption {
   value: ThemeValue;
@@ -19,27 +19,30 @@ const ThemeSwitcher = () => {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const themeOptions: ThemeOption[] = [
-    { value: 'system', label: 'System', icon: Laptop },
-    { value: 'light', label: 'Light', icon: Light },
-    { value: 'dark', label: 'Dark', icon: Asleep },
+    { value: "system", label: "System", icon: Laptop },
+    { value: "light", label: "Light", icon: Light },
+    { value: "dark", label: "Dark", icon: Asleep },
   ];
 
-  const currentThemeOption = themeOptions.find(opt => opt.value === theme);
+  const currentThemeOption = themeOptions.find((opt) => opt.value === theme);
   const CurrentIcon = currentThemeOption?.icon || Laptop;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
       }
     };
 
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener("mousedown", handleClickOutside);
     }
 
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [isOpen]);
 
@@ -69,7 +72,7 @@ const ThemeSwitcher = () => {
                 <li key={option.value}>
                   <button
                     className={`${styles.dropdownItem} ${
-                      theme === option.value ? styles.active : ''
+                      theme === option.value ? styles.active : ""
                     }`}
                     onClick={() => handleThemeChange(option.value)}
                   >

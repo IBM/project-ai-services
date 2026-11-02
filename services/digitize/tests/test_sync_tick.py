@@ -45,11 +45,9 @@ _complete_tick / _fail_tick
   - _fail_tick swallows a secondary exception from finalize_sync_log_and_update_connector
 
 _handle_interrupt
-  - None interrupt_type calls _cancel_tick and returns
-  - SYNC_CANCEL branch calls _cancel_tick and _sweep_staging_dir with correct args
-  - DELETE_CONNECTOR branch calls _cancel_tick and _run_teardown
-  - SYNC_CANCEL does not call _run_teardown
-  - DELETE_CONNECTOR does not call _sweep_staging_dir
+  - None / SYNC_CANCEL / DELETE_CONNECTOR all call _cancel_tick and _sweep_staging_dir
+  - none of them call _run_teardown (launched by the DELETE endpoint)
+  - _sweep_staging_dir receives connector_id and sync_seq
 
 _wait_for_job
   - exits immediately when job is already in terminal state
@@ -397,37 +395,37 @@ class TestProcessNewFiles:
 # _delete_orphans  (async)
 # ---------------------------------------------------------------------------
 
-_REMOVE_CHECKSUMS = "digitize.api.v1.connectors._remove_checksums"
+_CLEANUP_CONNECTOR_DOCUMENTS = "digitize.utils.connectors.cleanup_connector_documents"
 
 
 class TestDeleteOrphans:
     def test_deletes_doc_when_last_owner(self):
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])) as mock_rm:
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [], [])) as mock_rm:
             asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
 
         mock_rm.assert_called_once_with("c1", {"ck_orphan"})
 
     def test_skips_doc_deletion_when_other_owners_remain(self):
-        # doc deletion decisions live inside _remove_checksums; _delete_orphans
+        # doc deletion decisions live inside _cleanup_connector_documents; _delete_orphans
         # just raises on non-empty failure lists — a clean return means success
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])):
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [], [])):
             asyncio.run(_delete_orphans("c1", {"ck_shared"}))  # no exception
 
     def test_raises_when_remove_raises(self):
-        # _remove_checksums accumulates failures and returns them; _delete_orphans
+        # _cleanup_connector_documents accumulates failures and returns them; _delete_orphans
         # turns a non-empty checksum_removal_failures list into a RuntimeError
-        with patch(_REMOVE_CHECKSUMS, return_value=(["ck_orphan"], [])):
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=(["ck_orphan"], [], [])):
             with pytest.raises(RuntimeError, match="checksum removal failed"):
                 asyncio.run(_delete_orphans("c1", {"ck_orphan"}))
 
     def test_processes_multiple_checksums(self):
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])) as mock_rm:
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [], [])) as mock_rm:
             asyncio.run(_delete_orphans("c1", {"ck1", "ck2"}))
 
         mock_rm.assert_called_once_with("c1", {"ck1", "ck2"})
 
     def test_empty_orphan_set(self):
-        with patch(_REMOVE_CHECKSUMS, return_value=([], [])) as mock_rm:
+        with patch(_CLEANUP_CONNECTOR_DOCUMENTS, return_value=([], [], [])) as mock_rm:
             asyncio.run(_delete_orphans("c1", set()))
         mock_rm.assert_called_once_with("c1", set())
 
@@ -797,59 +795,44 @@ class TestInterruptTypeEnum:
 # ---------------------------------------------------------------------------
 
 class TestHandleInterrupt:
-    def test_none_interrupt_calls_cancel_tick(self):
-        with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
-             patch(f"{DB_MODULE}.finalize_sync_log_and_update_connector"):
-            asyncio.run(_handle_interrupt(sync_seq=1, connector_id="conn-1", interrupt_type=None))
-        mock_cancel.assert_called_once_with(1, "conn-1")
-
-    def test_sync_cancel_calls_cancel_tick_and_sweep(self):
+    @pytest.mark.parametrize(
+        "interrupt_type",
+        [None, InterruptType.SYNC_CANCEL, InterruptType.DELETE_CONNECTOR],
+    )
+    def test_all_interrupts_cancel_tick_and_sweep(self, interrupt_type):
+        """Sync cancel, delete and None are handled identically."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
-             patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep, \
+             patch("digitize.utils.connectors.sweep_staging_dir") as mock_sweep, \
              patch("digitize.settings.settings") as mock_settings:
             mock_settings.digitize.staging_dir = Path("/fake/staging")
             asyncio.run(_handle_interrupt(sync_seq=7, connector_id="conn-A",
-                                          interrupt_type=InterruptType.SYNC_CANCEL))
+                                          interrupt_type=interrupt_type))
         mock_cancel.assert_called_once_with(7, "conn-A")
         mock_sweep.assert_called_once()
 
-    def test_delete_connector_calls_cancel_tick_and_teardown(self):
-        with patch(f"{DB_MODULE}._cancel_tick") as mock_cancel, \
-             patch("digitize.api.v1.connectors._run_teardown",
-                   new_callable=AsyncMock) as mock_teardown:
-            asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
-                                          interrupt_type=InterruptType.DELETE_CONNECTOR))
-        mock_cancel.assert_called_once_with(3, "conn-B")
-        mock_teardown.assert_awaited_once_with("conn-B")
-
-    def test_delete_connector_does_not_call_sweep(self):
-        """DELETE_CONNECTOR must not call _sweep_staging_dir."""
-        with patch(f"{DB_MODULE}._cancel_tick"), \
-             patch("digitize.api.v1.connectors._run_teardown", new_callable=AsyncMock), \
-             patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep:
-            asyncio.run(_handle_interrupt(sync_seq=3, connector_id="conn-B",
-                                          interrupt_type=InterruptType.DELETE_CONNECTOR))
-        mock_sweep.assert_not_called()
-
-    def test_sync_cancel_does_not_call_teardown(self):
-        """SYNC_CANCEL must not call _run_teardown."""
+    @pytest.mark.parametrize(
+        "interrupt_type",
+        [None, InterruptType.SYNC_CANCEL, InterruptType.DELETE_CONNECTOR],
+    )
+    def test_interrupt_does_not_call_teardown(self, interrupt_type):
+        """Teardown is launched by the DELETE endpoint, never from the tick."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick"), \
-             patch("digitize.api.v1.connectors._sweep_staging_dir"), \
+             patch("digitize.utils.connectors.sweep_staging_dir"), \
              patch("digitize.settings.settings") as mock_settings, \
              patch("digitize.api.v1.connectors._run_teardown",
                    new_callable=AsyncMock) as mock_teardown:
             mock_settings.digitize.staging_dir = Path("/fake/staging")
             asyncio.run(_handle_interrupt(sync_seq=7, connector_id="conn-A",
-                                          interrupt_type=InterruptType.SYNC_CANCEL))
+                                          interrupt_type=interrupt_type))
         mock_teardown.assert_not_called()
 
     def test_sync_cancel_sweep_receives_connector_id_and_seq(self):
         """_sweep_staging_dir must be called with connector_id and sync_seq keyword."""
         from pathlib import Path
         with patch(f"{DB_MODULE}._cancel_tick"), \
-             patch("digitize.api.v1.connectors._sweep_staging_dir") as mock_sweep, \
+             patch("digitize.utils.connectors.sweep_staging_dir") as mock_sweep, \
              patch("digitize.settings.settings") as mock_settings:
             fake_staging = Path("/fake/staging")
             mock_settings.digitize.staging_dir = fake_staging

@@ -255,6 +255,7 @@ def get_job(job_id: str) -> Optional[dict]:
                 job_id=job.job_id,
                 job_name=job.job_name,
                 operation=job.operation,
+                source=job.source or JobSource.USER.value,
                 status=JobStatus(job.status),
                 submitted_at=job.submitted_at.isoformat().replace("+00:00", "Z"),
                 completed_at=job.completed_at.isoformat().replace("+00:00", "Z") if job.completed_at else None,
@@ -324,6 +325,7 @@ def get_all_jobs(
                 job_id=job.job_id,
                 job_name=job.job_name,
                 operation=job.operation,
+                source=job.source or JobSource.USER.value,
                 status=JobStatus(job.status),
                 submitted_at=job.submitted_at.isoformat().replace("+00:00", "Z"),
                 completed_at=job.completed_at.isoformat().replace("+00:00", "Z") if job.completed_at else None,
@@ -1438,12 +1440,15 @@ def list_connectors() -> List[Connector]:
 def list_connectors_paginated(
     limit: int = 50,
     offset: int = 0,
+    name: Optional[str] = None,
 ) -> tuple[List[Connector], int]:
     """Return paginated connectors ordered by attached_at descending.
 
+    ``name`` is an optional case-insensitive substring filter on connector name.
+
     Returns (items, total_count).
     """
-    return db_manager.get_all_connectors_paginated(limit=limit, offset=offset)
+    return db_manager.get_all_connectors_paginated(limit=limit, offset=offset, name=name)
 
 
 def delete_active_connector(connector_id: str) -> bool:

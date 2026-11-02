@@ -28,26 +28,32 @@ export function transformWorkerToRow(
   };
 }
 
-export async function fetchAllWorkerResources(): Promise<WorkerApiResponse[]> {
-  const response = await api.get<WorkerApiResponse[]>(
-    WORKERS_ENDPOINTS.LIST_WORKERS,
-  );
-  return response.data;
-}
-
 export async function fetchWorkerResources(
   page = 1,
   pageSize = 20,
 ): Promise<WorkerListResponse> {
-  const allItems = await fetchAllWorkerResources();
-  const start = (page - 1) * pageSize;
+  const res = await api.get<WorkerListResponse>(
+    WORKERS_ENDPOINTS.LIST_WORKERS,
+    {
+      params: { page, page_size: pageSize },
+    },
+  );
+  return res.data;
+}
 
-  return {
-    data: allItems.slice(start, start + pageSize),
-    total: allItems.length,
-    page,
-    page_size: pageSize,
-  };
+export async function fetchAllWorkerResources(): Promise<WorkerApiResponse[]> {
+  let currentPage = 1;
+  let hasNext = true;
+  const allData: WorkerApiResponse[] = [];
+
+  while (hasNext) {
+    const response = await fetchWorkerResources(currentPage, 100);
+    allData.push(...response.data);
+    hasNext = response.pagination.has_next;
+    currentPage++;
+  }
+
+  return allData;
 }
 
 export async function registerWorker(

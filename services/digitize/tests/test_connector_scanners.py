@@ -776,7 +776,7 @@ class TestSSHScannerScan:
             self._make_stat("archive.zip"),
         ]
         stdout = MagicMock()
-        stdout.read.return_value = b"aabbcc  /data/report.pdf"
+        stdout.read.return_value = b"d41d8cd98f00b204e9800998ecf8427e  /data/report.pdf"
         stdout.channel.recv_exit_status.return_value = 0
         stderr = MagicMock()
         stderr.read.return_value = b""
@@ -838,17 +838,26 @@ class TestSSHScannerScan:
 
         assert scanner.scan() == []
 
-    def test_scan_checksum_from_remote_md5(self):
-        """scan() must use the first token of md5sum output as the checksum."""
+    @pytest.mark.parametrize(
+        "remote_output,expected_md5",
+        [
+            ("d41d8cd98f00b204e9800998ecf8427e  /data/doc.pdf", "d41d8cd98f00b204e9800998ecf8427e"),
+            ("MD5(/data/doc.pdf)= d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"),
+            ("MD5 (/data/doc.pdf) = D41D8CD98F00B204E9800998ECF8427E", "d41d8cd98f00b204e9800998ecf8427e"),
+            ("d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"),
+            ("MD5(/data/doc.pdf)= d41d8cd98f00b204e9800998ecf8427e", "d41d8cd98f00b204e9800998ecf8427e"),
+        ],
+    )
+    def test_scan_checksum_from_remote_md5(self, remote_output, expected_md5):
+        """scan() must parse 32-char md5 checksum across md5sum, openssl dgst -md5, md5, and csum formats."""
         scanner = _make_ssh_scanner()
         mock_sftp = MagicMock()
         mock_ssh = MagicMock()
 
         mock_sftp.listdir_attr.return_value = [self._make_stat("doc.pdf")]
 
-        expected_md5 = "d41d8cd98f00b204e9800998ecf8427e"
         stdout = MagicMock()
-        stdout.read.return_value = f"{expected_md5}  /data/doc.pdf".encode()
+        stdout.read.return_value = remote_output.encode()
         stdout.channel.recv_exit_status.return_value = 0
         stderr = MagicMock()
         stderr.read.return_value = b""
@@ -971,6 +980,26 @@ class TestSSHScannerDownloadTo:
 
         call_args = mock_sftp.getfo.call_args
         assert isinstance(call_args[0][1], HashingWriter)
+
+    def test_download_retries_on_transient_error(self, tmp_path):
+        import paramiko
+        scanner = _make_ssh_scanner()
+        mock_sftp = MagicMock()
+        calls = 0
+
+        def _flaky_getfo(remote_path, fileobj):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise paramiko.SSHException("Connection reset")
+            fileobj.write(b"content")
+
+        mock_sftp.getfo.side_effect = _flaky_getfo
+        self._attach(scanner, mock_sftp)
+
+        scanner.download_to("/data/report.pdf", tmp_path / "report.pdf")
+        assert calls == 2
+        assert (tmp_path / "report.pdf").read_bytes() == b"content"
 
 
 # ---------------------------------------------------------------------------

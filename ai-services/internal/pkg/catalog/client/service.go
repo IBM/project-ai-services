@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -129,13 +130,24 @@ func (c *ServiceClient) GetConnectorSync(ctx context.Context, connectorID string
 	return &result, nil
 }
 
-// ListConnectors calls GET /v1/connectors with limit/offset pagination and returns a
-// ServiceConnectorPage keyed by connector ID for O(1) lookup. Pass limit=0 to use the
-// service default. Returns an error on HTTP failure or non-200 response.
-func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int) (*ServiceConnectorPage, error) {
-	path := serviceConnectPath
+// ListConnectors calls GET /v1/connectors with limit/offset pagination and an optional
+// case-insensitive name filter, and returns a ServiceConnectorPage keyed by connector ID
+// for O(1) lookup. Pass limit=0 to use the service default; pass an empty search to skip
+// name filtering. Returns an error on HTTP failure or non-200 response.
+func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int, search string) (*ServiceConnectorPage, error) {
+	query := url.Values{}
 	if limit > 0 || offset > 0 {
-		path += "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+		query.Set("limit", strconv.Itoa(limit))
+		query.Set("offset", strconv.Itoa(offset))
+	}
+
+	if search != "" {
+		query.Set("name", search)
+	}
+
+	path := serviceConnectPath
+	if len(query) > 0 {
+		path += "?" + query.Encode()
 	}
 
 	status, body, err := c.do(ctx, http.MethodGet, path, nil)

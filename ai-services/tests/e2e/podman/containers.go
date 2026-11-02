@@ -224,14 +224,22 @@ func getRestartCount(podName string, appRuntime string, appName string) (int, er
 
 func getPodmanRestartCount(podName string) (int, error) {
 	podRes, err := common.RunCommand("podman", "pod", "inspect", podName)
-	if err != nil {
-		return 0, fmt.Errorf("failed to inspect pod %s: %w", podName, err)
+	if err == nil {
+		// Pod has an infra container — use the standard pod inspect path.
+		return podmanPodInspectRestartCount(podName, podRes)
 	}
 
+	// No pod infra container — fall back to inspecting containers whose name starts with podName.
+	return podmanNamePrefixRestartCount(podName)
+}
+
+// podmanPodInspectRestartCount sums container restarts for a pod using the `podman pod inspect` output.
+func podmanPodInspectRestartCount(podName, podRes string) (int, error) {
 	var podData []PodInspect
 	if err := json.Unmarshal([]byte(podRes), &podData); err != nil {
 		return 0, fmt.Errorf("failed to parse pod inspect for %s: %w", podName, err)
 	}
+
 	if len(podData) == 0 {
 		return 0, fmt.Errorf("no pod inspect data for %s", podName)
 	}
@@ -246,15 +254,47 @@ func getPodmanRestartCount(podName string) (int, error) {
 		ctrIDs = append(ctrIDs, ctr.Id)
 	}
 
+	return sumContainerRestarts(podName, ctrIDs)
+}
+
+// podmanNamePrefixRestartCount sums restarts of containers whose name starts with podName.
+// e.g. podName="chat-bot-ac3d07543c" matches "chat-bot-ac3d07543c-ui", "chat-bot-ac3d07543c-backend-server".
+func podmanNamePrefixRestartCount(podName string) (int, error) {
+	const idNameParts = 2
+
+	psOut, err := common.RunCommand("podman", "ps", "--format", "{{.ID}} {{.Names}}")
+	if err != nil {
+		return 0, fmt.Errorf("failed to list containers for pod %s: %w", podName, err)
+	}
+
+	var ctrIDs []string
+
+	for _, line := range strings.Split(strings.TrimSpace(psOut), "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), " ", idNameParts)
+		if len(parts) == idNameParts && strings.HasPrefix(parts[1], podName+"-") {
+			ctrIDs = append(ctrIDs, parts[0])
+		}
+	}
+
+	if len(ctrIDs) == 0 {
+		return 0, nil
+	}
+
+	return sumContainerRestarts(podName, ctrIDs)
+}
+
+// sumContainerRestarts inspects the given containers and returns their total restart count.
+func sumContainerRestarts(podName string, ctrIDs []string) (int, error) {
 	args := append([]string{"inspect"}, ctrIDs...)
+
 	ctrRes, err := common.RunCommand("podman", args...)
 	if err != nil {
-		return 0, fmt.Errorf("failed to inspect containers in pod %s: %w", podName, err)
+		return 0, fmt.Errorf("failed to inspect containers for pod %s: %w", podName, err)
 	}
 
 	var allContainers []ContainerInspect
 	if err := json.Unmarshal([]byte(ctrRes), &allContainers); err != nil {
-		return 0, fmt.Errorf("failed to parse container inspect: %w", err)
+		return 0, fmt.Errorf("failed to parse container inspect for pod %s: %w", podName, err)
 	}
 
 	totalRestarts := 0
@@ -350,7 +390,116 @@ func waitForPodRunningNoCrash(ctx context.Context, cfg *config.Config, appName, 
 	})
 }
 
+// podmanContainerPodNames queries `podman ps` directly and returns a set of pod-level name
+// prefixes derived from container names (e.g. "chat-bot-ac3d07543c-ui" → "chat-bot-ac3d07543c").
+// This is used as a fallback when a service pod has no infra container and therefore does not
+// appear in `podman pod list` (and thus not in `application ps` output).
+func podmanContainerPodNames() map[string]bool {
+	out, err := common.RunCommand("podman", "ps", "--format", "{{.Names}}")
+	if err != nil {
+		return nil
+	}
+
+	podNames := make(map[string]bool)
+
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		// Container names have the form "<pod-name>-<container-role>" (e.g. "chat-bot-ac3d07543c-ui").
+		// Derive the pod name by stripping the last dash-separated segment.
+		if idx := strings.LastIndex(name, "-"); idx > 0 {
+			podNames[name[:idx]] = true
+		}
+	}
+
+	return podNames
+}
+
+// findPodByPrefix returns a pod name from the set that starts with prefix, or "" if none matches.
+func findPodByPrefix(pods map[string]bool, prefix string) string {
+	for podName := range pods {
+		if strings.HasPrefix(podName, prefix) {
+			return podName
+		}
+	}
+
+	return ""
+}
+
+// allSuffixesPresent reports whether a pod exists for every expected service suffix.
+func allSuffixesPresent(pods map[string]bool, suffixes []string) bool {
+	for _, suffix := range suffixes {
+		if findPodByPrefix(pods, suffix+"-") == "" {
+			return false
+		}
+	}
+
+	return true
+}
+
+// collectActualPods extracts pods from the ps output and, for podman, merges in pod names derived
+// from direct `podman ps` output. This catches services whose infra container is absent and thus
+// invisible to `podman pod list` (and therefore to `application ps`).
+func collectActualPods(ctx context.Context, psOutput string, cfg *config.Config, appName, appRuntime string) (map[string]bool, error) {
+	actualPods, err := extractActualPods(ctx, psOutput, cfg, appName, appRuntime)
+	if err != nil {
+		return nil, err
+	}
+
+	if appRuntime == "podman" {
+		for podName := range podmanContainerPodNames() {
+			actualPods[podName] = true
+		}
+	}
+
+	return actualPods, nil
+}
+
+// waitForExpectedPods retries fetching ps output until all expected pods are present or the timeout
+// elapses. The catalog API silently omits pods that aren't running yet, so a single snapshot may be
+// missing late-starting services. On timeout the latest pod set is returned so callers can assert on it.
+func waitForExpectedPods(
+	ctx context.Context,
+	cfg *config.Config,
+	widePSOutput, appName, appRuntime string,
+	suffixes []string,
+	pollTimeout, pollInterval time.Duration,
+) (map[string]bool, error) {
+	deadline := time.Now().Add(pollTimeout)
+
+	for attempt := 0; ; attempt++ {
+		psOutput := widePSOutput
+		if attempt > 0 {
+			// Not the first iteration — re-fetch fresh output.
+			freshOut, fetchErr := cli.ApplicationPS(ctx, cfg, appName, appRuntime, "-o", "wide")
+			if fetchErr != nil {
+				return nil, fmt.Errorf("failed to refresh application ps: %w", fetchErr)
+			}
+			psOutput = freshOut
+		}
+
+		actualPods, err := collectActualPods(ctx, psOutput, cfg, appName, appRuntime)
+		if err != nil {
+			return nil, err
+		}
+
+		if allSuffixesPresent(actualPods, suffixes) || time.Now().After(deadline) {
+			return actualPods, nil
+		}
+
+		logger.Infof("[Podman] not all pods present yet for app %s (available: %v) — retrying in %s", appName, podKeys(actualPods), pollInterval)
+		time.Sleep(pollInterval)
+	}
+}
+
 // VerifyContainers checks that all expected pods are healthy and have zero restarts; matches pods by prefix for both OpenShift and podman catalog paths.
+// It retries the ps call until all expected pods appear (up to 10 minutes) to handle services that start
+// after the initial ps snapshot was taken (e.g. chat-bot pods that come up later than components).
+// For podman, any pod prefix still missing from the catalog API output is resolved via a direct
+// `podman ps` fallback — this handles services whose infra container is absent and therefore
+// invisible to `podman pod list`.
 func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput string, appName, appRuntime, templateName string) error {
 	logger.Infof("[Podman] verifying containers for app: %s", appName)
 
@@ -359,10 +508,6 @@ func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput stri
 
 		return nil
 	}
-	actualPods, err := extractActualPods(ctx, widePSOutput, cfg, appName, appRuntime)
-	if err != nil {
-		return err
-	}
 
 	// Prefer template-aware suffix map; fall back to legacy runtime-only map for unknown templates.
 	suffixes, ok := common.ExpectedPodSuffixesByTemplate[templateName][appRuntime]
@@ -370,18 +515,20 @@ func VerifyContainers(ctx context.Context, cfg *config.Config, widePSOutput stri
 		suffixes = common.ExpectedPodSuffixes[appRuntime]
 	}
 
-	for _, suffix := range suffixes {
-		var foundPodName string
+	const (
+		pollTimeout  = 10 * time.Minute
+		pollInterval = 30 * time.Second
+	)
 
+	actualPods, err := waitForExpectedPods(ctx, cfg, widePSOutput, appName, appRuntime, suffixes, pollTimeout, pollInterval)
+	if err != nil {
+		return err
+	}
+
+	for _, suffix := range suffixes {
 		// Match by prefix: both OpenShift and podman catalog path use dynamic pod names beginning with the service suffix.
 		expectedPrefix := suffix + "-"
-		for podName := range actualPods {
-			if strings.HasPrefix(podName, expectedPrefix) {
-				foundPodName = podName
-
-				break
-			}
-		}
+		foundPodName := findPodByPrefix(actualPods, expectedPrefix)
 
 		gomega.Expect(foundPodName).NotTo(gomega.BeEmpty(),
 			"expected a pod with prefix %q to exist (available: %v)", expectedPrefix, podKeys(actualPods))

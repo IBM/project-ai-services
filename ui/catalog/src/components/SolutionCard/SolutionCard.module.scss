@@ -1,10 +1,8 @@
-@use "@carbon/react/scss/spacing";
-@use "@carbon/react/scss/type";
-@use "@carbon/react/scss/motion";
+@use "carbonTokens" as *;
 
 .card {
   background-color: var(--cds-layer);
-  padding: spacing.$spacing-05;
+  padding: $spacing-05;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -35,7 +33,7 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: spacing.$spacing-05;
+  margin-bottom: $spacing-05;
 }
 
 .iconContainer {
@@ -65,19 +63,19 @@
 }
 
 .category {
-  @include type.type-style("label-01");
+  @include type-style("label-01");
   color: var(--cds-text-secondary);
-  margin: 0 0 spacing.$spacing-02 0;
+  margin: 0 0 $spacing-02 0;
 }
 
 .title {
-  @include type.type-style("heading-03");
-  margin: 0 0 spacing.$spacing-03 0;
+  @include type-style("heading-03");
+  margin: 0 0 $spacing-03 0;
 }
 
 .description {
-  @include type.type-style("body-compact-01");
-  margin: 0 0 spacing.$spacing-05 0;
+  @include type-style("body-compact-01");
+  margin: 0 0 $spacing-05 0;
 }
 
 .footer {
@@ -89,7 +87,7 @@
 
 .tags {
   display: flex;
-  gap: spacing.$spacing-03;
+  gap: $spacing-03;
   align-items: center;
   flex-wrap: wrap;
 }

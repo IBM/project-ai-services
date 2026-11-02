@@ -16,6 +16,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
@@ -54,8 +55,12 @@ type Gateway struct {
 }
 
 // New creates a Gateway backed by the given registry.
+// The PKI directory defaults to workerconstants.GatewayPKIDir and can be
+// overridden with the GATEWAY_PKI_DIR env var (local development only).
 func New(ctx context.Context, reg *registry.Registry, runtimeType types.RuntimeType) (*Gateway, error) {
-	pki, err := loadOrGeneratePKI(ctx, workerconstants.GatewayPKIDir, runtimeType)
+	pkiDir := utils.GetEnv("GATEWAY_PKI_DIR", workerconstants.GatewayPKIDir)
+
+	pki, err := loadOrGeneratePKI(ctx, pkiDir, runtimeType)
 	if err != nil {
 		return nil, fmt.Errorf("worker gateway: PKI init failed: %w", err)
 	}

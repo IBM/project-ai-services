@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "custom-chatbot"
+  labels:
+    ai-services.io/service: {{ .Release.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/service: {{ .Release.Name }}
+      ai-services.io/component: custom-chatbot
+  template:
+    metadata:
+      labels:
+        ai-services.io/service: {{ .Release.Name }}
+        ai-services.io/template: {{ .Values.templateID }}
+        ai-services.io/component: custom-chatbot
+        ai-services.io/component-type: ui
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: custom-chatbot
+          image: "{{ .Values.chatbot.image }}"
+          command:
+            - "/var/venv/bin/python"
+            - "-m"
+            - "uvicorn"
+            - "app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+            - "--loop"
+            - "uvloop"
+            - "--http"
+            - "httptools"
+          env:
+            - name: PORT
+              value: "8080"
+            - name: LLM_ENDPOINT
+              value: http://llm-predictor:8000
+            - name: LLM_MODEL
+              value: {{ .Values.llm.model | quote }}
+            - name: LLM_MAX_TOKENS
+              value: {{ .Values.chatbot.max_tokens | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.chatbot.log_level | quote }}
+            - name: SYSTEM_PROMPT
+              value: {{ .Values.chatbot.system_prompt | quote }}
+            {{- if .Values.llm.apiKey }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "vllm-instruct-api-key"
+                  key: apiKey
+            {{- end }}
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.chatbot.resources.requests.cpu | quote }}
+              memory: {{ .Values.chatbot.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.chatbot.resources.limits.cpu | quote }}
+              memory: {{ .Values.chatbot.resources.limits.memory | quote }}

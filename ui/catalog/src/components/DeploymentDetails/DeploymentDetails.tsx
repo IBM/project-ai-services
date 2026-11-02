@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useDeploymentDatasourceSupport } from "./hooks/useDeploymentDatasourceSupport";
 import {
   Grid,
@@ -24,6 +24,7 @@ import {
   PauseOutline,
   ErrorFilled,
   InProgress,
+  DiamondFill,
 } from "@carbon/icons-react";
 import type {
   DeploymentDetails as DeploymentDetailsType,
@@ -62,6 +63,7 @@ const DeploymentDetails = ({
   defaultSection = "details",
 }: DeploymentDetailsProps) => {
   const [activeSection, setActiveSection] = useState(defaultSection);
+  const [datasourceCount, setDatasourceCount] = useState<number | null>(null);
   const [resources, setResources] = useState<ResourceAllocation[]>([]);
   const [deployedCatalogIds, setDeployedCatalogIds] = useState<
     string[] | undefined
@@ -225,21 +227,22 @@ const DeploymentDetails = ({
 
         const transformedServices: DeploymentServiceData[] =
           deploymentServices.map((service) => {
-            const llmComponent = service.components.find(
+            const components = service.components ?? [];
+            const llmComponent = components.find(
               (c) => c.type === COMPONENT_TYPES.LLM,
             );
-            const embeddingComponent = service.components.find(
+            const embeddingComponent = components.find(
               (c) => c.type === COMPONENT_TYPES.EMBEDDING,
             );
-            const vectorStoreComponent = service.components.find(
+            const vectorStoreComponent = components.find(
               (c) => c.type === COMPONENT_TYPES.VECTOR_STORE,
             );
-            const rerankerComponent = service.components.find(
+            const rerankerComponent = components.find(
               (c) => c.type === COMPONENT_TYPES.RERANKER,
             );
 
             // Collect custom/unknown component types not handled by the known set.
-            const customComponents = service.components
+            const customComponents = components
               .filter((c) => !knownComponentTypes.has(c.type))
               .map((c) => ({
                 label: c.type
@@ -254,16 +257,13 @@ const DeploymentDetails = ({
               serviceMetadataById[service.catalog_id]?.description ??
               `${service.type} service`;
 
-            // For inference backend: prefer known components first, then fall back
-            // to any custom component's provider name.
-            const customInferenceComponent = customComponents.find(
-              (c) => c.providerName,
-            );
+            // Inference backend is derived only from known component types.
+            // Custom components already render their own row (with providerName),
+            // so including them here would duplicate the value.
             const inferenceBackend =
               llmComponent?.provider?.name ||
               embeddingComponent?.provider?.name ||
               rerankerComponent?.provider?.name ||
-              customInferenceComponent?.providerName ||
               undefined;
 
             return {
@@ -486,7 +486,13 @@ const DeploymentDetails = ({
           title={deployment.name}
           subtitle={
             <div className={styles.headerSubtitle}>
-              {getStatusTag(deployment.status)}
+              {activeSection === "datasources" && datasourceCount === 0 ? (
+                <Tag type="purple" size="md" renderIcon={DiamondFill}>
+                  No data
+                </Tag>
+              ) : (
+                getStatusTag(deployment.status)
+              )}
               <Tag type="gray">{deployment.type}</Tag>
               {certifiedBy && (
                 <span className={styles.headerCertifiedBadge}>
@@ -818,19 +824,29 @@ const DeploymentDetails = ({
 
                       {deploymentServiceData.customComponents?.map(
                         (customComponent) => (
-                          <div
-                            key={customComponent.label}
-                            className={styles.serviceDetailRow}
-                          >
-                            <span className={styles.serviceDetailLabel}>
-                              {customComponent.label}
-                            </span>
-                            <span className={styles.serviceDetailValue}>
-                              {customComponent.model ??
-                                customComponent.providerName ??
-                                "Unknown"}
-                            </span>
-                          </div>
+                          <React.Fragment key={customComponent.label}>
+                            <div className={styles.serviceDetailRow}>
+                              <span className={styles.serviceDetailLabel}>
+                                {customComponent.label}
+                              </span>
+                              <span className={styles.serviceDetailValue}>
+                                {customComponent.model ??
+                                  customComponent.providerName ??
+                                  "Unknown"}
+                              </span>
+                            </div>
+                            {customComponent.model &&
+                              customComponent.providerName && (
+                                <div className={styles.serviceDetailRow}>
+                                  <span className={styles.serviceDetailLabel}>
+                                    {customComponent.label} backend
+                                  </span>
+                                  <span className={styles.serviceDetailValue}>
+                                    {customComponent.providerName}
+                                  </span>
+                                </div>
+                              )}
+                          </React.Fragment>
                         ),
                       )}
 
@@ -852,7 +868,10 @@ const DeploymentDetails = ({
           )}
 
           {activeSection === "datasources" && acceptsDatasource && (
-            <ApplicationDatasourcesTable applicationId={deployment.id} />
+            <ApplicationDatasourcesTable
+              applicationId={deployment.id}
+              onDatasourceCountChange={(count) => setDatasourceCount(count)}
+            />
           )}
 
           {activeSection === "integration" && (

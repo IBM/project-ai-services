@@ -3,14 +3,17 @@ package openapi
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pb33f/libopenapi"
 	highV3 "github.com/pb33f/libopenapi/datamodel/high/v3"
@@ -27,7 +30,7 @@ func LoadDescription(ref string, tlsSkipVerify bool) (*highV3.Document, error) {
 
 	// Load from URL or file
 	if isURL(ref) {
-		data, err = loadFromURL(ref, tlsSkipVerify)
+		data, err = loadFromURLWithRetry(ref, tlsSkipVerify)
 	} else {
 		data, err = loadFromFile(ref)
 	}
@@ -84,7 +87,48 @@ func isURL(str string) bool {
 	return err == nil && u.Scheme != "" && u.Host != ""
 }
 
-// loadFromURL loads content from a URL
+// Retry settings for fetching a remote description. As a sidecar, this server
+// usually starts alongside the service it describes, so the first fetches can
+// fail until the service is listening. Variables so tests can shorten them
+var (
+	fetchRetryTimeout   = 5 * time.Minute
+	fetchInitialBackoff = 1 * time.Second
+	fetchMaxBackoff     = 15 * time.Second
+)
+
+// fetchBackoffMultiplier is the factor the wait grows by after each failed fetch
+const fetchBackoffMultiplier = 2
+
+// retryableError marks a fetch failure that may succeed once the service is up
+type retryableError struct {
+	err error
+}
+
+func (e *retryableError) Error() string { return e.err.Error() }
+func (e *retryableError) Unwrap() error { return e.err }
+
+// loadFromURLWithRetry calls loadFromURL, retrying with exponential backoff while
+// the failure is retryable (connection refused, DNS not resolving yet, HTTP 5xx)
+// and fetchRetryTimeout has not elapsed. Other failures are returned immediately
+func loadFromURLWithRetry(urlStr string, tlsSkipVerify bool) ([]byte, error) {
+	deadline := time.Now().Add(fetchRetryTimeout)
+	backoff := fetchInitialBackoff
+
+	for attempt := 1; ; attempt++ {
+		data, err := loadFromURL(urlStr, tlsSkipVerify)
+
+		var retryErr *retryableError
+		if err == nil || !errors.As(err, &retryErr) || time.Now().Add(backoff).After(deadline) {
+			return data, err
+		}
+
+		log.Printf("OpenAPI description not available yet (attempt %d): %v; retrying in %s", attempt, err, backoff)
+		time.Sleep(backoff)
+		backoff = min(backoff*fetchBackoffMultiplier, fetchMaxBackoff)
+	}
+}
+
+// loadFromURL loads content from a URL in a single attempt
 func loadFromURL(urlStr string, tlsSkipVerify bool) ([]byte, error) {
 	// Validate URL scheme to prevent SSRF attacks
 	if err := validateURL(urlStr); err != nil {
@@ -102,7 +146,16 @@ func loadFromURL(urlStr string, tlsSkipVerify bool) ([]byte, error) {
 	// #nosec G107 - URL is validated above to only allow http/https schemes
 	resp, err := client.Get(urlStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch URL %s: %w", urlStr, err)
+		err = fmt.Errorf("failed to fetch URL %s: %w", urlStr, err)
+
+		// Dial failures (refused, DNS) mean the service is not up yet. TLS and
+		// other errors will not fix themselves, so they are not retried
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Op == "dial" {
+			return nil, &retryableError{err: err}
+		}
+
+		return nil, err
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
@@ -111,7 +164,12 @@ func loadFromURL(urlStr string, tlsSkipVerify bool) ([]byte, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch URL %s: HTTP %d", urlStr, resp.StatusCode)
+		err := fmt.Errorf("failed to fetch URL %s: HTTP %d", urlStr, resp.StatusCode)
+		if resp.StatusCode >= http.StatusInternalServerError {
+			return nil, &retryableError{err: err}
+		}
+
+		return nil, err
 	}
 
 	data, err := io.ReadAll(resp.Body)

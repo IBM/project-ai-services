@@ -16,7 +16,21 @@
 	tls internal
 }
 
-# Internal health check endpoint used by the liveness probe (plain HTTP).
+# Private ingress for service-to-service traffic (mTLS enforced)
+:9443 {
+	handle /internal/health {
+		# @id internal-private-health
+		respond "OK" 200
+	}
+
+	tls internal {
+		client_auth {
+			mode require_and_verify
+		}
+	}
+}
+
+# Internal health check endpoint used by the liveness probe and private egress (plain HTTP).
 :8080 {
 	respond /health "OK" 200
 }
