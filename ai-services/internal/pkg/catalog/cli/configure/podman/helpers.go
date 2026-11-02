@@ -13,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	workercmn "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 )
 
 // getExistingConfigFromCatalogBackend retrieves the existing configuration from the catalog pod.
@@ -46,8 +47,8 @@ func validateRequiredFields(opts *catalogUtils.PodmanConfigureOptions) error {
 	return nil
 }
 
-// validateReconfigureParameters validates that domain, HTTPS port, base directory, and certificates haven't changed during reconfigure.
-// This function performs all validation checks including certificate validation.
+// validateReconfigureParameters validates that domain, HTTPS port, base directory, certificates,
+// and --skip-local-worker haven't changed during reconfigure.
 func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
 	// Get existing configuration from catalog-backend pod
 	existingOpts, err := getExistingConfigFromCatalogBackend(ctx, rt)
@@ -58,6 +59,19 @@ func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newO
 	// Validate configuration parameters haven't changed
 	if err := validateConfigParameters(existingOpts, newOpts, caddyCtx.GetDomainSuffix()); err != nil {
 		return err
+	}
+
+	// Guard A: block --skip-local-worker changes while the catalog pod is running.
+	// Read LOCAL_WORKER from the live container env; LOCAL_WORKER=true means the
+	// original run had --skip-local-worker=false and vice-versa.
+	// Block when podLocalWorker == skipLocalWorker (the values are inconsistent).
+	podLocalWorker, err := workercmn.IsPodmanLocalWorker(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("failed to read LOCAL_WORKER from catalog pod: %w", err)
+	}
+
+	if podLocalWorker == newOpts.SkipLocalWorker {
+		return fmt.Errorf("--skip-local-worker flag cannot be changed on re-run; to change this setting, uninstall and re-run catalog configure")
 	}
 
 	// Validate certificate changes if SSL certificates are provided
