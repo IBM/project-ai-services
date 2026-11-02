@@ -97,6 +97,10 @@ const Navbar = (props: NavbarProps) => {
             {PAGE_TITLES.WORKER_RESOURCES}
           </SideNavMenuItem>
 
+          <SideNavMenuItem as={NavLink} to={ROUTES.MODELS}>
+            Models
+          </SideNavMenuItem>
+
           <SideNavDivider />
 
           <SideNavMenuItem as={NavLink} to={ROUTES.USE_CASE_REFERENCES}>

@@ -9,6 +9,7 @@ import DigitalAssistantsPage from "./pages/DigitalAssistants";
 import Services from "./pages/Services";
 import Connectors from "./pages/Connectors";
 import WorkerResources from "./pages/WorkerResources";
+import Models from "./pages/Models";
 import UseCaseReferences from "./pages/UseCaseReferences";
 import { AuthRoute } from "@/components";
 import SessionManager from "@/components/SessionManager";
@@ -36,6 +37,7 @@ function App() {
                 path={ROUTES.WORKER_RESOURCES}
                 element={<WorkerResources />}
               />
+              <Route path={ROUTES.MODELS} element={<Models />} />
               <Route
                 path={ROUTES.USE_CASE_REFERENCES}
                 element={<UseCaseReferences />}

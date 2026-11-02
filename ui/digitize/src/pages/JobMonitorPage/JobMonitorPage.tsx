@@ -34,7 +34,7 @@ import {
   InProgress,
   ErrorFilled,
   TrashCan,
-  Close,
+  CloseOutline,
 } from "@carbon/icons-react";
 import { useTheme } from "../../contexts/useTheme";
 import {
@@ -53,6 +53,7 @@ import {
   DOC_STATUS,
   JOB_OPERATION,
   JOB_TYPE_DISPLAY,
+  NON_TERMINAL_STATUSES,
 } from "../../constants/jobConstants";
 import styles from "./JobMonitorPage.module.scss";
 
@@ -81,6 +82,8 @@ interface JobMonitorState {
   showDeleteModal: boolean;
   jobToDelete: string | null;
   cancellingIds: Set<string>;
+  jobToCancel: string | null;
+  isCancelConfirmed: boolean;
   isConfirmed: boolean;
   toastOpen: boolean;
   errorMessage: string;
@@ -113,6 +116,9 @@ type JobMonitorAction =
   | { type: "OPEN_DELETE_MODAL"; payload: string }
   | { type: "CLOSE_DELETE_MODAL" }
   | { type: "CLOSE_DELETE_MODAL_KEEP_JOB" }
+  | { type: "OPEN_CANCEL_MODAL"; payload: string }
+  | { type: "CLOSE_CANCEL_MODAL" }
+  | { type: "SET_CANCEL_CONFIRMED"; payload: boolean }
   | { type: "SET_CONFIRMED"; payload: boolean }
   | { type: "SHOW_ERROR"; payload: { message: string; jobName?: string } }
   | { type: "HIDE_ERROR" }
@@ -143,6 +149,8 @@ const initialState: JobMonitorState = {
   showDeleteModal: false,
   cancellingIds: new Set<string>(),
   jobToDelete: null,
+  jobToCancel: null,
+  isCancelConfirmed: false,
   isConfirmed: false,
   toastOpen: false,
   errorMessage: "",
@@ -261,6 +269,16 @@ const jobMonitorReducer = (
         showDeleteModal: false,
         isConfirmed: false,
       };
+    case "OPEN_CANCEL_MODAL":
+      return {
+        ...state,
+        jobToCancel: action.payload,
+        isCancelConfirmed: false,
+      };
+    case "CLOSE_CANCEL_MODAL":
+      return { ...state, jobToCancel: null, isCancelConfirmed: false };
+    case "SET_CANCEL_CONFIRMED":
+      return { ...state, isCancelConfirmed: action.payload };
     case "SET_CONFIRMED":
       return { ...state, isConfirmed: action.payload };
     case "DELETE_JOB":
@@ -334,8 +352,7 @@ const headers = [
   { key: "started", header: "Started" },
   { key: "duration", header: "Duration" },
   { key: "view_action", header: "" },
-  { key: "cancel_action", header: "" },
-  { key: "delete_action", header: "" },
+  { key: "row_action", header: "" },
 ];
 
 const getStatusIcon = (status: string) => {
@@ -573,9 +590,8 @@ const JobMonitorPage = () => {
   const handleDeleteConfirm = async () => {
     if (!state.jobToDelete) return;
 
-    const jobName = getJobName(
-      state.jobs.find((j) => j.job_id === state.jobToDelete)!,
-    );
+    const job = state.jobs.find((j) => j.job_id === state.jobToDelete);
+    const jobName = job ? getJobName(job) : state.jobToDelete;
     dispatch({ type: "SET_IS_DELETING", payload: true });
 
     try {
@@ -760,7 +776,7 @@ const JobMonitorPage = () => {
         filename,
         headers,
         rows: exportRows,
-        excludeColumns: ["view_action", "cancel_action", "delete_action"],
+        excludeColumns: ["view_action", "row_action"],
       });
 
       dispatch({
@@ -797,6 +813,12 @@ const JobMonitorPage = () => {
   const rows = filteredJobs.map((job) => {
     const jobStatus = getJobStatus(job);
     const hasError = job.status === "failed";
+    const isConnector = job.source === "connector";
+    const isNonTerminal = NON_TERMINAL_STATUSES.has(job.status as any);
+    const isCancellable =
+      !isConnector &&
+      (job.status === JOB_STATUS.ACCEPTED ||
+        job.status === JOB_STATUS.IN_PROGRESS);
 
     return {
       id: job.job_id,
@@ -848,21 +870,19 @@ const JobMonitorPage = () => {
           View details
         </Button>
       ),
-      cancel_action:
-        job.source !== "connector" &&
-        (job.status === JOB_STATUS.ACCEPTED ||
-          job.status === JOB_STATUS.IN_PROGRESS) ? (
-          <Button
-            hasIconOnly
-            kind="ghost"
-            size="sm"
-            renderIcon={Close}
-            iconDescription="Cancel job"
-            disabled={state.cancellingIds.has(job.job_id)}
-            onClick={() => handleCancelJob(job.job_id)}
-          />
-        ) : null,
-      delete_action: (
+      row_action: isCancellable ? (
+        <Button
+          hasIconOnly
+          kind="ghost"
+          size="sm"
+          renderIcon={CloseOutline}
+          iconDescription="Cancel"
+          disabled={state.cancellingIds.has(job.job_id)}
+          onClick={() =>
+            dispatch({ type: "OPEN_CANCEL_MODAL", payload: job.job_id })
+          }
+        />
+      ) : !isConnector && !isNonTerminal ? (
         <Button
           hasIconOnly
           kind="ghost"
@@ -873,9 +893,17 @@ const JobMonitorPage = () => {
             dispatch({ type: "OPEN_DELETE_MODAL", payload: job.job_id })
           }
         />
-      ),
+      ) : null,
     };
   });
+
+  const jobToDelete = state.jobToDelete
+    ? state.jobs.find((j) => j.job_id === state.jobToDelete)
+    : undefined;
+
+  const jobToCancel = state.jobToCancel
+    ? state.jobs.find((j) => j.job_id === state.jobToCancel)
+    : undefined;
 
   return (
     <Theme theme={effectiveTheme}>
@@ -1321,19 +1349,58 @@ const JobMonitorPage = () => {
                 id="checkbox-delete-job"
                 labelText={
                   <strong>
-                    {state.jobToDelete
-                      ? getJobName(
-                          state.jobs.find(
-                            (j) => j.job_id === state.jobToDelete,
-                          )!,
-                        )
-                      : ""}
+                    {jobToDelete
+                      ? getJobName(jobToDelete)
+                      : (state.jobToDelete ?? "")}
                   </strong>
                 }
                 checked={state.isConfirmed}
                 onChange={(_, { checked }) =>
                   dispatch({
                     type: "SET_CONFIRMED",
+                    payload: checked,
+                  })
+                }
+              />
+            </CheckboxGroup>
+          </div>
+        </Modal>
+
+        {/* Cancel Confirmation Modal */}
+        <Modal
+          open={state.jobToCancel !== null}
+          danger
+          size="sm"
+          modalLabel="Cancel Job"
+          modalHeading="Confirm cancel"
+          primaryButtonText="Cancel"
+          secondaryButtonText="Close"
+          primaryButtonDisabled={!state.isCancelConfirmed}
+          onRequestClose={() => dispatch({ type: "CLOSE_CANCEL_MODAL" })}
+          onRequestSubmit={() => {
+            const jobId = state.jobToCancel;
+            dispatch({ type: "CLOSE_CANCEL_MODAL" });
+            if (jobId) handleCancelJob(jobId);
+          }}
+        >
+          <p>
+            Cancelling a job stops its processing. This action cannot be undone.
+          </p>
+          <div>
+            <CheckboxGroup legendText="Confirm job to be cancelled">
+              <Checkbox
+                id="checkbox-cancel-job"
+                labelText={
+                  <strong>
+                    {jobToCancel
+                      ? getJobName(jobToCancel)
+                      : (state.jobToCancel ?? "")}
+                  </strong>
+                }
+                checked={state.isCancelConfirmed}
+                onChange={(_, { checked }) =>
+                  dispatch({
+                    type: "SET_CANCEL_CONFIRMED",
                     payload: checked,
                   })
                 }

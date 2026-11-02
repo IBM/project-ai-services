@@ -3,6 +3,7 @@
 
 # --- model server (hack/tilt/model_server.py) ---
 fastapi
+filelock==4.2.4
 uvicorn
 sentence-transformers
 transformers

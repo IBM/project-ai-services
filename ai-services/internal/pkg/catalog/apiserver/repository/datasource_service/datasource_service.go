@@ -147,7 +147,7 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
 	}
 
-	encryptedParams, err := encryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
+	encryptedParams, err := catalogutils.EncryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -441,43 +441,6 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 	}
 
 	return applications, nil
-}
-
-// encryptSensitiveFields returns a copy of params where every key listed in
-// sensitiveKeys has its string value replaced with an AES-256-GCM ciphertext.
-// encryptionKey is the AES-256 secret injected at service construction time (DB_ENCRYPTION_KEY).
-func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool, encryptionKey string) (map[string]any, error) {
-	if len(sensitiveKeys) == 0 {
-		return params, nil
-	}
-
-	if encryptionKey == "" {
-		return nil, fmt.Errorf("encryption key is not configured (DB_ENCRYPTION_KEY must be set)")
-	}
-
-	result := make(map[string]any, len(params))
-	for k, v := range params {
-		if sensitiveKeys[k] {
-			plaintext, ok := v.(string)
-			if !ok {
-				return nil, &ValidationError{
-					Code:    http.StatusBadRequest,
-					Message: fmt.Sprintf("sensitive field %q must be a string value", k),
-				}
-			}
-
-			ciphertext, err := catalogutils.Encrypt(plaintext, encryptionKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to encrypt field %q: %w", k, err)
-			}
-
-			result[k] = ciphertext
-		} else {
-			result[k] = v
-		}
-	}
-
-	return result, nil
 }
 
 // ConnectDatasourcesToApplication links one or more datasource connectors to every eligible
@@ -954,7 +917,7 @@ func (s *DatasourceService) persistAndPropagate(
 	sensitiveFields map[string]bool,
 	updatable map[string]bool,
 ) (*apimodels.UpdateDatasourceResponse, error) {
-	encryptedMerged, err := encryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
+	encryptedMerged, err := catalogutils.EncryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}

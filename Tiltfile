@@ -8,9 +8,12 @@
 #   - Runs PostgreSQL in a Podman container.
 #   - Watches & live-reloads the Go Catalog Backend (recompiles on change).
 #   - Watches & live-reloads the React/Vite Catalog UI (instant HMR).
+#   - Runs a worker natively on the Mac that talks to the Podman VM and joins the catalog.
 #
 # Usage:
 #   tilt up                              # Start the local development environment
+#   tilt up -- --enable_worker=false     # Skip the local Mac worker
+#   tilt up -- --mock_workers=podman,openshift   # Also onboard mocked podman/openshift workers
 #   tilt up -- --backend_port=9090       # Custom ports or parameters
 #   tilt down                            # Stop and remove local state (.tilt/, catalog-db)
 #
@@ -36,6 +39,12 @@ config.define_string("db_encryption_key", args=False)
 config.define_string("mtls_encryption_key", args=False)
 config.define_string("backend_runtime", args=False)
 config.define_string("domain_suffix", args=False)
+
+# Local worker configuration
+config.define_string("enable_worker", args=False)
+config.define_string("worker_name", args=False)
+config.define_string("mock_workers", args=False)
+config.define_string("admin_password", args=False)
 
 # Frontend configuration
 config.define_string("frontend_port", args=False)
@@ -73,10 +82,23 @@ mtls_enc_key = str(cfg.get("mtls_encryption_key", "01234567890123456789012345678
 runtime_flag = str(cfg.get("backend_runtime", "podman"))
 domain_suffix = str(cfg.get("domain_suffix", "localhost"))
 
+enable_worker = str(cfg.get("enable_worker", "true")) == "true"
+worker_name = str(cfg.get("worker_name", "mac-worker"))
+
+# Comma-separated runtime types for mocked workers, e.g. "podman,openshift".
+mock_runtimes = [r.strip() for r in str(cfg.get("mock_workers", "")).split(",") if r.strip()]
+for _r in mock_runtimes:
+    if _r not in ["podman", "openshift"]:
+        fail("--mock_workers: unsupported runtime '{}' (use podman and/or openshift)".format(_r))
+
 ui_port = int(cfg.get("frontend_port", 5173))
 
 # The plaintext password is only known for the default hash.
 admin_pass_display = DEFAULT_ADMIN_PASSWORD if admin_hash == DEFAULT_ADMIN_HASH else "<custom password>"
+
+# The worker resource logs in to the catalog API to request its bootstrap token, so it needs the
+# plaintext password. Pass --admin_password when a custom --admin_password_hash is used.
+worker_admin_pass = str(cfg.get("admin_password", DEFAULT_ADMIN_PASSWORD if admin_hash == DEFAULT_ADMIN_HASH else ""))
 
 # -----------------------------------------------------------------------------
 # Quick links (shown in the header of the "quick-links" resource in the Tilt UI)
@@ -150,7 +172,7 @@ backend_script = """
 
     # Resolve the Podman API socket (needed on macOS where Podman runs in a VM)
     if [ -z "$CONTAINER_HOST" ]; then
-        _conn=$(podman system connection list --format '{{{{if .Default}}}}{{{{.URI}}}}|{{{{.Identity}}}}{{{{end}}}}' 2>/dev/null | head -n1)
+        _conn=$(podman system connection list --format '{{{{if .Default}}}}{{{{.URI}}}}|{{{{.Identity}}}}{{{{end}}}}' 2>/dev/null | grep . | head -n1)
         if [ -n "$_conn" ]; then
             export CONTAINER_HOST="${{_conn%%|*}}"
             export CONTAINER_SSHKEY="${{_conn##*|}}"
@@ -226,7 +248,153 @@ local_resource(
 )
 
 # -------------------------------------------------------------------------
-# 3. Catalog UI (Vite Dev Server with Instant Hot Module Reloading)
+# 3. Local Worker (runs natively on the Mac, talks to the Podman VM)
+# -------------------------------------------------------------------------
+# Runs `ai-services worker grpcstream` on the host. It reaches Podman through the VM's SSH socket
+# (CONTAINER_HOST / CONTAINER_SSHKEY, same as the backend) so no worker pod is deployed.
+# On every (re)start it deregisters any stale worker of the same name, requests a fresh single-use
+# bootstrap token from the catalog API, and joins the gateway. If the stream exits (e.g. the
+# backend restarted and lost its in-memory registry) it loops and re-registers.
+#
+# Limitations: no Caddy proxy runs locally, so PROXY_ROUTE commands fail; Spyre/vfio devices
+# are not available in the VM.
+#
+# worker_script() below is shared by the real worker and the mocked workers (--mock_workers).
+
+# Environment that lets the CLI reach the Podman VM (real worker only).
+PODMAN_ENV_SNIPPET = """
+    # Resolve the Podman API socket (podman runs in a VM on macOS)
+    if [ -z "${CONTAINER_HOST:-}" ]; then
+        _conn=$(podman system connection list --format '{{if .Default}}{{.URI}}|{{.Identity}}{{end}}' 2>/dev/null | grep . | head -n1)
+        if [ -n "$_conn" ]; then
+            export CONTAINER_HOST="${_conn%%|*}"
+            export CONTAINER_SSHKEY="${_conn##*|}"
+        fi
+    fi
+    if [ -f "$HOME/.config/containers/auth.json" ]; then
+        export REGISTRY_AUTH_FILE="$HOME/.config/containers/auth.json"
+    fi
+    # No local Caddy: only needed so the proxy router can be constructed.
+    export CADDY_ADMIN_URL="http://localhost:2019"
+"""
+
+# Mock workers need no Podman VM, cluster, Caddy, Spyre or Helm: the CLI serves every command
+# from an in-memory runtime (AI_SERVICES_MOCK_RUNTIME) and only reports the given runtime type.
+MOCK_ENV_SNIPPET = """
+    export AI_SERVICES_MOCK_RUNTIME="true"
+"""
+
+
+def worker_script(name, rt, mock, tls_dir):
+    return """
+    set -u
+    cd ai-services
+    ROOT="$(cd .. && pwd)"
+    API="http://localhost:{backend_port}"
+    NAME="{worker_name}"
+    PASS="{worker_pass}"
+    BIN="$ROOT/.tilt/bin/ai-services-{worker_name}"
+
+    if [ -z "$PASS" ]; then
+        echo "ERROR: custom --admin_password_hash in use; pass --admin_password=<plaintext> so the worker can log in."
+        exit 1
+    fi
+
+    echo "==> Building ai-services CLI for worker '$NAME'..."
+    mkdir -p "$ROOT/.tilt/bin"
+    go build -o "$BIN" ./cmd/ai-services || exit 1
+{env_snippet}
+    export AI_SERVICES_SKIP_PLATFORM_CHECK="true"
+    export AI_SERVICES_LOG_LEVEL="debug"
+    export MTLS_ENCRYPTION_KEY="{mtls_enc_key}"
+    export DOMAIN_SUFFIX="{domain_suffix}"
+    export WORKER_TLS_DIR="$ROOT/.tilt/{tls_dir}"
+    export AI_SERVICES_BASE_DIR="$ROOT/.tilt/{tls_dir}-data"
+    export CADDY_HTTPS_PORT="443"
+    mkdir -p "$AI_SERVICES_BASE_DIR/models"
+
+    while true; do
+        echo "==> Logging in to the catalog API..."
+        ACCESS=$(curl -fsS -X POST "$API/api/v1/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -nc --arg u '{admin_user}' --arg p "$PASS" '{{username:$u,password:$p}}')" | jq -r .access_token)
+        if [ -z "$ACCESS" ] || [ "$ACCESS" = "null" ]; then
+            echo "login failed, retrying in 5s..."; sleep 5; continue
+        fi
+
+        # Remove any stale registration with the same name (a 'ready' worker cannot be re-registered).
+        ID=$(curl -fsS -H "Authorization: Bearer $ACCESS" "$API/api/v1/workers?page=1&page_size=100" \
+            | jq -r --arg n "$NAME" '.data[] | select((.name|ascii_downcase)==($n|ascii_downcase)) | .id')
+        if [ -n "$ID" ]; then
+            curl -fsS -X DELETE -H "Authorization: Bearer $ACCESS" "$API/api/v1/workers/$ID" >/dev/null
+        fi
+
+        echo "==> Registering worker '$NAME'..."
+        RESP=$(curl -fsS -X POST "$API/api/v1/workers" \
+            -H "Authorization: Bearer $ACCESS" -H 'Content-Type: application/json' \
+            -d "$(jq -nc --arg n "$NAME" '{{worker_name:$n}}')") || {{ echo "register failed, retrying in 5s..."; sleep 5; continue; }}
+        TOKEN=$(echo "$RESP" | jq -r .token)
+        GATEWAY=$(echo "$RESP" | jq -r .gateway_address)
+
+        # Credentials from a previous token are useless after re-registration.
+        rm -rf "$WORKER_TLS_DIR"
+
+        echo "==> Joining gateway $GATEWAY as '$NAME' (runtime={runtime})..."
+        "$BIN" worker grpcstream "$GATEWAY" --token="$TOKEN" --runtime={runtime}
+        echo "worker stream exited; re-registering in 5s..."
+        sleep 5
+    done
+""".format(
+        backend_port=backend_port,
+        worker_name=name,
+        worker_pass=worker_admin_pass,
+        admin_user=admin_user,
+        mtls_enc_key=mtls_enc_key,
+        domain_suffix=domain_suffix,
+        runtime=rt,
+        tls_dir=tls_dir,
+        env_snippet=MOCK_ENV_SNIPPET if mock else PODMAN_ENV_SNIPPET,
+    )
+
+
+WORKER_DEPS = [
+    "ai-services/cmd",
+    "ai-services/internal",
+    "ai-services/assets",
+    "ai-services/go.mod",
+    "ai-services/go.sum",
+]
+WORKER_IGNORE = [
+    "ai-services/bin",
+    "ai-services/tests",
+    "ai-services/docs",
+]
+
+if enable_worker:
+    local_resource(
+        name="catalog-worker",
+        serve_cmd=worker_script(worker_name, "podman", False, "worker-tls"),
+        deps=WORKER_DEPS,
+        ignore=WORKER_IGNORE,
+        resource_deps=["catalog-backend"],
+        labels=["catalog", "worker"],
+    )
+
+# Mocked workers: one resource per requested runtime type (podman and/or openshift).
+for mock_rt in mock_runtimes:
+    mock_name = "mock-" + mock_rt
+    local_resource(
+        name="catalog-worker-" + mock_name,
+        serve_cmd=worker_script(mock_name, mock_rt, True, "worker-tls-" + mock_name),
+        deps=WORKER_DEPS,
+        ignore=WORKER_IGNORE,
+        resource_deps=["catalog-backend"],
+        labels=["catalog", "worker"],
+    )
+
+
+# -------------------------------------------------------------------------
+# 4. Catalog UI (Vite Dev Server with Instant Hot Module Reloading)
 # -------------------------------------------------------------------------
 # Runs Vite in development mode with HMR and automatic proxying of /api to Backend
 ui_script = """
