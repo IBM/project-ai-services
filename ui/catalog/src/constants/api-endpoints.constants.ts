@@ -59,3 +59,7 @@ export const WORKERS_ENDPOINTS = {
   REGISTER_WORKER: "/workers",
   DEREGISTER_WORKER: (id: string) => `/workers/${id}`,
 };
+
+export const MODEL_MANAGEMENT_ENDPOINTS = {
+  GET_CATALOG_MODELS: "/catalog/models",
+};

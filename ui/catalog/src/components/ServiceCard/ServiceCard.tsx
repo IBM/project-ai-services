@@ -7,7 +7,9 @@ export interface ServiceCardProps {
   title: string;
   description: string;
   certifiedBy?: string;
+  certifiedLabel?: string;
   standalone?: boolean;
+  providers?: string;
   onDeploy?: (id: string) => void;
   onLearnMore?: (id: string) => void;
 }
@@ -16,7 +18,9 @@ const ServiceCard = ({
   title,
   description,
   certifiedBy,
+  certifiedLabel,
   standalone,
+  providers,
   onDeploy,
   onLearnMore,
 }: ServiceCardProps) => {
@@ -57,13 +61,18 @@ const ServiceCard = ({
               <span className={styles.certifiedBadge}>
                 <Badge size={16} className={styles.badgeIcon} />
                 <span className={styles.badgeName}>
-                  {certifiedBy} certified
+                  {certifiedLabel ?? `${certifiedBy} certified`}
                 </span>
               </span>
             )}
           </div>
         </div>
-        <p className={styles.description}>{description}</p>
+        <p
+          className={`${styles.description} ${providers ? styles.descriptionWithProviders : ""}`}
+        >
+          {description}
+        </p>
+        {providers && <p className={styles.providers}>{providers}</p>}
       </ProductiveCard>
     </div>
   );

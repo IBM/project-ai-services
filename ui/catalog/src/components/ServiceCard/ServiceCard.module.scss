@@ -98,6 +98,16 @@
   margin-bottom: $spacing-10;
 }
 
+.descriptionWithProviders {
+  margin-bottom: $spacing-05;
+}
+
+.providers {
+  @include type-style("label-01");
+  color: var(--cds-text-secondary);
+  margin-bottom: $spacing-10;
+}
+
 .cardHeader {
   display: flex;
   justify-content: space-between;

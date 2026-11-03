@@ -2,6 +2,11 @@
 
 .modelsContainer {
   background-color: var(--cds-layer-02);
+
+  :global(.cds--tab-content) {
+    background-color: var(--cds-layer-02);
+    min-height: $spacing-13;
+  }
 }
 
 .pageHeader {
@@ -33,4 +38,29 @@
   :global(.cds--tabs__nav-item--selected) {
     border-bottom: 3px solid var(--cds-border-interactive);
   }
+}
+
+.catalogGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  column-gap: $spacing-05;
+  row-gap: $spacing-05;
+  margin: $spacing-07;
+  margin-bottom: 0;
+
+  @include breakpoint("md") {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  @include breakpoint("lg") {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.errorMessage {
+  @include type-style("body-long-01");
+  padding: $spacing-07;
+  margin: $spacing-05 $spacing-06;
+  text-align: center;
+  color: var(--cds-text-error);
 }
