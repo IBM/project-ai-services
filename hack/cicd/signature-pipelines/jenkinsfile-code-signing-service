@@ -4,8 +4,7 @@ pipeline {
     parameters {
         string(
             name: 'VERSION',
-            defaultValue: 'v0.2.0-rc.1',
-            description: 'Version to sign (e.g., v0.2.0-rc.1)'
+            description: 'Version to check out from the repo and build the Go binaries for signing (e.g. v0.2.0)'
         )
     }
     
@@ -90,10 +89,18 @@ pipeline {
                     }
                 }
 
-                stage('Sign and Verify Binaries') {
+                stage('Generate Signatures') {
                     steps {
                         script {
-                            signAndVerifyBinaries()
+                            signBinaries()
+                        }
+                    }
+                }
+
+                stage('Verify Signatures') {
+                    steps {
+                        script {
+                            verifyBinaries()
                         }
                     }
                 }
@@ -229,7 +236,6 @@ def checkoutRepository() {
         git clone ${env.AI_SERVICES_REPO_URL}
         cd ${env.REPO_DIR}
         git checkout ${params.VERSION}
-        ls -lrt
     """
 }
 
@@ -238,15 +244,13 @@ def buildBinaries() {
     
     sh "make -C ${env.REPO_DIR}/ai-services binaries"
     sh "ls -lrt ${env.REPO_DIR}/ai-services/bin"
-    sh "make -C ${env.REPO_DIR}/mcp binaries"
-    sh "ls -lrt ${env.REPO_DIR}/mcp/bin"
 }
 
-def signAndVerifyBinaries() {
-    echo "Signing and verifying binaries..."
+def signBinaries() {
+    echo "Generating signatures for binaries..."
     
     sh '''
-        find "./project-ai-services/ai-services/bin" "./project-ai-services/mcp/bin" -type f -executable | while read -r BINARY_PATH; do
+        find "./project-ai-services/ai-services/bin" -type f -executable | while read -r BINARY_PATH; do
             BINARY_NAME=$(basename "$BINARY_PATH")
             echo "Processing $BINARY_NAME..."
             
@@ -267,7 +271,21 @@ def signAndVerifyBinaries() {
             mv "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.cosign.sig" \
                "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.sig"
             
-            # Verify the signature
+            echo "✓ $BINARY_NAME signed successfully"
+            echo "---"
+        done
+    '''
+    
+    echo 'Signatures generated for all binaries'
+}
+
+def verifyBinaries() {
+    echo "Verifying binary signatures..."
+    
+    sh '''
+        find "./project-ai-services/ai-services/bin" -type f -executable | while read -r BINARY_PATH; do
+            BINARY_NAME=$(basename "$BINARY_PATH")
+            
             echo "Verifying signature for $BINARY_NAME..."
             cosign verify-blob \
                 --key "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/cosign.pub" \
@@ -275,12 +293,12 @@ def signAndVerifyBinaries() {
                 --signature "$DOCKER_AGENT_PUBLIC_ARTIFACTS_DIR/${BINARY_NAME}.sig" \
                 "$BINARY_PATH"
             
-            echo "✓ $BINARY_NAME signed and verified successfully"
+            echo "✓ $BINARY_NAME signature verified successfully"
             echo "---"
         done
     '''
     
-    echo 'All binaries signed and verified successfully'
+    echo 'All binary signatures verified successfully'
 }
 
 def uploadArtifacts() {
@@ -288,8 +306,12 @@ def uploadArtifacts() {
     
     sh "ls -lrt ${env.PUBLIC_ARTIFACTS_DIR}"
     
+    // Bundle all public artifacts into a single tarball and archive only that file
+    def tarballName = "release-${params.VERSION}-artifacts.tar.gz"
+    sh "tar -czf ${tarballName} -C ${env.PUBLIC_ARTIFACTS_DIR} ."
+    
     archiveArtifacts(
-        artifacts: 'public-artifacts/**/*',
+        artifacts: tarballName,
         fingerprint: true,
         allowEmptyArchive: false
     )

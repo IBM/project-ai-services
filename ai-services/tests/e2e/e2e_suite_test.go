@@ -24,6 +24,7 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
 	"github.com/project-ai-services/ai-services/tests/e2e/digitization"
+	"github.com/project-ai-services/ai-services/tests/e2e/extraction"
 	"github.com/project-ai-services/ai-services/tests/e2e/podman"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
 	"github.com/project-ai-services/ai-services/tests/e2e/similarity"
@@ -61,6 +62,7 @@ var (
 	summarizePort               string
 	similarityPort              string
 	judgePort                   string
+	extractPort                 string
 	goldenDatasetFile           string
 	defaultRagAccuracyThreshold = 0.70 //nolint:mnd
 	defaultMaxRetries           = 2    //nolint:mnd
@@ -205,6 +207,83 @@ func waitForSummarizeHealthy(logPrefix, baseURL string, timeout time.Duration) {
 	}
 }
 
+// waitForExtractURL polls application info until the extract-api URL is present.
+func waitForExtractURL(logPrefix string, timeout time.Duration) string {
+	pollCtx, pollCancel := context.WithTimeout(context.Background(), timeout)
+	defer pollCancel()
+
+	const pollInterval = 15 * time.Second
+	var (
+		infoOutput string
+		resultURL  string
+	)
+	for {
+		var infoErr error
+		infoOutput, infoErr = cli.ApplicationInfo(pollCtx, cfg, appName, appRuntime)
+		if infoErr != nil {
+			logger.Warningf("[%s] application info error while polling for extract URL: %v", logPrefix, infoErr)
+		} else {
+			resultURL = cli.ExtractExtractURL(infoOutput)
+			if resultURL != "" {
+				break
+			}
+		}
+		if pollCtx.Err() != nil {
+			ginkgo.Fail(fmt.Sprintf(
+				"[%s] Timed out waiting for extract-api URL in 'application info' for app %q.\nLast output:\n%s",
+				logPrefix, appName, infoOutput))
+		}
+		logger.Infof("[%s] extract-api URL not yet present - retrying in %s", logPrefix, pollInterval)
+		select {
+		case <-pollCtx.Done():
+			ginkgo.Fail(fmt.Sprintf("[%s] Timed out waiting for extract-api URL for app %q", logPrefix, appName))
+		case <-time.After(pollInterval):
+		}
+	}
+	return resultURL
+}
+
+// waitForExtractHealthy polls /health on the extract URL until the service is healthy.
+func waitForExtractHealthy(logPrefix, baseURL string, timeout time.Duration) {
+	healthCtx, healthCancel := context.WithTimeout(context.Background(), timeout)
+	defer healthCancel()
+
+	const pollInterval = 15 * time.Second
+	logger.Infof("[%s] Waiting for extract-api to be healthy at %s/health", logPrefix, baseURL)
+	for {
+		if err := extraction.HealthCheck(healthCtx, baseURL); err == nil {
+			logger.Infof("[%s] extract-api is healthy", logPrefix)
+			return
+		} else {
+			if healthCtx.Err() != nil {
+				ginkgo.Fail(fmt.Sprintf(
+					"[%s] Timed out waiting for extract-api to become healthy at %s - last error: %v",
+					logPrefix, baseURL, err))
+			}
+			logger.Infof("[%s] extract-api not yet healthy (%v) - retrying in %s", logPrefix, err, pollInterval)
+			select {
+			case <-healthCtx.Done():
+				ginkgo.Fail(fmt.Sprintf("[%s] Timed out waiting for extract-api to become healthy at %s", logPrefix, baseURL))
+			case <-time.After(pollInterval):
+			}
+		}
+	}
+}
+
+// expectShippingItemFields asserts every extracted shipping item has the required sub-fields.
+// "size" is nullable in the schema, so only the presence of its key is checked.
+func expectShippingItemFields(items []interface{}) {
+	required := []string{"weight", "weight_unit", "type", "size"}
+
+	for i, rawItem := range items {
+		item, castOK := rawItem.(map[string]interface{})
+		gomega.Expect(castOK).To(gomega.BeTrue(), "items[%d] must be an object", i)
+
+		missing, ok := common.AllFieldsPresent(item, required)
+		gomega.Expect(ok).To(gomega.BeTrue(), "expected sub-field %q in items[%d]", missing, i)
+	}
+}
+
 // catalogLoginWithDiscovery logs in to the catalog, auto-discovering the server URL; fatal=true fails the suite on error.
 func catalogLoginWithDiscovery(loginCtx context.Context, fatal bool) {
 	_, loginUsername, loginPassword := bootstrap.GetCatalogCreds()
@@ -300,6 +379,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	summarizePort = getEnvWithDefault("SUMMARIZE_PORT", "6100")
 	similarityPort = getEnvWithDefault("SIMILARITY_PORT", "9100")
 	judgePort = getEnvWithDefault("LLM_JUDGE_PORT", "8000")
+	extractPort = getEnvWithDefault("EXTRACT_PORT", "9500")
 	if ragAccuracyThreshold, err := strconv.ParseFloat(
 		getEnvWithDefault("RAG_ACCURACY_THRESHOLD", "0.70"),
 		64,
@@ -308,7 +388,7 @@ var _ = ginkgo.BeforeSuite(func() {
 	} else {
 		logger.Warningf("[SETUP][WARN] Invalid RAG_ACCURACY_THRESHOLD, using default %.2f", defaultRagAccuracyThreshold)
 	}
-	logger.Infof("[SETUP] Ports: backend=%s ui=%s digitize=%s digitizeUi = %s summarize=%s similarity=%s judge=%s | accuracy=%.2f", backendPort, uiPort, digitizePort, digitizeUiPort, summarizePort, similarityPort, judgePort, defaultRagAccuracyThreshold)
+	logger.Infof("[SETUP] Ports: backend=%s ui=%s digitize=%s digitizeUi=%s summarize=%s similarity=%s judge=%s extract=%s | accuracy=%.2f", backendPort, uiPort, digitizePort, digitizeUiPort, summarizePort, similarityPort, judgePort, extractPort, defaultRagAccuracyThreshold)
 
 	ginkgo.By("Loading application create params from environment")
 	createParams = bootstrap.GetCreateParams()
@@ -538,7 +618,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
-		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog configure - using existing application")
 			}
@@ -562,7 +642,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Infof("[TEST] Catalog service is running. Backend URL (from info): %s", catalogBackendURL)
 			}
 		})
-		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog info - using existing application")
 			}
@@ -597,7 +677,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infoln("[TEST] Catalog info output validated successfully!")
 		})
-		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "catalog-login"), func() {
+		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "catalog-login"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog login - using existing application")
 			}
@@ -712,7 +792,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests"), func() {
 			if providedAppName != "" {
 				// Extract URLs from existing application
 				ctx, cancel := withTimeout(5 * time.Minute)
@@ -779,8 +859,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				}
 				logger.Infof("[TEST] RAG application %s created and validated", appName)
-			} else if templateName == "summarize" || templateName == "digitize" {
-				// Deploy standalone service (summarize or digitize).
+			} else if templateName == "summarize" || templateName == "digitize" || templateName == "extract" {
+				// Deploy standalone service (summarize, digitize, or extract).
 				// URL resolution is deferred to each context's BeforeAll via application info.
 				_, err := cli.CreateApp(
 					ctx,
@@ -794,7 +874,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				logger.Infof("[TEST] %s service %s created successfully", templateName, appName)
 			} else {
-				ginkgo.Fail(fmt.Sprintf("Unsupported template: %s. Supported templates: rag, summarize, digitize", templateName))
+				ginkgo.Fail(fmt.Sprintf("Unsupported template: %s. Supported templates: rag, summarize, digitize, extract", templateName))
 			}
 
 			logger.Infof("[TEST] Application %s created, healthy, and endpoints validated", appName)
@@ -2209,7 +2289,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			finalStatus, err := summarization.SubmitJobExpectingFailure(ctx, summarizeBaseURL, "", "standard", jobName, 2*time.Minute)
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("job failed"))
-			gomega.Expect(finalStatus.Status).To(gomega.Equal(summarization.JobStatusFailed))
+			gomega.Expect(finalStatus.Status).To(gomega.Equal(common.JobStatusFailed))
 			gomega.Expect(finalStatus.Error).NotTo(gomega.BeNil())
 			gomega.Expect(*finalStatus.Error).To(gomega.ContainSubstring("Extracted text is empty"))
 			logger.Infof("[TEST] ✓ Empty text correctly failed with error: %s", *finalStatus.Error)
@@ -3431,8 +3511,550 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				})
 		})
 
+	ginkgo.Context("Entity Extraction Tests", ginkgo.Label("extraction-tests"), func() {
+		var extractBaseURL string
+		var createdJobIDs []string
+
+		ginkgo.BeforeAll(func() {
+			if templateName != "extract" {
+				ginkgo.Skip(fmt.Sprintf("Skipping extraction tests - template is '%s', not 'extract'", templateName))
+			}
+			if appName == "" {
+				ginkgo.Fail("Application name is not set")
+			}
+
+			logger.Infof("[EXTRACT] Setting up entity extraction tests for app: %s", appName)
+
+			loginCtx, loginCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			catalogLoginWithDiscovery(loginCtx, true)
+			loginCancel()
+
+			extractBaseURL = waitForExtractURL("EXTRACT", 10*time.Minute)
+			logger.Infof("[EXTRACT] Extract Base URL: %s", extractBaseURL)
+			waitForExtractHealthy("EXTRACT", extractBaseURL, 15*time.Minute)
+		})
+
+		ginkgo.AfterEach(func() {
+			for _, jobID := range createdJobIDs {
+				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				_, _ = extraction.WaitForJobCompletion(cleanCtx, extractBaseURL, jobID, 5*time.Minute)
+				_ = extraction.DeleteJob(cleanCtx, extractBaseURL, jobID)
+				cleanCancel()
+			}
+			createdJobIDs = nil
+		})
+
+		ginkgo.It("verifies entity extraction service health", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			err := extraction.HealthCheck(ctx, extractBaseURL)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			logger.Infof("[TEST] ✓ Entity extraction service health check passed")
+		})
+
+		ginkgo.It("extracts all required shipping fields from the DHL example email", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.ShippingUpdateExample().Text)
+
+			resp, err := extraction.Extract(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			missingField, ok := common.AllFieldsPresent(resp.GetData(),
+				[]string{"sender_info", "shipping_date", "tracking_number", "items"})
+			gomega.Expect(ok).To(gomega.BeTrue(),
+				"expected field %q to be present in extraction response", missingField)
+
+			gomega.Expect(common.FieldHasValue(resp.GetData(), "sender_info")).To(gomega.BeTrue(),
+				"expected non-nil sender_info in extraction response")
+
+			items, itemsOK := resp.GetData()["items"].([]interface{})
+			gomega.Expect(itemsOK).To(gomega.BeTrue(), "expected items to be an array")
+			gomega.Expect(items).NotTo(gomega.BeEmpty(), "expected at least one item in items array")
+
+			logger.Infof("[TEST] ✓ DHL extraction: tracking=%v date=%v items=%d sender=%v",
+				resp.GetData()["tracking_number"], resp.GetData()["shipping_date"],
+				len(items), resp.GetData()["sender_info"])
+		})
+
+		ginkgo.It("extracts sender_info sub-fields from the DHL example email", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.ShippingUpdateExample().Text)
+
+			resp, err := extraction.Extract(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			senderRaw, senderExists := resp.GetData()["sender_info"]
+			gomega.Expect(senderExists).To(gomega.BeTrue(), "sender_info must exist")
+
+			sender, castOK := senderRaw.(map[string]interface{})
+			gomega.Expect(castOK).To(gomega.BeTrue(), "sender_info must be an object")
+
+			for _, subField := range []string{"name", "phone", "email", "company"} {
+				val, ok := sender[subField]
+				gomega.Expect(ok).To(gomega.BeTrue(),
+					"expected sub-field %q in sender_info", subField)
+				gomega.Expect(fmt.Sprintf("%v", val)).NotTo(gomega.BeEmpty(),
+					"expected non-empty value for sender_info.%s", subField)
+			}
+
+			logger.Infof("[TEST] ✓ sender_info sub-fields verified: %v", sender)
+		})
+
+		ginkgo.It("extracts item array fields from the DHL example email", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.ShippingUpdateExample().Text)
+
+			resp, err := extraction.Extract(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			items, itemsOK := resp.GetData()["items"].([]interface{})
+			gomega.Expect(itemsOK).To(gomega.BeTrue(), "items must be an array")
+			gomega.Expect(items).NotTo(gomega.BeEmpty(), "items array must not be empty")
+
+			expectShippingItemFields(items)
+
+			logger.Infof("[TEST] ✓ item array fields verified across %d item(s)", len(items))
+		})
+
+		ginkgo.It("extracts handling_instructions from the DHL example email", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.ShippingUpdateExample().Text)
+
+			resp, err := extraction.Extract(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			val, exists := resp.GetData()["handling_instructions"]
+			gomega.Expect(exists).To(gomega.BeTrue(),
+				"expected handling_instructions key in response")
+			gomega.Expect(fmt.Sprintf("%v", val)).NotTo(gomega.BeEmpty(),
+				"expected non-empty handling_instructions")
+
+			logger.Infof("[TEST] ✓ handling_instructions: %v", val)
+		})
+
+		ginkgo.It("extracts multiple items from the FedEx multi-item email", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+
+			resp, err := extraction.Extract(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			missingField, ok := common.AllFieldsPresent(resp.GetData(),
+				[]string{"sender_info", "shipping_date", "tracking_number", "items"})
+			gomega.Expect(ok).To(gomega.BeTrue(),
+				"expected field %q to be present in extraction response", missingField)
+
+			items, itemsOK := resp.GetData()["items"].([]interface{})
+			gomega.Expect(itemsOK).To(gomega.BeTrue(), "items must be an array")
+			gomega.Expect(len(items)).To(gomega.BeNumerically(">=", 2),
+				"expected at least 2 items extracted from FedEx email, got %d", len(items))
+
+			logger.Infof("[TEST] ✓ FedEx multi-item extraction: %d items, tracking=%v",
+				len(items), resp.GetData()["tracking_number"])
+		})
+
+		ginkgo.It("extracts FedEx sender_info with correct company name", func() {
+			ctx, cancel := withTimeout(5 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+
+			resp, err := extraction.Extract(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(resp).NotTo(gomega.BeNil())
+
+			senderRaw, senderExists := resp.GetData()["sender_info"]
+			gomega.Expect(senderExists).To(gomega.BeTrue(), "sender_info must exist")
+			sender, castOK := senderRaw.(map[string]interface{})
+			gomega.Expect(castOK).To(gomega.BeTrue(), "sender_info must be an object")
+
+			company := fmt.Sprintf("%v", sender["company"])
+			gomega.Expect(company).NotTo(gomega.BeEmpty(),
+				"expected non-empty company in sender_info")
+
+			logger.Infof("[TEST] ✓ FedEx sender: name=%v company=%v email=%v",
+				sender["name"], sender["company"], sender["email"])
+		})
+
+		ginkgo.It("returns 422 for an empty text input", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest("")
+
+			_, statusCode, err := extraction.ExtractExpectingError(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnprocessableEntity),
+				"expected 422 for empty text input, got %d", statusCode)
+
+			logger.Infof("[TEST] ✓ empty text correctly rejected with status %d", statusCode)
+		})
+
+		ginkgo.It("returns 400 for a missing json_schema", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			req := extraction.ExtractRequest{
+				Name:       "shipping-update-v4",
+				JSONSchema: nil,
+				Text:       extraction.ShippingUpdateExample().Text,
+			}
+
+			_, statusCode, err := extraction.ExtractExpectingError(ctx, extractBaseURL, req)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusBadRequest),
+				"expected 400 for missing json_schema, got %d", statusCode)
+
+			logger.Infof("[TEST] ✓ missing json_schema correctly rejected with status %d", statusCode)
+		})
+
+		ginkgo.It("returns 422 for wrong content-type (text/plain body)", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody := bytes.NewBufferString("plain text, not JSON")
+			rawResp, statusCode, err := extraction.ExtractRawBody(ctx, extractBaseURL, rawBody, "text/plain")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnprocessableEntity),
+				"expected 422 for wrong content-type, got %d (body: %s)", statusCode, string(rawResp))
+
+			logger.Infof("[TEST] ✓ wrong content-type correctly rejected with status %d", statusCode)
+		})
+
+		ginkgo.It("returns 422 for malformed JSON body", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			rawBody := bytes.NewBufferString(`{"text": "valid text", "json_schema": {broken`)
+			rawResp, statusCode, err := extraction.ExtractRawBody(ctx, extractBaseURL, rawBody, "application/json")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(statusCode).To(gomega.Equal(http.StatusUnprocessableEntity),
+				"expected 422 for malformed JSON, got %d (body: %s)", statusCode, string(rawResp))
+
+			logger.Infof("[TEST] ✓ malformed JSON correctly rejected with status %d", statusCode)
+		})
+	})
+
+	ginkgo.Context("Async Entity Extraction Tests", ginkgo.Label("extraction-tests", "extraction-async"), func() {
+		var asyncExtractBaseURL string
+
+		var createdJobIDs []string
+
+		ginkgo.BeforeAll(func() {
+			if templateName != "extract" {
+				ginkgo.Skip(fmt.Sprintf(
+					"Skipping async entity extraction tests — template is %q, not \"extract\"", templateName))
+			}
+			if appName == "" {
+				ginkgo.Fail("Application name is not set")
+			}
+
+			logger.Infof("[EXTRACT-ASYNC] Setting up async entity extraction tests for app: %s", appName)
+
+			loginCtx, loginCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			catalogLoginWithDiscovery(loginCtx, true)
+			loginCancel()
+
+			asyncExtractBaseURL = waitForExtractURL("EXTRACT-ASYNC", 10*time.Minute)
+			logger.Infof("[EXTRACT-ASYNC] Extract Base URL: %s", asyncExtractBaseURL)
+			waitForExtractHealthy("EXTRACT-ASYNC", asyncExtractBaseURL, 15*time.Minute)
+		})
+
+		ginkgo.AfterEach(func() {
+			for _, jobID := range createdJobIDs {
+				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_ = extraction.DeleteJob(cleanCtx, asyncExtractBaseURL, jobID)
+				cleanCancel()
+			}
+			createdJobIDs = nil
+		})
+
+		ginkgo.It("creates an async extraction job and receives 202 with a job_id", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-create-%d", time.Now().Unix())
+
+			jobResp, err := extraction.CreateJobWithText(ctx, asyncExtractBaseURL, req, jobName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(jobResp).NotTo(gomega.BeNil())
+			gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty(), "job_id must not be empty")
+			gomega.Expect(jobResp.FileCount).To(gomega.BeNumerically(">=", 1),
+				"file_count must be at least 1")
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+			logger.Infof("[TEST] ✓ job created: job_id=%s file_count=%d", jobResp.JobID, jobResp.FileCount)
+		})
+
+		ginkgo.It("job reaches accepted or in_progress status immediately after creation", func() {
+			ctx, cancel := withTimeout(2 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-status-%d", time.Now().Unix())
+
+			jobResp, err := extraction.CreateJobWithText(ctx, asyncExtractBaseURL, req, jobName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, jobResp.JobID)
+
+			detail, err := extraction.GetJobDetail(ctx, asyncExtractBaseURL, jobResp.JobID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(detail.JobID).To(gomega.Equal(jobResp.JobID))
+			gomega.Expect(detail.Status).To(gomega.BeElementOf(
+				common.JobStatusAccepted,
+				common.JobStatusInProgress,
+				common.JobStatusCompleted,
+				common.JobStatusCompletedWithErrors,
+			), "expected job to be in a non-failed state right after creation")
+
+			logger.Infof("[TEST] ✓ initial status after creation: %s", detail.Status)
+		})
+
+		ginkgo.It("completes async extraction of FedEx email and result contains required fields", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-fedex-%d", time.Now().Unix())
+
+			detail, result, err := extraction.SubmitAndVerifyJob(
+				ctx, asyncExtractBaseURL, req, jobName, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(detail).NotTo(gomega.BeNil())
+			createdJobIDs = append(createdJobIDs, detail.JobID)
+
+			gomega.Expect(detail.Status).To(gomega.BeElementOf(
+				common.JobStatusCompleted,
+				common.JobStatusCompletedWithErrors,
+			))
+			gomega.Expect(result).NotTo(gomega.BeNil(), "result must not be nil on completed job")
+
+			missingField, ok := common.AllFieldsPresent(result.GetData(),
+				[]string{"sender_info", "shipping_date", "tracking_number", "items"})
+			gomega.Expect(ok).To(gomega.BeTrue(),
+				"expected field %q in async job result", missingField)
+
+			items, itemsOK := result.GetData()["items"].([]interface{})
+			gomega.Expect(itemsOK).To(gomega.BeTrue(), "items must be an array")
+			gomega.Expect(len(items)).To(gomega.BeNumerically(">=", 2),
+				"expected at least 2 items from FedEx email, got %d", len(items))
+
+			logger.Infof("[TEST] ✓ async job completed: job_id=%s status=%s tracking=%v items=%d",
+				detail.JobID, detail.Status, result.GetData()["tracking_number"], len(items))
+		})
+
+		ginkgo.It("completed job detail includes document list with status=completed", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-docs-%d", time.Now().Unix())
+
+			detail, _, err := extraction.SubmitAndVerifyJob(
+				ctx, asyncExtractBaseURL, req, jobName, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, detail.JobID)
+
+			gomega.Expect(detail.Documents).NotTo(gomega.BeEmpty(),
+				"completed job must include at least one document entry")
+
+			for i, doc := range detail.Documents {
+				gomega.Expect(doc.DocID).NotTo(gomega.BeEmpty(),
+					"document[%d] must have a non-empty doc_id", i)
+				gomega.Expect(doc.Filename).NotTo(gomega.BeEmpty(),
+					"document[%d] must have a non-empty filename", i)
+				gomega.Expect(doc.Status).To(gomega.BeElementOf(
+					string(common.JobDocStatusCompleted),
+					string(common.JobDocStatusFailed),
+				), "document[%d] must be in a terminal state", i)
+			}
+
+			logger.Infof("[TEST] ✓ job detail documents verified: count=%d", len(detail.Documents))
+		})
+
+		ginkgo.It("lists jobs and the newly created job appears in the response", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-list-%d", time.Now().Unix())
+
+			detail, _, err := extraction.SubmitAndVerifyJob(
+				ctx, asyncExtractBaseURL, req, jobName, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, detail.JobID)
+
+			listResp, err := extraction.ListJobs(ctx, asyncExtractBaseURL, 20, 0, "", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(listResp.Pagination.Total).To(gomega.BeNumerically(">=", 1))
+
+			found := false
+			for _, j := range listResp.Data {
+				if j.JobID == detail.JobID {
+					found = true
+					break
+				}
+			}
+			gomega.Expect(found).To(gomega.BeTrue(),
+				"expected job %s to appear in jobs list", detail.JobID)
+
+			logger.Infof("[TEST] ✓ list jobs: total=%d found job_id=%s",
+				listResp.Pagination.Total, detail.JobID)
+		})
+
+		ginkgo.It("lists jobs filtered by status=completed returns only completed jobs", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-list-status-%d", time.Now().Unix())
+
+			detail, _, err := extraction.SubmitAndVerifyJob(
+				ctx, asyncExtractBaseURL, req, jobName, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, detail.JobID)
+
+			listResp, err := extraction.ListJobs(ctx, asyncExtractBaseURL, 20, 0, "completed", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			for _, j := range listResp.Data {
+				gomega.Expect(j.Status).To(gomega.Equal(common.JobStatusCompleted),
+					"status-filtered list must only contain completed jobs, got %s for job %s",
+					j.Status, j.JobID)
+			}
+
+			logger.Infof("[TEST] ✓ status=completed filter verified: %d jobs", len(listResp.Data))
+		})
+
+		ginkgo.It("lists jobs with pagination limit=1 returns exactly one job", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-paging-%d", time.Now().Unix())
+
+			detail, _, err := extraction.SubmitAndVerifyJob(
+				ctx, asyncExtractBaseURL, req, jobName, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			createdJobIDs = append(createdJobIDs, detail.JobID)
+
+			listResp, err := extraction.ListJobs(ctx, asyncExtractBaseURL, 1, 0, "", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(listResp.Data).To(gomega.HaveLen(1),
+				"limit=1 must return exactly one job")
+
+			logger.Infof("[TEST] ✓ pagination limit=1 verified")
+		})
+
+		ginkgo.It("deletes a completed job by ID and it no longer appears in listing", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+			jobName := fmt.Sprintf("async-delete-%d", time.Now().Unix())
+
+			detail, _, err := extraction.SubmitAndVerifyJob(
+				ctx, asyncExtractBaseURL, req, jobName, 15*time.Minute)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			jobID := detail.JobID
+
+			gomega.Expect(extraction.DeleteJob(ctx, asyncExtractBaseURL, jobID)).To(gomega.Succeed())
+			logger.Infof("[TEST] job deleted: %s", jobID)
+
+			_, getErr := extraction.GetJobDetail(ctx, asyncExtractBaseURL, jobID)
+			gomega.Expect(getErr).To(gomega.HaveOccurred(),
+				"expected GET /jobs/%s to fail after deletion", jobID)
+
+			logger.Infof("[TEST] ✓ deleted job is no longer retrievable")
+		})
+
+		ginkgo.It("bulk-deletes all jobs with confirm=true", func() {
+			ctx, cancel := withTimeout(15 * time.Minute)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest(extraction.FedExShippingText)
+
+			for i := range 2 {
+				jobName := fmt.Sprintf("async-bulk-del-%d-%d", i, time.Now().Unix())
+				detail, _, err := extraction.SubmitAndVerifyJob(
+					ctx, asyncExtractBaseURL, req, jobName, 15*time.Minute)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				createdJobIDs = append(createdJobIDs, detail.JobID)
+			}
+
+			gomega.Expect(extraction.DeleteAllJobs(ctx, asyncExtractBaseURL)).To(gomega.Succeed())
+			createdJobIDs = nil
+
+			listResp, err := extraction.ListJobs(ctx, asyncExtractBaseURL, 20, 0, "", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(listResp.Pagination.Total).To(gomega.Equal(0),
+				"expected zero jobs after bulk delete, got %d", listResp.Pagination.Total)
+
+			logger.Infof("[TEST] ✓ bulk delete verified: 0 jobs remaining")
+		})
+
+		ginkgo.It("returns 415 when creating a job with an empty text file", func() {
+			ctx, cancel := withTimeout(30 * time.Second)
+			defer cancel()
+
+			req := extraction.NewShippingUpdateRequest("")
+			jobName := fmt.Sprintf("async-err-empty-%d", time.Now().Unix())
+
+			_, err := extraction.CreateJobWithText(ctx, asyncExtractBaseURL, req, jobName)
+			gomega.Expect(err).To(gomega.HaveOccurred(),
+				"expected error when creating job with empty text")
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("unexpected status 415"),
+				"expected 415 (INVALID_FILE_CONTENT) when creating job with empty text")
+
+			logger.Infof("[TEST] ✓ empty text job creation correctly rejected: %v", err)
+		})
+
+		ginkgo.It("returns 404 for a GET on a non-existent job ID", func() {
+			ctx, cancel := withTimeout(10 * time.Second)
+			defer cancel()
+
+			_, err := extraction.GetJobDetail(ctx, asyncExtractBaseURL, "invalid-job-id-000")
+			gomega.Expect(err).To(gomega.HaveOccurred(),
+				"expected error for non-existent job ID")
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("404"),
+				"expected 404 for non-existent job ID")
+
+			logger.Infof("[TEST] ✓ non-existent job correctly returns 404: %v", err)
+		})
+
+		ginkgo.It("returns 404 for a result GET on a non-existent job ID", func() {
+			ctx, cancel := withTimeout(10 * time.Second)
+			defer cancel()
+
+			_, err := extraction.GetJobResult(ctx, asyncExtractBaseURL, "invalid-job-id-000", "invalid-doc-id-000")
+			gomega.Expect(err).To(gomega.HaveOccurred(),
+				"expected error for non-existent job/doc ID")
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("404"),
+				"expected 404 for non-existent job/doc ID")
+
+			logger.Infof("[TEST] ✓ non-existent job result correctly returns 404: %v", err)
+		})
+	})
+
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
-		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests"), func() {
 			if providedAppName != "" {
 				// The app was provided by the caller - do not delete it so the
 				// caller can inspect or reuse it after the run.
@@ -3448,7 +4070,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[TEST] Application %s deleted successfully", appName)
 		})
-		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "catalog-logout"), func() {
+		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "catalog-logout"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog logout only supported for podman runtime")
 			}

@@ -13,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	workercmn "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
 )
 
 // getExistingConfigFromCatalogBackend retrieves the existing configuration from the catalog pod.
@@ -39,6 +40,9 @@ func validateRequiredFields(opts *catalogUtils.PodmanConfigureOptions) error {
 	if opts.HttpsPort == 0 {
 		return fmt.Errorf("CADDY_HTTPS_PORT environment variable not found in catalog pod")
 	}
+	if opts.PrivateIngressPort == 0 {
+		return fmt.Errorf("CADDY_PRIVATE_INGRESS_PORT environment variable not found in catalog pod")
+	}
 	if opts.BaseDir == "" {
 		return fmt.Errorf("AI_SERVICES_BASE_DIR environment variable not found in catalog pod")
 	}
@@ -46,8 +50,8 @@ func validateRequiredFields(opts *catalogUtils.PodmanConfigureOptions) error {
 	return nil
 }
 
-// validateReconfigureParameters validates that domain, HTTPS port, base directory, and certificates haven't changed during reconfigure.
-// This function performs all validation checks including certificate validation.
+// validateReconfigureParameters validates that domain, HTTPS port, base directory, certificates,
+// and --skip-local-worker haven't changed during reconfigure.
 func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newOpts *catalogUtils.PodmanConfigureOptions, caddyCtx *caddy.Context) error {
 	// Get existing configuration from catalog-backend pod
 	existingOpts, err := getExistingConfigFromCatalogBackend(ctx, rt)
@@ -60,12 +64,25 @@ func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newO
 		return err
 	}
 
+	// Guard A: block --skip-local-worker changes while the catalog pod is running.
+	// Read LOCAL_WORKER from the live container env; LOCAL_WORKER=true means the
+	// original run had --skip-local-worker=false and vice-versa.
+	// Block when podLocalWorker == skipLocalWorker (the values are inconsistent).
+	podLocalWorker, err := workercmn.IsPodmanLocalWorker(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("failed to read LOCAL_WORKER from catalog pod: %w", err)
+	}
+
+	if podLocalWorker == newOpts.SkipLocalWorker {
+		return fmt.Errorf("--skip-local-worker flag cannot be changed on re-run; to change this setting, uninstall and re-run catalog configure")
+	}
+
 	// Validate certificate changes if SSL certificates are provided
 
 	return validateCertificateChanges(ctx, newOpts, caddyCtx)
 }
 
-// validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
+// validateConfigParameters validates domain, HTTPS port, private ingress port, and base directory haven't changed.
 func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
 	if existingOpts.DomainName != domainSuffix {
 		return fmt.Errorf("domain change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change domain", existingOpts.DomainName, domainSuffix)
@@ -73,6 +90,10 @@ func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions,
 
 	if existingOpts.HttpsPort != newOpts.HttpsPort {
 		return fmt.Errorf("HTTPS port change not allowed during reconfigure: existing=%d, new=%d. Please uninstall the catalog deployment and re-run configure to change https port", existingOpts.HttpsPort, newOpts.HttpsPort)
+	}
+
+	if existingOpts.PrivateIngressPort != newOpts.PrivateIngressPort {
+		return fmt.Errorf("private ingress port change not allowed during reconfigure: existing=%d, new=%d. Please uninstall the catalog deployment and re-run configure to change private ingress port", existingOpts.PrivateIngressPort, newOpts.PrivateIngressPort)
 	}
 
 	if existingOpts.BaseDir != newOpts.BaseDir {

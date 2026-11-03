@@ -6,15 +6,9 @@
       "description": "Provides farmers with accurate, validated crop‑growing guidance tailored to their region and preferred language.",
       "creator": "IBM",
       "domain": "Agriculture",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Video demos"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Video demos"],
+      "tag": ["Digital assistant"],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
       "demoTitle": "IBM Spyre Accelerator for Power: turn-key solution for AI enterprise workloads",
       "demoDescription": "With IBM Spyre Accelerator - for Power, you can easily incorporate turnkey AI into your enterprise processes, boost productivity and directly measure value.",
@@ -26,15 +20,9 @@
       "description": "Enables finance teams to investigate fraud, identify high‑value clients, and uncover non‑performing assets using their core data—without needing specialized AI or IT skills such as SQL.",
       "creator": "IBM",
       "domain": "Banking and finance",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Video demos"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Video demos"],
+      "tag": ["Digital assistant"],
       "demo": "https://mediacenter.ibm.com/media/Infusing%20AI%20into%20mission%20critical%20workloads%20with%20PowerVS%20and%20watsonx.ai/1_fzqutamr",
       "demoTitle": "Infusing AI into mission critical workloads with PowerVS and watsonx.ai",
       "demoDescription": "PowerVS provides a great environment for hosting Enterprise Mission Critical Applications and watonsx.ai provides a premier environment for Generative AI. This demo illustrates how you can connect them together to start your AI Journey.",
@@ -46,19 +34,20 @@
       "description": "Enables teams to ask a question to analyze their data, understand business logic, and uncover what's happening, why it matters, and what to do next.",
       "creator": "IBM",
       "domain": "Enterprise resource planning",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Video demos"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Video demos", "Client stories and testimonials"],
+      "tag": ["Digital assistant"],
       "demo": "https://mediacenter.ibm.com/media/IBM%20watsonx%20BI%2C%20your%20new%20AI-powered%20business%20insights%20agent/1_402dvneq",
       "demoTitle": "IBM watsonx BI, your new AI-powered business insights agent",
       "demoDescription": "Meet IBM watsonx BI — your new AI-powered business insights agent.Just ask a question, and it analyzes your data, understands your business logic, and reveals what's happening, why it matters, and what you can do about it.",
-      "demoDuration": "2:03"
+      "demoDuration": "2:03",
+      "clientStories": [
+        {
+          "company": "Mølgaard Data A/S",
+          "title": "Securely fueling digital assistants with ERP knowledge from SAP on IBM i",
+          "url": "https://www.ibm.com/downloads/documents/us-en/16ddab5aa1547477"
+        }
+      ]
     },
     {
       "id": "4",
@@ -66,16 +55,9 @@
       "description": "Innovates conference experiences by enabling fast access to presentation slides from current and past events through a search‑driven digital assistant.",
       "creator": "IBM",
       "domain": "Professional services",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Reference stories",
-        "Client stories and testimonials"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Reference stories", "Client stories and testimonials"],
+      "tag": ["Digital assistant"],
       "featuredArticle": {
         "company": "MIDRANGE",
         "title": "AI-Powered Search Enhances Conference Experiences on IBM i",
@@ -89,16 +71,9 @@
       "description": "Enables conversational self-service for financial FAQs by helping customers quickly find information without digging through documents—reducing support friction.",
       "creator": "IBM",
       "domain": "Banking and finance",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Reference stories",
-        "Client stories and testimonials"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Reference stories", "Client stories and testimonials"],
+      "tag": ["Digital assistant"],
       "featuredArticle": {
         "company": "Portolan",
         "title": "Portolan Modernizes Financial Software with AI Search on IBM Power",
@@ -111,15 +86,9 @@
       "description": "Ensures accurate, complete, and compliant financial transactions through automated multi‑way invoice matching within your ERP system.",
       "creator": "IBM",
       "domain": "Enterprise resource planning",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Video demos"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Video demos"],
+      "tag": ["Digital assistant"],
       "demo": "https://mediacenter.ibm.com/media/Intelligent%20workflow%20automation%20with%20agentic%20AI%20on%20SAP%20and%20IBM%20watsonx/1_c8dzgznk",
       "demoTitle": "Intelligent workflow automation with agentic AI on SAP and IBM watsonx",
       "demoDescription": "With watsonx, users running SAP Cloud ERP Private on IBM Power Virtual Server can build agents to automate finance, manufacturing, procurement and supply chain workflows that require data from both SAP and non-SAP data sources.",
@@ -131,16 +100,9 @@
       "description": "Enables teams to quickly resolve everyday IT issues, automate common support tasks, and get instant help—without waiting for a technician.",
       "creator": "IBM",
       "domain": "IT operations",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Video demos",
-        "Client stories and testimonials"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Video demos", "Client stories and testimonials"],
+      "tag": ["Digital assistant"],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
       "demoTitle": "IBM Spyre Accelerator for Power: turn-key solution for AI enterprise workloads",
       "demoDescription": "With IBM Spyre Accelerator - for Power, you can easily incorporate turnkey AI into your enterprise processes, boost productivity and directly measure value.",
@@ -158,16 +120,9 @@
       "description": "Streamline account opening by automatically classifying onboarding documents and improving compliance with built‑in PII controls.",
       "creator": "IBM",
       "domain": "Banking and finance",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Video demos",
-        "Client stories and testimonials"
-      ],
-      "tag": [
-        "Digitize assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Video demos", "Client stories and testimonials"],
+      "tag": ["Digitize assistant"],
       "demo": "https://mediacenter.ibm.com/media/AI+on+PowerA+IBM+Power10+Entity+Extraction+%28Demo%29/1_0r3zgnd4",
       "demoTitle": "AI on Power: IBM Power10 Entity Extraction (Demo)",
       "demoDescription": "IBM Power10 is a platform that enables users to manage ROI of generative AI solutions, including entity extraction use cases. See how you can automate simple tasks like analyzing documents or sales conversations to extract PII entities increasing the productivity of ERP tasks.",
@@ -183,17 +138,13 @@
       "description": "Streamlines order processing by automatically extracting relevant information and populating the correct ERP forms.",
       "creator": "IBM",
       "domain": "Enterprise resource planning",
-      "architectures": [
-        "Extract information"
-      ],
+      "architectures": ["Extract information"],
       "assets": [
         "Video demos",
         "Reference stories",
         "Client stories and testimonials"
       ],
-      "tag": [
-        "Extract information"
-      ],
+      "tag": ["Extract information"],
       "demo": "https://mediacenter.ibm.com/media/IBM+Spyre+for+Power%3A+Turn-key+AI/1_etcvyc6u",
       "demoTitle": "IBM Spyre Accelerator: Turn-key solution for AI enterprise workloads",
       "demoDescription": "With IBM Spyre Accelerator - for Power, you can easily incorporate turnkey AI into your enterprise processes, boost productivity and directly measure value.",
@@ -211,15 +162,9 @@
       "description": "Reduces administrative effort by enabling fast, secure access to relevant information from private documents and keeping content continuously up to date.",
       "creator": "IBM",
       "domain": "Public sector",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Client stories and testimonials"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Client stories and testimonials"],
+      "tag": ["Digital assistant"],
       "clientStories": [
         {
           "company": "Government client, DACH",
@@ -233,16 +178,9 @@
       "description": "Drive growth and optimize costs with accurate, timely data tailored to real‑estate business.",
       "creator": "IBM",
       "domain": "Real estate",
-      "architectures": [
-        "Digital assistant"
-      ],
-      "assets": [
-        "Reference stories",
-        "Client stories and testimonials"
-      ],
-      "tag": [
-        "Digital assistant"
-      ],
+      "architectures": ["Digital assistant"],
+      "assets": ["Reference stories", "Client stories and testimonials"],
+      "tag": ["Digital assistant"],
       "featuredArticle": {
         "company": "Edsvard Hallbarhet AB",
         "title": "From contract headache to strategic asset: How Edsvard makes sense of unstructured real estate data with IBM Cloud and watsonx.data",
@@ -266,21 +204,39 @@
       "description": "Reduce volatility, optimize batch sizes, and better coordinate materials and manufacturing capacity across the entire production chain.",
       "creator": "IBM",
       "domain": "Manufacturing",
-      "architectures": [
-        "Forecasting"
-      ],
-      "assets": [
-        "Reference stories",
-        "Client stories and testimonials"
-      ],
-      "tag": [
-        "Forecasting"
-      ],
+      "architectures": ["Forecasting"],
+      "assets": ["Reference stories", "Client stories and testimonials"],
+      "tag": ["Forecasting"],
       "featuredArticle": {
         "company": "BECOM Electronics GmbH",
         "title": "AI on IBM i Optimizes Production Planning",
         "articleUrl": "https://www.ibm.com/downloads/documents/us-en/15db45f02d520e7a"
       }
+    },
+    {
+      "id": "13",
+      "title": "Inference-as-a-Service",
+      "description": "Centralize and unify on-demand access to AI models through APIs, eliminating the need to manage AI infrastructure manually. Enable developers to quickly integrate scalable inferencing capabilities based upon a variety of models into applications and business processes.",
+      "creator": "IBM",
+      "domain": "IT operations",
+      "architectures": ["Model management"],
+      "assets": ["Client stories and testimonials"],
+      "tag": ["Model management"],
+      "clientStories": [
+        {
+          "company": "Red Hat OpenShift AI on Power",
+          "url": "https://www.redhat.com/en/products/ai/openshift-ai"
+        },
+        {
+          "company": "Red Hat AI Inference on Power",
+          "url": "https://www.redhat.com/en/products/ai/inference"
+        },
+        {
+          "company": "Horsa Power S.r.l. Kobe",
+          "title": "Centralizing AI inferencing on IBM i",
+          "url": "https://www.ibm.com/downloads/documents/us-en/16ddab5aa1547475"
+        }
+      ]
     }
   ]
 }

@@ -219,6 +219,7 @@ func (h *DatasourceHandler) DeleteDatasource(c *gin.Context) {
 //	@Param			page_size	query		int		false	"Number of items per page (max: 100)"	default(20)
 //	@Param			status		query		string	false	"Filter by status: 'connected' or 'offline'"
 //	@Param			provider	query		string	false	"Filter by provider ID (e.g. 'object_storage', 'file_system')"
+//	@Param			q			query		string	false	"Case-insensitive substring search on datasource name"
 //	@Success		200			{object}	models.DatasourceListResponse
 //	@Failure		400			{object}	ErrorResponse	"Invalid query parameters"
 //	@Failure		401			{object}	ErrorResponse	"Unauthorized"
@@ -251,6 +252,7 @@ func (h *DatasourceHandler) ListDatasources(c *gin.Context) {
 		PageSize: pageSize,
 		Status:   status,
 		Provider: c.Query("provider"),
+		Search:   c.Query("q"),
 	}
 
 	resp, err := h.datasourceSvc.ListDatasources(c.Request.Context(), req)
@@ -396,6 +398,7 @@ func (h *DatasourceHandler) ListApplicationDatasources(c *gin.Context) {
 //	@Success		207		{object}	models.ConnectDatasourcesResponse	"One or more datasources failed to connect"
 //	@Failure		400		{object}	ErrorResponse						"Invalid request body"
 //	@Failure		401		{object}	ErrorResponse						"Unauthorized"
+//	@Failure		403		{object}	ErrorResponse						"User doesn't own this application"
 //	@Failure		404		{object}	ErrorResponse						"Application or datasource not found"
 //	@Failure		422		{object}	ErrorResponse						"No eligible running service found"
 //	@Failure		500		{object}	ErrorResponse						"Internal Server Error"
@@ -410,6 +413,9 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 		return
 	}
 
+	// Extract authenticated user from context.
+	userID := c.GetString(middleware.CtxUserIDKey)
+
 	var req models.ConnectDatasourcesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
@@ -419,22 +425,14 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 		return
 	}
 
-	// Parse each string UUID into uuid.UUID.
-	datasourceIDs := make([]uuid.UUID, 0, len(req.DatasourceIDs))
-	for _, idStr := range req.DatasourceIDs {
-		id, parseErr := uuid.Parse(idStr)
-		if parseErr != nil {
-			c.JSON(http.StatusBadRequest, ErrorResponse{
-				Error: fmt.Sprintf("Invalid datasource ID %q: %v", idStr, parseErr),
-			})
+	datasourceIDs, parseErr := parseDatasourceIDs(req.DatasourceIDs)
+	if parseErr != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: parseErr.Error()})
 
-			return
-		}
-
-		datasourceIDs = append(datasourceIDs, id)
+		return
 	}
 
-	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, datasourceIDs)
+	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, userID, datasourceIDs)
 	if err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
 			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
@@ -457,6 +455,23 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusMultiStatus, resp)
+}
+
+// parseDatasourceIDs converts a slice of string UUIDs to []uuid.UUID.
+// Returns an error describing the first invalid entry, if any.
+func parseDatasourceIDs(ids []string) ([]uuid.UUID, error) {
+	out := make([]uuid.UUID, 0, len(ids))
+
+	for _, idStr := range ids {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid datasource ID %q: %v", idStr, err)
+		}
+
+		out = append(out, id)
+	}
+
+	return out, nil
 }
 
 // GetApplicationDatasource godoc
@@ -524,6 +539,7 @@ func (h *DatasourceHandler) GetApplicationDatasource(c *gin.Context) {
 //	@Success		204				"Datasource disconnected successfully"
 //	@Failure		400				{object}	ErrorResponse	"Invalid application or datasource ID"
 //	@Failure		401				{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403				{object}	ErrorResponse	"User doesn't own this application"
 //	@Failure		404				{object}	ErrorResponse	"Datasource not connected to this application"
 //	@Failure		502				{object}	ErrorResponse	"Downstream Digitize service returned an error"
 //	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
@@ -547,7 +563,10 @@ func (h *DatasourceHandler) DisconnectDatasourcesFromApplication(c *gin.Context)
 		return
 	}
 
-	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, datasourceID); err != nil {
+	// Extract authenticated user from context.
+	userID := c.GetString(middleware.CtxUserIDKey)
+
+	if err := h.datasourceSvc.DisconnectDatasourcesFromApplication(c.Request.Context(), applicationID, userID, datasourceID); err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
 			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
 

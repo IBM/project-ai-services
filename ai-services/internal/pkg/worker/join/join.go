@@ -35,7 +35,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
@@ -75,7 +74,7 @@ func StartGrpcStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.Pr
 		return fmt.Errorf("worker join: invalid gateway address %q — must be host:port (e.g. gateway.10.0.0.1.nip.io:9191)", opts.GatewayAddr)
 	}
 
-	tlsDir := workerconstants.WorkerTLSDir
+	tlsDir := workerTLSDir()
 	// ── Step 1: Check for existing valid mTLS credentials & stream loop ────────────────────
 	if hasValidTLSCredentials(ctx, tlsDir) {
 		logger.InfofCtx(ctx, "worker join: valid mTLS credentials found in %s, skipping registration", tlsDir)
@@ -117,7 +116,7 @@ func runRegistrationLoop(ctx context.Context, rt runtime.Runtime, pr *workercadd
 func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.RuntimeType) (string, error) {
 	logger.InfolnCtx(ctx, "Registering worker with catalog control plane...")
 
-	tlsDir := workerconstants.WorkerTLSDir
+	tlsDir := workerTLSDir()
 	// 1. Generate local ECDSA P-256 key + CSR — private key never transmitted.
 	keyPEM, csrPEM, err := generateKeyAndCSR()
 	if err != nil {
@@ -172,7 +171,7 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 // workerName is sent in the first stream message so the gateway can identify
 // this worker; it is empty on reconnect (the gateway will read it from the message).
 func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, gatewayAddr, workerName string) error {
-	tlsDir := workerconstants.WorkerTLSDir
+	tlsDir := workerTLSDir()
 	cert, err := loadClientCert(tlsDir)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)

@@ -97,8 +97,8 @@ spec:
         - name: CHATBOT_SIMILARITY_SERVICE_URL
           value: "http://similarity-api-{{ .InstanceSlug }}:7000"
         - name: CHATBOT_SYSTEM_PROMPT
-          {{- if .Values.backend.systemPrompt }}
-          value: "{{ .Values.backend.systemPrompt }}"
+          {{- if .Values.backend.chatbot.systemPrompt }}
+          value: "{{ .Values.backend.chatbot.systemPrompt }}"
           {{- else }}
           value: ""
           {{ end }}

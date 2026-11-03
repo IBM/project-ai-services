@@ -1,9 +1,9 @@
-import { Theme, SideNav, SideNavItems, SideNavLink } from '@carbon/react';
-import { Activity, Document } from '@carbon/icons-react';
-import { NavLink } from 'react-router';
-import { useRef, useEffect } from 'react';
-import { useTheme } from '@contexts/useTheme';
-import styles from './Navbar.module.scss';
+import { Theme, SideNav, SideNavItems, SideNavLink } from "@carbon/react";
+import { Activity, Document } from "@carbon/icons-react";
+import { NavLink } from "react-router";
+import { useRef, useEffect } from "react";
+import { useTheme } from "@contexts/useTheme";
+import styles from "./Navbar.module.scss";
 
 interface NavbarProps {
   isSideNavOpen: boolean;
@@ -22,8 +22,8 @@ const Navbar = ({ isSideNavOpen, setIsSideNavOpen }: NavbarProps) => {
       setIsSideNavOpen(false);
     }
 
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [isSideNavOpen, setIsSideNavOpen]);
 
   return (
@@ -32,6 +32,13 @@ const Navbar = ({ isSideNavOpen, setIsSideNavOpen }: NavbarProps) => {
         aria-label="Side navigation"
         expanded={isSideNavOpen}
         isFixedNav
+        // isRail keeps the collapsed 3rem rail interactive: without it Carbon
+        // (>= 1.119) marks a collapsed fixed nav as `inert` and sets
+        // tabIndex=-1 on its links. Hover/focus expansion is disabled because
+        // expansion is driven by the header menu button.
+        isRail
+        addMouseListeners={false}
+        addFocusListeners={false}
         isChildOfHeader={false}
         ref={navRef}
       >

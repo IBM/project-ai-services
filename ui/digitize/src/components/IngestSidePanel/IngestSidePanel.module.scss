@@ -90,9 +90,11 @@
       border-color: var(--cds-icon-primary);
     }
 
-    .cds--radio-button:checked + .cds--radio-button__label .cds--radio-button__appearance {
+    .cds--radio-button:checked
+      + .cds--radio-button__label
+      .cds--radio-button__appearance {
       border-color: var(--cds-icon-primary);
-      
+
       &::before {
         background-color: var(--cds-icon-primary);
       }

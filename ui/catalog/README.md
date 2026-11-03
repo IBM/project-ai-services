@@ -1,16 +1,16 @@
 # catalog-ui
 
-Frontend application built with **React 19**, **Vite 7**, **TypeScript**, and **IBM Carbon Design System**.
+Frontend application built with **React 19**, **Vite 8**, **TypeScript**, and **IBM Carbon Design System**.
 
 ---
 
 ## Tech Stack
 
 - React 19
-- Vite 7
+- Vite 8
 - TypeScript (strict mode)
-- IBM Carbon (`@carbon/react` + `@carbon/icons-react`)
-- React Router v7
+- IBM Carbon (`@carbon/react` + `@carbon/icons-react` + `@carbon/ibm-products`)
+- React Router v8
 - ESLint (flat config)
 - Prettier
 - Sass (`sass`)
@@ -166,9 +166,5 @@ VITE_
 `@carbon/ibm-products` depends internally on `react-table@7.8.0`, which is the last release of the v7 line and does not declare React 19 peer support. The `overrides` block forces React 19 for `react-table` to silence the `ERESOLVE` warning during `npm install`.
 
 `react-table` v7 is unmaintained — in v8 it was moved to `@tanstack/react-table`, which Carbon has not yet adopted. **Remove this override once `@carbon/ibm-products` migrates to `@tanstack/react-table`.**
-
-### `source-map-js` override in `package.json`
-
-`source-map-js` is a transitive dependency pulled in by `sass` and `postcss`. Both pin it at `^1.2.1`, which resolves to `1.2.1` on a fresh install. The `overrides` entry forces it to `^1.2.2` to pick up the security fix released in that version. **Remove this override once `sass` and `postcss` raise their own floor to `>=1.2.2`.**
 
 ---

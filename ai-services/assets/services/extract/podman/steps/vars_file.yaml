@@ -2,3 +2,7 @@ containers:
   - name: "extract-api-{{ .InstanceSlug }}-extract-api"
     format: ".Status"
     alias: API_STATUS
+
+  - name: "extract-api-{{ .InstanceSlug }}-mcp-sidecar"
+    format: ".Status"
+    alias: MCP_STATUS

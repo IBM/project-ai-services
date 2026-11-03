@@ -13,10 +13,7 @@ export interface ServicesState {
   showDeploymentDetails: boolean;
   /** Section to open in DeploymentDetails when navigating from the overflow menu */
   deploymentDefaultSection:
-    | "details"
-    | "services"
-    | "integration"
-    | "datasources";
+    "details" | "services" | "integration" | "datasources";
 }
 
 // Action types

@@ -28,6 +28,10 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 	return appservice.ValidatePaginationParams(page, pageSize)
 }
 
+// LoadAppWithOwnership re-exported from the applicationservice subpackage so callers
+// outside that package (e.g. datasource_service) can use repository.LoadAppWithOwnership.
+var LoadAppWithOwnership = appservice.LoadAppWithOwnership
+
 // NewApplicationService creates the appropriate ApplicationServiceInterface implementation
 // based on the runtime type. It is the single construction point for the apiserver.
 //
@@ -41,8 +45,9 @@ func ValidatePaginationParams(page, pageSize int) (int, int, error) {
 //   - datasourceSvc is wired into ApplicationServiceBase so that after a successful
 //     deployment the connectors are automatically attached to eligible services.
 //
-// Both parameters are optional (nil is accepted); when nil the respective feature is
-// skipped silently, preserving backward compatibility for test callers.
+// Both parameters may be nil. When connectorRepo is nil, create requests that carry
+// connector refs are rejected with an error; requests without connector refs are unaffected.
+// When datasourceSvc is nil, post-deploy connector attachment is skipped.
 func NewApplicationService(
 	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,

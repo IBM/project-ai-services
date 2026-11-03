@@ -1,5 +1,5 @@
-import { useReducer, useEffect } from 'react';
-import { NoDataEmptyState } from '@carbon/ibm-products';
+import { useReducer, useEffect } from "react";
+import { NoDataEmptyState } from "@carbon/ibm-products";
 import {
   DataTable,
   DataTableSkeleton,
@@ -25,13 +25,26 @@ import {
   TextInput,
   InlineLoading,
   Tooltip,
-} from '@carbon/react';
-import { Renew, TrashCan, Download, CheckmarkFilled, ErrorFilled, InProgress } from '@carbon/icons-react';
-import { DOC_STATUS } from '../../constants/jobConstants';
-import { useTheme } from '../../contexts/useTheme';
-import { listDocuments, getDocumentContent, deleteDocument, getDocumentMetadata, Document } from '../../services/api';
-import { exportToCSV, validateFilename } from '../../utils/csvExport';
-import styles from './DocumentListPage.module.scss';
+} from "@carbon/react";
+import {
+  Renew,
+  TrashCan,
+  Download,
+  CheckmarkFilled,
+  ErrorFilled,
+  InProgress,
+} from "@carbon/icons-react";
+import { DOC_STATUS } from "../../constants/jobConstants";
+import { useTheme } from "../../contexts/useTheme";
+import {
+  listDocuments,
+  getDocumentContent,
+  deleteDocument,
+  getDocumentMetadata,
+  Document,
+} from "../../services/api";
+import { exportToCSV, validateFilename } from "../../utils/csvExport";
+import styles from "./DocumentListPage.module.scss";
 
 interface DocumentContentData {
   result: any;
@@ -40,12 +53,12 @@ interface DocumentContentData {
 
 interface NotificationStatus {
   show: boolean;
-  kind: 'success' | 'error' | 'info';
+  kind: "success" | "error" | "info";
   title: string;
   subtitle?: string;
 }
 
-export type ExportStatus = 'idle' | 'exporting' | 'success' | 'error';
+export type ExportStatus = "idle" | "exporting" | "success" | "error";
 
 interface DocumentListState {
   documents: Document[];
@@ -75,36 +88,45 @@ interface DocumentListState {
 }
 
 type DocumentListAction =
-  | { type: 'SET_DOCUMENTS'; payload: { documents: Document[]; totalItems: number } }
-  | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SET_PAGE'; payload: number }
-  | { type: 'SET_PAGE_SIZE'; payload: number }
-  | { type: 'SET_SEARCH'; payload: string }
-  | { type: 'SET_SELECTED_DOC'; payload: Document | null }
-  | { type: 'SET_SHOW_CONTENT_MODAL'; payload: boolean }
-  | { type: 'SET_DOC_CONTENT'; payload: DocumentContentData | null }
-  | { type: 'SET_LOADING_CONTENT'; payload: boolean }
-  | { type: 'SET_SHOW_DELETE_MODAL'; payload: boolean }
-  | { type: 'SET_DOC_TO_DELETE'; payload: string | null }
-  | { type: 'OPEN_CONTENT_MODAL'; payload: { doc: Document; content: DocumentContentData } }
-  | { type: 'CLOSE_CONTENT_MODAL' }
-  | { type: 'OPEN_DELETE_MODAL'; payload: string }
-  | { type: 'SET_DUPLICATE_NAMES'; payload: { names: string[]; loading: boolean; forDocId: string } }
-  | { type: 'CLOSE_DELETE_MODAL' }
-  | { type: 'CLOSE_DELETE_MODAL_KEEP_DOC' }
-  | { type: 'SET_CONFIRMED'; payload: boolean }
-  | { type: 'SHOW_ERROR'; payload: { message: string; docName?: string } }
-  | { type: 'HIDE_ERROR' }
-  | { type: 'SET_IS_DELETING'; payload: boolean }
-  | { type: 'DELETE_DOCUMENT'; payload: string }
-  | { type: 'SET_DELETE_STATUS'; payload: NotificationStatus }
-  | { type: 'HIDE_DELETE_STATUS' }
-  | { type: 'OPEN_EXPORT_DIALOG' }
-  | { type: 'CLOSE_EXPORT_DIALOG' }
-  | { type: 'SET_CSV_FILENAME'; payload: string }
-  | { type: 'SET_EXPORT_STATUS'; payload: ExportStatus }
-  | { type: 'SET_EXPORT_ERROR'; payload: string }
-  | { type: 'CLEAR_EXPORT_ERROR' };
+  | {
+      type: "SET_DOCUMENTS";
+      payload: { documents: Document[]; totalItems: number };
+    }
+  | { type: "SET_LOADING"; payload: boolean }
+  | { type: "SET_PAGE"; payload: number }
+  | { type: "SET_PAGE_SIZE"; payload: number }
+  | { type: "SET_SEARCH"; payload: string }
+  | { type: "SET_SELECTED_DOC"; payload: Document | null }
+  | { type: "SET_SHOW_CONTENT_MODAL"; payload: boolean }
+  | { type: "SET_DOC_CONTENT"; payload: DocumentContentData | null }
+  | { type: "SET_LOADING_CONTENT"; payload: boolean }
+  | { type: "SET_SHOW_DELETE_MODAL"; payload: boolean }
+  | { type: "SET_DOC_TO_DELETE"; payload: string | null }
+  | {
+      type: "OPEN_CONTENT_MODAL";
+      payload: { doc: Document; content: DocumentContentData };
+    }
+  | { type: "CLOSE_CONTENT_MODAL" }
+  | { type: "OPEN_DELETE_MODAL"; payload: string }
+  | {
+      type: "SET_DUPLICATE_NAMES";
+      payload: { names: string[]; loading: boolean; forDocId: string };
+    }
+  | { type: "CLOSE_DELETE_MODAL" }
+  | { type: "CLOSE_DELETE_MODAL_KEEP_DOC" }
+  | { type: "SET_CONFIRMED"; payload: boolean }
+  | { type: "SHOW_ERROR"; payload: { message: string; docName?: string } }
+  | { type: "HIDE_ERROR" }
+  | { type: "SET_IS_DELETING"; payload: boolean }
+  | { type: "DELETE_DOCUMENT"; payload: string }
+  | { type: "SET_DELETE_STATUS"; payload: NotificationStatus }
+  | { type: "HIDE_DELETE_STATUS" }
+  | { type: "OPEN_EXPORT_DIALOG" }
+  | { type: "CLOSE_EXPORT_DIALOG" }
+  | { type: "SET_CSV_FILENAME"; payload: string }
+  | { type: "SET_EXPORT_STATUS"; payload: ExportStatus }
+  | { type: "SET_EXPORT_ERROR"; payload: string }
+  | { type: "CLEAR_EXPORT_ERROR" };
 
 const initialState: DocumentListState = {
   documents: [],
@@ -112,7 +134,7 @@ const initialState: DocumentListState = {
   page: 1,
   pageSize: 10,
   totalItems: 0,
-  search: '',
+  search: "",
   selectedDoc: null,
   showContentModal: false,
   docContent: null,
@@ -123,78 +145,78 @@ const initialState: DocumentListState = {
   loadingDuplicates: false,
   isConfirmed: false,
   toastOpen: false,
-  errorMessage: '',
-  errorDocName: '',
+  errorMessage: "",
+  errorDocName: "",
   isDeleting: false,
-  deleteStatus: { show: false, kind: 'info', title: '' },
+  deleteStatus: { show: false, kind: "info", title: "" },
   isExportDialogOpen: false,
-  csvFileName: '',
-  exportStatus: 'idle',
-  exportErrorMessage: '',
+  csvFileName: "",
+  exportStatus: "idle",
+  exportErrorMessage: "",
 };
 
 const documentListReducer = (
   state: DocumentListState,
-  action: DocumentListAction
+  action: DocumentListAction,
 ): DocumentListState => {
   switch (action.type) {
-    case 'SET_DOCUMENTS':
+    case "SET_DOCUMENTS":
       return {
         ...state,
         documents: action.payload.documents,
         totalItems: action.payload.totalItems,
       };
-    case 'SET_LOADING':
+    case "SET_LOADING":
       return {
         ...state,
         loading: action.payload,
       };
-    case 'SET_PAGE':
+    case "SET_PAGE":
       return {
         ...state,
         page: action.payload,
       };
-    case 'SET_PAGE_SIZE':
+    case "SET_PAGE_SIZE":
       return {
         ...state,
         pageSize: action.payload,
       };
-    case 'SET_SEARCH':
+    case "SET_SEARCH":
       return {
         ...state,
         search: action.payload,
       };
-    case 'SET_SELECTED_DOC':
+    case "SET_SELECTED_DOC":
       return {
         ...state,
         selectedDoc: action.payload,
       };
-    case 'SET_SHOW_CONTENT_MODAL':
+    case "SET_SHOW_CONTENT_MODAL":
       return {
         ...state,
         showContentModal: action.payload,
       };
-    case 'SET_DOC_CONTENT':
+    case "SET_DOC_CONTENT":
       return {
         ...state,
         docContent: action.payload,
       };
-    case 'SET_LOADING_CONTENT':
+    case "SET_LOADING_CONTENT":
       return {
         ...state,
         loadingContent: action.payload,
       };
-    case 'SET_SHOW_DELETE_MODAL':
+    case "SET_SHOW_DELETE_MODAL":
       return {
         ...state,
         showDeleteModal: action.payload,
       };
-    case 'SET_DOC_TO_DELETE':
+    case "SET_DOC_TO_DELETE":
       return {
         ...state,
         docToDelete: action.payload,
       };
-    case 'OPEN_CONTENT_MODAL':
+    case "OPEN_CONTENT_MODAL":
       return {
         ...state,
         docContent: action.payload.content,
@@ -202,14 +224,14 @@ const documentListReducer = (
         showContentModal: true,
         loadingContent: false,
       };
-    case 'CLOSE_CONTENT_MODAL':
+    case "CLOSE_CONTENT_MODAL":
       return {
         ...state,
         showContentModal: false,
         docContent: null,
         selectedDoc: null,
       };
-    case 'OPEN_DELETE_MODAL':
+    case "OPEN_DELETE_MODAL":
       return {
         ...state,
         docToDelete: action.payload,
@@ -218,7 +240,7 @@ const documentListReducer = (
         loadingDuplicates: true,
         toastOpen: false,
       };
-    case 'SET_DUPLICATE_NAMES':
+    case "SET_DUPLICATE_NAMES":
       // Guard: discard result if the modal was closed or re-opened for a different doc
       if (action.payload.forDocId !== state.docToDelete) return state;
       return {
@@ -226,7 +248,7 @@ const documentListReducer = (
         duplicateNames: action.payload.names,
         loadingDuplicates: action.payload.loading,
       };
-    case 'CLOSE_DELETE_MODAL':
+    case "CLOSE_DELETE_MODAL":
       return {
         ...state,
         showDeleteModal: false,
@@ -235,7 +257,7 @@ const documentListReducer = (
         duplicateNames: [],
         loadingDuplicates: false,
       };
-    case 'CLOSE_DELETE_MODAL_KEEP_DOC':
+    case "CLOSE_DELETE_MODAL_KEEP_DOC":
       return {
         ...state,
         showDeleteModal: false,
@@ -243,77 +265,77 @@ const documentListReducer = (
         duplicateNames: [],
         loadingDuplicates: false,
       };
-    case 'SET_CONFIRMED':
+    case "SET_CONFIRMED":
       return { ...state, isConfirmed: action.payload };
-    case 'DELETE_DOCUMENT':
+    case "DELETE_DOCUMENT":
       return {
         ...state,
         documents: state.documents.filter((d) => d.id !== action.payload),
         showDeleteModal: false,
         isConfirmed: false,
       };
-    case 'SHOW_ERROR':
+    case "SHOW_ERROR":
       return {
         ...state,
         errorMessage: action.payload.message,
-        errorDocName: action.payload.docName ?? '',
+        errorDocName: action.payload.docName ?? "",
         toastOpen: true,
         isDeleting: false,
       };
-    case 'HIDE_ERROR':
+    case "HIDE_ERROR":
       return {
         ...state,
         toastOpen: false,
         docToDelete: null,
-        errorDocName: '',
+        errorDocName: "",
       };
-    case 'SET_IS_DELETING':
+    case "SET_IS_DELETING":
       return { ...state, isDeleting: action.payload };
-    case 'SET_DELETE_STATUS':
+    case "SET_DELETE_STATUS":
       return {
         ...state,
         deleteStatus: action.payload,
       };
-    case 'HIDE_DELETE_STATUS':
+    case "HIDE_DELETE_STATUS":
       return {
         ...state,
-        deleteStatus: { show: false, kind: 'info', title: '' },
+        deleteStatus: { show: false, kind: "info", title: "" },
       };
-    case 'OPEN_EXPORT_DIALOG':
+    case "OPEN_EXPORT_DIALOG":
       return {
         ...state,
         isExportDialogOpen: true,
-        csvFileName: '',
-        exportErrorMessage: '',
-        exportStatus: 'idle',
+        csvFileName: "",
+        exportErrorMessage: "",
+        exportStatus: "idle",
       };
-    case 'CLOSE_EXPORT_DIALOG':
+    case "CLOSE_EXPORT_DIALOG":
       return {
         ...state,
         isExportDialogOpen: false,
       };
-    case 'SET_CSV_FILENAME':
+    case "SET_CSV_FILENAME":
       return { ...state, csvFileName: action.payload };
-    case 'SET_EXPORT_STATUS':
+    case "SET_EXPORT_STATUS":
       return { ...state, exportStatus: action.payload };
-    case 'SET_EXPORT_ERROR':
+    case "SET_EXPORT_ERROR":
       return {
         ...state,
         exportErrorMessage: action.payload,
       };
-    case 'CLEAR_EXPORT_ERROR':
-      return { ...state, exportErrorMessage: '' };
+    case "CLEAR_EXPORT_ERROR":
+      return { ...state, exportErrorMessage: "" };
     default:
       return state;
   }
 };
 
 const headers = [
-  { key: 'name', header: 'Document Name' },
-  { key: 'status', header: 'Status' },
-  { key: 'submitted_at', header: 'Submitted' },
-  { key: 'view_action', header: '' },
-  { key: 'delete_action', header: '' },
+  { key: "name", header: "Document Name" },
+  { key: "status", header: "Status" },
+  { key: "submitted_at", header: "Submitted" },
+  { key: "view_action", header: "" },
+  { key: "delete_action", header: "" },
 ];
 
 const getStatusIcon = (status: string) => {
@@ -343,7 +365,7 @@ const DocumentListPage = () => {
   const [state, dispatch] = useReducer(documentListReducer, initialState);
 
   const fetchDocuments = async () => {
-    dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: "SET_LOADING", payload: true });
     try {
       const offset = (state.page - 1) * state.pageSize;
       const response = await listDocuments({
@@ -351,75 +373,83 @@ const DocumentListPage = () => {
         offset: offset,
         name: state.search || null,
       });
-      
+
       dispatch({
-        type: 'SET_DOCUMENTS',
+        type: "SET_DOCUMENTS",
         payload: {
           documents: response.data || [],
           totalItems: response.pagination?.total || 0,
         },
       });
     } catch (error: any) {
-      
       // Handle 5xx server errors with appropriate user-facing messages
-      if (error.response && error.response.status >= 500 && error.response.status < 600) {
-        const errorMessage = error.response.status === 503
-          ? 'The service is temporarily unavailable. Please try again in a few moments.'
-          : 'A server error occurred while fetching documents. Please try again later.';
-        
+      if (
+        error.response &&
+        error.response.status >= 500 &&
+        error.response.status < 600
+      ) {
+        const errorMessage =
+          error.response.status === 503
+            ? "The service is temporarily unavailable. Please try again in a few moments."
+            : "A server error occurred while fetching documents. Please try again later.";
+
         dispatch({
-          type: 'SHOW_ERROR',
+          type: "SHOW_ERROR",
           payload: {
             message: errorMessage,
           },
         });
-      } else if (error.code === 'ECONNABORTED' || error.message === 'Network Error') {
+      } else if (
+        error.code === "ECONNABORTED" ||
+        error.message === "Network Error"
+      ) {
         // Handle network/timeout errors
         dispatch({
-          type: 'SHOW_ERROR',
+          type: "SHOW_ERROR",
           payload: {
-            message: 'Unable to connect to the server. Please check your network connection and try again.',
+            message:
+              "Unable to connect to the server. Please check your network connection and try again.",
           },
         });
       }
     } finally {
-      dispatch({ type: 'SET_LOADING', payload: false });
+      dispatch({ type: "SET_LOADING", payload: false });
     }
   };
 
   useEffect(() => {
     fetchDocuments();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.page, state.pageSize, state.search]);
 
   const handleViewContent = async (doc: Document) => {
-    dispatch({ type: 'SET_LOADING_CONTENT', payload: true });
-    dispatch({ type: 'SET_SHOW_CONTENT_MODAL', payload: true });
-    dispatch({ type: 'SET_SELECTED_DOC', payload: doc });
-    
+    dispatch({ type: "SET_LOADING_CONTENT", payload: true });
+    dispatch({ type: "SET_SHOW_CONTENT_MODAL", payload: true });
+    dispatch({ type: "SET_SELECTED_DOC", payload: doc });
+
     try {
       const content = await getDocumentContent(doc.id);
       dispatch({
-        type: 'OPEN_CONTENT_MODAL',
+        type: "OPEN_CONTENT_MODAL",
         payload: { doc, content },
       });
     } catch (error) {
-      console.error('Error fetching document content:', error);
-      dispatch({ type: 'SET_LOADING_CONTENT', payload: false });
+      console.error("Error fetching document content:", error);
+      dispatch({ type: "SET_LOADING_CONTENT", payload: false });
     }
   };
 
   const getFileExtensionAndMimeType = (outputFormat: string) => {
     // Backend supports: json, md, txt
     switch (outputFormat.toLowerCase()) {
-      case 'json':
-        return { extension: 'json', mimeType: 'application/json' };
-      case 'md':
-        return { extension: 'md', mimeType: 'text/markdown' };
-      case 'txt':
-        return { extension: 'txt', mimeType: 'text/plain' };
+      case "json":
+        return { extension: "json", mimeType: "application/json" };
+      case "md":
+        return { extension: "md", mimeType: "text/markdown" };
+      case "txt":
+        return { extension: "txt", mimeType: "text/plain" };
       default:
-        return { extension: 'json', mimeType: 'application/json' };
+        return { extension: "json", mimeType: "application/json" };
     }
   };
 
@@ -427,43 +457,44 @@ const DocumentListPage = () => {
     if (!state.docContent || !state.selectedDoc) return;
 
     try {
-      const outputFormat = state.docContent.output_format || 'json';
+      const outputFormat = state.docContent.output_format || "json";
       const { extension, mimeType } = getFileExtensionAndMimeType(outputFormat);
-      
+
       // Convert content to appropriate string format
       let contentStr: string;
       const contentResult = state.docContent.result;
-      
-      if (typeof contentResult === 'string') {
+
+      if (typeof contentResult === "string") {
         // For md and text formats, content is already a string
         contentStr = contentResult;
       } else {
         // For JSON format, stringify with formatting
         contentStr = JSON.stringify(contentResult, null, 2);
       }
-      
+
       // Create a Blob from the content
       const blob = new Blob([contentStr], { type: mimeType });
-      
+
       // Create a download link
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      
+
       // Generate filename from document name
-      const docName = state.selectedDoc.name || state.selectedDoc.filename || 'document';
-      const baseFilename = docName.replace(/\.[^/.]+$/, '');
+      const docName =
+        state.selectedDoc.name || state.selectedDoc.filename || "document";
+      const baseFilename = docName.replace(/\.[^/.]+$/, "");
       link.download = `${baseFilename}_content.${extension}`;
-      
+
       // Trigger download
       document.body.appendChild(link);
       link.click();
-      
+
       // Cleanup
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Error downloading content:', error);
+      console.error("Error downloading content:", error);
     }
   };
 
@@ -484,15 +515,15 @@ const DocumentListPage = () => {
     try {
       const contentResult = state.docContent.result;
       let displayContent: string;
-      
-      if (typeof contentResult === 'string') {
+
+      if (typeof contentResult === "string") {
         // For md and text formats, display as-is
         displayContent = contentResult;
       } else {
         // For JSON format, stringify with formatting
         displayContent = JSON.stringify(contentResult, null, 2);
       }
-      
+
       return (
         <div className={styles.contentPreview}>
           <pre className={styles.contentPre}>{displayContent}</pre>
@@ -504,17 +535,21 @@ const DocumentListPage = () => {
   };
 
   const handleOpenDeleteModal = async (docId: string) => {
-    dispatch({ type: 'OPEN_DELETE_MODAL', payload: docId });
+    dispatch({ type: "OPEN_DELETE_MODAL", payload: docId });
     try {
       const detail = await getDocumentMetadata(docId, true);
       dispatch({
-        type: 'SET_DUPLICATE_NAMES',
-        payload: { names: detail.duplicate_names ?? [], loading: false, forDocId: docId },
+        type: "SET_DUPLICATE_NAMES",
+        payload: {
+          names: detail.duplicate_names ?? [],
+          loading: false,
+          forDocId: docId,
+        },
       });
     } catch {
       // Non-critical — proceed without duplicate names
       dispatch({
-        type: 'SET_DUPLICATE_NAMES',
+        type: "SET_DUPLICATE_NAMES",
         payload: { names: [], loading: false, forDocId: docId },
       });
     }
@@ -523,51 +558,55 @@ const DocumentListPage = () => {
   const handleDeleteConfirm = async () => {
     if (!state.docToDelete) return;
 
-    const docName = state.documents.find((d) => d.id === state.docToDelete)?.name || '';
-    dispatch({ type: 'SET_IS_DELETING', payload: true });
+    const docName =
+      state.documents.find((d) => d.id === state.docToDelete)?.name || "";
+    dispatch({ type: "SET_IS_DELETING", payload: true });
 
     try {
       await deleteDocument(state.docToDelete);
-      dispatch({ type: 'DELETE_DOCUMENT', payload: state.docToDelete });
-      
+      dispatch({ type: "DELETE_DOCUMENT", payload: state.docToDelete });
+
       // Show success notification
       dispatch({
-        type: 'SET_DELETE_STATUS',
+        type: "SET_DELETE_STATUS",
         payload: {
           show: true,
-          kind: 'success',
-          title: 'Document deleted successfully',
+          kind: "success",
+          title: "Document deleted successfully",
           subtitle: `"${docName}" has been removed`,
         },
       });
 
       // Hide success notification after 3 seconds
       setTimeout(() => {
-        dispatch({ type: 'HIDE_DELETE_STATUS' });
+        dispatch({ type: "HIDE_DELETE_STATUS" });
       }, 3000);
 
       fetchDocuments();
-      
+
       // Close modal and clear state on success
-      dispatch({ type: 'SET_IS_DELETING', payload: false });
-      dispatch({ type: 'CLOSE_DELETE_MODAL' });
+      dispatch({ type: "SET_IS_DELETING", payload: false });
+      dispatch({ type: "CLOSE_DELETE_MODAL" });
     } catch (error: any) {
-      const msg = error.response?.data?.detail || error.message || 'Failed deleting document';
-      
+      const msg =
+        error.response?.data?.detail ||
+        error.message ||
+        "Failed deleting document";
+
       // Show error notification
       dispatch({
-        type: 'SET_DELETE_STATUS',
+        type: "SET_DELETE_STATUS",
         payload: {
           show: true,
-          kind: 'error',
-          title: 'Failed to delete document',
+          kind: "error",
+          title: "Failed to delete document",
           subtitle: `${docName}: ${msg}`,
         },
       });
-      
+
       // Close modal but keep docToDelete for retry
-      dispatch({ type: 'SET_IS_DELETING', payload: false });
-      dispatch({ type: 'CLOSE_DELETE_MODAL_KEEP_DOC' });
+      dispatch({ type: "SET_IS_DELETING", payload: false });
+      dispatch({ type: "CLOSE_DELETE_MODAL_KEEP_DOC" });
     }
   };
 
@@ -577,7 +616,7 @@ const DocumentListPage = () => {
 
     if (validationError) {
       dispatch({
-        type: 'SET_EXPORT_ERROR',
+        type: "SET_EXPORT_ERROR",
         payload: validationError,
       });
       return;
@@ -585,64 +624,66 @@ const DocumentListPage = () => {
 
     if (state.documents.length === 0) {
       dispatch({
-        type: 'SET_EXPORT_ERROR',
-        payload: 'No data available to export',
+        type: "SET_EXPORT_ERROR",
+        payload: "No data available to export",
       });
       return;
     }
 
     dispatch({
-      type: 'SET_EXPORT_STATUS',
-      payload: 'exporting',
+      type: "SET_EXPORT_STATUS",
+      payload: "exporting",
     });
 
     try {
       // Create rows for export (excluding action columns)
       const exportRows = state.documents.map((doc) => ({
-        name: doc.name || doc.filename || 'N/A',
+        name: doc.name || doc.filename || "N/A",
         status: doc.status,
         submitted_at: doc.submitted_at
-          ? new Date(doc.submitted_at).toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
+          ? new Date(doc.submitted_at).toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
               hour12: true,
             })
-          : 'N/A',
+          : "N/A",
       }));
 
       exportToCSV({
         filename,
         headers,
         rows: exportRows,
-        excludeColumns: ['view_action', 'delete_action'],
+        excludeColumns: ["view_action", "delete_action"],
       });
 
       dispatch({
-        type: 'SET_EXPORT_STATUS',
-        payload: 'success',
+        type: "SET_EXPORT_STATUS",
+        payload: "success",
       });
     } catch (error: any) {
       dispatch({
-        type: 'SET_EXPORT_STATUS',
-        payload: 'error',
+        type: "SET_EXPORT_STATUS",
+        payload: "error",
       });
 
       dispatch({
-        type: 'SET_EXPORT_ERROR',
-        payload: error.message || 'An error occurred while exporting the CSV file. Please try again.',
+        type: "SET_EXPORT_ERROR",
+        payload:
+          error.message ||
+          "An error occurred while exporting the CSV file. Please try again.",
       });
     }
   };
 
   const rows = state.documents.map((doc) => {
-    const hasError = doc.status === 'failed';
-    
+    const hasError = doc.status === "failed";
+
     return {
       id: doc.id,
-      name: doc.name || doc.filename || 'N/A',
+      name: doc.name || doc.filename || "N/A",
       status: (
         <div className={styles.statusCell}>
           {!hasError && getStatusIcon(doc.status)}
@@ -666,21 +707,17 @@ const DocumentListPage = () => {
         </div>
       ),
       submitted_at: doc.submitted_at
-        ? new Date(doc.submitted_at).toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
+        ? new Date(doc.submitted_at).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
             hour12: true,
           })
-        : 'N/A',
+        : "N/A",
       view_action: (
-        <Button
-          kind="ghost"
-          size="sm"
-          onClick={() => handleViewContent(doc)}
-        >
+        <Button kind="ghost" size="sm" onClick={() => handleViewContent(doc)}>
           View content
         </Button>
       ),
@@ -709,14 +746,18 @@ const DocumentListPage = () => {
               aria-label="close notification"
               kind="error"
               closeOnEscape
-              title={state.errorDocName ? `Delete document ${state.errorDocName} failed` : 'Error loading documents'}
+              title={
+                state.errorDocName
+                  ? `Delete document ${state.errorDocName} failed`
+                  : "Error loading documents"
+              }
               subtitle={state.errorMessage}
               onActionButtonClick={() => {
-                dispatch({ type: 'HIDE_ERROR' });
+                dispatch({ type: "HIDE_ERROR" });
                 fetchDocuments();
               }}
               onCloseButtonClick={() => {
-                dispatch({ type: 'HIDE_ERROR' });
+                dispatch({ type: "HIDE_ERROR" });
               }}
               lowContrast
             />
@@ -724,7 +765,7 @@ const DocumentListPage = () => {
         )}
 
         {/* Delete Error Notification with Retry */}
-        {state.deleteStatus.show && state.deleteStatus.kind === 'error' && (
+        {state.deleteStatus.show && state.deleteStatus.kind === "error" && (
           <div className={styles.notificationWrapper}>
             <ActionableNotification
               actionButtonLabel="Try again"
@@ -734,14 +775,17 @@ const DocumentListPage = () => {
               title={state.deleteStatus.title}
               subtitle={state.deleteStatus.subtitle}
               onActionButtonClick={() => {
-                dispatch({ type: 'HIDE_DELETE_STATUS' });
+                dispatch({ type: "HIDE_DELETE_STATUS" });
                 // Re-open the delete modal with the last document
                 if (state.docToDelete) {
-                  dispatch({ type: 'OPEN_DELETE_MODAL', payload: state.docToDelete });
+                  dispatch({
+                    type: "OPEN_DELETE_MODAL",
+                    payload: state.docToDelete,
+                  });
                 }
               }}
               onCloseButtonClick={() => {
-                dispatch({ type: 'HIDE_DELETE_STATUS' });
+                dispatch({ type: "HIDE_DELETE_STATUS" });
               }}
               lowContrast
             />
@@ -749,13 +793,13 @@ const DocumentListPage = () => {
         )}
 
         {/* Delete Success Notification */}
-        {state.deleteStatus.show && state.deleteStatus.kind === 'success' && (
+        {state.deleteStatus.show && state.deleteStatus.kind === "success" && (
           <div className={styles.notificationWrapper}>
             <ToastNotification
               kind="success"
               title={state.deleteStatus.title}
               subtitle={state.deleteStatus.subtitle}
-              onClose={() => dispatch({ type: 'HIDE_DELETE_STATUS' })}
+              onClose={() => dispatch({ type: "HIDE_DELETE_STATUS" })}
               timeout={3000}
             />
           </div>
@@ -797,7 +841,12 @@ const DocumentListPage = () => {
                         <TableToolbarSearch
                           persistent
                           placeholder="Search"
-                          onChange={(_e: any, value?: string) => dispatch({ type: 'SET_SEARCH', payload: value || '' })}
+                          onChange={(_e: any, value?: string) =>
+                            dispatch({
+                              type: "SET_SEARCH",
+                              payload: value || "",
+                            })
+                          }
                           value={state.search}
                         />
                         <Button
@@ -806,7 +855,9 @@ const DocumentListPage = () => {
                           renderIcon={Download}
                           iconDescription="Download"
                           tooltipPosition="bottom"
-                          onClick={() => dispatch({ type: 'OPEN_EXPORT_DIALOG' })}
+                          onClick={() =>
+                            dispatch({ type: "OPEN_EXPORT_DIALOG" })
+                          }
                         />
                         <Button
                           kind="ghost"
@@ -835,22 +886,37 @@ const DocumentListPage = () => {
                       <TableBody>
                         {rows.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={headers.length} className={styles.emptyStateCell}>
+                            <TableCell
+                              colSpan={headers.length}
+                              className={styles.emptyStateCell}
+                            >
                               <NoDataEmptyState
                                 illustrationTheme="light"
                                 size="lg"
-                                title={noSearchResults ? "No data" : "No documents found"}
-                                subtitle={noSearchResults ? "Try adjusting your search." : "Start ingesting the document to get started"}
+                                title={
+                                  noSearchResults
+                                    ? "No data"
+                                    : "No documents found"
+                                }
+                                subtitle={
+                                  noSearchResults
+                                    ? "Try adjusting your search."
+                                    : "Start ingesting the document to get started"
+                                }
                               />
                             </TableCell>
                           </TableRow>
                         ) : (
                           rows.map((row) => {
-                            const { key: rowKey, ...rowProps } = getRowProps({ row });
+                            const { key: rowKey, ...rowProps } = getRowProps({
+                              row,
+                            });
                             return (
                               <TableRow key={rowKey} {...rowProps}>
                                 {row.cells.map((cell) => (
-                                  <TableCell key={cell.id}>{cell.value}</TableCell>
+                                  <TableCell key={cell.id}>
+                                    {cell.value}
+                                  </TableCell>
                                 ))}
                               </TableRow>
                             );
@@ -865,8 +931,11 @@ const DocumentListPage = () => {
                         pageSizes={[10, 25, 50, 100]}
                         totalItems={state.totalItems}
                         onChange={({ page, pageSize }) => {
-                          dispatch({ type: 'SET_PAGE', payload: page });
-                          dispatch({ type: 'SET_PAGE_SIZE', payload: pageSize });
+                          dispatch({ type: "SET_PAGE", payload: page });
+                          dispatch({
+                            type: "SET_PAGE_SIZE",
+                            payload: pageSize,
+                          });
                         }}
                         itemsPerPageText="Items per page:"
                       />
@@ -878,135 +947,141 @@ const DocumentListPage = () => {
           )}
         </div>
 
-      {/* Content Modal */}
-      <Modal
-        open={state.showContentModal}
-        onRequestClose={() => dispatch({ type: 'CLOSE_CONTENT_MODAL' })}
-        modalHeading={`Document Content: ${state.selectedDoc?.name || state.selectedDoc?.filename || 'Document'}`}
-        primaryButtonText="Download"
-        primaryButtonDisabled={state.loadingContent || !state.docContent}
-        secondaryButtonText="Close"
-        onRequestSubmit={handleDownloadContent}
-        onSecondarySubmit={() => dispatch({ type: 'CLOSE_CONTENT_MODAL' })}
-        size="lg"
-      >
-        <div className={styles.modalContent}>
-          {renderContentPreview()}
-        </div>
-      </Modal>
+        {/* Content Modal */}
+        <Modal
+          open={state.showContentModal}
+          onRequestClose={() => dispatch({ type: "CLOSE_CONTENT_MODAL" })}
+          modalHeading={`Document Content: ${state.selectedDoc?.name || state.selectedDoc?.filename || "Document"}`}
+          primaryButtonText="Download"
+          primaryButtonDisabled={state.loadingContent || !state.docContent}
+          secondaryButtonText="Close"
+          onRequestSubmit={handleDownloadContent}
+          onSecondarySubmit={() => dispatch({ type: "CLOSE_CONTENT_MODAL" })}
+          size="lg"
+        >
+          <div className={styles.modalContent}>{renderContentPreview()}</div>
+        </Modal>
 
-      {/* Delete Confirmation Modal */}
-      <Modal
-        open={state.showDeleteModal}
-        danger
-        size="sm"
-        modalLabel="Delete Document"
-        modalHeading="Confirm delete"
-        primaryButtonText="Delete"
-        secondaryButtonText="Cancel"
-        primaryButtonDisabled={!state.isConfirmed}
-        onRequestClose={() => dispatch({ type: 'CLOSE_DELETE_MODAL' })}
-        onRequestSubmit={handleDeleteConfirm}
-      >
-        <p>
-          Deleting a document permanently removes it from the system. This action cannot be undone.
-        </p>
-        <div>
-          <CheckboxGroup
-            legendText="Confirm document to be deleted"
-          >
-            <Checkbox
-              id="checkbox-delete-doc"
-              labelText={
-                <strong>
-                  {state.docToDelete
-                    ? state.documents.find((d) => d.id === state.docToDelete)?.name || 'Document'
-                    : ''}
-                </strong>
-              }
-              checked={state.isConfirmed}
-              onChange={(_, { checked }) =>
-                dispatch({
-                  type: 'SET_CONFIRMED',
-                  payload: checked,
-                })
-              }
-            />
-          </CheckboxGroup>
-          {state.loadingDuplicates && (
-            <p className={styles.duplicatesHelperText}>Checking for duplicates…</p>
-          )}
-          {!state.loadingDuplicates && state.duplicateNames.length > 0 && (
-            <div className={styles.duplicatesSection}>
+        {/* Delete Confirmation Modal */}
+        <Modal
+          open={state.showDeleteModal}
+          danger
+          size="sm"
+          modalLabel="Delete Document"
+          modalHeading="Confirm delete"
+          primaryButtonText="Delete"
+          secondaryButtonText="Cancel"
+          primaryButtonDisabled={!state.isConfirmed}
+          onRequestClose={() => dispatch({ type: "CLOSE_DELETE_MODAL" })}
+          onRequestSubmit={handleDeleteConfirm}
+        >
+          <p>
+            Deleting a document permanently removes it from the system. This
+            action cannot be undone.
+          </p>
+          <div>
+            <CheckboxGroup legendText="Confirm document to be deleted">
+              <Checkbox
+                id="checkbox-delete-doc"
+                labelText={
+                  <strong>
+                    {state.docToDelete
+                      ? state.documents.find((d) => d.id === state.docToDelete)
+                          ?.name || "Document"
+                      : ""}
+                  </strong>
+                }
+                checked={state.isConfirmed}
+                onChange={(_, { checked }) =>
+                  dispatch({
+                    type: "SET_CONFIRMED",
+                    payload: checked,
+                  })
+                }
+              />
+            </CheckboxGroup>
+            {state.loadingDuplicates && (
               <p className={styles.duplicatesHelperText}>
-                The following duplicate entries will also be removed:
+                Checking for duplicates…
               </p>
-              <ul className={styles.duplicatesList}>
-                {state.duplicateNames.map((name) => (
-                  <li key={name}>{name}</li>
-                ))}
-              </ul>
+            )}
+            {!state.loadingDuplicates && state.duplicateNames.length > 0 && (
+              <div className={styles.duplicatesSection}>
+                <p className={styles.duplicatesHelperText}>
+                  The following duplicate entries will also be removed:
+                </p>
+                <ul className={styles.duplicatesList}>
+                  {state.duplicateNames.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </Modal>
+
+        {/* Export CSV Modal */}
+        <Modal
+          open={state.isExportDialogOpen}
+          size="sm"
+          modalHeading="Export as CSV"
+          passiveModal={state.exportStatus !== "idle"}
+          preventCloseOnClickOutside
+          {...(state.exportStatus === "idle" && {
+            primaryButtonText: "Export",
+            secondaryButtonText: "Cancel",
+            onRequestSubmit: handleExportCSV,
+          })}
+          onRequestClose={() => dispatch({ type: "CLOSE_EXPORT_DIALOG" })}
+        >
+          {state.exportStatus === "idle" && (
+            <TextInput
+              id="csv-file-name"
+              labelText="File name"
+              value={state.csvFileName}
+              invalid={!!state.exportErrorMessage}
+              invalidText={state.exportErrorMessage}
+              onChange={(e) => {
+                dispatch({
+                  type: "SET_CSV_FILENAME",
+                  payload: e.target.value,
+                });
+                dispatch({ type: "CLEAR_EXPORT_ERROR" });
+              }}
+            />
+          )}
+
+          {state.exportStatus === "exporting" && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
+              <InlineLoading status="active" description="Exporting..." />
             </div>
           )}
-        </div>
-      </Modal>
 
-      {/* Export CSV Modal */}
-      <Modal
-        open={state.isExportDialogOpen}
-        size="sm"
-        modalHeading="Export as CSV"
-        passiveModal={state.exportStatus !== 'idle'}
-        preventCloseOnClickOutside
-        {...(state.exportStatus === 'idle' && {
-          primaryButtonText: 'Export',
-          secondaryButtonText: 'Cancel',
-          onRequestSubmit: handleExportCSV,
-        })}
-        onRequestClose={() => dispatch({ type: 'CLOSE_EXPORT_DIALOG' })}
-      >
-        {state.exportStatus === 'idle' && (
-          <TextInput
-            id="csv-file-name"
-            labelText="File name"
-            value={state.csvFileName}
-            invalid={!!state.exportErrorMessage}
-            invalidText={state.exportErrorMessage}
-            onChange={(e) => {
-              dispatch({
-                type: 'SET_CSV_FILENAME',
-                payload: e.target.value,
-              });
-              dispatch({ type: 'CLEAR_EXPORT_ERROR' });
-            }}
-          />
-        )}
+          {state.exportStatus === "success" && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
+              <InlineLoading
+                status="finished"
+                description="The file has been exported"
+              />
+            </div>
+          )}
 
-        {state.exportStatus === 'exporting' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <InlineLoading status="active" description="Exporting..." />
-          </div>
-        )}
-
-        {state.exportStatus === 'success' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <InlineLoading
-              status="finished"
-              description="The file has been exported"
-            />
-          </div>
-        )}
-
-        {state.exportStatus === 'error' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <InlineLoading
-              status="error"
-              description={state.exportErrorMessage}
-            />
-          </div>
-        )}
-      </Modal>
-    </div>
+          {state.exportStatus === "error" && (
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
+              <InlineLoading
+                status="error"
+                description={state.exportErrorMessage}
+              />
+            </div>
+          )}
+        </Modal>
+      </div>
     </Theme>
   );
 };

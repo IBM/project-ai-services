@@ -56,7 +56,7 @@ export function ApiKeyDialog({ isOpen, onApiKeyValidated }) {
     }
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !isValidating) {
       handleSubmit();
     }
@@ -105,7 +105,7 @@ export function ApiKeyDialog({ isOpen, onApiKeyValidated }) {
             setApiKey(e.target.value);
             setError(null);
           }}
-          onKeyPress={handleKeyPress}
+          onKeyDown={handleKeyDown}
           disabled={isValidating}
           type="password"
           autoFocus

@@ -20,11 +20,13 @@ export interface UseCase {
   };
   clientStories?: Array<{
     company: string;
+    title?: string;
     description?: string;
     url?: string;
   }>;
   partnerStories?: Array<{
     company: string;
+    title?: string;
     description?: string;
     url?: string;
     testimonial?: string;

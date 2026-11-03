@@ -223,6 +223,7 @@ type ListDatasourcesRequest struct {
 	PageSize int
 	Status   string
 	Provider string
+	Search   string // Optional: case-insensitive substring search on datasource name
 }
 
 // ApplicationDatasourceItem is one entry in the GET /api/v1/applications/:id/datasources list.

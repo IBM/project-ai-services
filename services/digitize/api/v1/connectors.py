@@ -22,7 +22,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
 
-from common.misc_utils import cleanup_staging_directory, get_logger, get_utc_timestamp
+from common.misc_utils import get_logger, get_utc_timestamp
 from common.error_utils import APIError, ErrorCode, http_error_responses, extract_http_error_message, build_http_error_detail
 from pydantic import ValidationError
 from digitize.connectors.models import (
@@ -46,6 +46,13 @@ from digitize.connectors.encryption import (
     safe_connection_details,
 )
 import digitize.utils.db as db_ops
+from digitize.utils.connectors import (
+    wait_for_connector_jobs as _wait_for_connector_jobs,
+    cleanup_connector_documents as _cleanup_connector_documents,
+    get_unregistered_connector_docs as _get_unregistered_connector_docs,
+    best_effort_delete_document as _best_effort_delete_document,
+    sweep_staging_dir as _sweep_staging_dir,
+)
 from digitize.exceptions import SyncLocked, SyncNotFound
 from digitize.settings import settings
 
@@ -293,22 +300,18 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
     summary="Detach and delete a connector",
     description=(
         "Non-blocking detachment. Always returns 204 immediately. "
-        "If a sync tick is running the connector is marked delete_pending and "
-        "the tick handles teardown; otherwise teardown runs as a background task."
+        "The connector is marked delete_pending and teardown runs as a background "
+        "task that first waits for any active sync jobs to be cancelled."
     ),
     response_description="No content — teardown proceeds in the background",
 )
 async def delete_connector(connector_id: str):
     """Fast, non-blocking DELETE.
 
-    Case A — status == 'syncing':
-        Mark DELETE_PENDING. The running tick will hit _check_delete_pending at
-        its next checkpoint, cancel itself, and dispatch teardown.
-        Return 204 immediately.
-
-    Case B — status != 'syncing':
-        Mark DELETE_PENDING, dispatch asyncio.create_task(_run_teardown(...)),
-        return 204 immediately.
+    Mark DELETE_PENDING and dispatch asyncio.create_task(_run_teardown(...)),
+    then return 204 immediately. If a sync tick is running, it hits its next
+    interrupt checkpoint, cancels its active job and stops; _run_teardown waits
+    for that cancellation before cleaning anything up.
     """
     try:
         connector = db_ops.get_connector_by_id(connector_id)
@@ -319,10 +322,7 @@ async def delete_connector(connector_id: str):
             )
 
         db_ops.mark_connector_delete_pending(connector_id)
-
-        if connector.status != ConnectorStatus.SYNCING:
-            # No tick running — kick off teardown ourselves.
-            asyncio.create_task(_run_teardown(connector_id))
+        asyncio.create_task(_run_teardown(connector_id))
 
         return Response(status_code=204)
 
@@ -342,23 +342,40 @@ async def _run_teardown(connector_id: str) -> None:
     """
     Teardown for connector deletion.
 
-    Scheduled via asyncio.create_task from the delete endpoint (Case B — no
-    tick running). Awaited directly from _handle_interrupt in sync_tick
-    (Case A — tick interrupted). In Case A the caller is responsible for
-    purging in-flight conversion tasks *before* calling this function, since
-    no tick is running when _run_teardown executes in Case B.
+    Single entry point for connector deletion, launched via asyncio.create_task
+    from the delete endpoint (and from startup recovery for connectors left in
+    DELETE_PENDING).
 
     Steps:
-      1. Remove the scheduled job so no new ticks fire
-      2. Snapshot checksums owned by this connector
-      3. Remove ownership rows; delete documents when last owner
-      4. Sweep residual batch staging directories
-      5. Delete the connector row (cascades to connector_sync_logs)
+      1. Wait for the connector's active jobs (cancelled by the sync tick on
+         seeing DELETE_PENDING) to reach a terminal state; if they don't, the
+         connector is NOT deleted
+      2. Remove the scheduled job so no new ticks fire
+      3. Snapshot checksums owned by this connector
+      4. Clean up ingested documents: release checksum ownership rows and delete
+         documents when this connector was their last owner (remaining count == 0)
+      5. Delete docs created for this connector that no connector owns
+         (never registered in connector_document_checksum)
+      6. Sweep residual batch staging directories
+      7. Delete the connector row (cascades to connector_sync_logs)
     """
     logger.info(f"Starting teardown for connector {connector_id!r}")
     deletion_errors: list[str] = []
     try:
-        # Step 1: Remove the scheduled job so no new ticks fire after this point.
+        # Step 1: make sure active jobs (cancelled by the sync tick) actually
+        # reached a terminal state before anything is touched.  If
+        # cancellation is stuck, keep the connector (DELETE_PENDING) rather
+        # than deleting it silently and orphaning mid-flight documents.
+        job_wait_error = await _wait_for_connector_jobs(connector_id)
+        if job_wait_error:
+            error_msg = f"Failed to delete connector, error: {job_wait_error}"
+            db_ops.set_connector_message(connector_id, error_msg)
+            logger.warning(
+                f"Skipping teardown for {connector_id!r}: {error_msg}"
+            )
+            return
+
+        # Step 2: Remove the scheduled job so no new ticks fire after this point.
         try:
             import digitize.connectors.scheduler as _sched
             await _sched.remove_connector_job(connector_id)
@@ -368,11 +385,20 @@ async def _run_teardown(connector_id: str) -> None:
                 f"Could not remove scheduler job for {connector_id!r}: {sched_exc}"
             )
 
-        # Steps 2+3: remove checksum ownership; delete orphaned documents
+        # Steps 3+4: Clean up documents ingested by this connector — release its
+        # checksum ownership mappings. When this connector is the last owner of
+        # a checksum (remaining owner count drops to 0), the underlying document
+        # is deleted; if other connectors still share the checksum, the document
+        # is preserved. Docs created for this connector's batches that no
+        # connector owns (mid-flight or cancelled docs that never reached
+        # add_connector_checksum_entry) are also deleted; safe now that all jobs
+        # are terminal.
         owned_checksums = db_ops.list_connector_checksums(connector_id)
-        checksum_removal_failures, doc_deletion_failures = _remove_checksums(
-            connector_id, owned_checksums
-        )
+        (
+            checksum_removal_failures,
+            doc_deletion_failures,
+            unregistered_doc_failures,
+        ) = _cleanup_connector_documents(connector_id, owned_checksums)
         if checksum_removal_failures:
             deletion_errors.append(
                 f"checksum removal failed for {len(checksum_removal_failures)} checksum(s)"
@@ -381,8 +407,12 @@ async def _run_teardown(connector_id: str) -> None:
             deletion_errors.append(
                 f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
             )
+        for doc_id in unregistered_doc_failures:
+            deletion_errors.append(
+                f"unregistered document deletion failed for doc_id={doc_id!r}"
+            )
 
-        # Step 4: sweep any residual batch staging directories
+        # Step 5: sweep any residual batch staging directories
         if not _sweep_staging_dir(connector_id, settings.digitize.staging_dir / "connectors"):
             deletion_errors.append("staging directory sweep failed")
 
@@ -392,7 +422,7 @@ async def _run_teardown(connector_id: str) -> None:
             logger.warning(f"Skipping connector row deletion for {connector_id!r} due to teardown failures: {error_msg}")
             return
 
-        # Step 5: delete the connector row (cascades to connector_sync_logs)
+        # Step 6: delete the connector row (cascades to connector_sync_logs)
         deleted = db_ops.delete_active_connector(connector_id)
         if not deleted:
             logger.warning(
@@ -407,102 +437,6 @@ async def _run_teardown(connector_id: str) -> None:
             exc_info=True,
         )
         db_ops.set_connector_message(connector_id, f"Unexpected error during teardown: {exc}")
-
-
-def _remove_checksums(
-    connector_id: str,
-    checksums: list[str] | set[str],
-) -> tuple[list[str], list[str]]:
-    """
-    Remove checksum ownership rows for *connector_id* and delete any document
-    that loses its last owner.
-
-    Iterates all *checksums*, accumulating failures rather than stopping on the
-    first error so that as many checksums as possible are cleaned up in one pass.
-
-    Returns
-    -------
-    checksum_removal_failures:
-        Checksums for which ``remove_connector_checksum_entry`` raised.
-    doc_deletion_failures:
-        Checksums whose associated document could not be deleted (best-effort).
-    """
-    checksum_removal_failures: list[str] = []
-    doc_deletion_failures: list[str] = []
-    for checksum in checksums:
-        try:
-            remaining, doc_id = db_ops.remove_connector_checksum_entry(connector_id, checksum)
-            if remaining == 0 and doc_id:
-                if not _best_effort_delete_document(doc_id):
-                    doc_deletion_failures.append(checksum)
-        except Exception as exc:
-            checksum_removal_failures.append(checksum)
-            logger.error(
-                f"Error removing checksum {checksum!r} for connector "
-                f"{connector_id!r}: {exc}",
-                exc_info=True,
-            )
-    return checksum_removal_failures, doc_deletion_failures
-
-
-def _best_effort_delete_document(doc_id: str) -> bool:
-    """
-    Delete a document via the full teardown path (VDB → files → DB record).
-
-    Calls delete_document_data() so that indexed chunks and output files are
-    cleaned up — not just the DB row.
-    All failures are logged and swallowed (best-effort semantics).
-
-    Returns True on success, False if an error occurred.
-    """
-    try:
-        from digitize.api.v1.documents import delete_document_data
-        delete_document_data(doc_id)
-        logger.debug(f"Deleted document {doc_id!r} (connector cleanup)")
-        return True
-    except Exception as exc:
-        logger.error(
-            f"Best-effort document deletion failed for {doc_id!r}: {exc}",
-            exc_info=True,
-        )
-        return False
-
-
-def _sweep_staging_dir(
-    connector_id: str,
-    staging_connectors_dir,
-    sync_seq: int | None = None,
-) -> bool:
-    """
-    Remove any residual batch staging directories for *connector_id*.
-
-    Per-batch dirs are named ``<connector_id>-<job_id>-<batch_number>`` and are
-    cleaned up inline after each ingest.  This sweep only has work to do when a
-    worker crashed mid-tick and left a directory behind.
-
-    When *sync_seq* is given the sweep is narrowed to dirs matching
-    ``<connector_id>-<sync_seq>-*`` (i.e. only the batches of that sync).
-
-    Returns True on success, False if an error occurred.
-    """
-    from pathlib import Path
-
-    base = Path(staging_connectors_dir)
-    if not base.exists():
-        return True
-    prefix = f"{connector_id}-{sync_seq}-" if sync_seq is not None else f"{connector_id}-"
-    try:
-        for entry in base.iterdir():
-            if entry.is_dir() and entry.name.startswith(prefix):
-                cleanup_staging_directory(entry.name, base, ignore_errors=True)
-                logger.debug(f"Swept residual staging dir {entry.name!r} for connector {connector_id!r}")
-        return True
-    except Exception as exc:
-        logger.error(
-            f"Error sweeping staging dir for connector {connector_id!r}: {exc}",
-            exc_info=True,
-        )
-        return False
 
 
 # ---------------------------------------------------------------------------

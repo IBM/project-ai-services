@@ -1,5 +1,5 @@
 import { SidePanel } from "@carbon/ibm-products";
-import { Button, Tag, Link, Layer } from "@carbon/react";
+import { Tag, Link, Layer } from "@carbon/react";
 import { Badge, PlayOutline, DataViewAlt } from "@carbon/icons-react";
 import { useUseCases } from "@/hooks/useUseCases";
 import { renderParagraphs } from "@/utils/string.tsx";
@@ -159,22 +159,27 @@ const SolutionDetailPanel = ({
               <div className={styles.storiesContainer}>
                 {allStories.map((story, index) => (
                   <div key={index} className={styles.story}>
-                    <p className={styles.storyCompany}>{story.company}</p>
+                    {(story.title || !story.url) && (
+                      <p className={styles.storyCompany}>{story.company}</p>
+                    )}
                     {story.url && (
-                      <Button
-                        kind="tertiary"
-                        size="sm"
-                        onClick={() =>
-                          window.open(
-                            story.url,
-                            "_blank",
-                            "noopener,noreferrer",
-                          )
-                        }
-                        className={styles.demoButton}
-                      >
-                        Read online
-                      </Button>
+                      <Layer withBackground className={styles.storyCard}>
+                        <div className={styles.storyCardText}>
+                          <h5 className={styles.storyCardTitle}>
+                            {story.title || story.company}
+                          </h5>
+                          <Link
+                            href={story.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            renderIcon={DataViewAlt}
+                            className={styles.storyLink}
+                            aria-label={`Read ${story.title || story.company}`}
+                          >
+                            Read
+                          </Link>
+                        </div>
+                      </Layer>
                     )}
                     {story.description && (
                       <p className={styles.storyDescription}>

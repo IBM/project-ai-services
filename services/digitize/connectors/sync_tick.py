@@ -40,6 +40,7 @@ from typing import Optional
 from pydantic import ValidationError
 
 from common.misc_utils import cleanup_staging_directory, get_logger, validate_document_file
+from common.validation_utils import safe_filename, sanitize_basename
 from digitize.connectors.scanners.scanner_factory import build_scanner
 from digitize.settings import settings
 from digitize.connectors.models import ConnectorError, ConnectorStatus, SyncLogStatus
@@ -371,9 +372,14 @@ async def _process_new_files(
 
         try:
             for remote_path, checksum in batch:
-                filename = Path(remote_path).name
+                # Normalise the extension to lowercase (same as the user upload
+                # path) so ingest() picks the file up; remote names like
+                # "file.PDF" are otherwise skipped and the doc stays "accepted".
+                remote_name = Path(sanitize_basename(remote_path))
+                filename = remote_name.stem + remote_name.suffix.lower()
+                local_path = safe_filename(filename, batch_dir)
                 local_checksum = await asyncio.to_thread(
-                    scanner.download_to, remote_path, batch_dir / filename
+                    scanner.download_to, remote_path, local_path
                 )
                 if not scanner.verify_integrity(local_checksum, checksum):
                     logger.warning(
@@ -382,14 +388,14 @@ async def _process_new_files(
                     )
                     continue
                 try:
-                    file_bytes = (batch_dir / filename).read_bytes()
+                    file_bytes = local_path.read_bytes()
                     validate_document_file(filename, file_bytes)
                 except ValueError as val_exc:
                     logger.warning(
                         f"Invalid file {remote_path!r} in connector "
                         f"{connector_id!r}; skipping file: {val_exc}"
                     )
-                    (batch_dir / filename).unlink(missing_ok=True)
+                    local_path.unlink(missing_ok=True)
                     invalid_files.append(remote_path)
                     continue
                 filename_to_checksum[filename] = checksum
@@ -476,10 +482,14 @@ async def _process_new_files(
 
 async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None:
     """Remove orphaned checksum rows and delete documents that lose their last owner."""
-    from digitize.api.v1.connectors import _remove_checksums
+    from digitize.utils.connectors import cleanup_connector_documents as _cleanup_connector_documents
 
-    checksum_removal_failures, doc_deletion_failures = await asyncio.to_thread(
-        _remove_checksums, connector_id, orphan_checksums
+    (
+        checksum_removal_failures,
+        doc_deletion_failures,
+        unregistered_doc_failures,
+    ) = await asyncio.to_thread(
+        _cleanup_connector_documents, connector_id, orphan_checksums
     )
     if checksum_removal_failures:
         raise RuntimeError(
@@ -488,6 +498,10 @@ async def _delete_orphans(connector_id: str, orphan_checksums: set[str]) -> None
     if doc_deletion_failures:
         raise RuntimeError(
             f"document deletion failed for {len(doc_deletion_failures)} checksum(s)"
+        )
+    if unregistered_doc_failures:
+        raise RuntimeError(
+            f"unregistered document deletion failed for {len(unregistered_doc_failures)} document(s)"
         )
 
 
@@ -501,35 +515,26 @@ async def _handle_interrupt(
     interrupt_type: Optional[InterruptType],
 ) -> None:
     """
-    Handle cancellation based on interrupt type.
+    Handle a cancelled tick (sync cancel and connector delete are handled alike).
 
-    SYNC_CANCEL: Stop the current sync, set connector to OUT_OF_SYNC, cleanup staging.
-    DELETE_CONNECTOR: Stop sync + full teardown (remove checksums, docs, connector row).
+    Closes the sync log as cancelled and cleans up this sync's staging
+    directory. For a connector being deleted (DELETE_PENDING) the connector row
+    is left untouched — ``update_connector_after_sync`` skips DELETE_PENDING
+    rows — and ``_run_teardown`` owns the remaining cleanup. Otherwise the
+    connector goes to OUT_OF_SYNC.
     """
-    if interrupt_type is None:
-        # Default cancel behavior — treat as sync cancel
-        _cancel_tick(sync_seq, connector_id)
-        return
+    logger.info(
+        f"Handling interrupt (type={interrupt_type}) for connector {connector_id!r}"
+    )
+    _cancel_tick(sync_seq, connector_id)
 
-    if interrupt_type == InterruptType.SYNC_CANCEL:
-        logger.info(f"Handling sync cancel for connector {connector_id!r}")
-        _cancel_tick(sync_seq, connector_id)
-        # Note: finalize_sync_log_and_update_connector() automatically sets connector to OUT_OF_SYNC when
-        # sync log status is CANCELLED. Cleanup staging directory for this sync.
-        from digitize.api.v1.connectors import _sweep_staging_dir
-        from digitize.settings import settings
-        _sweep_staging_dir(
-            connector_id,
-            settings.digitize.staging_dir / "connectors",
-            sync_seq=sync_seq,
-        )
-
-    elif interrupt_type == InterruptType.DELETE_CONNECTOR:
-        logger.info(f"Handling delete connector for {connector_id!r}")
-        _cancel_tick(sync_seq, connector_id)
-        # Run full teardown: remove checksums, delete orphaned docs, delete connector row
-        from digitize.api.v1.connectors import _run_teardown
-        await _run_teardown(connector_id)
+    from digitize.utils.connectors import sweep_staging_dir as _sweep_staging_dir
+    from digitize.settings import settings
+    _sweep_staging_dir(
+        connector_id,
+        settings.digitize.staging_dir / "connectors",
+        sync_seq=sync_seq,
+    )
 
 
 # ---------------------------------------------------------------------------

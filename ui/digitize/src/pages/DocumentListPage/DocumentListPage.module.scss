@@ -1,4 +1,4 @@
-@use '@carbon/react/scss/spacing' as *;
+@use "@carbon/react/scss/spacing" as *;
 
 .documentListPage {
   background-color: var(--cds-background);
@@ -12,35 +12,35 @@
   right: 1rem;
   z-index: 9000;
   max-width: 400px;
-  
+
   :global {
     .cds--inline-notification {
       margin-bottom: 0;
     }
-    
+
     .cds--toast-notification {
       margin-bottom: 0;
 
       &.cds--toast-notification--success {
         background-color: var(--cds-notification-background-success);
       }
-      
+
       &.cds--toast-notification--error {
         background-color: var(--cds-notification-background-error);
       }
-      
+
       &.cds--toast-notification--info {
         background-color: var(--cds-notification-background-info);
       }
-      
+
       .cds--toast-notification__title {
         color: var(--cds-text-primary);
       }
-      
+
       .cds--toast-notification__subtitle {
         color: var(--cds-text-secondary);
       }
-      
+
       .cds--toast-notification__close-button {
         svg {
           fill: var(--cds-icon-primary);
@@ -76,7 +76,7 @@
   text-decoration: none;
   font-size: 0.875rem;
   white-space: nowrap;
-  
+
   &:hover {
     text-decoration: underline;
   }
@@ -88,26 +88,26 @@
 
 .tableContainer {
   background-color: var(--cds-layer-01);
-  
+
   :global {
     .cds--data-table-container {
       padding-top: 0;
     }
-    
+
     .cds--table-toolbar {
       background-color: var(--cds-layer-01);
       border-bottom: 1px solid var(--cds-border-subtle-01);
     }
-    
+
     .cds--toolbar-content {
       background-color: var(--cds-layer-01);
       justify-content: flex-start;
     }
-    
+
     .cds--batch-actions {
       background-color: var(--cds-background-brand);
     }
-    
+
     .cds--toolbar-search-container-persistent {
       width: 100%;
       max-width: 400px;
@@ -120,7 +120,7 @@
   :global {
     thead {
       background-color: var(--cds-layer-accent-01);
-      
+
       th {
         background-color: var(--cds-layer-accent-01);
         color: var(--cds-text-primary);
@@ -131,16 +131,16 @@
         vertical-align: middle;
       }
     }
-    
+
     tbody {
       tr {
         border-bottom: 1px solid var(--cds-border-subtle-01);
         background-color: var(--cds-layer-01);
-        
+
         &:hover {
           background-color: var(--cds-layer-hover-01);
         }
-        
+
         td {
           padding: 1rem;
           color: var(--cds-text-primary);
@@ -193,11 +193,11 @@
   margin-left: 0.25rem;
   cursor: pointer;
   outline: none;
-  
+
   &:hover .errorInfoIcon {
     fill: var(--cds-icon-primary);
   }
-  
+
   &:focus {
     outline: 2px solid var(--cds-focus);
     outline-offset: 2px;
@@ -217,26 +217,26 @@
       max-height: 12rem;
       overflow-y: auto;
       word-wrap: break-word;
-      
+
       /* Custom scrollbar styling */
       &::-webkit-scrollbar {
         width: 6px;
       }
-      
+
       &::-webkit-scrollbar-track {
         background: var(--cds-layer-02);
         border-radius: 3px;
       }
-      
+
       &::-webkit-scrollbar-thumb {
         background: var(--cds-border-subtle-01);
         border-radius: 3px;
-        
+
         &:hover {
           background: var(--cds-border-strong-01);
         }
       }
-      
+
       /* Firefox scrollbar styling */
       scrollbar-width: thin;
       scrollbar-color: var(--cds-border-subtle-01) var(--cds-layer-02);
@@ -248,7 +248,7 @@
   padding: $spacing-09 $spacing-05 !important;
   border-bottom: none !important;
   background-color: var(--cds-layer-01) !important;
-  
+
   :global {
     tr:hover & {
       background-color: var(--cds-layer-01) !important;
@@ -282,7 +282,9 @@
   word-wrap: break-word;
   color: var(--cds-text-primary);
   margin: 0;
-  font-family: 'IBM Plex Mono', 'Menlo', 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', Courier, monospace;
+  font-family:
+    "IBM Plex Mono", "Menlo", "DejaVu Sans Mono", "Bitstream Vera Sans Mono",
+    Courier, monospace;
   line-height: 1.5;
 }
 

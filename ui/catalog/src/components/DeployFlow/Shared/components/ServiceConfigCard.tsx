@@ -377,8 +377,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
             // Custom component: model row first, then backend row (matches LLM pattern)
             if (field.isCustomComponent) {
               const modelId = config.components?.[field.key]?.params?.model as
-                | string
-                | undefined;
+                string | undefined;
               const modelName =
                 field.options.find((m) => m.id === modelId)?.text ??
                 modelId ??
@@ -520,8 +519,7 @@ export const ServiceConfigCard: React.FC<ServiceConfigCardProps> = ({
               value = config.version;
             } else if (field.isModelFirst) {
               value = config.components?.[field.key]?.params?.model as
-                | string
-                | undefined;
+                string | undefined;
             } else if (config.components && config.components[field.key]) {
               value = config.components[field.key].providerId;
             }

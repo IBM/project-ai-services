@@ -166,8 +166,8 @@ const renderAboutSection = (aboutSection: AboutSection, index: number) => {
           </div>
         )}
 
-        {/* Render sections with values arrays */}
-        {aboutSection.sections.some((s) => s.values) && (
+        {/* Render sections with values arrays or url/cta buttons */}
+        {aboutSection.sections.some((s) => s.values || s.url) && (
           <div
             className={
               aboutSection.sections.length === 2

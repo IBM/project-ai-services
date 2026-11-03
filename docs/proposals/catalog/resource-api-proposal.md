@@ -192,7 +192,7 @@ The Resource API leverages the Podman Go bindings to retrieve system information
 
 **Technology Stack:**
 
-- `github.com/containers/podman/v5/pkg/bindings/system` - Podman system info API
+- `go.podman.io/podman/v6/pkg/bindings/system` - Podman system info API
 - Go standard library for calculations
 
 **Data Flow:**

@@ -946,6 +946,15 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.WorkerListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker'
+        type: array
+      pagination:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata'
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_models.AcceleratorInfo:
     properties:
       available:
@@ -1061,6 +1070,10 @@ paths:
       - description: Filter by catalog ID (e.g., 'rag', 'chat', 'digitize', 'summarize')
         in: query
         name: catalog_id
+        type: string
+      - description: Case-insensitive substring search on application name
+        in: query
+        name: q
         type: string
       produces:
       - application/json
@@ -1351,6 +1364,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User doesn't own this application
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
           description: Application or datasource not found
           schema:
@@ -1394,6 +1411,10 @@ paths:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User doesn't own this application
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "404":
@@ -2245,6 +2266,10 @@ paths:
         in: query
         name: provider
         type: string
+      - description: Case-insensitive substring search on datasource name
+        in: query
+        name: q
+        type: string
       produces:
       - application/json
       responses:
@@ -2801,20 +2826,40 @@ paths:
     get:
       description: Returns all registered workers, their current status, human-readable
         message, and connected application IDs.
+      parameters:
+      - default: 1
+        description: Page number (1-indexed)
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 'Number of items per page (max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      - description: Case-insensitive substring search on worker name
+        in: query
+        name: q
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: List of workers
+          description: List of workers with pagination
           schema:
-            items:
-              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Worker'
-            type: array
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.WorkerListResponse'
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "500":
           description: Internal error
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
       security:
       - BearerAuth: []
       summary: List all workers

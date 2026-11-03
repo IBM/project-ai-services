@@ -1,8 +1,8 @@
-import { Outlet } from 'react-router';
-import { useState } from 'react';
-import AppHeader from '../components/AppHeader';
-import Navbar from '../components/Navbar';
-import '../index.scss';
+import { Outlet } from "react-router";
+import { useState } from "react";
+import AppHeader from "../components/AppHeader";
+import Navbar from "../components/Navbar";
+import "../index.scss";
 
 const MainLayout = () => {
   const [isSideNavOpen, setIsSideNavOpen] = useState(false);
@@ -13,13 +13,13 @@ const MainLayout = () => {
         isSideNavOpen={isSideNavOpen}
         setIsSideNavOpen={setIsSideNavOpen}
       />
-      
+
       <Navbar
         isSideNavOpen={isSideNavOpen}
         setIsSideNavOpen={setIsSideNavOpen}
       />
 
-      <main className={isSideNavOpen ? 'sideNavExpanded' : ''}>
+      <main className={isSideNavOpen ? "sideNavExpanded" : ""}>
         <Outlet />
       </main>
     </div>
