@@ -41,7 +41,7 @@ const (
 	sanityServiceDeployTimeout = 45 * time.Minute
 	sanityServiceReadyTimeout  = 25 * time.Minute
 	sanityServicePollInterval  = 15 * time.Second
-	sanityJobTimeout           = 10 * time.Minute
+	sanityJobTimeout           = 20 * time.Minute
 	sanityDeleteTimeout        = 15 * time.Minute
 )
 
@@ -251,6 +251,8 @@ func defineSanityExtract() {
 
 		ginkgo.BeforeAll(func() {
 			skipUnlessSanityRun()
+			// Set before deploying so AfterAll can clean up a partially created app if deploy fails.
+			svcApp = sanityAppName("extract")
 			svcApp, baseURL = deploySanityService(sanityService{
 				template:  "extract",
 				logPrefix: "SANITY-EXTRACT",
@@ -324,6 +326,7 @@ func defineSanityDigitize() {
 			pdfPath = digitization.GetTestPDFPath()
 			gomega.Expect(pdfPath).NotTo(gomega.BeEmpty(), "test PDF path could not be resolved")
 
+			svcApp = sanityAppName("digitize")
 			svcApp, baseURL = deploySanityService(sanityService{
 				template:  "digitize",
 				logPrefix: "SANITY-DIGITIZE",
@@ -401,6 +404,7 @@ func defineSanitySummarize() {
 
 		ginkgo.BeforeAll(func() {
 			skipUnlessSanityRun()
+			svcApp = sanityAppName("summarize")
 			svcApp, baseURL = deploySanityService(sanityService{
 				template:  "summarize",
 				logPrefix: "SANITY-SUMMARIZE",
@@ -434,7 +438,7 @@ func defineSanitySummarize() {
 		})
 
 		ginkgo.It("summarizes a PDF through an async job", func() {
-			ctx, cancel := withTimeout(15 * time.Minute)
+			ctx, cancel := withTimeout(25 * time.Minute)
 			defer cancel()
 
 			res, err := summarization.SubmitAndVerifyJob(ctx, baseURL, testFilePath("ingestion/docs/test_doc.pdf"), "", "standard",

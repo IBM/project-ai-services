@@ -825,7 +825,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			catalogLoginWithDiscovery(ctx, true)
 
 			cliOptions := cli.CreateOptions{
-				SkipModelDownload: false,
+				// In a sanity run models were already downloaded in a prior full e2e
+				// run or pre-staged on the machine. Skipping in-create model download
+				// removes the concurrent I/O from model-download containers running
+				// alongside component pod deployments, which prevents podman socket
+				// saturation on resource-constrained machines.
+				SkipModelDownload: isSanityRun(),
 				ImagePullPolicy:   "IfNotPresent",
 			}
 			// Handle different templates
