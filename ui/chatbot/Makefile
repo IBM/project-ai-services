@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY ?= icr.io/ai-services-private
 IMAGE = chatbot-ui
 TAG ?= v0.0.62
@@ -5,7 +6,7 @@ CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGIST
 
 CONTAINER_BUILDER?=podman
 build:
-	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
 push:

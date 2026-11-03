@@ -1,3 +1,4 @@
+include ../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 CONTAINER_BUILDER?=podman
 CREDS_ARG := $(if $(and $(REGISTRY_USER),$(REGISTRY_PASSWORD)),--creds="$(REGISTRY_USER):$(REGISTRY_PASSWORD)")
@@ -15,7 +16,7 @@ endif
 include $(SERVICE_MAKEFILE)
 
 build:
-	$(CONTAINER_BUILDER) build $(CREDS_ARG) -f $(SERVICE)/Containerfile -t $(REGISTRY)/$(IMAGE):$(TAG) .
+	$(CONTAINER_BUILDER) build $(call image_labels,$(SERVICE)/Containerfile) $(CREDS_ARG) -f $(SERVICE)/Containerfile -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build
 
 push:

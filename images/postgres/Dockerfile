@@ -28,6 +28,9 @@ RUN dnf install -y git ca-certificates && \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+LABEL org.opencontainers.image.title="PostgreSQL" \
+      org.opencontainers.image.description="PostgreSQL 18 database on UBI 9 Minimal"
+
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 # Create postgres group and user with flexible GID/UID for OpenShift compatibility

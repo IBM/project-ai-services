@@ -2,6 +2,9 @@ FROM localhost/prebuilder as prebuilder
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+LABEL org.opencontainers.image.title="AI Services Service Base" \
+      org.opencontainers.image.description="Base image with Python runtime, dependencies and Docling models for AI services"
+
 RUN microdnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && microdnf clean all
 
 RUN microdnf install -y python3.12-devel \

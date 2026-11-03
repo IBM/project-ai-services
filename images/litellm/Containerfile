@@ -91,6 +91,9 @@ RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} \
 #### Runtime Stage
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+LABEL org.opencontainers.image.title="LiteLLM" \
+      org.opencontainers.image.description="LiteLLM proxy for a unified OpenAI-compatible LLM gateway"
+
 ARG VERSION=${VERSION}
 ARG PYTHON_VERSION
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"

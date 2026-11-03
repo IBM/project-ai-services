@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 IMAGE=caddy
 CADDY_VERSION?=v2.11.7
@@ -10,7 +11,7 @@ IMAGE_TAG := $(REGISTRY)/$(IMAGE):$(TAG)
 
 CONTAINER_BUILDER?=podman
 build:
-	$(CONTAINER_BUILDER) build --build-arg CADDY_VERSION=$(CADDY_VERSION) -t $(IMAGE_TAG) .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) --build-arg CADDY_VERSION=$(CADDY_VERSION) -t $(IMAGE_TAG) .
 .PHONY: build
 
 push:

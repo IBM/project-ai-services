@@ -43,6 +43,9 @@ RUN ARCH=$(uname -m) && mkdir -p /rpms && \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+LABEL org.opencontainers.image.title="AI Services Tools" \
+      org.opencontainers.image.description="Tools image with Python utilities and ServiceReport for AI services"
+
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 ENV VIRTUAL_ENV=/opt/venv

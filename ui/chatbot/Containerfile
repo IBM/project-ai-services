@@ -11,6 +11,9 @@ RUN npm run build
 
 FROM registry.access.redhat.com/ubi9/nginx-126:9.8
 
+LABEL org.opencontainers.image.title="Chatbot UI" \
+      org.opencontainers.image.description="Chatbot UI for AI Services"
+
 USER root
 RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && dnf clean all
 USER 1001

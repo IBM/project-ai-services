@@ -6,6 +6,9 @@
 # This stage is maintained for future requirements or architecture-specific builds.
 FROM registry.access.redhat.com/ubi9/ubi:9.8
 
+LABEL org.opencontainers.image.title="Service Base Prebuilder" \
+      org.opencontainers.image.description="Pre-builder image that builds Python wheels for the service base image"
+
 RUN yum install -y --setopt=tsflags=nodocs gcc-c++ python3.12-devel python3.12-pip git rust cargo openssl-devel libffi-devel zlib-devel && \
     yum clean all && rm -rf /var/cache/yum && \
     rm -rf /usr/bin/python && rm -rf /usr/bin/python3 && \

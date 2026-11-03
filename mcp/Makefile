@@ -1,3 +1,4 @@
+include ../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 IMAGE=ai-services-mcp
 TAG?=v0.0.9
@@ -28,7 +29,7 @@ PLATFORMS := \
 
 # Build container image (used by CI via build-and-publish-image.yml)
 build:
-	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) -f Containerfile .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(REGISTRY)/$(IMAGE):$(TAG) -f Containerfile .
 
 # Build the Go binary (native)
 build-binary:
@@ -41,7 +42,7 @@ build-optimized:
 
 # Build container image
 build-container:
-	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) -f Containerfile .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(REGISTRY)/$(IMAGE):$(TAG) -f Containerfile .
 
 # Push container image
 push:

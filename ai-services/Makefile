@@ -1,3 +1,4 @@
+include ../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 IMAGE=ai-services
 TAG?=v0.0.467
@@ -102,7 +103,7 @@ binary:
 # Container image build
 build:
 	@echo "Building container image with catalog API enabled"
-	$(CONTAINER_BUILDER) build --build-arg CMD_VERSION=$(VERSION) \
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) --build-arg CMD_VERSION=$(VERSION) \
     --build-arg GITCOMMIT=$(GITCOMMIT) --build-arg BUILDDATE=$(BUILDDATE) \
     --build-arg BUILDTAGS="$(BUILDTAGS)" -t $(REGISTRY)/$(IMAGE):$(TAG) .
 .PHONY: build

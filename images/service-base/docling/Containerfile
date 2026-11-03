@@ -1,5 +1,8 @@
 FROM registry.access.redhat.com/ubi9/ubi:9.8 AS build
 
+LABEL org.opencontainers.image.title="Docling Builder" \
+      org.opencontainers.image.description="Build image for Docling and its native dependency wheels"
+
 ARG package_version=2.60.1
 
 ENV PACKAGE_NAME="docling"

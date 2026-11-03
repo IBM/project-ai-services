@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY ?= icr.io/ai-services-private
 IMAGE ?= catalog-ui
 TAG ?= v0.0.109
@@ -10,7 +11,7 @@ FULL_IMAGE := $(REGISTRY)/$(IMAGE):$(TAG)
 .PHONY: build push run stop rm logs clean image-tag
 
 build:
-	$(CONTAINER_BUILDER) build -t $(FULL_IMAGE) .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) -t $(FULL_IMAGE) .
 
 push:
 	$(CONTAINER_BUILDER) push $(CREDS_ARG) $(FULL_IMAGE)

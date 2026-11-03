@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 IMAGE=tools
 TAG?=0.16
@@ -24,7 +25,7 @@ FULL_IMAGE_TAG = $(REGISTRY)/$(IMAGE):$(TAG)-$(PLATFORM)
 
 CONTAINER_BUILDER?=podman
 build:
-	$(CONTAINER_BUILDER) build --platform linux/$(PLATFORM) --build-arg SR_COMMIT=$(SR_COMMIT) -t $(ARCH_TAG) .
+	$(CONTAINER_BUILDER) build $(IMAGE_LABEL_ARGS) --platform linux/$(PLATFORM) --build-arg SR_COMMIT=$(SR_COMMIT) -t $(ARCH_TAG) .
 .PHONY: build
 
 push:

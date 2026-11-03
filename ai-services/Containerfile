@@ -33,6 +33,9 @@ RUN CGO_ENABLED=0 go build \
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
+LABEL org.opencontainers.image.title="AI Services" \
+      org.opencontainers.image.description="AI Services CLI and catalog API for deploying and managing AI services"
+
 # Install pciutils for lspci command (required for Spyre card detection)
 RUN microdnf install -y pciutils && \
     microdnf clean all

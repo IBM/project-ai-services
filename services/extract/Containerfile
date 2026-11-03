@@ -1,5 +1,8 @@
 FROM icr.io/ai-services-cicd/service-base:v0.0.45
 
+LABEL org.opencontainers.image.title="Extract Service" \
+      org.opencontainers.image.description="Extraction service for AI Services"
+
 WORKDIR /opt/services/extract
 
 ENV PYTHONPATH=/opt/services

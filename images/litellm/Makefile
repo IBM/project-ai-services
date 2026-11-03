@@ -1,3 +1,4 @@
+include ../../hack/image-labels.mk
 REGISTRY?=icr.io/ai-services-private
 IMAGE=litellm
 # When updating LITELLM_VERSION:
@@ -59,6 +60,7 @@ clean:
 
 build:
 	$(CONTAINER_BUILDER) build -t $(REGISTRY)/$(IMAGE):$(TAG) \
+		$(IMAGE_LABEL_ARGS) \
 		--jobs 2 \
 		--build-arg VERSION=$(LITELLM_VERSION) \
 		--build-arg LITELLM_SHA256=$(LITELLM_SHA256) \

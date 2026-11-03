@@ -1,5 +1,8 @@
 FROM icr.io/ai-services-cicd/service-base:v0.0.45
 
+LABEL org.opencontainers.image.title="Chatbot Service" \
+      org.opencontainers.image.description="Chatbot service for AI Services"
+
 WORKDIR /opt/services/chatbot
 
 ENV PYTHONPATH=/opt/services
