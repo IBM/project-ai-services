@@ -114,7 +114,7 @@ class ConnectorCreateRequest(BaseModel):
     )
     name: str = Field(..., description="Human-readable unique name, e.g. 'prod-sftp-reports'")
     type: str = Field(..., description="Connector transport type: 'file_system' or 'object_storage'")
-    allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx']")
+    allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx', '.html']")
     connection_details: Dict[str, Any] = Field(..., description="Transport-specific connection parameters")
 
     model_config = {
@@ -122,7 +122,7 @@ class ConnectorCreateRequest(BaseModel):
             "example": {
                 "name": "prod-sftp-reports",
                 "type": "file_system",
-                "allowed_extensions": [".pdf", ".docx"],
+                "allowed_extensions": [".pdf", ".docx", ".html"],
                 "connection_details": {
                     "host": "sftp.example.com",
                     "port": 22,
@@ -227,7 +227,7 @@ class ConnectorUpdateRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "name": "prod-sftp-reports-updated",
-                "allowed_extensions": [".pdf", ".docx"],
+                "allowed_extensions": [".pdf", ".docx", ".html"],
                 "connection_details": {
                     "remote_path": "/exports/v2",
                 },
@@ -303,7 +303,7 @@ class ConnectorDetailResponse(BaseModel):
                 "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
                 "name": "prod-sftp-reports",
                 "type": "file_system",
-                "allowed_extensions": [".pdf", ".docx"],
+                "allowed_extensions": [".pdf", ".docx", ".html"],
                 "sync_interval_seconds": 60,
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",
