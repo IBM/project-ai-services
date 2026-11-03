@@ -398,14 +398,18 @@ func (v *ApplicationValidator) ValidateServices(ctx context.Context, services []
 }
 
 // ValidateConnectorRefs validates the connectors list on a single service against both the
-// catalog YAML (accepts_datasource flag) and the DB connectors table (existence, type, status).
+// catalog YAML (datasource block) and the DB connectors table (existence, type, status, provider).
 //
 // Rules applied per service:
+//   - When the service's catalog YAML declares datasource.required: true, at least one
+//     ConnectorRef of type "datasource" must be provided; otherwise returns 400.
 //   - A ConnectorRef with type "datasource" is only valid when the service's catalog YAML
-//     declares accepts_datasource: true; otherwise returns 400.
+//     declares datasource settings; otherwise returns 400.
 //   - Each ConnectorRef.ID must parse as a valid UUID; otherwise returns 400.
 //   - Each ConnectorRef.ID must reference a row in the connectors table whose type matches
 //     ConnectorRef.Type and whose status is "connected"; otherwise returns 400.
+//   - When datasource.supported_providers is non-empty, the connector's provider must be in the allowlist;
+//     otherwise returns 400.
 //   - The same ID must not appear more than once within a single service's connectors list;
 //     otherwise returns 400.
 //
@@ -417,6 +421,10 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 	catalogService *types.Service,
 	connectorRepo dbrepo.ConnectorRepository,
 ) error {
+	if err := validateRequiredDatasource(service, catalogService); err != nil {
+		return err
+	}
+
 	if len(service.Connectors) == 0 {
 		return nil
 	}
@@ -436,8 +444,27 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 	return nil
 }
 
+// validateRequiredDatasource enforces that, when datasource.required is true in the catalog YAML,
+// at least one connector ref of type "datasource" is supplied.
+func validateRequiredDatasource(service apimodels.Service, catalogService *types.Service) error {
+	if catalogService == nil || catalogService.Datasource == nil || !catalogService.Datasource.Required {
+		return nil
+	}
+
+	for _, ref := range service.Connectors {
+		if ref.Type == catalogconstants.ConnectorTypeDatasource {
+			return nil
+		}
+	}
+
+	return &ValidationError{
+		Code:    http.StatusBadRequest,
+		Message: fmt.Sprintf("service %q requires a datasource connector; include at least one connector ref of type 'datasource'", service.CatalogID),
+	}
+}
+
 // validateOneConnectorRef validates a single ConnectorRef entry: deduplication, catalog-level
-// guard, UUID format, and DB-level existence/type/status checks.
+// guard, UUID format, and DB-level existence/type/status/provider checks.
 func (v *ApplicationValidator) validateOneConnectorRef(
 	ctx context.Context,
 	ref apimodels.ConnectorRef,
@@ -454,8 +481,9 @@ func (v *ApplicationValidator) validateOneConnectorRef(
 	}
 	seenIDs[ref.ID] = true
 
-	// Catalog-level guard: the service must declare accepts_datasource: true.
-	if ref.Type == catalogconstants.ConnectorTypeDatasource && !catalogService.AcceptsDatasource {
+	// Catalog-level guard: the service must declare datasource settings.
+	acceptsDatasource := catalogService != nil && catalogService.Datasource != nil
+	if ref.Type == catalogconstants.ConnectorTypeDatasource && !acceptsDatasource {
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
 			Message: fmt.Sprintf("service %q does not accept datasource connectors (accepts_datasource is not set)", serviceCatalogID),
@@ -470,16 +498,17 @@ func (v *ApplicationValidator) validateOneConnectorRef(
 		}
 	}
 
-	return validateConnectorInDB(ctx, connectorID, ref, serviceCatalogID, connectorRepo)
+	return validateConnectorInDB(ctx, connectorID, ref, serviceCatalogID, catalogService, connectorRepo)
 }
 
-// validateConnectorInDB performs the DB-level existence, type, and status checks for a
+// validateConnectorInDB performs the DB-level existence, type, status, and supported provider checks for a
 // single connector ref.
 func validateConnectorInDB(
 	ctx context.Context,
 	connectorID uuid.UUID,
 	ref apimodels.ConnectorRef,
 	serviceCatalogID string,
+	catalogService *types.Service,
 	connectorRepo dbrepo.ConnectorRepository,
 ) error {
 	connector, err := connectorRepo.GetByID(ctx, connectorID, false)
@@ -514,7 +543,35 @@ func validateConnectorInDB(
 		}
 	}
 
+	// Provider check: when datasource.supported_providers is non-empty, verify the referenced connector's
+	// provider field is in the allowlist.
+	if catalogService != nil && catalogService.Datasource != nil && len(catalogService.Datasource.SupportedProviders) > 0 {
+		if !isProviderSupported(connector.Provider, catalogService.Datasource.SupportedProviders) {
+			return &ValidationError{
+				Code: http.StatusBadRequest,
+				Message: fmt.Sprintf(
+					"provider %s is not supported by service %s; supported providers: %v",
+					connector.Provider, serviceCatalogID, catalogService.Datasource.SupportedProviders,
+				),
+			}
+		}
+	}
+
 	return nil
+}
+
+// isProviderSupported checks whether the given provider is in the allowlist.
+func isProviderSupported(provider string, supported []string) bool {
+	if len(supported) == 0 {
+		return true
+	}
+	for _, p := range supported {
+		if p == provider {
+			return true
+		}
+	}
+
+	return false
 }
 
 // seenComponent records the first occurrence of a component type/provider pair

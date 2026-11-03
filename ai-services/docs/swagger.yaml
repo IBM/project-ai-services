@@ -688,6 +688,15 @@ definitions:
         description: Type is the connector type (e.g. "datasource").
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings:
+    properties:
+      required:
+        type: boolean
+      supported_providers:
+        items:
+          type: string
+        type: array
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference:
     properties:
       id:
@@ -746,6 +755,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent'
         type: array
+      datasource:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings'
       id:
         type: string
       name:
@@ -836,6 +847,8 @@ definitions:
         type: array
       certified_by:
         type: string
+      datasource:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings'
       dependencies:
         items:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference'

@@ -142,6 +142,57 @@ about:
 	}
 }
 
+func TestServiceDatasourceSettings(t *testing.T) {
+	yamlWithDatasource := `
+id: digitize
+name: Digitize Service
+type: service
+datasource:
+  required: true
+  supported_providers:
+    - object_storage
+    - file_system
+`
+	var svc Service
+	err := yaml.Unmarshal([]byte(yamlWithDatasource), &svc)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal YAML with datasource: %v", err)
+	}
+
+	if !svc.AcceptsDatasource {
+		t.Errorf("Expected AcceptsDatasource to be true")
+	}
+	if svc.Datasource == nil {
+		t.Fatalf("Expected Datasource to be non-nil")
+	}
+	if !svc.Datasource.Required {
+		t.Errorf("Expected Required to be true")
+	}
+	if len(svc.Datasource.SupportedProviders) != 2 ||
+		svc.Datasource.SupportedProviders[0] != "object_storage" ||
+		svc.Datasource.SupportedProviders[1] != "file_system" {
+		t.Errorf("Unexpected SupportedProviders: %v", svc.Datasource.SupportedProviders)
+	}
+
+	yamlWithoutDatasource := `
+id: chat
+name: Chat Service
+type: service
+`
+	var chatSvc Service
+	err = yaml.Unmarshal([]byte(yamlWithoutDatasource), &chatSvc)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal YAML without datasource: %v", err)
+	}
+
+	if chatSvc.AcceptsDatasource {
+		t.Errorf("Expected AcceptsDatasource to be false")
+	}
+	if chatSvc.Datasource != nil {
+		t.Errorf("Expected Datasource to be nil")
+	}
+}
+
 // Helper function to find substring position
 func findSubstring(s, substr string) int {
 	for i := 0; i <= len(s)-len(substr); i++ {

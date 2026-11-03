@@ -3839,6 +3839,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings": {
+            "type": "object",
+            "properties": {
+                "required": {
+                    "type": "boolean"
+                },
+                "supported_providers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference": {
             "type": "object",
             "properties": {
@@ -3927,6 +3941,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent"
                     }
+                },
+                "datasource": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings"
                 },
                 "id": {
                     "type": "string"
@@ -4063,6 +4080,9 @@ const docTemplate = `{
                 },
                 "certified_by": {
                     "type": "string"
+                },
+                "datasource": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings"
                 },
                 "dependencies": {
                     "type": "array",
