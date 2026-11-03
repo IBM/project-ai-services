@@ -65,7 +65,7 @@ def _make_config(**overrides) -> S3ConnectorConfig:
         delimiter="",
         verify_ssl=False,
         download_concurrency=2,
-        allowed_extensions=[".pdf", ".docx"],
+        allowed_extensions=[".pdf", ".docx", ".html"],
     )
     defaults.update(overrides)
     return S3ConnectorConfig(**defaults)
@@ -305,12 +305,13 @@ class TestS3ScannerScan:
         page = self._make_page([
             self._make_obj("docs/report.pdf", "abc123"),
             self._make_obj("docs/manual.docx", "def456"),
+            self._make_obj("docs/page.html", "ghi789"),
         ])
         scanner._client = _make_mock_client([page])
 
         result = scanner.scan()
 
-        assert result == [("docs/report.pdf", "abc123"), ("docs/manual.docx", "def456")]
+        assert result == [("docs/report.pdf", "abc123"), ("docs/manual.docx", "def456"), ("docs/page.html", "ghi789")]
 
     def test_skips_non_document_extensions(self):
         cfg = _make_config()
@@ -507,7 +508,7 @@ def _make_sftp_config(**overrides) -> "SSHConnectorConfig":
         username="user",
         private_key=_FAKE_PEM,
         remote_path="/data",
-        allowed_extensions=[".pdf", ".docx"],
+        allowed_extensions=[".pdf", ".docx", ".html"],
     )
     defaults.update(overrides)
     return SSHConnectorConfig(**defaults)
@@ -529,7 +530,7 @@ class TestSSHConnectorConfig:
         assert cfg.port == 22
         assert cfg.username == "user"
         assert cfg.remote_path == "/data"
-        assert cfg.allowed_extensions == [".pdf", ".docx"]
+        assert cfg.allowed_extensions == [".pdf", ".docx", ".html"]
 
     def test_default_port_is_22(self):
         cfg = _make_sftp_config()
@@ -738,14 +739,16 @@ class TestSSHScannerScan:
         mock_sftp = MagicMock()
         mock_ssh = MagicMock()
 
-        # /data contains report.pdf and manual.docx — give each a unique md5
+        # /data contains report.pdf, manual.docx, page.html — give each a unique md5
         mock_sftp.listdir_attr.return_value = [
             self._make_stat("report.pdf"),
             self._make_stat("manual.docx"),
+            self._make_stat("page.html"),
         ]
         _md5s = {
             "/data/report.pdf": "aabbccdd11223344aabbccdd11223344",
             "/data/manual.docx": "11223344aabbccdd11223344aabbccdd",
+            "/data/page.html": "55667788aabbccdd55667788aabbccdd",
         }
         def exec_command_side_effect(cmd):
             path = cmd.split('"')[1]
@@ -764,6 +767,7 @@ class TestSSHScannerScan:
         paths = [r[0] for r in result]
         assert "/data/report.pdf" in paths
         assert "/data/manual.docx" in paths
+        assert "/data/page.html" in paths
 
     def test_scan_filters_non_allowed_extensions(self):
         scanner = _make_ssh_scanner()
