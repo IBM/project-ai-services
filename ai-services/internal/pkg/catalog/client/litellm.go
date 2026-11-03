@@ -135,7 +135,7 @@ func (c *litellmClient) doRequest(ctx context.Context, method, path string, body
 	if err != nil {
 		return nil, 0, fmt.Errorf("http request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -43,8 +44,9 @@ func NewModelHandler(modelService repository.ModelServiceInterface) *ModelHandle
 //	@Failure		500		{object}	ErrorResponse					"Internal Server Error"
 //	@Router			/models [post]
 func (h *ModelHandler) CreateModel(c *gin.Context) {
-	var req models.CreateModelRequest
+	ctx := c.Request.Context()
 
+	var req models.CreateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: fmt.Sprintf("Invalid request body: %v", err),
@@ -53,30 +55,33 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		return
 	}
 
-	userID := c.GetString(middleware.CtxUserIDKey)
-	req.CreatedBy = userID
+	req.CreatedBy = c.GetString(middleware.CtxUserIDKey)
 
-	resp, err := h.modelService.CreateModel(c.Request.Context(), req)
+	resp, err := h.modelService.CreateModel(ctx, req)
 	if err != nil {
-		if valErr, ok := err.(*validators.ValidationError); ok {
-			c.JSON(valErr.Code, ErrorResponse{
-				Error: valErr.Message,
-			})
+		var valErr *validators.ValidationError
+		if errors.As(err, &valErr) {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
 
 			return
 		}
 
-		logger.ErrorfCtx(c.Request.Context(), "failed to create model: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{
-			Error: fmt.Sprintf("Failed to create model: %v", err),
-		})
+		// Internal details are logged, not returned: they may include upstream response bodies.
+		logger.ErrorfCtx(ctx, "failed to create model: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to create model"})
 
 		return
 	}
 
-	if req.DeploymentType == "local" {
-		c.JSON(http.StatusAccepted, resp)
-	} else {
-		c.JSON(http.StatusCreated, resp)
+	c.JSON(createModelStatus(resp.DeploymentType), resp)
+}
+
+// createModelStatus maps a deployment type to its success status: local deployments continue
+// in the background (202), remote registrations complete before responding (201).
+func createModelStatus(t models.DeploymentType) int {
+	if t == models.DeploymentTypeLocal {
+		return http.StatusAccepted
 	}
+
+	return http.StatusCreated
 }

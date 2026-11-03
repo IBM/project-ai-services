@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,8 +20,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mockComponentRepo is safe for concurrent use: local deployments update it from a goroutine.
 type mockComponentRepo struct {
 	dbrepo.ComponentRepository
+	mu         sync.Mutex
 	components map[string]*dbmodels.Component
 	byID       map[uuid.UUID]*dbmodels.Component
 }
@@ -33,6 +36,9 @@ func newMockComponentRepo() *mockComponentRepo {
 }
 
 func (m *mockComponentRepo) Insert(_ context.Context, c *dbmodels.Component) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if c.ID == uuid.Nil {
 		c.ID = uuid.New()
 	}
@@ -42,7 +48,24 @@ func (m *mockComponentRepo) Insert(_ context.Context, c *dbmodels.Component) err
 	return nil
 }
 
+// get returns a snapshot of the component, or nil.
+func (m *mockComponentRepo) get(id uuid.UUID) *dbmodels.Component {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c, ok := m.byID[id]
+	if !ok {
+		return nil
+	}
+	snapshot := *c
+
+	return &snapshot
+}
+
 func (m *mockComponentRepo) GetByName(_ context.Context, name string) (*dbmodels.Component, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	for n, c := range m.components {
 		if stringsEqualFold(n, name) {
 			return c, nil
@@ -53,6 +76,9 @@ func (m *mockComponentRepo) GetByName(_ context.Context, name string) (*dbmodels
 }
 
 func (m *mockComponentRepo) UpdateStatus(_ context.Context, id uuid.UUID, status dbmodels.ComponentStatus, message string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if c, ok := m.byID[id]; ok {
 		c.Status = status
 		c.Message = message
@@ -62,6 +88,9 @@ func (m *mockComponentRepo) UpdateStatus(_ context.Context, id uuid.UUID, status
 }
 
 func (m *mockComponentRepo) UpdateEndpoints(_ context.Context, id uuid.UUID, endpoints []map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if c, ok := m.byID[id]; ok {
 		c.Endpoints = endpoints
 	}
@@ -167,6 +196,8 @@ func (m *mockLiteLLMClient) HealthProbe(_ context.Context, _ string) (*catalogcl
 		},
 	}, nil
 }
+
+const validWatsonxKey = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR" // 44 chars
 
 func stringsEqualFold(s1, s2 string) bool {
 	return len(s1) == len(s2) && (s1 == s2 || (len(s1) > 0 && len(s2) > 0 && (s1[0]|0x20) == (s2[0]|0x20))) // simplified for test
@@ -315,8 +346,8 @@ func TestCreateModel_Remote_WatsonX_Success(t *testing.T) {
 		Model:          "ibm/granite-4-h-small",
 		Params: map[string]any{
 			"api_base":   "https://us-south.ml.cloud.ibm.com",
-			"project_id": "proj-123",
-			"api_key":    "sk-test-key",
+			"project_id": "123e4567-e89b-12d3-a456-426614174000",
+			"api_key":    validWatsonxKey,
 		},
 		CreatedBy: "admin",
 	}
@@ -325,12 +356,13 @@ func TestCreateModel_Remote_WatsonX_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.NotEmpty(t, resp.ID)
+	assert.Equal(t, apimodels.DeploymentTypeRemote, resp.DeploymentType)
 
 	// Verify LiteLLM registration
 	require.Len(t, mockLite.registeredModels, 1)
 	assert.Equal(t, "ibm/granite-4-h-small", mockLite.registeredModels[0].ModelName)
 	assert.Equal(t, "watsonx/ibm/granite-4-h-small", mockLite.registeredModels[0].LiteLLMParams.Model)
-	assert.Equal(t, "sk-test-key", mockLite.registeredModels[0].LiteLLMParams.APIKey)
+	assert.Equal(t, validWatsonxKey, mockLite.registeredModels[0].LiteLLMParams.APIKey)
 
 	// Verify connector persisted without api_key
 	conn, ok := connRepo.connectors["prod-watsonx"]
@@ -338,8 +370,10 @@ func TestCreateModel_Remote_WatsonX_Success(t *testing.T) {
 	assert.Equal(t, dbmodels.ConnectorStatusConnected, conn.Status)
 	assert.Equal(t, "models", conn.Type)
 	assert.Equal(t, "llm", conn.Metadata["component_type"])
-	assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model_name"])
-	assert.Nil(t, conn.Metadata["api_key"])
+	assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
+	assert.NotContains(t, conn.Metadata, "api_key", "credentials must never be persisted")
+	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", conn.Metadata["api_base"])
+	assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", conn.Metadata["project_id"])
 }
 
 func TestCreateModel_Remote_ProbeFailure(t *testing.T) {
@@ -372,7 +406,9 @@ func TestCreateModel_Remote_ProbeFailure(t *testing.T) {
 		ProviderID:     "watsonx",
 		Model:          "ibm/granite-4-h-small",
 		Params: map[string]any{
-			"api_key": "bad-key",
+			"api_base":   "https://us-south.ml.cloud.ibm.com",
+			"project_id": "123e4567-e89b-12d3-a456-426614174000",
+			"api_key":    validWatsonxKey,
 		},
 	}
 
@@ -410,9 +446,9 @@ func TestCreateModel_Local_RuntimeUnavailable(t *testing.T) {
 	connRepo := newMockConnectorRepo()
 
 	svc := NewModelService(compRepo, connRepo, nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
-	svc.runtimeResolver = func(string) (runtime.Runtime, error) {
+	svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) {
 		return nil, errors.New("worker is not connected")
-	}
+	})
 
 	resp, err := svc.CreateModel(context.Background(), apimodels.CreateModelRequest{
 		DeploymentType: "local",
@@ -449,7 +485,7 @@ func TestCreateModel_Local_Success(t *testing.T) {
 
 	rt := &blockingRuntime{release: make(chan struct{})}
 	t.Cleanup(func() { close(rt.release) })
-	svc.runtimeResolver = func(string) (runtime.Runtime, error) { return rt, nil }
+	svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) { return rt, nil })
 
 	req := apimodels.CreateModelRequest{
 		DeploymentType: "local",
@@ -464,6 +500,7 @@ func TestCreateModel_Local_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.NotEmpty(t, resp.ID)
+	assert.Equal(t, apimodels.DeploymentTypeLocal, resp.DeploymentType)
 
 	comp, ok := compRepo.components["local-granite"]
 	require.True(t, ok)

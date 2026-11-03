@@ -1,0 +1,243 @@
+package deployment
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"strings"
+	texttemplate "text/template"
+
+	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/repository/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
+)
+
+const (
+	// valuesKeyModel is the template value (.Values.model) that carries the requested model.
+	valuesKeyModel = "model"
+
+	paramAPIKey    = "api_key"
+	paramAPIBase   = "api_base"
+	paramProjectID = "project_id"
+)
+
+// ModelPlanner plans model deployments by:
+//  1. Validating the request against the catalog (component type, provider, params schema)
+//  2. Resolving the target worker, its runtime and the runtime's deployer (local models)
+//  3. Loading the provider's templates and building the template values / gateway route
+//
+// Planning has no side effects, so a bad request is rejected with a proper status code before any
+// row is written or any background work starts.
+type ModelPlanner struct {
+	catalogProvider *catalog.CatalogProvider
+	models          modelCatalog
+	workers         *workerResolver
+	// deployers maps a runtime type to the deployer that starts local model pods on it.
+	deployers map[runtimeTypes.RuntimeType]types.Deployer
+}
+
+// NewModelPlanner creates a new model planner with the default per-runtime deployers.
+func NewModelPlanner(provider *catalog.CatalogProvider) *ModelPlanner {
+	return &ModelPlanner{
+		catalogProvider: provider,
+		models:          modelCatalog{provider: provider},
+		workers:         &workerResolver{},
+		deployers: map[runtimeTypes.RuntimeType]types.Deployer{
+			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeployer(),
+		},
+	}
+}
+
+// WithWorkerRepo wires the worker repository into the planner. Without it only the control-plane
+// worker can be targeted.
+func (p *ModelPlanner) WithWorkerRepo(repo dbrepo.WorkerRepository) *ModelPlanner {
+	p.workers.repo = repo
+
+	return p
+}
+
+// WithWorkerRegistry wires the worker registry into the planner so it can resolve a runtime for
+// workers connected over the gRPC CommandStream.
+func (p *ModelPlanner) WithWorkerRegistry(reg stream.WorkerRegistry) *ModelPlanner {
+	p.workers.registry = reg
+
+	return p
+}
+
+// WithDeployers replaces the per-runtime deployers.
+func (p *ModelPlanner) WithDeployers(deployers map[runtimeTypes.RuntimeType]types.Deployer) *ModelPlanner {
+	p.deployers = deployers
+
+	return p
+}
+
+// WithRuntimeResolver overrides how the runtime of a worker is resolved; used by tests.
+func (p *ModelPlanner) WithRuntimeResolver(fn func(workerName string) (runtime.Runtime, error)) *ModelPlanner {
+	p.workers.runtimeFn = fn
+
+	return p
+}
+
+// ValidateComponentType rejects a component type that has no model providers in the catalog.
+func (p *ModelPlanner) ValidateComponentType(componentType string) error {
+	return p.models.validateType(componentType)
+}
+
+// PlanLocal validates a local-model request and resolves where and how it will be deployed.
+func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelRequest) (*types.LocalPlan, error) {
+	target, err := p.workers.resolve(ctx, req.WorkerSelector)
+	if err != nil {
+		return nil, err
+	}
+
+	// Resolving the runtime up front means an unreachable worker fails the request (422)
+	// instead of leaving a component row stuck in Deploying.
+	rt, err := p.workers.runtime(target.Name)
+	if err != nil {
+		return nil, Unprocessable("cannot reach worker %q: %v", target.Name, err)
+	}
+
+	deployer, ok := p.deployers[rt.Type()]
+	if !ok {
+		return nil, Unprocessable("models are unsupported on %s runtime", rt.Type())
+	}
+
+	// Scope the catalog to the worker's actual runtime so templates, metadata, and values
+	// are loaded from the correct runtime-specific asset path.
+	provider, err := p.catalogProvider.WithRuntime(rt.Type().String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to scope catalog provider: %w", err)
+	}
+
+	comp, err := validateLocalParams(ctx, provider, req)
+	if err != nil {
+		return nil, err
+	}
+
+	metadata, tmpls, values, err := loadLocalAssets(provider, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.LocalPlan{
+		ComponentID: uuid.New(),
+		Req:         req,
+		Worker:      target,
+		Runtime:     rt,
+		Deployer:    deployer,
+		LiteLLM:     *comp.LiteLLM,
+		Catalog:     provider,
+		Metadata:    metadata,
+		Templates:   tmpls,
+		Values:      values,
+	}, nil
+}
+
+// loadLocalAssets loads the provider's runtime metadata and templates and builds the template values.
+func loadLocalAssets(
+	provider *catalog.CatalogProvider,
+	req apimodels.CreateModelRequest,
+) (*clitemplates.AppMetadata, map[string]*texttemplate.Template, map[string]any, error) {
+	componentType := req.ComponentType
+
+	metadata, err := provider.LoadComponentRuntimeMetadata(componentType, req.ProviderID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load component metadata: %w", err)
+	}
+
+	tmpls, err := provider.LoadComponentTemplates(componentType, req.ProviderID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to load component templates: %w", err)
+	}
+
+	// A provider without a values file is valid: fall back to request-only values.
+	values, err := provider.LoadComponentValues(componentType, req.ProviderID, map[string]string{})
+	if err != nil || values == nil {
+		values = make(map[string]any)
+	}
+
+	maps.Copy(values, req.Params)
+
+	// The templates read the model as .Values.model; it is a top-level request field, not a param.
+	values[valuesKeyModel] = req.Model
+
+	// TODO(profiles): validate req.Profile against the provider's profiles.yaml (404/400 when
+	// unknown) and resolve it into concrete deployment settings (context length, resources, ...)
+	// that get merged into values here.
+
+	return metadata, tmpls, values, nil
+}
+
+// PlanRemote validates a remote-model request against the provider's schema and builds its route.
+func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModelRequest) (*types.RemotePlan, error) {
+	sensitive, err := validateRemoteParams(ctx, p.catalogProvider, req)
+	if err != nil {
+		return nil, err
+	}
+
+	mode, err := p.models.modeFor(req.ComponentType)
+	if err != nil {
+		return nil, err
+	}
+
+	connectorID := uuid.New()
+	rp := parseRemoteParams(req.Params)
+
+	r := types.Route{
+		Tag:           connectorID.String(),
+		Mode:          mode,
+		Model:         req.Model,
+		UpstreamModel: fmt.Sprintf("%s/%s", req.ProviderID, req.Model),
+		APIBase:       rp.apiBase,
+		APIKey:        rp.apiKey,
+		ProjectID:     rp.projectID,
+	}
+	// A /tokenize passthrough is registered by default. A provider whose endpoint has no /tokenize
+	// will cause registration to fail.
+	if rp.apiBase != "" {
+		r.TokenizeURL = tokenizeURL(rp.apiBase)
+	}
+
+	// Credentials go to the gateway only; the catalog DB keeps everything else.
+	metadata := catalogutils.StripSensitiveFields(req.Params, sensitive)
+	metadata[constants.MetadataKeyComponentType] = req.ComponentType
+	metadata[constants.MetadataKeyModel] = req.Model
+
+	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Metadata: metadata}, nil
+}
+
+// remoteParams are the typed params LiteLLM needs to reach a remote model. Which of them a
+// provider requires is decided by the provider's schema.json, not here.
+type remoteParams struct {
+	apiKey    string
+	apiBase   string
+	projectID string
+}
+
+func parseRemoteParams(params map[string]any) remoteParams {
+	str := func(key string) string {
+		v, _ := params[key].(string)
+
+		return v
+	}
+
+	return remoteParams{
+		apiKey:    str(paramAPIKey),
+		apiBase:   str(paramAPIBase),
+		projectID: str(paramProjectID),
+	}
+}
+
+// tokenizeURL derives the /tokenize target from an OpenAI-style api_base.
+func tokenizeURL(apiBase string) string {
+	return strings.TrimSuffix(strings.TrimRight(apiBase, "/"), "/v1") + "/tokenize"
+}

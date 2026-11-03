@@ -20,10 +20,27 @@ const (
 	CatalogTypeConnectors = "connectors"
 )
 
+// Component category constants, matching the `category` field of a component's metadata.yaml.
+const (
+	// ComponentCategoryModels marks components that serve a model (llm, embedding, reranker, ...).
+	ComponentCategoryModels = "models"
+)
+
+// Model metadata key constants used when persisting model connector metadata.
+const (
+	// MetadataKeyComponentType is the metadata key that stores the component type of a model connector.
+	MetadataKeyComponentType = "component_type"
+	// MetadataKeyModel is the metadata key that stores the model name of a model connector.
+	MetadataKeyModel = "model"
+)
+
 // Connector type constants.
 const (
 	// ConnectorTypeDatasource is the catalog connector type shared by all datasource providers.
 	ConnectorTypeDatasource = "datasource"
+	// ConnectorTypeModels is the connector type for remote model connectors. It is set server-side
+	// and separates model connectors from datasource connectors in the shared connectors table.
+	ConnectorTypeModels = "models"
 )
 
 // Datasource provider ID constants.

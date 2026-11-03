@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,7 +31,8 @@ func (m *mockModelService) CreateModel(ctx context.Context, req models.CreateMod
 	}
 
 	return &models.CreateModelResponse{
-		ID: "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
+		ID:             "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
+		DeploymentType: req.DeploymentType,
 	}, nil
 }
 
@@ -46,7 +49,7 @@ func setupModelRouter(svc repository.ModelServiceInterface, tm *auth.TokenManage
 func TestCreateModel_Local_Success(t *testing.T) {
 	mockSvc := &mockModelService{
 		createModelFunc: func(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error) {
-			assert.Equal(t, "local", req.DeploymentType)
+			assert.Equal(t, models.DeploymentTypeLocal, req.DeploymentType)
 			assert.Equal(t, "llm", req.ComponentType)
 			assert.Equal(t, "granite-llm", req.Name)
 			assert.Equal(t, "vllm-spyre", req.ProviderID)
@@ -55,7 +58,8 @@ func TestCreateModel_Local_Success(t *testing.T) {
 			assert.Equal(t, "user-123", req.CreatedBy)
 
 			return &models.CreateModelResponse{
-				ID: "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
+				ID:             "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
+				DeploymentType: models.DeploymentTypeLocal,
 			}, nil
 		},
 	}
@@ -97,14 +101,15 @@ func TestCreateModel_Local_Success(t *testing.T) {
 func TestCreateModel_Remote_Success(t *testing.T) {
 	mockSvc := &mockModelService{
 		createModelFunc: func(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error) {
-			assert.Equal(t, "remote", req.DeploymentType)
+			assert.Equal(t, models.DeploymentTypeRemote, req.DeploymentType)
 			assert.Equal(t, "llm", req.ComponentType)
 			assert.Equal(t, "prod-watsonx", req.Name)
 			assert.Equal(t, "watsonx", req.ProviderID)
 			assert.Equal(t, "ibm/granite-4-h-small", req.Model)
 
 			return &models.CreateModelResponse{
-				ID: "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+				ID:             "c1d2e3f4-a5b6-7890-cdef-123456789abc",
+				DeploymentType: models.DeploymentTypeRemote,
 			}, nil
 		},
 	}
@@ -261,4 +266,65 @@ func TestCreateModel_ValidationError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestCreateModel_InternalErrorIsNotLeaked(t *testing.T) {
+	mockSvc := &mockModelService{
+		createModelFunc: func(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error) {
+			return nil, errors.New("litellm returned status 500: secret upstream body")
+		},
+	}
+
+	tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+	token, _, err := tm.GenerateAccessToken("user-123")
+	require.NoError(t, err)
+
+	router := setupModelRouter(mockSvc, tm)
+
+	body, _ := json.Marshal(models.CreateModelRequest{
+		DeploymentType: models.DeploymentTypeRemote,
+		ComponentType:  "llm",
+		Name:           "remote-model",
+		ProviderID:     "watsonx",
+		Model:          "ibm/granite-3-8b-instruct",
+	})
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/models", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.NotContains(t, w.Body.String(), "secret upstream body")
+}
+
+func TestCreateModel_WrappedValidationError(t *testing.T) {
+	mockSvc := &mockModelService{
+		createModelFunc: func(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error) {
+			return nil, fmt.Errorf("wrapped: %w", &validators.ValidationError{Code: http.StatusNotFound, Message: "worker not found"})
+		},
+	}
+
+	tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+	token, _, err := tm.GenerateAccessToken("user-123")
+	require.NoError(t, err)
+
+	router := setupModelRouter(mockSvc, tm)
+
+	body, _ := json.Marshal(models.CreateModelRequest{
+		DeploymentType: models.DeploymentTypeLocal,
+		ComponentType:  "llm",
+		Name:           "local-model",
+		ProviderID:     "vllm-cpu",
+		Model:          "ibm-granite/granite-3.3-8b-instruct",
+	})
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/models", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
