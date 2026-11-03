@@ -27,25 +27,20 @@ type LiteLLMClient interface {
 	HealthProbe(ctx context.Context, modelName string) (*LiteLLMHealthResponse, error)
 }
 
-// LiteLLMModelParams holds parameters under litellm_params in /model/new.
-type LiteLLMModelParams struct {
-	Model     string   `json:"model"`
-	APIBase   string   `json:"api_base,omitempty"`
-	APIKey    string   `json:"api_key,omitempty"`
-	ProjectID string   `json:"project_id,omitempty"`
-	Tags      []string `json:"tags,omitempty"`
-}
-
 // LiteLLMModelInfo holds routing mode in /model/new (embedding/rerank).
 type LiteLLMModelInfo struct {
 	Mode string `json:"mode,omitempty"`
 }
 
 // LiteLLMModelNewRequest is the payload for POST /model/new.
+//
+// LiteLLMParams is the free-form litellm_params object. It is a map rather than a struct because
+// the set of provider params (api_base, api_key, project_id, ...) is defined by each provider's
+// schema.json and is forwarded as is; the client must not need a change when a schema gains a field.
 type LiteLLMModelNewRequest struct {
-	ModelName     string             `json:"model_name"`
-	LiteLLMParams LiteLLMModelParams `json:"litellm_params"`
-	ModelInfo     *LiteLLMModelInfo  `json:"model_info,omitempty"`
+	ModelName     string            `json:"model_name"`
+	LiteLLMParams map[string]any    `json:"litellm_params"`
+	ModelInfo     *LiteLLMModelInfo `json:"model_info,omitempty"`
 }
 
 // LiteLLMPassThroughRequest is the payload for POST /config/pass_through_endpoint.

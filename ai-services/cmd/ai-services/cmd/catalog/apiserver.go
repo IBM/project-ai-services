@@ -159,19 +159,9 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		return apiserver.APIServerOptions{}, nil, err
 	}
 
-	var authSvc auth.Service
-	if manageiqURL != "" {
-		logger.Infof("ManageIQ integration enabled: %s (insecure TLS: %v)\n", manageiqURL, manageiqInsecure)
-		miqClient := miq.NewHTTPClient(manageiqURL, manageiqInsecure)
-		authSvc = auth.NewAuthServiceWithMIQ(userRepo, tokenMgr, blacklist, miqClient)
-	} else {
-		logger.Infoln("Using the default auth service")
-		authSvc = auth.NewAuthService(userRepo, tokenMgr, blacklist)
-	}
-
 	opts := apiserver.APIServerOptions{
 		Port:               0, // set by caller
-		AuthService:        authSvc,
+		AuthService:        newAuthService(userRepo, tokenMgr, blacklist, manageiqURL, manageiqInsecure),
 		TokenManager:       tokenMgr,
 		Blacklist:          blacklist,
 		ApplicationService: apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType(), workerReg, connectorRepo, datasourceSvc),
@@ -189,6 +179,26 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	}
 
 	return opts, cleanup, nil
+}
+
+// newAuthService returns the ManageIQ-backed auth service when manageiqURL is set, otherwise the
+// default one.
+func newAuthService(
+	userRepo *apirepository.InMemoryUserRepo,
+	tokenMgr *auth.TokenManager,
+	blacklist *apirepository.DBTokenBlacklist,
+	manageiqURL string,
+	manageiqInsecure bool,
+) auth.Service {
+	if manageiqURL == "" {
+		logger.Infoln("Using the default auth service")
+
+		return auth.NewAuthService(userRepo, tokenMgr, blacklist)
+	}
+
+	logger.Infof("ManageIQ integration enabled: %s (insecure TLS: %v)\n", manageiqURL, manageiqInsecure)
+
+	return auth.NewAuthServiceWithMIQ(userRepo, tokenMgr, blacklist, miq.NewHTTPClient(manageiqURL, manageiqInsecure))
 }
 
 // runAPIServer initializes and starts the API server with the provided configuration.

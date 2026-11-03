@@ -65,16 +65,17 @@ func (e *ModelExecutor) ExecuteLocal(ctx context.Context, plan *types.LocalPlan)
 }
 
 func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) error {
-	endpoint, err := plan.Deployer.Deploy(ctx, plan)
+	eps, err := plan.Deployer.Deploy(ctx, plan)
 	if err != nil {
 		return err
 	}
 
-	if err := e.gateway.register(ctx, localRoute(plan, endpoint)); err != nil {
+	// LiteLLM is given the egress address the control plane can reach; the DB records the pod's own.
+	if err := e.gateway.register(ctx, localRoute(plan, eps.Egress)); err != nil {
 		return err
 	}
 
-	endpoints := []map[string]any{{"type": "internal", "url": "http://" + endpoint}}
+	endpoints := []map[string]any{{"type": "internal", "url": "http://" + eps.Internal}}
 	if err := e.componentRepo.UpdateEndpoints(ctx, plan.ComponentID, endpoints); err != nil {
 		return fmt.Errorf("failed to save endpoints: %w", err)
 	}
@@ -96,21 +97,18 @@ func (e *ModelExecutor) failLocal(ctx context.Context, plan *types.LocalPlan, ca
 	}
 }
 
-// localRoute builds the LiteLLM route for a deployed pod.
-//
-// TODO(mTLS): models on remote workers still register the pod's internal endpoint, which the
-// control plane cannot resolve across hosts. For a non-local worker, the deploy step must create
-// the worker mTLS ingress/egress Caddy routes (worker :8443 -> pod, control-plane :8080 ->
-// worker), and APIBase and TokenizeURL here must then point at the control-plane egress URL.
-// Both routes must also be removed on undeploy.
-func localRoute(plan *types.LocalPlan, endpoint string) types.Route {
+// localRoute builds the LiteLLM route for a deployed pod. egress is the Deployer's
+// ModelEndpoints.Egress, used as is; making it reachable from the control plane is the Deployer's
+// job (see the TODO(mTLS) on types.Deployer).
+func localRoute(plan *types.LocalPlan, egress string) types.Route {
 	return types.Route{
 		Tag:           plan.ComponentID.String(),
+		Provider:      plan.LiteLLM.Provider,
 		Mode:          plan.LiteLLM.ModelMode,
 		Model:         plan.Req.Model,
 		UpstreamModel: fmt.Sprintf("%s/%s", plan.LiteLLM.Provider, plan.Req.Model),
-		APIBase:       fmt.Sprintf("http://%s%s", endpoint, plan.LiteLLM.APIBasePath),
-		TokenizeURL:   fmt.Sprintf("http://%s/tokenize", endpoint),
+		APIBase:       fmt.Sprintf("http://%s%s", egress, plan.LiteLLM.APIBasePath),
+		TokenizeURL:   fmt.Sprintf("http://%s/tokenize", egress),
 	}
 }
 

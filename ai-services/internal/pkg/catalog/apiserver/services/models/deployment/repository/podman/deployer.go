@@ -22,20 +22,24 @@ func NewPodmanDeployer() *PodmanDeployer {
 }
 
 // Deploy pulls the images, downloads the model, starts the pods and returns the model server's
-// internal "host:port".
-func (d *PodmanDeployer) Deploy(ctx context.Context, plan *types.LocalPlan) (string, error) {
+// endpoints.
+//
+// TODO(mTLS): Egress is set to the pod's own address, which the control plane can only reach when
+// plan.Worker is the local worker. For a remote worker, create the worker mTLS ingress/egress
+// Caddy routes here and return the control-plane private egress as Egress (see types.Deployer).
+func (d *PodmanDeployer) Deploy(ctx context.Context, plan *types.LocalPlan) (types.ModelEndpoints, error) {
 	if err := preparePrerequisites(ctx, plan); err != nil {
-		return "", err
+		return types.ModelEndpoints{}, err
 	}
 
 	spyrePool, err := allocateSpyreCards(ctx, plan)
 	if err != nil {
-		return "", err
+		return types.ModelEndpoints{}, err
 	}
 
 	baseDir, err := podmanutils.FetchBaseDir(ctx, plan.Runtime)
 	if err != nil {
-		return "", err
+		return types.ModelEndpoints{}, err
 	}
 
 	// Same code path as application components: it handles ordered PodTemplateExecutions, Spyre
@@ -51,10 +55,15 @@ func (d *PodmanDeployer) Deploy(ctx context.Context, plan *types.LocalPlan) (str
 		BaseDir:       baseDir,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to deploy component pods: %w", err)
+		return types.ModelEndpoints{}, fmt.Errorf("failed to deploy component pods: %w", err)
 	}
 
-	return internalEndpoint(plan, podEndpoints)
+	internal, err := internalEndpoint(plan, podEndpoints)
+	if err != nil {
+		return types.ModelEndpoints{}, err
+	}
+
+	return types.ModelEndpoints{Internal: internal, Egress: internal}, nil
 }
 
 // preparePrerequisites pulls the container images declared by the provider templates and

@@ -33,15 +33,15 @@ func NewModelHandler(modelService repository.ModelServiceInterface) *ModelHandle
 //	@Accept			json
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			request	body		models.CreateModelRequest		true	"Model creation request"
-//	@Success		201		{object}	models.CreateModelResponse		"Remote model connector created"
-//	@Success		202		{object}	models.CreateModelResponse		"Local model deployment initiated"
-//	@Failure		400		{object}	ErrorResponse					"Invalid request body or validation errors"
-//	@Failure		401		{object}	ErrorResponse					"Unauthorized"
-//	@Failure		404		{object}	ErrorResponse					"Provider or worker not found"
-//	@Failure		409		{object}	ErrorResponse					"Model or connector name conflict"
-//	@Failure		422		{object}	ErrorResponse					"Connectivity check failed"
-//	@Failure		500		{object}	ErrorResponse					"Internal Server Error"
+//	@Param			request	body		models.CreateModelRequest	true	"Model creation request"
+//	@Success		201		{object}	models.CreateModelResponse	"Remote model connector created"
+//	@Success		202		{object}	models.CreateModelResponse	"Local model deployment initiated"
+//	@Failure		400		{object}	ErrorResponse				"Invalid request body or validation errors"
+//	@Failure		401		{object}	ErrorResponse				"Unauthorized"
+//	@Failure		404		{object}	ErrorResponse				"Provider or worker not found"
+//	@Failure		409		{object}	ErrorResponse				"Model or connector name conflict"
+//	@Failure		422		{object}	ErrorResponse				"Connectivity check failed"
+//	@Failure		500		{object}	ErrorResponse				"Internal Server Error"
 //	@Router			/models [post]
 func (h *ModelHandler) CreateModel(c *gin.Context) {
 	ctx := c.Request.Context()

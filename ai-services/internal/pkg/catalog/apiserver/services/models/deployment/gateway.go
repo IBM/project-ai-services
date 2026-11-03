@@ -3,22 +3,33 @@ package deployment
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
+// Keys of litellm_params that the platform owns; a provider param can never override them.
+const (
+	litellmParamModel = "model"
+	litellmParamTags  = "tags"
+)
+
 func modelRequest(r types.Route) catalogclient.LiteLLMModelNewRequest {
+	params := make(map[string]any, len(r.Params))
+	maps.Copy(params, r.Params)
+
+	if r.APIBase != "" {
+		params[paramAPIBase] = r.APIBase
+	}
+
+	params[litellmParamModel] = r.UpstreamModel
+	params[litellmParamTags] = []string{r.Tag}
+
 	req := catalogclient.LiteLLMModelNewRequest{
-		ModelName: r.Model,
-		LiteLLMParams: catalogclient.LiteLLMModelParams{
-			Model:     r.UpstreamModel,
-			APIBase:   r.APIBase,
-			APIKey:    r.APIKey,
-			ProjectID: r.ProjectID,
-			Tags:      []string{r.Tag},
-		},
+		ModelName:     r.Model,
+		LiteLLMParams: params,
 	}
 
 	if r.Mode != "" {
@@ -29,7 +40,7 @@ func modelRequest(r types.Route) catalogclient.LiteLLMModelNewRequest {
 }
 
 func passThroughID(r types.Route) string {
-	return fmt.Sprintf("vllm-token-passthrough-%s", r.Tag)
+	return fmt.Sprintf("%s-token-passthrough-%s", r.Provider, r.Tag)
 }
 
 func passThroughRequest(r types.Route) catalogclient.LiteLLMPassThroughRequest {

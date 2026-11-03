@@ -2203,6 +2203,87 @@ const docTemplate = `{
                 }
             }
         },
+        "/models": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates a model deployment. deployment_type=local starts a pod and registers a LiteLLM route asynchronously (202 Accepted). deployment_type=remote registers an external endpoint connector synchronously (201 Created).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Models"
+                ],
+                "summary": "Create a model (local pod or remote connector)",
+                "parameters": [
+                    {
+                        "description": "Model creation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Remote model connector created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelResponse"
+                        }
+                    },
+                    "202": {
+                        "description": "Local model deployment initiated",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body or validation errors",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Provider or worker not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Model or connector name conflict",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Connectivity check failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/resources": {
             "get": {
                 "security": [
@@ -3130,6 +3211,57 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelRequest": {
+            "type": "object",
+            "required": [
+                "component_type",
+                "deployment_type",
+                "model",
+                "name",
+                "provider_id"
+            ],
+            "properties": {
+                "component_type": {
+                    "description": "ComponentType is a catalog component type whose providers have ` + "`" + `category: models` + "`" + `\n(see the component's metadata.yaml); the valid values come from the catalog.",
+                    "type": "string"
+                },
+                "deployment_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 3
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "worker_selector": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelResponse": {
+            "type": "object",
+            "properties": {
+                "deployment_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse": {
             "type": "object",
             "properties": {
@@ -3213,6 +3345,17 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType": {
+            "type": "string",
+            "enum": [
+                "local",
+                "remote"
+            ],
+            "x-enum-varnames": [
+                "DeploymentTypeLocal",
+                "DeploymentTypeRemote"
+            ]
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse": {
             "type": "object",

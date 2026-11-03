@@ -25,9 +25,13 @@ const (
 	// valuesKeyModel is the template value (.Values.model) that carries the requested model.
 	valuesKeyModel = "model"
 
-	paramAPIKey    = "api_key"
-	paramAPIBase   = "api_base"
-	paramProjectID = "project_id"
+	// paramAPIBase is the litellm_params key of the model endpoint. It is the only provider param
+	// the platform interprets itself (to derive the /tokenize target); every other param is
+	// forwarded to LiteLLM untouched.
+	paramAPIBase = "api_base"
+
+	// watsonxTokenizeURL is the tokenize passthrough target for watsonx remote models.
+	watsonxTokenizeURL = "http://localhost:8000/watsonx/ml/v1/text/tokenization"
 )
 
 // ModelPlanner plans model deployments by:
@@ -190,22 +194,20 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 	}
 
 	connectorID := uuid.New()
-	rp := parseRemoteParams(req.Params)
 
+	// The params were validated against the provider's schema.json, so they are forwarded to
+	// LiteLLM as is: a field added to the schema reaches the gateway without a code change.
 	r := types.Route{
 		Tag:           connectorID.String(),
+		Provider:      req.ProviderID,
 		Mode:          mode,
 		Model:         req.Model,
 		UpstreamModel: fmt.Sprintf("%s/%s", req.ProviderID, req.Model),
-		APIBase:       rp.apiBase,
-		APIKey:        rp.apiKey,
-		ProjectID:     rp.projectID,
+		Params:        maps.Clone(req.Params),
 	}
-	// A /tokenize passthrough is registered by default. A provider whose endpoint has no /tokenize
-	// will cause registration to fail.
-	if rp.apiBase != "" {
-		r.TokenizeURL = tokenizeURL(rp.apiBase)
-	}
+	// A tokenize passthrough is registered by default. A provider whose endpoint cannot be
+	// reached at the resolved target will cause registration to fail.
+	r.TokenizeURL = remoteTokenizeURL(req.ProviderID, req.Params)
 
 	// Credentials go to the gateway only; the catalog DB keeps everything else.
 	metadata := catalogutils.StripSensitiveFields(req.Params, sensitive)
@@ -215,26 +217,19 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Metadata: metadata}, nil
 }
 
-// remoteParams are the typed params LiteLLM needs to reach a remote model. Which of them a
-// provider requires is decided by the provider's schema.json, not here.
-type remoteParams struct {
-	apiKey    string
-	apiBase   string
-	projectID string
-}
-
-func parseRemoteParams(params map[string]any) remoteParams {
-	str := func(key string) string {
-		v, _ := params[key].(string)
-
-		return v
+// remoteTokenizeURL returns the target of the tokenize passthrough for a remote provider, or ""
+// when none applies. watsonx has a fixed tokenization endpoint; every other provider is assumed to
+// be OpenAI-style, so the target is derived from its api_base.
+func remoteTokenizeURL(providerID string, params map[string]any) string {
+	if providerID == constants.ConnectorProviderWatsonx {
+		return watsonxTokenizeURL
 	}
 
-	return remoteParams{
-		apiKey:    str(paramAPIKey),
-		apiBase:   str(paramAPIBase),
-		projectID: str(paramProjectID),
+	if apiBase, _ := params[paramAPIBase].(string); apiBase != "" {
+		return tokenizeURL(apiBase)
 	}
+
+	return ""
 }
 
 // tokenizeURL derives the /tokenize target from an OpenAI-style api_base.

@@ -19,11 +19,29 @@ type WorkerTarget struct {
 	Name string
 }
 
-// Deployer starts the pods of a planned local model on one kind of runtime and returns the model
-// server's internal "host:port". Supporting another runtime means adding an implementation under
+// Deployer starts the pods of a planned local model on one kind of runtime and returns where the
+// model server can be reached. Supporting another runtime means adding an implementation under
 // repository/ and registering it with the planner; the plan and execute phases do not change.
+//
+// TODO(mTLS): for a non-local worker, Deploy must create the worker mTLS ingress/egress Caddy
+// routes (worker :8443 -> pod, control-plane private egress -> worker) and return the
+// control-plane private egress as Egress, keeping the pod's own address as Internal. Those
+// routes must also be removed on undeploy.
 type Deployer interface {
-	Deploy(ctx context.Context, plan *LocalPlan) (endpoint string, err error)
+	Deploy(ctx context.Context, plan *LocalPlan) (ModelEndpoints, error)
+}
+
+// ModelEndpoints are the "host:port" addresses of a deployed model server. They are two values
+// because they are different facts: where the pod is, and how the control plane gets to it. They
+// are equal only when the pod runs on the local worker.
+type ModelEndpoints struct {
+	// Internal is the pod's own address on its worker. It is persisted as the component's
+	// "internal" endpoint.
+	Internal string
+	// Egress is the address the control plane uses to reach the model, so it is what LiteLLM's
+	// api_base and tokenize target are built from. For a remote worker it is the control-plane
+	// private egress, not the pod.
+	Egress string
 }
 
 // LocalPlan is a fully resolved local-model deployment.
@@ -58,14 +76,23 @@ type RemotePlan struct {
 type Route struct {
 	// Tag is the component or connector ID. It tags the LiteLLM model and suffixes the passthrough.
 	Tag string
+	// Provider is the LiteLLM provider prefix (e.g. "watsonx", "hosted_vllm"). It prefixes the
+	// passthrough ID so a route can be told apart by provider.
+	Provider string
 	// Mode is the LiteLLM model mode ("chat", "embedding", "rerank", ...), from component metadata.
 	Mode string
 	// Model is the name consumers use; UpstreamModel is the provider-prefixed name LiteLLM forwards.
 	Model         string
 	UpstreamModel string
-	APIBase       string
-	APIKey        string
-	ProjectID     string
+	// APIBase is the endpoint the platform derives for a local pod from the endpoint its Deployer
+	// returned. Local requests carry no api_base (their params are template values), and remote
+	// models supply theirs in Params, so exactly one of the two is ever set.
+	APIBase string
+	// Params are forwarded verbatim as litellm_params (api_base, api_key, project_id, ...). For
+	// remote models they are the request params validated against the provider's schema.json, so
+	// the schema alone decides what reaches LiteLLM. "model" and "tags" are reserved: they are
+	// always set from UpstreamModel and Tag.
+	Params map[string]any
 	// TokenizeURL, when set, registers a /tokenize passthrough to that target.
 	TokenizeURL string
 }

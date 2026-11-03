@@ -43,6 +43,14 @@ const (
 	ConnectorTypeModels = "models"
 )
 
+// Model connector provider ID constants.
+// These values must match the connector IDs defined in the catalog assets
+// (assets/connectors/models/<id>/metadata.yaml).
+const (
+	// ConnectorProviderWatsonx is the provider ID for IBM watsonx.ai model connectors.
+	ConnectorProviderWatsonx = "watsonx"
+)
+
 // Datasource provider ID constants.
 // These values must match the connector IDs defined in the catalog assets
 // (assets/connectors/datasource/<id>/metadata.yaml).
