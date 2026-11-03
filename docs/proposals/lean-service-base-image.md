@@ -9,8 +9,9 @@ docling models downloaded at build time. This caused every service image
 (chatbot, extract, similarity, summarize, translate) to inherit and ship an
 unnecessarily large image layer.
 
-This proposal moves the digitize-only Python packages and docling models out of
-`service-base` and into the `digitize` service image itself. No additional base
+This proposal moves the digitize-only Python packages, docling OS packages and
+docling models out of `service-base` and into the `digitize` service image
+itself. No additional base
 image is introduced: an intermediate `digitize-base` image was evaluated and
 dropped (see [Alternatives Considered](#alternatives-considered)).
 
@@ -35,6 +36,10 @@ The original `service-base` `Containerfile`:
 - Carried ~90 Python packages (docling, torch, torchvision, transformers,
   OpenCV, pandas, scipy, …) in the shared layer consumed by chatbot, extract,
   similarity, summarize, and translate.
+- Installed OS packages needed only by docling / its ML dependencies
+  (`lcms2-devel`, `openblas-devel`, `freetype`, `libicu`, `libjpeg-turbo`,
+  `spatialindex-devel` and the EPEL repository they depend on) in every
+  service image.
 - Included a `docling/` sub-image workaround (patch-based Containerfile +
   `0001-Exclude-source-that-has-commercial-license_v0.22.1.patch` +
   `docling_v2.60.1.patch`) which is no longer needed.
@@ -47,6 +52,8 @@ The original `service-base` `Containerfile`:
 
 Lean base image consumed by all services. Contains only:
 
+- **OS:** `python3.12-devel` (plus the `python`/`python3` → `python3.12`
+  symlinks). No docling-related OS packages and no EPEL repository.
 - **Runtime:** `fastapi`, `pydantic`, `pydantic-settings`, `requests`,
   `starlette`, `uvicorn`, `uvloop`, `python-multipart`, `psutil`
 - **Database:** `psycopg2`, `SQLAlchemy`
@@ -81,6 +88,22 @@ Extends `service-base:v0.0.46` and adds the dependencies exclusive to the
   `accelerate`, `safetensors`, `opencv-python-headless`, `pillow`, `scipy`,
   `pandas`, … (now listed in `services/digitize/requirements.txt`, together with
   the existing `boto3`, `botocore`, `s3transfer`, `paramiko` and `apscheduler`)
+- **OS packages (moved from `service-base`):** installed via `microdnf` in the
+  `digitize` `Containerfile`, before the Python dependencies are installed:
+
+  | Package | Notes |
+  |---|---|
+  | `lcms2-devel` | Image/colour handling libs for the docling / OpenCV / Pillow stack |
+  | `openblas-devel` | BLAS/LAPACK for the numeric / ML stack |
+  | `freetype` | Font rendering |
+  | `libicu` | Unicode/ICU runtime library |
+  | `libjpeg-turbo` | JPEG codec |
+  | `epel-release` | EPEL 9 release RPM (downloaded from `dl.fedoraproject.org`); prerequisite for `spatialindex-devel` |
+  | `spatialindex-devel` | Spatial index library, available only from EPEL |
+
+  `python3.12-devel` remains in `service-base`. The EPEL release RPM is
+  downloaded, installed and removed in the same `RUN` layer, followed by
+  `microdnf clean all`, so no installer artefacts remain in the image.
 - **Docling models:** downloaded at build time via `download_docling_models.py`
   (Layout + TableFormer; OCR/EasyOCR/code-formula/picture-classifier excluded)
   into `DOCLING_MODELS_PATH=/var/docling-models`
@@ -111,13 +134,13 @@ services/digitize/
 
 | File | Change |
 |---|---|
-| `images/service-base/Containerfile` | Removed model download step; consolidated digitize OS packages (+ EPEL) into the single package install layer |
+| `images/service-base/Containerfile` | Removed model download step; removed docling OS packages (`lcms2-devel`, `openblas-devel`, `freetype`, `libicu`, `libjpeg-turbo`, `spatialindex-devel`) and the EPEL repository install — only `python3.12-devel` is installed |
 | `images/service-base/requirements.txt` | Removed ~90 digitize-only packages |
 | `images/service-base/Makefile` | Tag bumped to `v0.0.46` |
 | `images/service-base/docling/Containerfile` | **Deleted** (patch-based workaround removed) |
 | `images/service-base/docling/docling_v2.60.1.patch` | **Deleted** |
 | `images/service-base/docling/0001-Exclude-source-…patch` | **Deleted** |
-| `services/digitize/Containerfile` | Installs docling/ML deps, sets `DOCLING_MODELS_PATH` / `HF_HUB_DISABLE_XET`, downloads docling models; base bumped to `service-base:v0.0.46` |
+| `services/digitize/Containerfile` | Installs docling OS packages (+ EPEL), installs docling/ML deps, sets `DOCLING_MODELS_PATH` / `HF_HUB_DISABLE_XET`, downloads docling models; base bumped to `service-base:v0.0.46` |
 | `services/digitize/requirements.txt` | Added digitize-only ML / document-processing deps |
 | `services/digitize/download_docling_models.py` | **New** (moved from `service-base`) |
 
@@ -133,7 +156,7 @@ registry.access.redhat.com/ubi9/ubi-minimal:9.8
         │                                   similarity, summarize,
         │                                   translate
         ▼
-  digitize-service:v0.0.81      ← adds docling / ML stack + models
+  digitize-service:v0.0.81      ← adds docling OS pkgs, ML stack + models
 ```
 
 ---
@@ -198,7 +221,8 @@ all services (excluding `digitize`), and which service each package is needed by
 ## Benefits
 
 - **Smaller `service-base`** — ~4 GB down to ~1.9 GB, so the 5 non-digitize
-  services no longer carry PyTorch, docling, OpenCV, or ML model weights.
+  services no longer carry PyTorch, docling, OpenCV, ML model weights, or the
+  docling-only OS libraries (and the EPEL repository).
 - **Cleaner SBOM / CVE surface** — digitize-specific packages (torch,
   transformers, opencv, …) no longer appear in chatbot/extract/similarity/
   summarize/translate image scans.
