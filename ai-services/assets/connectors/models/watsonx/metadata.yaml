@@ -1,0 +1,9 @@
+# Connector identification
+type: connector
+id: watsonx
+name: "Watsonx"
+description: "Connect to models hosted on IBM watsonx.ai"
+
+# Connector type this provider belongs to
+connector_type: models
+connector_name: "Models"
