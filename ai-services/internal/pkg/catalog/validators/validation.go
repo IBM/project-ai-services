@@ -421,23 +421,8 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 	catalogService *types.Service,
 	connectorRepo dbrepo.ConnectorRepository,
 ) error {
-	// Required check: when datasource.required is true, at least one datasource connector must be supplied.
-	if catalogService != nil && catalogService.Datasource != nil && catalogService.Datasource.Required {
-		hasDatasource := false
-		for _, ref := range service.Connectors {
-			if ref.Type == catalogconstants.ConnectorTypeDatasource {
-				hasDatasource = true
-
-				break
-			}
-		}
-
-		if !hasDatasource {
-			return &ValidationError{
-				Code:    http.StatusBadRequest,
-				Message: fmt.Sprintf("service %q requires a datasource connector; include at least one connector ref of type 'datasource'", service.CatalogID),
-			}
-		}
+	if err := validateRequiredDatasource(service, catalogService); err != nil {
+		return err
 	}
 
 	if len(service.Connectors) == 0 {
@@ -457,6 +442,25 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 	}
 
 	return nil
+}
+
+// validateRequiredDatasource enforces that, when datasource.required is true in the catalog YAML,
+// at least one connector ref of type "datasource" is supplied.
+func validateRequiredDatasource(service apimodels.Service, catalogService *types.Service) error {
+	if catalogService == nil || catalogService.Datasource == nil || !catalogService.Datasource.Required {
+		return nil
+	}
+
+	for _, ref := range service.Connectors {
+		if ref.Type == catalogconstants.ConnectorTypeDatasource {
+			return nil
+		}
+	}
+
+	return &ValidationError{
+		Code:    http.StatusBadRequest,
+		Message: fmt.Sprintf("service %q requires a datasource connector; include at least one connector ref of type 'datasource'", service.CatalogID),
+	}
 }
 
 // validateOneConnectorRef validates a single ConnectorRef entry: deduplication, catalog-level
