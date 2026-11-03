@@ -1,4 +1,5 @@
 import { api } from "@/api/axios";
+import { CONNECTOR_STATUS } from "@/constants";
 import { CONNECTORS_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
   ConnectorParamsSchema,
@@ -26,7 +27,10 @@ export function transformConnectorToRow(
     type: connector.provider.name,
     services: connector.connected_services,
     // Suppress the message column for healthy connectors — no warning to show.
-    messages: connector.status === "connected" ? "" : (connector.message ?? ""),
+    messages:
+      connector.status === CONNECTOR_STATUS.CONNECTED
+        ? ""
+        : (connector.message ?? ""),
     actions: "actions",
   };
 }

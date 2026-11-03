@@ -1,18 +1,12 @@
 import type { DataTableHeader } from "@carbon/react";
+import type { DeploymentStatus } from "@/constants";
 
 export interface BaseTableRow {
   id: string;
   status: string;
 }
 
-export type RowStatus =
-  | "Initializing"
-  | "Downloading"
-  | "Deploying"
-  | "Running"
-  | "Deleting"
-  | "Stopped"
-  | "Error";
+export type RowStatus = DeploymentStatus;
 
 export type TableHeaders = DataTableHeader[];
 

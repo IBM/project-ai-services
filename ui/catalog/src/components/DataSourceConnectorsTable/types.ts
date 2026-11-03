@@ -1,4 +1,6 @@
 import type { DataTableHeader } from "@carbon/react";
+import { DETAILS_PANEL_MODES } from "@/constants";
+import type { DetailsPanelMode as AppDetailsPanelMode } from "@/constants";
 import type { ConnectorStatus, PaginationMetadata } from "@/types/api.types";
 import type {
   BaseTableState,
@@ -32,7 +34,7 @@ export interface AppState extends BaseTableState<DataSourceConnectorRow> {
   modalDeleteError: string;
 }
 
-export type DetailsPanelMode = "view" | "update-key";
+export type DetailsPanelMode = AppDetailsPanelMode;
 
 export const ACTION_TYPES = {
   FETCH_CONNECTORS_SUCCESS: "FETCH_CONNECTORS_SUCCESS",
@@ -101,7 +103,7 @@ export const INITIAL_STATE: AppState = {
   isLoading: true,
   fetchError: null,
   selectedConnectorId: null,
-  detailsPanelMode: "view",
+  detailsPanelMode: DETAILS_PANEL_MODES.VIEW,
   isDetailsPanelOpen: false,
   confirmTextValue: "",
 };

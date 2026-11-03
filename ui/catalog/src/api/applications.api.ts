@@ -6,7 +6,11 @@ import {
   SERVICE_ENDPOINTS,
 } from "@/constants/api-endpoints.constants";
 import { API_BASE_URL } from "@/constants/env.constants";
-import { COMPONENT_TYPES } from "@/constants";
+import {
+  COMPONENT_TYPES,
+  DEPLOYMENT_STATUS,
+  DATASOURCE_SYNC_STATUS,
+} from "@/constants";
 import { WORKER_RUNTIME_LABELS } from "@/constants/app.constants";
 import type {
   ArchitectureSummary,
@@ -372,7 +376,7 @@ export function transformApplicationToRow(
       WORKER_RUNTIME_LABELS[app.worker?.runtime_type ?? ""]?.short ??
       app.worker?.runtime_type ??
       "",
-    messages: app.status === "Running" ? "" : app.message || "",
+    messages: app.status === DEPLOYMENT_STATUS.RUNNING ? "" : app.message || "",
     actions: "actions",
     children: services.map((service) => ({
       id: service.id,
@@ -477,7 +481,7 @@ export function transformDatasourceToRow(
     // previous sync timestamp exists. Only fall back to calculateUptime once
     // the sync has completed (status is no longer "syncing").
     last_sync:
-      item.status === "syncing"
+      item.status === DATASOURCE_SYNC_STATUS.SYNCING
         ? "In progress"
         : raw
           ? calculateUptime(raw)

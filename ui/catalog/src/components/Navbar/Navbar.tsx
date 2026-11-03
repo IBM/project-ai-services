@@ -9,7 +9,7 @@ import {
 import { NavLink } from "react-router";
 import { useRef, useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { ROUTES, PAGE_TITLES } from "@/constants";
+import { ROUTES, PAGE_TITLES, CONNECTOR_STATUS } from "@/constants";
 import { fetchDataSourceConnectors } from "@/api/connectors.api";
 import styles from "./Navbar.module.scss";
 
@@ -43,7 +43,11 @@ const Navbar = (props: NavbarProps) => {
     let isMounted = true;
     const loadOfflineCount = async () => {
       try {
-        const response = await fetchDataSourceConnectors(1, 1, "offline");
+        const response = await fetchDataSourceConnectors(
+          1,
+          1,
+          CONNECTOR_STATUS.OFFLINE,
+        );
         if (isMounted) {
           setOfflineCount(response.pagination?.total_items ?? 0);
         }

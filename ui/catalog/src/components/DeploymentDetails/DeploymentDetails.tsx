@@ -44,7 +44,9 @@ import {
   SERVICE_ENDPOINTS,
   COMPONENT_TYPES,
   WORKER_RUNTIME_LABELS,
+  DEPLOYMENT_DETAILS_SECTIONS,
 } from "@/constants";
+import type { DeploymentDetailsSection } from "@/constants";
 
 interface DeploymentDetailsProps {
   deployment: DeploymentDetailsType;
@@ -52,7 +54,7 @@ interface DeploymentDetailsProps {
   deploymentSource: string;
   onNameUpdate?: (newName: string) => void;
   /** Pre-select a side-nav section when the panel opens */
-  defaultSection?: "details" | "services" | "integration" | "datasources";
+  defaultSection?: DeploymentDetailsSection;
 }
 
 const DeploymentDetails = ({
@@ -60,9 +62,10 @@ const DeploymentDetails = ({
   onBack,
   deploymentSource,
   onNameUpdate,
-  defaultSection = "details",
+  defaultSection = DEPLOYMENT_DETAILS_SECTIONS.DETAILS,
 }: DeploymentDetailsProps) => {
-  const [activeSection, setActiveSection] = useState(defaultSection);
+  const [activeSection, setActiveSection] =
+    useState<DeploymentDetailsSection>(defaultSection);
   const [datasourceCount, setDatasourceCount] = useState<number | null>(null);
   const [resources, setResources] = useState<ResourceAllocation[]>([]);
   const [deployedCatalogIds, setDeployedCatalogIds] = useState<
@@ -486,7 +489,8 @@ const DeploymentDetails = ({
           title={deployment.name}
           subtitle={
             <div className={styles.headerSubtitle}>
-              {activeSection === "datasources" && datasourceCount === 0 ? (
+              {activeSection === DEPLOYMENT_DETAILS_SECTIONS.DATASOURCES &&
+              datasourceCount === 0 ? (
                 <Tag type="purple" size="md" renderIcon={DiamondFill}>
                   No data
                 </Tag>
@@ -518,27 +522,41 @@ const DeploymentDetails = ({
           >
             <SideNavItems>
               <SideNavLink
-                isActive={activeSection === "details"}
-                onClick={() => setActiveSection("details")}
+                isActive={activeSection === DEPLOYMENT_DETAILS_SECTIONS.DETAILS}
+                onClick={() =>
+                  setActiveSection(DEPLOYMENT_DETAILS_SECTIONS.DETAILS)
+                }
               >
                 Details
               </SideNavLink>
               <SideNavLink
-                isActive={activeSection === "services"}
-                onClick={() => setActiveSection("services")}
+                isActive={
+                  activeSection === DEPLOYMENT_DETAILS_SECTIONS.SERVICES
+                }
+                onClick={() =>
+                  setActiveSection(DEPLOYMENT_DETAILS_SECTIONS.SERVICES)
+                }
               >
                 Services
               </SideNavLink>
               <SideNavLink
-                isActive={activeSection === "integration"}
-                onClick={() => setActiveSection("integration")}
+                isActive={
+                  activeSection === DEPLOYMENT_DETAILS_SECTIONS.INTEGRATION
+                }
+                onClick={() =>
+                  setActiveSection(DEPLOYMENT_DETAILS_SECTIONS.INTEGRATION)
+                }
               >
                 Integration endpoints
               </SideNavLink>
               {acceptsDatasource && (
                 <SideNavLink
-                  isActive={activeSection === "datasources"}
-                  onClick={() => setActiveSection("datasources")}
+                  isActive={
+                    activeSection === DEPLOYMENT_DETAILS_SECTIONS.DATASOURCES
+                  }
+                  onClick={() =>
+                    setActiveSection(DEPLOYMENT_DETAILS_SECTIONS.DATASOURCES)
+                  }
                 >
                   Data sources
                 </SideNavLink>
@@ -548,7 +566,7 @@ const DeploymentDetails = ({
         </Column>
 
         <Column sm={4} md={6} lg={13} className={styles.contentColumn}>
-          {activeSection === "details" && (
+          {activeSection === DEPLOYMENT_DETAILS_SECTIONS.DETAILS && (
             <>
               <Grid className={styles.detailsGrid}>
                 <Column sm={4} md={8} lg={16}>
@@ -753,7 +771,7 @@ const DeploymentDetails = ({
             </>
           )}
 
-          {activeSection === "services" && (
+          {activeSection === DEPLOYMENT_DETAILS_SECTIONS.SERVICES && (
             <Grid className={styles.servicesGrid}>
               <Column sm={4} md={8} lg={16}>
                 <ProductiveCard
@@ -867,14 +885,15 @@ const DeploymentDetails = ({
             </Grid>
           )}
 
-          {activeSection === "datasources" && acceptsDatasource && (
-            <ApplicationDatasourcesTable
-              applicationId={deployment.id}
-              onDatasourceCountChange={(count) => setDatasourceCount(count)}
-            />
-          )}
+          {activeSection === DEPLOYMENT_DETAILS_SECTIONS.DATASOURCES &&
+            acceptsDatasource && (
+              <ApplicationDatasourcesTable
+                applicationId={deployment.id}
+                onDatasourceCountChange={(count) => setDatasourceCount(count)}
+              />
+            )}
 
-          {activeSection === "integration" && (
+          {activeSection === DEPLOYMENT_DETAILS_SECTIONS.INTEGRATION && (
             <Grid className={styles.servicesGrid}>
               <Column sm={4} md={8} lg={16}>
                 <ProductiveCard

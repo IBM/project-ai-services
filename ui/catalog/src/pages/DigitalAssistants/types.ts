@@ -1,4 +1,6 @@
 import type { DataTableHeader } from "@carbon/react";
+import { DEPLOYMENT_DETAILS_SECTIONS } from "@/constants";
+import type { DeploymentStatus, DeploymentDetailsSection } from "@/constants";
 import type { PaginationMetadata, DeploymentDetails } from "@/types/api.types";
 import type {
   BaseTableState,
@@ -13,13 +15,7 @@ import {
 export interface DigitalAssistantRow {
   id: string;
   name: string;
-  status:
-    | "Downloading"
-    | "Deploying"
-    | "Running"
-    | "Deleting"
-    | "Error"
-    | "Initializing";
+  status: DeploymentStatus;
   type?: string;
   uptime: string;
   workerResource: string;
@@ -39,8 +35,7 @@ export interface AppState extends BaseTableState<DigitalAssistantRow> {
   selectedDeployment: DeploymentDetails | null;
   showDeploymentDetails: boolean;
   /** Section to open in DeploymentDetails when navigating from the overflow menu */
-  deploymentDefaultSection:
-    "details" | "services" | "integration" | "datasources";
+  deploymentDefaultSection: DeploymentDetailsSection;
   // DA-specific: launch endpoint error toast
   launchErrorToastOpen: boolean;
   launchErrorToastMessage: string;
@@ -76,7 +71,7 @@ export type AppAction =
   | {
       type: typeof ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS;
       payload: DeploymentDetails;
-      defaultSection?: "details" | "services" | "integration" | "datasources";
+      defaultSection?: DeploymentDetailsSection;
     }
   | { type: typeof ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS }
   | { type: typeof ACTION_TYPES.UPDATE_DEPLOYMENT_NAME; payload: string }
@@ -134,7 +129,7 @@ export const INITIAL_STATE: AppState = {
   pagination: null,
   selectedDeployment: null,
   showDeploymentDetails: false,
-  deploymentDefaultSection: "details",
+  deploymentDefaultSection: DEPLOYMENT_DETAILS_SECTIONS.DETAILS,
   launchErrorToastOpen: false,
   launchErrorToastMessage: "",
 };
@@ -160,14 +155,15 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ...state,
         selectedDeployment: action.payload,
         showDeploymentDetails: true,
-        deploymentDefaultSection: action.defaultSection ?? "details",
+        deploymentDefaultSection:
+          action.defaultSection ?? DEPLOYMENT_DETAILS_SECTIONS.DETAILS,
       };
     case ACTION_TYPES.HIDE_DEPLOYMENT_DETAILS:
       return {
         ...state,
         selectedDeployment: null,
         showDeploymentDetails: false,
-        deploymentDefaultSection: "details",
+        deploymentDefaultSection: DEPLOYMENT_DETAILS_SECTIONS.DETAILS,
       };
     case ACTION_TYPES.UPDATE_DEPLOYMENT_NAME:
       return {

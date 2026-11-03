@@ -1,6 +1,12 @@
 import React from "react";
 import { Tag, Link, OverflowMenu, OverflowMenuItem } from "@carbon/react";
 import {
+  DEPLOYMENT_STATUS,
+  CONNECTOR_STATUS,
+  DATASOURCE_SYNC_STATUS,
+  WORKER_STATUS,
+} from "@/constants";
+import {
   CheckmarkFilled,
   PauseOutline,
   ErrorFilled,
@@ -10,93 +16,93 @@ import {
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 export const STATUS_CONFIG = {
-  Initializing: {
+  [DEPLOYMENT_STATUS.INITIALIZING]: {
     tagType: "blue" as const,
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
-  Downloading: {
+  [DEPLOYMENT_STATUS.DOWNLOADING]: {
     tagType: "blue" as const,
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
-  Deploying: {
+  [DEPLOYMENT_STATUS.DEPLOYING]: {
     tagType: "blue" as const,
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
-  Deleting: {
+  [DEPLOYMENT_STATUS.DELETING]: {
     tagType: "blue" as const,
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
-  Running: {
+  [DEPLOYMENT_STATUS.RUNNING]: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: sharedStyles.statusTagSuccess,
   },
-  Stopped: {
+  [DEPLOYMENT_STATUS.STOPPED]: {
     tagType: "gray" as const,
     icon: PauseOutline,
     className: sharedStyles.statusTagSecondary,
   },
-  Error: {
+  [DEPLOYMENT_STATUS.ERROR]: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
   },
   // ── Data source connector statuses ──────────────────────────────────────────
-  connected: {
+  [CONNECTOR_STATUS.CONNECTED]: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: sharedStyles.statusTagSuccess,
   },
-  offline: {
+  [CONNECTOR_STATUS.OFFLINE]: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
   },
   // ── Worker statuses ──────────────────────────────────────────────────────────
-  ready: {
+  [WORKER_STATUS.READY]: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: sharedStyles.statusTagSuccess,
   },
-  pending: {
+  [WORKER_STATUS.PENDING]: {
     tagType: "blue" as const,
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
-  disconnected: {
+  [WORKER_STATUS.DISCONNECTED]: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
   },
   // ── Application datasource statuses ─────────────────────────────────────────
-  "up to date": {
+  [DATASOURCE_SYNC_STATUS.UP_TO_DATE]: {
     tagType: "green" as const,
     icon: CheckmarkFilled,
     className: sharedStyles.statusTagSuccess,
   },
-  "out of sync": {
+  [DATASOURCE_SYNC_STATUS.OUT_OF_SYNC]: {
     tagType: "red" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagError,
   },
-  syncing: {
+  [DATASOURCE_SYNC_STATUS.SYNCING]: {
     tagType: "blue" as const,
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
   // The backend API filters out "delete pending" rows before they reach the UI.
   // Kept as a fallback.
-  "delete pending": {
+  [DATASOURCE_SYNC_STATUS.DELETE_PENDING]: {
     tagType: "blue" as const,
     icon: InProgress,
     className: sharedStyles.statusTagInfo,
   },
   // Service pod was unreachable when the catalog last attempted to fetch sync state
-  unknown: {
+  [DATASOURCE_SYNC_STATUS.UNKNOWN]: {
     tagType: "gray" as const,
     icon: ErrorFilled,
     className: sharedStyles.statusTagSecondary,
@@ -179,8 +185,16 @@ export interface MessageCellProps extends SharedCellRendererProps {
 export const MessageCell = ({
   value,
   rowData,
-  hideStatuses = ["Running", "connected", "up to date"],
-  errorStatuses = ["Error", "offline", "out of sync"],
+  hideStatuses = [
+    DEPLOYMENT_STATUS.RUNNING,
+    CONNECTOR_STATUS.CONNECTED,
+    DATASOURCE_SYNC_STATUS.UP_TO_DATE,
+  ],
+  errorStatuses = [
+    DEPLOYMENT_STATUS.ERROR,
+    CONNECTOR_STATUS.OFFLINE,
+    DATASOURCE_SYNC_STATUS.OUT_OF_SYNC,
+  ],
 }: MessageCellProps) => {
   const message = String(value || "");
   const status = rowData?.status || "";
@@ -221,7 +235,7 @@ export const ActionCell = ({
 }: ActionCellProps) => {
   const [isPrefetching, setIsPrefetching] = React.useState(false);
   const deleteEnabled = isDeleteEnabled(rowData?.status);
-  const isRunning = rowData?.status === "Running";
+  const isRunning = rowData?.status === DEPLOYMENT_STATUS.RUNNING;
 
   const handleOpen = React.useCallback(async () => {
     if (!onMenuOpen) return;
