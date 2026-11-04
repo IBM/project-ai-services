@@ -15,7 +15,7 @@ import pytest
 from digitize.processing.tables import split_markdown_table_into_row_chunks
 
 HEADER = "| Corridor | Metric | FY21 | FY22 |"
-SEPARATOR = "|----------|--------|------|------|"
+SEPARATOR = "|---|---|---|---|"
 
 
 def _make_table(n_rows: int) -> str:
@@ -109,6 +109,35 @@ class TestSplitMarkdownTableIntoRowChunks:
         )
         assert len(chunks) > 1
         assert "\n".join(chunks) == table
+
+    def test_alignment_padding_is_stripped(self):
+        """Docling/tabulate pads cells to column width; padding must not count as tokens."""
+        padded = "\n".join([
+            "| Corridor        | Metric   | FY21   | FY22   |",
+            "|-----------------|----------|--------|--------|",
+            "| Northeast       | Actual   | 10.1   | 12.4   |",
+        ])
+        chunks = split_markdown_table_into_row_chunks(padded, "", max_tokens=1000)
+        assert chunks == [
+            "\n".join([
+                "| Corridor | Metric | FY21 | FY22 |",
+                "|---|---|---|---|",
+                "| Northeast | Actual | 10.1 | 12.4 |",
+            ])
+        ]
+
+    def test_padded_table_packs_multiple_rows_per_chunk(self):
+        """Regression: padding made the header exceed the budget, giving one row per chunk."""
+        pad = " " * 40
+        rows = [f"| Row{i}{pad} | Actual{pad} | {i}.1{pad} | {i}.2{pad} |" for i in range(20)]
+        padded = "\n".join([
+            f"| Corridor{pad} | Metric{pad} | FY21{pad} | FY22{pad} |",
+            f"|{'-' * 50}|{'-' * 50}|{'-' * 50}|{'-' * 50}|",
+            *rows,
+        ])
+        chunks = split_markdown_table_into_row_chunks(padded, "", max_tokens=200)
+        assert len(chunks) < 20  # rows are grouped, not one per chunk
+        assert any(len(chunk.split("\n")) > 3 for chunk in chunks)
 
     def test_default_token_estimate_splits_large_table(self):
         chunks = split_markdown_table_into_row_chunks(_make_table(200), "Table 1", max_tokens=200)
