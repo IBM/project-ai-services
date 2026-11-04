@@ -32,6 +32,10 @@ const (
 	MetadataKeyComponentType = "component_type"
 	// MetadataKeyModel is the metadata key that stores the model name of a model connector.
 	MetadataKeyModel = "model"
+	// MetadataKeyProfile is the metadata key that stores the deployment profile of a local model.
+	MetadataKeyProfile = "profile"
+	// MetadataKeyParams is the metadata key that holds the non-sensitive provider params of a model.
+	MetadataKeyParams = "params"
 )
 
 // Connector type constants.

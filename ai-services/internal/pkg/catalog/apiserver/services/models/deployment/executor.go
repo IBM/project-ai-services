@@ -42,9 +42,13 @@ func NewModelExecutor(
 	}
 }
 
-// ExecuteLocal runs a local plan: deploy the pods, expose them through the gateway, then mark the
-// component Running. Any failure moves the component to Error. The component row has already been
-// written by the caller, and ExecuteLocal never panics.
+// ExecuteLocal runs a local plan end to end: prepare the worker (images and model) while the
+// component is Downloading, start the pods while it is Deploying, expose them through the
+// gateway, then mark it Running. Any failure moves the component to Error. The component row has
+// already been written (as Downloading) by the caller, and ExecuteLocal never panics.
+//
+// A caller that needs the steps separately (e.g. to download ahead of starting) can call
+// plan.Deployer.Prepare and plan.Deployer.Start itself and manage status on its own.
 func (e *ModelExecutor) ExecuteLocal(ctx context.Context, plan *types.LocalPlan) {
 	ctx, cancel := context.WithTimeout(ctx, localDeployTimeout)
 	defer cancel()
@@ -65,7 +69,16 @@ func (e *ModelExecutor) ExecuteLocal(ctx context.Context, plan *types.LocalPlan)
 }
 
 func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) error {
-	eps, err := plan.Deployer.Deploy(ctx, plan)
+	// The row is inserted as Downloading, so the pull and download run under that status.
+	if err := plan.Deployer.Prepare(ctx, plan); err != nil {
+		return err
+	}
+
+	if err := e.componentRepo.UpdateStatus(ctx, plan.ComponentID, dbmodels.ComponentStatusDeploying, ""); err != nil {
+		return fmt.Errorf("failed to mark component deploying: %w", err)
+	}
+
+	eps, err := plan.Deployer.Start(ctx, plan)
 	if err != nil {
 		return err
 	}

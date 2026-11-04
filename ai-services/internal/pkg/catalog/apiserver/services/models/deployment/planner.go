@@ -122,7 +122,7 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		return nil, fmt.Errorf("failed to scope catalog provider: %w", err)
 	}
 
-	comp, err := validateLocalParams(ctx, provider, req)
+	comp, sensitive, err := validateLocalParams(ctx, provider, req)
 	if err != nil {
 		return nil, err
 	}
@@ -133,17 +133,34 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 	}
 
 	return &types.LocalPlan{
-		ComponentID: uuid.New(),
-		Req:         req,
-		Worker:      target,
-		Runtime:     rt,
-		Deployer:    deployer,
-		LiteLLM:     *comp.LiteLLM,
-		Catalog:     provider,
-		Metadata:    metadata,
-		Templates:   tmpls,
-		Values:      values,
+		ComponentID:       uuid.New(),
+		Req:               req,
+		Worker:            target,
+		Runtime:           rt,
+		Deployer:          deployer,
+		LiteLLM:           *comp.LiteLLM,
+		Catalog:           provider,
+		Metadata:          metadata,
+		ComponentMetadata: localComponentMetadata(req, sensitive),
+		Templates:         tmpls,
+		Values:            values,
 	}, nil
+}
+
+// localComponentMetadata is what is persisted on the component row: the top-level model and
+// profile, with the non-sensitive params nested under "params". Credentials only reach the pod
+// through the template values.
+func localComponentMetadata(req apimodels.CreateModelRequest, sensitive map[string]bool) map[string]any {
+	md := map[string]any{
+		constants.MetadataKeyModel:  req.Model,
+		constants.MetadataKeyParams: catalogutils.StripSensitiveFields(req.Params, sensitive),
+	}
+
+	if req.Profile != "" {
+		md[constants.MetadataKeyProfile] = req.Profile
+	}
+
+	return md
 }
 
 // loadLocalAssets loads the provider's runtime metadata and templates and builds the template values.
@@ -209,10 +226,13 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 	// reached at the resolved target will cause registration to fail.
 	r.TokenizeURL = remoteTokenizeURL(req.ProviderID, req.Params)
 
-	// Credentials go to the gateway only; the catalog DB keeps everything else.
-	metadata := catalogutils.StripSensitiveFields(req.Params, sensitive)
-	metadata[constants.MetadataKeyComponentType] = req.ComponentType
-	metadata[constants.MetadataKeyModel] = req.Model
+	// Credentials go to the gateway only; the catalog DB keeps everything else, with the params
+	// nested under "params".
+	metadata := map[string]any{
+		constants.MetadataKeyComponentType: req.ComponentType,
+		constants.MetadataKeyModel:         req.Model,
+		constants.MetadataKeyParams:        catalogutils.StripSensitiveFields(req.Params, sensitive),
+	}
 
 	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Metadata: metadata}, nil
 }

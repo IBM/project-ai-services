@@ -19,16 +19,22 @@ type WorkerTarget struct {
 	Name string
 }
 
-// Deployer starts the pods of a planned local model on one kind of runtime and returns where the
-// model server can be reached. Supporting another runtime means adding an implementation under
-// repository/ and registering it with the planner; the plan and execute phases do not change.
+// Deployer deploys a planned local model on one kind of runtime in two steps, so a caller can run
+// the slow download step ahead of, or apart from, starting the pods. Supporting another runtime
+// means adding an implementation under repository/ and registering it with the planner; the plan
+// and execute phases do not change.
 //
-// TODO(mTLS): for a non-local worker, Deploy must create the worker mTLS ingress/egress Caddy
+// TODO(mTLS): for a non-local worker, Start must create the worker mTLS ingress/egress Caddy
 // routes (worker :8443 -> pod, control-plane private egress -> worker) and return the
 // control-plane private egress as Egress, keeping the pod's own address as Internal. Those
 // routes must also be removed on undeploy.
 type Deployer interface {
-	Deploy(ctx context.Context, plan *LocalPlan) (ModelEndpoints, error)
+	// Prepare makes the worker ready to start the model: it pulls the container images and
+	// downloads the model weights. It starts nothing and is safe to call again.
+	Prepare(ctx context.Context, plan *LocalPlan) error
+	// Start allocates any accelerator cards, starts the pods and returns where the model server
+	// can be reached. It expects Prepare to have succeeded.
+	Start(ctx context.Context, plan *LocalPlan) (ModelEndpoints, error)
 }
 
 // ModelEndpoints are the "host:port" addresses of a deployed model server. They are two values
@@ -54,9 +60,12 @@ type LocalPlan struct {
 	// LiteLLM is how the provider's pods are exposed through the gateway (from component metadata).
 	LiteLLM catalogtypes.LiteLLMConfig
 	// Catalog is scoped to the runtime the pods are deployed on.
-	Catalog   *catalog.CatalogProvider
-	Metadata  *clitemplates.AppMetadata
-	Templates map[string]*texttemplate.Template
+	Catalog  *catalog.CatalogProvider
+	Metadata *clitemplates.AppMetadata
+	// ComponentMetadata is what gets persisted on the component row: the model, the profile and
+	// the non-sensitive params nested under "params".
+	ComponentMetadata map[string]any
+	Templates         map[string]*texttemplate.Template
 	// Values are the rendered template values: provider defaults overridden by params, plus the
 	// requested model as .Values.model.
 	Values map[string]any

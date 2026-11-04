@@ -14,27 +14,28 @@ import (
 )
 
 // validateLocalParams checks that the provider is a model provider in the catalog and that params
-// are valid against its values.schema.json. It returns the provider's component metadata.
-func validateLocalParams(ctx context.Context, provider *catalog.CatalogProvider, req apimodels.CreateModelRequest) (*types.Component, error) {
+// are valid against its values.schema.json. It returns the provider's component metadata and the
+// set of sensitive (format: password) param names, which must reach the pod but never be persisted.
+func validateLocalParams(ctx context.Context, provider *catalog.CatalogProvider, req apimodels.CreateModelRequest) (*types.Component, map[string]bool, error) {
 	comp, err := provider.LoadComponent(req.ComponentType, req.ProviderID)
 	if err != nil {
-		return nil, NotFound("provider %q not found for component type %q", req.ProviderID, req.ComponentType)
+		return nil, nil, NotFound("provider %q not found for component type %q", req.ProviderID, req.ComponentType)
 	}
 
 	if comp.Category != catalogconstants.ComponentCategoryModels || comp.LiteLLM == nil {
-		return nil, BadRequest("provider %q of component type %q does not serve models", req.ProviderID, req.ComponentType)
+		return nil, nil, BadRequest("provider %q of component type %q does not serve models", req.ProviderID, req.ComponentType)
 	}
 
 	schema, err := provider.GetComponentProviderParams(ctx, req.ComponentType, req.ProviderID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load param schema for %s/%s: %w", req.ComponentType, req.ProviderID, err)
+		return nil, nil, fmt.Errorf("failed to load param schema for %s/%s: %w", req.ComponentType, req.ProviderID, err)
 	}
 
 	if err := validators.ValidateParams(req.Params, schema, fmt.Sprintf("provider %q", req.ProviderID)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return comp, nil
+	return comp, catalogutils.SensitiveFieldsFromSchema(schema), nil
 }
 
 // validateRemoteParams checks that the model connector provider exists and that params satisfy its

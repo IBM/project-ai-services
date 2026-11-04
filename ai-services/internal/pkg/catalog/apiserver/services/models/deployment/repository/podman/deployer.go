@@ -21,17 +21,40 @@ func NewPodmanDeployer() *PodmanDeployer {
 	return &PodmanDeployer{}
 }
 
-// Deploy pulls the images, downloads the model, starts the pods and returns the model server's
-// endpoints.
+// Prepare pulls the container images declared by the provider templates and downloads the model
+// weights on the target worker, reusing the application deployment helpers.
+func (d *PodmanDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) error {
+	// The tool image is required for the model download container and housekeeping tasks.
+	imageSet := map[string]bool{vars.ToolImage: true}
+	if err := plan.Catalog.CollectImagesFromTemplates(ctx, plan.Templates, plan.Values, imageSet); err != nil {
+		return fmt.Errorf("failed to collect images for %s/%s: %w", plan.Req.ComponentType, plan.Req.ProviderID, err)
+	}
+
+	images := make([]string, 0, len(imageSet))
+	for img := range imageSet {
+		images = append(images, img)
+	}
+
+	logger.InfofCtx(ctx, "Pulling images for model component %s", plan.ComponentID)
+	if err := podmanutils.PullImages(ctx, plan.Runtime, images); err != nil {
+		return fmt.Errorf("image pull failed: %w", err)
+	}
+
+	logger.InfofCtx(ctx, "Downloading model %q for component %s", plan.Req.Model, plan.ComponentID)
+	if err := podmanutils.DownloadModels(ctx, plan.Runtime, []string{plan.Req.Model}); err != nil {
+		return fmt.Errorf("model download failed: %w", err)
+	}
+
+	return nil
+}
+
+// Start allocates Spyre cards when the provider needs them, starts the pods and returns the
+// model server's endpoints.
 //
 // TODO(mTLS): Egress is set to the pod's own address, which the control plane can only reach when
 // plan.Worker is the local worker. For a remote worker, create the worker mTLS ingress/egress
 // Caddy routes here and return the control-plane private egress as Egress (see types.Deployer).
-func (d *PodmanDeployer) Deploy(ctx context.Context, plan *types.LocalPlan) (types.ModelEndpoints, error) {
-	if err := preparePrerequisites(ctx, plan); err != nil {
-		return types.ModelEndpoints{}, err
-	}
-
+func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (types.ModelEndpoints, error) {
 	spyrePool, err := allocateSpyreCards(ctx, plan)
 	if err != nil {
 		return types.ModelEndpoints{}, err
@@ -64,33 +87,6 @@ func (d *PodmanDeployer) Deploy(ctx context.Context, plan *types.LocalPlan) (typ
 	}
 
 	return types.ModelEndpoints{Internal: internal, Egress: internal}, nil
-}
-
-// preparePrerequisites pulls the container images declared by the provider templates and
-// downloads the model weights on the target worker, reusing the application deployment helpers.
-func preparePrerequisites(ctx context.Context, plan *types.LocalPlan) error {
-	// The tool image is required for the model download container and housekeeping tasks.
-	imageSet := map[string]bool{vars.ToolImage: true}
-	if err := plan.Catalog.CollectImagesFromTemplates(ctx, plan.Templates, plan.Values, imageSet); err != nil {
-		return fmt.Errorf("failed to collect images for %s/%s: %w", plan.Req.ComponentType, plan.Req.ProviderID, err)
-	}
-
-	images := make([]string, 0, len(imageSet))
-	for img := range imageSet {
-		images = append(images, img)
-	}
-
-	logger.InfofCtx(ctx, "Pulling images for model component %s", plan.ComponentID)
-	if err := podmanutils.PullImages(ctx, plan.Runtime, images); err != nil {
-		return fmt.Errorf("image pull failed: %w", err)
-	}
-
-	logger.InfofCtx(ctx, "Downloading model %q for component %s", plan.Req.Model, plan.ComponentID)
-	if err := podmanutils.DownloadModels(ctx, plan.Runtime, []string{plan.Req.Model}); err != nil {
-		return fmt.Errorf("model download failed: %w", err)
-	}
-
-	return nil
 }
 
 // allocateSpyreCards builds a Spyre card pool when the provider templates declare spyre-card

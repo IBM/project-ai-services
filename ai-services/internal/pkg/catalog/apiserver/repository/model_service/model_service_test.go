@@ -28,12 +28,15 @@ type mockComponentRepo struct {
 	mu         sync.Mutex
 	components map[string]*dbmodels.Component
 	byID       map[uuid.UUID]*dbmodels.Component
+	// statuses records every status a component was moved to, in order.
+	statuses map[uuid.UUID][]dbmodels.ComponentStatus
 }
 
 func newMockComponentRepo() *mockComponentRepo {
 	return &mockComponentRepo{
 		components: make(map[string]*dbmodels.Component),
 		byID:       make(map[uuid.UUID]*dbmodels.Component),
+		statuses:   make(map[uuid.UUID][]dbmodels.ComponentStatus),
 	}
 }
 
@@ -84,9 +87,18 @@ func (m *mockComponentRepo) UpdateStatus(_ context.Context, id uuid.UUID, status
 	if c, ok := m.byID[id]; ok {
 		c.Status = status
 		c.Message = message
+		m.statuses[id] = append(m.statuses[id], status)
 	}
 
 	return nil
+}
+
+// statusHistory returns the statuses the component was moved to after its insert.
+func (m *mockComponentRepo) statusHistory(id uuid.UUID) []dbmodels.ComponentStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return append([]dbmodels.ComponentStatus(nil), m.statuses[id]...)
 }
 
 func (m *mockComponentRepo) UpdateEndpoints(_ context.Context, id uuid.UUID, endpoints []map[string]any) error {
@@ -374,9 +386,13 @@ func TestCreateModel_Remote_WatsonX_Success(t *testing.T) {
 	assert.Equal(t, "models", conn.Type)
 	assert.Equal(t, "llm", conn.Metadata["component_type"])
 	assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
-	assert.NotContains(t, conn.Metadata, "api_key", "credentials must never be persisted")
-	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", conn.Metadata["api_base"])
-	assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", conn.Metadata["project_id"])
+	params, ok := conn.Metadata["params"].(map[string]any)
+	require.True(t, ok, "provider params are nested under \"params\"")
+	assert.NotContains(t, params, "api_key", "credentials must never be persisted")
+	assert.NotContains(t, conn.Metadata, "api_key")
+	assert.NotContains(t, conn.Metadata, "api_base", "params are not stored flat")
+	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", params["api_base"])
+	assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", params["project_id"])
 }
 
 func TestCreateModel_Remote_ProbeFailure(t *testing.T) {
@@ -507,9 +523,10 @@ func TestCreateModel_Local_Success(t *testing.T) {
 
 	comp, ok := compRepo.components["local-granite"]
 	require.True(t, ok)
-	assert.Equal(t, dbmodels.ComponentStatusDeploying, comp.Status)
+	assert.Equal(t, dbmodels.ComponentStatusDownloading, comp.Status, "the row starts in the download phase")
 	assert.Equal(t, "test-user", comp.CreatedBy)
 	assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", comp.Metadata["model"])
+	assert.Contains(t, comp.Metadata, "params", "params are nested, even when empty")
 }
 
 // fakeDeployer stands in for a runtime-specific types.Deployer. egress defaults to endpoint, like
@@ -517,24 +534,34 @@ func TestCreateModel_Local_Success(t *testing.T) {
 type fakeDeployer struct {
 	endpoint string
 	egress   string
-	err      error
+	err      error // returned by Prepare
+	startErr error // returned by Start
 	panics   bool
 	called   chan struct{}
+	steps    []string
 }
 
-func (f *fakeDeployer) Deploy(context.Context, *types.LocalPlan) (types.ModelEndpoints, error) {
+func (f *fakeDeployer) Prepare(context.Context, *types.LocalPlan) error {
 	defer close(f.called)
+
+	f.steps = append(f.steps, "prepare")
 
 	if f.panics {
 		panic("boom")
 	}
+
+	return f.err
+}
+
+func (f *fakeDeployer) Start(context.Context, *types.LocalPlan) (types.ModelEndpoints, error) {
+	f.steps = append(f.steps, "start")
 
 	egress := f.egress
 	if egress == "" {
 		egress = f.endpoint
 	}
 
-	return types.ModelEndpoints{Internal: f.endpoint, Egress: egress}, f.err
+	return types.ModelEndpoints{Internal: f.endpoint, Egress: egress}, f.startErr
 }
 
 // podmanRuntime reports the Podman runtime type; every other method would panic if called.
@@ -633,6 +660,76 @@ func TestCreateLocal_DeployFailure_MarksError(t *testing.T) {
 	assert.Empty(t, lite.registeredModels, "no route must be registered when pods failed to deploy")
 }
 
+// A model is Downloading while its images and weights are fetched, then Deploying while the pods
+// start, then Running.
+func TestCreateLocal_StatusProgression(t *testing.T) {
+	deployer := &fakeDeployer{endpoint: "llm-abc:8000", called: make(chan struct{})}
+	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
+
+	resp, err := svc.CreateModel(context.Background(), localRequest())
+	require.NoError(t, err)
+
+	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusRunning)
+
+	id, err := uuid.Parse(resp.ID)
+	require.NoError(t, err)
+	assert.Equal(t,
+		[]dbmodels.ComponentStatus{dbmodels.ComponentStatusDeploying, dbmodels.ComponentStatusRunning},
+		repo.statusHistory(id),
+		"the insert already recorded Downloading; the executor then moves Deploying -> Running")
+}
+
+// A failed download is an Error from the Downloading phase and never reaches Deploying.
+func TestCreateLocal_PrepareFailure_NeverReachesDeploying(t *testing.T) {
+	deployer := &fakeDeployer{err: errors.New("image pull failed"), called: make(chan struct{})}
+	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
+
+	resp, err := svc.CreateModel(context.Background(), localRequest())
+	require.NoError(t, err)
+
+	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
+
+	id, err := uuid.Parse(resp.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []dbmodels.ComponentStatus{dbmodels.ComponentStatusError}, repo.statusHistory(id))
+}
+
+// Prepare (download) runs before Start (pods); a failed Prepare must never start anything.
+func TestCreateLocal_PreparesBeforeStarting(t *testing.T) {
+	deployer := &fakeDeployer{endpoint: "llm-abc:8000", called: make(chan struct{})}
+	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
+
+	resp, err := svc.CreateModel(context.Background(), localRequest())
+	require.NoError(t, err)
+
+	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusRunning)
+	assert.Equal(t, []string{"prepare", "start"}, deployer.steps)
+}
+
+func TestCreateLocal_PrepareFailure_DoesNotStart(t *testing.T) {
+	deployer := &fakeDeployer{err: errors.New("image pull failed"), called: make(chan struct{})}
+	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
+
+	resp, err := svc.CreateModel(context.Background(), localRequest())
+	require.NoError(t, err)
+
+	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
+	assert.Equal(t, []string{"prepare"}, deployer.steps, "pods must not start when the download failed")
+}
+
+func TestCreateLocal_StartFailure_MarksErrorWithoutRoute(t *testing.T) {
+	lite := &mockLiteLLMClient{}
+	deployer := &fakeDeployer{startErr: errors.New("no spyre cards"), called: make(chan struct{})}
+	svc, repo := newLocalService(t, deployer, lite)
+
+	resp, err := svc.CreateModel(context.Background(), localRequest())
+	require.NoError(t, err)
+
+	comp := awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
+	assert.Contains(t, comp.Message, "no spyre cards")
+	assert.Empty(t, lite.registeredModels, "no route must be registered when the pods failed to start")
+}
+
 func TestCreateLocal_Panic_MarksError(t *testing.T) {
 	deployer := &fakeDeployer{panics: true, called: make(chan struct{})}
 	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
@@ -715,6 +812,23 @@ func TestPlanLocal_ValuesCarryParamsAndModel(t *testing.T) {
 	assert.NotEqual(t, uuid.Nil, plan.ComponentID)
 }
 
+// The component row keeps the non-sensitive params; credentials only reach the pod via the values.
+func TestPlanLocal_ComponentMetadataStripsSensitive(t *testing.T) {
+	svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
+
+	req := localRequest()
+	req.Profile = "small"
+	req.Params = map[string]any{"apiKey": "k"}
+
+	plan, err := svc.planner.PlanLocal(context.Background(), req)
+	require.NoError(t, err)
+
+	assert.NotContains(t, plan.ComponentMetadata, "apiKey", "params are not stored flat")
+	assert.Empty(t, plan.ComponentMetadata["params"], "credentials must never be persisted")
+	assert.Equal(t, req.Model, plan.ComponentMetadata["model"])
+	assert.Equal(t, "small", plan.ComponentMetadata["profile"])
+}
+
 func TestPlanRemote_StripsSensitiveFromMetadata(t *testing.T) {
 	svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
 
@@ -728,8 +842,10 @@ func TestPlanRemote_StripsSensitiveFromMetadata(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.NotContains(t, plan.Metadata, "api_key")
-	assert.Equal(t, "http://vllm.example.com:8000/v1", plan.Metadata["api_base"])
+	params, ok := plan.Metadata["params"].(map[string]any)
+	require.True(t, ok, "provider params are nested under \"params\"")
+	assert.NotContains(t, params, "api_key")
+	assert.Equal(t, "http://vllm.example.com:8000/v1", params["api_base"])
 	assert.Equal(t, "embedding", plan.Metadata["component_type"])
 	assert.Equal(t, "secret", plan.Route.Params["api_key"], "the gateway still receives the credential")
 	assert.Equal(t, "http://vllm.example.com:8000/tokenize", plan.Route.TokenizeURL)

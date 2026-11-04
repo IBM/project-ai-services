@@ -14,12 +14,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
-// Keys under which the top-level model and profile are persisted in the component metadata.
-const (
-	metadataModel   = "model"
-	metadataProfile = "profile"
-)
-
 // ModelService implements the ModelServiceInterface for model management.
 //
 // It only orchestrates; like the application flow, the work is split into phases that live in
@@ -115,25 +109,16 @@ func (s *ModelService) insertComponent(ctx context.Context, plan *types.LocalPla
 		Name:      req.Name,
 		Type:      req.ComponentType,
 		Provider:  req.ProviderID,
-		Status:    dbmodels.ComponentStatusDeploying,
+		Status:    dbmodels.ComponentStatusDownloading,
 		CreatedBy: req.CreatedBy,
 		WorkerID:  plan.Worker.ID,
-		Metadata:  localMetadata(req),
+		Metadata:  plan.ComponentMetadata,
 	}
 	if err := s.componentRepo.Insert(ctx, component); err != nil {
 		return fmt.Errorf("failed to insert component: %w", err)
 	}
 
 	return nil
-}
-
-func localMetadata(req apimodels.CreateModelRequest) map[string]any {
-	md := map[string]any{metadataModel: req.Model}
-	if req.Profile != "" {
-		md[metadataProfile] = req.Profile
-	}
-
-	return md
 }
 
 // createRemoteModel plans the registration and executes it synchronously.

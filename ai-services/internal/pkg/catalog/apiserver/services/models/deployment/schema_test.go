@@ -33,35 +33,35 @@ func TestValidateLocalParams(t *testing.T) {
 	}
 
 	t.Run("valid with no params", func(t *testing.T) {
-		_, err := validateLocalParams(context.Background(), provider, base)
+		_, _, err := validateLocalParams(context.Background(), provider, base)
 		require.NoError(t, err)
 	})
 
 	t.Run("valid with schema param", func(t *testing.T) {
 		req := base
 		req.Params = map[string]any{"apiKey": "secret"}
-		_, err := validateLocalParams(context.Background(), provider, req)
+		_, _, err := validateLocalParams(context.Background(), provider, req)
 		require.NoError(t, err)
 	})
 
 	t.Run("unknown provider is 404", func(t *testing.T) {
 		req := base
 		req.ProviderID = "nope"
-		_, err := validateLocalParams(context.Background(), provider, req)
+		_, _, err := validateLocalParams(context.Background(), provider, req)
 		requireStatus(t, err, http.StatusNotFound, "not found")
 	})
 
 	t.Run("unknown param is 400", func(t *testing.T) {
 		req := base
 		req.Params = map[string]any{"bogus": "x"}
-		_, err := validateLocalParams(context.Background(), provider, req)
+		_, _, err := validateLocalParams(context.Background(), provider, req)
 		requireStatus(t, err, http.StatusBadRequest, "Parameter validation failed")
 	})
 
 	t.Run("wrongly typed param is 400", func(t *testing.T) {
 		req := base
 		req.Params = map[string]any{"apiKey": 123}
-		_, err := validateLocalParams(context.Background(), provider, req)
+		_, _, err := validateLocalParams(context.Background(), provider, req)
 		requireStatus(t, err, http.StatusBadRequest, "Parameter validation failed")
 	})
 }
