@@ -19,16 +19,22 @@ type WorkerTarget struct {
 	Name string
 }
 
-// Deployer deploys a planned local model on one kind of runtime in two steps, so a caller can run
-// the slow download step ahead of, or apart from, starting the pods. Supporting another runtime
-// means adding an implementation under repository/ and registering it with the planner; the plan
-// and execute phases do not change.
+// Deployer deploys a planned local model on one kind of runtime in three steps: Check, Prepare
+// and Start, so a caller can reject a request up front and run the slow download step ahead of,
+// or apart from, starting the pods. Supporting another runtime means adding an implementation
+// under repository/ and registering it with the planner; the plan and execute phases do not
+// change.
 //
 // TODO(mTLS): for a non-local worker, Start must create the worker mTLS ingress/egress Caddy
 // routes (worker :8443 -> pod, control-plane private egress -> worker) and return the
 // control-plane private egress as Egress, keeping the pod's own address as Internal. Those
 // routes must also be removed on undeploy.
 type Deployer interface {
+	// Check verifies, without side effects, that the worker can host the model right now (e.g.
+	// enough free accelerator cards), so an unsatisfiable request is rejected during planning
+	// before anything is written or downloaded. It is a point-in-time check: Start still has to
+	// allocate for real and can fail if the resources were taken in between.
+	Check(ctx context.Context, plan *LocalPlan) error
 	// Prepare makes the worker ready to start the model: it pulls the container images and
 	// downloads the model weights. It starts nothing and is safe to call again.
 	Prepare(ctx context.Context, plan *LocalPlan) error

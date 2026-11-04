@@ -42,7 +42,7 @@ func TestPlanRemote_WatsonxTokenizeTarget(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "http://localhost:8000/watsonx/ml/v1/text/tokenization", plan.Route.TokenizeURL)
+	assert.Equal(t, "http://localhost:4000/watsonx/ml/v1/text/tokenization", plan.Route.TokenizeURL)
 }
 
 func TestRemoteTokenizeURL(t *testing.T) {

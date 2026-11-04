@@ -21,6 +21,14 @@ func NewPodmanDeployer() *PodmanDeployer {
 	return &PodmanDeployer{}
 }
 
+// Check verifies that the worker has the Spyre cards the provider needs. It only discovers free
+// cards; Start is what allocates them.
+func (d *PodmanDeployer) Check(ctx context.Context, plan *types.LocalPlan) error {
+	_, err := allocateSpyreCards(ctx, plan)
+
+	return err
+}
+
 // Prepare pulls the container images declared by the provider templates and downloads the model
 // weights on the target worker, reusing the application deployment helpers.
 func (d *PodmanDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) error {

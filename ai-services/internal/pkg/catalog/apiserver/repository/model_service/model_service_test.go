@@ -534,11 +534,16 @@ func TestCreateModel_Local_Success(t *testing.T) {
 type fakeDeployer struct {
 	endpoint string
 	egress   string
+	checkErr error // returned by Check
 	err      error // returned by Prepare
 	startErr error // returned by Start
 	panics   bool
 	called   chan struct{}
 	steps    []string
+}
+
+func (f *fakeDeployer) Check(context.Context, *types.LocalPlan) error {
+	return f.checkErr
 }
 
 func (f *fakeDeployer) Prepare(context.Context, *types.LocalPlan) error {
@@ -796,6 +801,23 @@ func TestPlanLocal_UnsupportedRuntime(t *testing.T) {
 	_, err := svc.CreateModel(context.Background(), localRequest())
 	requireStatus(t, err, http.StatusUnprocessableEntity, "unsupported")
 	assert.Empty(t, repo.components)
+}
+
+// A worker that cannot host the model (e.g. no free Spyre cards) rejects the request during
+// planning: nothing is written, downloaded or registered.
+func TestCreateModel_Local_WorkerCannotHost_RejectedBeforeInsert(t *testing.T) {
+	deployer := &fakeDeployer{
+		checkErr: errors.New("insufficient Spyre cards: required 1, available 0"),
+		called:   make(chan struct{}),
+	}
+	lite := &mockLiteLLMClient{}
+	svc, repo := newLocalService(t, deployer, lite)
+
+	_, err := svc.CreateModel(context.Background(), localRequest())
+	requireStatus(t, err, http.StatusUnprocessableEntity, "insufficient Spyre cards")
+	assert.Empty(t, repo.components, "no row may be written for a request the worker cannot host")
+	assert.Empty(t, deployer.steps, "nothing may be pulled, downloaded or started")
+	assert.Empty(t, lite.registeredModels)
 }
 
 func TestPlanLocal_ValuesCarryParamsAndModel(t *testing.T) {

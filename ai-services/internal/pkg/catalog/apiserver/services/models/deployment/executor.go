@@ -17,8 +17,6 @@ import (
 const (
 	// localDeployTimeout bounds the whole background deployment (image pull + model download + start).
 	localDeployTimeout = 60 * time.Minute
-
-	remoteConnectedMessage = "Endpoint reachable and credentials accepted"
 )
 
 // ModelExecutor executes already-planned model deployments: it hands local plans to the plan's
@@ -143,7 +141,6 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 		Type:      catalogconstants.ConnectorTypeModels,
 		Provider:  plan.Req.ProviderID,
 		Status:    dbmodels.ConnectorStatusConnected,
-		Message:   remoteConnectedMessage,
 		CreatedBy: plan.Req.CreatedBy,
 		Metadata:  plan.Metadata,
 	}

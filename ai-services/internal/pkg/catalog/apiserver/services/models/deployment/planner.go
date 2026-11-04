@@ -31,7 +31,7 @@ const (
 	paramAPIBase = "api_base"
 
 	// watsonxTokenizeURL is the tokenize passthrough target for watsonx remote models.
-	watsonxTokenizeURL = "http://localhost:8000/watsonx/ml/v1/text/tokenization"
+	watsonxTokenizeURL = "http://localhost:4000/watsonx/ml/v1/text/tokenization"
 )
 
 // ModelPlanner plans model deployments by:
@@ -132,7 +132,7 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		return nil, err
 	}
 
-	return &types.LocalPlan{
+	plan := &types.LocalPlan{
 		ComponentID:       uuid.New(),
 		Req:               req,
 		Worker:            target,
@@ -144,7 +144,15 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		ComponentMetadata: localComponentMetadata(req, sensitive),
 		Templates:         tmpls,
 		Values:            values,
-	}, nil
+	}
+
+	// Reject what the worker cannot host (e.g. not enough free Spyre cards) now, instead of after
+	// the row is written and the images and weights are downloaded.
+	if err := deployer.Check(ctx, plan); err != nil {
+		return nil, Unprocessable("worker %q cannot host this model: %v", target.Name, err)
+	}
+
+	return plan, nil
 }
 
 // localComponentMetadata is what is persisted on the component row: the top-level model and
