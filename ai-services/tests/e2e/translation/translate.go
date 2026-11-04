@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"time"
 
@@ -16,34 +14,24 @@ import (
 )
 
 const (
-	getCallTimeout  = 10 * time.Second
+	getCallTimeout  = 30 * time.Second
 	postCallTimeout = 120 * time.Second // translation calls can be slow
 	pollInterval    = 5 * time.Second   // interval between job status polls
 )
 
 // ── Fixture path helpers ──────────────────────────────────────────────────────
 
-// fixturePath returns the absolute path to a file in the translation/docs fixture directory.
-func fixturePath(name string) string {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
-	}
+// GetGermanTXTPath returns the absolute path to docs/german_text.txt.
+func GetGermanTXTPath() string { return common.PathFromCaller("docs", "german_text.txt") }
 
-	return filepath.Join(filepath.Dir(filename), "docs", name)
-}
+// GetTestMDPath returns the absolute path to docs/test.md.
+func GetTestMDPath() string { return common.PathFromCaller("docs", "test.md") }
 
-// GetGermanTXTPath returns the absolute path to german_text.txt.
-func GetGermanTXTPath() string { return fixturePath("german_text.txt") }
+// GetPDFPath returns the absolute path to docs/document.pdf (unsupported type fixture).
+func GetPDFPath() string { return common.PathFromCaller("docs", "document.pdf") }
 
-// GetTestMDPath returns the absolute path to test.md.
-func GetTestMDPath() string { return fixturePath("test.md") }
-
-// GetPDFPath returns the absolute path to document.pdf (unsupported type fixture).
-func GetPDFPath() string { return fixturePath("document.pdf") }
-
-// GetDOCXPath returns the absolute path to document.docx (unsupported type fixture).
-func GetDOCXPath() string { return fixturePath("document.docx") }
+// GetDOCXPath returns the absolute path to docs/document.docx (unsupported type fixture).
+func GetDOCXPath() string { return common.PathFromCaller("docs", "document.docx") }
 
 // ── Response types ────────────────────────────────────────────────────────────
 
@@ -76,18 +64,18 @@ type JobDetailResponse struct {
 }
 
 // TranslationData is the nested "data" object in a translation response.
+// SourceLanguage is the resolved (lower-cased) source, or "auto" when detection fell back to the LLM.
 type TranslationData struct {
-	Translation         string `json:"translation"`
-	SourceLanguage      string `json:"source_language"`
-	TargetLanguage      string `json:"target_language"`
-	OriginalWordCount   int    `json:"original_word_count"`
-	TranslatedWordCount int    `json:"translated_word_count"`
+	Translation    string `json:"translation"`
+	SourceLanguage string `json:"source_language"`
+	TargetLanguage string `json:"target_language"`
 }
 
 // UsageInfo contains token usage counters.
 type UsageInfo struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
 }
 
 // JobsListResponse is the body returned by GET /v1/translate/jobs.
@@ -99,18 +87,6 @@ type JobsListResponse struct {
 // HealthCheckResponse is the body returned by GET /health.
 type HealthCheckResponse struct {
 	Status string `json:"status"`
-}
-
-// ErrorResponse is the translate-service error envelope.
-// Unlike common.ErrorResponse, the translate API returns a string error code
-// (e.g. "EMPTY_INPUT") and a numeric HTTP status:
-// {"error":{"code":"EMPTY_INPUT","message":"...","status":400}}.
-type ErrorResponse struct {
-	Error struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-		Status  int    `json:"status"`
-	} `json:"error,omitempty"`
 }
 
 // SyncTranslateRequest is the JSON body for POST /v1/translate.
@@ -155,21 +131,6 @@ func doGET(ctx context.Context, url string) ([]byte, int, error) {
 
 func doPOST(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
 	return common.DoPOST(ctx, url, body, contentType, common.HTTPConfigForTimeout(postCallTimeout))
-}
-
-// expectError parses body as an ErrorResponse. It returns an error when statusCode
-// equals successStatus, because the caller expected the request to fail.
-func expectError(body []byte, statusCode, successStatus int) (*ErrorResponse, error) {
-	if statusCode == successStatus {
-		return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
-	}
-
-	var errResp ErrorResponse
-	if err := json.Unmarshal(body, &errResp); err != nil {
-		return nil, fmt.Errorf("failed to parse error response (status %d): %w, body: %s", statusCode, err, string(body))
-	}
-
-	return &errResp, nil
 }
 
 // ── Service operations ────────────────────────────────────────────────────────
@@ -220,13 +181,13 @@ func TranslateText(ctx context.Context, baseURL, text, sourceLang, targetLang st
 }
 
 // TranslateTextExpectingError calls POST /v1/translate and expects a non-200 error response.
-func TranslateTextExpectingError(ctx context.Context, baseURL, text, sourceLang, targetLang string) (*ErrorResponse, int, error) {
+func TranslateTextExpectingError(ctx context.Context, baseURL, text, sourceLang, targetLang string) (*common.ServiceErrorResponse, int, error) {
 	respBody, statusCode, err := postSync(ctx, baseURL, text, sourceLang, targetLang)
 	if err != nil {
 		return nil, statusCode, err
 	}
 
-	errResp, err := expectError(respBody, statusCode, http.StatusOK)
+	errResp, err := common.ExpectErrorAs[common.ServiceErrorResponse](respBody, statusCode, http.StatusOK)
 
 	return errResp, statusCode, err
 }
@@ -278,13 +239,13 @@ func CreateJob(ctx context.Context, baseURL, filePath, sourceLang, targetLang, j
 }
 
 // CreateJobExpectingError submits a file job and expects a non-202 error response.
-func CreateJobExpectingError(ctx context.Context, baseURL, filePath, sourceLang, targetLang, jobName string) (*ErrorResponse, int, error) {
+func CreateJobExpectingError(ctx context.Context, baseURL, filePath, sourceLang, targetLang, jobName string) (*common.ServiceErrorResponse, int, error) {
 	respBody, statusCode, err := postJob(ctx, baseURL, filePath, sourceLang, targetLang, jobName)
 	if err != nil {
 		return nil, statusCode, err
 	}
 
-	errResp, err := expectError(respBody, statusCode, http.StatusAccepted)
+	errResp, err := common.ExpectErrorAs[common.ServiceErrorResponse](respBody, statusCode, http.StatusAccepted)
 
 	return errResp, statusCode, err
 }

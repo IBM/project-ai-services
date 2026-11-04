@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
 
@@ -24,10 +25,6 @@ const (
 
 	// oversizedUploadBytes exceeds the default MAX_UPLOAD_SIZE_MB (10 MB).
 	oversizedUploadBytes = 11 * 1024 * 1024
-
-	// Job ids that do not exist: one free-form, one well-formed UUID.
-	unknownJobID = "xxxyyy"
-	unknownUUID  = "00000000-0000-0000-0000-000000000000"
 )
 
 // translateBaseURL is resolved from TRANSLATE_URL, from the existing application in BeforeSuite,
@@ -102,14 +99,36 @@ func translateCtx(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
 }
 
-// expectTranslation translates text synchronously and asserts a non-empty result.
-func expectTranslation(text, sourceLang, targetLang, label string) {
+// expectTranslation translates text synchronously and validates the response body:
+//   - the translation is non-empty, differs from the input and still contains keepToken
+//     (a value that must survive translation unchanged, such as a year);
+//   - target_language echoes the request, and source_language is the language the text is in
+//     (wantSource, lower-case) - when the request left it to auto-detect, the service may also
+//     report "auto" if detection confidence was too low;
+//   - token usage is reported and consistent.
+func expectTranslation(text, sourceLang, targetLang, wantSource, keepToken, label string) {
 	ctx, cancel := translateCtx(translateSyncTimeout)
 	defer cancel()
 
 	resp, err := translation.TranslateText(ctx, translateBaseURL, text, sourceLang, targetLang)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 	gomega.Expect(resp.Translation()).NotTo(gomega.BeEmpty())
+	gomega.Expect(resp.Translation()).NotTo(gomega.Equal(text), "translation should differ from the input")
+	gomega.Expect(resp.Translation()).To(gomega.ContainSubstring(keepToken))
+
+	gomega.Expect(resp.Data.TargetLanguage).To(gomega.Equal(strings.ToLower(targetLang)))
+
+	if requested := strings.ToLower(sourceLang); requested == "" || requested == "auto" {
+		gomega.Expect(resp.Data.SourceLanguage).To(gomega.BeElementOf(wantSource, "auto"))
+	} else {
+		gomega.Expect(resp.Data.SourceLanguage).To(gomega.Equal(wantSource))
+	}
+
+	gomega.Expect(resp.Usage.InputTokens).To(gomega.BeNumerically(">", 0))
+	gomega.Expect(resp.Usage.OutputTokens).To(gomega.BeNumerically(">", 0))
+	gomega.Expect(resp.Usage.TotalTokens).To(gomega.Equal(resp.Usage.InputTokens + resp.Usage.OutputTokens))
+
 	logger.Infof("[TRANSLATE] %s: %s", label, resp.Translation())
 }
 
@@ -173,11 +192,13 @@ func expectJobError(filePath, sourceLang, targetLang string, wantStatus int, wan
 	logger.Infof("[TRANSLATE] job rejected %d: %s", statusCode, errResp.Error.Message)
 }
 
-// expectNotFound calls get with an unknown job id and asserts 404 with a "not found" message.
-func expectNotFound(get rawJobGetFn, jobID string) {
+// expectNotFound calls get with a random, well-formed job UUID that does not exist and
+// asserts 404 with a "not found" message.
+func expectNotFound(get rawJobGetFn) {
 	ctx, cancel := translateCtx(translateShortTimeout)
 	defer cancel()
 
+	jobID := uuid.NewString()
 	respBody, statusCode, _ := get(ctx, translateBaseURL, jobID)
 	gomega.Expect(statusCode).To(gomega.Equal(http.StatusNotFound))
 	gomega.Expect(strings.ToLower(string(respBody))).To(gomega.ContainSubstring("not found"))
@@ -254,27 +275,27 @@ func translationSpecs() {
 
 		ginkgo.It("explicit source language translates German to English",
 			ginkgo.Label("translate", "sync", "happy"), func() {
-				expectTranslation(germanText, "German", "English", "explicit source")
+				expectTranslation(germanText, "German", "English", "german", "2025", "explicit source")
 			})
 
 		ginkgo.It("omitted source language defaults to auto-detect (German → English)",
 			ginkgo.Label("translate", "sync", "happy"), func() {
-				expectTranslation(germanText, "", "English", "auto source")
+				expectTranslation(germanText, "", "English", "german", "2025", "auto source")
 			})
 
 		ginkgo.It(`explicit source_language "auto" translates German to English`,
 			ginkgo.Label("translate", "sync", "happy"), func() {
-				expectTranslation(germanText, "auto", "English", "source=auto")
+				expectTranslation(germanText, "auto", "English", "german", "2025", "source=auto")
 			})
 
 		ginkgo.It("translate English to German",
 			ginkgo.Label("translate", "sync", "happy"), func() {
-				expectTranslation(englishText, "English", "German", "EN→DE")
+				expectTranslation(englishText, "English", "German", "english", "2025", "EN→DE")
 			})
 
 		ginkgo.It("language names are case-insensitive (ENGLISH → GERMAN)",
 			ginkgo.Label("translate", "sync", "happy"), func() {
-				expectTranslation(englishText, "ENGLISH", "GERMAN", "case-insensitive")
+				expectTranslation(englishText, "ENGLISH", "GERMAN", "english", "2025", "case-insensitive")
 			})
 	})
 
@@ -392,7 +413,7 @@ func translationSpecs() {
 
 		ginkgo.It("job detail for unknown job_id returns 404",
 			ginkgo.Label("translate", "async", "lifecycle"), func() {
-				expectNotFound(translation.GetJobDetailRaw, "xxxvggaha")
+				expectNotFound(translation.GetJobDetailRaw)
 			})
 	})
 
@@ -464,7 +485,7 @@ func translationSpecs() {
 
 		ginkgo.It("get result for unknown job_id returns 404",
 			ginkgo.Label("translate", "result"), func() {
-				expectNotFound(translation.GetJobResultRaw, unknownJobID)
+				expectNotFound(translation.GetJobResultRaw)
 			})
 	})
 
@@ -479,7 +500,7 @@ func translationSpecs() {
 
 		ginkgo.It("download from unknown job_id returns 404",
 			ginkgo.Label("translate", "download"), func() {
-				expectNotFound(translation.GetJobResultDownloadRaw, unknownUUID)
+				expectNotFound(translation.GetJobResultDownloadRaw)
 			})
 	})
 }
