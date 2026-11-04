@@ -186,10 +186,34 @@ type LiteLLMConfig struct {
 
 // Model is one entry in a provider's models.yaml.
 type Model struct {
-	ID          string `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
-	Default     bool   `yaml:"default" json:"default"`         // whether this is the default model for the provider
-	Title       string `yaml:"title" json:"title"`             // short display name
-	Description string `yaml:"description" json:"description"` // markdown description
+	ID             string   `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
+	Default        bool     `yaml:"default" json:"default"`         // whether this is the default model for the provider
+	Title          string   `yaml:"title" json:"title"`             // short display name
+	Name           string   `yaml:"name" json:"name"`               // human-readable name
+	ComponentType  string   `yaml:"component_type" json:"-"`        // model role; set in connector models.yaml only
+	Description    string   `yaml:"description" json:"description"` // markdown description
+	DefaultProfile string   `yaml:"default_profile" json:"-"`       // default hardware profile ID; local providers only
+	Profiles       []string `yaml:"profiles" json:"-"`              // supported hardware profile IDs; local providers only
+}
+
+// ProfileResources is the resource footprint declared inside a profile's params.
+type ProfileResources struct {
+	Memory       int            `yaml:"memory"`       // bytes
+	Accelerators map[string]int `yaml:"accelerators"` // e.g. {"ibm.com/spyre_pf": 4}
+}
+
+// ProfileParam holds the hardware parameters of one profile.
+type ProfileParam struct {
+	Resources ProfileResources `yaml:"resources"`
+}
+
+// Profile is one entry in a provider's profiles.yaml.
+type Profile struct {
+	ID          string       `yaml:"id"`
+	Default     bool         `yaml:"default"`
+	Name        string       `yaml:"name"`
+	Description string       `yaml:"description"`
+	Params      ProfileParam `yaml:"params"`
 }
 
 // ComponentSummary represents a component for list API responses.
@@ -279,6 +303,33 @@ type DeployOptionsService struct {
 	Components        []DeployOptionsComponent `json:"components"`
 	Resources         *Resources               `json:"resources,omitempty"`
 	AcceptsDatasource bool                     `json:"accepts_datasource,omitempty"`
+}
+
+// ModelDeployProfile is a hardware profile a model can be deployed with.
+type ModelDeployProfile struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Default     bool      `json:"default"`
+	Resources   Resources `json:"resources"`
+}
+
+// ModelDeployProvider is a provider (local or remote) a model can be deployed through.
+type ModelDeployProvider struct {
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	DeploymentType string               `json:"deployment_type"` // "local" or "remote"
+	Default        bool                 `json:"default"`
+	Profiles       []ModelDeployProfile `json:"profiles,omitempty"`
+	Schema         string               `json:"schema,omitempty"`
+}
+
+// ModelDeployOptions is the response of GET /catalog/models/:id/deploy-options.
+type ModelDeployOptions struct {
+	ID            string                `json:"id"`
+	Name          string                `json:"name"`
+	ComponentType string                `json:"component_type"`
+	Providers     []ModelDeployProvider `json:"providers"`
 }
 
 // DeployOptionsArchitecture represents deploy options for an architecture.

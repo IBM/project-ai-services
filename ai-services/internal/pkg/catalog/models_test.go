@@ -28,7 +28,7 @@ func TestLoadModelsFromFile(t *testing.T) {
 	}
 
 	t.Run("parses entries", func(t *testing.T) {
-		models, err := loadModelsFromFile(fsys, "llm/p")
+		models, err := loadYAMLList[types.Model](fsys, "llm/p", modelsFileName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -44,14 +44,14 @@ func TestLoadModelsFromFile(t *testing.T) {
 	})
 
 	t.Run("missing file is not an error", func(t *testing.T) {
-		models, err := loadModelsFromFile(fsys, "llm/none")
+		models, err := loadYAMLList[types.Model](fsys, "llm/none", modelsFileName)
 		if err != nil || models != nil {
 			t.Fatalf("expected nil, nil; got %v, %v", models, err)
 		}
 	})
 
 	t.Run("invalid yaml returns error", func(t *testing.T) {
-		if _, err := loadModelsFromFile(fsys, "llm/bad"); err == nil {
+		if _, err := loadYAMLList[types.Model](fsys, "llm/bad", modelsFileName); err == nil {
 			t.Fatal("expected parse error")
 		}
 	})

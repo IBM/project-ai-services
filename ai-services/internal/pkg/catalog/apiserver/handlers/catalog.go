@@ -236,6 +236,71 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	c.JSON(http.StatusOK, deployOptions)
 }
 
+const deployOptionsSuffix = "/deploy-options"
+
+// GetCatalogModelByPath serves GET /catalog/models/<model-id>/deploy-options.
+// Model IDs contain slashes (ibm-granite/granite-...), which ":id" can't match,
+// so the route takes the whole tail and we split off "/deploy-options" here.
+// Any other tail is a 404.
+func (h *CatalogHandler) GetCatalogModelByPath(c *gin.Context) {
+	modelID, ok := strings.CutSuffix(strings.Trim(c.Param("path"), "/"), deployOptionsSuffix)
+	if !ok || modelID == "" {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: "not found"})
+
+		return
+	}
+
+	h.getModelDeployOptions(c, modelID)
+}
+
+// getModelDeployOptions godoc
+//
+//	@Summary		Get model deploy options
+//	@Description	Retrieves the providers (local with hardware profiles, remote connectors) a catalog model can be deployed with
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			path		path		string	true	"Model ID followed by /deploy-options (e.g., 'ibm-granite/granite-3.3-8b-instruct/deploy-options')"
+//	@Param			provider_id	query		string	false	"Return only this provider (e.g., 'vllm-spyre')"
+//	@Param			runtime		query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200			{object}	types.ModelDeployOptions
+//	@Failure		400			{object}	ErrorResponse	"Invalid runtime parameter"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404			{object}	ErrorResponse	"Model not found in catalog"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/catalog/models/{path} [get]
+func (h *CatalogHandler) getModelDeployOptions(c *gin.Context, modelID string) {
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	provider, err := h.provider.WithRuntime(rt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	deployOptions, err := provider.GetModelDeployOptions(c.Request.Context(), modelID, c.Query("provider_id"))
+	if errors.Is(err, catalog.ErrModelNotFound) {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get deploy options for model '%s': %v", modelID, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, deployOptions)
+}
+
 // GetComponentProviderParams godoc
 //
 //	@Summary		Get component provider parameters

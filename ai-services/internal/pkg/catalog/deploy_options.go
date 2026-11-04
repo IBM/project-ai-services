@@ -366,7 +366,7 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 	}
 
 	// Models are defined once in the provider-root models.yaml and injected into the schema's model field.
-	models, err := loadModelsFromFile(itemFS, componentPath)
+	models, err := loadYAMLList[types.Model](itemFS, componentPath, modelsFileName)
 	if err != nil {
 		return nil, err
 	}

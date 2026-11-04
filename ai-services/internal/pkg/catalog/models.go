@@ -10,24 +10,27 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const modelsFileName = "models.yaml"
+const (
+	modelsFileName   = "models.yaml"
+	profilesFileName = "profiles.yaml"
+)
 
-// loadModelsFromFile reads models.yaml from the provider's root directory.
-func loadModelsFromFile(itemFS fs.FS, providerPath string) ([]types.Model, error) {
-	data, err := fs.ReadFile(itemFS, path.Join(providerPath, modelsFileName))
+// loadYAMLList reads dir/name as a YAML list. A missing file is not an error (nil, nil).
+func loadYAMLList[T any](fsys fs.FS, dir, name string) ([]T, error) {
+	data, err := fs.ReadFile(fsys, path.Join(dir, name))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", modelsFileName, err)
+		return nil, fmt.Errorf("failed to read %s: %w", name, err)
 	}
 
-	var models []types.Model
-	if err := yaml.Unmarshal(data, &models); err != nil {
-		return nil, fmt.Errorf("failed to parse %s: %w", modelsFileName, err)
+	var items []T
+	if err := yaml.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", name, err)
 	}
 
-	return models, nil
+	return items, nil
 }
 
 // injectModelsIntoSchema sets properties.model.oneOf and properties.model.default
