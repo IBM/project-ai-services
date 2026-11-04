@@ -1206,7 +1206,10 @@ There is no endpoint to read a key back. Internal consumer services do not call 
   {
     "id": "ibm-granite/granite-3.3-8b-instruct",
     "name": "Granite 3.3 8B Instruct",
-    "component_type": "llm",
+    "component_type": {
+      "id": "llm",
+      "name": "Large Language Model"
+    },
     "certified_by": "IBM",
     "description": "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. Powers tasks such as prompt-based reasoning, summarization, and answer generation.",
     "providers": [
@@ -1230,7 +1233,10 @@ There is no endpoint to read a key back. Internal consumer services do not call 
   {
     "id": "ibm-granite/granite-embedding-278m-multilingual",
     "name": "Granite Embedding 278M Multilingual",
-    "component_type": "embedding",
+    "component_type": {
+      "id": "embedding",
+      "name": "Embedding Model"
+    },
     "certified_by": "IBM",
     "description": "Multilingual document embedding model for semantic search and retrieval.",
     "providers": [
@@ -1244,7 +1250,10 @@ There is no endpoint to read a key back. Internal consumer services do not call 
   {
     "id": "BAAI/bge-reranker-v2-m3",
     "name": "BGE Reranker v2 M3",
-    "component_type": "reranker",
+    "component_type": {
+      "id": "reranker",
+      "name": "Reranker Model"
+    },
     "certified_by": "BAAI",
     "description": "A multilingual cross-encoder reranker model used to improve retrieval quality by scoring and ranking candidate documents.",
     "providers": [
@@ -1283,7 +1292,10 @@ There is no endpoint to read a key back. Internal consumer services do not call 
 {
   "id": "ibm-granite/granite-3.3-8b-instruct",
   "name": "Granite 3.3 8B Instruct",
-  "component_type": "llm",
+  "component_type": {
+    "id": "llm",
+    "name": "Large Language Model"
+  },
   "certified_by": "IBM",
   "license": "Apache 2.0",
   "description": "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. Powers tasks such as prompt-based reasoning, summarization, and answer generation.",
@@ -1351,7 +1363,10 @@ There is no endpoint to read a key back. Internal consumer services do not call 
 {
   "id": "ibm-granite/granite-3.3-8b-instruct",
   "name": "Granite 3.3 8B Instruct",
-  "component_type": "llm",
+  "component_type": {
+    "id": "llm",
+    "name": "Large Language Model"
+  },
   "providers": [
     {
       "id": "vllm-spyre",
@@ -1547,7 +1562,10 @@ The `modelmanager` package validates `params` against the provider's parameter s
       "id": "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
       "deployment_type": "local",
       "name": "granite-llm",
-      "component_type": "llm",
+      "component_type": {
+        "id": "llm",
+        "name": "Large Language Model"
+      },
       "provider": { "id": "vllm-spyre", "name": "vLLM (Spyre)" },
       "worker": { "name": "lpar-1", "runtime_type": "podman" },
       "model": "ibm-granite/granite-3.3-8b-instruct",
@@ -1563,6 +1581,7 @@ The `modelmanager` package validates `params` against the provider's parameter s
         }
       },
       "status": "Running",
+      "message": "Model running",
       "connected_services": 2,
       "created_at": "2026-07-01T10:00:00Z",
       "updated_at": "2026-07-01T10:05:00Z"
@@ -1571,7 +1590,10 @@ The `modelmanager` package validates `params` against the provider's parameter s
       "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
       "deployment_type": "remote",
       "name": "prod-watsonx",
-      "component_type": "llm",
+      "component_type": {
+        "id": "llm",
+        "name": "Large Language Model"
+      },
       "provider": { "id": "watsonx", "name": "WatsonX" },
       "worker": null,
       "model": "ibm/granite-4-h-small",
@@ -1581,6 +1603,7 @@ The `modelmanager` package validates `params` against the provider's parameter s
         "project_id": "my-watsonx-project-id"
       },
       "status": "connected",
+      "message": "Endpoint reachable and credentials accepted",
       "connected_services": 2,
       "created_at": "2026-07-01T11:00:00Z",
       "updated_at": "2026-07-01T11:05:00Z"
@@ -1639,7 +1662,10 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `
   "id": "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
   "deployment_type": "local",
   "name": "granite-llm",
-  "component_type": "llm",
+  "component_type": {
+    "id": "llm",
+    "name": "Large Language Model"
+  },
   "provider": { "id": "vllm-spyre", "name": "vLLM (Spyre)" },
   "worker": { "name": "lpar-1", "runtime_type": "podman" },
   "model": "ibm-granite/granite-3.3-8b-instruct",
@@ -1678,7 +1704,10 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `
   "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
   "deployment_type": "remote",
   "name": "prod-watsonx",
-  "component_type": "llm",
+  "component_type": {
+    "id": "llm",
+    "name": "Large Language Model"
+  },
   "provider": { "id": "watsonx", "name": "WatsonX" },
   "worker": null,
   "model": "ibm/granite-4-h-small",
@@ -1766,7 +1795,10 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `
   "id": "c1d2e3f4-a5b6-7890-cdef-123456789abc",
   "deployment_type": "remote",
   "name": "prod-watsonx",
-  "component_type": "llm",
+  "component_type": {
+    "id": "llm",
+    "name": "Large Language Model"
+  },
   "provider": { "id": "watsonx", "name": "WatsonX" },
   "status": "connected",
   "message": "",
