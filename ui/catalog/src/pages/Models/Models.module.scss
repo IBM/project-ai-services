@@ -27,7 +27,7 @@
   @include type-style("heading-compact-01");
   margin: 0;
   background-color: var(--cds-layer-01);
-  padding-left: $spacing-06;
+  padding-left: $spacing-05;
   border-bottom: 1px solid var(--cds-border-subtle-01);
 
   :global(.cds--tabs__nav-item),
@@ -42,19 +42,11 @@
 
 .catalogGrid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   column-gap: $spacing-05;
   row-gap: $spacing-05;
-  margin: $spacing-07;
+  margin: $spacing-05;
   margin-bottom: 0;
-
-  @include breakpoint("md") {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  @include breakpoint("lg") {
-    grid-template-columns: repeat(4, 1fr);
-  }
 }
 
 .errorMessage {

@@ -7,10 +7,16 @@ export interface ModelProvider {
   deployment_type: "local" | "remote";
 }
 
+export interface ComponentType {
+  id: string;
+  name: string;
+  short_name: string;
+}
+
 export interface CatalogModel {
   id: string;
   name: string;
-  component_type: string;
+  component_type: ComponentType;
   certified_by: string;
   description: string;
   providers: ModelProvider[];

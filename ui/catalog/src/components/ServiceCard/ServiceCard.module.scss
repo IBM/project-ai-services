@@ -14,7 +14,7 @@
   padding-right: $spacing-05;
   padding-bottom: $spacing-05;
   background-color: $layer;
-  // transition: background-color 150ms ease-in-out;
+  transition: background-color 150ms ease-in-out;
 
   &:hover {
     background-color: $layer-hover;
@@ -63,14 +63,26 @@
   }
 
   :global(.c4p--card__footer button:first-child) {
-    background-color: var(--cds-button-primary);
-    color: var(--cds-text-on-color);
-    border: none;
+    background-color: transparent;
+    color: var(--cds-button-primary);
+    border: 1px solid var(--cds-button-primary);
     width: fit-content;
     height: auto;
     box-shadow: none;
     position: relative;
     z-index: 2;
+
+    &:hover {
+      background-color: var(--cds-button-tertiary-hover);
+      color: var(--cds-text-on-color);
+      border-color: var(--cds-button-tertiary-hover);
+    }
+
+    &:active {
+      background-color: var(--cds-button-primary-active);
+      color: var(--cds-text-on-color);
+      border-color: var(--cds-button-primary-active);
+    }
   }
 
   :global(.c4p--card__footer button:last-child) {
@@ -95,16 +107,6 @@
   @include type-style("body-compact-01");
   color: var(--cds-text-primary);
   margin-top: $spacing-07;
-  margin-bottom: $spacing-10;
-}
-
-.descriptionWithProviders {
-  margin-bottom: $spacing-05;
-}
-
-.providers {
-  @include type-style("label-01");
-  color: var(--cds-text-secondary);
   margin-bottom: $spacing-10;
 }
 

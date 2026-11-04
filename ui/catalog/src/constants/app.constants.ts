@@ -49,3 +49,9 @@ export const WORKER_RUNTIME_LABELS: Record<
       "This mode deploys all services into a single worker resource, with additional resource requirements; and runs on the premises of the client, rather than at a remote facility.",
   },
 } as const;
+
+export const PROVIDER_TAG_LABELS: Record<string, string> = {
+  "vllm-spyre": "Spyre",
+  "vllm-cpu": "CPU",
+  watsonx: "watsonx",
+};
