@@ -3226,7 +3226,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "deployment_type": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                    "enum": [
+                        "local",
+                        "remote"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                        }
+                    ]
                 },
                 "model": {
                     "type": "string"
