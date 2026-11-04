@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: ''
+      skipSwaggerValidation:
+        description: 'Skip the Swagger documentation check (for modules without Swagger docs)'
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 
@@ -27,6 +32,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: '${{ inputs.working-directory }}/go.mod'
+          cache-dependency-path: '${{ inputs.working-directory }}/go.sum'
 
       - run: go version
 
@@ -42,23 +48,19 @@ jobs:
           version: v2.12
           working-directory: ${{ inputs.working-directory }}
 
-      - name: Build Go binary
+      - name: Check Swagger format and docs are up to date
+        if: ${{ !inputs.skipSwaggerValidation }}
         working-directory: ${{ inputs.working-directory }}
         run: |
-          GOOS=linux GOARCH=ppc64le make binary
-
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Setup Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: '${{ inputs.working-directory }}/go.mod'
-          cache-dependency-path: '${{ inputs.working-directory }}/go.sum'
+          go install github.com/swaggo/swag/cmd/swag@latest
+          make swagger-fmt
+          make swagger
+          if ! git diff --exit-code; then
+            echo "❌ Swagger comments or docs are out of date. Run 'make swagger-fmt && make swagger' and commit the changes."
+            git diff
+            exit 1
+          fi
+          echo "✅ Swagger comments and documentation are up to date!"
 
       - name: Run unit tests with coverage
         working-directory: ${{ inputs.working-directory }}
@@ -73,4 +75,9 @@ jobs:
       - name: Print coverage summary
         working-directory: ${{ inputs.working-directory }}
         run: go tool cover -func=coverage.out
+      
+      - name: Build Go binary
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          GOOS=linux GOARCH=ppc64le make binary
 
