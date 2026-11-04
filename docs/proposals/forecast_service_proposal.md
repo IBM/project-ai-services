@@ -1027,6 +1027,7 @@ These are the items we don not have in scope for the initial release of the serv
 
 1. **CSV Support** Allowing training using data gathered from CSV file(s)
 2. **Multi-Connector Support** Allowing multiple connectors to be served using the same forecast service instance. This would entail using locks for training to ensure that only a single training job runs at one time.
+3. **Redundancy Check** Having a check for new information in the DB. In case of no new information since the last successful training, we should add an ability to skip the training step entirely with an appropriate message in the logs/UI.
 
 ---
 
