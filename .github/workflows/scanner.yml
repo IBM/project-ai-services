@@ -1,4 +1,4 @@
-name: Image Scanner
+name: Scan Image
 
 on:
   workflow_call:
@@ -41,6 +41,7 @@ permissions:
 
 jobs:
   scan:
+    name: "License & CVE Scan"
     runs-on: ubuntu-24.04-ppc64le-p10
     steps:
       - name: Checkout code
