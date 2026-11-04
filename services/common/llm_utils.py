@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import threading
 import time
@@ -64,44 +65,74 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
     }
 
     try:
+        logger.info(f"Requesting table summary from LLM: model={gen_model}, prompt_chars={len(prompt)}, max_tokens={max_tokens}")
+
         response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.llm.api_key.get_secret_value()))
         response.raise_for_status()
         data = response.json() or {}
         choices = data.get("choices", [])
         text = ""
+        finish_reason = None
         if choices:
             text = (choices[0].get("message", {}).get("content") or "").strip()
+            finish_reason = choices[0].get("finish_reason")
 
         # Parse response - handle multi-line summaries
         summary = ""
         decision = False
         lines = text.splitlines()
 
-        # Find Summary: and Decision: lines
+        # Find Summary: and Decision: lines. Tolerate markdown decoration the model may add,
+        # e.g. "**Summary:**", "## Summary:", "Summary :" or "- Decision: Yes".
         summary_start = -1
         decision_line = -1
+        summary_label = re.compile(r"^[\s*#>_\-]*summary\s*:[\s*_]*", re.IGNORECASE)
+        decision_label = re.compile(r"^[\s*#>_\-]*decision\s*:[\s*_]*", re.IGNORECASE)
 
         for i, line in enumerate(lines):
-            line_lower = line.strip().lower()
-            if line_lower.startswith("summary:"):
+            if summary_label.match(line):
                 summary_start = i
-            elif line_lower.startswith("decision:"):
+            elif decision_label.match(line):
                 decision_line = i
-                decision = "yes" in line_lower
+                decision = "yes" in line.lower()
+
+        decision_text = lines[decision_line].strip() if decision_line >= 0 else ""
 
         # Extract summary (everything between "Summary:" and "Decision:")
         if summary_start >= 0:
-            if decision_line > summary_start:
-                # Summary is between Summary: and Decision:
-                summary_lines = lines[summary_start:decision_line]
-                # Remove "Summary:" prefix from first line
-                summary_lines[0] = summary_lines[0][summary_lines[0].lower().find("summary:") + len("summary:"):].strip()
-                summary = "\n".join(line.strip() for line in summary_lines if line.strip())
-            else:
-                # No decision found, take everything after Summary:
-                summary_lines = lines[summary_start:]
-                summary_lines[0] = summary_lines[0][summary_lines[0].lower().find("summary:") + len("summary:"):].strip()
-                summary = "\n".join(line.strip() for line in summary_lines if line.strip())
+            end = decision_line if decision_line > summary_start else len(lines)
+            summary_lines = lines[summary_start:end]
+            # Remove the "Summary:" label (and any markdown around it) from the first line
+            summary_lines[0] = summary_label.sub("", summary_lines[0], count=1)
+            summary = "\n".join(line.strip() for line in summary_lines if line.strip())
+
+        # Diagnostics: a missing Summary/Decision line silently turns into "No summary."/discard.
+        if finish_reason == "length":
+            logger.warning(
+                f"Table summary hit the max_tokens limit ({max_tokens}) - finish_reason=length; "
+                f"the 'Decision:' line may be missing and the table chunk would be discarded"
+            )
+        if summary_start < 0:
+            logger.warning(
+                f"Table response has no 'Summary:' line (finish_reason={finish_reason}); "
+                f"first 300 chars: {text[:300]!r}"
+            )
+        if decision_line < 0:
+            logger.warning(
+                f"Table response has no 'Decision:' line (finish_reason={finish_reason}); "
+                f"last 200 chars: {text[-200:]!r}"
+            )
+        if summary_start >= 0 and not summary:
+            logger.warning(
+                f"Table response has a 'Summary:' label but empty summary text; "
+                f"response (first 300 chars): {text[:300]!r}"
+            )
+        logger.info(
+            f"Parsed table LLM response: response_chars={len(text)}, finish_reason={finish_reason}, "
+            f"summary_line={summary_start}, decision_line={decision_line}, "
+            f"decision_text={decision_text!r} -> keep={decision}, summary_chars={len(summary)}, "
+            f"summary_preview={summary[:120]!r}"
+        )
 
         return summary or "No summary.", decision
 

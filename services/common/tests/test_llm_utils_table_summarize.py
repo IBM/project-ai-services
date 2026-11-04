@@ -121,6 +121,96 @@ class TestSummarizeAndClassifySingleTable:
         assert summary == "No summary."
         assert decision is False
 
+    @pytest.mark.parametrize(
+        "response_text",
+        [
+            "**Summary:** Ridership rose.\n**Decision:** Yes",
+            "## Summary: Ridership rose.\n## Decision: Yes",
+            "Summary : Ridership rose.\nDecision : Yes",
+            "- Summary: Ridership rose.\n- Decision: Yes",
+            "**Summary:**\nRidership rose.\n\n**Decision:** Yes",
+        ],
+    )
+    def test_markdown_decorated_labels_are_parsed(
+        self, mock_session, mock_llm_settings, response_text
+    ):
+        """Markdown-decorated Summary/Decision labels must not produce 'No summary.'/discard."""
+        from common.llm_utils import summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response(response_text)
+
+        summary, decision = summarize_and_classify_single_table(
+            "prompt", "model", "http://llm", 512
+        )
+
+        assert summary == "Ridership rose."
+        assert decision is True
+
+    def test_multiline_summary_without_decision(self, mock_session, mock_llm_settings):
+        """A truncated reply (no Decision line) keeps the summary text and discards the chunk."""
+        from common.llm_utils import summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response(
+            "Summary: Row one.\nRow two."
+        )
+
+        summary, decision = summarize_and_classify_single_table(
+            "prompt", "model", "http://llm", 512
+        )
+
+        assert summary == "Row one.\nRow two."
+        assert decision is False
+
+    def test_parse_logs_decision_and_summary(self, mock_session, mock_llm_settings):
+        """An info log records the parsed Decision line, keep flag and summary size."""
+        from common.llm_utils import summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response(
+            "Summary: Ridership rose.\nDecision: Yes"
+        )
+
+        with patch("common.llm_utils.logger") as mock_logger:
+            summarize_and_classify_single_table("prompt", "model", "http://llm", 512)
+
+        info_msgs = [c.args[0] for c in mock_logger.info.call_args_list]
+        parsed = [m for m in info_msgs if "Parsed table LLM response" in m]
+        assert len(parsed) == 1
+        assert "decision_text='Decision: Yes'" in parsed[0]
+        assert "keep=True" in parsed[0]
+        assert "summary_chars=15" in parsed[0]
+        mock_logger.warning.assert_not_called()
+
+    def test_missing_labels_log_warnings_with_raw_text(self, mock_session, mock_llm_settings):
+        """A reply without Summary/Decision labels logs warnings that include the raw text."""
+        from common.llm_utils import summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response("Ridership rose a lot.")
+
+        with patch("common.llm_utils.logger") as mock_logger:
+            summary, decision = summarize_and_classify_single_table(
+                "prompt", "model", "http://llm", 512
+            )
+
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        assert any("no 'Summary:' line" in w and "Ridership rose a lot." in w for w in warnings)
+        assert any("no 'Decision:' line" in w for w in warnings)
+        assert summary == "No summary."
+        assert decision is False
+
+    def test_finish_reason_length_logs_warning(self, mock_session, mock_llm_settings):
+        """A truncated reply (finish_reason=length) is flagged in the logs."""
+        from common.llm_utils import summarize_and_classify_single_table
+
+        resp = _make_response("Summary: Row one and row")
+        resp.json.return_value["choices"][0]["finish_reason"] = "length"
+        mock_session.post.return_value = resp
+
+        with patch("common.llm_utils.logger") as mock_logger:
+            summarize_and_classify_single_table("prompt", "model", "http://llm", 512)
+
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        assert any("finish_reason=length" in w for w in warnings)
+
 
 @pytest.mark.unit
 class TestSummarizeAndClassifyTables:
