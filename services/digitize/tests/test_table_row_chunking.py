@@ -204,6 +204,67 @@ class TestProcessTableRowChunking:
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.settings")
+    def test_discarded_chunk_is_kept_when_sibling_chunk_is_kept(self, mock_settings, mock_summarize):
+        """A real summary of a chunk is rescued if another chunk of the same table was kept."""
+        from common.lang_utils import LanguageCodes
+
+        english = Mock()
+        english.prompt = "English prompt {content}"
+        english.max_tokens = 1024
+        table_summary = MagicMock()
+        table_summary.english = english
+        mock_settings.table_summary = table_summary
+
+        def fake_summarize(markdowns, *args, **kwargs):
+            n = len(markdowns)
+            assert n >= 3
+            summaries = [f"summary {i}" for i in range(n)]
+            decisions = [True] * n
+            decisions[1] = False                # real summary, LLM said no -> rescued
+            summaries[2] = "No summary."        # failed parse, LLM said no -> stays dropped
+            decisions[2] = False
+            return summaries, decisions, {}
+
+        mock_summarize.side_effect = fake_summarize
+
+        converted_doc = Mock()
+        converted_doc.tables = [_mock_table(_make_table(30), "Table 1", 3)]
+
+        with patch.object(Path, "write_text") as mock_write:
+            table_count, _, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+
+        n_chunks = len(mock_summarize.call_args[0][0])
+        assert table_count == n_chunks - 1  # only the "No summary." chunk is dropped
+        saved = mock_write.call_args[0][0]
+        assert '"summary": "summary 1"' in saved
+        assert '"summary": "summary 2"' not in saved
+
+    @patch("digitize.processing.tables.summarize_and_classify_tables")
+    @patch("digitize.processing.tables.settings")
+    def test_discarded_table_with_no_kept_chunks_stays_discarded(self, mock_settings, mock_summarize):
+        from common.lang_utils import LanguageCodes
+
+        english = Mock()
+        english.prompt = "English prompt {content}"
+        english.max_tokens = 1024
+        table_summary = MagicMock()
+        table_summary.english = english
+        mock_settings.table_summary = table_summary
+        mock_summarize.side_effect = lambda markdowns, *a, **k: (
+            ["irrelevant"] * len(markdowns), [False] * len(markdowns), {}
+        )
+
+        converted_doc = Mock()
+        converted_doc.tables = [_mock_table(_make_table(30), "Table 1", 3)]
+
+        with patch.object(Path, "write_text"):
+            table_count, _, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+
+        assert table_count == 0
+
+
+    @patch("digitize.processing.tables.summarize_and_classify_tables")
+    @patch("digitize.processing.tables.settings")
     def test_small_table_stays_single_chunk(self, mock_settings, mock_summarize):
         from common.lang_utils import LanguageCodes
 

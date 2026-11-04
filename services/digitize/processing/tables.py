@@ -264,6 +264,8 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
+_NO_SUMMARY = "No summary."  # fallback summary returned by summarize_and_classify_*
+
 def _is_separator_line(line: str) -> bool:
     """True for a markdown table separator row such as ``|---|:---:|``."""
     return '|' in line and '-' in line and not any(c.isalnum() for c in line)
@@ -449,6 +451,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     table_markdowns = []
     table_captions_list = []
     table_page_numbers = []
+    table_group_ids = []  # source table key of each chunk
     for key in sorted(merged_table_dict):
         entry = merged_table_dict[key]
         page_num = None if is_docx else entry["page_number"]
@@ -463,6 +466,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
             table_markdowns.append(chunk_md)
             table_captions_list.append(entry["caption"])
             table_page_numbers.append(page_num)
+            table_group_ids.append(key)
     logger.info(f"Summarizing {len(table_markdowns)} table chunk(s) for '{doc_path}'")
 
     # Select appropriate prompt and max_tokens based on document language (lingua ISO format: 'EN', 'DE', etc.)
@@ -501,6 +505,22 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         stop_event=stop_event,
     )
 
+    # The relevance decision is made per chunk, but a table is either relevant or not. If any
+    # chunk of a table was kept, keep its sibling chunks too (when they have a real summary),
+    # otherwise rows of a relevant table silently disappear from the index.
+    kept_groups = {gid for gid, keep in zip(table_group_ids, decisions) if keep}
+    final_keep = []
+    for gid, keep, summary in zip(table_group_ids, decisions, table_summaries):
+        rescued = (not keep) and gid in kept_groups and bool(summary) and summary != _NO_SUMMARY
+        final_keep.append(keep or rescued)
+        if rescued:
+            logger.info(f"Keeping chunk of table {gid} of '{doc_path}': discarded by the LLM but a sibling chunk was kept")
+    dropped = [i + 1 for i, keep in enumerate(final_keep) if not keep]
+    logger.info(
+        f"Table chunk decisions for '{doc_path}': kept {sum(final_keep)}/{len(final_keep)} "
+        f"(LLM kept {sum(decisions)}); dropped chunk numbers: {dropped}"
+    )
+
     filtered_table_dicts = {
         idx: {
             'summary': summary,
@@ -508,7 +528,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
             'page_number': page_num,
         }
         for idx, (keep, markdown, summary, caption, page_num) in enumerate(
-            zip(decisions, table_markdowns, table_summaries, table_captions_list, table_page_numbers)
+            zip(final_keep, table_markdowns, table_summaries, table_captions_list, table_page_numbers)
         )
         if keep
     }
