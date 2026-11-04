@@ -1029,3 +1029,225 @@ These are the items we don not have in scope for the initial release of the serv
 2. **Multi-Connector Support** Allowing multiple connectors to be served using the same forecast service instance. This would entail using locks for training to ensure that only a single training job runs at one time.
 
 ---
+
+## 14. Jira Stories
+
+These stories break the design above into units of work. Each one has a description, acceptance criteria and its dependencies. The larger stories list subtasks, which can be created as Jira sub-tasks. The stories carry no sizes and no delivery order beyond their dependencies.
+
+**Assumptions the stories rely on.**
+
+- ONNX conversion and Triton on Power already work (see the scope notes). No story covers them. The stories cover the service around them.
+- **One connector is attached at a time.** The service enforces it: `POST /v1/connectors` returns `409` while a connector exists.
+- **One training runs at a time, with no lock and no queue.** If the connector already has a `queued` or `running` job, a new run is skipped and logged. The unique `running` index is the database backstop.
+- **Boot recovery marks `queued` and `running` jobs `failed`.**
+- **Cleanup after a connector is deleted is not covered.** It is an open question.
+
+| #  | Story                                    | Depends on |
+|:---|:-----------------------------------------|:-----------|
+| 1  | Service skeleton                         | —          |
+| 2  | Database and init container              | 1          |
+| 3  | Forecast service and Postgres deployment | 1, 2       |
+| 4  | Connectors API                           | 2          |
+| 5  | Data loader                              | 2          |
+| 6  | Training worker                          | 2, 4, 5    |
+| 7  | Training orchestration                   | 4, 6       |
+| 8  | Scheduled training and boot recovery     | 7          |
+| 9  | Triton component and deployment          | 1          |
+| 10 | Triton integration and retention         | 7, 9       |
+| 11 | Forecast API                             | 10         |
+
+### 14.1 Story 1 — Service skeleton
+
+**Description.** Create the FastAPI application that every other story builds on: configuration, the shared error format and the health check.
+
+**Subtasks.**
+
+- Project layout, and loading of the variables in the Configuration section.
+- Error envelope `{"error": {"code", "message", "status"}}`, with a handler for FastAPI's `RequestValidationError` that returns code `INVALID_REQUEST`, and the new `TRITON_UNAVAILABLE` code.
+- `GET /health`.
+- Container image build for ppc64le.
+
+**Acceptance criteria.**
+
+- The service starts on port 8500 and reads its configuration from the environment.
+- Every error response uses the shared envelope, and a `422` uses it too.
+- `GET /health` returns `200` with `checks.postgres` and `checks.triton` when PostgreSQL is reachable, and `503` when it is not. An unreachable Triton does not make the response `503`.
+- The image builds for ppc64le and runs the API and `python -m forecast.worker` from the same code.
+
+### 14.2 Story 2 — Database and init container
+
+**Description.** Create the `forecast_metadata` database objects with an idempotent init container.
+
+**Acceptance criteria.**
+
+- The init container creates `connectors`, `training_configs`, `jobs` and `forecasters` with the columns in the Database Tables section, and runs again without error.
+- The constraints exist: the unique partial index `idx_jobs_single_running`, the unique `forecasters.name`, the CHECK constraint that keeps `connector_id` on a `queued` or `running` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
+- `jobs.seq` is an identity column.
+- The `scheduler` schema exists for the APScheduler job store.
+- The restricted `forecast_worker` role has column-level grants: it can read the connector and its training configuration, and can write the job's `result` and `message`. It has no write grant on `forecasters`.
+
+### 14.3 Story 3 — Forecast service and Postgres deployment
+
+**Description.** Package the Forecast service and its PostgreSQL pod as Catalog assets.
+
+**Acceptance criteria.**
+
+- The service deploys on Podman and OpenShift, with PostgreSQL in a pod of its own and the init container running before the API.
+- The service declares the `ml_inference` dependency and receives `TRITON_URL` and `MODEL_REPO_PATH` from it.
+- The shared repository volume is mounted read-write at `/models`, with the security context and the `:z` label described in the shared volume section.
+- The API runs with a single replica.
+- Resource values are left as "to be provided by DEV".
+
+### 14.4 Story 4 — Connectors API
+
+**Description.** Implement the connector endpoints and the training details that `POST /v1/connectors` carries.
+
+**Subtasks.**
+
+- Connector type `db2_for_i` with required, optional, safe and encrypted fields; AES-256-GCM encryption with `DB_ENCRYPTION_KEY`.
+- `POST /v1/connectors`: validate the body, store the connector and its `training_configs` row, insert a `queued` job, register the APScheduler jobs (Story 7) and return `201` with the id.
+- `GET /v1/connectors` with `limit`, `offset` and the `name` filter.
+- `GET /v1/connectors/{connector_id}`.
+- `PUT /v1/connectors/{connector_id}` with a partial merge of `connection_details`.
+- `DELETE /v1/connectors/{connector_id}`.
+- `GET /v1/connectors/{connector_id}/metrics`
+
+**Acceptance criteria.**
+
+- A secret field is never returned, and a field that is not on the allowlist is encrypted.
+- `POST` returns `409` when the `id` or `name` already exists, and `409` when another connector already exists. In both cases nothing is stored: no job and no schedule.
+- `POST` returns `422` for an unknown type, an `id` that is not a UUID, or a missing or unknown field in `connection_details` or `training`.
+- The list and get responses return `status` and `message` from the `connectors` row and, on get, `last_trained_at` from the `jobs` table.
+- `PUT` rejects `type` and `training` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
+- `DELETE` returns `204`, and returns `409` while a `queued` or `running` job uses the connector. The CHECK constraint makes a job queued in the meantime fail the delete with the same `409`.
+- Cleanup of the schedule and the forecasters of a deleted connector is not part of this story.
+
+### 14.5 Story 5 — Data loader
+
+**Description.** Read the training table from Db2 for i through Mapepire, inside the worker.
+
+**Acceptance criteria.**
+
+- The loader reads the connector and its training configuration with the worker's read-only grant, decrypts the secrets with `DB_ENCRYPTION_KEY` and connects.
+- The session is read-only, with a statement timeout where the database supports it. Rows are streamed in chunks of `LOADER_CHUNK_ROWS` to local scratch inside one read-only transaction.
+- Every identifier supplied by the user is quoted through the driver. Raw SQL is not accepted.
+- A connector that no longer exists or cannot be decrypted fails with an error that names the connector and holds no secret.
+- Authentication and network failures raise distinct errors, and the error message is stored on the job.
+- A table with more than `MAX_TRAINING_ROWS` rows fails the job with a permanent-failure error.
+- The loader has been run against a real Db2 for i.
+
+### 14.6 Story 6 — Training worker
+
+**Description.** Implement `python -m forecast.worker <job_id>`: read the data, train with AutoGluon, export to ONNX and publish the forecaster's directory.
+
+**Subtasks.**
+
+- Worker entry point that reads the job, the training configuration and the connector.
+- AutoGluon training on the input columns and the target, and ONNX export.
+- Atomic publish: write `model.onnx` and `config.pbtxt` to `.staging/<job_id>/` on the repository volume, then rename the directory to `fc_<connector_id>_<version>`.
+- Write `jobs.result`: the algorithm AutoGluon chose, the validation metric and score, the training time and the rows read.
+- Exit codes, including a dedicated code for a failure that would only repeat.
+- Memory and time measurement on the target image, to set `WORKER_MEMORY_LIMIT_MB`.
+
+**Acceptance criteria.**
+
+- A successful run leaves a complete `fc_<connector_id>_<version>` directory on the volume and exits `0`.
+- The worker never deletes anything and never writes to `forecasters`.
+- The permanent-failure exit code is used when the connector is missing or cannot be decrypted, the table or a column does not exist, the table has no rows, or it has more than `MAX_TRAINING_ROWS` rows.
+- Directories and files are created as `0755` and `0644`.
+- `WORKER_MEMORY_LIMIT_MB` has a measured value.
+
+### 14.7 Story 7 — Training orchestration
+
+**Description.** Start every training from APScheduler in the API process, run the worker as a subprocess and handle its outcome.
+
+**Subtasks.**
+
+- `AsyncIOScheduler` with a `SQLAlchemyJobStore` in the `scheduler` schema, at the version digitize uses.
+- The one-off job that `POST /v1/connectors` registers.
+- Subprocess launch with its own process group, the time limit and the memory cap.
+- Retry of the worker step.
+- Failure handling and cleanup.
+
+**Acceptance criteria.**
+
+- The one-off job fires at once, uses the `queued` row that `POST` inserted, sets it `running` with `started_at`, and spawns the worker.
+- A run is skipped, and the reason is logged, when the connector already has a `queued` or `running` job.
+- On exit `0`, the job function hands the result to Story 10 and then sets the job `completed` with `finished_at`.
+- On any other non-zero exit, a kill or a timeout, the worker is run again after `TRAINING_RETRY_DELAY_SECONDS`, up to `TRAINING_MAX_ATTEMPTS` attempts in total. The permanent-failure exit code is not retried. The process group is killed on a timeout.
+- The temporary directory is deleted before each new attempt and after the last one.
+- After the last failed attempt the job is `failed`, `message` holds the last error, and the number of attempts is added to `result`.
+- An unexpected exception in the job function also marks the job `failed`, so a `running` row never blocks later trainings.
+- Database and Triton calls do not block the event loop.
+
+### 14.8 Story 8 — Scheduled training and boot recovery
+
+**Description.** Run later trainings on `TRAINING_SCHEDULE` and bring the service to a clean state after a restart.
+
+**Subtasks.**
+
+- Cron job per connector, in UTC.
+- Startup registration of cron jobs.
+- Boot recovery.
+- Run-history pruning.
+
+**Acceptance criteria.**
+
+- When `TRAINING_SCHEDULE` is set, a connector has a cron job that inserts its own `queued` job and runs it as in Story 7. When it is unset, only the first training runs.
+- The jobs use a short misfire grace time. A run missed while the API was down is skipped and logged with the reason.
+- At startup, the API registers a cron job only for a connector that has none, and updates the job when `TRAINING_SCHEDULE` has changed. Existing jobs keep their stored next run time.
+- Boot recovery marks every `queued` and `running` job `failed`, removes `.staging/*` and any `fc_*` directory with no `ready` or `retiring` row, and finishes before the scheduler starts.
+- After each run finishes, the newest `FORECASTER_RETENTION_COUNT` finished jobs of the connector are kept and the older ones are deleted. `queued` and `running` jobs are never deleted.
+
+### 14.9 Story 9 — Triton component and deployment
+
+**Description.** Add Triton Inference Server (CPU) as a Catalog component with a shared repository volume.
+
+**Subtasks.**
+
+- Catalog component `triton-cpu` with Podman and OpenShift assets.
+- Podman pod template with the flags in the deployment section.
+- Shared repository volume and its permissions.
+- OpenShift `Deployment`, `Service` and `PersistentVolumeClaim`.
+
+**Acceptance criteria.**
+
+- Triton starts with `--model-control-mode=explicit`, an empty repository, `--strict-readiness=false` and `--exit-on-error=false`, and its first `containerPort` is the HTTP port 8000.
+- The pod has no `ai-services.io/routes` and no `ai-services.io/ports` label, so only other pods of the application can reach it.
+- The repository volume is listed in the Triton pod's volume label only. Triton mounts it read-only and the Forecast pod mounts it read-write.
+- The Forecast user can create, rename and delete under `/models`, and Triton's user can read what it writes. This has been verified on the ppc64le image.
+- On OpenShift the volume is a `ReadWriteMany` claim that is kept when the chart is removed, and Triton has a readiness probe on `/v2/health/ready`.
+- CPU, memory and storage values are provided by DEV.
+
+### 14.10 Story 10 — Triton integration and retention
+
+**Description.** Let the API load, unload and reconcile forecasters in Triton, and apply retention.
+
+**Subtasks.**
+
+- Triton client for load, unload, repository index, health and inference.
+- Load after a successful training, and the `forecasters` insert.
+- Retention.
+- Boot reconciliation.
+- `TRITON_UNAVAILABLE` handling.
+
+**Acceptance criteria.**
+
+- After a successful worker run, the API calls `load` for `fc_<connector_id>_<version>`, reads the repository index, and inserts the `forecasters` row as `ready` only when the state is `READY`.
+- When the load fails, the job is `failed`, no `ready` row is written, and the published directory is removed. The load is not retried.
+- After each load, when the connector has more than `FORECASTER_RETENTION_COUNT` `ready` forecasters, the oldest is retired in this order: row `retiring`, `unload`, wait for `UNAVAILABLE`, delete the directory, row `deleted`. Rows are kept.
+- At boot, the API waits for Triton to be ready for up to `TRITON_STARTUP_WAIT_S`, reads the repository index, loads every `ready` forecaster that is not `READY`, and finishes every `retiring` forecaster. The API starts and answers `/health` while Triton is down.
+- Calls use `TRITON_LOAD_TIMEOUT_S` and `TRITON_INFER_TIMEOUT_S`.
+- Only the API process talks to Triton.
+
+### 14.11 Story 11 — Forecast API
+
+**Description.** Implement the two forecast endpoints.
+
+**Acceptance criteria.**
+
+- `GET /v1/forecast/{connector_id}` lists the forecasters that are not `deleted`, newest first, with `version`, `status`, `metrics` and `created_at`. A connector with none returns an empty `data` array, and an unknown connector returns `404`.
+- `POST /v1/forecast/{connector_id}` validates `instances` against the connector's input columns, sends them to the newest `ready` forecaster and returns one prediction and a `confidence` per row, in order, with the `version` that answered.
+- It returns `400` for an empty `instances`, or a row with a missing or unknown input column or a value of the wrong type; `404` for an unknown connector or one with no `ready` forecaster; `422` for a body that is not valid; `500` for a database failure or a Triton error; and `503 TRITON_UNAVAILABLE` when Triton cannot be reached.
+
+---
