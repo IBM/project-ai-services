@@ -268,6 +268,21 @@ def _is_separator_line(line: str) -> bool:
     """True for a markdown table separator row such as ``|---|:---:|``."""
     return '|' in line and '-' in line and not any(c.isalnum() for c in line)
 
+_WHITESPACE_RUN = re.compile(r'\s{2,}')
+_DASH_RUN = re.compile(r'-{3,}')
+
+def _normalize_table_line(line: str) -> str:
+    """Strip the column-alignment padding that markdown exporters (tabulate) add.
+
+    Collapses runs of whitespace and shortens separator dashes (``|-----|`` -> ``|---|``)
+    so token counts reflect the real content instead of padding, and the LLM prompt
+    is smaller. Cell values are not modified.
+    """
+    line = _WHITESPACE_RUN.sub(' ', line.strip())
+    if _is_separator_line(line):
+        line = _DASH_RUN.sub('---', line)
+    return line
+
 def _estimate_tokens(text: str) -> int:
     """Cheap token estimate (~3 characters per token) that avoids a tokenizer call per table row."""
     return math.ceil(len(text) / 3)
@@ -284,7 +299,8 @@ def split_markdown_table_into_row_chunks(
     table text), the header row(s) and the separator row are repeated at the top of
     each chunk, followed by a contiguous group of data rows. A table that already
     fits in ``max_tokens`` is returned as a single chunk. Rows are never split; a
-    single row larger than the budget is emitted on its own chunk.
+    single row larger than the budget is emitted on its own chunk. Alignment padding
+    added by the markdown exporter is removed before counting tokens.
 
     Args:
         markdown_table: Markdown formatted table string.
@@ -303,7 +319,7 @@ def split_markdown_table_into_row_chunks(
     if count_tokens_fn is None:
         count_tokens_fn = _estimate_tokens
 
-    lines = [line.strip() for line in markdown_table.strip().split('\n') if line.strip()]
+    lines = [_normalize_table_line(line) for line in markdown_table.strip().split('\n') if line.strip()]
     sep_idx = next((i for i, line in enumerate(lines) if _is_separator_line(line)), -1)
 
     if sep_idx >= 0:
