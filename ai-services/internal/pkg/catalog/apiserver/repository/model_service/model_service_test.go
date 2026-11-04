@@ -19,6 +19,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -225,24 +226,94 @@ func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
 	return provider
 }
 
-func TestCreateModel_OpenShiftControlPlane_FailsFast(t *testing.T) {
+// mockWorkerRegistry reports a fixed runtime type per connected worker.
+type mockWorkerRegistry struct {
+	stream.WorkerRegistry
+	runtimes map[string]string
+}
+
+func (m *mockWorkerRegistry) WorkerRuntimeType(name string) (string, bool) {
+	rt, ok := m.runtimes[name]
+
+	return rt, ok
+}
+
+// setControlPlaneRuntime sets the global runtime factory for the duration of a test.
+func setControlPlaneRuntime(t *testing.T, rt runtimeTypes.RuntimeType) {
+	t.Helper()
+
 	prev := vars.RuntimeFactory
-	vars.RuntimeFactory = runtime.NewRuntimeFactory(runtimeTypes.RuntimeTypeOpenShift)
+	vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
 	t.Cleanup(func() { vars.RuntimeFactory = prev })
+}
 
-	svc := NewModelService(
-		newMockComponentRepo(),
-		newMockConnectorRepo(),
-		nil,
-		nil,
-		setupTestCatalogProvider(t),
-		&mockLiteLLMClient{},
-	)
+func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
+	const ocpWorker = "ocp-worker"
 
-	for _, dt := range []apimodels.DeploymentType{apimodels.DeploymentTypeLocal, apimodels.DeploymentTypeRemote} {
-		t.Run(string(dt), func(t *testing.T) {
+	tests := []struct {
+		name         string
+		controlPlane runtimeTypes.RuntimeType
+		deployment   apimodels.DeploymentType
+		selector     string
+		// worker is the DB row of the targeted worker; nil means no row.
+		worker *dbmodels.Worker
+		// registryRuntimes is the live registry content (worker name -> runtime type).
+		registryRuntimes map[string]string
+	}{
+		{
+			name:         "local model, openshift control plane",
+			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
+			deployment:   apimodels.DeploymentTypeLocal,
+		},
+		{
+			name:         "remote model, openshift control plane",
+			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
+			deployment:   apimodels.DeploymentTypeRemote,
+		},
+		{
+			name:         "default worker stored as openshift",
+			controlPlane: runtimeTypes.RuntimeTypePodman,
+			deployment:   apimodels.DeploymentTypeLocal,
+			worker:       &dbmodels.Worker{Name: "Local", RuntimeType: dbmodels.WorkerRuntimeTypeOpenShift, Status: dbmodels.WorkerStatusReady},
+		},
+		{
+			name:         "selected remote worker stored as openshift",
+			controlPlane: runtimeTypes.RuntimeTypePodman,
+			deployment:   apimodels.DeploymentTypeLocal,
+			selector:     ocpWorker,
+			worker:       &dbmodels.Worker{Name: ocpWorker, RuntimeType: dbmodels.WorkerRuntimeTypeOpenShift, Status: dbmodels.WorkerStatusReady},
+		},
+		{
+			name:             "selected remote worker openshift only in live registry",
+			controlPlane:     runtimeTypes.RuntimeTypePodman,
+			deployment:       apimodels.DeploymentTypeLocal,
+			selector:         ocpWorker,
+			worker:           &dbmodels.Worker{Name: ocpWorker, RuntimeType: dbmodels.WorkerRuntimeTypeUnknown, Status: dbmodels.WorkerStatusReady},
+			registryRuntimes: map[string]string{ocpWorker: string(runtimeTypes.RuntimeTypeOpenShift)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setControlPlaneRuntime(t, tt.controlPlane)
+
+			compRepo := newMockComponentRepo()
+			connRepo := newMockConnectorRepo()
+			workerRepo := newMockWorkerRepo()
+			if tt.worker != nil {
+				workerRepo.workers[tt.worker.Name] = tt.worker
+			}
+
+			var registry stream.WorkerRegistry
+			if tt.registryRuntimes != nil {
+				registry = &mockWorkerRegistry{runtimes: tt.registryRuntimes}
+			}
+
+			svc := NewModelService(compRepo, connRepo, workerRepo, registry, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+
 			req := validRequest()
-			req.DeploymentType = dt
+			req.DeploymentType = tt.deployment
+			req.WorkerSelector = tt.selector
 
 			resp, err := svc.CreateModel(context.Background(), req)
 			assert.Nil(t, resp)
@@ -251,226 +322,186 @@ func TestCreateModel_OpenShiftControlPlane_FailsFast(t *testing.T) {
 			require.ErrorAs(t, err, &valErr)
 			assert.Equal(t, http.StatusBadRequest, valErr.Code)
 			assert.Contains(t, valErr.Message, "models are unsupported on openshift runtime")
+			assert.Empty(t, compRepo.components, "no component row must be written")
+			assert.Empty(t, connRepo.connectors, "no connector must be written")
 		})
 	}
 }
 
-func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
-	compRepo := newMockComponentRepo()
-	connRepo := newMockConnectorRepo()
-	workerRepo := newMockWorkerRepo()
-	catalogProvider := setupTestCatalogProvider(t)
-
-	workerRepo.workers["Local"] = &dbmodels.Worker{
-		Name:        "Local",
-		RuntimeType: "openshift",
-		Status:      "ready",
-	}
-
-	svc := NewModelService(
-		compRepo,
-		connRepo,
-		workerRepo,
-		nil,
-		catalogProvider,
-		&mockLiteLLMClient{},
-	)
-
-	req := apimodels.CreateModelRequest{
-		DeploymentType: "local",
-		ComponentType:  "llm",
-		Name:           "test-model",
-		ProviderID:     "vllm-cpu",
-		Model:          "ibm-granite/granite-3.3-8b-instruct",
-	}
-
-	resp, err := svc.CreateModel(context.Background(), req)
-	assert.Nil(t, resp)
-	require.Error(t, err)
-
-	valErr, ok := err.(*validators.ValidationError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusBadRequest, valErr.Code)
-	assert.Contains(t, valErr.Message, "models are unsupported on openshift runtime")
-}
-
 func TestCreateModel_Validation_InvalidFields(t *testing.T) {
-	compRepo := newMockComponentRepo()
-	connRepo := newMockConnectorRepo()
-	catalogProvider := setupTestCatalogProvider(t)
-
-	svc := NewModelService(
-		compRepo,
-		connRepo,
-		nil,
-		nil,
-		catalogProvider,
-		&mockLiteLLMClient{},
-	)
-
-	// Invalid component_type
-	req := apimodels.CreateModelRequest{
-		DeploymentType: "local",
-		ComponentType:  "database",
-		Name:           "test-model",
-		ProviderID:     "vllm-cpu",
-		Model:          "ibm-granite/granite-3.3-8b-instruct",
+	tests := []struct {
+		name    string
+		mutate  func(*apimodels.CreateModelRequest)
+		wantMsg string
+	}{
+		{"invalid component_type", func(r *apimodels.CreateModelRequest) { r.ComponentType = "database" }, "invalid component_type"},
+		{"invalid name", func(r *apimodels.CreateModelRequest) { r.Name = "a!" }, "name must contain only"},
 	}
-	_, err := svc.CreateModel(context.Background(), req)
-	assert.Error(t, err)
 
-	// Invalid name
-	req.ComponentType = "llm"
-	req.Name = "a!"
-	_, err = svc.CreateModel(context.Background(), req)
-	assert.Error(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
+
+			svc := NewModelService(newMockComponentRepo(), newMockConnectorRepo(), nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+
+			req := validRequest()
+			tt.mutate(&req)
+
+			resp, err := svc.CreateModel(context.Background(), req)
+			assert.Nil(t, resp)
+
+			var valErr *validators.ValidationError
+			require.ErrorAs(t, err, &valErr)
+			assert.Equal(t, http.StatusBadRequest, valErr.Code)
+			assert.Contains(t, valErr.Message, tt.wantMsg)
+		})
+	}
 }
 
 func TestCreateModel_Conflict_Name(t *testing.T) {
-	compRepo := newMockComponentRepo()
-	connRepo := newMockConnectorRepo()
-	catalogProvider := setupTestCatalogProvider(t)
-
-	// Existing component with name "existing-model"
-	_ = compRepo.Insert(context.Background(), &dbmodels.Component{
-		Name:   "existing-model",
-		Type:   "llm",
-		Status: dbmodels.ComponentStatusRunning,
-	})
-
-	svc := NewModelService(
-		compRepo,
-		connRepo,
-		nil,
-		nil,
-		catalogProvider,
-		&mockLiteLLMClient{},
-	)
-
-	req := apimodels.CreateModelRequest{
-		DeploymentType: "local",
-		ComponentType:  "llm",
-		Name:           "existing-model",
-		ProviderID:     "vllm-cpu",
-		Model:          "ibm-granite/granite-3.3-8b-instruct",
-	}
-
-	_, err := svc.CreateModel(context.Background(), req)
-	require.Error(t, err)
-	valErr, ok := err.(*validators.ValidationError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusConflict, valErr.Code)
-}
-
-func TestCreateModel_Remote_WatsonX_Success(t *testing.T) {
-	compRepo := newMockComponentRepo()
-	connRepo := newMockConnectorRepo()
-	catalogProvider := setupTestCatalogProvider(t)
-	mockLite := &mockLiteLLMClient{}
-
-	svc := NewModelService(
-		compRepo,
-		connRepo,
-		nil,
-		nil,
-		catalogProvider,
-		mockLite,
-	)
-
-	req := apimodels.CreateModelRequest{
-		DeploymentType: "remote",
-		ComponentType:  "llm",
-		Name:           "prod-watsonx",
-		ProviderID:     "watsonx",
-		Model:          "ibm/granite-4-h-small",
-		Params: map[string]any{
-			"api_base":   "https://us-south.ml.cloud.ibm.com",
-			"project_id": "123e4567-e89b-12d3-a456-426614174000",
-			"api_key":    validWatsonxKey,
+	tests := []struct {
+		name     string
+		existing string
+		seed     func(*mockComponentRepo, *mockConnectorRepo)
+	}{
+		{
+			name:     "name used by a local model",
+			existing: "existing-model",
+			seed: func(comps *mockComponentRepo, _ *mockConnectorRepo) {
+				_ = comps.Insert(context.Background(), &dbmodels.Component{
+					Name:   "existing-model",
+					Type:   "llm",
+					Status: dbmodels.ComponentStatusRunning,
+				})
+			},
 		},
-		CreatedBy: "admin",
-	}
-
-	resp, err := svc.CreateModel(context.Background(), req)
-	require.NoError(t, err)
-	assert.NotNil(t, resp)
-	assert.NotEmpty(t, resp.ID)
-
-	// Verify LiteLLM registration
-	require.Len(t, mockLite.registeredModels, 1)
-	assert.Equal(t, "ibm/granite-4-h-small", mockLite.registeredModels[0].ModelName)
-	assert.Equal(t, "watsonx/ibm/granite-4-h-small", mockLite.registeredModels[0].LiteLLMParams["model"])
-	assert.Equal(t, validWatsonxKey, mockLite.registeredModels[0].LiteLLMParams["api_key"])
-	assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", mockLite.registeredModels[0].LiteLLMParams["project_id"])
-
-	// Verify connector persisted without api_key
-	conn, ok := connRepo.connectors["prod-watsonx"]
-	require.True(t, ok)
-	assert.Equal(t, dbmodels.ConnectorStatusConnected, conn.Status)
-	assert.Equal(t, "models", conn.Type)
-	assert.Equal(t, "llm", conn.Metadata["component_type"])
-	assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
-	params, ok := conn.Metadata["params"].(map[string]any)
-	require.True(t, ok, "provider params are nested under \"params\"")
-	assert.NotContains(t, params, "api_key", "credentials must never be persisted")
-	assert.NotContains(t, conn.Metadata, "api_key")
-	assert.NotContains(t, conn.Metadata, "api_base", "params are not stored flat")
-	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", params["api_base"])
-	assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", params["project_id"])
-}
-
-func TestCreateModel_Remote_ProbeFailure(t *testing.T) {
-	compRepo := newMockComponentRepo()
-	connRepo := newMockConnectorRepo()
-	catalogProvider := setupTestCatalogProvider(t)
-	mockLite := &mockLiteLLMClient{
-		probeResponse: &catalogclient.LiteLLMHealthResponse{
-			HealthyCount:   0,
-			UnhealthyCount: 1,
-			UnhealthyEndpoints: []catalogclient.LiteLLMHealthEndpoint{
-				{Error: "invalid watsonx credentials"},
+		{
+			name:     "name used by a remote model connector",
+			existing: "existing-connector",
+			seed: func(_ *mockComponentRepo, conns *mockConnectorRepo) {
+				_ = conns.Insert(context.Background(), &dbmodels.Connector{Name: "existing-connector"})
 			},
 		},
 	}
 
-	svc := NewModelService(
-		compRepo,
-		connRepo,
-		nil,
-		nil,
-		catalogProvider,
-		mockLite,
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compRepo := newMockComponentRepo()
+			connRepo := newMockConnectorRepo()
+			tt.seed(compRepo, connRepo)
 
-	req := apimodels.CreateModelRequest{
-		DeploymentType: "remote",
-		ComponentType:  "llm",
-		Name:           "bad-watsonx",
-		ProviderID:     "watsonx",
-		Model:          "ibm/granite-4-h-small",
-		Params: map[string]any{
-			"api_base":   "https://us-south.ml.cloud.ibm.com",
-			"project_id": "123e4567-e89b-12d3-a456-426614174000",
-			"api_key":    validWatsonxKey,
+			svc := NewModelService(compRepo, connRepo, nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+
+			req := validRequest()
+			req.Name = tt.existing
+
+			resp, err := svc.CreateModel(context.Background(), req)
+			assert.Nil(t, resp)
+			requireStatus(t, err, http.StatusConflict, "already exists")
+		})
+	}
+}
+
+func watsonxParams() map[string]any {
+	return map[string]any{
+		"api_base":   "https://us-south.ml.cloud.ibm.com",
+		"project_id": "123e4567-e89b-12d3-a456-426614174000",
+		"api_key":    validWatsonxKey,
+	}
+}
+
+func TestCreateModel_Remote(t *testing.T) {
+	watsonxRequest := func(name string) apimodels.CreateModelRequest {
+		return apimodels.CreateModelRequest{
+			DeploymentType: apimodels.DeploymentTypeRemote,
+			ComponentType:  "llm",
+			Name:           name,
+			ProviderID:     "watsonx",
+			Model:          "ibm/granite-4-h-small",
+			Params:         watsonxParams(),
+			CreatedBy:      "admin",
+		}
+	}
+
+	tests := []struct {
+		name     string
+		req      apimodels.CreateModelRequest
+		lite     *mockLiteLLMClient
+		wantCode int // 0 means success
+		wantMsg  string
+		check    func(t *testing.T, lite *mockLiteLLMClient, conns *mockConnectorRepo)
+	}{
+		{
+			name: "watsonx success registers the route and persists the connector without credentials",
+			req:  watsonxRequest("prod-watsonx"),
+			lite: &mockLiteLLMClient{},
+			check: func(t *testing.T, lite *mockLiteLLMClient, conns *mockConnectorRepo) {
+				require.Len(t, lite.registeredModels, 1)
+				assert.Equal(t, "ibm/granite-4-h-small", lite.registeredModels[0].ModelName)
+				assert.Equal(t, "watsonx/ibm/granite-4-h-small", lite.registeredModels[0].LiteLLMParams["model"])
+				assert.Equal(t, validWatsonxKey, lite.registeredModels[0].LiteLLMParams["api_key"])
+				assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", lite.registeredModels[0].LiteLLMParams["project_id"])
+
+				conn, ok := conns.connectors["prod-watsonx"]
+				require.True(t, ok)
+				assert.Equal(t, dbmodels.ConnectorStatusConnected, conn.Status)
+				assert.Equal(t, "models", conn.Type)
+				assert.Equal(t, "llm", conn.Metadata["component_type"])
+				assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
+
+				params, ok := conn.Metadata["params"].(map[string]any)
+				require.True(t, ok, "provider params are nested under \"params\"")
+				assert.NotContains(t, params, "api_key", "credentials must never be persisted")
+				assert.NotContains(t, conn.Metadata, "api_key")
+				assert.NotContains(t, conn.Metadata, "api_base", "params are not stored flat")
+				assert.Equal(t, "https://us-south.ml.cloud.ibm.com", params["api_base"])
+				assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", params["project_id"])
+			},
+		},
+		{
+			name: "failed probe is a 422 and rolls the route back",
+			req:  watsonxRequest("bad-watsonx"),
+			lite: &mockLiteLLMClient{
+				probeResponse: &catalogclient.LiteLLMHealthResponse{
+					UnhealthyCount: 1,
+					UnhealthyEndpoints: []catalogclient.LiteLLMHealthEndpoint{
+						{Error: "invalid watsonx credentials"},
+					},
+				},
+			},
+			wantCode: http.StatusUnprocessableEntity,
+			wantMsg:  "invalid watsonx credentials",
+			check: func(t *testing.T, lite *mockLiteLLMClient, conns *mockConnectorRepo) {
+				assert.Equal(t, []string{"ibm/granite-4-h-small"}, lite.deregisteredModels)
+				assert.Empty(t, conns.connectors, "no connector must be persisted when the probe fails")
+			},
 		},
 	}
 
-	resp, err := svc.CreateModel(context.Background(), req)
-	assert.Nil(t, resp)
-	require.Error(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
 
-	valErr, ok := err.(*validators.ValidationError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusUnprocessableEntity, valErr.Code)
-	assert.Contains(t, valErr.Message, "invalid watsonx credentials")
+			conns := newMockConnectorRepo()
+			svc := NewModelService(newMockComponentRepo(), conns, nil, nil, setupTestCatalogProvider(t), tt.lite)
 
-	// Verify rollback
-	require.Len(t, mockLite.deregisteredModels, 1)
-	assert.Equal(t, "ibm/granite-4-h-small", mockLite.deregisteredModels[0])
+			resp, err := svc.CreateModel(context.Background(), tt.req)
+			if tt.wantCode == 0 {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				assert.NotEmpty(t, resp.ID)
+			} else {
+				assert.Nil(t, resp)
+				requireStatus(t, err, tt.wantCode, tt.wantMsg)
+			}
+
+			tt.check(t, tt.lite, conns)
+		})
+	}
 }
 
 // blockingRuntime is a fake Podman runtime whose ListImages blocks until released, so the
-// asynchronous deployment stays in the Deploying state while the test asserts on it.
+// asynchronous deployment stays in its initial state while the test asserts on it.
 type blockingRuntime struct {
 	runtime.Runtime
 	release chan struct{}
@@ -484,72 +515,47 @@ func (r *blockingRuntime) ListImages(_ context.Context) ([]runtimeTypes.Image, e
 	return nil, errors.New("released")
 }
 
-func TestCreateModel_Local_RuntimeUnavailable(t *testing.T) {
-	compRepo := newMockComponentRepo()
-	connRepo := newMockConnectorRepo()
-
-	svc := NewModelService(compRepo, connRepo, nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
-	svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) {
-		return nil, errors.New("worker is not connected")
-	})
-
-	resp, err := svc.CreateModel(context.Background(), apimodels.CreateModelRequest{
-		DeploymentType: "local",
-		ComponentType:  "llm",
-		Name:           "local-granite",
-		ProviderID:     "vllm-cpu",
-		Model:          "ibm-granite/granite-3.3-8b-instruct",
-		CreatedBy:      "test-user",
-	})
-	assert.Nil(t, resp)
-	require.Error(t, err)
-
-	valErr, ok := err.(*validators.ValidationError)
-	require.True(t, ok)
-	assert.Equal(t, http.StatusUnprocessableEntity, valErr.Code)
-	assert.Contains(t, valErr.Message, "worker is not connected")
-	assert.Empty(t, compRepo.components, "no component row must be inserted when the runtime cannot be resolved")
-}
-
-func TestCreateModel_Local_Success(t *testing.T) {
-	compRepo := newMockComponentRepo()
-	connRepo := newMockConnectorRepo()
-	catalogProvider := setupTestCatalogProvider(t)
-	mockLite := &mockLiteLLMClient{}
-
-	svc := NewModelService(
-		compRepo,
-		connRepo,
-		nil,
-		nil,
-		catalogProvider,
-		mockLite,
-	)
-
-	rt := &blockingRuntime{release: make(chan struct{})}
-	t.Cleanup(func() { close(rt.release) })
-	svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) { return rt, nil })
-
-	req := apimodels.CreateModelRequest{
-		DeploymentType: "local",
-		ComponentType:  "llm",
-		Name:           "local-granite",
-		ProviderID:     "vllm-cpu",
-		Model:          "ibm-granite/granite-3.3-8b-instruct",
-		CreatedBy:      "test-user",
+// A local request returns as soon as the component row exists, before any download happens.
+func TestCreateModel_Local_InitialRow(t *testing.T) {
+	tests := []struct {
+		name        string
+		mutate      func(*apimodels.CreateModelRequest)
+		wantProfile any
+	}{
+		{name: "minimal request", mutate: func(*apimodels.CreateModelRequest) {}},
+		{name: "request with a profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "small" }, wantProfile: "small"},
 	}
 
-	resp, err := svc.CreateModel(context.Background(), req)
-	require.NoError(t, err)
-	assert.NotNil(t, resp)
-	assert.NotEmpty(t, resp.ID)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
 
-	comp, ok := compRepo.components["local-granite"]
-	require.True(t, ok)
-	assert.Equal(t, dbmodels.ComponentStatusDownloading, comp.Status, "the row starts in the download phase")
-	assert.Equal(t, "test-user", comp.CreatedBy)
-	assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", comp.Metadata["model"])
-	assert.Contains(t, comp.Metadata, "params", "params are nested, even when empty")
+			compRepo := newMockComponentRepo()
+			svc := NewModelService(compRepo, newMockConnectorRepo(), nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+
+			rt := &blockingRuntime{release: make(chan struct{})}
+			t.Cleanup(func() { close(rt.release) })
+			svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) { return rt, nil })
+
+			req := validRequest()
+			req.Name = "local-granite"
+			req.CreatedBy = "test-user"
+			tt.mutate(&req)
+
+			resp, err := svc.CreateModel(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			assert.NotEmpty(t, resp.ID)
+
+			comp, ok := compRepo.components["local-granite"]
+			require.True(t, ok)
+			assert.Equal(t, dbmodels.ComponentStatusDownloading, comp.Status, "the row starts in the download phase")
+			assert.Equal(t, "test-user", comp.CreatedBy)
+			assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", comp.Metadata["model"])
+			assert.Contains(t, comp.Metadata, "params", "params are nested, even when empty")
+			assert.Equal(t, tt.wantProfile, comp.Metadata["profile"])
+		})
+	}
 }
 
 // fakeDeployer stands in for a runtime-specific types.Deployer. egress defaults to endpoint, like
@@ -600,6 +606,8 @@ func (podmanRuntime) Type() runtimeTypes.RuntimeType { return runtimeTypes.Runti
 func newLocalService(t *testing.T, d types.Deployer, lite *mockLiteLLMClient) (*ModelService, *mockComponentRepo) {
 	t.Helper()
 
+	setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
+
 	repo := newMockComponentRepo()
 	svc := NewModelService(repo, newMockConnectorRepo(), nil, nil, setupTestCatalogProvider(t), lite)
 	svc.planner.
@@ -637,176 +645,81 @@ func awaitStatus(t *testing.T, repo *mockComponentRepo, id string, want dbmodels
 	return comp
 }
 
-func TestCreateLocal_Success_RegistersRouteAndMarksRunning(t *testing.T) {
-	lite := &mockLiteLLMClient{}
-	deployer := &fakeDeployer{endpoint: "llm-abc:8000", called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, lite)
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	comp := awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusRunning)
-	assert.Equal(t, []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}}, comp.Endpoints)
-
-	require.Len(t, lite.registeredModels, 1)
-	assert.Equal(t, "hosted_vllm/ibm-granite/granite-3.3-8b-instruct", lite.registeredModels[0].LiteLLMParams["model"])
-	assert.Equal(t, "http://llm-abc:8000/v1", lite.registeredModels[0].LiteLLMParams["api_base"])
-	assert.Equal(t, []string{resp.ID}, lite.registeredModels[0].LiteLLMParams["tags"])
-	require.Len(t, lite.registeredPass, 1)
-	assert.Equal(t, "http://llm-abc:8000/tokenize", lite.registeredPass[0].Target)
-}
-
-// The DB records the pod's own address while LiteLLM is pointed at the egress the control plane
-// can reach (the two differ for a pod on a remote worker).
-func TestCreateLocal_RoutesThroughEgress(t *testing.T) {
-	lite := &mockLiteLLMClient{}
-	deployer := &fakeDeployer{endpoint: "llm-abc:8000", egress: "egress.cp:8080", called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, lite)
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	comp := awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusRunning)
-	assert.Equal(t, []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}}, comp.Endpoints)
-
-	require.Len(t, lite.registeredModels, 1)
-	assert.Equal(t, "http://egress.cp:8080/v1", lite.registeredModels[0].LiteLLMParams["api_base"])
-	require.Len(t, lite.registeredPass, 1)
-	assert.Equal(t, "http://egress.cp:8080/tokenize", lite.registeredPass[0].Target)
-}
-
-func TestCreateLocal_DeployFailure_MarksError(t *testing.T) {
-	lite := &mockLiteLLMClient{}
-	deployer := &fakeDeployer{err: errors.New("image pull failed"), called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, lite)
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	comp := awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
-	assert.Contains(t, comp.Message, "image pull failed")
-	assert.Empty(t, lite.registeredModels, "no route must be registered when pods failed to deploy")
-}
-
-// A model is Downloading while its images and weights are fetched, then Deploying while the pods
-// start, then Running.
-func TestCreateLocal_StatusProgression(t *testing.T) {
-	deployer := &fakeDeployer{endpoint: "llm-abc:8000", called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusRunning)
-
-	id, err := uuid.Parse(resp.ID)
-	require.NoError(t, err)
-	assert.Equal(t,
-		[]dbmodels.ComponentStatus{dbmodels.ComponentStatusDeploying, dbmodels.ComponentStatusRunning},
-		repo.statusHistory(id),
-		"the insert already recorded Downloading; the executor then moves Deploying -> Running")
-}
-
-// A failed download is an Error from the Downloading phase and never reaches Deploying.
-func TestCreateLocal_PrepareFailure_NeverReachesDeploying(t *testing.T) {
-	deployer := &fakeDeployer{err: errors.New("image pull failed"), called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
-
-	id, err := uuid.Parse(resp.ID)
-	require.NoError(t, err)
-	assert.Equal(t, []dbmodels.ComponentStatus{dbmodels.ComponentStatusError}, repo.statusHistory(id))
-}
-
-// Prepare (download) runs before Start (pods); a failed Prepare must never start anything.
-func TestCreateLocal_PreparesBeforeStarting(t *testing.T) {
-	deployer := &fakeDeployer{endpoint: "llm-abc:8000", called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusRunning)
-	assert.Equal(t, []string{"prepare", "start"}, deployer.steps)
-}
-
-func TestCreateLocal_PrepareFailure_DoesNotStart(t *testing.T) {
-	deployer := &fakeDeployer{err: errors.New("image pull failed"), called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
-	assert.Equal(t, []string{"prepare"}, deployer.steps, "pods must not start when the download failed")
-}
-
-func TestCreateLocal_StartFailure_MarksErrorWithoutRoute(t *testing.T) {
-	lite := &mockLiteLLMClient{}
-	deployer := &fakeDeployer{startErr: errors.New("no spyre cards"), called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, lite)
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	comp := awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
-	assert.Contains(t, comp.Message, "no spyre cards")
-	assert.Empty(t, lite.registeredModels, "no route must be registered when the pods failed to start")
-}
-
-func TestCreateLocal_Panic_MarksError(t *testing.T) {
-	deployer := &fakeDeployer{panics: true, called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	comp := awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
-	assert.Contains(t, comp.Message, "panic")
-}
-
-func TestCreateLocal_ProbeFailure_RollsBackRouteAndMarksError(t *testing.T) {
-	lite := &mockLiteLLMClient{probeErr: errors.New("connection refused")}
-	deployer := &fakeDeployer{endpoint: "llm-abc:8000", called: make(chan struct{})}
-	svc, repo := newLocalService(t, deployer, lite)
-
-	resp, err := svc.CreateModel(context.Background(), localRequest())
-	require.NoError(t, err)
-
-	comp := awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusError)
-	assert.Contains(t, comp.Message, "connection refused")
-	assert.Equal(t, []string{"ibm-granite/granite-3.3-8b-instruct"}, lite.deregisteredModels)
-	assert.Len(t, lite.deregisteredPass, 1)
-}
-
 // The plan phase must reject bad requests before any row exists or any background work starts.
-func TestCreateLocal_PlanFailures_HaveNoSideEffects(t *testing.T) {
+func TestCreateModel_Local_Rejected(t *testing.T) {
 	tests := []struct {
-		name   string
-		mutate func(*apimodels.CreateModelRequest)
-		code   int
+		name string
+		// setup customises the service and the fake deployer before the request is made.
+		setup    func(svc *ModelService, d *fakeDeployer)
+		mutate   func(*apimodels.CreateModelRequest)
+		wantCode int
+		wantMsg  string
 	}{
-		{"unknown provider", func(r *apimodels.CreateModelRequest) { r.ProviderID = "nope" }, http.StatusNotFound},
-		{"params not matching schema", func(r *apimodels.CreateModelRequest) { r.Params = map[string]any{"bogus": "x"} }, http.StatusBadRequest},
-		{"unknown worker", func(r *apimodels.CreateModelRequest) { r.WorkerSelector = "ghost" }, http.StatusNotFound},
+		{
+			name:     "unknown provider",
+			mutate:   func(r *apimodels.CreateModelRequest) { r.ProviderID = "nope" },
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "params not matching schema",
+			mutate:   func(r *apimodels.CreateModelRequest) { r.Params = map[string]any{"bogus": "x"} },
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "unknown worker",
+			mutate:   func(r *apimodels.CreateModelRequest) { r.WorkerSelector = "ghost" },
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name: "worker runtime cannot be resolved",
+			setup: func(svc *ModelService, _ *fakeDeployer) {
+				svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) {
+					return nil, errors.New("worker is not connected")
+				})
+			},
+			wantCode: http.StatusUnprocessableEntity,
+			wantMsg:  "worker is not connected",
+		},
+		{
+			name: "runtime without a registered deployer",
+			setup: func(svc *ModelService, _ *fakeDeployer) {
+				svc.planner.WithDeployers(map[runtimeTypes.RuntimeType]types.Deployer{})
+			},
+			wantCode: http.StatusUnprocessableEntity,
+			wantMsg:  "unsupported",
+		},
+		{
+			name: "worker cannot host the model",
+			setup: func(_ *ModelService, d *fakeDeployer) {
+				d.checkErr = errors.New("insufficient Spyre cards: required 1, available 0")
+			},
+			wantCode: http.StatusUnprocessableEntity,
+			wantMsg:  "insufficient Spyre cards",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			deployer := &fakeDeployer{called: make(chan struct{})}
-			svc, repo := newLocalService(t, deployer, &mockLiteLLMClient{})
+			lite := &mockLiteLLMClient{}
+			svc, repo := newLocalService(t, deployer, lite)
+
+			if tt.setup != nil {
+				tt.setup(svc, deployer)
+			}
 
 			req := localRequest()
-			tt.mutate(&req)
+			if tt.mutate != nil {
+				tt.mutate(&req)
+			}
 
 			resp, err := svc.CreateModel(context.Background(), req)
 			assert.Nil(t, resp)
-			requireStatus(t, err, tt.code, "")
-			assert.Empty(t, repo.components, "plan failures must not write a component row")
+			requireStatus(t, err, tt.wantCode, tt.wantMsg)
+
+			assert.Empty(t, repo.components, "rejected requests must not write a component row")
+			assert.Empty(t, deployer.steps, "nothing may be pulled, downloaded or started")
+			assert.Empty(t, lite.registeredModels, "no route may be registered")
 
 			select {
 			case <-deployer.called:
@@ -817,83 +730,262 @@ func TestCreateLocal_PlanFailures_HaveNoSideEffects(t *testing.T) {
 	}
 }
 
-func TestPlanLocal_UnsupportedRuntime(t *testing.T) {
-	svc, repo := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
-	svc.planner.WithDeployers(map[runtimeTypes.RuntimeType]types.Deployer{}) // e.g. OpenShift: no deployer registered
+// A local deployment runs in the background: Downloading (Prepare) -> Deploying (Start) -> Running,
+// or Error from whichever phase failed. A route is registered only once the pods are up.
+func TestCreateModel_Local_Lifecycle(t *testing.T) {
+	const wantModel = "hosted_vllm/ibm-granite/granite-3.3-8b-instruct"
 
-	_, err := svc.CreateModel(context.Background(), localRequest())
-	requireStatus(t, err, http.StatusUnprocessableEntity, "unsupported")
-	assert.Empty(t, repo.components)
-}
+	tests := []struct {
+		name     string
+		deployer fakeDeployer
+		lite     *mockLiteLLMClient
 
-// A worker that cannot host the model (e.g. no free Spyre cards) rejects the request during
-// planning: nothing is written, downloaded or registered.
-func TestCreateModel_Local_WorkerCannotHost_RejectedBeforeInsert(t *testing.T) {
-	deployer := &fakeDeployer{
-		checkErr: errors.New("insufficient Spyre cards: required 1, available 0"),
-		called:   make(chan struct{}),
+		wantStatus  dbmodels.ComponentStatus
+		wantMessage string
+		// wantEndpoints is the endpoint list stored on the row; nil skips the check.
+		wantEndpoints []map[string]any
+		wantSteps     []string
+		// wantHistory is the status history after the insert; nil skips the check.
+		wantHistory []dbmodels.ComponentStatus
+		// wantAPIBase is the route's api_base; empty means no route may be registered.
+		wantAPIBase  string
+		wantTokenize string
+		// wantDeregistered is the route rolled back after the registration.
+		wantDeregistered     []string
+		wantDeregisteredPass int
+	}{
+		{
+			name:     "success registers a route to the pod and marks running",
+			deployer: fakeDeployer{endpoint: "llm-abc:8000"},
+			lite:     &mockLiteLLMClient{},
+
+			wantStatus:    dbmodels.ComponentStatusRunning,
+			wantEndpoints: []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
+			wantSteps:     []string{"prepare", "start"},
+			wantHistory:   []dbmodels.ComponentStatus{dbmodels.ComponentStatusDeploying, dbmodels.ComponentStatusRunning},
+			wantAPIBase:   "http://llm-abc:8000/v1",
+			wantTokenize:  "http://llm-abc:8000/tokenize",
+		},
+		{
+			// The DB records the pod's own address while LiteLLM is pointed at the egress the
+			// control plane can reach (the two differ for a pod on a remote worker).
+			name:     "route goes through the egress while the row keeps the pod address",
+			deployer: fakeDeployer{endpoint: "llm-abc:8000", egress: "egress.cp:8080"},
+			lite:     &mockLiteLLMClient{},
+
+			wantStatus:    dbmodels.ComponentStatusRunning,
+			wantEndpoints: []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
+			wantSteps:     []string{"prepare", "start"},
+			wantAPIBase:   "http://egress.cp:8080/v1",
+			wantTokenize:  "http://egress.cp:8080/tokenize",
+		},
+		{
+			name:     "download failure is an error that never reaches deploying and never starts pods",
+			deployer: fakeDeployer{err: errors.New("image pull failed")},
+			lite:     &mockLiteLLMClient{},
+
+			wantStatus:  dbmodels.ComponentStatusError,
+			wantMessage: "image pull failed",
+			wantSteps:   []string{"prepare"},
+			wantHistory: []dbmodels.ComponentStatus{dbmodels.ComponentStatusError},
+		},
+		{
+			name:     "start failure is an error without a route",
+			deployer: fakeDeployer{startErr: errors.New("no spyre cards")},
+			lite:     &mockLiteLLMClient{},
+
+			wantStatus:  dbmodels.ComponentStatusError,
+			wantMessage: "no spyre cards",
+			wantSteps:   []string{"prepare", "start"},
+		},
+		{
+			name:     "panic in the deployer is recovered as an error",
+			deployer: fakeDeployer{panics: true},
+			lite:     &mockLiteLLMClient{},
+
+			wantStatus:  dbmodels.ComponentStatusError,
+			wantMessage: "panic",
+			wantSteps:   []string{"prepare"},
+		},
+		{
+			name:     "failed probe rolls the route back and marks error",
+			deployer: fakeDeployer{endpoint: "llm-abc:8000"},
+			lite:     &mockLiteLLMClient{probeErr: errors.New("connection refused")},
+
+			wantStatus:           dbmodels.ComponentStatusError,
+			wantMessage:          "connection refused",
+			wantSteps:            []string{"prepare", "start"},
+			wantAPIBase:          "http://llm-abc:8000/v1",
+			wantDeregistered:     []string{"ibm-granite/granite-3.3-8b-instruct"},
+			wantDeregisteredPass: 1,
+		},
 	}
-	lite := &mockLiteLLMClient{}
-	svc, repo := newLocalService(t, deployer, lite)
 
-	_, err := svc.CreateModel(context.Background(), localRequest())
-	requireStatus(t, err, http.StatusUnprocessableEntity, "insufficient Spyre cards")
-	assert.Empty(t, repo.components, "no row may be written for a request the worker cannot host")
-	assert.Empty(t, deployer.steps, "nothing may be pulled, downloaded or started")
-	assert.Empty(t, lite.registeredModels)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deployer := tt.deployer
+			deployer.called = make(chan struct{})
+			svc, repo := newLocalService(t, &deployer, tt.lite)
+
+			resp, err := svc.CreateModel(context.Background(), localRequest())
+			require.NoError(t, err)
+
+			comp := awaitStatus(t, repo, resp.ID, tt.wantStatus)
+			assert.Contains(t, comp.Message, tt.wantMessage)
+			assert.Equal(t, tt.wantSteps, deployer.steps)
+
+			if tt.wantEndpoints != nil {
+				assert.Equal(t, tt.wantEndpoints, comp.Endpoints)
+			}
+
+			if tt.wantHistory != nil {
+				id, err := uuid.Parse(resp.ID)
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantHistory, repo.statusHistory(id),
+					"the insert already recorded Downloading; the executor records the later phases")
+			}
+
+			if tt.wantAPIBase == "" {
+				assert.Empty(t, tt.lite.registeredModels, "no route may be registered")
+			} else {
+				require.Len(t, tt.lite.registeredModels, 1)
+				assert.Equal(t, wantModel, tt.lite.registeredModels[0].LiteLLMParams["model"])
+				assert.Equal(t, tt.wantAPIBase, tt.lite.registeredModels[0].LiteLLMParams["api_base"])
+				assert.Equal(t, []string{resp.ID}, tt.lite.registeredModels[0].LiteLLMParams["tags"])
+			}
+
+			// The tokenize passthrough is registered only after the health probe succeeds.
+			if tt.wantTokenize == "" {
+				assert.Empty(t, tt.lite.registeredPass, "no tokenize passthrough may be registered")
+			} else {
+				require.Len(t, tt.lite.registeredPass, 1)
+				assert.Equal(t, tt.wantTokenize, tt.lite.registeredPass[0].Target)
+			}
+
+			assert.Equal(t, tt.wantDeregistered, tt.lite.deregisteredModels)
+			assert.Len(t, tt.lite.deregisteredPass, tt.wantDeregisteredPass)
+		})
+	}
 }
 
-func TestPlanLocal_ValuesCarryParamsAndModel(t *testing.T) {
-	svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
+func TestPlanLocal(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*apimodels.CreateModelRequest)
+		check  func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan)
+	}{
+		{
+			name:   "params and model reach the template values",
+			mutate: func(r *apimodels.CreateModelRequest) { r.Params = map[string]any{"apiKey": "k"} },
+			check: func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan) {
+				assert.Equal(t, "k", plan.Values["apiKey"])
+				assert.Equal(t, req.Model, plan.Values["model"], "the requested model must reach the templates as .Values.model")
+				assert.NotEqual(t, uuid.Nil, plan.ComponentID)
+			},
+		},
+		{
+			// The component row keeps the non-sensitive params; credentials only reach the pod via the values.
+			name: "component metadata keeps the profile and strips sensitive params",
+			mutate: func(r *apimodels.CreateModelRequest) {
+				r.Profile = "small"
+				r.Params = map[string]any{"apiKey": "k"}
+			},
+			check: func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan) {
+				assert.NotContains(t, plan.ComponentMetadata, "apiKey", "params are not stored flat")
+				assert.Empty(t, plan.ComponentMetadata["params"], "credentials must never be persisted")
+				assert.Equal(t, req.Model, plan.ComponentMetadata["model"])
+				assert.Equal(t, "small", plan.ComponentMetadata["profile"])
+			},
+		},
+	}
 
-	req := localRequest()
-	req.Params = map[string]any{"apiKey": "k"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
 
-	plan, err := svc.planner.PlanLocal(context.Background(), req)
-	require.NoError(t, err)
+			req := localRequest()
+			tt.mutate(&req)
 
-	assert.Equal(t, "k", plan.Values["apiKey"])
-	assert.Equal(t, req.Model, plan.Values["model"], "the requested model must reach the templates as .Values.model")
-	assert.NotEqual(t, uuid.Nil, plan.ComponentID)
+			plan, err := svc.planner.PlanLocal(context.Background(), req)
+			require.NoError(t, err)
+
+			tt.check(t, req, plan)
+		})
+	}
 }
 
-// The component row keeps the non-sensitive params; credentials only reach the pod via the values.
-func TestPlanLocal_ComponentMetadataStripsSensitive(t *testing.T) {
-	svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
+func TestPlanRemote(t *testing.T) {
+	tests := []struct {
+		name string
+		req  apimodels.CreateModelRequest
+		// wantParams are the non-sensitive params persisted on the connector.
+		wantParams map[string]any
+		// wantGateway are the params the gateway receives, credentials included.
+		wantGateway      map[string]any
+		wantComponent    string
+		wantTokenizeURL  string
+		wantNotPersisted string
+	}{
+		{
+			name: "openai-style provider derives the tokenize target from api_base",
+			req: apimodels.CreateModelRequest{
+				DeploymentType: apimodels.DeploymentTypeRemote,
+				ComponentType:  "embedding",
+				Name:           "remote-vllm",
+				ProviderID:     "hosted_vllm",
+				Model:          "ibm/embed",
+				Params:         map[string]any{"api_base": "http://vllm.example.com:8000/v1", "api_key": "secret"},
+			},
+			wantParams:       map[string]any{"api_base": "http://vllm.example.com:8000/v1"},
+			wantGateway:      map[string]any{"api_key": "secret"},
+			wantComponent:    "embedding",
+			wantTokenizeURL:  "http://vllm.example.com:8000/tokenize",
+			wantNotPersisted: "api_key",
+		},
+		{
+			name: "watsonx uses its fixed tokenization endpoint",
+			req: apimodels.CreateModelRequest{
+				DeploymentType: apimodels.DeploymentTypeRemote,
+				ComponentType:  "llm",
+				Name:           "remote-watsonx",
+				ProviderID:     "watsonx",
+				Model:          "ibm/granite-4-h-small",
+				Params:         watsonxParams(),
+			},
+			wantParams: map[string]any{
+				"api_base":   "https://us-south.ml.cloud.ibm.com",
+				"project_id": "123e4567-e89b-12d3-a456-426614174000",
+			},
+			wantGateway:      map[string]any{"api_key": validWatsonxKey},
+			wantComponent:    "llm",
+			wantTokenizeURL:  "http://localhost:4000/watsonx/ml/v1/text/tokenization",
+			wantNotPersisted: "api_key",
+		},
+	}
 
-	req := localRequest()
-	req.Profile = "small"
-	req.Params = map[string]any{"apiKey": "k"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
 
-	plan, err := svc.planner.PlanLocal(context.Background(), req)
-	require.NoError(t, err)
+			plan, err := svc.planner.PlanRemote(context.Background(), tt.req)
+			require.NoError(t, err)
 
-	assert.NotContains(t, plan.ComponentMetadata, "apiKey", "params are not stored flat")
-	assert.Empty(t, plan.ComponentMetadata["params"], "credentials must never be persisted")
-	assert.Equal(t, req.Model, plan.ComponentMetadata["model"])
-	assert.Equal(t, "small", plan.ComponentMetadata["profile"])
-}
+			params, ok := plan.Metadata["params"].(map[string]any)
+			require.True(t, ok, "provider params are nested under \"params\"")
+			assert.NotContains(t, params, tt.wantNotPersisted)
 
-func TestPlanRemote_StripsSensitiveFromMetadata(t *testing.T) {
-	svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
+			for k, v := range tt.wantParams {
+				assert.Equal(t, v, params[k], "persisted param %q", k)
+			}
 
-	plan, err := svc.planner.PlanRemote(context.Background(), apimodels.CreateModelRequest{
-		DeploymentType: apimodels.DeploymentTypeRemote,
-		ComponentType:  "embedding",
-		Name:           "remote-vllm",
-		ProviderID:     "hosted_vllm",
-		Model:          "ibm/embed",
-		Params:         map[string]any{"api_base": "http://vllm.example.com:8000/v1", "api_key": "secret"},
-	})
-	require.NoError(t, err)
+			for k, v := range tt.wantGateway {
+				assert.Equal(t, v, plan.Route.Params[k], "the gateway still receives %q", k)
+			}
 
-	params, ok := plan.Metadata["params"].(map[string]any)
-	require.True(t, ok, "provider params are nested under \"params\"")
-	assert.NotContains(t, params, "api_key")
-	assert.Equal(t, "http://vllm.example.com:8000/v1", params["api_base"])
-	assert.Equal(t, "embedding", plan.Metadata["component_type"])
-	assert.Equal(t, "secret", plan.Route.Params["api_key"], "the gateway still receives the credential")
-	assert.Equal(t, "http://vllm.example.com:8000/tokenize", plan.Route.TokenizeURL)
+			assert.Equal(t, tt.wantComponent, plan.Metadata["component_type"])
+			assert.Equal(t, tt.wantTokenizeURL, plan.Route.TokenizeURL)
+		})
+	}
 }
 
 func requireStatus(t *testing.T, err error, code int, msgContains string) {
