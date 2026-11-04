@@ -195,6 +195,9 @@ spec:
     - name: litellm-secret
       secret:
         secretName: litellm-secret
+        items:
+          - key: master-key
+            path: master-key
     - name: catalog-bundles
       persistentVolumeClaim:
         claimName: catalog-bundles

@@ -19,11 +19,11 @@ import (
 func validateLocalParams(ctx context.Context, provider *catalog.CatalogProvider, req apimodels.CreateModelRequest) (*types.Component, map[string]bool, error) {
 	comp, err := provider.LoadComponent(req.ComponentType, req.ProviderID)
 	if err != nil {
-		return nil, nil, NotFound("provider %q not found for component type %q", req.ProviderID, req.ComponentType)
+		return nil, nil, validators.NotFound("provider %q not found for component type %q", req.ProviderID, req.ComponentType)
 	}
 
 	if comp.Category != catalogconstants.ComponentCategoryModels || comp.LiteLLM == nil {
-		return nil, nil, BadRequest("provider %q of component type %q does not serve models", req.ProviderID, req.ComponentType)
+		return nil, nil, validators.BadRequest("provider %q of component type %q does not serve models", req.ProviderID, req.ComponentType)
 	}
 
 	schema, err := provider.GetComponentProviderParams(ctx, req.ComponentType, req.ProviderID)
@@ -43,7 +43,7 @@ func validateLocalParams(ctx context.Context, provider *catalog.CatalogProvider,
 // to the gateway but never persisted.
 func validateRemoteParams(ctx context.Context, provider *catalog.CatalogProvider, req apimodels.CreateModelRequest) (map[string]bool, error) {
 	if !provider.ConnectorExists(catalogconstants.ConnectorTypeModels, req.ProviderID) {
-		return nil, NotFound("provider %q not found for remote models", req.ProviderID)
+		return nil, validators.NotFound("provider %q not found for remote models", req.ProviderID)
 	}
 
 	raw, err := provider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeModels, req.ProviderID)
@@ -58,7 +58,7 @@ func validateRemoteParams(ctx context.Context, provider *catalog.CatalogProvider
 
 	// ValidateParams skips empty params, so required fields would go unchecked without this guard.
 	if len(schema) > 0 && len(req.Params) == 0 {
-		return nil, BadRequest("params is required for provider %q", req.ProviderID)
+		return nil, validators.BadRequest("params is required for provider %q", req.ProviderID)
 	}
 
 	if err := validators.ValidateParams(req.Params, schema, fmt.Sprintf("provider %q", req.ProviderID)); err != nil {

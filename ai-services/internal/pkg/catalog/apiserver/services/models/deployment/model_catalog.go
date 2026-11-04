@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
 // modelCatalog answers "what is a model?" from the catalog instead of hard-coded type names:
@@ -45,7 +46,7 @@ func (m modelCatalog) validateType(componentType string) error {
 		return nil
 	}
 
-	return BadRequest("invalid component_type %q; must be one of: %s", componentType, strings.Join(valid, ", "))
+	return validators.BadRequest("invalid component_type %q; must be one of: %s", componentType, strings.Join(valid, ", "))
 }
 
 // modeFor returns the LiteLLM model mode declared by the providers of a component type. It lets

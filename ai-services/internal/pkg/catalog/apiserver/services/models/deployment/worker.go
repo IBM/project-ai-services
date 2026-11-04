@@ -7,6 +7,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -33,7 +34,7 @@ func (r *workerResolver) resolve(ctx context.Context, selector string) (types.Wo
 
 	if r.repo == nil {
 		if explicit {
-			return types.WorkerTarget{}, NotFound("worker %q not found", selector)
+			return types.WorkerTarget{}, validators.NotFound("worker %q not found", selector)
 		}
 
 		return types.WorkerTarget{Name: name}, nil
@@ -46,18 +47,18 @@ func (r *workerResolver) resolve(ctx context.Context, selector string) (types.Wo
 
 	if worker == nil {
 		if explicit {
-			return types.WorkerTarget{}, NotFound("worker %q not found", selector)
+			return types.WorkerTarget{}, validators.NotFound("worker %q not found", selector)
 		}
 
 		return types.WorkerTarget{Name: name}, nil
 	}
 
 	if explicit && worker.Status != dbmodels.WorkerStatusReady {
-		return types.WorkerTarget{}, BadRequest("worker %q is not ready", selector)
+		return types.WorkerTarget{}, validators.BadRequest("worker %q is not ready", selector)
 	}
 
 	if r.runtimeType(worker) == string(dbmodels.WorkerRuntimeTypeOpenShift) {
-		return types.WorkerTarget{}, BadRequest("models are unsupported on openshift runtime")
+		return types.WorkerTarget{}, validators.BadRequest("models are unsupported on openshift runtime")
 	}
 
 	return types.WorkerTarget{ID: &worker.ID, Name: worker.Name}, nil

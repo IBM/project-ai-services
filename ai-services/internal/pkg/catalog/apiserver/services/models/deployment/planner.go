@@ -15,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -107,12 +108,12 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 	// instead of leaving a component row stuck in Deploying.
 	rt, err := p.workers.runtime(target.Name)
 	if err != nil {
-		return nil, Unprocessable("cannot reach worker %q: %v", target.Name, err)
+		return nil, validators.Unprocessable("cannot reach worker %q: %v", target.Name, err)
 	}
 
 	deployer, ok := p.deployers[rt.Type()]
 	if !ok {
-		return nil, Unprocessable("models are unsupported on %s runtime", rt.Type())
+		return nil, validators.Unprocessable("models are unsupported on %s runtime", rt.Type())
 	}
 
 	// Scope the catalog to the worker's actual runtime so templates, metadata, and values
@@ -149,7 +150,7 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 	// Reject what the worker cannot host (e.g. not enough free Spyre cards) now, instead of after
 	// the row is written and the images and weights are downloaded.
 	if err := deployer.Check(ctx, plan); err != nil {
-		return nil, Unprocessable("worker %q cannot host this model: %v", target.Name, err)
+		return nil, validators.Unprocessable("worker %q cannot host this model: %v", target.Name, err)
 	}
 
 	return plan, nil

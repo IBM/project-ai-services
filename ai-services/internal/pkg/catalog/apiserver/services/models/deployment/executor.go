@@ -11,6 +11,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -129,7 +130,7 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 	if err := e.gateway.register(ctx, plan.Route); err != nil {
 		var probeErr *probeError
 		if errors.As(err, &probeErr) {
-			return Unprocessable("%s", probeErr.Error())
+			return validators.Unprocessable("%s", probeErr.Error())
 		}
 
 		return err

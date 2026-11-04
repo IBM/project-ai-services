@@ -6,7 +6,7 @@ import (
 	"regexp"
 
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
-	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
 const (
@@ -21,13 +21,13 @@ var nameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 func validateCreateRequest(req apimodels.CreateModelRequest) error {
 	switch {
 	case !req.DeploymentType.IsValid():
-		return modelsvc.BadRequest("invalid deployment_type %q; must be 'local' or 'remote'", req.DeploymentType)
+		return validators.BadRequest("invalid deployment_type %q; must be 'local' or 'remote'", req.DeploymentType)
 	case !validName(req.Name):
-		return modelsvc.BadRequest("name must be between %d and %d characters and contain only letters, numbers, hyphens, and underscores", minNameLen, maxNameLen)
+		return validators.BadRequest("name must be between %d and %d characters and contain only letters, numbers, hyphens, and underscores", minNameLen, maxNameLen)
 	case req.ProviderID == "":
-		return modelsvc.BadRequest("provider_id is required")
+		return validators.BadRequest("provider_id is required")
 	case req.Model == "":
-		return modelsvc.BadRequest("model is required")
+		return validators.BadRequest("model is required")
 	default:
 		return nil
 	}
@@ -45,7 +45,7 @@ func (s *ModelService) ensureNameAvailable(ctx context.Context, name string) err
 		return fmt.Errorf("failed to check component name uniqueness: %w", err)
 	}
 	if component != nil {
-		return modelsvc.Conflict("A model with name %q already exists", name)
+		return validators.Conflict("A model with name %q already exists", name)
 	}
 
 	connector, err := s.connectorRepo.GetByName(ctx, name)
@@ -53,7 +53,7 @@ func (s *ModelService) ensureNameAvailable(ctx context.Context, name string) err
 		return fmt.Errorf("failed to check connector name uniqueness: %w", err)
 	}
 	if connector != nil {
-		return modelsvc.Conflict("A connector with name %q already exists", name)
+		return validators.Conflict("A connector with name %q already exists", name)
 	}
 
 	return nil
