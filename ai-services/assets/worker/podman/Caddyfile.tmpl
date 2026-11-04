@@ -16,16 +16,20 @@
 	tls internal
 }
 
-# Private ingress for service-to-service traffic (mTLS enforced)
+# Private ingress for service-to-service traffic (mTLS enforced).
+# Serves the worker certificate and trusts only client certificates signed by the
+# platform CA. tls.key.pem is the plaintext copy of the encrypted tls.key, written
+# by the worker process once it has registered with the control plane.
 :9443 {
 	handle /internal/health {
 		# @id internal-private-health
 		respond "OK" 200
 	}
 
-	tls internal {
+	tls /data/worker-tls/tls.crt /data/worker-tls/tls.key.pem {
 		client_auth {
 			mode require_and_verify
+			trusted_ca_cert_file /data/worker-tls/ca.crt
 		}
 	}
 }
