@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import shlex
 import stat
 from pathlib import Path
 from typing import Iterator, Optional
@@ -107,11 +108,18 @@ class SSHScanner(BaseScanner):
 
     @retry_on_transient_error(max_retries=3, initial_delay=1.0, retryable_exceptions=(IOError, OSError, paramiko.SSHException), allow_local_retries=True)
     def _remote_md5(self, remote_file_path: str) -> str:
+        # Quote the path as a single POSIX shell word so filenames containing
+        # special characters are handled correctly. Non-absolute paths are
+        # prefixed with "./" so a leading "-" is not parsed as an option.
+        safe_path = remote_file_path
+        if not safe_path.startswith("/"):
+            safe_path = "./" + safe_path
+        quoted = shlex.quote(safe_path)
         cmd = (
-            f'md5sum "{remote_file_path}" 2>/dev/null || '
-            f'openssl dgst -md5 "{remote_file_path}" 2>/dev/null || '
-            f'md5 "{remote_file_path}" 2>/dev/null || '
-            f'csum -h MD5 "{remote_file_path}" 2>/dev/null || '
+            f'md5sum {quoted} 2>/dev/null || '
+            f'openssl dgst -md5 {quoted} 2>/dev/null || '
+            f'md5 {quoted} 2>/dev/null || '
+            f'csum -h MD5 {quoted} 2>/dev/null || '
             f'{{ echo "No md5 utility found" >&2; exit 127; }}'
         )
         _, stdout, stderr = self._ssh.exec_command(cmd)

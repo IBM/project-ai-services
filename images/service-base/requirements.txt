@@ -35,3 +35,5 @@ SQLAlchemy==2.0.49
 
 # SFTP scanner dependencies
 paramiko==5.0.0
+
+httptools==0.9.0

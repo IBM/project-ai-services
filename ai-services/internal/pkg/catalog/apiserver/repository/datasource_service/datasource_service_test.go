@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/stretchr/testify/assert"
@@ -91,4 +92,39 @@ func TestDisconnectDatasourcesFromApplication_OwnershipCheck(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusForbidden, valErr.Code)
 	assert.Equal(t, "user does not own this application", valErr.Message)
+}
+
+// mockConnectorRepoForTest embeds the interface so only GetByIDs needs to be implemented.
+type mockConnectorRepoForTest struct {
+	dbrepo.ConnectorRepository
+}
+
+func (m *mockConnectorRepoForTest) GetByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]dbmodels.Connector, error) {
+	return nil, nil
+}
+
+func TestBuildDatasourcePage_PreservesOrder(t *testing.T) {
+	const n = 5
+
+	order := make([]string, n)
+	for i := range order {
+		order[i] = uuid.New().String()
+	}
+
+	// Insert in the reverse of the expected order. Go map iteration for small maps is a
+	// rotation of insertion order, so ranging over the map can never reproduce `order`.
+	serviceItems := make(map[string]apimodels.ConnectorItem, n)
+	for i := n - 1; i >= 0; i-- {
+		serviceItems[order[i]] = apimodels.ConnectorItem{ID: order[i]}
+	}
+
+	svc := &DatasourceService{connectorRepo: &mockConnectorRepoForTest{}}
+
+	items, err := svc.buildDatasourcePage(context.Background(), "http://service", serviceItems, order)
+	require.NoError(t, err)
+	require.Len(t, items, n)
+
+	for i, item := range items {
+		assert.Equal(t, order[i], item.ID)
+	}
 }
