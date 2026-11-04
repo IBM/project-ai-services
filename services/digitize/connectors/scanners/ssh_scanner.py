@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import shlex
 import stat
 from pathlib import Path
 from typing import Iterator, Optional
@@ -107,7 +108,13 @@ class SSHScanner(BaseScanner):
         return local_md5
 
     def _remote_md5(self, remote_file_path: str) -> str:
-        _, stdout, stderr = self._ssh.exec_command(f'md5sum "{remote_file_path}"')
+        # Quote the path as a single POSIX shell word so filenames containing
+        # special characters are handled correctly. Non-absolute paths are
+        # prefixed with "./" so a leading "-" is not parsed as an option.
+        safe_path = remote_file_path
+        if not safe_path.startswith("/"):
+            safe_path = "./" + safe_path
+        _, stdout, stderr = self._ssh.exec_command(f"md5sum {shlex.quote(safe_path)}")
         output = stdout.read().decode().strip()
         error_output = stderr.read().decode().strip()
         exit_status = stdout.channel.recv_exit_status()

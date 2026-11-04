@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import shlex
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -748,7 +750,7 @@ class TestSSHScannerScan:
             "/data/manual.docx": "11223344aabbccdd11223344aabbccdd",
         }
         def exec_command_side_effect(cmd):
-            path = cmd.split('"')[1]
+            path = shlex.split(cmd)[1]
             md5 = _md5s.get(path, "deadbeefdeadbeefdeadbeefdeadbeef")
             stdout = MagicMock()
             stdout.read.return_value = f"{md5}  {path}".encode()
@@ -813,7 +815,7 @@ class TestSSHScannerScan:
             "/data/subdir/nested.docx": "1111222233334444aaaabbbbccccdddd",
         }
         def exec_command_side_effect(cmd):
-            path = cmd.split('"')[1]
+            path = shlex.split(cmd)[1]
             md5 = _md5s.get(path, "deadbeefdeadbeefdeadbeefdeadbeef")
             stdout = MagicMock()
             stdout.read.return_value = f"{md5}  {path}".encode()
@@ -908,6 +910,67 @@ class TestSSHScannerScan:
 
         result = scanner.scan()
         assert len(result) == 1  # second entry with duplicate md5 is dropped
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            'a"b;c#d.pdf',
+            "a$(b).pdf",
+            "a`b`.pdf",
+            "a'b'.pdf",
+            "a\nb.pdf",
+            "a b.pdf",
+        ],
+    )
+    def test_remote_md5_quotes_special_characters(self, filename, tmp_path):
+        """Filenames with special characters are passed as a single argument."""
+        out_file = tmp_path / "arg.txt"
+        scanner = _make_ssh_scanner()
+        captured = {}
+
+        def exec_command_side_effect(cmd):
+            captured["cmd"] = cmd
+            stdout = MagicMock()
+            stdout.read.return_value = b"d41d8cd98f00b204e9800998ecf8427e  x"
+            stdout.channel.recv_exit_status.return_value = 0
+            stderr = MagicMock()
+            stderr.read.return_value = b""
+            return None, stdout, stderr
+
+        mock_ssh = MagicMock()
+        mock_ssh.exec_command.side_effect = exec_command_side_effect
+        scanner._ssh = mock_ssh
+
+        path = "/data/" + filename
+        scanner._remote_md5(path)
+
+        # Run the generated command in a real shell with md5sum stubbed out
+        # as a function that records the argument it receives.
+        script = (
+            'md5sum() { printf %s "$1" > "$OUT"; }\n' + captured["cmd"]
+        )
+        subprocess.run(
+            ["/bin/sh", "-c", script],
+            cwd=tmp_path,
+            env={"OUT": str(out_file), "PATH": "/usr/bin:/bin"},
+            check=False,
+        )
+        assert out_file.read_text() == path
+
+    def test_remote_md5_relative_path_prefixed(self):
+        scanner = _make_ssh_scanner()
+        mock_ssh = MagicMock()
+        stdout = MagicMock()
+        stdout.read.return_value = b"d41d8cd98f00b204e9800998ecf8427e  x"
+        stdout.channel.recv_exit_status.return_value = 0
+        stderr = MagicMock()
+        stderr.read.return_value = b""
+        mock_ssh.exec_command.return_value = (None, stdout, stderr)
+        scanner._ssh = mock_ssh
+
+        scanner._remote_md5("-evil.pdf")
+        cmd = mock_ssh.exec_command.call_args[0][0]
+        assert shlex.split(cmd)[1] == "./-evil.pdf"
 
 
 # ---------------------------------------------------------------------------
