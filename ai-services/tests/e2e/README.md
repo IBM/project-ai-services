@@ -121,6 +121,7 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `digitization-tests` | Digitization API coverage against an existing or suite-created application |
 | `similarity-tests` | Similarity API health and `/v1/similarity-search` behavior |
 | `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
+| `translation-tests` | Translation service lifecycle plus synchronous (`POST /v1/translate`) and asynchronous jobs (`/v1/translate/jobs`) API coverage (requires `--template=translate`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
 | `mcp-tests` | **Umbrella label** — all MCP sidecar tests (health checks + tools/list). Podman-only. |
 | `mcp-health` | MCP `/health` endpoint checks for chat, digitize, and similarity sidecars |
@@ -177,6 +178,74 @@ go run github.com/onsi/ginkgo/v2/ginkgo \
 ginkgo -r -tags "$TAGS" \
   --label-filter="summarization-tests" --timeout=3h \
   ./tests/e2e -- --app-name=<appname> --template=summarize --runtime=podman
+```
+
+## Running Translation Tests
+
+The Translation Tests validate the `translate-api` service end-to-end, covering the synchronous API (`POST /v1/translate`) and the asynchronous jobs API (`POST/GET/DELETE /v1/translate/jobs`, job listing, result and download). They also cover negative paths such as invalid languages, unsupported file types, oversized uploads and unknown job IDs.
+
+The translation specs are registered inside the main ordered E2E lifecycle, so the `translation-tests` label selects the lifecycle steps (catalog, login, application create/delete, logout) together with the translation specs. They only run with `--template=translate`; with any other template they are skipped.
+
+### Prerequisites
+
+- A ppc64le/Spyre host with Podman, or an existing translate application (see the second mode below).
+- `CATALOG_PASSWORD` must be set — the suite runs `catalog login` automatically.
+- Registry credentials must be set when the suite deploys the application itself (`REGISTRY_URL`, `REGISTRY_USER_NAME`, `REGISTRY_PASSWORD`).
+- The Ginkgo CLI version must match the module version (`v2.28.1`) if you use the `ginkgo` command.
+
+### Environment variables
+
+```bash
+# Required
+export CATALOG_PASSWORD="<your-catalog-admin-password>"
+
+# Required only for a from-scratch run (suite pulls the images)
+export REGISTRY_URL="icr.io"
+export REGISTRY_USER_NAME="<your-icr-username>"
+export REGISTRY_PASSWORD="<your-icr-api-key>"
+
+# Optional — defaults to true (self-signed certs)
+export CATALOG_INSECURE=true
+
+# Optional — skip URL discovery and point the specs at an already reachable translate-api
+# export TRANSLATE_URL="https://<host>:<port>"
+```
+
+### Run modes
+
+| Mode | When to use | Flags |
+|---|---|---|
+| From scratch | The suite cleans up any leftover applications and catalog, redeploys the catalog, creates a `translate-app-<runID>` application, runs all specs, then deletes the application. | `-template=translate` |
+| Existing application | Validate an application that is already running. The suite does **not** create or delete it and skips the pre-run cleanup. | `-app-name=<appname> -template=translate` |
+
+> **Note:** `make test` does not forward `-template`, so run the translation tests with `go test` or the `ginkgo` CLI as shown below.
+
+### Commands to Run Translation Tests
+
+Run these from the `ai-services/` directory.
+
+```bash
+export CATALOG_PASSWORD="<your-catalog-admin-password>"
+
+# From scratch — deploys a fresh translate application, runs the specs, then deletes it
+go test ./tests/e2e/... -v \
+  -template translate -runtime podman \
+  --ginkgo.label-filter="translation-tests" \
+  -timeout 90m
+
+# Against an existing application
+go test ./tests/e2e/... -v \
+  -app-name <appname> -template translate -runtime podman \
+  --ginkgo.label-filter="translation-tests" \
+  -timeout 90m
+
+# Using ginkgo CLI directly
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+ginkgo -r --procs=1 -tags "$TAGS" \
+  --label-filter="translation-tests" \
+  --timeout=90m --v \
+  ./tests/e2e \
+  -- -app-name=<appname> -template=translate -runtime=podman
 ```
 
 ## Running Entity Extraction Tests
