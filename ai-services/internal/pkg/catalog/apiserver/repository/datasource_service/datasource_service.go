@@ -1184,7 +1184,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 	// connectors that are still linked to this application in the DB.
 	dropped := filterServiceDeletionPendingDatasources(servicePage.ByID, allConnectorIDs)
 
-	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID)
+	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID, servicePage.Order)
 	if err != nil {
 		return nil, err
 	}
@@ -1283,9 +1283,10 @@ func filterServiceDeletionPendingDatasources(serviceItems map[string]apimodels.C
 }
 
 // buildDatasourcePage bulk-fetches the DB connector rows for the IDs in serviceItems and
-// assembles the slice of ApplicationDatasourceItem for the current page.
+// assembles the slice of ApplicationDatasourceItem for the current page, preserving the
+// status-based order given by order (IDs absent from serviceItems are skipped).
 // IDs in serviceItems are UUIDs stored by this service, so no parse-error handling is needed.
-func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL string, serviceItems map[string]apimodels.ConnectorItem) ([]apimodels.ApplicationDatasourceItem, error) {
+func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL string, serviceItems map[string]apimodels.ConnectorItem, order []string) ([]apimodels.ApplicationDatasourceItem, error) {
 	ids := make([]uuid.UUID, 0, len(serviceItems))
 	for idStr := range serviceItems {
 		ids = append(ids, uuid.MustParse(idStr))
@@ -1297,7 +1298,12 @@ func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL str
 	}
 
 	items := make([]apimodels.ApplicationDatasourceItem, 0, len(serviceItems))
-	for _, serviceConn := range serviceItems {
+	for _, idStr := range order {
+		serviceConn, ok := serviceItems[idStr]
+		if !ok {
+			continue
+		}
+
 		item := s.buildApplicationDatasourceItem(uuid.MustParse(serviceConn.ID), serviceConn, baseURL, dbConnectors)
 		items = append(items, *item)
 	}
