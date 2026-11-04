@@ -1208,7 +1208,8 @@ There is no endpoint to read a key back. Internal consumer services do not call 
     "name": "Granite 3.3 8B Instruct",
     "component_type": {
       "id": "llm",
-      "name": "Large Language Model"
+      "name": "Large Language Model (LLM)",
+      "short_name": "LLM"
     },
     "certified_by": "IBM",
     "description": "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. Powers tasks such as prompt-based reasoning, summarization, and answer generation.",
@@ -1235,7 +1236,8 @@ There is no endpoint to read a key back. Internal consumer services do not call 
     "name": "Granite Embedding 278M Multilingual",
     "component_type": {
       "id": "embedding",
-      "name": "Embedding Model"
+      "name": "Embedding Model",
+      "short_name": "Embedding"
     },
     "certified_by": "IBM",
     "description": "Multilingual document embedding model for semantic search and retrieval.",
@@ -1252,7 +1254,8 @@ There is no endpoint to read a key back. Internal consumer services do not call 
     "name": "BGE Reranker v2 M3",
     "component_type": {
       "id": "reranker",
-      "name": "Reranker Model"
+      "name": "Reranker Model",
+      "short_name": "Reranker"
     },
     "certified_by": "BAAI",
     "description": "A multilingual cross-encoder reranker model used to improve retrieval quality by scoring and ranking candidate documents.",
@@ -1294,7 +1297,8 @@ There is no endpoint to read a key back. Internal consumer services do not call 
   "name": "Granite 3.3 8B Instruct",
   "component_type": {
     "id": "llm",
-    "name": "Large Language Model"
+    "name": "Large Language Model (LLM)",
+    "short_name": "LLM"
   },
   "certified_by": "IBM",
   "license": "Apache 2.0",
@@ -1365,7 +1369,8 @@ There is no endpoint to read a key back. Internal consumer services do not call 
   "name": "Granite 3.3 8B Instruct",
   "component_type": {
     "id": "llm",
-    "name": "Large Language Model"
+    "name": "Large Language Model (LLM)",
+    "short_name": "LLM"
   },
   "providers": [
     {
@@ -1564,7 +1569,8 @@ The `modelmanager` package validates `params` against the provider's parameter s
       "name": "granite-llm",
       "component_type": {
         "id": "llm",
-        "name": "Large Language Model"
+        "name": "Large Language Model (LLM)",
+        "short_name": "LLM"
       },
       "provider": { "id": "vllm-spyre", "name": "vLLM (Spyre)" },
       "worker": { "name": "lpar-1", "runtime_type": "podman" },
@@ -1592,7 +1598,8 @@ The `modelmanager` package validates `params` against the provider's parameter s
       "name": "prod-watsonx",
       "component_type": {
         "id": "llm",
-        "name": "Large Language Model"
+        "name": "Large Language Model (LLM)",
+        "short_name": "LLM"
       },
       "provider": { "id": "watsonx", "name": "WatsonX" },
       "worker": null,
@@ -1664,7 +1671,8 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `
   "name": "granite-llm",
   "component_type": {
     "id": "llm",
-    "name": "Large Language Model"
+    "name": "Large Language Model (LLM)",
+    "short_name": "LLM"
   },
   "provider": { "id": "vllm-spyre", "name": "vLLM (Spyre)" },
   "worker": { "name": "lpar-1", "runtime_type": "podman" },
@@ -1706,7 +1714,8 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `
   "name": "prod-watsonx",
   "component_type": {
     "id": "llm",
-    "name": "Large Language Model"
+    "name": "Large Language Model (LLM)",
+    "short_name": "LLM"
   },
   "provider": { "id": "watsonx", "name": "WatsonX" },
   "worker": null,
@@ -1797,7 +1806,8 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `
   "name": "prod-watsonx",
   "component_type": {
     "id": "llm",
-    "name": "Large Language Model"
+    "name": "Large Language Model (LLM)",
+    "short_name": "LLM"
   },
   "provider": { "id": "watsonx", "name": "WatsonX" },
   "status": "connected",
