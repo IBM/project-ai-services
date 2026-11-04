@@ -24,16 +24,20 @@
 	tls internal
 }
 
-# Private ingress for service-to-service traffic (mTLS enforced)
+# Private ingress for service-to-service traffic (mTLS enforced).
+# Serves the gateway server certificate and trusts only client certificates signed
+# by the platform CA. server.key.pem is the plaintext copy of the encrypted
+# server.key, written by the catalog process before this pod starts.
 :9443 {
 	handle /internal/health {
 		# @id internal-private-health
 		respond "OK" 200
 	}
 
-	tls internal {
+	tls /data/gateway-pki/server.crt /data/gateway-pki/server.key.pem {
 		client_auth {
 			mode require_and_verify
+			trusted_ca_cert_file /data/gateway-pki/ca.crt
 		}
 	}
 }

@@ -1,20 +1,28 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
@@ -516,9 +524,218 @@ func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 		t.Fatalf("ParseCertificate: %v", err)
 	}
 
-	expectedSANs := []string{"catalog-worker-gateway.example.com", workerconstants.PodmanGatewayPodName}
-	if len(leaf.DNSNames) != len(expectedSANs) || leaf.DNSNames[0] != expectedSANs[0] || leaf.DNSNames[1] != expectedSANs[1] {
+	expectedSANs := []string{"catalog-worker-gateway.example.com", workerconstants.PodmanGatewayPodName, "example.com"}
+	if !slices.Equal(leaf.DNSNames, expectedSANs) {
 		t.Errorf("expected SANs %v; got DNSNames=%v", expectedSANs, leaf.DNSNames)
+	}
+}
+
+// TestGenerateAndPersistPKI_PlaintextServerKey checks that Caddy gets a readable,
+// unencrypted copy of the server key, and that the encrypted original is untouched.
+func TestGenerateAndPersistPKI_PlaintextServerKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
+	t.Setenv(workerconstants.MTLSEncryptionKeyEnv, "test-mtls-secret")
+
+	if _, err := generateAndPersistPKI(t.Context(), dir, "podman"); err != nil {
+		t.Fatalf("generateAndPersistPKI: %v", err)
+	}
+
+	assertPlaintextKeyMatchesCert(t, dir)
+
+	enc, err := os.ReadFile(filepath.Join(dir, "server.key"))
+	if err != nil {
+		t.Fatalf("read server.key: %v", err)
+	}
+	if bytes.Contains(enc, []byte("PRIVATE KEY")) {
+		t.Error("server.key must stay encrypted at rest")
+	}
+}
+
+// TestLoadPKI_RefreshesPlaintextServerKey checks the plaintext copy is rewritten on
+// restart, so a deleted or stale copy never leaves Caddy without a key.
+func TestLoadPKI_RefreshesPlaintextServerKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
+	t.Setenv(workerconstants.MTLSEncryptionKeyEnv, "test-mtls-secret")
+
+	if _, err := generateAndPersistPKI(t.Context(), dir, "podman"); err != nil {
+		t.Fatalf("generateAndPersistPKI: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, ServerKeyPlaintextFile)); err != nil {
+		t.Fatalf("remove plaintext key: %v", err)
+	}
+
+	if _, err := loadOrGeneratePKI(t.Context(), dir, "podman"); err != nil {
+		t.Fatalf("loadOrGeneratePKI: %v", err)
+	}
+
+	assertPlaintextKeyMatchesCert(t, dir)
+}
+
+func assertPlaintextKeyMatchesCert(t *testing.T, dir string) {
+	t.Helper()
+
+	certPEM, err := os.ReadFile(filepath.Join(dir, "server.crt"))
+	if err != nil {
+		t.Fatalf("read server.crt: %v", err)
+	}
+	keyPath := filepath.Join(dir, ServerKeyPlaintextFile)
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", ServerKeyPlaintextFile, err)
+	}
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		t.Errorf("%s does not pair with server.crt: %v", ServerKeyPlaintextFile, err)
+	}
+
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("stat %s: %v", ServerKeyPlaintextFile, err)
+	}
+	if info.Mode().Perm()&0o044 != 0o044 {
+		t.Errorf("%s mode %v: must be group/other readable for the Caddy user", ServerKeyPlaintextFile, info.Mode().Perm())
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat %s: %v", dir, err)
+	}
+	if dirInfo.Mode().Perm()&0o055 != 0o055 {
+		t.Errorf("dir mode %v: must be traversable by the Caddy user", dirInfo.Mode().Perm())
+	}
+}
+
+func TestGenerateServerCert_ServerAndClientAuth(t *testing.T) {
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("generateCA: %v", err)
+	}
+	_, certDER, err := generateServerCert(caCert, caKey, []string{"cp.example.com"})
+	if err != nil {
+		t.Fatalf("generateServerCert: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageServerAuth, "cp.example.com")
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageClientAuth, "")
+}
+
+func TestSignWorkerCSR_ServerAndClientAuthWithSAN(t *testing.T) {
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("generateCA: %v", err)
+	}
+
+	sans := []string{"w1.example.com"}
+	certPEM, _, _, err := signWorkerCSR(makeTestCSR(t), "w1", sans, caCert, caKey)
+	if err != nil {
+		t.Fatalf("signWorkerCSR: %v", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	if leaf.Subject.CommonName != "w1" {
+		t.Errorf("CN = %q, want w1 (the worker recovers its name from it)", leaf.Subject.CommonName)
+	}
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageServerAuth, "w1.example.com")
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageClientAuth, "")
+}
+
+// TestSignWorkerCSR_IgnoresCSRSANs guards the trust boundary: the gateway decides
+// the SANs, so a worker cannot request another node's name in its CSR.
+func TestSignWorkerCSR_IgnoresCSRSANs(t *testing.T) {
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("generateCA: %v", err)
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject:  pkix.Name{Organization: []string{"system:workers"}},
+		DNSNames: []string{"control-plane.example.com"},
+	}, key)
+	if err != nil {
+		t.Fatalf("CreateCertificateRequest: %v", err)
+	}
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+
+	certPEM, _, _, err := signWorkerCSR(csrPEM, "w1", []string{"w1.example.com"}, caCert, caKey)
+	if err != nil {
+		t.Fatalf("signWorkerCSR: %v", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	if !slices.Equal(leaf.DNSNames, []string{"w1.example.com"}) {
+		t.Errorf("DNSNames = %v, want only the gateway-chosen SAN", leaf.DNSNames)
+	}
+}
+
+func TestWorkerCertDNSNames(t *testing.T) {
+	meta := map[string]string{workerconstants.MetaKeyDomainSuffix: "10.0.0.5.nip.io"}
+
+	tests := []struct {
+		name    string
+		runtime types.RuntimeType
+		meta    map[string]string
+		want    []string
+	}{
+		{"podman with domain suffix", types.RuntimeTypePodman, meta, []string{"w1.10.0.0.5.nip.io"}},
+		{"podman without domain suffix", types.RuntimeTypePodman, map[string]string{}, nil},
+		{"podman nil metadata", types.RuntimeTypePodman, nil, nil},
+		{"openshift is not supported yet", types.RuntimeTypeOpenShift, meta, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := workerCertDNSNames("w1", tc.runtime, tc.meta)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("workerCertDNSNames = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// assertVerifiesFor fails unless leaf chains to ca for the given usage and, when
+// host is non-empty, is valid for that hostname.
+func assertVerifiesFor(t *testing.T, leaf, ca *x509.Certificate, usage x509.ExtKeyUsage, host string) {
+	t.Helper()
+
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{usage}, DNSName: host}); err != nil {
+		t.Errorf("cert does not verify for usage %v host %q: %v", usage, host, err)
+	}
+}
+
+// TestCatalogCaddyfile_PrivateIngressUsesGatewayPKI keeps the Caddyfile paths in
+// step with the file names the gateway writes.
+func TestCatalogCaddyfile_PrivateIngressUsesGatewayPKI(t *testing.T) {
+	raw, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile.tmpl")
+	if err != nil {
+		t.Fatalf("read catalog Caddyfile: %v", err)
+	}
+
+	want := []string{
+		filepath.Join(workerconstants.GatewayPKIDir, "server.crt"),
+		filepath.Join(workerconstants.GatewayPKIDir, ServerKeyPlaintextFile),
+		"trusted_ca_cert_file " + filepath.Join(workerconstants.GatewayPKIDir, "ca.crt"),
+	}
+	for _, s := range want {
+		if !strings.Contains(string(raw), s) {
+			t.Errorf("catalog Caddyfile.tmpl does not reference %q", s)
+		}
 	}
 }
 
