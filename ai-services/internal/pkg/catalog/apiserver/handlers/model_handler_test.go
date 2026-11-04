@@ -30,10 +30,7 @@ func (m *mockModelService) CreateModel(ctx context.Context, req models.CreateMod
 		return m.createModelFunc(ctx, req)
 	}
 
-	return &models.CreateModelResponse{
-		ID:             "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
-		DeploymentType: req.DeploymentType,
-	}, nil
+	return &models.CreateModelResponse{ID: "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"}, nil
 }
 
 func setupModelRouter(svc repository.ModelServiceInterface, tm *auth.TokenManager) *gin.Engine {
@@ -57,10 +54,7 @@ func TestCreateModel_Local_Success(t *testing.T) {
 			assert.Equal(t, "compact-4k", req.Profile)
 			assert.Equal(t, "user-123", req.CreatedBy)
 
-			return &models.CreateModelResponse{
-				ID:             "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
-				DeploymentType: models.DeploymentTypeLocal,
-			}, nil
+			return &models.CreateModelResponse{ID: "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"}, nil
 		},
 	}
 
@@ -96,6 +90,7 @@ func TestCreateModel_Local_Success(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Equal(t, "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f", resp.ID)
+	assert.NotContains(t, w.Body.String(), "deployment_type", "the response carries only the id")
 }
 
 func TestCreateModel_Remote_Success(t *testing.T) {
@@ -107,10 +102,7 @@ func TestCreateModel_Remote_Success(t *testing.T) {
 			assert.Equal(t, "watsonx", req.ProviderID)
 			assert.Equal(t, "ibm/granite-4-h-small", req.Model)
 
-			return &models.CreateModelResponse{
-				ID:             "c1d2e3f4-a5b6-7890-cdef-123456789abc",
-				DeploymentType: models.DeploymentTypeRemote,
-			}, nil
+			return &models.CreateModelResponse{ID: "c1d2e3f4-a5b6-7890-cdef-123456789abc"}, nil
 		},
 	}
 

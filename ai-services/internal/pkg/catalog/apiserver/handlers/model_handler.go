@@ -73,7 +73,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		return
 	}
 
-	c.JSON(createModelStatus(resp.DeploymentType), resp)
+	c.JSON(createModelStatus(req.DeploymentType), resp)
 }
 
 // createModelStatus maps a deployment type to its success status: local deployments continue

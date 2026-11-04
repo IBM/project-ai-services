@@ -95,10 +95,7 @@ func (s *ModelService) createLocalModel(ctx context.Context, req apimodels.Creat
 	// while keeping its values, such as the request ID used by the logger.
 	go s.executor.ExecuteLocal(context.WithoutCancel(ctx), plan)
 
-	return &apimodels.CreateModelResponse{
-		ID:             plan.ComponentID.String(),
-		DeploymentType: apimodels.DeploymentTypeLocal,
-	}, nil
+	return &apimodels.CreateModelResponse{ID: plan.ComponentID.String()}, nil
 }
 
 func (s *ModelService) insertComponent(ctx context.Context, plan *types.LocalPlan) error {
@@ -132,8 +129,5 @@ func (s *ModelService) createRemoteModel(ctx context.Context, req apimodels.Crea
 		return nil, err
 	}
 
-	return &apimodels.CreateModelResponse{
-		ID:             plan.ConnectorID.String(),
-		DeploymentType: apimodels.DeploymentTypeRemote,
-	}, nil
+	return &apimodels.CreateModelResponse{ID: plan.ConnectorID.String()}, nil
 }

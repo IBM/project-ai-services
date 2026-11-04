@@ -32,6 +32,5 @@ type CreateModelRequest struct {
 
 // CreateModelResponse represents the response body returned for POST /api/v1/models.
 type CreateModelResponse struct {
-	ID             string         `json:"id"`
-	DeploymentType DeploymentType `json:"deployment_type"`
+	ID string `json:"id"`
 }

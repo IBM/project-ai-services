@@ -370,7 +370,6 @@ func TestCreateModel_Remote_WatsonX_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.NotEmpty(t, resp.ID)
-	assert.Equal(t, apimodels.DeploymentTypeRemote, resp.DeploymentType)
 
 	// Verify LiteLLM registration
 	require.Len(t, mockLite.registeredModels, 1)
@@ -519,7 +518,6 @@ func TestCreateModel_Local_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.NotEmpty(t, resp.ID)
-	assert.Equal(t, apimodels.DeploymentTypeLocal, resp.DeploymentType)
 
 	comp, ok := compRepo.components["local-granite"]
 	require.True(t, ok)

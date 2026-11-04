@@ -217,8 +217,6 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelResponse:
     properties:
-      deployment_type:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType'
       id:
         type: string
     type: object
