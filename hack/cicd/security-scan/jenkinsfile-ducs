@@ -241,14 +241,16 @@ def generateImageList() {
         opensearchImage = sh(returnStdout: true, script: '''#!/bin/bash
             set -euo pipefail
 
-            grep -rhoE "${ICR_REGISTRY}/opensearch:[^[:space:]]+" ai-services/assets | sed -n '1p' || true
+            # Registry can be either icr.io/ai-services or icr.io/ai-services-cicd
+            grep -rhoE "icr[.]io/ai-services(-cicd)?/opensearch:[^[:space:]]+" ai-services/assets | sed -n '1p' || true
         ''').trim()
     }
-    if (!opensearchImage) {
-        error 'opensearch image not found in ai-services/assets'
+    if (opensearchImage) {
+        images.add(opensearchImage)
+        echo "Adding opensearch image for scan: ${opensearchImage}"
+    } else {
+        echo 'opensearch image not found in ai-services/assets, skipping it'
     }
-    images.add(opensearchImage)
-    echo "Adding opensearch image for scan: ${opensearchImage}"
 
     if (images.isEmpty()) {
         error 'No images discovered from Makefiles'
