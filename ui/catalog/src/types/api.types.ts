@@ -595,3 +595,54 @@ export interface ConnectDatasourceError {
 export interface ConnectDatasourcesResponse {
   errors: ConnectDatasourceError[];
 }
+
+// ─── Models API types ─────────────────────────────────────────────────────────
+
+export interface ModelProvider {
+  id: string;
+  name: string;
+}
+
+export interface ModelWorker {
+  name: string;
+  runtime_type: string;
+}
+
+export interface ModelProfileParams {
+  resources?: {
+    memory?: number;
+    accelerators?: Record<string, number>;
+  };
+  maxModelLen?: number;
+  maxBatchSize?: number;
+  shmSize?: string;
+}
+
+export interface ModelProfile {
+  id: string;
+  name: string;
+  description: string;
+  params?: ModelProfileParams;
+}
+
+export interface ModelDeployment {
+  id: string;
+  deployment_type: "local" | "remote";
+  name: string;
+  component_type: string;
+  provider: ModelProvider;
+  worker: ModelWorker | null;
+  model: string;
+  profile: ModelProfile | null;
+  api_base?: string;
+  project_id?: string;
+  status: string;
+  connected_services: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ModelDeploymentsListResponse {
+  data: ModelDeployment[];
+  pagination: PaginationMetadata;
+}
