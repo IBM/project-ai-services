@@ -18,6 +18,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -224,6 +225,36 @@ func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
 	return provider
 }
 
+func TestCreateModel_OpenShiftControlPlane_FailsFast(t *testing.T) {
+	prev := vars.RuntimeFactory
+	vars.RuntimeFactory = runtime.NewRuntimeFactory(runtimeTypes.RuntimeTypeOpenShift)
+	t.Cleanup(func() { vars.RuntimeFactory = prev })
+
+	svc := NewModelService(
+		newMockComponentRepo(),
+		newMockConnectorRepo(),
+		nil,
+		nil,
+		setupTestCatalogProvider(t),
+		&mockLiteLLMClient{},
+	)
+
+	for _, dt := range []apimodels.DeploymentType{apimodels.DeploymentTypeLocal, apimodels.DeploymentTypeRemote} {
+		t.Run(string(dt), func(t *testing.T) {
+			req := validRequest()
+			req.DeploymentType = dt
+
+			resp, err := svc.CreateModel(context.Background(), req)
+			assert.Nil(t, resp)
+
+			var valErr *validators.ValidationError
+			require.ErrorAs(t, err, &valErr)
+			assert.Equal(t, http.StatusBadRequest, valErr.Code)
+			assert.Contains(t, valErr.Message, "models are unsupported on openshift runtime")
+		})
+	}
+}
+
 func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 	compRepo := newMockComponentRepo()
 	connRepo := newMockConnectorRepo()
@@ -277,21 +308,15 @@ func TestCreateModel_Validation_InvalidFields(t *testing.T) {
 		&mockLiteLLMClient{},
 	)
 
-	// Invalid deployment_type
+	// Invalid component_type
 	req := apimodels.CreateModelRequest{
-		DeploymentType: "cloud",
-		ComponentType:  "llm",
+		DeploymentType: "local",
+		ComponentType:  "database",
 		Name:           "test-model",
 		ProviderID:     "vllm-cpu",
 		Model:          "ibm-granite/granite-3.3-8b-instruct",
 	}
 	_, err := svc.CreateModel(context.Background(), req)
-	assert.Error(t, err)
-
-	// Invalid component_type
-	req.DeploymentType = "local"
-	req.ComponentType = "database"
-	_, err = svc.CreateModel(context.Background(), req)
 	assert.Error(t, err)
 
 	// Invalid name

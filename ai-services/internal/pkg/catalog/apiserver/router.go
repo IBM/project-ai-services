@@ -48,9 +48,7 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg, workerRepo, vars.RuntimeFactory.GetRuntimeType(), workerGatewayPort), auth)
 	registerDatasourceRoutes(v1, datasourceH, auth)
 	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
-	if modelService != nil {
-		registerModelRoutes(v1, handlers.NewModelHandler(modelService), auth)
-	}
+	registerModelRoutes(v1, handlers.NewModelHandler(modelService), auth)
 
 	return router
 }

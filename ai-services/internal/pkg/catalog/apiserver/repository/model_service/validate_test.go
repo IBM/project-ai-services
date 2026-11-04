@@ -2,7 +2,6 @@ package modelservice
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -28,12 +27,7 @@ func TestValidateCreateRequest(t *testing.T) {
 		wantMsg string
 	}{
 		{"valid", func(*apimodels.CreateModelRequest) {}, ""},
-		{"bad deployment type", func(r *apimodels.CreateModelRequest) { r.DeploymentType = "cloud" }, "deployment_type"},
-		{"name too short", func(r *apimodels.CreateModelRequest) { r.Name = "ab" }, "name must be"},
-		{"name too long", func(r *apimodels.CreateModelRequest) { r.Name = strings.Repeat("a", 101) }, "name must be"},
-		{"name bad chars", func(r *apimodels.CreateModelRequest) { r.Name = "a!b" }, "name must be"},
-		{"missing provider", func(r *apimodels.CreateModelRequest) { r.ProviderID = "" }, "provider_id"},
-		{"missing model", func(r *apimodels.CreateModelRequest) { r.Model = "" }, "model is required"},
+		{"name bad chars", func(r *apimodels.CreateModelRequest) { r.Name = "a!b" }, "name must contain only"},
 	}
 
 	for _, tt := range tests {

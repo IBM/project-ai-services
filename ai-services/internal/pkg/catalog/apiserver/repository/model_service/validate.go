@@ -9,32 +9,21 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
-const (
-	minNameLen = 3
-	maxNameLen = 100
-)
-
 var nameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
-// validateCreateRequest performs the provider-independent checks on a create request.
-// It is a pure function so it can be tested without any service dependencies.
+// validateCreateRequest performs the checks on a create request that are not expressed as
+// binding tags on apimodels.CreateModelRequest (required fields, name length and deployment_type
+// are enforced there). It is a pure function so it can be tested without any service dependencies.
 func validateCreateRequest(req apimodels.CreateModelRequest) error {
-	switch {
-	case !req.DeploymentType.IsValid():
-		return validators.BadRequest("invalid deployment_type %q; must be 'local' or 'remote'", req.DeploymentType)
-	case !validName(req.Name):
-		return validators.BadRequest("name must be between %d and %d characters and contain only letters, numbers, hyphens, and underscores", minNameLen, maxNameLen)
-	case req.ProviderID == "":
-		return validators.BadRequest("provider_id is required")
-	case req.Model == "":
-		return validators.BadRequest("model is required")
-	default:
-		return nil
+	if !nameRegex.MatchString(req.Name) {
+		return validators.BadRequest("name must contain only letters, numbers, hyphens, and underscores")
 	}
-}
 
-func validName(name string) bool {
-	return len(name) >= minNameLen && len(name) <= maxNameLen && nameRegex.MatchString(name)
+	// TODO(model-validation): validate req.Model against the catalog models (the upcoming
+	// GET /catalog/models listing, or the findModel helper) and reject unknown models with a 400.
+	// The model is no longer part of the provider params schema, so nothing validates it today.
+
+	return nil
 }
 
 // ensureNameAvailable rejects a name already used by a local model (component) or a remote

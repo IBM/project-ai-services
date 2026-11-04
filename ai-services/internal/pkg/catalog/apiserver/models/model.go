@@ -10,14 +10,9 @@ const (
 	DeploymentTypeRemote DeploymentType = "remote"
 )
 
-// IsValid reports whether d is a supported deployment type.
-func (d DeploymentType) IsValid() bool {
-	return d == DeploymentTypeLocal || d == DeploymentTypeRemote
-}
-
 // CreateModelRequest represents the request payload for POST /api/v1/models.
 type CreateModelRequest struct {
-	DeploymentType DeploymentType `json:"deployment_type" binding:"required"`
+	DeploymentType DeploymentType `json:"deployment_type" binding:"required,oneof=local remote"`
 	// ComponentType is a catalog component type whose providers have `category: models`
 	// (see the component's metadata.yaml); the valid values come from the catalog.
 	ComponentType  string         `json:"component_type" binding:"required"`
