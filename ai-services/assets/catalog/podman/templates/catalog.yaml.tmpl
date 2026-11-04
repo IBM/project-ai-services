@@ -125,6 +125,8 @@ spec:
           value: "{{ .CaddyAdminURL }}"
         - name: CADDY_HTTPS_PORT
           value: "{{ .Values.caddy.httpsPort }}"
+        - name: CADDY_PRIVATE_INGRESS_PORT
+          value: "{{ .Values.caddy.privateIngressPort }}"
         - name: DOMAIN_SUFFIX
           value: "{{ .DomainSuffix }}"
         - name: WORKER_GATEWAY_PORT

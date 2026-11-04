@@ -67,12 +67,6 @@ export const HEADERS: DataTableHeader[] = [
   { header: "", key: "actions" },
 ];
 
-// Status column sort order — offline floats to the top
-export const STATUS_SORT_ORDER: Record<ConnectorStatus, number> = {
-  offline: 1,
-  connected: 2,
-};
-
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
@@ -118,9 +112,7 @@ function ownCases(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         ...setLoading(false),
-        rowsData: [...action.payload.rows].sort(
-          (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
-        ),
+        rowsData: action.payload.rows,
         totalItems: action.payload.pagination.total_items,
         fetchError: null,
       };

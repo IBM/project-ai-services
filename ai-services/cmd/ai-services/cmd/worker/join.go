@@ -14,6 +14,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -28,8 +29,9 @@ import (
 )
 
 const (
-	defaultJoinHTTPSPort = 443
-	hostAliasSplitParts  = 2
+	defaultJoinHTTPSPort          = 443
+	defaultJoinPrivateIngressPort = 9443
+	hostAliasSplitParts           = 2
 )
 
 // Flag variables for the worker join command.
@@ -40,12 +42,13 @@ var (
 	skipChecks  []string
 
 	// podman flags.
-	baseDir     string
-	httpsPort   int
-	domainName  string
-	sslCertPath string
-	sslKeyPath  string
-	addHosts    []string
+	baseDir            string
+	httpsPort          int
+	privateIngressPort int
+	domainName         string
+	sslCertPath        string
+	sslKeyPath         string
+	addHosts           []string
 )
 
 var cmd = &cobra.Command{
@@ -109,7 +112,7 @@ func joinPreRunE(cmd *cobra.Command, _ []string) error {
 func buildWorkerFlagValidator() *flagvalidator.FlagValidator {
 	return cmdcommon.BuildFlagValidator(
 		[]string{constants.TokenFlag},
-		[]string{constants.BaseDirFlag, constants.HTTPSPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag},
+		[]string{constants.BaseDirFlag, constants.HTTPSPortFlag, constants.PrivateIngressPortFlag, constants.DomainNameFlag, constants.SSLCertFlag, constants.SSLKeyFlag},
 		nil,
 	)
 }
@@ -119,8 +122,12 @@ func validateWorkerJoinFlags(ctx context.Context) error {
 		return fmt.Errorf("required flag(s) %q not set", constants.TokenFlag)
 	}
 
-	if httpsPort < 1 || httpsPort > 65535 {
-		return fmt.Errorf("invalid HTTPS port %d: must be between 1 and 65535", httpsPort)
+	if err := cmdcommon.ValidatePort(httpsPort, "HTTPS port"); err != nil {
+		return err
+	}
+
+	if err := cmdcommon.ValidatePort(privateIngressPort, "private ingress port"); err != nil {
+		return err
 	}
 
 	if err := utils.ValidateSSLFlags(sslCertPath, sslKeyPath, domainName); err != nil {
@@ -227,18 +234,19 @@ func joinRunE(cmd *cobra.Command, args []string) error {
 			CommonWorkerOptions: workertypes.CommonWorkerOptions{
 				HostAliases: parseAddHosts(addHosts),
 			},
-			BaseDir:     baseDir,
-			HTTPSPort:   httpsPort,
-			DomainName:  domainName,
-			SSLCertPath: sslCertPath,
-			SSLKeyPath:  sslKeyPath,
+			BaseDir:            baseDir,
+			HTTPSPort:          httpsPort,
+			PrivateIngressPort: privateIngressPort,
+			DomainName:         domainName,
+			SSLCertPath:        sslCertPath,
+			SSLKeyPath:         sslKeyPath,
 		},
 		RuntimeType: runtimeType,
 	})
 }
 
 // configureFlags registers the flags shared by the join and grpcstream
-// commands: --token, --runtime, --basedir, --https-port,
+// commands: --token, --runtime, --basedir, --https-port, --private-ingress-port,
 // --ssl-cert, and --ssl-key.
 // requireToken controls whether --token is marked as a required flag.
 func configureFlags(c *cobra.Command, requireToken bool) {
@@ -257,7 +265,7 @@ func configureFlags(c *cobra.Command, requireToken bool) {
 }
 
 func initJoinPodmanFlags(c *cobra.Command) {
-	cmdcommon.ConfigurePodmanDeployFlags(c, &baseDir, &httpsPort, defaultJoinHTTPSPort, &sslCertPath, &sslKeyPath, &domainName)
+	cmdcommon.ConfigurePodmanDeployFlags(c, &baseDir, &httpsPort, defaultJoinHTTPSPort, &privateIngressPort, defaultJoinPrivateIngressPort, &sslCertPath, &sslKeyPath, &domainName)
 
 	c.Flags().StringArrayVar(&addHosts, constants.AddHostFlag, nil,
 		"Add an extra entry to the worker pod's /etc/hosts (repeatable).\n"+
@@ -311,6 +319,12 @@ func grpcStreamRunE(cmd *cobra.Command, args []string) error {
 		// ── Build Caddy proxy router (Podman only) ──────────────────────
 		// Must happen after Setup so the Caddy pod is running and its admin port
 		// is discoverable. For OpenShift workers routes are managed natively.
+		if mock.Enabled() {
+			pr = workercaddy.NewInMemoryProxyRouter()
+
+			break
+		}
+
 		pr, err = workercaddy.NewProxyRouter(ctx)
 		if err != nil {
 			return fmt.Errorf("worker grpcstream: init local Caddy manager: %w", err)
