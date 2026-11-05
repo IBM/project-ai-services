@@ -4,7 +4,7 @@ Database repository layer for Job, Document, Connector, and ConversionTask opera
 Provides CRUD operations with proper error handling and transaction management.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, cast
 from sqlalchemy import select, update, delete, func, or_, and_, exists, case
@@ -24,6 +24,16 @@ from digitize.models import JobStatus, DocStatus
 from digitize.connectors.models import ConnectorStatus, SyncLogStatus, LAST_SYNC_ERROR_PREFIX
 
 logger = get_logger("db_repository")
+
+# Retention period for sync logs and terminal connector jobs.
+SYNC_HISTORY_RETENTION = timedelta(days=1)
+
+_TERMINAL_JOB_STATUSES = (
+    JobStatus.COMPLETED.value,
+    JobStatus.COMPLETED_WITH_ERRORS.value,
+    JobStatus.FAILED.value,
+    JobStatus.CANCELLED.value,
+)
 
 # Sentinel used by update_connector to distinguish "not supplied" from explicit None.
 _UNSET: object = object()
@@ -1385,10 +1395,66 @@ class DatabaseManager:
                 )
                 seq: int = session.execute(stmt).scalar_one()
                 logger.debug(f"insert_sync_log: connector={connector_id!r} seq={seq}")
+
+                # Evict sync logs & terminal connector jobs older than retention window together
+                cutoff = (started_at or datetime.now(timezone.utc)) - SYNC_HISTORY_RETENTION
+                conn_name = session.scalar(select(Connector.name).where(Connector.id == connector_id))
+                if conn_name:
+                    session.execute(
+                        delete(Job).where(
+                            Job.source == JobSource.CONNECTOR.value,
+                            Job.status.in_(_TERMINAL_JOB_STATUSES),
+                            Job.job_name.startswith(f"Connector-{conn_name}-", autoescape=True),
+                            Job.submitted_at < cutoff,
+                        )
+                    )
+                session.execute(
+                    delete(ConnectorSyncLog).where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.started_at < cutoff,
+                    )
+                )
                 return seq
         except SQLAlchemyError as e:
             logger.error(f"DB error in insert_sync_log({connector_id}): {e}", exc_info=True)
             raise
+
+    @staticmethod
+    def prune_all_sync_history(cutoff: Optional[datetime] = None) -> int:
+        """
+        Delete terminal connector jobs and sync logs older than the retention
+        window (1 day) across all connectors. Returns total deleted rows.
+        """
+        try:
+            with get_db_session() as session:
+                cutoff = cutoff or (datetime.now(timezone.utc) - SYNC_HISTORY_RETENTION)
+                job_res = cast(
+                    CursorResult,
+                    session.execute(
+                        delete(Job).where(
+                            Job.source == JobSource.CONNECTOR.value,
+                            Job.status.in_(_TERMINAL_JOB_STATUSES),
+                            Job.submitted_at < cutoff,
+                        )
+                    ),
+                )
+                log_res = cast(
+                    CursorResult,
+                    session.execute(
+                        delete(ConnectorSyncLog).where(
+                            ConnectorSyncLog.started_at < cutoff,
+                        )
+                    ),
+                )
+                total = (job_res.rowcount or 0) + (log_res.rowcount or 0)
+                if total:
+                    logger.info(
+                        f"prune_all_sync_history: evicted {log_res.rowcount} sync log(s) and {job_res.rowcount} job(s)"
+                    )
+                return total
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in prune_all_sync_history: {e}", exc_info=True)
+            return 0
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
