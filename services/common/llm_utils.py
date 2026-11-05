@@ -45,12 +45,29 @@ def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None,
     
     return effective_max_tokens
 
+# Schema the LLM output is constrained to (guided decoding) for table summarization.
+# "summary" comes first so the model writes the summary before it decides on relevance.
+TABLE_SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "decision": {"type": "string", "enum": ["yes", "no"]},
+    },
+    "required": ["summary", "decision"],
+    "additionalProperties": False,
+}
+
+
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024):
     """Combined function to summarize and classify a table in a single LLM call.
 
+    The response is constrained to ``TABLE_SUMMARY_SCHEMA`` via guided decoding, so it is parsed
+    as plain JSON: ``{"summary": "...", "decision": "yes" | "no"}``.
+
     Returns tuple: (summary, decision).
-    Raises on failure so that the retry decorator and the caller can handle it.
+    Raises on failure (including a response that is not valid JSON, e.g. truncated at max_tokens)
+    so that the caller can record the failure.
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
@@ -61,53 +78,45 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
         "temperature": 0,
         "max_tokens": max_tokens,
         "stream": False,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "table_summary", "schema": TABLE_SUMMARY_SCHEMA, "strict": True},
+        },
     }
 
     try:
+        logger.debug(f"Requesting table summary from LLM: model={gen_model}, prompt_chars={len(prompt)}, max_tokens={max_tokens}")
+
         response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.llm.api_key.get_secret_value()))
         response.raise_for_status()
         data = response.json() or {}
-        choices = data.get("choices", [])
-        text = ""
-        if choices:
-            text = (choices[0].get("message", {}).get("content") or "").strip()
+        choice = (data.get("choices") or [{}])[0]
+        text = (choice.get("message", {}).get("content") or "").strip()
+        finish_reason = choice.get("finish_reason")
 
-        # Parse response - handle multi-line summaries
-        summary = ""
-        decision = False
-        lines = text.splitlines()
+        try:
+            parsed = json.loads(text)
+            summary = parsed["summary"].strip()
+            decision = parsed["decision"] == "yes"
+        except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+            logger.error(
+                f"Table LLM response is not the expected JSON (finish_reason={finish_reason}, "
+                f"response_chars={len(text)}): {e}; last 200 chars: {text[-200:]!r}"
+            )
+            raise ValueError(f"Invalid table summary response (finish_reason={finish_reason}): {e}") from e
 
-        # Find Summary: and Decision: lines
-        summary_start = -1
-        decision_line = -1
-
-        for i, line in enumerate(lines):
-            line_lower = line.strip().lower()
-            if line_lower.startswith("summary:"):
-                summary_start = i
-            elif line_lower.startswith("decision:"):
-                decision_line = i
-                decision = "yes" in line_lower
-
-        # Extract summary (everything between "Summary:" and "Decision:")
-        if summary_start >= 0:
-            if decision_line > summary_start:
-                # Summary is between Summary: and Decision:
-                summary_lines = lines[summary_start:decision_line]
-                # Remove "Summary:" prefix from first line
-                summary_lines[0] = summary_lines[0][summary_lines[0].lower().find("summary:") + len("summary:"):].strip()
-                summary = "\n".join(line.strip() for line in summary_lines if line.strip())
-            else:
-                # No decision found, take everything after Summary:
-                summary_lines = lines[summary_start:]
-                summary_lines[0] = summary_lines[0][summary_lines[0].lower().find("summary:") + len("summary:"):].strip()
-                summary = "\n".join(line.strip() for line in summary_lines if line.strip())
+        logger.debug(
+            f"Parsed table LLM response: response_chars={len(text)}, finish_reason={finish_reason}, "
+            f"decision={parsed['decision']!r} -> keep={decision}, summary_chars={len(summary)}, "
+            f"summary_preview={summary[:120]!r}"
+        )
 
         return summary or "No summary.", decision
 
     except Exception as e:
         logger.error(f"Error summarizing/classifying table: {e}")
         raise
+
 
 def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32, stop_event: threading.Event | None = None):
     """Combined function to summarize and classify tables using a single prompt.
@@ -135,7 +144,10 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
     if not all_prompts:
+        logger.debug(f"No tables to summarize for '{doc_path}'")
         return [], [], {}
+
+    logger.debug(f"Summarizing {len(all_prompts)} table chunk(s) for '{doc_path}' (max_tokens={max_tokens})")
 
     results: list[tuple[str, bool]] = [("No summary.", False)] * len(all_prompts)
     summaries: list[str] = []
@@ -159,7 +171,10 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
                 idx = pending.pop(fut)
                 try:
                     results[idx] = fut.result()
-                    logger.debug(f"Summarized table {idx + 1}/{len(all_prompts)} from '{doc_path}'")
+                    logger.debug(
+                        f"Summarized table chunk {idx + 1}/{len(all_prompts)} from '{doc_path}' "
+                        f"(keep={results[idx][1]}, summary_chars={len(results[idx][0])})"
+                    )
                 except Exception as e:
                     error_msg = f"Failed to process table {idx}: {str(e)}"
                     logger.error(error_msg)
@@ -184,6 +199,10 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
         summaries.append(summary)
         decisions.append(decision)
 
+    logger.debug(
+        f"Table summarization done for '{doc_path}': {len(summaries)} chunk(s), "
+        f"{sum(decisions)} kept, {len(failures)} failed"
+    )
     return summaries, decisions, failures
 
 def get_vllm_headers(api_key: str | None = None):
