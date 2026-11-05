@@ -256,7 +256,7 @@ func (h *CatalogHandler) GetCatalogModelByPath(c *gin.Context) {
 // getModelDeployOptions godoc
 //
 //	@Summary		Get model deploy options
-//	@Description	Retrieves the providers (local with hardware profiles, remote connectors) a catalog model can be deployed with. The actual URL is /catalog/models/{model-id}/deploy-options; model IDs contain slashes, so Swagger shows {path} as '<model-id>/deploy-options'.
+//	@Description	Lists the providers a catalog model can be deployed with. Local providers include the model's hardware profiles; remote providers include a link to their settings schema.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth

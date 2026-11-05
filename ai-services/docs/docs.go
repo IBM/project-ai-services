@@ -1637,7 +1637,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves the providers (local with hardware profiles, remote connectors) a catalog model can be deployed with. The actual URL is /catalog/models/{model-id}/deploy-options; model IDs contain slashes, so Swagger shows {path} as '\u003cmodel-id\u003e/deploy-options'.",
+                "description": "Lists the providers a catalog model can be deployed with. Local providers include the model's hardware profiles; remote providers include a link to their settings schema.",
                 "produces": [
                     "application/json"
                 ],

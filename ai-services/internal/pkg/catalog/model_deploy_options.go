@@ -29,6 +29,9 @@ func (p *CatalogProvider) GetModelDeployOptions(ctx context.Context, modelID, pr
 	result := &types.ModelDeployOptions{ID: modelID, Providers: []types.ModelDeployProvider{}}
 	found := false
 
+	// TODO: cache a model-id -> providers index instead of scanning every item's models.yaml per request.
+	// Warm latency is ~2ms currently.
+
 	for _, item := range p.allItems() {
 		model, err := findModel(item, modelID)
 		if err != nil {
