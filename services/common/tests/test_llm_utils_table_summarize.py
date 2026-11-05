@@ -191,8 +191,8 @@ class TestSummarizeAndClassifySingleTable:
         with patch("common.llm_utils.logger") as mock_logger:
             summarize_and_classify_single_table("prompt", "model", "http://llm", 512)
 
-        info_msgs = [c.args[0] for c in mock_logger.info.call_args_list]
-        parsed = [m for m in info_msgs if "Parsed table LLM response" in m]
+        debug_msgs = [c.args[0] for c in mock_logger.debug.call_args_list]
+        parsed = [m for m in debug_msgs if "Parsed table LLM response" in m]
         assert len(parsed) == 1
         assert "decision='yes'" in parsed[0]
         assert "keep=True" in parsed[0]

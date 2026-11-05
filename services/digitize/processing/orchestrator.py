@@ -286,7 +286,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
 
         chunked_tables = []
         tables_chunked_count = 0
-        logger.info(f"Chunking {len(tab_data)} table summaries from '{input_path}' (max_tokens={max_tokens})")
+        logger.debug(f"Chunking {len(tab_data)} table summaries from '{input_path}' (max_tokens={max_tokens})")
 
         if tab_data:
             tab_data_list = list(tab_data.values())
@@ -319,7 +319,7 @@ def chunk_tables(input_path, out_path, emb_endpoint, max_tokens=512, doc_id=None
             json.dump(chunked_tables, f, indent=2)
 
         elapsed = time.time() - t0
-        logger.info(
+        logger.debug(
             f"Chunked {len(tab_data)} table summaries into {len(chunked_tables)} chunks "
             f"({tables_chunked_count} oversized summaries split) in {elapsed:.2f}s"
         )
@@ -498,7 +498,7 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
             stop_event=stop_event,
             table_chunk_max_tokens=settings.digitize.table_chunk_max_tokens,
         )
-        logger.info(f"Table processing for '{doc_path}' produced {table_count} table chunk summaries")
+        logger.debug(f"Table processing for '{doc_path}' produced {table_count} table chunk summaries")
         timings["process_tables"] = process_time
 
         return processed_text_json_path, processed_table_json_path, page_count, table_count, timings, document_language, table_failures
