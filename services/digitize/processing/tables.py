@@ -505,12 +505,23 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         stop_event=stop_event,
     )
 
-    # Chunks whose LLM call failed (e.g. invalid/truncated JSON) fall back to "No summary." and are
-    # discarded; name each one so lost rows can be traced to a chunk.
+    # Chunks whose LLM call failed (e.g. invalid/truncated JSON) have no summary. Rather than losing
+    # their rows, index the chunk's own markdown (it already repeats the caption and header row) in
+    # the summary field and keep the chunk. Name each one so the fallback can be traced.
+    table_summaries = list(table_summaries)
+    decisions = list(decisions)
     for failed_idx, error_msg in sorted(failures.items()):
+        table_summaries[failed_idx] = table_markdowns[failed_idx]
+        decisions[failed_idx] = True
         logger.info(
             f"Table chunk {failed_idx + 1}/{len(table_markdowns)} of table {table_group_ids[failed_idx]} "
-            f"(page {table_page_numbers[failed_idx]}) of '{doc_path}' failed and has no summary: {error_msg}"
+            f"(page {table_page_numbers[failed_idx]}) of '{doc_path}' failed ({error_msg}); "
+            f"using its raw markdown ({len(table_markdowns[failed_idx])} chars) as the summary"
+        )
+    if failures:
+        logger.info(
+            f"Raw-markdown fallback applied to {len(failures)} table chunk(s) of '{doc_path}': "
+            f"chunk numbers {[i + 1 for i in sorted(failures)]}"
         )
 
     # The relevance decision is made per chunk, but a table is either relevant or not. If any
