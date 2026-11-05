@@ -1,4 +1,4 @@
-package deployment
+package helpers
 
 import (
 	"slices"
@@ -10,15 +10,20 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
-// modelCatalog answers "what is a model?" from the catalog instead of hard-coded type names:
+// ModelCatalog answers "what is a model?" from the catalog instead of hard-coded type names:
 // a component type is a model type when its providers declare `category: models` in their
 // metadata.yaml, and the LiteLLM settings come from the provider's `litellm` section.
-type modelCatalog struct {
+type ModelCatalog struct {
 	provider *catalog.CatalogProvider
 }
 
-// components returns all model-category components, ordered for deterministic lookups.
-func (m modelCatalog) components() []types.Component {
+// New creates a ModelCatalog backed by the given catalog provider.
+func New(provider *catalog.CatalogProvider) ModelCatalog {
+	return ModelCatalog{provider: provider}
+}
+
+// Components returns all model-category components, ordered for deterministic lookups.
+func (m ModelCatalog) Components() []types.Component {
 	comps := m.provider.ListComponentsByCategory(catalogconstants.ComponentCategoryModels)
 	slices.SortFunc(comps, func(a, b types.Component) int {
 		return strings.Compare(a.ComponentType+"/"+a.ID, b.ComponentType+"/"+b.ID)
@@ -27,10 +32,10 @@ func (m modelCatalog) components() []types.Component {
 	return comps
 }
 
-// componentTypes returns the distinct, sorted component types that serve models.
-func (m modelCatalog) componentTypes() []string {
+// ComponentTypes returns the distinct, sorted component types that serve models.
+func (m ModelCatalog) ComponentTypes() []string {
 	var out []string
-	for _, c := range m.components() {
+	for _, c := range m.Components() {
 		if !slices.Contains(out, c.ComponentType) {
 			out = append(out, c.ComponentType)
 		}
@@ -39,9 +44,9 @@ func (m modelCatalog) componentTypes() []string {
 	return out
 }
 
-// validateType rejects a component type that has no model providers in the catalog.
-func (m modelCatalog) validateType(componentType string) error {
-	valid := m.componentTypes()
+// ValidateType rejects a component type that has no model providers in the catalog.
+func (m ModelCatalog) ValidateType(componentType string) error {
+	valid := m.ComponentTypes()
 	if slices.Contains(valid, componentType) {
 		return nil
 	}
@@ -49,17 +54,17 @@ func (m modelCatalog) validateType(componentType string) error {
 	return validators.BadRequest("invalid component_type %q; must be one of: %s", componentType, strings.Join(valid, ", "))
 }
 
-// modeFor returns the LiteLLM model mode declared by the providers of a component type. It lets
+// ModeFor returns the LiteLLM model mode declared by the providers of a component type. It lets
 // remote models, which have no component provider of their own, use the same mode as local ones.
 //
 // It fails with a 400 only when the component type is not a model type. A type whose providers
 // declare no mode yields "", which registers the model with the gateway's default mode.
-func (m modelCatalog) modeFor(componentType string) (string, error) {
-	if err := m.validateType(componentType); err != nil {
+func (m ModelCatalog) ModeFor(componentType string) (string, error) {
+	if err := m.ValidateType(componentType); err != nil {
 		return "", err
 	}
 
-	return modeOf(m.components(), componentType), nil
+	return modeOf(m.Components(), componentType), nil
 }
 
 // modeOf returns the first non-empty LiteLLM model mode declared by a provider of componentType.

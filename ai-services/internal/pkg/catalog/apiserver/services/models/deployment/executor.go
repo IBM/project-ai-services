@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -25,7 +26,7 @@ const (
 type ModelExecutor struct {
 	componentRepo dbrepo.ComponentRepository
 	connectorRepo dbrepo.ConnectorRepository
-	gateway       gateway
+	gateway       litellm.Gateway
 }
 
 // NewModelExecutor creates a new ModelExecutor instance.
@@ -37,7 +38,7 @@ func NewModelExecutor(
 	return &ModelExecutor{
 		componentRepo: componentRepo,
 		connectorRepo: connectorRepo,
-		gateway:       gateway{client: litellmClient},
+		gateway:       litellm.NewGateway(litellmClient),
 	}
 }
 
@@ -84,7 +85,7 @@ func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) err
 
 	// LiteLLM is given the egress address the control plane can reach; the DB records the pod's own.
 	updateLocalRoute(plan, eps.Egress)
-	if err := e.gateway.register(ctx, plan.Route); err != nil {
+	if err := e.gateway.Register(ctx, plan.Route); err != nil {
 		return err
 	}
 
@@ -121,8 +122,8 @@ func updateLocalRoute(plan *types.LocalPlan, egress string) {
 // ExecuteRemote runs a remote plan synchronously: add the LiteLLM route, verify connectivity and
 // persist a connector. Any failure rolls the route back. A connectivity failure is reported as 422.
 func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePlan) error {
-	if err := e.gateway.register(ctx, plan.Route); err != nil {
-		var probeErr *probeError
+	if err := e.gateway.Register(ctx, plan.Route); err != nil {
+		var probeErr *litellm.ProbeError
 		if errors.As(err, &probeErr) {
 			return validators.Unprocessable("%s", probeErr.Error())
 		}
@@ -140,7 +141,7 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 		Metadata:  plan.Metadata,
 	}
 	if err := e.connectorRepo.Insert(ctx, connector); err != nil {
-		e.gateway.deregister(ctx, plan.Route)
+		e.gateway.Deregister(ctx, plan.Route)
 
 		return fmt.Errorf("failed to insert connector: %w", err)
 	}

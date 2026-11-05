@@ -1,15 +1,14 @@
-package deployment
+package litellm
 
 import (
 	"testing"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestModelRequest(t *testing.T) {
-	r := types.Route{Tag: "id-1", Mode: "rerank", Model: "m", UpstreamModel: "p/m"}
+	r := Route{Tag: "id-1", Mode: "rerank", Model: "m", UpstreamModel: "p/m"}
 	req := modelRequest(r)
 
 	assert.Equal(t, "m", req.ModelName)
@@ -33,7 +32,7 @@ func TestModelRequest_ForwardsParamsVerbatim(t *testing.T) {
 		"model":      "attacker/override",
 		"tags":       []string{"attacker"},
 	}
-	r := types.Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", Params: params}
+	r := Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", Params: params}
 
 	got := modelRequest(r).LiteLLMParams
 
@@ -48,18 +47,18 @@ func TestModelRequest_ForwardsParamsVerbatim(t *testing.T) {
 
 // api_base comes from the platform-derived APIBase for local pods and from Params for remote models.
 func TestModelRequest_APIBase(t *testing.T) {
-	local := types.Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", APIBase: "http://llm:8000/v1"}
+	local := Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", APIBase: "http://llm:8000/v1"}
 	assert.Equal(t, "http://llm:8000/v1", modelRequest(local).LiteLLMParams["api_base"])
 
-	remote := types.Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", Params: map[string]any{"api_base": "https://host"}}
+	remote := Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", Params: map[string]any{"api_base": "https://host"}}
 	assert.Equal(t, "https://host", modelRequest(remote).LiteLLMParams["api_base"])
 
-	none := types.Route{Model: "m"}
+	none := Route{Model: "m"}
 	assert.NotContains(t, modelRequest(none).LiteLLMParams, "api_base")
 }
 
 func TestPassThroughRequest(t *testing.T) {
-	r := types.Route{Tag: "id-1", Provider: "watsonx", TokenizeURL: "http://llm:8000/tokenize"}
+	r := Route{Tag: "id-1", Provider: "watsonx", TokenizeURL: "http://llm:8000/tokenize"}
 	req := passThroughRequest(r)
 
 	assert.Equal(t, "watsonx-token-passthrough-id-1", req.ID)

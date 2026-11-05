@@ -1,11 +1,10 @@
-package deployment
+package litellm
 
 import (
 	"context"
 	"fmt"
 	"maps"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -16,12 +15,12 @@ const (
 	litellmParamTags  = "tags"
 )
 
-func modelRequest(r types.Route) catalogclient.LiteLLMModelNewRequest {
+func modelRequest(r Route) catalogclient.LiteLLMModelNewRequest {
 	params := make(map[string]any, len(r.Params))
 	maps.Copy(params, r.Params)
 
 	if r.APIBase != "" {
-		params[paramAPIBase] = r.APIBase
+		params[ParamAPIBase] = r.APIBase
 	}
 
 	params[litellmParamModel] = r.UpstreamModel
@@ -39,11 +38,11 @@ func modelRequest(r types.Route) catalogclient.LiteLLMModelNewRequest {
 	return req
 }
 
-func passThroughID(r types.Route) string {
+func passThroughID(r Route) string {
 	return fmt.Sprintf("%s-token-passthrough-%s", r.Provider, r.Tag)
 }
 
-func passThroughRequest(r types.Route) catalogclient.LiteLLMPassThroughRequest {
+func passThroughRequest(r Route) catalogclient.LiteLLMPassThroughRequest {
 	return catalogclient.LiteLLMPassThroughRequest{
 		ID:      passThroughID(r),
 		Path:    fmt.Sprintf("/tokenize/%s", r.Tag),
@@ -53,37 +52,42 @@ func passThroughRequest(r types.Route) catalogclient.LiteLLMPassThroughRequest {
 	}
 }
 
-// probeError reports that a route was registered but the gateway could not reach the model.
-type probeError struct {
+// ProbeError reports that a route was registered but the gateway could not reach the model.
+type ProbeError struct {
 	reason string
 }
 
-func (e *probeError) Error() string {
+func (e *ProbeError) Error() string {
 	return "LiteLLM connectivity probe failed: " + e.reason
 }
 
-// gateway wraps the LiteLLM client with the registration workflow shared by all deployment types.
-type gateway struct {
+// Gateway wraps the LiteLLM client with the registration workflow shared by all model deployment types.
+type Gateway struct {
 	client catalogclient.LiteLLMClient
 }
 
-// register adds the route to LiteLLM and verifies it with a health probe. If the probe fails the
-// route is removed again and a *probeError is returned. A failure to register the tokenize
+// NewGateway creates a Gateway that registers routes through client.
+func NewGateway(client catalogclient.LiteLLMClient) Gateway {
+	return Gateway{client: client}
+}
+
+// Register adds the route to LiteLLM and verifies it with a health probe. If the probe fails the
+// route is removed again and a *ProbeError is returned. A failure to register the tokenize
 // passthrough is also an error and triggers the same rollback.
-func (g gateway) register(ctx context.Context, r types.Route) error {
+func (g Gateway) Register(ctx context.Context, r Route) error {
 	if err := g.client.RegisterModel(ctx, modelRequest(r)); err != nil {
 		return fmt.Errorf("failed to register model in litellm: %w", err)
 	}
 
 	if err := g.probe(ctx, r.Model); err != nil {
-		g.deregister(ctx, r)
+		g.Deregister(ctx, r)
 
 		return err
 	}
 
 	if r.TokenizeURL != "" {
 		if err := g.client.RegisterPassThrough(ctx, passThroughRequest(r)); err != nil {
-			g.deregister(ctx, r)
+			g.Deregister(ctx, r)
 
 			return fmt.Errorf("failed to register tokenize passthrough for %s: %w", r.Tag, err)
 		}
@@ -92,9 +96,9 @@ func (g gateway) register(ctx context.Context, r types.Route) error {
 	return nil
 }
 
-// deregister removes the route (best effort). It runs on a context detached from cancellation so
+// Deregister removes the route (best effort). It runs on a context detached from cancellation so
 // rollback still happens when the originating request has been cancelled.
-func (g gateway) deregister(ctx context.Context, r types.Route) {
+func (g Gateway) Deregister(ctx context.Context, r Route) {
 	ctx = context.WithoutCancel(ctx)
 
 	if err := g.client.DeregisterModel(ctx, r.Model); err != nil {
@@ -108,10 +112,10 @@ func (g gateway) deregister(ctx context.Context, r types.Route) {
 	}
 }
 
-func (g gateway) probe(ctx context.Context, model string) error {
+func (g Gateway) probe(ctx context.Context, model string) error {
 	resp, err := g.client.HealthProbe(ctx, model)
 	if err != nil {
-		return &probeError{reason: err.Error()}
+		return &ProbeError{reason: err.Error()}
 	}
 
 	if resp != nil && resp.HealthyCount > 0 {
@@ -123,5 +127,5 @@ func (g gateway) probe(ctx context.Context, model string) error {
 		reason = resp.UnhealthyEndpoints[0].Error
 	}
 
-	return &probeError{reason: reason}
+	return &ProbeError{reason: reason}
 }

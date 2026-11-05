@@ -4,11 +4,21 @@ import (
 	"context"
 	"testing"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
+	t.Helper()
+
+	provider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	return provider
+}
 
 const validWatsonxKey = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR" // 44 chars
 

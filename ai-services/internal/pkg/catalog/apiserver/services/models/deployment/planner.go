@@ -11,6 +11,8 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
@@ -21,11 +23,6 @@ import (
 const (
 	// valuesKeyModel is the template value (.Values.model) that carries the requested model.
 	valuesKeyModel = "model"
-
-	// paramAPIBase is the litellm_params key of the model endpoint. It is the only provider param
-	// the platform interprets itself (to derive the /tokenize target); every other param is
-	// forwarded to LiteLLM untouched.
-	paramAPIBase = "api_base"
 
 	// watsonxTokenizeURL is the tokenize passthrough target for watsonx remote models.
 	watsonxTokenizeURL = "http://localhost:4000/watsonx/ml/v1/text/tokenization"
@@ -40,7 +37,7 @@ const (
 // row is written or any background work starts.
 type ModelPlanner struct {
 	catalogProvider *catalog.CatalogProvider
-	models          modelCatalog
+	models          helpers.ModelCatalog
 	workers         worker.Resolver
 	// deployers maps a runtime type to the deployer that starts local model pods on it.
 	deployers map[runtimeTypes.RuntimeType]types.Deployer
@@ -50,7 +47,7 @@ type ModelPlanner struct {
 func NewModelPlanner(provider *catalog.CatalogProvider, workers worker.Resolver) *ModelPlanner {
 	return &ModelPlanner{
 		catalogProvider: provider,
-		models:          modelCatalog{provider: provider},
+		models:          helpers.New(provider),
 		workers:         workers,
 		deployers: map[runtimeTypes.RuntimeType]types.Deployer{
 			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeployer(),
@@ -67,10 +64,12 @@ func (p *ModelPlanner) WithDeployers(deployers map[runtimeTypes.RuntimeType]type
 
 // ValidateComponentType rejects a component type that has no model providers in the catalog.
 func (p *ModelPlanner) ValidateComponentType(componentType string) error {
-	return p.models.validateType(componentType)
+	return p.models.ValidateType(componentType)
 }
 
 // PlanLocal validates a local-model request and resolves where and how it will be deployed.
+//
+//nolint:funlen // one sequence of validation and resolution steps, clearer kept together
 func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelRequest) (*types.LocalPlan, error) {
 	workerName := worker.DefaultName(req.WorkerName)
 
@@ -128,7 +127,7 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		RootMetadata: comp,
 		// The endpoint (APIBase, TokenizeURL) is only known once the Deployer has started the
 		// pods, so the executor completes the route then.
-		Route: types.Route{
+		Route: litellm.Route{
 			Tag:           componentID.String(),
 			Provider:      comp.LiteLLM.Provider,
 			Mode:          comp.LiteLLM.ModelMode,
@@ -193,7 +192,7 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 		return nil, err
 	}
 
-	mode, err := p.models.modeFor(req.ComponentType)
+	mode, err := p.models.ModeFor(req.ComponentType)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +201,7 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 
 	// The params were validated against the provider's schema.json, so they are forwarded to
 	// LiteLLM as is: a field added to the schema reaches the gateway without a code change.
-	r := types.Route{
+	r := litellm.Route{
 		Tag:           connectorID.String(),
 		Provider:      req.ProviderID,
 		Mode:          mode,
@@ -233,7 +232,7 @@ func remoteTokenizeURL(providerID string, params map[string]any) string {
 		return watsonxTokenizeURL
 	}
 
-	if apiBase, _ := params[paramAPIBase].(string); apiBase != "" {
+	if apiBase, _ := params[litellm.ParamAPIBase].(string); apiBase != "" {
 		return tokenizeURL(apiBase)
 	}
 
