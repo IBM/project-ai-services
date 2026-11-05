@@ -319,6 +319,20 @@ class TestCreateJobs:
         assert response.status_code == 202
         stage_upload_files_mock.assert_awaited_once()
 
+    @pytest.mark.parametrize("filename,content,mime", [
+        ("notes.md", b"# Title\n\nBody", "text/markdown"),
+        ("notes.txt", b"plain text", "text/plain"),
+    ])
+    def test_successful_ingestion_job_creation_with_md_and_txt(self, digitize_test_client, filename, content, mime):
+        """Markdown and plain-text files are accepted."""
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[("files", (filename, content, mime))],
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_id"] == "job-123"
+
     def test_mixed_pdf_docx_and_html_ingestion(self, digitize_test_client):
         """Test ingestion job with PDF, DOCX, and HTML files."""
         pdf_header = b"%PDF-1.4 test"

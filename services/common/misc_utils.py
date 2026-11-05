@@ -327,14 +327,14 @@ def verify_checksum(file, checksum_file):
 
 def validate_document_file(filename: str, content) -> None:
     """
-    Validate a document file (PDF, DOCX, or HTML) with comprehensive checks.
+    Validate a document file (PDF, DOCX, HTML, Markdown, or text) with comprehensive checks.
 
     Performs validation checks:
     1. Filename exists
     2. Content was read successfully (not an Exception)
     3. Content is not empty
-    4. File has .pdf, .docx, or .html extension
-    5. File content matches expected format (magic bytes check for PDF/DOCX, UTF-8 leading '<' for HTML)
+    4. File has .pdf, .docx, .html, .md, or .txt extension
+    5. File content matches expected format (magic bytes check for PDF/DOCX, UTF-8 leading '<' for HTML, valid UTF-8 for MD/TXT)
 
     Args:
         filename: Name of the file
@@ -362,11 +362,11 @@ def validate_document_file(filename: str, content) -> None:
         raise ValueError(f"File is empty: {filename}")
 
     # Validate extension and format
-    allowed_extensions = {'.pdf', '.docx', '.html'}
+    allowed_extensions = {'.pdf', '.docx', '.html', '.md', '.txt'}
     file_ext = Path(filename).suffix.lower()
 
     if file_ext not in allowed_extensions:
-        raise ValueError(f"Only PDF, DOCX, and HTML files are allowed. Invalid file: {filename}")
+        raise ValueError(f"Only PDF, DOCX, HTML, Markdown, and text files are allowed. Invalid file: {filename}")
 
     # Validate file signatures / content
     if file_ext == '.pdf':
@@ -388,6 +388,12 @@ def validate_document_file(filename: str, content) -> None:
             raise ValueError(f"File has .html extension but is not valid UTF-8: {filename}")
         if not text.startswith('<'):
             raise ValueError(f"File has .html extension but invalid HTML format: {filename}")
+
+    elif file_ext in ('.md', '.txt'):
+        try:
+            content.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            raise ValueError(f"File has {file_ext} extension but is not valid UTF-8: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
     """Return the set of files from original_files that have not yet been processed."""

@@ -473,7 +473,7 @@ def process_converted_document(converted_json_path, doc_path, out_path, gen_mode
         file_ext = Path(doc_path).suffix.lower()
         if file_ext == '.docx':
             page_count, process_time = process_text_docx(converted_doc, doc_path, processed_text_json_path)
-        elif file_ext == '.html':
+        elif file_ext in ('.html', '.md', '.txt'):
             page_count, process_time = process_text_html(converted_doc, doc_path, processed_text_json_path)
         else:
             page_count, process_time = process_text(converted_doc, doc_path, processed_text_json_path)

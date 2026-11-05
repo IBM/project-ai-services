@@ -181,11 +181,13 @@ def ingest(
 
     try:
         # Files are already staged and validated at API level in app.py
-        # Collect PDF, DOCX, and HTML files from the staging directory
+        # Collect PDF, DOCX, HTML, Markdown, and text files from the staging directory
         pdf_files = list(directory_path.glob("*.pdf"))
         docx_files = list(directory_path.glob("*.docx"))
         html_files = list(directory_path.glob("*.html"))
-        input_file_paths = [str(p) for p in pdf_files + docx_files + html_files]
+        md_files = list(directory_path.glob("*.md"))
+        txt_files = list(directory_path.glob("*.txt"))
+        input_file_paths = [str(p) for p in pdf_files + docx_files + html_files + md_files + txt_files]
 
         # Total includes already-exists files (doc_id_dict covers all submitted files).
         total_documents = len(doc_id_dict) if doc_id_dict else len(input_file_paths)

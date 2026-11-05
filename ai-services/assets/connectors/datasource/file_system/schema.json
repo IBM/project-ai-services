@@ -51,7 +51,9 @@
         "enum": [
           ".pdf",
           ".docx",
-          ".html"
+          ".html",
+          ".md",
+          ".txt"
         ]
       }
     }
