@@ -345,7 +345,7 @@ A connector stores the connection details of one source database, with its secre
 | `type`               | string | Yes      | A supported connector type (`db2_for_i`).                                              |
 | `connection_details` | object | Yes      | Fields for the type, as in the connector types table. Unknown fields are rejected.     |
 | `training`           | object | Yes      | The details of the training job that the call queues. See the `training` object table. |
-| `schedule`               | string | No      | Training cadence for the data.(provided in cron format, a one-off job is run if not provided)                                       |
+| `schedule`               | enum | No      | Training cadence for the data.                                       |
 
 **`training` object:**
 
@@ -364,7 +364,7 @@ curl -X POST http://localhost:8500/v1/connectors \
   -d '{
         "name": "prod-sales-db",
         "type": "db2_for_i",
-        "schedule": "0 0 * * *",
+        "schedule": "daily",
         "connection_details": {
           "host": "ibmi.example.com",
           "port": 8471,
@@ -552,7 +552,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `source_table`      | Table to train on.                                                         |
 | `target_column`     | The column to predict.                                                     |
 | `input_columns`   | The input columns, each with a name and, where AutoGluon needs it, a type. |
-| `schedule`        | The schedule at which the training will run (stored in cron format).                                      |
+| `schedule`        | The schedule at which the training will run.                                      |
 | `created_at`        | UTC time at which the row was stored.                                      |
 
 **`jobs`**
