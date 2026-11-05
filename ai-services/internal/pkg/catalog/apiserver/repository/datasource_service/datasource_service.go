@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	appservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/application_service"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -136,17 +137,12 @@ func (s *DatasourceService) CreateDatasource(ctx context.Context, req apimodels.
 	}
 
 	// Phase 4: derive sensitive fields from the provider's schema.json and encrypt.
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	sensitiveFields, err := SensitiveFieldsForProvider(ctx, s.catalogProvider, req.ProviderID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", req.ProviderID, err)
+		return nil, err
 	}
 
-	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", req.ProviderID, err)
-	}
-
-	encryptedParams, err := encryptSensitiveFields(req.Params, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
+	encryptedParams, err := catalogutils.EncryptSensitiveFields(req.Params, sensitiveFields, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -200,17 +196,10 @@ func (s *DatasourceService) GetDatasource(ctx context.Context, id uuid.UUID) (*a
 		providerName = catalogConn.Name
 	}
 
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, connector.Provider)
+	sensitiveFields, err := SensitiveFieldsForProvider(ctx, s.catalogProvider, connector.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", connector.Provider, err)
+		return nil, err
 	}
-
-	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
-	}
-
-	sensitiveFields := catalogutils.SensitiveFieldsFromSchema(schema)
 
 	// Steps 3–4: fetch linked applications and enrich each with live Digitize sync state.
 	applications, err := s.buildConnectedApplications(ctx, id)
@@ -442,43 +431,6 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 	return applications, nil
 }
 
-// encryptSensitiveFields returns a copy of params where every key listed in
-// sensitiveKeys has its string value replaced with an AES-256-GCM ciphertext.
-// encryptionKey is the AES-256 secret injected at service construction time (DB_ENCRYPTION_KEY).
-func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool, encryptionKey string) (map[string]any, error) {
-	if len(sensitiveKeys) == 0 {
-		return params, nil
-	}
-
-	if encryptionKey == "" {
-		return nil, fmt.Errorf("encryption key is not configured (DB_ENCRYPTION_KEY must be set)")
-	}
-
-	result := make(map[string]any, len(params))
-	for k, v := range params {
-		if sensitiveKeys[k] {
-			plaintext, ok := v.(string)
-			if !ok {
-				return nil, &ValidationError{
-					Code:    http.StatusBadRequest,
-					Message: fmt.Sprintf("sensitive field %q must be a string value", k),
-				}
-			}
-
-			ciphertext, err := catalogutils.Encrypt(plaintext, encryptionKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to encrypt field %q: %w", k, err)
-			}
-
-			result[k] = ciphertext
-		} else {
-			result[k] = v
-		}
-	}
-
-	return result, nil
-}
-
 // ConnectDatasourcesToApplication links one or more datasource connectors to every eligible
 // service (AcceptsDatasource == true) in the given application.
 //
@@ -489,12 +441,15 @@ func encryptSensitiveFields(params map[string]any, sensitiveKeys map[string]bool
 // This method is the single reusable core for both:
 //   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect)
 //   - the app-creation flow where datasources are pre-attached at deploy time.
-func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
-	// Resolve eligible services once — shared across all datasources.
-	linkedServices, err := s.eligibleServicesForApp(ctx, applicationID)
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+	// Verify application exists and ownership.
+	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
 		return nil, err
 	}
+
+	// Resolve eligible services once — shared across all datasources.
+	linkedServices := s.eligibleServicesForApp(ctx, app)
 
 	if len(linkedServices) == 0 {
 		return nil, &ValidationError{
@@ -568,19 +523,7 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 
 // eligibleServicesForApp returns the subset of services in applicationID whose catalog
 // entry has AcceptsDatasource == true and which have a registered api-type endpoint.
-func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicationID uuid.UUID) ([]dbrepo.LinkedServiceRow, error) {
-	app, err := s.appRepo.GetByID(ctx, applicationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load application: %w", err)
-	}
-
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("application %s not found", applicationID),
-		}
-	}
-
+func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, app *dbmodels.Application) []dbrepo.LinkedServiceRow {
 	var eligible []dbrepo.LinkedServiceRow
 
 	for _, svc := range app.Services {
@@ -606,7 +549,7 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, applicat
 		})
 	}
 
-	return eligible, nil
+	return eligible
 }
 
 // loadConnector fetches the connector by ID (with credentials). Returns a typed ValidationError on 404.
@@ -629,17 +572,38 @@ func (s *DatasourceService) loadConnector(ctx context.Context, datasourceID uuid
 // decryptedConnectionDetails loads the provider schema and returns the connector metadata
 // with all sensitive (format:"password") fields decrypted in-memory.
 func (s *DatasourceService) decryptedConnectionDetails(ctx context.Context, connector *dbmodels.Connector) (map[string]any, error) {
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, connector.Provider)
+	sensitiveFields, err := SensitiveFieldsForProvider(ctx, s.catalogProvider, connector.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", connector.Provider, err)
+		return nil, err
+	}
+
+	return catalogutils.DecryptSensitiveFields(connector.Metadata, sensitiveFields, s.encryptionKey)
+}
+
+// providerSchema loads and decodes the schema.json of the given datasource provider.
+func providerSchema(ctx context.Context, catalogProvider *catalog.CatalogProvider, providerID string) (map[string]any, error) {
+	rawSchema, err := catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load schema for provider %q: %w", providerID, err)
 	}
 
 	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", connector.Provider, err)
+		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", providerID, err)
 	}
 
-	return catalogutils.DecryptSensitiveFields(connector.Metadata, catalogutils.SensitiveFieldsFromSchema(schema), s.encryptionKey)
+	return schema, nil
+}
+
+// SensitiveFieldsForProvider loads the provider schema and derives the set of
+// sensitive (format: "password") field keys. Used by Create, Get, Decrypt and the connector sync job.
+func SensitiveFieldsForProvider(ctx context.Context, catalogProvider *catalog.CatalogProvider, providerID string) (map[string]bool, error) {
+	schema, err := providerSchema(ctx, catalogProvider, providerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return catalogutils.SensitiveFieldsFromSchema(schema), nil
 }
 
 // sendToService POSTs the connector payload to a single eligible service and records the
@@ -722,14 +686,9 @@ func (s *DatasourceService) UpdateDatasource(ctx context.Context, id uuid.UUID, 
 	}
 
 	// Phase 2: load provider schema to derive updatable and sensitive fields.
-	rawSchema, err := s.catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, existing.Provider)
+	schema, err := providerSchema(ctx, s.catalogProvider, existing.Provider)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load schema for provider %q: %w", existing.Provider, err)
-	}
-
-	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode schema for provider %q: %w", existing.Provider, err)
+		return nil, err
 	}
 
 	updatable := catalogutils.UpdatableFieldsFromSchema(schema)
@@ -859,18 +818,11 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 //     is actually connected. Return 404 if no rows are found.
 //  4. For each confirmed row, call DELETE /v1/connectors/{id} on the Digitize endpoint,
 //     then remove the service_dependency row.
-func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, datasourceID uuid.UUID) error {
-	// Step 1: verify application exists.
-	app, err := s.appRepo.GetByID(ctx, applicationID)
+func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error {
+	// Step 1: verify application exists and ownership.
+	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to load application: %w", err)
-	}
-
-	if app == nil {
-		return &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("application %s not found", applicationID),
-		}
+		return err
 	}
 
 	// Step 2: verify datasource exists.
@@ -969,7 +921,7 @@ func (s *DatasourceService) persistAndPropagate(
 	sensitiveFields map[string]bool,
 	updatable map[string]bool,
 ) (*apimodels.UpdateDatasourceResponse, error) {
-	encryptedMerged, err := encryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
+	encryptedMerged, err := catalogutils.EncryptSensitiveFields(merged, sensitiveFields, s.encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt connector credentials: %w", err)
 	}
@@ -1232,7 +1184,7 @@ func (s *DatasourceService) ListApplicationDatasources(ctx context.Context, req 
 	// connectors that are still linked to this application in the DB.
 	dropped := filterServiceDeletionPendingDatasources(servicePage.ByID, allConnectorIDs)
 
-	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID)
+	data, err := s.buildDatasourcePage(ctx, baseURL, servicePage.ByID, servicePage.Order)
 	if err != nil {
 		return nil, err
 	}
@@ -1331,9 +1283,10 @@ func filterServiceDeletionPendingDatasources(serviceItems map[string]apimodels.C
 }
 
 // buildDatasourcePage bulk-fetches the DB connector rows for the IDs in serviceItems and
-// assembles the slice of ApplicationDatasourceItem for the current page.
+// assembles the slice of ApplicationDatasourceItem for the current page, preserving the
+// status-based order given by order (IDs absent from serviceItems are skipped).
 // IDs in serviceItems are UUIDs stored by this service, so no parse-error handling is needed.
-func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL string, serviceItems map[string]apimodels.ConnectorItem) ([]apimodels.ApplicationDatasourceItem, error) {
+func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL string, serviceItems map[string]apimodels.ConnectorItem, order []string) ([]apimodels.ApplicationDatasourceItem, error) {
 	ids := make([]uuid.UUID, 0, len(serviceItems))
 	for idStr := range serviceItems {
 		ids = append(ids, uuid.MustParse(idStr))
@@ -1345,7 +1298,12 @@ func (s *DatasourceService) buildDatasourcePage(ctx context.Context, baseURL str
 	}
 
 	items := make([]apimodels.ApplicationDatasourceItem, 0, len(serviceItems))
-	for _, serviceConn := range serviceItems {
+	for _, idStr := range order {
+		serviceConn, ok := serviceItems[idStr]
+		if !ok {
+			continue
+		}
+
 		item := s.buildApplicationDatasourceItem(uuid.MustParse(serviceConn.ID), serviceConn, baseURL, dbConnectors)
 		items = append(items, *item)
 	}

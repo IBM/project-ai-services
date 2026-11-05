@@ -1,4 +1,5 @@
 import { useReducer, useCallback, useRef, useEffect } from "react";
+import axios from "axios";
 import ConnectorDetailsPanel from "@/components/ConnectorDetailsPanel";
 import {
   DataTable,
@@ -35,10 +36,8 @@ import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
 import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
 import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
-import {
-  filterRowsBySearch,
-  getVisibleHeaders,
-} from "@/components/Table/utils/tableUtils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { getVisibleHeaders } from "@/components/Table/utils/tableUtils";
 import {
   fetchDataSourceConnectors,
   fetchAllDataSourceConnectors,
@@ -115,13 +114,39 @@ const DataSourceConnectorsTable = ({
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
 
+  const debouncedSearch = useDebouncedValue(state.search.trim(), 400);
+  const debouncedSearchRef = useRef(debouncedSearch);
+  debouncedSearchRef.current = debouncedSearch;
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Flips to true after the very first successful fetch. Used by showSkeleton
+  // so that all subsequent loads use the dimming overlay instead of the full skeleton.
+  const hasEverLoadedRef = useRef(false);
+
   const loadConnectors = useCallback(
-    async (page = pageRef.current, pageSize = pageSizeRef.current) => {
+    async (
+      page = pageRef.current,
+      pageSize = pageSizeRef.current,
+      search = debouncedSearchRef.current,
+    ) => {
+      // Cancel previous pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       dispatch({ type: "SHARED_SET_LOADING", payload: true });
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
-        const response = await fetchDataSourceConnectors(page, pageSize);
+        const response = await fetchDataSourceConnectors(
+          page,
+          pageSize,
+          undefined,
+          search,
+          { signal: controller.signal },
+        );
         const rows = response.data.map(transformConnectorToRow);
 
         // Guard: if the deleted item was the last one on a non-first page,
@@ -131,15 +156,24 @@ const DataSourceConnectorsTable = ({
         if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          void loadConnectors(totalPages, pageSize);
+          void loadConnectors(totalPages, pageSize, search);
           return;
         }
 
+        hasEverLoadedRef.current = true;
         dispatch({
           type: ACTION_TYPES.FETCH_CONNECTORS_SUCCESS,
           payload: { rows, pagination: response.pagination },
         });
       } catch (error) {
+        if (
+          controller.signal.aborted ||
+          (error instanceof Error && error.name === "AbortError") ||
+          axios.isCancel(error)
+        ) {
+          return;
+        }
+
         const errorMessage =
           error instanceof Error
             ? error.message
@@ -150,6 +184,29 @@ const DataSourceConnectorsTable = ({
     },
     [],
   );
+
+  const isFirstMount = useRef(true);
+
+  // Trigger search on debounced term changes (resetting page to 1)
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    pageRef.current = 1;
+    dispatch({ type: "SHARED_SET_PAGE", payload: 1 });
+    void loadConnectors(1, pageSizeRef.current, debouncedSearch);
+  }, [debouncedSearch, loadConnectors]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Background prefetch — fires once after the first fetch completes (even if empty).
   useEffect(() => {
@@ -202,10 +259,10 @@ const DataSourceConnectorsTable = ({
     }
   };
 
-  // Mount fetch + optional 2-minute auto-refresh (paused during delete flow)
+  // Mount fetch + 2-minute auto-refresh.
   useAutoRefresh({
     fetchFn: loadConnectors,
-    hasData: state.rowsData.length > 0,
+    hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
     refreshTrigger,
   });
@@ -221,11 +278,13 @@ const DataSourceConnectorsTable = ({
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: ["name", "status", "type", "services", "messages"],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
+    serverSideSearch: true,
     fetchAllRows: async () => {
-      const allData = await fetchAllDataSourceConnectors();
+      // Use state.search.trim() so the export
+      // always reflects what the user sees in the search box
+      const allData = await fetchAllDataSourceConnectors(state.search.trim());
       return allData.map(transformConnectorToRow) as unknown as Record<
         string,
         unknown
@@ -234,19 +293,21 @@ const DataSourceConnectorsTable = ({
     dispatch,
   });
 
-  // Client-side search filter (API endpoint will handle this server-side later)
-  const filteredRows = filterRowsBySearch<Record<string, unknown>>(
-    state.rowsData as unknown as Record<string, unknown>[],
-    state.search,
-    ["name", "status", "type", "services", "messages"],
-  ) as unknown as DataSourceConnectorRow[];
-
   const noData =
-    state.rowsData.length === 0 && !state.isLoading && !state.fetchError;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !debouncedSearch;
   const noSearchResults =
-    state.rowsData.length > 0 && filteredRows.length === 0 && !state.fetchError;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !!debouncedSearch;
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
+
+  // Show the full skeleton only on the very first load
+  const showSkeleton = state.isLoading && !hasEverLoadedRef.current;
 
   return (
     <>
@@ -277,14 +338,18 @@ const DataSourceConnectorsTable = ({
       <div className={styles.tableContent}>
         <Grid fullWidth>
           <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-            {state.isLoading ? (
+            {showSkeleton ? (
               <DataTableSkeleton
                 headers={HEADERS}
                 rowCount={state.pageSize}
                 columnCount={HEADERS.length}
               />
             ) : (
-              <DataTable rows={filteredRows} headers={visibleHeaders} size="lg">
+              <DataTable
+                rows={state.rowsData}
+                headers={visibleHeaders}
+                size="lg"
+              >
                 {({
                   rows,
                   headers,
@@ -332,7 +397,12 @@ const DataSourceConnectorsTable = ({
                         </Button>
                       </TableToolbarActions>
 
-                      <Table {...getTableProps()}>
+                      <Table
+                        className={
+                          state.isLoading ? styles.loadingTable : undefined
+                        }
+                        {...getTableProps()}
+                      >
                         <TableHead>
                           <TableRow>
                             {headers.map((header) => {
@@ -354,7 +424,7 @@ const DataSourceConnectorsTable = ({
                               const { key: rowKey, ...rowProps } = getRowProps({
                                 row,
                               });
-                              const originalRow = filteredRows.find(
+                              const originalRow = state.rowsData.find(
                                 (r) => r.id === row.id,
                               );
 
@@ -393,7 +463,7 @@ const DataSourceConnectorsTable = ({
                     {/* Show pagination only when there is more than one page */}
                     {!state.isLoading &&
                       state.totalItems > state.pageSize &&
-                      filteredRows.length > 0 && (
+                      state.rowsData.length > 0 && (
                         <Pagination
                           page={state.page}
                           pageSize={state.pageSize}

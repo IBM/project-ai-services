@@ -492,13 +492,19 @@ export async function fetchApplicationDatasources(
   applicationId: string,
   page: number,
   pageSize: number,
+  search?: string,
+  options?: { signal?: AbortSignal },
 ): Promise<{
   rows: ApplicationDatasourceRow[];
   pagination: PaginationMetadata;
 }> {
+  const params: Record<string, string | number> = { page, page_size: pageSize };
+  if (search) {
+    params.q = search;
+  }
   const response = await api.get<ApplicationDatasourcesListResponse>(
     APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
-    { params: { page, page_size: pageSize } },
+    { params, ...options },
   );
   return {
     rows: response.data.data.map(transformDatasourceToRow),
@@ -509,15 +515,23 @@ export async function fetchApplicationDatasources(
 // Fetches all datasources for a given application — used for CSV export
 export async function fetchAllApplicationDatasources(
   applicationId: string,
+  search?: string,
 ): Promise<ApplicationDatasourceRow[]> {
   let currentPage = 1;
   let hasNext = true;
   const allData: ApplicationDatasourceApiItem[] = [];
 
   while (hasNext) {
+    const params: Record<string, string | number> = {
+      page: currentPage,
+      page_size: 100,
+    };
+    if (search) {
+      params.q = search;
+    }
     const response = await api.get<ApplicationDatasourcesListResponse>(
       APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
-      { params: { page: currentPage, page_size: 100 } },
+      { params },
     );
     allData.push(...response.data.data);
     hasNext = response.data.pagination?.has_next ?? false;

@@ -55,7 +55,7 @@ jobs:
       - name: Create and Push Manifest
         working-directory: images/tools
         run: |
-          make manifest REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
+          make manifest BRANCH_TAG=${GITHUB_REF_NAME//\//-} REGISTRY=${{ env.ICR_REGISTRY }}/${{ env.ICR_NAMESPACE }} REGISTRY_USER=${{ secrets.ICR_USERNAME }} REGISTRY_PASSWORD=${{ secrets.ICR_APIKEY }}
 
   scan:
     uses: ./.github/workflows/scanner.yml

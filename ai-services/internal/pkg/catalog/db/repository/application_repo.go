@@ -34,6 +34,7 @@ type ApplicationFilters struct {
 	DeploymentType string // Optional: filter by deployment_type ("architectures" or "services")
 	CatalogID      string // Optional: filter by catalog_id (e.g., "rag", "chat", "digitize")
 	Search         string // Optional: case-insensitive substring search on the application name
+	CreatedBy      string // Optional: filter by created_by (owner)
 	Limit          int    // Optional: number of records to return (for pagination)
 	Offset         int    // Optional: number of records to skip (for pagination)
 }
@@ -110,6 +111,11 @@ func buildApplicationWhereClauses(filters *ApplicationFilters) ([]string, []inte
 		if filters.CatalogID != "" {
 			whereClauses = append(whereClauses, fmt.Sprintf("a.catalog_id = $%d", len(args)+1))
 			args = append(args, filters.CatalogID)
+		}
+
+		if filters.CreatedBy != "" {
+			whereClauses = append(whereClauses, fmt.Sprintf("a.created_by = $%d", len(args)+1))
+			args = append(args, filters.CreatedBy)
 		}
 
 		if filters.Search != "" {

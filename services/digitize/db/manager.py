@@ -7,7 +7,7 @@ Provides CRUD operations with proper error handling and transaction management.
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, cast
-from sqlalchemy import select, update, delete, func, or_, and_, exists
+from sqlalchemy import select, update, delete, func, or_, and_, exists, case
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -27,6 +27,15 @@ logger = get_logger("db_repository")
 
 # Sentinel used by update_connector to distinguish "not supplied" from explicit None.
 _UNSET: object = object()
+
+# Connector list ordering by status: out of sync first, then in-progress
+# states (syncing / delete pending), then up to date. Unlisted statuses rank last.
+_CONNECTOR_STATUS_PRIORITY = case(
+    (Connector.status == ConnectorStatus.OUT_OF_SYNC, 0),
+    (Connector.status.in_([ConnectorStatus.SYNCING, ConnectorStatus.DELETE_PENDING]), 1),
+    (Connector.status == ConnectorStatus.UP_TO_DATE, 2),
+    else_=3,
+)
 
 
 class DatabaseManager:
@@ -1007,7 +1016,8 @@ class DatabaseManager:
         name: Optional[str] = None,
     ) -> tuple[List[Connector], int]:
         """
-        Return paginated connectors ordered by attached_at descending.
+        Return paginated connectors ordered by status priority (out of sync,
+        then syncing / delete pending, then up to date), then attached_at descending.
 
         Args:
             name: Optional case-insensitive substring match on connector name.
@@ -1026,7 +1036,7 @@ class DatabaseManager:
                 ).scalar() or 0
                 stmt = (
                     base
-                    .order_by(Connector.attached_at.desc())
+                    .order_by(_CONNECTOR_STATUS_PRIORITY, Connector.attached_at.desc())
                     .limit(limit)
                     .offset(offset)
                 )

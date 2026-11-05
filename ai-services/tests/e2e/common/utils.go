@@ -205,6 +205,32 @@ func ExpectErrorResponse(body []byte, statusCode, successStatus int) (*ErrorResp
 	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
+// ServiceErrorResponse is the error envelope returned by services whose error code is a string
+// and whose status is the numeric HTTP status.
+// Shape: {"error":{"code":"EMPTY_INPUT","message":"...","status":400}}.
+type ServiceErrorResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Status  int    `json:"status"`
+	} `json:"error,omitempty"`
+}
+
+// ExpectErrorAs parses an error body into T when statusCode != successStatus.
+// Returns an error if the server unexpectedly returned a success status.
+func ExpectErrorAs[T any](body []byte, statusCode, successStatus int) (*T, error) {
+	if statusCode == successStatus {
+		return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
+	}
+
+	var errResp T
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		return nil, fmt.Errorf("failed to parse error response (status %d): %w, body: %s", statusCode, err, string(body))
+	}
+
+	return &errResp, nil
+}
+
 // GetTestPDFPath returns the absolute path to the shared test PDF fixture (test_doc.pdf)
 // located at ingestion/docs/test_doc.pdf relative to the e2e tests root.
 // Returns an empty string if the caller location cannot be resolved.
@@ -216,6 +242,18 @@ func GetTestPDFPath() string {
 
 	// common/ is one level below the e2e root; ingestion/docs is a sibling of common/.
 	return filepath.Join(filepath.Dir(filepath.Dir(filename)), "ingestion", "docs", "test_doc.pdf")
+}
+
+// PathFromCaller joins elem onto the directory of the source file that calls it, so fixtures
+// can be located independent of the working directory. Returns an empty string if the caller
+// location cannot be resolved.
+func PathFromCaller(elem ...string) string {
+	_, filename, _, ok := runtime.Caller(1)
+	if !ok {
+		return ""
+	}
+
+	return filepath.Join(append([]string{filepath.Dir(filename)}, elem...)...)
 }
 
 // IsResourceLockedError reports whether err is an HTTP 409 resource-lock error.

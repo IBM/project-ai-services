@@ -35,3 +35,17 @@ The build output is ready to be deployed.
 Serves the production build locally.
 After running npm run build, use this command to test your production output before deploying.
 Open http://localhost:3010 to view the production build.
+
+## Known Dependency Notes
+
+### `qs` override in `package.json`
+
+`qs` is a transitive dependency of `express` and `body-parser`, whose declared ranges (`^6.16.x`) still allow older releases. The `overrides` block enforces `qs@^6.17.1` so a regenerated lockfile cannot resolve to an older version.
+
+**Remove this override once `express` and `body-parser` raise their own `qs` minimum to `^6.17.1` or higher.**
+
+### `minimatch` override in `package.json`
+
+`eslint` (via `@eslint/config-array` and `@eslint/eslintrc`) and `eslint-plugin-react` depend on `minimatch@10`, which is affected by a denial-of-service advisory ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)) fixed in `11.0.1`. The `overrides` block forces `minimatch@^11.0.4` so `npm audit` stays clean. `minimatch@11` requires Node `20 || >=22`.
+
+ESLint 10 does not fix this on its own, because it still depends on `minimatch@10`, and `eslint-plugin-react` does not yet support ESLint 10. **Remove this override once `eslint` and `eslint-plugin-react` depend on `minimatch@>=11.0.1`.**

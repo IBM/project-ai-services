@@ -39,6 +39,7 @@ type ComponentStatus string
 
 const (
 	ComponentStatusInitializing ComponentStatus = "Initializing"
+	ComponentStatusDeploying    ComponentStatus = "Deploying"
 	ComponentStatusRunning      ComponentStatus = "Running"
 	ComponentStatusError        ComponentStatus = "Error"
 )

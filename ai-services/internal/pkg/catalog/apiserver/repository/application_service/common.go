@@ -33,7 +33,7 @@ import (
 // which is the single method called after a successful deployment. This narrow interface
 // breaks the import cycle between the application_service and repository packages.
 type DatasourceConnector interface {
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
 }
 
 // ValidationError represents a validation error with HTTP status code.
@@ -46,6 +46,7 @@ type ListApplicationsRequest struct {
 	DeploymentType string
 	CatalogID      string
 	Search         string // Optional: case-insensitive substring search on the application name
+	CreatedBy      string // Optional: filter by created_by (owner)
 }
 
 // DeleteApplicationResponse is the response body for a delete application request.
@@ -255,21 +256,8 @@ func (s *ApplicationServiceBase) UpdateApplication(ctx context.Context, id uuid.
 		}
 	}
 
-	app, err := s.AppRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: ErrMsgApplicationNotFound,
-		}
-	}
-	if app.CreatedBy != userID {
-		return nil, &ValidationError{
-			Code:    http.StatusForbidden,
-			Message: ErrMsgUserNotOwner,
-		}
+	if _, err := LoadAppWithOwnership(ctx, s.AppRepo, id, userID); err != nil {
+		return nil, err
 	}
 
 	err = s.AppRepo.UpdateDeploymentName(ctx, id, newName)
@@ -513,13 +501,18 @@ func (s *ApplicationServiceBase) InsertDeploymentRecords(
 	plan *deployment.DeploymentPlan,
 	createdBy string,
 ) error {
+	workerID, err := s.resolveWorkerID(plan)
+	if err != nil {
+		return err
+	}
+
 	// 1. Insert application record
-	if err := s.insertApplicationRecord(ctx, plan, createdBy); err != nil {
+	if err := s.insertApplicationRecord(ctx, plan, createdBy, workerID); err != nil {
 		return err
 	}
 
 	// 2. Insert component records
-	componentIDMap, err := s.insertComponentRecords(ctx, plan)
+	componentIDMap, err := s.insertComponentRecords(ctx, plan, createdBy, workerID)
 	if err != nil {
 		return err
 	}
@@ -532,11 +525,28 @@ func (s *ApplicationServiceBase) InsertDeploymentRecords(
 	return nil
 }
 
+// resolveWorkerID returns the database ID of the worker the plan deploys to.
+// Every deployment goes through a worker (the local worker is used for local deployments).
+// WorkerName is always set by the CLI since the --worker flag defaults to workerconstants.LocalWorkerName.
+func (s *ApplicationServiceBase) resolveWorkerID(plan *deployment.DeploymentPlan) (*uuid.UUID, error) {
+	if plan.WorkerName == "" {
+		return nil, fmt.Errorf("worker name is required for application deployment; use --worker to specify a worker (default: %q)", workerconstants.LocalWorkerName)
+	}
+
+	dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName)
+	if !ok {
+		return nil, fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", plan.WorkerName)
+	}
+
+	return &dbID, nil
+}
+
 // insertApplicationRecord inserts the application record into the database.
 func (s *ApplicationServiceBase) insertApplicationRecord(
 	ctx context.Context,
 	plan *deployment.DeploymentPlan,
 	createdBy string,
+	workerID *uuid.UUID,
 ) error {
 	app := &models.Application{
 		ID:             plan.ApplicationID,
@@ -547,21 +557,8 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 		Message:        "Initializing deployment",
 		Version:        plan.Version,
 		CreatedBy:      createdBy,
+		WorkerID:       workerID,
 	}
-
-	// Attach the worker FK. Every deployment goes through a worker (the local worker
-	// is used for local deployments). WorkerName is always set by the CLI since the
-	// --worker flag defaults to workerconstants.LocalWorkerName.
-	if plan.WorkerName == "" {
-		return fmt.Errorf("worker name is required for application deployment; use --worker to specify a worker (default: %q)", workerconstants.LocalWorkerName)
-	}
-
-	dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName)
-	if !ok {
-		return fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", plan.WorkerName)
-	}
-
-	app.WorkerID = &dbID
 
 	if err := s.AppRepo.Insert(ctx, app); err != nil {
 		return fmt.Errorf("failed to insert application: %w", err)
@@ -574,6 +571,8 @@ func (s *ApplicationServiceBase) insertApplicationRecord(
 func (s *ApplicationServiceBase) insertComponentRecords(
 	ctx context.Context,
 	plan *deployment.DeploymentPlan,
+	createdBy string,
+	workerID *uuid.UUID,
 ) (map[string]uuid.UUID, error) {
 	componentIDMap := make(map[string]uuid.UUID)
 	scopedProvider, err := s.Provider.WithRuntime(plan.RuntimeType)
@@ -591,12 +590,14 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 		}
 
 		component := &models.Component{
-			ID:       instanceUUID,
-			Type:     comp.ComponentType,
-			Provider: comp.ProviderID,
-			Status:   models.ComponentStatusInitializing,
-			Version:  comp.Version,
-			Metadata: metadata,
+			ID:        instanceUUID,
+			Type:      comp.ComponentType,
+			Provider:  comp.ProviderID,
+			Status:    models.ComponentStatusInitializing,
+			Version:   comp.Version,
+			Metadata:  metadata,
+			CreatedBy: createdBy,
+			WorkerID:  workerID,
 		}
 
 		if err := s.ComponentRepo.Insert(ctx, component); err != nil {
@@ -679,6 +680,7 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 		DeploymentType: req.DeploymentType,
 		CatalogID:      req.CatalogID,
 		Search:         req.Search,
+		CreatedBy:      req.CreatedBy,
 		Limit:          req.PageSize,
 		Offset:         (req.Page - 1) * req.PageSize,
 	}
@@ -782,7 +784,7 @@ func (s *ApplicationServiceBase) validateCreateApplicationRequest(
 		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", runtimeType, err)
 	}
 
-	requestValidator := validators.NewApplicationValidator(scopedProvider)
+	requestValidator := validators.NewApplicationValidator(scopedProvider).WithConnectorRepo(s.Validator.ConnectorRepo())
 	if err := requestValidator.ValidateDeploymentRequest(ctx, req); err != nil {
 		return err
 	}
@@ -863,7 +865,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 	// datasource connectors that were specified in the create request.
 	// Failures here do NOT revert the Running status — the deployment succeeded; only
 	// the connector attachment is partial. Errors are logged for operator visibility.
-	s.attachConnectorsPostDeploy(ctx, plan.ApplicationID, req.Services)
+	s.attachConnectorsPostDeploy(ctx, plan.ApplicationID, req.CreatedBy, req.Services)
 	logger.InfolnCtx(ctx, fmt.Sprintf("Post-deploy connector attachment completed for application %s", plan.ApplicationName))
 }
 
@@ -871,7 +873,7 @@ func (s *ApplicationServiceBase) executeDeploymentAsync(deployCtx context.Contex
 // UUIDs found in the create request's service connector refs. It is a best-effort operation:
 // failures are logged but do not affect the application's Running status. No-op when
 // DatasourceService is nil or when no service in the request carries connector refs.
-func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context, applicationID uuid.UUID, services []apimodels.Service) {
+func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context, applicationID uuid.UUID, userID string, services []apimodels.Service) {
 	if s.DatasourceService == nil {
 		logger.WarningfCtx(ctx, "DatasourceService is nil; skipping post-deploy connector attachment for application %s", applicationID)
 
@@ -885,7 +887,7 @@ func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context,
 		return
 	}
 
-	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, datasourceIDs)
+	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "post-deploy connector attachment failed for application %s: %v", applicationID, err)
 
@@ -1318,15 +1320,9 @@ func loadApplicationPods(ctx context.Context, rt runtime.Runtime, appID string) 
 // validateForDeletion fetches the application and validates that the requesting
 // user owns it and it is not already being deleted. Returns the app model on success.
 func (s *ApplicationServiceBase) validateForDeletion(ctx context.Context, id uuid.UUID, user string) (*models.Application, error) {
-	app, err := s.AppRepo.GetByID(ctx, id)
+	app, err := LoadAppWithOwnership(ctx, s.AppRepo, id, user)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get application: %w", err)
-	}
-	if app == nil {
-		return nil, &ValidationError{Code: http.StatusNotFound, Message: ErrMsgApplicationNotFound}
-	}
-	if app.CreatedBy != user {
-		return nil, &ValidationError{Code: http.StatusForbidden, Message: ErrMsgUserNotOwner}
+		return nil, err
 	}
 	if app.Status == models.ApplicationStatusDeleting {
 		return nil, &ValidationError{Code: http.StatusConflict, Message: ErrMsgApplicationAlreadyDeleting}
