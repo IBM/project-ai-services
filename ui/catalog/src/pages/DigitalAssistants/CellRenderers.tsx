@@ -1,4 +1,5 @@
 import type { Dispatch, ReactElement } from "react";
+import { DEPLOYMENT_STATUS } from "@/constants";
 import type { AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
 import type { SharedTableAction } from "@/components/Table/types";
@@ -35,7 +36,7 @@ export const ActionCell = ({
     onDelete={(id) =>
       dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: id })
     }
-    isDeleteEnabled={(status) => status !== "Deleting"}
+    isDeleteEnabled={(status) => status !== DEPLOYMENT_STATUS.DELETING}
     onMenuOpen={onMenuOpen}
     onViewIntegration={onViewIntegration}
     onLaunchEndpoint={onLaunchEndpoint}
@@ -59,7 +60,7 @@ export const NameCell = ({
     value={value}
     rowId={rowId}
     rowData={rowData}
-    isLinkEnabled={rowData?.status === "Running"}
+    isLinkEnabled={rowData?.status === DEPLOYMENT_STATUS.RUNNING}
     onNameClick={(id, name, status, type) =>
       dispatch({
         type: ACTION_TYPES.SHOW_DEPLOYMENT_DETAILS,

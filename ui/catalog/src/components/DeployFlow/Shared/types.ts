@@ -1,3 +1,5 @@
+import { WORKER_RUNTIME_TYPES } from "@/constants";
+
 export interface DropdownItem {
   id: string;
   label: string;
@@ -15,7 +17,8 @@ export interface ServiceConfig {
   params: Record<string, unknown>; // Service-level params from schema
 }
 
-export type DeploymentRuntimeType = "podman" | "openshift";
+export type DeploymentRuntimeType =
+  typeof WORKER_RUNTIME_TYPES.PODMAN | typeof WORKER_RUNTIME_TYPES.OPENSHIFT;
 
 export interface DeployFormData {
   name: string;
