@@ -1,5 +1,5 @@
 // Package repository provides interfaces and implementations for data storage and retrieval
-// related to users and token blacklisting in the AI Services API server.
+// related to users and token blacklisting in the AI Launchpad API server.
 package repository
 
 import (

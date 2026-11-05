@@ -29,7 +29,7 @@ Steps to reproduce the behavior:
 ## 🖥️ Environment Info
 
 - RHEL Version: [output of `cat /etc/redhat-release`]
-- AI Services Version: [output of `ai-services version`]
+- AI Launchpad (ai-services) binary Version: [output of `ai-services version`]
 
 ## 🧪 Diagnostic Commands & Output
 

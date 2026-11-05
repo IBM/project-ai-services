@@ -1,9 +1,9 @@
-// Package apiserver provides the implementation of the API server for the AI Services Catalog.
+// Package apiserver provides the implementation of the API server for the AI Launchpad Catalog.
 // It includes the setup of routes, authentication, and server configuration.
 //
-//	@title						AI Services Catalog API
+//	@title						AI Launchpad Catalog API
 //	@version					1.0
-//	@description				API server for managing AI Services catalog, applications, and authentication
+//	@description				API server for managing AI Launchpad catalog, applications, and authentication
 //	@termsOfService				http://swagger.io/terms/
 //
 //	@contact.name				API Support

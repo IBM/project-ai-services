@@ -121,7 +121,7 @@ func ValidateCreateAppOutput(output, appName string) error {
 // ValidateHelpCommandOutput validates the output of the help command.
 func ValidateHelpCommandOutput(output string) error {
 	return checkRequiredStrings(output, "help command", []string{
-		"A CLI tool for managing AI Services infrastructure.",
+		"A CLI tool for managing AI Launchpad infrastructure.",
 		"Use \"ai-services [command] --help\" for more information about a command.",
 	})
 }
@@ -138,7 +138,7 @@ func ValidateHelpRandomCommandOutput(command string, output string) error {
 			"ai-services application [command]",
 		},
 		"bootstrap": {
-			"The bootstrap command configures and validates the environment needed to run AI Services, ensuring prerequisites are met and initial configuration is completed.",
+			"The bootstrap command configures and validates the environment needed to run AI Launchpad, ensuring prerequisites are met and initial configuration is completed.",
 			"ai-services bootstrap [flags]",
 		},
 		"completion": {
