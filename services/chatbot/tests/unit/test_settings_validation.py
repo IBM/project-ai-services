@@ -284,6 +284,35 @@ class TestSystemPromptValidator:
         # Should proceed with basic validation only
         assert config.system_prompt == custom_prompt
 
+    @patch('common.lang_utils.detect_language')
+    @patch('chatbot.prompt_validator.validate_prompt_with_llm')
+    def test_validate_system_prompt_temp_session_cleaned_up(
+        self, mock_validate, mock_detect_lang
+    ):
+        """Test temporary LLM session is closed and reset to None after validation."""
+        import common.misc_utils as misc_utils
+        from chatbot.settings import RAGConfig
+        from chatbot.prompt_validator import ValidationResult, PromptValidationResponse
+
+        mock_detect_lang.return_value = "EN"
+        mock_validate.return_value = PromptValidationResponse(
+            ValidationResult.VALID, "All checks passed", 0.95
+        )
+
+        misc_utils.SESSION = None
+        try:
+            custom_prompt = "You are a helpful technical assistant."
+            RAGConfig(
+                system_prompt=custom_prompt,
+                llm_validate_custom_system_prompt=True
+            )
+            # Session should be reset to None so app lifespan can initialize the production pool
+            assert misc_utils.SESSION is None
+        finally:
+            if misc_utils.SESSION is not None:
+                misc_utils.SESSION.close()
+                misc_utils.SESSION = None
+
 
 @pytest.mark.unit
 class TestLLMConfigValidators:
