@@ -116,7 +116,7 @@ class S3ConnectorConfig(BaseModel):
         description="Verify TLS certificates when connecting to the S3 endpoint.",
     )
     allowed_extensions: list[str] = Field(
-        default_factory=lambda: [".pdf", ".docx", ".html"],
+        default_factory=lambda: [".pdf", ".docx", ".html", ".md", ".txt"],
         description="File extensions to include.  Others are silently skipped.",
     )
 
@@ -260,7 +260,7 @@ class SSHConnectorConfig(BaseModel):
     )
     remote_path: str = Field(default="/", description="Absolute remote directory to scan recursively.")
     allowed_extensions: list[str] = Field(
-        default_factory=lambda: [".pdf", ".docx", ".html"],
+        default_factory=lambda: [".pdf", ".docx", ".html", ".md", ".txt"],
         description="File extensions to include.",
     )
 

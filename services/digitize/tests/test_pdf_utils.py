@@ -88,9 +88,14 @@ class TestGetDocumentPageCount:
         """Test page count for HTML files with uppercase extension returns 1."""
         assert get_document_page_count("document.HTML") == 1
 
+    def test_get_page_count_for_md_and_txt(self):
+        """Test page count for Markdown and text files returns 1."""
+        assert get_document_page_count("notes.md") == 1
+        assert get_document_page_count("notes.TXT") == 1
+
     def test_get_page_count_for_unknown_extension(self):
         """Test page count for unknown file extension returns 0."""
-        result = get_document_page_count("document.txt")
+        result = get_document_page_count("document.csv")
         
         assert result == 0
 

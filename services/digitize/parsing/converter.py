@@ -214,6 +214,7 @@ def get_doc_converter():
             InputFormat.PDF,
             InputFormat.DOCX,
             InputFormat.HTML,
+            InputFormat.MD,
         ],
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )

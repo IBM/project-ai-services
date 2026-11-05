@@ -211,6 +211,10 @@ class TestConnectorCreateRequest:
         req = ConnectorCreateRequest(**self._ssh_payload(allowed_extensions=[".html"]))
         assert req.allowed_extensions == [".html"]
 
+    def test_allowed_extensions_accepts_md_and_txt(self):
+        req = ConnectorCreateRequest(**self._ssh_payload(allowed_extensions=["MD", ".txt"]))
+        assert req.allowed_extensions == [".md", ".txt"]
+
     def test_allowed_extensions_accepts_mixed(self):
         req = ConnectorCreateRequest(**self._ssh_payload(allowed_extensions=["html", ".pdf", "DOCX"]))
         assert req.allowed_extensions == [".html", ".pdf", ".docx"]
@@ -276,7 +280,7 @@ class TestConnectorUpdateRequest:
 
     def test_allowed_extensions_rejects_unsupported_on_update(self):
         with pytest.raises(ValidationError, match="Unsupported extension"):
-            ConnectorUpdateRequest(allowed_extensions=[".txt"])
+            ConnectorUpdateRequest(allowed_extensions=[".csv"])
 
     def test_partial_connection_details(self):
         req = ConnectorUpdateRequest(connection_details={"host": "new-host"})

@@ -712,6 +712,17 @@ class TestValidateDocumentFile:
         content = b"   \n\t<html><body>Hello</body></html>"
         validate_document_file("sample.html", content)
 
+    def test_validate_valid_md_and_txt(self):
+        from common.misc_utils import validate_document_file
+        validate_document_file("notes.md", b"# Title\n\nSome text")
+        validate_document_file("notes.TXT", b"\xef\xbb\xbfplain text")
+
+    def test_validate_md_txt_invalid_utf8_raises(self):
+        from common.misc_utils import validate_document_file
+        for name in ("notes.md", "notes.txt"):
+            with pytest.raises(ValueError, match="not valid UTF-8"):
+                validate_document_file(name, b"\xff\xfe\x00\x00invalid")
+
     def test_validate_empty_filename_raises(self):
         from common.misc_utils import validate_document_file
         with pytest.raises(ValueError, match="File must have a filename"):
@@ -734,8 +745,8 @@ class TestValidateDocumentFile:
 
     def test_validate_unsupported_extension_raises(self):
         from common.misc_utils import validate_document_file
-        with pytest.raises(ValueError, match="Only PDF, DOCX, and HTML files are allowed"):
-            validate_document_file("sample.txt", b"plain text")
+        with pytest.raises(ValueError, match="Only PDF, DOCX, HTML, Markdown, and text files are allowed"):
+            validate_document_file("sample.csv", b"plain text")
 
     def test_validate_invalid_pdf_signature_raises(self):
         from common.misc_utils import validate_document_file

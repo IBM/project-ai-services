@@ -1,10 +1,10 @@
 """
-Text processing: extraction from PDF, DOCX, and HTML converted documents.
+Text processing: extraction from PDF, DOCX, HTML, Markdown, and text converted documents.
 
 Responsibilities:
 - process_text      — PDF text extraction with TOC / font-size header levels
 - process_text_docx — DOCX text extraction with TOC / fallback header levels
-- process_text_html — HTML text extraction with heading level mapping
+- process_text_html — HTML/Markdown/text extraction with heading level mapping
 """
 
 import json
@@ -84,8 +84,9 @@ def process_text_docx(converted_doc, docx_path, out_path):
 
 def process_text_html(converted_doc, html_path, out_path):
     """
-    Process text content from HTML files.
-    Extracts structured text and maps HTML headings to markdown-style hashes.
+    Process text content from HTML, Markdown, and plain-text files.
+    Extracts structured text and maps headings to markdown-style hashes
+    (Docling maps <h1>/'#' to "title" and deeper levels to section_header).
     """
     import math
     from digitize.parsing.docx import CHARS_PER_PAGE
