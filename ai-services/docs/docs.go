@@ -3254,7 +3254,7 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "string"
                 },
-                "worker_selector": {
+                "worker_name": {
                     "type": "string"
                 }
             }

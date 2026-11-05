@@ -2,22 +2,13 @@ package types
 
 import (
 	"context"
-	texttemplate "text/template"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
-	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
-
-// WorkerTarget identifies the worker a local model is deployed to.
-type WorkerTarget struct {
-	// ID is nil when the control-plane (local) worker has no row in the workers table.
-	ID   *uuid.UUID
-	Name string
-}
 
 // Deployer deploys a planned local model on one kind of runtime in three steps: Check, Prepare
 // and Start, so a caller can reject a request up front and run the slow download step ahead of,
@@ -60,18 +51,21 @@ type ModelEndpoints struct {
 type LocalPlan struct {
 	ComponentID uuid.UUID
 	Req         apimodels.CreateModelRequest
-	Worker      WorkerTarget
+	WorkerName  string
+	WorkerID    *uuid.UUID
 	Runtime     runtime.Runtime
 	Deployer    Deployer
-	// LiteLLM is how the provider's pods are exposed through the gateway (from component metadata).
-	LiteLLM catalogtypes.LiteLLMConfig
-	// Catalog is scoped to the runtime the pods are deployed on.
-	Catalog  *catalog.CatalogProvider
-	Metadata *clitemplates.AppMetadata
-	// ComponentMetadata is what gets persisted on the component row: the model, the profile and
-	// the non-sensitive params nested under "params".
-	ComponentMetadata map[string]any
-	Templates         map[string]*texttemplate.Template
+	// RootMetadata is the provider's metadata section.
+	RootMetadata *catalogtypes.Component
+	// Route is the gateway route of the model. It has no APIBase or TokenizeURL yet: those are
+	// derived from the endpoint the Deployer returns, so the executor completes it after Start.
+	Route Route
+	// Metadata is what gets persisted on the component row: the model, the profile and the
+	// non-sensitive params nested under "params".
+	Metadata map[string]any
+	// Catalog is scoped to the runtime the pods are deployed on. The Deployer loads the
+	// provider's templates and runtime metadata from it.
+	Catalog *catalog.CatalogProvider
 	// Values are the rendered template values: provider defaults overridden by params, plus the
 	// requested model as .Values.model.
 	Values map[string]any

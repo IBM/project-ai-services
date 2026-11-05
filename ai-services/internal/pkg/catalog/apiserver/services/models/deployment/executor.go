@@ -83,7 +83,8 @@ func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) err
 	}
 
 	// LiteLLM is given the egress address the control plane can reach; the DB records the pod's own.
-	if err := e.gateway.register(ctx, localRoute(plan, eps.Egress)); err != nil {
+	updateLocalRoute(plan, eps.Egress)
+	if err := e.gateway.register(ctx, plan.Route); err != nil {
 		return err
 	}
 
@@ -109,19 +110,12 @@ func (e *ModelExecutor) failLocal(ctx context.Context, plan *types.LocalPlan, ca
 	}
 }
 
-// localRoute builds the LiteLLM route for a deployed pod. egress is the Deployer's
-// ModelEndpoints.Egress, used as is; making it reachable from the control plane is the Deployer's
-// job (see the TODO(mTLS) on types.Deployer).
-func localRoute(plan *types.LocalPlan, egress string) types.Route {
-	return types.Route{
-		Tag:           plan.ComponentID.String(),
-		Provider:      plan.LiteLLM.Provider,
-		Mode:          plan.LiteLLM.ModelMode,
-		Model:         plan.Req.Model,
-		UpstreamModel: fmt.Sprintf("%s/%s", plan.LiteLLM.Provider, plan.Req.Model),
-		APIBase:       fmt.Sprintf("http://%s%s", egress, plan.LiteLLM.APIBasePath),
-		TokenizeURL:   fmt.Sprintf("http://%s/tokenize", egress),
-	}
+// updateLocalRoute completes plan.Route for a deployed pod by setting the endpoint-derived fields
+// the planner could not know. egress is the Deployer's ModelEndpoints.Egress, used as is; making
+// it reachable from the control plane is the Deployer's job (see the TODO(mTLS) on types.Deployer).
+func updateLocalRoute(plan *types.LocalPlan, egress string) {
+	plan.Route.APIBase = fmt.Sprintf("http://%s%s", egress, plan.RootMetadata.LiteLLM.APIBasePath)
+	plan.Route.TokenizeURL = fmt.Sprintf("http://%s/tokenize", egress)
 }
 
 // ExecuteRemote runs a remote plan synchronously: add the LiteLLM route, verify connectivity and

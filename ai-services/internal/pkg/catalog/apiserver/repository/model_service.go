@@ -3,7 +3,7 @@ package repository
 import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	modelservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/model_service"
-	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
@@ -12,17 +12,13 @@ import (
 func NewModelService(
 	componentRepo dbrepo.ComponentRepository,
 	connectorRepo dbrepo.ConnectorRepository,
-	workerRepo dbrepo.WorkerRepository,
 	workerRegistry stream.WorkerRegistry,
 	catalogProvider *catalog.CatalogProvider,
-	litellmClient catalogclient.LiteLLMClient,
 ) ModelServiceInterface {
 	return modelservice.NewModelService(
 		componentRepo,
 		connectorRepo,
-		workerRepo,
-		workerRegistry,
+		worker.NewResolver(workerRegistry),
 		catalogProvider,
-		litellmClient,
 	)
 }

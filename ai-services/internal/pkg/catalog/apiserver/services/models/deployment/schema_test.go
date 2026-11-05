@@ -7,11 +7,21 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 const validWatsonxKey = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR" // 44 chars
+
+func requireStatus(t *testing.T, err error, code int, msgContains string) {
+	t.Helper()
+
+	var valErr *validators.ValidationError
+	require.ErrorAs(t, err, &valErr)
+	assert.Equal(t, code, valErr.Code)
+	assert.Contains(t, valErr.Message, msgContains)
+}
 
 func podmanProvider(t *testing.T) *catalog.CatalogProvider {
 	t.Helper()

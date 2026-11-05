@@ -15,14 +15,14 @@ type CreateModelRequest struct {
 	DeploymentType DeploymentType `json:"deployment_type" binding:"required,oneof=local remote"`
 	// ComponentType is a catalog component type whose providers have `category: models`
 	// (see the component's metadata.yaml); the valid values come from the catalog.
-	ComponentType  string         `json:"component_type" binding:"required"`
-	Name           string         `json:"name" binding:"required,min=3,max=100"`
-	ProviderID     string         `json:"provider_id" binding:"required"`
-	Model          string         `json:"model" binding:"required"`
-	Profile        string         `json:"profile,omitempty"`
-	WorkerSelector string         `json:"worker_selector,omitempty"`
-	Params         map[string]any `json:"params,omitempty"`
-	CreatedBy      string         `json:"-"`
+	ComponentType string         `json:"component_type" binding:"required"`
+	Name          string         `json:"name" binding:"required,min=3,max=100"`
+	ProviderID    string         `json:"provider_id" binding:"required"`
+	Model         string         `json:"model" binding:"required"`
+	Profile       string         `json:"profile,omitempty"`
+	WorkerName    string         `json:"worker_name,omitempty"`
+	Params        map[string]any `json:"params,omitempty"`
+	CreatedBy     string         `json:"-"`
 }
 
 // CreateModelResponse represents the response body returned for POST /api/v1/models.

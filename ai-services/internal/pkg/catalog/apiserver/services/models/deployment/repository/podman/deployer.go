@@ -24,7 +24,12 @@ func NewPodmanDeployer() *PodmanDeployer {
 // Check verifies that the worker has the Spyre cards the provider needs. It only discovers free
 // cards; Start is what allocates them.
 func (d *PodmanDeployer) Check(ctx context.Context, plan *types.LocalPlan) error {
-	_, err := allocateSpyreCards(ctx, plan)
+	tmpls, err := loadTemplates(plan)
+	if err != nil {
+		return err
+	}
+
+	_, err = allocateSpyreCards(ctx, plan, tmpls)
 
 	return err
 }
@@ -32,9 +37,14 @@ func (d *PodmanDeployer) Check(ctx context.Context, plan *types.LocalPlan) error
 // Prepare pulls the container images declared by the provider templates and downloads the model
 // weights on the target worker, reusing the application deployment helpers.
 func (d *PodmanDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) error {
+	tmpls, err := loadTemplates(plan)
+	if err != nil {
+		return err
+	}
+
 	// The tool image is required for the model download container and housekeeping tasks.
 	imageSet := map[string]bool{vars.ToolImage: true}
-	if err := plan.Catalog.CollectImagesFromTemplates(ctx, plan.Templates, plan.Values, imageSet); err != nil {
+	if err := plan.Catalog.CollectImagesFromTemplates(ctx, tmpls, plan.Values, imageSet); err != nil {
 		return fmt.Errorf("failed to collect images for %s/%s: %w", plan.Req.ComponentType, plan.Req.ProviderID, err)
 	}
 
@@ -60,10 +70,20 @@ func (d *PodmanDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) err
 // model server's endpoints.
 //
 // TODO(mTLS): Egress is set to the pod's own address, which the control plane can only reach when
-// plan.Worker is the local worker. For a remote worker, create the worker mTLS ingress/egress
+// plan.WorkerName is the local worker. For a remote worker, create the worker mTLS ingress/egress
 // Caddy routes here and return the control-plane private egress as Egress (see types.Deployer).
 func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (types.ModelEndpoints, error) {
-	spyrePool, err := allocateSpyreCards(ctx, plan)
+	metadata, err := plan.Catalog.LoadComponentRuntimeMetadata(plan.Req.ComponentType, plan.Req.ProviderID)
+	if err != nil {
+		return types.ModelEndpoints{}, fmt.Errorf("failed to load component metadata: %w", err)
+	}
+
+	tmpls, err := loadTemplates(plan)
+	if err != nil {
+		return types.ModelEndpoints{}, err
+	}
+
+	spyrePool, err := allocateSpyreCards(ctx, plan, tmpls)
 	if err != nil {
 		return types.ModelEndpoints{}, err
 	}
@@ -80,8 +100,8 @@ func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (type
 		ComponentID:   plan.ComponentID,
 		ComponentType: plan.Req.ComponentType,
 		Values:        plan.Values,
-		Metadata:      plan.Metadata,
-		Templates:     plan.Templates,
+		Metadata:      metadata,
+		Templates:     tmpls,
 		SpyrePool:     spyrePool,
 		BaseDir:       baseDir,
 	})
@@ -97,10 +117,24 @@ func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (type
 	return types.ModelEndpoints{Internal: internal, Egress: internal}, nil
 }
 
+// loadTemplates loads the provider's pod templates from the plan's runtime-scoped catalog.
+func loadTemplates(plan *types.LocalPlan) (map[string]*texttemplate.Template, error) {
+	tmpls, err := plan.Catalog.LoadComponentTemplates(plan.Req.ComponentType, plan.Req.ProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load component templates: %w", err)
+	}
+
+	return tmpls, nil
+}
+
 // allocateSpyreCards builds a Spyre card pool when the provider templates declare spyre-card
 // annotations. It returns a nil pool for providers that need no cards.
-func allocateSpyreCards(ctx context.Context, plan *types.LocalPlan) (*deploymenttypes.SpyreCardPool, error) {
-	required, err := countSpyreCards(ctx, plan.Catalog, plan.Templates, plan.Values)
+func allocateSpyreCards(
+	ctx context.Context,
+	plan *types.LocalPlan,
+	tmpls map[string]*texttemplate.Template,
+) (*deploymenttypes.SpyreCardPool, error) {
+	required, err := countSpyreCards(ctx, plan.Catalog, tmpls, plan.Values)
 	if err != nil {
 		return nil, err
 	}

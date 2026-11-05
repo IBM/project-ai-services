@@ -5,21 +5,17 @@ import (
 	"fmt"
 	"maps"
 	"strings"
-	texttemplate "text/template"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
-	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 const (
@@ -37,7 +33,7 @@ const (
 
 // ModelPlanner plans model deployments by:
 //  1. Validating the request against the catalog (component type, provider, params schema)
-//  2. Resolving the target worker, its runtime and the runtime's deployer (local models)
+//  2. Resolving the target worker's runtime and the runtime's deployer (local models)
 //  3. Loading the provider's templates and building the template values / gateway route
 //
 // Planning has no side effects, so a bad request is rejected with a proper status code before any
@@ -45,49 +41,26 @@ const (
 type ModelPlanner struct {
 	catalogProvider *catalog.CatalogProvider
 	models          modelCatalog
-	workers         *workerResolver
+	workers         worker.Resolver
 	// deployers maps a runtime type to the deployer that starts local model pods on it.
 	deployers map[runtimeTypes.RuntimeType]types.Deployer
 }
 
 // NewModelPlanner creates a new model planner with the default per-runtime deployers.
-func NewModelPlanner(provider *catalog.CatalogProvider) *ModelPlanner {
+func NewModelPlanner(provider *catalog.CatalogProvider, workers worker.Resolver) *ModelPlanner {
 	return &ModelPlanner{
 		catalogProvider: provider,
 		models:          modelCatalog{provider: provider},
-		workers:         &workerResolver{},
+		workers:         workers,
 		deployers: map[runtimeTypes.RuntimeType]types.Deployer{
 			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeployer(),
 		},
 	}
 }
 
-// WithWorkerRepo wires the worker repository into the planner. Without it only the control-plane
-// worker can be targeted.
-func (p *ModelPlanner) WithWorkerRepo(repo dbrepo.WorkerRepository) *ModelPlanner {
-	p.workers.repo = repo
-
-	return p
-}
-
-// WithWorkerRegistry wires the worker registry into the planner so it can resolve a runtime for
-// workers connected over the gRPC CommandStream.
-func (p *ModelPlanner) WithWorkerRegistry(reg stream.WorkerRegistry) *ModelPlanner {
-	p.workers.registry = reg
-
-	return p
-}
-
 // WithDeployers replaces the per-runtime deployers.
 func (p *ModelPlanner) WithDeployers(deployers map[runtimeTypes.RuntimeType]types.Deployer) *ModelPlanner {
 	p.deployers = deployers
-
-	return p
-}
-
-// WithRuntimeResolver overrides how the runtime of a worker is resolved; used by tests.
-func (p *ModelPlanner) WithRuntimeResolver(fn func(workerName string) (runtime.Runtime, error)) *ModelPlanner {
-	p.workers.runtimeFn = fn
 
 	return p
 }
@@ -99,16 +72,17 @@ func (p *ModelPlanner) ValidateComponentType(componentType string) error {
 
 // PlanLocal validates a local-model request and resolves where and how it will be deployed.
 func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelRequest) (*types.LocalPlan, error) {
-	target, err := p.workers.resolve(ctx, req.WorkerSelector)
-	if err != nil {
-		return nil, err
-	}
+	workerName := worker.DefaultName(req.WorkerName)
 
 	// Resolving the runtime up front means an unreachable worker fails the request (422)
 	// instead of leaving a component row stuck in Deploying.
-	rt, err := p.workers.runtime(target.Name)
+	rt, err := p.workers.NewRuntime(ctx, workerName, "")
 	if err != nil {
-		return nil, validators.Unprocessable("cannot reach worker %q: %v", target.Name, err)
+		return nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
+	}
+
+	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
+		return nil, validators.BadRequest("models are unsupported on openshift runtime")
 	}
 
 	deployer, ok := p.deployers[rt.Type()]
@@ -128,29 +102,39 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		return nil, err
 	}
 
-	metadata, tmpls, values, err := loadLocalAssets(provider, req)
-	if err != nil {
-		return nil, err
+	componentID := uuid.New()
+
+	var workerID *uuid.UUID
+	if id, ok := p.workers.ID(workerName); ok {
+		workerID = &id
 	}
 
 	plan := &types.LocalPlan{
-		ComponentID:       uuid.New(),
-		Req:               req,
-		Worker:            target,
-		Runtime:           rt,
-		Deployer:          deployer,
-		LiteLLM:           *comp.LiteLLM,
-		Catalog:           provider,
-		Metadata:          metadata,
-		ComponentMetadata: localComponentMetadata(req, sensitive),
-		Templates:         tmpls,
-		Values:            values,
+		ComponentID:  componentID,
+		Req:          req,
+		WorkerName:   workerName,
+		WorkerID:     workerID,
+		Runtime:      rt,
+		Deployer:     deployer,
+		RootMetadata: comp,
+		// The endpoint (APIBase, TokenizeURL) is only known once the Deployer has started the
+		// pods, so the executor completes the route then.
+		Route: types.Route{
+			Tag:           componentID.String(),
+			Provider:      comp.LiteLLM.Provider,
+			Mode:          comp.LiteLLM.ModelMode,
+			Model:         req.Model,
+			UpstreamModel: fmt.Sprintf("%s/%s", comp.LiteLLM.Provider, req.Model),
+		},
+		Metadata: localComponentMetadata(req, sensitive),
+		Catalog:  provider,
+		Values:   loadLocalValues(provider, req),
 	}
 
 	// Reject what the worker cannot host (e.g. not enough free Spyre cards) now, instead of after
 	// the row is written and the images and weights are downloaded.
 	if err := deployer.Check(ctx, plan); err != nil {
-		return nil, validators.Unprocessable("worker %q cannot host this model: %v", target.Name, err)
+		return nil, validators.Unprocessable("worker %q cannot host this model: %v", workerName, err)
 	}
 
 	return plan, nil
@@ -172,25 +156,11 @@ func localComponentMetadata(req apimodels.CreateModelRequest, sensitive map[stri
 	return md
 }
 
-// loadLocalAssets loads the provider's runtime metadata and templates and builds the template values.
-func loadLocalAssets(
-	provider *catalog.CatalogProvider,
-	req apimodels.CreateModelRequest,
-) (*clitemplates.AppMetadata, map[string]*texttemplate.Template, map[string]any, error) {
-	componentType := req.ComponentType
-
-	metadata, err := provider.LoadComponentRuntimeMetadata(componentType, req.ProviderID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to load component metadata: %w", err)
-	}
-
-	tmpls, err := provider.LoadComponentTemplates(componentType, req.ProviderID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to load component templates: %w", err)
-	}
-
+// loadLocalValues builds the template values: the provider's defaults overridden by the request
+// params, plus the requested model.
+func loadLocalValues(provider *catalog.CatalogProvider, req apimodels.CreateModelRequest) map[string]any {
 	// A provider without a values file is valid: fall back to request-only values.
-	values, err := provider.LoadComponentValues(componentType, req.ProviderID, map[string]string{})
+	values, err := provider.LoadComponentValues(req.ComponentType, req.ProviderID, map[string]string{})
 	if err != nil || values == nil {
 		values = make(map[string]any)
 	}
@@ -204,7 +174,7 @@ func loadLocalAssets(
 	// unknown) and resolve it into concrete deployment settings (context length, resources, ...)
 	// that get merged into values here.
 
-	return metadata, tmpls, values, nil
+	return values
 }
 
 // PlanRemote validates a remote-model request against the provider's schema and builds its route.

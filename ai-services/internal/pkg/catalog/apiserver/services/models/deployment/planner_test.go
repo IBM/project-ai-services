@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // The /tokenize passthrough is registered by default for every remote model with an api_base.
 func TestPlanRemote_TokenizePassthroughByDefault(t *testing.T) {
-	planner := NewModelPlanner(setupTestCatalogProvider(t))
+	planner := NewModelPlanner(setupTestCatalogProvider(t), worker.NewResolver(nil))
 
 	plan, err := planner.PlanRemote(context.Background(), apimodels.CreateModelRequest{
 		DeploymentType: apimodels.DeploymentTypeRemote,
@@ -27,7 +28,7 @@ func TestPlanRemote_TokenizePassthroughByDefault(t *testing.T) {
 
 // watsonx has a fixed tokenization endpoint, so its target is not derived from api_base.
 func TestPlanRemote_WatsonxTokenizeTarget(t *testing.T) {
-	planner := NewModelPlanner(setupTestCatalogProvider(t))
+	planner := NewModelPlanner(setupTestCatalogProvider(t), worker.NewResolver(nil))
 
 	plan, err := planner.PlanRemote(context.Background(), apimodels.CreateModelRequest{
 		DeploymentType: apimodels.DeploymentTypeRemote,

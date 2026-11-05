@@ -4,10 +4,20 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
+	t.Helper()
+
+	provider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	return provider
+}
 
 func TestModelCatalog_ComponentTypesComeFromMetadata(t *testing.T) {
 	mc := modelCatalog{provider: setupTestCatalogProvider(t)}

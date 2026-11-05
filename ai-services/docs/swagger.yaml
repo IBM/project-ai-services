@@ -210,7 +210,7 @@ definitions:
         type: string
       provider_id:
         type: string
-      worker_selector:
+      worker_name:
         type: string
     required:
     - component_type

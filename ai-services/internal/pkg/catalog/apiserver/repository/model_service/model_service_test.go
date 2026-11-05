@@ -11,7 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -144,25 +146,6 @@ func (m *mockConnectorRepo) GetByName(_ context.Context, name string) (*dbmodels
 	return nil, nil
 }
 
-type mockWorkerRepo struct {
-	dbrepo.WorkerRepository
-	workers map[string]*dbmodels.Worker
-}
-
-func newMockWorkerRepo() *mockWorkerRepo {
-	return &mockWorkerRepo{
-		workers: make(map[string]*dbmodels.Worker),
-	}
-}
-
-func (m *mockWorkerRepo) GetByName(_ context.Context, name string) (*dbmodels.Worker, error) {
-	if w, ok := m.workers[name]; ok {
-		return w, nil
-	}
-
-	return nil, nil
-}
-
 type mockLiteLLMClient struct {
 	registeredModels   []catalogclient.LiteLLMModelNewRequest
 	deregisteredModels []string
@@ -226,10 +209,45 @@ func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
 	return provider
 }
 
-// mockWorkerRegistry reports a fixed runtime type per connected worker.
+// newTestModelService builds a ModelService whose executor talks to lite instead of a real LiteLLM.
+func newTestModelService(t *testing.T, comps dbrepo.ComponentRepository, conns dbrepo.ConnectorRepository, workers worker.Resolver, lite catalogclient.LiteLLMClient) *ModelService {
+	t.Helper()
+
+	svc := NewModelService(comps, conns, workers, setupTestCatalogProvider(t))
+	svc.executor = modelsvc.NewModelExecutor(comps, conns, lite)
+
+	return svc
+}
+
+// fakeWorkers is a worker.Resolver that hands out a fixed runtime (or error) and worker IDs.
+type fakeWorkers struct {
+	worker.Resolver
+	rt  runtime.Runtime
+	err error
+	ids map[string]uuid.UUID
+}
+
+func (f *fakeWorkers) NewRuntime(context.Context, string, string) (runtime.Runtime, error) {
+	return f.rt, f.err
+}
+
+func (f *fakeWorkers) ID(name string) (uuid.UUID, bool) {
+	id, ok := f.ids[name]
+
+	return id, ok
+}
+
+// mockWorkerRegistry reports a fixed runtime type per worker. A worker with a runtime type is
+// connected.
 type mockWorkerRegistry struct {
 	stream.WorkerRegistry
 	runtimes map[string]string
+}
+
+func (m *mockWorkerRegistry) IsWorkerConnected(_ context.Context, name string) bool {
+	_, ok := m.runtimes[name]
+
+	return ok
 }
 
 func (m *mockWorkerRegistry) WorkerRuntimeType(name string) (string, bool) {
@@ -255,8 +273,6 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 		controlPlane runtimeTypes.RuntimeType
 		deployment   apimodels.DeploymentType
 		selector     string
-		// worker is the DB row of the targeted worker; nil means no row.
-		worker *dbmodels.Worker
 		// registryRuntimes is the live registry content (worker name -> runtime type).
 		registryRuntimes map[string]string
 	}{
@@ -271,24 +287,16 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 			deployment:   apimodels.DeploymentTypeRemote,
 		},
 		{
-			name:         "default worker stored as openshift",
-			controlPlane: runtimeTypes.RuntimeTypePodman,
-			deployment:   apimodels.DeploymentTypeLocal,
-			worker:       &dbmodels.Worker{Name: "Local", RuntimeType: dbmodels.WorkerRuntimeTypeOpenShift, Status: dbmodels.WorkerStatusReady},
+			name:             "default worker is openshift",
+			controlPlane:     runtimeTypes.RuntimeTypePodman,
+			deployment:       apimodels.DeploymentTypeLocal,
+			registryRuntimes: map[string]string{"Local": string(runtimeTypes.RuntimeTypeOpenShift)},
 		},
 		{
-			name:         "selected remote worker stored as openshift",
-			controlPlane: runtimeTypes.RuntimeTypePodman,
-			deployment:   apimodels.DeploymentTypeLocal,
-			selector:     ocpWorker,
-			worker:       &dbmodels.Worker{Name: ocpWorker, RuntimeType: dbmodels.WorkerRuntimeTypeOpenShift, Status: dbmodels.WorkerStatusReady},
-		},
-		{
-			name:             "selected remote worker openshift only in live registry",
+			name:             "selected remote worker is openshift",
 			controlPlane:     runtimeTypes.RuntimeTypePodman,
 			deployment:       apimodels.DeploymentTypeLocal,
 			selector:         ocpWorker,
-			worker:           &dbmodels.Worker{Name: ocpWorker, RuntimeType: dbmodels.WorkerRuntimeTypeUnknown, Status: dbmodels.WorkerStatusReady},
 			registryRuntimes: map[string]string{ocpWorker: string(runtimeTypes.RuntimeTypeOpenShift)},
 		},
 	}
@@ -299,21 +307,17 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 
 			compRepo := newMockComponentRepo()
 			connRepo := newMockConnectorRepo()
-			workerRepo := newMockWorkerRepo()
-			if tt.worker != nil {
-				workerRepo.workers[tt.worker.Name] = tt.worker
-			}
 
 			var registry stream.WorkerRegistry
 			if tt.registryRuntimes != nil {
 				registry = &mockWorkerRegistry{runtimes: tt.registryRuntimes}
 			}
 
-			svc := NewModelService(compRepo, connRepo, workerRepo, registry, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+			svc := newTestModelService(t, compRepo, connRepo, worker.NewResolver(registry), &mockLiteLLMClient{})
 
 			req := validRequest()
 			req.DeploymentType = tt.deployment
-			req.WorkerSelector = tt.selector
+			req.WorkerName = tt.selector
 
 			resp, err := svc.CreateModel(context.Background(), req)
 			assert.Nil(t, resp)
@@ -342,7 +346,7 @@ func TestCreateModel_Validation_InvalidFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
 
-			svc := NewModelService(newMockComponentRepo(), newMockConnectorRepo(), nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+			svc := newTestModelService(t, newMockComponentRepo(), newMockConnectorRepo(), worker.NewResolver(nil), &mockLiteLLMClient{})
 
 			req := validRequest()
 			tt.mutate(&req)
@@ -390,7 +394,7 @@ func TestCreateModel_Conflict_Name(t *testing.T) {
 			connRepo := newMockConnectorRepo()
 			tt.seed(compRepo, connRepo)
 
-			svc := NewModelService(compRepo, connRepo, nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+			svc := newTestModelService(t, compRepo, connRepo, worker.NewResolver(nil), &mockLiteLLMClient{})
 
 			req := validRequest()
 			req.Name = tt.existing
@@ -483,7 +487,7 @@ func TestCreateModel_Remote(t *testing.T) {
 			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
 
 			conns := newMockConnectorRepo()
-			svc := NewModelService(newMockComponentRepo(), conns, nil, nil, setupTestCatalogProvider(t), tt.lite)
+			svc := newTestModelService(t, newMockComponentRepo(), conns, worker.NewResolver(nil), tt.lite)
 
 			resp, err := svc.CreateModel(context.Background(), tt.req)
 			if tt.wantCode == 0 {
@@ -530,12 +534,11 @@ func TestCreateModel_Local_InitialRow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
 
-			compRepo := newMockComponentRepo()
-			svc := NewModelService(compRepo, newMockConnectorRepo(), nil, nil, setupTestCatalogProvider(t), &mockLiteLLMClient{})
-
 			rt := &blockingRuntime{release: make(chan struct{})}
 			t.Cleanup(func() { close(rt.release) })
-			svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) { return rt, nil })
+
+			compRepo := newMockComponentRepo()
+			svc := newTestModelService(t, compRepo, newMockConnectorRepo(), &fakeWorkers{rt: rt}, &mockLiteLLMClient{})
 
 			req := validRequest()
 			req.Name = "local-granite"
@@ -603,16 +606,21 @@ type podmanRuntime struct{ runtime.Runtime }
 
 func (podmanRuntime) Type() runtimeTypes.RuntimeType { return runtimeTypes.RuntimeTypePodman }
 
+// newLocalService builds a service whose workers all run a Podman runtime.
 func newLocalService(t *testing.T, d types.Deployer, lite *mockLiteLLMClient) (*ModelService, *mockComponentRepo) {
+	t.Helper()
+
+	return newLocalServiceWith(t, d, lite, &fakeWorkers{rt: podmanRuntime{}})
+}
+
+func newLocalServiceWith(t *testing.T, d types.Deployer, lite *mockLiteLLMClient, workers worker.Resolver) (*ModelService, *mockComponentRepo) {
 	t.Helper()
 
 	setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
 
 	repo := newMockComponentRepo()
-	svc := NewModelService(repo, newMockConnectorRepo(), nil, nil, setupTestCatalogProvider(t), lite)
-	svc.planner.
-		WithDeployers(map[runtimeTypes.RuntimeType]types.Deployer{runtimeTypes.RuntimeTypePodman: d}).
-		WithRuntimeResolver(func(string) (runtime.Runtime, error) { return podmanRuntime{}, nil })
+	svc := newTestModelService(t, repo, newMockConnectorRepo(), workers, lite)
+	svc.planner.WithDeployers(map[runtimeTypes.RuntimeType]types.Deployer{runtimeTypes.RuntimeTypePodman: d})
 
 	return svc, repo
 }
@@ -649,6 +657,8 @@ func awaitStatus(t *testing.T, repo *mockComponentRepo, id string, want dbmodels
 func TestCreateModel_Local_Rejected(t *testing.T) {
 	tests := []struct {
 		name string
+		// workers is the worker resolver; nil means workers that run a Podman runtime.
+		workers worker.Resolver
 		// setup customises the service and the fake deployer before the request is made.
 		setup    func(svc *ModelService, d *fakeDeployer)
 		mutate   func(*apimodels.CreateModelRequest)
@@ -666,17 +676,16 @@ func TestCreateModel_Local_Rejected(t *testing.T) {
 			wantCode: http.StatusBadRequest,
 		},
 		{
-			name:     "unknown worker",
-			mutate:   func(r *apimodels.CreateModelRequest) { r.WorkerSelector = "ghost" },
-			wantCode: http.StatusNotFound,
+			// Uses the real registry-backed resolver instead of the fake one.
+			name:     "worker not connected",
+			workers:  worker.NewResolver(&mockWorkerRegistry{}),
+			mutate:   func(r *apimodels.CreateModelRequest) { r.WorkerName = "ghost" },
+			wantCode: http.StatusUnprocessableEntity,
+			wantMsg:  `worker "ghost" is not connected`,
 		},
 		{
-			name: "worker runtime cannot be resolved",
-			setup: func(svc *ModelService, _ *fakeDeployer) {
-				svc.planner.WithRuntimeResolver(func(string) (runtime.Runtime, error) {
-					return nil, errors.New("worker is not connected")
-				})
-			},
+			name:     "worker runtime cannot be resolved",
+			workers:  &fakeWorkers{err: errors.New("worker is not connected")},
 			wantCode: http.StatusUnprocessableEntity,
 			wantMsg:  "worker is not connected",
 		},
@@ -702,7 +711,11 @@ func TestCreateModel_Local_Rejected(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			deployer := &fakeDeployer{called: make(chan struct{})}
 			lite := &mockLiteLLMClient{}
-			svc, repo := newLocalService(t, deployer, lite)
+			workers := tt.workers
+			if workers == nil {
+				workers = &fakeWorkers{rt: podmanRuntime{}}
+			}
+			svc, repo := newLocalServiceWith(t, deployer, lite, workers)
 
 			if tt.setup != nil {
 				tt.setup(svc, deployer)
@@ -891,10 +904,10 @@ func TestPlanLocal(t *testing.T) {
 				r.Params = map[string]any{"apiKey": "k"}
 			},
 			check: func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan) {
-				assert.NotContains(t, plan.ComponentMetadata, "apiKey", "params are not stored flat")
-				assert.Empty(t, plan.ComponentMetadata["params"], "credentials must never be persisted")
-				assert.Equal(t, req.Model, plan.ComponentMetadata["model"])
-				assert.Equal(t, "small", plan.ComponentMetadata["profile"])
+				assert.NotContains(t, plan.Metadata, "apiKey", "params are not stored flat")
+				assert.Empty(t, plan.Metadata["params"], "credentials must never be persisted")
+				assert.Equal(t, req.Model, plan.Metadata["model"])
+				assert.Equal(t, "small", plan.Metadata["profile"])
 			},
 		},
 	}
@@ -910,6 +923,32 @@ func TestPlanLocal(t *testing.T) {
 			require.NoError(t, err)
 
 			tt.check(t, req, plan)
+		})
+	}
+}
+
+// The worker ID persisted on the component comes from the worker resolver, like the application flow.
+func TestPlanLocal_WorkerID(t *testing.T) {
+	workerID := uuid.New()
+
+	tests := []struct {
+		name string
+		ids  map[string]uuid.UUID
+		want *uuid.UUID
+	}{
+		{name: "registered worker", ids: map[string]uuid.UUID{"Local": workerID}, want: &workerID},
+		{name: "unregistered worker", ids: map[string]uuid.UUID{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newLocalServiceWith(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{}, &fakeWorkers{rt: podmanRuntime{}, ids: tt.ids})
+
+			plan, err := svc.planner.PlanLocal(context.Background(), localRequest())
+			require.NoError(t, err)
+
+			assert.Equal(t, "Local", plan.WorkerName)
+			assert.Equal(t, tt.want, plan.WorkerID)
 		})
 	}
 }

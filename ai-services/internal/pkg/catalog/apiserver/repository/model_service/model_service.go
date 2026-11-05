@@ -8,13 +8,13 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // ModelService implements the ModelServiceInterface for model management.
@@ -34,27 +34,19 @@ type ModelService struct {
 }
 
 // NewModelService creates a new ModelService instance.
-// componentRepo, connectorRepo and catalogProvider are required; workerRepo and workerRegistry
-// are optional (without them only the control-plane worker can be targeted).
+// componentRepo, connectorRepo, workers and catalogProvider are required; workers is used to
+// reach the worker that hosts a local model.
 func NewModelService(
 	componentRepo dbrepo.ComponentRepository,
 	connectorRepo dbrepo.ConnectorRepository,
-	workerRepo dbrepo.WorkerRepository,
-	workerRegistry stream.WorkerRegistry,
+	workers worker.Resolver,
 	catalogProvider *catalog.CatalogProvider,
-	litellmClient catalogclient.LiteLLMClient,
 ) *ModelService {
-	if litellmClient == nil {
-		litellmClient = catalogclient.NewLiteLLMClient("", "")
-	}
-
 	return &ModelService{
 		componentRepo: componentRepo,
 		connectorRepo: connectorRepo,
-		planner: modelsvc.NewModelPlanner(catalogProvider).
-			WithWorkerRepo(workerRepo).
-			WithWorkerRegistry(workerRegistry),
-		executor: modelsvc.NewModelExecutor(componentRepo, connectorRepo, litellmClient),
+		planner:       modelsvc.NewModelPlanner(catalogProvider, workers),
+		executor:      modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
 	}
 }
 
@@ -116,8 +108,8 @@ func (s *ModelService) insertComponent(ctx context.Context, plan *types.LocalPla
 		Provider:  req.ProviderID,
 		Status:    dbmodels.ComponentStatusDownloading,
 		CreatedBy: req.CreatedBy,
-		WorkerID:  plan.Worker.ID,
-		Metadata:  plan.ComponentMetadata,
+		WorkerID:  plan.WorkerID,
+		Metadata:  plan.Metadata,
 	}
 	if err := s.componentRepo.Insert(ctx, component); err != nil {
 		return fmt.Errorf("failed to insert component: %w", err)

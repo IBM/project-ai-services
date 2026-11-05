@@ -1,16 +1,16 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/go-resty/resty/v2"
 )
 
 const (
@@ -70,74 +70,50 @@ type LiteLLMHealthResponse struct {
 }
 
 type litellmClient struct {
-	baseURL    string
-	masterKey  string
-	httpClient *http.Client
+	httpClient *resty.Client
 }
 
-// NewLiteLLMClient creates a new LiteLLMClient.
-func NewLiteLLMClient(baseURL, masterKey string) LiteLLMClient {
-	if baseURL == "" {
-		if envURL := os.Getenv("LITELLM_ENDPOINT"); envURL != "" {
-			baseURL = envURL
-		} else if envURL := os.Getenv("LITELLM_URL"); envURL != "" {
-			baseURL = envURL
-		} else {
-			baseURL = defaultLiteLLMBaseURL
-		}
+// NewLiteLLMClient creates a new LiteLLMClient. The base URL and master key are resolved from the
+// environment (LITELLM_ENDPOINT, LITELLM_MASTER_KEY) or the mounted secret file.
+func NewLiteLLMClient() LiteLLMClient {
+	baseURL := defaultLiteLLMBaseURL
+	if envURL := os.Getenv("LITELLM_ENDPOINT"); envURL != "" {
+		baseURL = envURL
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	if masterKey == "" {
-		if key := os.Getenv("LITELLM_MASTER_KEY"); key != "" {
-			masterKey = key
-		} else if keyBytes, err := os.ReadFile("/etc/secret/litellm-secret/master-key"); err == nil {
-			masterKey = strings.TrimSpace(string(keyBytes))
-		}
+	var masterKey string
+	if key := os.Getenv("LITELLM_MASTER_KEY"); key != "" {
+		masterKey = key
+	} else if keyBytes, err := os.ReadFile("/etc/secret/litellm-secret/master-key"); err == nil {
+		masterKey = strings.TrimSpace(string(keyBytes))
 	}
 
-	return &litellmClient{
-		baseURL:   baseURL,
-		masterKey: masterKey,
-		httpClient: &http.Client{
-			Timeout: defaultLiteLLMTimeout,
-		},
+	httpClient := resty.New().
+		SetBaseURL(baseURL).
+		SetTimeout(defaultLiteLLMTimeout).
+		SetHeader("Content-Type", "application/json")
+	if masterKey != "" {
+		httpClient.SetAuthToken(masterKey)
 	}
+
+	return &litellmClient{httpClient: httpClient}
 }
 
+// doRequest sends the request and returns the raw response body and status code. A non-2xx status
+// is not an error here; callers decide what each status means.
 func (c *litellmClient) doRequest(ctx context.Context, method, path string, body any) ([]byte, int, error) {
-	var bodyReader io.Reader
+	req := c.httpClient.R().SetContext(ctx)
 	if body != nil {
-		jsonBytes, err := json.Marshal(body)
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to marshal request body: %w", err)
-		}
-		bodyReader = bytes.NewReader(jsonBytes)
+		req.SetBody(body)
 	}
 
-	reqURL := fmt.Sprintf("%s%s", c.baseURL, path)
-	req, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create http request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if c.masterKey != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.masterKey))
-	}
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := req.Execute(method, path)
 	if err != nil {
 		return nil, 0, fmt.Errorf("http request failed: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	return respBytes, resp.StatusCode, nil
+	return resp.Body(), resp.StatusCode(), nil
 }
 
 func (c *litellmClient) RegisterModel(ctx context.Context, req LiteLLMModelNewRequest) error {

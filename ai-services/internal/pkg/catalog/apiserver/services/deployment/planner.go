@@ -10,14 +10,12 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/params"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // DeploymentPlanner plans the deployment of applications by:
@@ -29,30 +27,22 @@ type DeploymentPlanner struct {
 	componentRepo   repository.ComponentRepository
 	paramBuilder    *params.ParamBuilder
 	runtimeType     string
-	// workerRegistry is optional; when set, PlanDeployment validates remote
-	// worker metadata (e.g. Caddy config) before any DB records are written.
-	workerRegistry stream.WorkerRegistry
+	// workers resolves the runtime of the target worker.
+	workers worker.Resolver
 }
 
 // NewDeploymentPlanner creates a new deployment planner.
 func NewDeploymentPlanner(
 	provider *catalog.CatalogProvider,
 	componentRepo repository.ComponentRepository,
+	workers worker.Resolver,
 ) *DeploymentPlanner {
 	return &DeploymentPlanner{
 		catalogProvider: provider,
 		componentRepo:   componentRepo,
 		paramBuilder:    params.NewParamBuilder(provider),
+		workers:         workers,
 	}
-}
-
-// WithWorkerRegistry wires the worker registry into the planner so it can
-// validate remote worker metadata during PlanDeployment and fail early before
-// any DB records are written.
-func (p *DeploymentPlanner) WithWorkerRegistry(reg stream.WorkerRegistry) *DeploymentPlanner {
-	p.workerRegistry = reg
-
-	return p
 }
 
 // WithRuntime returns a runtime-scoped planner copy.
@@ -110,10 +100,7 @@ func (p *DeploymentPlanner) PlanDeployment(
 		return nil, fmt.Errorf("planner has no runtime type: call WithRuntime before PlanDeployment")
 	}
 
-	workerName := req.WorkerName
-	if workerName == "" {
-		workerName = workerconstants.LocalWorkerName
-	}
+	workerName := worker.DefaultName(req.WorkerName)
 
 	isArchitecture, err := p.resolveIsArchitecture(req.CatalogID)
 	if err != nil {
@@ -283,9 +270,9 @@ func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(ctx context.Context, 
 
 	// Discover free Spyre cards via the worker over gRPC (the API server never touches hardware
 	// directly) and build the allocation pool using the shared podmanutils helper.
-	rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(p.runtimeType)).CreateRemote(workerName, p.workerRegistry, "")
+	rt, err := p.workers.NewRuntime(ctx, workerName, "")
 	if err != nil {
-		return fmt.Errorf("failed to create remote runtime for worker %q: %w", workerName, err)
+		return err
 	}
 
 	pool, err := podmanutils.NewSpyreCardPool(ctx, rt, totalRequired)
@@ -319,50 +306,6 @@ func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Contex
 	}
 
 	return totalSpyreCards, nil
-}
-
-// WorkerDBID returns the database UUID for the named worker by consulting the
-// in-memory registry.
-func (p *DeploymentPlanner) WorkerDBID(workerName string) (uuid.UUID, bool) {
-	if p.workerRegistry == nil {
-		return uuid.Nil, false
-	}
-
-	return p.workerRegistry.WorkerID(workerName)
-}
-
-// ValidateWorker confirms the named worker is connected. Called from
-// PlanDeployment before any DB records are written so the Create API can
-// return an error immediately on failure.
-func (p *DeploymentPlanner) ValidateWorker(ctx context.Context, workerName string) error {
-	if p.workerRegistry == nil {
-		return fmt.Errorf("worker registry is not configured on this server")
-	}
-
-	if !p.workerRegistry.IsWorkerConnected(ctx, workerName) {
-		return fmt.Errorf("worker %q is not connected", workerName)
-	}
-
-	return nil
-}
-
-// ResolveRuntimeType returns the worker's registered runtime type for a
-// create-application request. Always queries the worker registry so both
-// local and remote workers are treated uniformly.
-func (p *DeploymentPlanner) ResolveRuntimeType(ctx context.Context, workerName string) (string, error) {
-	if err := p.ValidateWorker(ctx, workerName); err != nil {
-		return "", err
-	}
-
-	workerRT, ok := p.workerRegistry.WorkerRuntimeType(workerName)
-	if !ok || workerRT == "" {
-		return "", fmt.Errorf("worker %q runtime type not available", workerName)
-	}
-	if !runtimeTypes.RuntimeType(workerRT).Valid() {
-		return "", fmt.Errorf("worker %q has unsupported runtime type %q", workerName, workerRT)
-	}
-
-	return workerRT, nil
 }
 
 // Made with Bob
