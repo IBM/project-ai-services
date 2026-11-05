@@ -267,6 +267,116 @@ class TestCreateJobs:
         assert response.status_code == 202
         assert response.json()["job_id"] == "job-123"
 
+    def test_successful_digitization_job_creation_with_html(self, digitize_test_client):
+        """Test successful digitization job creation with HTML file."""
+        stage_upload_files_mock = cast(AsyncMock, digitize_app.dg_util.stage_upload_files)
+        initialize_and_launch_mock = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch)
+        html_content = b"<!DOCTYPE html><html><body><h1>Title</h1></body></html>"
+
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json",
+            files=[("files", ("document.html", html_content, "text/html"))],
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_id"] == "job-123"
+        stage_upload_files_mock.assert_awaited_once()
+        initialize_and_launch_mock.assert_awaited_once()
+        call_kwargs = initialize_and_launch_mock.call_args.kwargs
+        assert call_kwargs["filenames"] == ["document.html"]
+
+    def test_successful_ingestion_job_creation_with_html(self, digitize_test_client):
+        """Test successful ingestion job creation with HTML file."""
+        html_content = b"<!DOCTYPE html><html><body><h1>Title</h1></body></html>"
+
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[("files", ("document.html", html_content, "text/html"))],
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_id"] == "job-123"
+
+    def test_rejects_invalid_html_file(self, digitize_test_client):
+        """Test rejection of invalid HTML file (does not start with '<')."""
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization",
+            files=[("files", ("document.html", b"plain text without tag", "text/html"))],
+        )
+
+        assert response.status_code == 415
+
+    def test_accepts_html_with_uppercase_extension(self, digitize_test_client):
+        """Test that HTML files with uppercase extension are accepted."""
+        stage_upload_files_mock = cast(AsyncMock, digitize_app.dg_util.stage_upload_files)
+        html_content = b"<!DOCTYPE html><html><body><h1>Title</h1></body></html>"
+
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json",
+            files=[("files", ("DOCUMENT.HTML", html_content, "text/html"))],
+        )
+
+        assert response.status_code == 202
+        stage_upload_files_mock.assert_awaited_once()
+
+    @pytest.mark.parametrize("filename,content,mime", [
+        ("notes.md", b"# Title\n\nBody", "text/markdown"),
+        ("notes.txt", b"plain text", "text/plain"),
+    ])
+    def test_successful_ingestion_job_creation_with_md_and_txt(self, digitize_test_client, filename, content, mime):
+        """Markdown and plain-text files are accepted."""
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[("files", (filename, content, mime))],
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_id"] == "job-123"
+
+    @pytest.mark.parametrize("filename,expected,content,mime", [
+        ("notes.md", "notes.md", b"# Title\n\nBody", "text/markdown"),
+        ("NOTES.TXT", "NOTES.txt", b"plain text", "text/plain"),
+    ])
+    def test_successful_digitization_job_creation_with_md_and_txt(self, digitize_test_client, filename, expected, content, mime):
+        """Digitization accepts Markdown and plain-text files (extension case-insensitive, suffix normalised)."""
+        initialize_and_launch_mock = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch)
+
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json",
+            files=[("files", (filename, content, mime))],
+        )
+
+        assert response.status_code == 202
+        assert initialize_and_launch_mock.call_args.kwargs["filenames"] == [expected]
+
+    @pytest.mark.parametrize("filename", ["notes.md", "notes.txt"])
+    def test_rejects_md_and_txt_with_invalid_utf8(self, digitize_test_client, filename):
+        """Markdown/text files that are not valid UTF-8 are rejected."""
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization",
+            files=[("files", (filename, b"\xff\xfe\x00\x00bad", "text/plain"))],
+        )
+
+        assert response.status_code == 415
+
+    def test_mixed_pdf_docx_and_html_ingestion(self, digitize_test_client):
+        """Test ingestion job with PDF, DOCX, and HTML files."""
+        pdf_header = b"%PDF-1.4 test"
+        docx_header = b"PK\x03\x04\x14\x00\x06\x00"
+        html_content = b"<!DOCTYPE html><html><body><h1>Title</h1></body></html>"
+
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("document.pdf", pdf_header, "application/pdf")),
+                ("files", ("document.docx", docx_header, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
+                ("files", ("document.html", html_content, "text/html")),
+            ],
+        )
+
+        assert response.status_code == 202
+        assert response.json()["job_id"] == "job-123"
+
     def test_mixed_batch_returns_202_without_warnings(self, digitize_test_client, monkeypatch):
         """202 response for a mixed batch contains only job_id — no warnings field.
 

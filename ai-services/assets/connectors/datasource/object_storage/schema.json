@@ -62,7 +62,10 @@
         "type": "string",
         "enum": [
           ".pdf",
-          ".docx"
+          ".docx",
+          ".html",
+          ".md",
+          ".txt"
         ]
       }
     }
