@@ -71,6 +71,13 @@ var (
 				"llm",
 			},
 		},
+		"translate": {
+			"podman": {
+				"translate-db",
+				"translate-api",
+				"llm",
+			},
+		},
 	}
 
 	DeleteSleepInterval = 10 * time.Second

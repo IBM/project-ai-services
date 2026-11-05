@@ -885,7 +885,7 @@ def process_documents(
                             if indexing_callback:
                                 try:
                                     doc_chunks = merge_chunked_documents(
-                                        text_chunk_json, table_chunk_json, path
+                                        text_chunk_json, table_chunk_json, Path(path).name
                                     )
                                     for chunk in doc_chunks:
                                         chunk["doc_id"] = doc_id

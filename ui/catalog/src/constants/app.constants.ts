@@ -13,6 +13,19 @@ export const COMPONENT_TYPES = {
 export type ComponentType =
   (typeof COMPONENT_TYPES)[keyof typeof COMPONENT_TYPES];
 
+export const DEPLOYMENT_STATUS = {
+  INITIALIZING: "Initializing",
+  DOWNLOADING: "Downloading",
+  DEPLOYING: "Deploying",
+  RUNNING: "Running",
+  DELETING: "Deleting",
+  STOPPED: "Stopped",
+  ERROR: "Error",
+} as const;
+
+export type DeploymentStatus =
+  (typeof DEPLOYMENT_STATUS)[keyof typeof DEPLOYMENT_STATUS];
+
 // The worker name used by the local (same-node) deployment target.
 export const LOCAL_WORKER_NAME = "Local";
 
