@@ -333,6 +333,32 @@ class TestCreateJobs:
         assert response.status_code == 202
         assert response.json()["job_id"] == "job-123"
 
+    @pytest.mark.parametrize("filename,expected,content,mime", [
+        ("notes.md", "notes.md", b"# Title\n\nBody", "text/markdown"),
+        ("NOTES.TXT", "NOTES.txt", b"plain text", "text/plain"),
+    ])
+    def test_successful_digitization_job_creation_with_md_and_txt(self, digitize_test_client, filename, expected, content, mime):
+        """Digitization accepts Markdown and plain-text files (extension case-insensitive, suffix normalised)."""
+        initialize_and_launch_mock = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch)
+
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json",
+            files=[("files", (filename, content, mime))],
+        )
+
+        assert response.status_code == 202
+        assert initialize_and_launch_mock.call_args.kwargs["filenames"] == [expected]
+
+    @pytest.mark.parametrize("filename", ["notes.md", "notes.txt"])
+    def test_rejects_md_and_txt_with_invalid_utf8(self, digitize_test_client, filename):
+        """Markdown/text files that are not valid UTF-8 are rejected."""
+        response = digitize_test_client.post(
+            "/v1/jobs?operation=digitization",
+            files=[("files", (filename, b"\xff\xfe\x00\x00bad", "text/plain"))],
+        )
+
+        assert response.status_code == 415
+
     def test_mixed_pdf_docx_and_html_ingestion(self, digitize_test_client):
         """Test ingestion job with PDF, DOCX, and HTML files."""
         pdf_header = b"%PDF-1.4 test"
