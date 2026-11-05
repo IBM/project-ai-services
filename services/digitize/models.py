@@ -34,6 +34,7 @@ class DocStatus(str, Enum):
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
     ALREADY_EXISTS = "already_exists"
+    SKIPPED = "skipped"
     CANCELLED = "cancelled"
 
 
@@ -42,6 +43,28 @@ class AlreadyExistsFile(BaseModel):
     filename: str = Field(..., description="Original filename of the skipped file")
     existing_doc_id: str = Field(..., description="doc_id of the already-ingested document")
     existing_doc_name: str = Field(..., description="Name of the already-ingested document")
+    file_hash: str = Field(..., description="MD5 hash that matched.")
+
+
+class SkippedFile(BaseModel):
+    """
+    Describes a file that was not processed because the same content is already
+    being processed — either by another in-flight job, or by an earlier file in
+    the same submission.
+    """
+    filename: str = Field(..., description="Original filename of the skipped file")
+    existing_doc_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "doc_id of the in-flight document processing this content. "
+            "None only transiently for same-job duplicates, until the doc_id is "
+            "assigned in initialize_job_state."
+        ),
+    )
+    existing_doc_name: str = Field(..., description="Name of the in-flight document")
+    existing_job_id: Optional[str] = Field(
+        default=None, description="Job that is processing this content"
+    )
     file_hash: str = Field(..., description="MD5 hash that matched.")
 
 

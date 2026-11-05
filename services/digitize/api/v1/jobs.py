@@ -73,9 +73,11 @@ async def _validate_files(
         "- **digitization**: Convert document to text/markdown/JSON format (single file only)\n\n"
         "The operation runs asynchronously in the background. "
         "Use the returned `job_id` to track progress.\n\n"
-        "Files are deduplicated using hash against completed documents. "
-        "If only some files are duplicates, the job proceeds with the novel files; "
-        "skipped files appear in the document list with `status=already_exists`."
+        "Files are deduplicated using hash. "
+        "If only some files are duplicates, the job proceeds with the novel files. "
+        "Files whose content is already ingested appear in the document list with "
+        "`status=already_exists`; files whose content is currently being processed "
+        "(by another job, or earlier in the same submission) appear with `status=skipped`."
     ),
     response_description="Job accepted. `job_id` can be used to poll status.",
     tags=["MCP"],
@@ -177,71 +179,127 @@ async def create_job(
 
         filenames, file_contents = await _validate_files(files, file_contents_raw)
 
-        # 5. File-hash already-exists detection.
+        # 5. File-hash dedup (within-job, in-flight, and completed).
         #
-        # Each file is hashed and checked against completed documents of the same
-        # operation type. Files that already exist are removed from the batch; novel
-        # files continue. If ALL files already exist, return 409 immediately (no job
-        # created). If SOME files already exist, only novel files are processed;
-        # skipped files are recorded in the job's document list with status
-        # `already_exists` (visible via GET /v1/jobs/{job_id}).
+        # Each file is hashed, then classified:
+        #   - Same checksum as an earlier novel file in this submission → recorded as
+        #     `skipped` (pointing at this job and that file).
+        #   - Same checksum as an earlier file in this submission that itself resolved
+        #     to an existing document → silently dropped (that file's record covers it).
+        #   - Otherwise the owner of (hash, operation) in document_checksum is looked up:
+        #       * owner is completed → `already_exists`;
+        #       * owner is still being processed → `skipped`.
+        #   - A digitization request additionally looks at the ingestion owner of the
+        #     same content first — no point re-digitizing indexed content.
+        #   - Otherwise → novel, processed by this job.
         #
-        # A file already exists only if a document with:
-        #   - type   = operation ('ingestion' or 'digitization')
-        #   - status = 'completed'
-        #   - metadata->>'file_hash' = computed_hash
-        # is found. Failed / in-progress records are NOT considered to already exist.
+        # This lookup is only a fast path. The authoritative check is the atomic claim
+        # (INSERT ... ON CONFLICT DO NOTHING) made per novel document in
+        # initialize_job_state, so concurrent submissions of the same content cannot
+        # both win; a loser is turned into an already_exists / skipped record there.
+        #
+        # If ALL files are duplicates, return 409 immediately (no job created). If SOME
+        # are, only novel files are processed; the rest are recorded in the job's
+        # document list (visible via GET /v1/jobs/{job_id}).
+        #
+        # `skipped` rows are NOT retried: if the job processing the original content
+        # later fails, the content must be resubmitted.
 
         already_exists_files: list[models.AlreadyExistsFile] = []
-        file_checksum_dict: dict[str, str] = {}  # filename -> md5 hex (novel files only)
+        skipped_files: list[models.SkippedFile] = []
+        completed_summaries: list[str] = []  # owner row is 'completed'
+        in_progress_summaries: list[str] = []  # owner row is 'in_progress'
+        file_hashes: dict[str, str] = {}  # filename -> md5 hex (novel files only)
+        # hash -> filename of the novel file carrying it in this batch, or None when
+        # that file resolved to an already-existing / in-flight document.
+        seen_checksums: dict[str, Optional[str]] = {}
 
         novel_filenames: list[str] = []
         novel_contents:  list[bytes] = []
 
         for filename, content in zip(filenames, file_contents):
             file_hash = await asyncio.to_thread(generate_file_checksum, content)
-            existing = db_manager.find_completed_document_by_hash(file_hash, operation.value)
 
-            # A digitization request is also blocked by a completed ingestion of the
-            # same file — no point re-digitizing content that is already indexed.
-            if not existing and operation == models.OperationType.DIGITIZATION:
-                existing = db_manager.find_completed_document_by_hash(
-                    file_hash, models.OperationType.INGESTION.value
-                )
-
-            if existing:
-                logger.info(
-                    f"File '{filename}' already exists — matches completed "
-                    f"doc_id={existing.doc_id} (hash={file_hash[:20]}...)"
-                )
-                already_exists_files.append(
-                    models.AlreadyExistsFile(
-                        filename=filename,
-                        existing_doc_id=existing.doc_id,
-                        existing_doc_name=existing.name,
-                        file_hash=file_hash,
+            if file_hash in seen_checksums:
+                first_filename = seen_checksums[file_hash]
+                # Same name and same content: nothing to tell the user apart by (doc ids
+                # are keyed by filename), so drop silently like the existing-doc case.
+                if first_filename is None or first_filename == filename:
+                    logger.info(
+                        f"Job {job_id}: Duplicate file '{filename}' (hash={file_hash[:20]}...) "
+                        f"already submitted in this batch — silently dropping"
                     )
+                else:
+                    logger.info(
+                        f"Job {job_id}: Duplicate file '{filename}' (hash={file_hash[:20]}...) "
+                        f"of '{first_filename}' in this batch — recording as skipped"
+                    )
+                    skipped_files.append(
+                        models.SkippedFile(
+                            filename=filename,
+                            existing_doc_id=None,  # resolved in initialize_job_state
+                            existing_doc_name=first_filename,
+                            existing_job_id=job_id,
+                            file_hash=file_hash,
+                        )
+                    )
+                continue
+
+            owner = None
+            if operation == models.OperationType.DIGITIZATION:
+                owner = await asyncio.to_thread(
+                    db_manager.get_file_owner, file_hash, models.OperationType.INGESTION.value
                 )
+            if owner is None:
+                owner = await asyncio.to_thread(
+                    db_manager.get_file_owner, file_hash, operation.value
+                )
+
+            if owner is not None:
+                seen_checksums[file_hash] = None
+                record = dg_util.build_duplicate_record(filename, file_hash, owner)
+                if isinstance(record, models.SkippedFile):
+                    logger.info(
+                        f"File '{filename}' is currently being processed in active "
+                        f"job_id={owner.job_id} (doc_id={owner.doc_id}, hash={file_hash[:20]}...)"
+                    )
+                    in_progress_summaries.append(
+                        f"'{filename}' (doc: {owner.doc_id}, job: {owner.job_id})"
+                    )
+                    skipped_files.append(record)
+                else:
+                    logger.info(
+                        f"File '{filename}' already exists — matches completed "
+                        f"doc_id={owner.doc_id} (hash={file_hash[:20]}...)"
+                    )
+                    completed_summaries.append(f"'{filename}' (doc: {owner.doc_id})")
+                    already_exists_files.append(record)
             else:
+                seen_checksums[file_hash] = filename
                 novel_filenames.append(filename)
                 novel_contents.append(content)
-                file_checksum_dict[filename] = file_hash
+                file_hashes[filename] = file_hash
 
         # All files already exist → 409 Conflict, no job created.
         if not novel_filenames:
-            skipped_summary = ", ".join(
-                f"'{s.filename}' (existing doc: {s.existing_doc_id})"
-                for s in already_exists_files
-            )
+            message_parts = ["No job was created because all submitted files are duplicates."]
+            if completed_summaries:
+                message_parts.append(
+                    f"Already processed: {', '.join(completed_summaries)}."
+                )
+            if in_progress_summaries:
+                message_parts.append(
+                    f"Currently being processed: {', '.join(in_progress_summaries)}. "
+                    "Wait for these jobs to finish, or delete the existing documents to re-process."
+                )
+            else:
+                message_parts.append("Delete the existing documents first to re-process.")
             logger.warning(
-                f"All {len(already_exists_files)} submitted file(s) already exist. "
-                f"No job created. Files: {skipped_summary}"
+                f"All {len(completed_summaries) + len(in_progress_summaries)} submitted file(s) already exist "
+                f"({len(completed_summaries)} completed, {len(in_progress_summaries)} in progress). "
+                f"No job created."
             )
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                f"All submitted files have already been processed: {skipped_summary}. "
-                f"Delete the existing documents first if you want to re-process.",
-            )
+            APIError.raise_error(ErrorCode.RESOURCE_LOCKED, " ".join(message_parts))
 
         # Replace filenames/file_contents with the novel subset only.
         filenames     = novel_filenames
@@ -266,7 +324,8 @@ async def create_job(
             queued_for_op=queued_for_op,
             job_name=job_name,
             already_exists_files=already_exists_files,
-            file_checksum_dict=file_checksum_dict,
+            skipped_files=skipped_files,
+            file_hashes=file_hashes,
         )
 
         logger.info(

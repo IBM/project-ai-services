@@ -220,6 +220,19 @@ def create_job(
         raise
 
 
+def _document_message(doc) -> Optional[str]:
+    """Build the human-readable message shown for shadow (already_exists / skipped) docs."""
+    metadata = doc.doc_metadata or {}
+    if doc.status == DocStatus.ALREADY_EXISTS.value:
+        return f"Already ingested as {metadata.get('existing_doc_name')}"
+    if doc.status == DocStatus.SKIPPED.value:
+        return (
+            f"Skipped: Being ingested via Job {metadata.get('existing_job_id')} "
+            f"as file {metadata.get('existing_doc_name')}"
+        )
+    return None
+
+
 def get_job(job_id: str) -> Optional[dict]:
     """
     Get job data from database.
@@ -244,8 +257,7 @@ def get_job(job_id: str) -> Optional[dict]:
                     id=doc.doc_id,
                     name=doc.name,
                     status=doc.status,
-                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
-                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
+                    message=_document_message(doc),
                 )
                 for doc in documents
             ]
@@ -314,8 +326,7 @@ def get_all_jobs(
                     id=doc.doc_id,
                     name=doc.name,
                     status=doc.status,
-                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
-                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
+                    message=_document_message(doc),
                 )
                 for doc in documents
             ]
@@ -478,11 +489,12 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
 
 def get_shadow_documents_for(doc_id: str) -> List[str]:
     """
-    Return the names of all 'already_exists' shadow document rows whose
-    ``existing_doc_id`` metadata key references *doc_id*.
+    Return the names of all 'already_exists' / 'skipped' shadow document rows
+    whose ``existing_doc_id`` metadata key references *doc_id*.
 
     These placeholder rows are created whenever a duplicate file is submitted
-    (the original was already ingested).  They will be automatically removed
+    (the original was already ingested, or is currently being processed).
+    They will be automatically removed
     by :meth:`~digitize.db.manager.DatabaseManager.delete_document` when the
     original document is deleted, so callers should surface this list to the
     user before confirming deletion.
@@ -499,7 +511,9 @@ def get_shadow_documents_for(doc_id: str) -> List[str]:
             stmt = (
                 _select(Document.name)
                 .where(
-                    Document.status == DocStatus.ALREADY_EXISTS.value,
+                    Document.status.in_(
+                        [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                    ),
                     Document.doc_metadata["existing_doc_id"].as_string() == doc_id,
                 )
                 .order_by(Document.submitted_at)
@@ -1153,18 +1167,11 @@ class DatabaseStatusManager:
                 update_params["metadata"] = merged_metadata
 
         # Perform database update
+        # The document_checksum registry (in_progress → completed / removed) is kept in
+        # step with the document status inside db_manager.update_document.
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
-            if success:
-                # Register the checksum when the document reaches any terminal success
-                # state (COMPLETED or COMPLETED_WITH_ERRORS) so future re-uploads of
-                # the same content are de-duplicated via document_checksum.
-                if (
-                    update_params.get("status") in [DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS]
-                    and "file_hash" in metadata_fields
-                ):
-                    db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)
-            else:
+            if not success:
                 logger.warning(f"Document {doc_id} not found in database for update")
 
     def _update_job(
@@ -1219,11 +1226,12 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics.
-        # ALREADY_EXISTS and COMPLETED_WITH_ERRORS are both terminal success states;
-        # count them with completed.
+        # ALREADY_EXISTS, SKIPPED and COMPLETED_WITH_ERRORS are all terminal success
+        # states; count them with completed.
         _terminal_ok = (
             DocStatus.COMPLETED.value,
             DocStatus.ALREADY_EXISTS.value,
+            DocStatus.SKIPPED.value,
             DocStatus.COMPLETED_WITH_ERRORS.value,
         )
         stats = {
@@ -1296,7 +1304,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name", "had_table_failures"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "existing_doc_id", "existing_doc_name", "had_table_failures"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
