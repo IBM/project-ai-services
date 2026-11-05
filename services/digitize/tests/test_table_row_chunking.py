@@ -7,6 +7,7 @@ Covers:
 - Table summary prompts contain the keyword-preservation rules in every language
 """
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
@@ -264,8 +265,8 @@ class TestProcessTableRowChunking:
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.settings")
-    def test_failed_and_dropped_chunks_are_logged(self, mock_settings, mock_summarize):
-        """Every failed chunk and every dropped chunk is named in the logs."""
+    def test_failed_chunk_falls_back_to_raw_markdown_and_is_logged(self, mock_settings, mock_summarize):
+        """A chunk whose LLM call failed is kept with its own markdown as the summary, and logged."""
         from common.lang_utils import LanguageCodes
 
         english = Mock()
@@ -288,17 +289,25 @@ class TestProcessTableRowChunking:
         converted_doc = Mock()
         converted_doc.tables = [_mock_table(_make_table(30), "Table 1", 3)]
 
-        with patch.object(Path, "write_text"), patch("digitize.processing.tables.logger") as mock_logger:
-            _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+        with patch.object(Path, "write_text") as mock_write, \
+                patch("digitize.processing.tables.logger") as mock_logger:
+            table_count, _, failures = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
 
-        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
-        assert any(
-            "Table chunk 2/" in w and "failed and has no summary" in w and "Invalid table summary response" in w
-            for w in warnings
-        )
+        markdowns = mock_summarize.call_args[0][0]
+        # no chunk is lost, and the failure is still reported to the caller
+        assert table_count == len(markdowns)
+        assert list(failures) == [1]
+
+        saved = json.loads(mock_write.call_args[0][0])
+        assert saved["1"]["summary"] == markdowns[1]       # raw markdown stored in the summary column
+        assert HEADER in saved["1"]["summary"]             # header row is repeated in the chunk
+        assert saved["1"]["summary"] != "No summary."
+        assert saved["0"]["summary"] == "summary 0"        # successful chunks keep their LLM summary
+
         infos = [c.args[0] for c in mock_logger.info.call_args_list]
-        assert any("Dropping chunk 2 of table" in m for m in infos)
-        assert any("dropped chunk numbers: [2]" in m for m in infos)
+        assert any("Table chunk 2/" in m and "using its raw markdown" in m for m in infos)
+        assert any("Raw-markdown fallback applied to 1 table chunk(s)" in m and "[2]" in m for m in infos)
+        assert any("dropped chunk numbers: []" in m for m in infos)
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.settings")
