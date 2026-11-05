@@ -196,26 +196,6 @@ type Model struct {
 	Profiles       []string `yaml:"profiles" json:"-"`              // supported hardware profile IDs; local providers only
 }
 
-// ProfileResources is the resource footprint declared inside a profile's params.
-type ProfileResources struct {
-	Memory       int            `yaml:"memory"`       // bytes
-	Accelerators map[string]int `yaml:"accelerators"` // e.g. {"ibm.com/spyre_pf": 4}
-}
-
-// ProfileParam holds the hardware parameters of one profile.
-type ProfileParam struct {
-	Resources ProfileResources `yaml:"resources"`
-}
-
-// Profile is one entry in a provider's profiles.yaml.
-type Profile struct {
-	ID          string       `yaml:"id"`
-	Default     bool         `yaml:"default"`
-	Name        string       `yaml:"name"`
-	Description string       `yaml:"description"`
-	Params      ProfileParam `yaml:"params"`
-}
-
 // ComponentSummary represents a component for list API responses.
 type ComponentSummary struct {
 	ID            string `json:"id"`

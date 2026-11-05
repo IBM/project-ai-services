@@ -256,11 +256,11 @@ func (h *CatalogHandler) GetCatalogModelByPath(c *gin.Context) {
 // getModelDeployOptions godoc
 //
 //	@Summary		Get model deploy options
-//	@Description	Retrieves the providers (local with hardware profiles, remote connectors) a catalog model can be deployed with
+//	@Description	Retrieves the providers (local with hardware profiles, remote connectors) a catalog model can be deployed with. The actual URL is /catalog/models/{model-id}/deploy-options; model IDs contain slashes, so Swagger shows {path} as '<model-id>/deploy-options'.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			path		path		string	true	"Model ID followed by /deploy-options (e.g., 'ibm-granite/granite-3.3-8b-instruct/deploy-options')"
+//	@Param			path		path		string	true	"'{model-id}/deploy-options', e.g. 'ibm-granite/granite-3.3-8b-instruct/deploy-options'"
 //	@Param			provider_id	query		string	false	"Return only this provider (e.g., 'vllm-spyre')"
 //	@Param			runtime		query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
 //	@Success		200			{object}	types.ModelDeployOptions

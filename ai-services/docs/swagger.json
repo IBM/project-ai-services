@@ -1631,7 +1631,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves the providers (local with hardware profiles, remote connectors) a catalog model can be deployed with",
+                "description": "Retrieves the providers (local with hardware profiles, remote connectors) a catalog model can be deployed with. The actual URL is /catalog/models/{model-id}/deploy-options; model IDs contain slashes, so Swagger shows {path} as '\u003cmodel-id\u003e/deploy-options'.",
                 "produces": [
                     "application/json"
                 ],
@@ -1642,7 +1642,7 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Model ID followed by /deploy-options (e.g., 'ibm-granite/granite-3.3-8b-instruct/deploy-options')",
+                        "description": "'{model-id}/deploy-options', e.g. 'ibm-granite/granite-3.3-8b-instruct/deploy-options'",
                         "name": "path",
                         "in": "path",
                         "required": true

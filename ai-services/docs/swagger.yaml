@@ -2216,9 +2216,10 @@ paths:
   /catalog/models/{path}:
     get:
       description: Retrieves the providers (local with hardware profiles, remote connectors)
-        a catalog model can be deployed with
+        a catalog model can be deployed with. The actual URL is /catalog/models/{model-id}/deploy-options;
+        model IDs contain slashes, so Swagger shows {path} as '<model-id>/deploy-options'.
       parameters:
-      - description: Model ID followed by /deploy-options (e.g., 'ibm-granite/granite-3.3-8b-instruct/deploy-options')
+      - description: '''{model-id}/deploy-options'', e.g. ''ibm-granite/granite-3.3-8b-instruct/deploy-options'''
         in: path
         name: path
         required: true

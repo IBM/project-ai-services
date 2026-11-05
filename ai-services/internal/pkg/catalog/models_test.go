@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 func TestLoadModelsFromFile(t *testing.T) {
@@ -28,7 +29,7 @@ func TestLoadModelsFromFile(t *testing.T) {
 	}
 
 	t.Run("parses entries", func(t *testing.T) {
-		models, err := loadYAMLList[types.Model](fsys, "llm/p", modelsFileName)
+		models, err := utils.LoadYAMLList[types.Model](fsys, "llm/p", modelsFileName)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -44,14 +45,14 @@ func TestLoadModelsFromFile(t *testing.T) {
 	})
 
 	t.Run("missing file is not an error", func(t *testing.T) {
-		models, err := loadYAMLList[types.Model](fsys, "llm/none", modelsFileName)
+		models, err := utils.LoadYAMLList[types.Model](fsys, "llm/none", modelsFileName)
 		if err != nil || models != nil {
 			t.Fatalf("expected nil, nil; got %v, %v", models, err)
 		}
 	})
 
 	t.Run("invalid yaml returns error", func(t *testing.T) {
-		if _, err := loadYAMLList[types.Model](fsys, "llm/bad", modelsFileName); err == nil {
+		if _, err := utils.LoadYAMLList[types.Model](fsys, "llm/bad", modelsFileName); err == nil {
 			t.Fatal("expected parse error")
 		}
 	})
