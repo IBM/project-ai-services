@@ -195,6 +195,51 @@ class TestProcessConvertedDocumentDispatch:
         mock_process_text.assert_not_called()
         assert res[2] == 2  # page_count
 
+    @pytest.mark.parametrize("doc_path", ["notes.md", "notes.txt", "NOTES.MD"])
+    @patch("digitize.processing.orchestrator.process_table")
+    @patch("digitize.processing.orchestrator.detect_document_language")
+    @patch("digitize.processing.orchestrator.process_text_html")
+    @patch("digitize.processing.orchestrator.process_text_docx")
+    @patch("digitize.processing.orchestrator.process_text")
+    @patch("digitize.processing.orchestrator.DoclingDocument.load_from_json")
+    def test_dispatches_to_html_processor_for_md_and_txt(
+        self,
+        mock_load,
+        mock_process_text,
+        mock_process_docx,
+        mock_process_html,
+        mock_detect_lang,
+        mock_process_table,
+        doc_path,
+        tmp_path,
+    ):
+        from digitize.processing.orchestrator import process_converted_document
+
+        mock_load.return_value = Mock()
+        mock_process_html.return_value = (1, 0.1)
+        mock_detect_lang.return_value = "EN"
+        mock_process_table.return_value = (0, 0.05, {})
+
+        (tmp_path / "doc4_text.json").write_text("[]", encoding="utf-8")
+        conv_json = tmp_path / "doc4.json"
+        conv_json.write_text("{}", encoding="utf-8")
+
+        res = process_converted_document(
+            converted_json_path=str(conv_json),
+            doc_path=doc_path,
+            out_path=str(tmp_path),
+            gen_model="test-llm",
+            gen_endpoint="http://llm",
+            emb_endpoint="http://emb",
+            max_tokens=2000,
+            doc_id="doc4",
+        )
+
+        mock_process_html.assert_called_once()
+        mock_process_docx.assert_not_called()
+        mock_process_text.assert_not_called()
+        assert res[2] == 1
+
     @patch("digitize.processing.orchestrator.process_table")
     @patch("digitize.processing.orchestrator.detect_document_language")
     @patch("digitize.processing.orchestrator.process_text_html")

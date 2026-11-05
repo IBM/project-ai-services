@@ -278,6 +278,10 @@ class TestConnectorUpdateRequest:
         req = ConnectorUpdateRequest(allowed_extensions=[".html", ".pdf"])
         assert req.allowed_extensions == [".html", ".pdf"]
 
+    def test_allowed_extensions_accepts_md_and_txt_on_update(self):
+        req = ConnectorUpdateRequest(allowed_extensions=["MD", ".txt"])
+        assert req.allowed_extensions == [".md", ".txt"]
+
     def test_allowed_extensions_rejects_unsupported_on_update(self):
         with pytest.raises(ValidationError, match="Unsupported extension"):
             ConnectorUpdateRequest(allowed_extensions=[".csv"])
