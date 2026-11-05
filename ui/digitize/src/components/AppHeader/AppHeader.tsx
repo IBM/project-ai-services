@@ -82,7 +82,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
           className={styles.helpModal}
         >
           <div className={styles.helpContent}>
-            <h4>Welcome to Digitize Service</h4>
+            <h4>Welcome to Digitize Document Service</h4>
             <p>
               This application helps you digitize and process documents
               efficiently.
