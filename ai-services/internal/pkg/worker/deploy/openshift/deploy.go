@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/assets"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -33,7 +34,7 @@ const (
 // provided gateway address and authentication token, and installs or upgrades the Helm
 // release in the worker namespace.
 func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) error {
-	namespace := workerconstants.WorkerAppName
+	namespace := catalogconstants.CatalogNamespace
 	logger.Infof("Deploying worker grpc stream to OpenShift in namespace '%s'\n", namespace)
 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
