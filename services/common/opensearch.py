@@ -29,9 +29,14 @@ class OpensearchNotReadyError(VectorStoreNotReadyError):
     pass
 
 class OpensearchVectorStore(VectorStore):
-    # Soft-deleted docs are only droppable by a merge once the retention lease catches up with the
-    # global checkpoint, which syncs every 30s by default. Merging earlier is a no-op, so wait past it.
-    FORCE_MERGE_DELAY_SECS = 35
+    # Delay between a delete and the force merge. Lets a batch of deletes finish, and is past the ~30s
+    # retention-lease sync after which OpenSearch can actually drop soft-deleted docs (earlier is a no-op).
+    FORCE_MERGE_DELAY_SECS = 60
+
+    # Indices with a force merge queued or running. Class-level because get_vector_store() creates a
+    # new instance per call, so the gate must be shared across instances in the process.
+    _force_merge_pending = set()
+    _force_merge_lock = threading.Lock()
 
     def __init__(self):
 
@@ -459,18 +464,29 @@ class OpensearchVectorStore(VectorStore):
 
     def _schedule_force_merge(self):
         """
-        Merge the index down to a single segment shortly after a delete, so deleted docs are dropped,
-        disk space is freed and searches have fewer segments to visit. Runs on a background timer so the
-        delete call is not blocked; failures are only logged since the delete itself already succeeded.
+        Merge the index down to a single segment FORCE_MERGE_DELAY_SECS after a delete, so deleted docs are
+        dropped, disk space is freed and searches have fewer segments to visit. Runs on a background timer
+        so the delete call is not blocked. If a merge is already queued or running for this index, this
+        call does nothing. Failures are only logged since the delete itself already succeeded.
         """
+        index_name = self.index_name
+        with OpensearchVectorStore._force_merge_lock:
+            if index_name in OpensearchVectorStore._force_merge_pending:
+                logger.debug(f"Force merge already queued or running for {index_name}, skipping")
+                return
+            OpensearchVectorStore._force_merge_pending.add(index_name)
+
         def _force_merge():
             try:
-                self.client.indices.forcemerge(index=self.index_name, params={"max_num_segments": 1})
+                self.client.indices.forcemerge(index=index_name, params={"max_num_segments": 1})
                 # merged-away segment files are only deleted from disk once a new commit is made
-                self.client.indices.flush(index=self.index_name)
-                logger.info(f"Force merged index {self.index_name} after delete")
+                self.client.indices.flush(index=index_name)
+                logger.info(f"Force merged index {index_name} after delete")
             except Exception as e:
-                logger.warning(f"Force merge of index {self.index_name} failed: {e}")
+                logger.warning(f"Force merge of index {index_name} failed: {e}")
+            finally:
+                with OpensearchVectorStore._force_merge_lock:
+                    OpensearchVectorStore._force_merge_pending.discard(index_name)
 
         timer = threading.Timer(self.FORCE_MERGE_DELAY_SECS, _force_merge)
         timer.daemon = True
