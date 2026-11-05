@@ -1,5 +1,4 @@
 import os
-import re
 import requests
 import threading
 import time
@@ -46,12 +45,29 @@ def apply_token_buffer(max_tokens: int, token_buffer_ratio: float | None = None,
     
     return effective_max_tokens
 
+# Schema the LLM output is constrained to (guided decoding) for table summarization.
+# "summary" comes first so the model writes the summary before it decides on relevance.
+TABLE_SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "decision": {"type": "string", "enum": ["yes", "no"]},
+    },
+    "required": ["summary", "decision"],
+    "additionalProperties": False,
+}
+
+
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
 def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tokens: int = 1024):
     """Combined function to summarize and classify a table in a single LLM call.
 
+    The response is constrained to ``TABLE_SUMMARY_SCHEMA`` via guided decoding, so it is parsed
+    as plain JSON: ``{"summary": "...", "decision": "yes" | "no"}``.
+
     Returns tuple: (summary, decision).
-    Raises on failure so that the retry decorator and the caller can handle it.
+    Raises on failure (including a response that is not valid JSON, e.g. truncated at max_tokens)
+    so that the caller can record the failure.
     """
     if misc_utils.SESSION is None:
         raise RuntimeError("LLM session not initialized. Call create_llm_session() first.")
@@ -62,6 +78,10 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
         "temperature": 0,
         "max_tokens": max_tokens,
         "stream": False,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "table_summary", "schema": TABLE_SUMMARY_SCHEMA, "strict": True},
+        },
     }
 
     try:
@@ -70,67 +90,24 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
         response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.llm.api_key.get_secret_value()))
         response.raise_for_status()
         data = response.json() or {}
-        choices = data.get("choices", [])
-        text = ""
-        finish_reason = None
-        if choices:
-            text = (choices[0].get("message", {}).get("content") or "").strip()
-            finish_reason = choices[0].get("finish_reason")
+        choice = (data.get("choices") or [{}])[0]
+        text = (choice.get("message", {}).get("content") or "").strip()
+        finish_reason = choice.get("finish_reason")
 
-        # Parse response - handle multi-line summaries
-        summary = ""
-        decision = False
-        lines = text.splitlines()
-
-        # Find Summary: and Decision: lines. Tolerate markdown decoration the model may add,
-        # e.g. "**Summary:**", "## Summary:", "Summary :" or "- Decision: Yes".
-        summary_start = -1
-        decision_line = -1
-        summary_label = re.compile(r"^[\s*#>_\-]*summary\s*:[\s*_]*", re.IGNORECASE)
-        decision_label = re.compile(r"^[\s*#>_\-]*decision\s*:[\s*_]*", re.IGNORECASE)
-
-        for i, line in enumerate(lines):
-            if summary_label.match(line):
-                summary_start = i
-            elif decision_label.match(line):
-                decision_line = i
-                decision = "yes" in line.lower()
-
-        decision_text = lines[decision_line].strip() if decision_line >= 0 else ""
-
-        # Extract summary (everything between "Summary:" and "Decision:")
-        if summary_start >= 0:
-            end = decision_line if decision_line > summary_start else len(lines)
-            summary_lines = lines[summary_start:end]
-            # Remove the "Summary:" label (and any markdown around it) from the first line
-            summary_lines[0] = summary_label.sub("", summary_lines[0], count=1)
-            summary = "\n".join(line.strip() for line in summary_lines if line.strip())
-
-        # Diagnostics: a missing Summary/Decision line silently turns into "No summary."/discard.
-        if finish_reason == "length":
-            logger.warning(
-                f"Table summary hit the max_tokens limit ({max_tokens}) - finish_reason=length; "
-                f"the 'Decision:' line may be missing and the table chunk would be discarded"
+        try:
+            parsed = json.loads(text)
+            summary = parsed["summary"].strip()
+            decision = parsed["decision"] == "yes"
+        except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
+            logger.error(
+                f"Table LLM response is not the expected JSON (finish_reason={finish_reason}, "
+                f"response_chars={len(text)}): {e}; last 200 chars: {text[-200:]!r}"
             )
-        if summary_start < 0:
-            logger.warning(
-                f"Table response has no 'Summary:' line (finish_reason={finish_reason}); "
-                f"first 300 chars: {text[:300]!r}"
-            )
-        if decision_line < 0:
-            logger.warning(
-                f"Table response has no 'Decision:' line (finish_reason={finish_reason}); "
-                f"last 200 chars: {text[-200:]!r}"
-            )
-        if summary_start >= 0 and not summary:
-            logger.warning(
-                f"Table response has a 'Summary:' label but empty summary text; "
-                f"response (first 300 chars): {text[:300]!r}"
-            )
+            raise ValueError(f"Invalid table summary response (finish_reason={finish_reason}): {e}") from e
+
         logger.info(
             f"Parsed table LLM response: response_chars={len(text)}, finish_reason={finish_reason}, "
-            f"summary_line={summary_start}, decision_line={decision_line}, "
-            f"decision_text={decision_text!r} -> keep={decision}, summary_chars={len(summary)}, "
+            f"decision={parsed['decision']!r} -> keep={decision}, summary_chars={len(summary)}, "
             f"summary_preview={summary[:120]!r}"
         )
 
@@ -139,6 +116,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
     except Exception as e:
         logger.error(f"Error summarizing/classifying table: {e}")
         raise
+
 
 def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, prompt_template: str, max_tokens: int = 1024, max_workers=32, stop_event: threading.Event | None = None):
     """Combined function to summarize and classify tables using a single prompt.

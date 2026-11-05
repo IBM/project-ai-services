@@ -114,7 +114,7 @@ def extract_table_headers(markdown_table: str) -> list[str]:
         headers = [h.strip() for h in header_line.split('|') if h.strip()]
         return headers
     except Exception as e:
-        logger.debug(f"Failed to extract headers from markdown table: {e}")
+        logger.info(f"Failed to extract headers from markdown table: {e}", exc_info=True)
         return []
 
 def is_table_continuation(headers1: list[str], headers2: list[str], fuzzy_threshold: float = 85.0) -> bool:
@@ -505,21 +505,37 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         stop_event=stop_event,
     )
 
+    # Chunks whose LLM call failed (e.g. invalid/truncated JSON) fall back to "No summary." and are
+    # discarded; name each one so lost rows can be traced to a chunk.
+    for failed_idx, error_msg in sorted(failures.items()):
+        logger.info(
+            f"Table chunk {failed_idx + 1}/{len(table_markdowns)} of table {table_group_ids[failed_idx]} "
+            f"(page {table_page_numbers[failed_idx]}) of '{doc_path}' failed and has no summary: {error_msg}"
+        )
+
     # The relevance decision is made per chunk, but a table is either relevant or not. If any
     # chunk of a table was kept, keep its sibling chunks too (when they have a real summary),
     # otherwise rows of a relevant table silently disappear from the index.
     kept_groups = {gid for gid, keep in zip(table_group_ids, decisions) if keep}
     final_keep = []
-    for gid, keep, summary in zip(table_group_ids, decisions, table_summaries):
-        rescued = (not keep) and gid in kept_groups and bool(summary) and summary != _NO_SUMMARY
+    for chunk_idx, (gid, keep, summary) in enumerate(zip(table_group_ids, decisions, table_summaries)):
+        has_real_summary = bool(summary) and summary != _NO_SUMMARY
+        rescued = (not keep) and gid in kept_groups and has_real_summary
         final_keep.append(keep or rescued)
         if rescued:
-            logger.info(f"Keeping chunk of table {gid} of '{doc_path}': discarded by the LLM but a sibling chunk was kept")
+            logger.info(f"Keeping chunk {chunk_idx + 1} of table {gid} of '{doc_path}': discarded by the LLM but a sibling chunk was kept")
+        elif not keep and gid in kept_groups:
+            logger.info(
+                f"Dropping chunk {chunk_idx + 1} of table {gid} of '{doc_path}': discarded by the LLM "
+                f"and it has no usable summary, so it cannot be rescued; its rows will be missing from the index"
+            )
     dropped = [i + 1 for i, keep in enumerate(final_keep) if not keep]
     logger.info(
         f"Table chunk decisions for '{doc_path}': kept {sum(final_keep)}/{len(final_keep)} "
         f"(LLM kept {sum(decisions)}); dropped chunk numbers: {dropped}"
     )
+    if dropped:
+        logger.info(f"{len(dropped)} table chunk(s) of '{doc_path}' were dropped (chunk numbers: {dropped})")
 
     filtered_table_dicts = {
         idx: {
