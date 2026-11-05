@@ -183,8 +183,8 @@ class TableSummaryConfig(BaseSettings):
                 - List ALL sections, subsections, and their reference numbers if present
                 - Include EVERY specification, feature, number, code, condition, and requirement
                 - Mention ALL items even if they seem minor - nothing should be omitted
-                - Use structured format with clear organization (numbered lists, bullet points, or detailed paragraphs)
-                - Be extremely thorough and comprehensive - aim for maximum detail
+                - Write the summary as ONE plain-text paragraph: no line breaks, no bullet points, no numbered lists, no markdown, no closing remarks
+                - Be complete but concise: one short sentence per row/value, with no filler or repeated explanations
                 - If the table has multiple rows/columns, describe each one
                 - Preserve all technical terms, version numbers, and specific details exactly as shown
 
@@ -204,7 +204,7 @@ class TableSummaryConfig(BaseSettings):
 
                 3. Output a single JSON object with exactly these two keys, and nothing else:
 
-                {{"summary": "<your extremely detailed summary here - be verbose and comprehensive>", "decision": "<yes or no>"}}
+                {{"summary": "<your complete but concise single-paragraph summary here>", "decision": "<yes or no>"}}
 
                 Do NOT output extra commentary or any other text outside the JSON object.
 
@@ -263,8 +263,8 @@ class TableSummaryConfig(BaseSettings):
                 - Listen Sie ALLE Abschnitte, Unterabschnitte und deren Referenznummern auf, falls vorhanden
                 - Fügen Sie JEDE Spezifikation, Funktion, Nummer, Code, Bedingung und Anforderung hinzu
                 - Erwähnen Sie ALLE Elemente, auch wenn sie nebensächlich erscheinen - nichts sollte ausgelassen werden
-                - Verwenden Sie ein strukturiertes Format mit klarer Organisation (nummerierte Listen, Aufzählungspunkte oder detaillierte Absätze)
-                - Seien Sie äußerst gründlich und umfassend - streben Sie maximale Detailtiefe an
+                - Schreiben Sie die Zusammenfassung als EINEN einfachen Textabsatz: keine Zeilenumbrüche, keine Aufzählungspunkte, keine nummerierten Listen, kein Markdown, keine Schlussbemerkungen
+                - Seien Sie vollständig, aber prägnant: ein kurzer Satz pro Zeile/Wert, ohne Fülltext oder wiederholte Erklärungen
                 - Wenn die Tabelle mehrere Zeilen/Spalten hat, beschreiben Sie jede einzelne
                 - Bewahren Sie alle Fachbegriffe, Versionsnummern und spezifischen Details genau wie angegeben
 
@@ -284,7 +284,7 @@ class TableSummaryConfig(BaseSettings):
 
                 3. Ausgabe im exakten Format unten:
 
-                {{"summary": "<Ihre äußerst detaillierte Zusammenfassung hier - seien Sie ausführlich und umfassend>", "decision": "<yes oder no>"}}
+                {{"summary": "<Ihre vollständige, aber prägnante Zusammenfassung in einem Absatz hier>", "decision": "<yes oder no>"}}
 
                 Geben Sie keine zusätzlichen Kommentare oder anderen Text außerhalb des JSON-Objekts aus.
 
@@ -332,8 +332,8 @@ class TableSummaryConfig(BaseSettings):
                 - Elenca TUTTE le sezioni, sottosezioni e gli eventuali numeri di riferimento
                 - Includi OGNI specifica, caratteristica, numero, codice, condizione e requisito
                 - Menziona TUTTI gli elementi anche se sembrano secondari: non omettere nulla
-                - Usa un formato strutturato con organizzazione chiara (elenchi numerati, punti elenco o paragrafi dettagliati)
-                - Sii estremamente accurato e completo: punta al massimo livello di dettaglio
+                - Scrivi il riassunto come UN SOLO paragrafo di testo semplice: nessun a capo, nessun punto elenco, nessun elenco numerato, nessun markdown, nessuna osservazione finale
+                - Sii completo ma conciso: una frase breve per riga/valore, senza riempitivi o spiegazioni ripetute
                 - Se la tabella ha più righe/colonne, descrivi ciascuna di esse
                 - Mantieni invariati tutti i termini tecnici, i numeri di versione e i dettagli specifici così come appaiono
 
@@ -353,7 +353,7 @@ class TableSummaryConfig(BaseSettings):
 
                 3. Fornisci l'output nel formato esatto seguente:
 
-                {{"summary": "<il tuo riassunto estremamente dettagliato qui - sii completo e approfondito>", "decision": "<yes o no>"}}
+                {{"summary": "<il tuo riassunto completo ma conciso in un unico paragrafo qui>", "decision": "<yes o no>"}}
 
                 NON produrre commenti aggiuntivi o altro testo al di fuori dell'oggetto JSON.
 
@@ -401,8 +401,8 @@ class TableSummaryConfig(BaseSettings):
                 - Listez TOUTES les sections, sous-sections et leurs numéros de référence si présents
                 - Incluez CHAQUE spécification, fonctionnalité, nombre, code, condition et exigence
                 - Mentionnez TOUS les éléments même s'ils semblent mineurs : rien ne doit être omis
-                - Utilisez un format structuré avec une organisation claire (listes numérotées, puces ou paragraphes détaillés)
-                - Soyez extrêmement minutieux et exhaustif : visez un niveau de détail maximal
+                - Rédigez le résumé en UN SEUL paragraphe de texte brut : aucun saut de ligne, aucune puce, aucune liste numérotée, aucun markdown, aucune remarque finale
+                - Soyez complet mais concis : une phrase courte par ligne/valeur, sans remplissage ni explications répétées
                 - Si le tableau comporte plusieurs lignes/colonnes, décrivez chacune d'elles
                 - Conservez exactement tous les termes techniques, numéros de version et détails spécifiques tels qu'ils apparaissent
 
@@ -422,7 +422,7 @@ class TableSummaryConfig(BaseSettings):
 
                 3. Produisez la sortie au format exact ci-dessous :
 
-                {{"summary": "<votre résumé extrêmement détaillé ici - soyez complet et exhaustif>", "decision": "<yes ou no>"}}
+                {{"summary": "<votre résumé complet mais concis en un seul paragraphe ici>", "decision": "<yes ou no>"}}
 
                 Ne produisez PAS de commentaires supplémentaires ni d'autre texte en dehors de l'objet JSON.
 
@@ -474,8 +474,8 @@ class TableSummaryConfig(BaseSettings):
                 - すべてのセクション、サブセクション、および存在する場合はその参照番号を一覧表示してください
                 - すべての仕様、機能、番号、コード、条件、および要件を含めてください
                 - 些細に見えるものも含め、すべての項目に言及してください。何も省略しないでください
-                - 明確な構成の構造化されたフォーマット（番号付きリスト、箇条書き、または詳細な段落）を使用してください
-                - 極めて徹底的かつ包括的に行い、最大限の詳細を目指してください
+                - 要約は改行、箇条書き、番号付きリスト、マークダウン、締めのコメントを使わず、1つの平文の段落として記述してください
+                - 網羅的かつ簡潔に：各行/値につき短い1文で記述し、冗長な説明や繰り返しは避けてください
                 - 表に複数の行/列がある場合は、それぞれを説明してください
                 - 技術用語、バージョン番号、および特定の詳細はすべてそのまま保持してください
 
@@ -495,7 +495,7 @@ class TableSummaryConfig(BaseSettings):
 
                 3. 以下の正確な形式で出力してください：
 
-                {{"summary": "<ここに非常に詳細な要約を記述してください。冗長かつ包括的に>", "decision": "<yes または no>"}}
+                {{"summary": "<ここに網羅的かつ簡潔な1段落の要約を記述してください>", "decision": "<yes または no>"}}
 
                 JSONオブジェクト以外の追加のコメントやテキストを出力しないでください。
                 重要：JSONのキー（「summary」と「decision」）と decision の値（「yes」または「no」）は必ず英語のままにしてください。翻訳しないでください。
