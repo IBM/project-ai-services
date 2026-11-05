@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -33,6 +35,102 @@ func GetPDFPath() string { return common.PathFromCaller("docs", "document.pdf") 
 // GetDOCXPath returns the absolute path to docs/document.docx (unsupported type fixture).
 func GetDOCXPath() string { return common.PathFromCaller("docs", "document.docx") }
 
+// oversizedChars is large enough to exceed the context window of any model the service is
+// expected to run (~45K tokens of prose, ~70K of table rows; the guard trips above ~16K tokens for a 32K model), while staying well below
+// MAX_UPLOAD_SIZE_MB and cheap enough to tokenize within the 2 minute POST timeout.
+const oversizedChars = 200_000
+
+// OversizedText returns plain prose that exceeds the model context window, so POST /v1/translate
+// rejects it with 413 before any translation is attempted.
+func OversizedText() string {
+	const sentence = "The quick brown fox jumps over the lazy dog while the translation service waits patiently. "
+
+	return strings.Repeat(sentence, oversizedChars/len(sentence)+1)
+}
+
+// OversizedTable returns a single GFM table that exceeds the model context window. The chunker never
+// splits a table, so an async job for it fails deterministically (CONTEXT_LIMIT_EXCEEDED) before
+// any translation call is made.
+func OversizedTable() string {
+	const (
+		header = "| id | description |\n|---|---|\n"
+		row    = "| 1 | lorem ipsum dolor sit amet consectetur |\n"
+	)
+
+	return header + strings.Repeat(row, oversizedChars/len(row)+1)
+}
+
+// ── Markdown structure ────────────────────────────────────────────────────────
+
+var tableSeparatorRow = regexp.MustCompile(`^\|[\s:|-]+\|$`)
+
+// MarkdownShape captures the structure a translation must preserve: heading, bullet and
+// table-row counts, plus the number of pipes on every table row.
+type MarkdownShape struct {
+	Headings      int
+	Bullets       int
+	SeparatorRows int
+	TableRowPipes []int
+}
+
+// AnalyzeMarkdown extracts the MarkdownShape of text.
+func AnalyzeMarkdown(text string) MarkdownShape {
+	var shape MarkdownShape
+
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+
+		switch {
+		case strings.HasPrefix(line, "#"):
+			shape.Headings++
+		case strings.HasPrefix(line, "- "), strings.HasPrefix(line, "* "):
+			shape.Bullets++
+		case strings.HasPrefix(line, "|"):
+			shape.TableRowPipes = append(shape.TableRowPipes, strings.Count(line, "|"))
+
+			if tableSeparatorRow.MatchString(line) {
+				shape.SeparatorRows++
+			}
+		}
+	}
+
+	return shape
+}
+
+// FirstTableRow returns the first line of text that belongs to a table, or "" when there is none.
+func FirstTableRow(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "|") {
+			return line
+		}
+	}
+
+	return ""
+}
+
+// ── Job phases ────────────────────────────────────────────────────────────────
+
+// Job phases in the order the worker moves through them.
+const (
+	phaseChunking = iota
+	phaseTranslating
+	phaseCompleted
+)
+
+var jobPhaseOrder = map[string]int{
+	"chunking":    phaseChunking,
+	"translating": phaseTranslating,
+	"completed":   phaseCompleted,
+}
+
+// JobPhaseRank returns the position of a job_metadata.phase value in the expected
+// chunking -> translating -> completed sequence, and false for an unknown phase.
+func JobPhaseRank(phase string) (int, bool) {
+	rank, ok := jobPhaseOrder[phase]
+
+	return rank, ok
+}
+
 // ── Response types ────────────────────────────────────────────────────────────
 
 // JobCreatedResponse is the 202 body returned when a translation job is accepted.
@@ -54,13 +152,32 @@ type JobMetadata struct {
 
 // JobDetailResponse is the body returned by GET /v1/translate/jobs/{job_id}.
 type JobDetailResponse struct {
-	JobID       string           `json:"job_id"`
-	JobName     *string          `json:"job_name,omitempty"`
-	Status      common.JobStatus `json:"status"`
-	SubmittedAt string           `json:"submitted_at"`
-	CompletedAt *string          `json:"completed_at"`
-	Error       *string          `json:"error"`
-	Metadata    *JobMetadata     `json:"job_metadata,omitempty"`
+	JobID          string           `json:"job_id"`
+	JobName        *string          `json:"job_name,omitempty"`
+	Status         common.JobStatus `json:"status"`
+	SourceLanguage string           `json:"source_language"`
+	TargetLanguage string           `json:"target_language"`
+	InputType      string           `json:"input_type"`
+	DocumentName   string           `json:"document_name"`
+	SubmittedAt    string           `json:"submitted_at"`
+	CompletedAt    *string          `json:"completed_at"`
+	Error          *string          `json:"error"`
+	Metadata       *JobMetadata     `json:"job_metadata,omitempty"`
+}
+
+// JobResultData is the nested "data" object of GET /v1/translate/jobs/{job_id}/result.
+type JobResultData struct {
+	Translation    string `json:"translation"`
+	SourceLanguage string `json:"source_language"`
+	TargetLanguage string `json:"target_language"`
+	InputType      string `json:"input_type"`
+	DocumentName   string `json:"document_name"`
+}
+
+// JobResultResponse is the 200 body returned by GET /v1/translate/jobs/{job_id}/result.
+type JobResultResponse struct {
+	Data  JobResultData `json:"data"`
+	Usage UsageInfo     `json:"usage"`
 }
 
 // TranslationData is the nested "data" object in a translation response.
@@ -261,6 +378,26 @@ func GetJobDetailRaw(ctx context.Context, baseURL, jobID string) ([]byte, int, e
 	return doGET(ctx, jobURL(baseURL, jobID))
 }
 
+// GetJobResult fetches GET /v1/translate/jobs/{id}/result and expects 200.
+func GetJobResult(ctx context.Context, baseURL, jobID string) (*JobResultResponse, error) {
+	return common.GetJSON[JobResultResponse](ctx, jobResultURL(baseURL, jobID), common.HTTPConfigForTimeout(getCallTimeout))
+}
+
+// DownloadJobResult fetches GET /v1/translate/jobs/{id}/result/download, expects 200 and returns the
+// full response so callers can assert on headers as well as the body.
+func DownloadJobResult(ctx context.Context, baseURL, jobID string) (*common.HTTPResponse, error) {
+	resp, err := common.DoGETFull(ctx, jobResultDownloadURL(baseURL, jobID), common.HTTPConfigForTimeout(getCallTimeout))
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(resp.Body))
+	}
+
+	return resp, nil
+}
+
 // GetJobResultRaw fetches GET /v1/translate/jobs/{id}/result and returns raw bytes and status.
 // Used for tests asserting 202 (in_progress), 404, etc.
 func GetJobResultRaw(ctx context.Context, baseURL, jobID string) ([]byte, int, error) {
@@ -289,11 +426,37 @@ func ListJobsRaw(ctx context.Context, baseURL, status string) ([]byte, int, erro
 	return doGET(ctx, common.AppendQueryParams(jobsURL(baseURL), map[string]string{"status_filter": status}))
 }
 
+func jobStateOf(d *JobDetailResponse) common.JobState {
+	return common.JobState{Status: d.Status, Error: d.Error}
+}
+
 // WaitForJobCompletion polls GET /v1/translate/jobs/{id} until the job reaches a terminal state or timeout.
+// For a failed job the last detail is returned together with the "job failed" error.
 func WaitForJobCompletion(ctx context.Context, baseURL, jobID string, timeout time.Duration) (*JobDetailResponse, error) {
 	return common.WaitForJob(ctx, jobID,
 		common.JobPollConfig{Timeout: timeout, Interval: pollInterval, LogPrefix: "TRANSLATE"},
 		func(ctx context.Context) (*JobDetailResponse, error) { return GetJobDetail(ctx, baseURL, jobID) },
-		func(d *JobDetailResponse) common.JobState { return common.JobState{Status: d.Status, Error: d.Error} },
+		jobStateOf,
 	)
+}
+
+// ObserveJob polls GET /v1/translate/jobs/{id} every interval until the job reaches a terminal state
+// or timeout, and returns every detail snapshot seen along the way (in order).
+func ObserveJob(ctx context.Context, baseURL, jobID string, timeout, interval time.Duration) ([]JobDetailResponse, error) {
+	var snapshots []JobDetailResponse
+
+	_, err := common.WaitForJob(ctx, jobID,
+		common.JobPollConfig{Timeout: timeout, Interval: interval, LogPrefix: "TRANSLATE"},
+		func(ctx context.Context) (*JobDetailResponse, error) {
+			detail, err := GetJobDetail(ctx, baseURL, jobID)
+			if err == nil {
+				snapshots = append(snapshots, *detail)
+			}
+
+			return detail, err
+		},
+		jobStateOf,
+	)
+
+	return snapshots, err
 }
