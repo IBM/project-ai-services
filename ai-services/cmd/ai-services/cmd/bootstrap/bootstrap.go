@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -15,9 +16,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const bootstrapSkipUpgradeFlag = "skip-upgrade"
+
 var (
 	// Runtime type flag for bootstrap command.
 	runtimeType string
+	// skipOperatorUpgrade skips the operator upgrade prompt flow.
+	skipOperatorUpgrade bool
 )
 
 // BootstrapCmd represents the bootstrap command.
@@ -37,6 +42,10 @@ func BootstrapCmd() *cobra.Command {
 	// Add runtime flag as required
 	cmdcommon.ConfigurePersistentRuntimeFlag(bootstrapCmd, &runtimeType)
 	bootstrapCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+	bootstrapCmd.PersistentFlags().BoolVar(&skipOperatorUpgrade, bootstrapSkipUpgradeFlag, false,
+		"Skip the upgrade prompt for already-installed OCP operators.\n"+
+			"By default, the user is prompted to upgrade them to the versions defined in the ai-services.\n"+
+			"Note: Supported for openshift runtime only.\n")
 
 	// subcommands
 	bootstrapCmd.AddCommand(validateCmd())
@@ -48,7 +57,16 @@ func BootstrapCmd() *cobra.Command {
 func bootstrapPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 
-	return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
+	if err := cmdcommon.InitAndValidateRuntimeFlag(runtimeType); err != nil {
+		return err
+	}
+
+	// Validate that --skip-upgrade is only used with the openshift runtime.
+	validator := flagvalidator.NewFlagValidatorBuilder(vars.RuntimeFactory.GetRuntimeType()).
+		AddOpenShiftFlag(bootstrapSkipUpgradeFlag, nil).
+		Build()
+
+	return validator.Validate(cmd)
 }
 
 func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
@@ -67,6 +85,8 @@ func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create bootstrap instance: %w", err)
 		}
+
+		bootstrap.SetSkipUpgrade(rt, skipOperatorUpgrade)
 
 		if configureErr := bootstrapInstance.Configure(cmd.Context()); configureErr != nil {
 			return fmt.Errorf("failed to run bootstrap configure: %w", configureErr)
@@ -105,6 +125,12 @@ func bootstrapExample() string {
 
   # Configure the infrastructure for openshift runtime
   ai-services bootstrap configure --runtime openshift
+
+  # Bootstrap without prompting to upgrade already-installed OCP operators
+  ai-services bootstrap --runtime openshift --skip-upgrade
+
+  # Configure without prompting to upgrade already-installed OCP operators
+  ai-services bootstrap configure --runtime openshift --skip-upgrade
 
   # Get help on a specific subcommand
   ai-services bootstrap validate --help`
