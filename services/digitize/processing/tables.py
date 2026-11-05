@@ -185,7 +185,7 @@ def extract_table_headers(markdown_table: str) -> list[str]:
         headers = [h.strip() for h in header_line.split('|') if h.strip()]
         return headers
     except Exception as e:
-        logger.info(f"Failed to extract headers from markdown table: {e}", exc_info=True)
+        logger.debug(f"Failed to extract headers from markdown table: {e}", exc_info=True)
         return []
 
 def is_table_continuation(headers1: list[str], headers2: list[str], fuzzy_threshold: float = 85.0) -> bool:
@@ -386,7 +386,7 @@ def split_markdown_table_into_row_chunks(
         List of markdown chunk strings (empty if the table is empty).
     """
     if not markdown_table or not markdown_table.strip():
-        logger.info("Row chunking skipped: empty markdown table")
+        logger.debug("Row chunking skipped: empty markdown table")
         return []
 
     if count_tokens_fn is None:
@@ -399,7 +399,7 @@ def split_markdown_table_into_row_chunks(
         header_lines = lines[:sep_idx + 1]
         row_lines = lines[sep_idx + 1:]
     else:
-        logger.info("Row chunking: no separator row found, treating every line as a data row without header")
+        logger.debug("Row chunking: no separator row found, treating every line as a data row without header")
         header_lines = []
         row_lines = lines
 
@@ -415,13 +415,13 @@ def split_markdown_table_into_row_chunks(
 
     row_tokens = [count_tokens_fn(row) for row in row_lines]
     total_tokens = preamble_tokens + sum(row_tokens)
-    logger.info(
+    logger.debug(
         f"Row chunking: caption='{caption[:60]}', header_lines={len(header_lines)}, "
         f"data_rows={len(row_lines)}, total_tokens={total_tokens}, max_tokens={max_tokens}"
     )
 
     if not row_lines or total_tokens <= max_tokens:
-        logger.info("Row chunking: table fits in a single chunk, no split needed")
+        logger.debug("Row chunking: table fits in a single chunk, no split needed")
         return [_assemble(row_lines)]
 
     chunks: list[str] = []
@@ -430,7 +430,7 @@ def split_markdown_table_into_row_chunks(
     for row, tokens in zip(row_lines, row_tokens):
         if current_rows and current_tokens + tokens > max_tokens:
             chunks.append(_assemble(current_rows))
-            logger.info(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
+            logger.debug(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
             current_rows = []
             current_tokens = preamble_tokens
         if not current_rows and preamble_tokens + tokens > max_tokens:
@@ -443,9 +443,9 @@ def split_markdown_table_into_row_chunks(
 
     if current_rows:
         chunks.append(_assemble(current_rows))
-        logger.info(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
+        logger.debug(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
 
-    logger.info(f"Row chunking: split {len(row_lines)} rows into {len(chunks)} chunks")
+    logger.debug(f"Row chunking: split {len(row_lines)} rows into {len(chunks)} chunks")
     return chunks
 
 def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None, table_chunk_max_tokens: int = 400):
@@ -462,14 +462,14 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
      # --- Table Extraction ---
     if not converted_doc.tables:
-        logger.info(f"No tables found in '{doc_path}'")
+        logger.debug(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
         return table_count, process_time, {}
 
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
 
-    logger.info(f"Extracting {len(converted_doc.tables)} tables from '{doc_path}'")
+    logger.debug(f"Extracting {len(converted_doc.tables)} tables from '{doc_path}'")
 
     # Lazy import to avoid circular dependency
     from digitize.parsing.docx import recover_table_caption_from_body_context
@@ -513,7 +513,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
     logger.debug(f"Merging cross-page tables for '{doc_path}'")
     merged_table_dict = merge_consecutive_tables(table_dict)
-    logger.info(
+    logger.debug(
         f"Table merge for '{doc_path}': {len(table_dict)} extracted -> {len(merged_table_dict)} after cross-page merge"
     )
 
@@ -529,7 +529,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         row_chunks = split_markdown_table_into_row_chunks(
             entry["markdown"], entry["caption"], max_tokens=table_chunk_max_tokens,
         )
-        logger.info(
+        logger.debug(
             f"Table {key} (page {page_num}) of '{doc_path}' -> {len(row_chunks)} row chunk(s) "
             f"(max ~{table_chunk_max_tokens} tokens each)"
         )
@@ -538,7 +538,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
             table_captions_list.append(entry["caption"])
             table_page_numbers.append(page_num)
             table_group_ids.append(key)
-    logger.info(f"Summarizing {len(table_markdowns)} table chunk(s) for '{doc_path}'")
+    logger.debug(f"Summarizing {len(table_markdowns)} table chunk(s) for '{doc_path}'")
 
     # Select appropriate prompt and max_tokens based on document language (lingua ISO format: 'EN', 'DE', etc.)
     prompt_templates = {
@@ -560,7 +560,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     }
     selected_max_tokens = max_tokens_config.get(document_language, settings.table_summary.english.max_tokens)
 
-    logger.info(
+    logger.debug(
         f"Using language prompt {document_language} and max_tokens ({selected_max_tokens}) "
         f"for table summarization of '{doc_path}'"
     )
@@ -584,13 +584,13 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     for failed_idx, error_msg in sorted(failures.items()):
         table_summaries[failed_idx] = table_markdowns[failed_idx]
         decisions[failed_idx] = True
-        logger.info(
+        logger.debug(
             f"Table chunk {failed_idx + 1}/{len(table_markdowns)} of table {table_group_ids[failed_idx]} "
             f"(page {table_page_numbers[failed_idx]}) of '{doc_path}' failed ({error_msg}); "
             f"using its raw markdown ({len(table_markdowns[failed_idx])} chars) as the summary"
         )
     if failures:
-        logger.info(
+        logger.debug(
             f"Raw-markdown fallback applied to {len(failures)} table chunk(s) of '{doc_path}': "
             f"chunk numbers {[i + 1 for i in sorted(failures)]}"
         )
@@ -605,19 +605,19 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         rescued = (not keep) and gid in kept_groups and has_real_summary
         final_keep.append(keep or rescued)
         if rescued:
-            logger.info(f"Keeping chunk {chunk_idx + 1} of table {gid} of '{doc_path}': discarded by the LLM but a sibling chunk was kept")
+            logger.debug(f"Keeping chunk {chunk_idx + 1} of table {gid} of '{doc_path}': discarded by the LLM but a sibling chunk was kept")
         elif not keep and gid in kept_groups:
-            logger.info(
+            logger.debug(
                 f"Dropping chunk {chunk_idx + 1} of table {gid} of '{doc_path}': discarded by the LLM "
                 f"and it has no usable summary, so it cannot be rescued; its rows will be missing from the index"
             )
     dropped = [i + 1 for i, keep in enumerate(final_keep) if not keep]
-    logger.info(
+    logger.debug(
         f"Table chunk decisions for '{doc_path}': kept {sum(final_keep)}/{len(final_keep)} "
         f"(LLM kept {sum(decisions)}); dropped chunk numbers: {dropped}"
     )
     if dropped:
-        logger.info(f"{len(dropped)} table chunk(s) of '{doc_path}' were dropped (chunk numbers: {dropped})")
+        logger.debug(f"{len(dropped)} table chunk(s) of '{doc_path}' were dropped (chunk numbers: {dropped})")
 
     filtered_table_dicts = {
         idx: {
@@ -633,7 +633,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     table_count = len(filtered_table_dicts)
     out_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
     process_time = time.time() - t0
-    logger.info(
+    logger.debug(
         f"Processed tables for '{doc_path}': kept {table_count}/{len(table_markdowns)} chunks "
         f"(failures={len(failures)}) in {process_time:.2f}s, saved to {out_path}"
     )

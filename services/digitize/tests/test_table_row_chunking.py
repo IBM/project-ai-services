@@ -146,12 +146,12 @@ class TestSplitMarkdownTableIntoRowChunks:
         for chunk in chunks:
             assert chunk.split("\n")[1] == HEADER
 
-    def test_emits_info_logs(self):
+    def test_emits_debug_logs(self):
         with patch("digitize.processing.tables.logger") as mock_logger:
             split_markdown_table_into_row_chunks(
                 _make_table(30), "Table 1", max_tokens=40, count_tokens_fn=_word_count
             )
-        messages = " ".join(c.args[0] for c in mock_logger.info.call_args_list)
+        messages = " ".join(c.args[0] for c in mock_logger.debug.call_args_list)
         assert "Row chunking" in messages
         assert "chunks" in messages
 
@@ -304,10 +304,10 @@ class TestProcessTableRowChunking:
         assert saved["1"]["summary"] != "No summary."
         assert saved["0"]["summary"] == "summary 0"        # successful chunks keep their LLM summary
 
-        infos = [c.args[0] for c in mock_logger.info.call_args_list]
-        assert any("Table chunk 2/" in m and "using its raw markdown" in m for m in infos)
-        assert any("Raw-markdown fallback applied to 1 table chunk(s)" in m and "[2]" in m for m in infos)
-        assert any("dropped chunk numbers: []" in m for m in infos)
+        debugs = [c.args[0] for c in mock_logger.debug.call_args_list]
+        assert any("Table chunk 2/" in m and "using its raw markdown" in m for m in debugs)
+        assert any("Raw-markdown fallback applied to 1 table chunk(s)" in m and "[2]" in m for m in debugs)
+        assert any("dropped chunk numbers: []" in m for m in debugs)
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.settings")

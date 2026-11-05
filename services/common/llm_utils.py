@@ -85,7 +85,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
     }
 
     try:
-        logger.info(f"Requesting table summary from LLM: model={gen_model}, prompt_chars={len(prompt)}, max_tokens={max_tokens}")
+        logger.debug(f"Requesting table summary from LLM: model={gen_model}, prompt_chars={len(prompt)}, max_tokens={max_tokens}")
 
         response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=get_vllm_headers(settings.llm.api_key.get_secret_value()))
         response.raise_for_status()
@@ -105,7 +105,7 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
             )
             raise ValueError(f"Invalid table summary response (finish_reason={finish_reason}): {e}") from e
 
-        logger.info(
+        logger.debug(
             f"Parsed table LLM response: response_chars={len(text)}, finish_reason={finish_reason}, "
             f"decision={parsed['decision']!r} -> keep={decision}, summary_chars={len(summary)}, "
             f"summary_preview={summary[:120]!r}"
@@ -144,10 +144,10 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
     all_prompts = [prompt_template.format(content=md) for md in table_mds]
 
     if not all_prompts:
-        logger.info(f"No tables to summarize for '{doc_path}'")
+        logger.debug(f"No tables to summarize for '{doc_path}'")
         return [], [], {}
 
-    logger.info(f"Summarizing {len(all_prompts)} table chunk(s) for '{doc_path}' (max_tokens={max_tokens})")
+    logger.debug(f"Summarizing {len(all_prompts)} table chunk(s) for '{doc_path}' (max_tokens={max_tokens})")
 
     results: list[tuple[str, bool]] = [("No summary.", False)] * len(all_prompts)
     summaries: list[str] = []
@@ -171,7 +171,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
                 idx = pending.pop(fut)
                 try:
                     results[idx] = fut.result()
-                    logger.info(
+                    logger.debug(
                         f"Summarized table chunk {idx + 1}/{len(all_prompts)} from '{doc_path}' "
                         f"(keep={results[idx][1]}, summary_chars={len(results[idx][0])})"
                     )
@@ -199,7 +199,7 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
         summaries.append(summary)
         decisions.append(decision)
 
-    logger.info(
+    logger.debug(
         f"Table summarization done for '{doc_path}': {len(summaries)} chunk(s), "
         f"{sum(decisions)} kept, {len(failures)} failed"
     )
