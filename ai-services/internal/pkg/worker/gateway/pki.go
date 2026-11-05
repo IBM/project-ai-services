@@ -36,6 +36,21 @@ const (
 	dirPerm       = 0o700
 	certPerm      = 0o644
 	keyPerm       = 0o600
+
+	// ServerKeyPlaintextFile is the decrypted copy of server.key written next to
+	// it so Caddy (which cannot decrypt our AES-GCM key files) can serve the
+	// private ingress with the gateway server certificate.
+	ServerKeyPlaintextFile = "server.key.pem"
+
+	// plaintextKeyPerm is the mode of the plaintext key copy. It must be readable
+	// by the Caddy container user, which differs from the user that writes the
+	// file (catalog process), so 0600 would make it unreadable to Caddy.
+	// The volume is mounted only into the catalog and Caddy pods.
+	plaintextKeyPerm = 0o644
+
+	// traversableDirPerm lets the Caddy user reach the files in the PKI directory.
+	// The private keys inside stay protected by their own file modes.
+	traversableDirPerm = 0o755
 )
 
 // pkiResult groups the four pieces of PKI material the gateway needs.
@@ -109,8 +124,12 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNa
 		DNSNames:     dnsNames,
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(serverCertTTL),
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage:     x509.KeyUsageDigitalSignature,
+		// ServerAuth: served by the gateway and by Caddy's private ingress (:9443).
+		// ClientAuth: the control-plane Caddy presents this same cert when it dials
+		//             a worker's private ingress; Go TLS rejects a client cert
+		//             that lacks ExtKeyUsageClientAuth.
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
 	}
 	srvCertDER, err := x509.CreateCertificate(rand.Reader, srvTemplate, caCert, &srvKey.PublicKey, caKey)
 	if err != nil {
@@ -151,6 +170,23 @@ func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []b
 	return nil
 }
 
+// writePlaintextServerKey writes the plaintext PEM of the server private key to
+// pkiDir/ServerKeyPlaintextFile for Caddy. It runs every time PKI material is
+// generated or loaded so the copy always matches server.key.
+func writePlaintextServerKey(pkiDir string, srvKeyPEM []byte) error {
+	// The directory is created 0700, which would stop the Caddy user from reaching
+	// the files inside. Best effort: if we do not own the directory, the files'
+	// own permissions still apply.
+	_ = os.Chmod(pkiDir, traversableDirPerm)
+
+	path := filepath.Join(pkiDir, ServerKeyPlaintextFile)
+	if err := os.WriteFile(path, srvKeyPEM, plaintextKeyPerm); err != nil { //nolint:gosec // must be readable by the Caddy user, see plaintextKeyPerm
+		return fmt.Errorf("write %s: %w", ServerKeyPlaintextFile, err)
+	}
+
+	return nil
+}
+
 // generateAndPersistPKI creates a new ECDSA P-256 root CA and signs a server
 // certificate, then writes all four PEM files to pkiDir.
 //
@@ -172,9 +208,12 @@ func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]s
 			return nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set — cannot generate gateway server cert")
 		}
 
+		// domainSuffix itself is included because a worker's Caddy dials the
+		// control-plane private ingress at the bare domain.
 		return []string{
 			workerconstants.WorkerGatewayName + "." + domainSuffix,
 			workerconstants.PodmanGatewayPodName,
+			domainSuffix,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime type %q for gateway PKI generation", runtimeType)
@@ -217,6 +256,10 @@ func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types
 	srvKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: srvKeyDER})
 
 	if err := writePKIFiles(pkiDir, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER, secret); err != nil {
+		return empty, err
+	}
+
+	if err := writePlaintextServerKey(pkiDir, srvKeyPEM); err != nil {
 		return empty, err
 	}
 
@@ -307,6 +350,10 @@ func loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath string) (pkiResult, er
 
 	srvKeyPEM, err := loadServerKeyPEM(srvKeyPath, secret)
 	if err != nil {
+		return empty, err
+	}
+
+	if err := writePlaintextServerKey(filepath.Dir(srvKeyPath), srvKeyPEM); err != nil {
 		return empty, err
 	}
 
