@@ -202,12 +202,11 @@ class TableSummaryConfig(BaseSettings):
                 - Relevant: contains factual, instructional, or explanatory info useful for answering questions.
                 - Irrelevant: personal info, disclaimers, administrative notes, or unrelated commentary.
 
-                3. Output in the exact format below:
+                3. Output a single JSON object with exactly these two keys, and nothing else:
 
-                Summary: <your extremely detailed summary here - be verbose and comprehensive>
-                Decision: <yes or no>
+                {{"summary": "<your extremely detailed summary here - be verbose and comprehensive>", "decision": "<yes or no>"}}
 
-                Do NOT output JSON, extra commentary, or any other text.
+                Do NOT output extra commentary or any other text outside the JSON object.
 
                 Examples:
 
@@ -218,8 +217,7 @@ class TableSummaryConfig(BaseSettings):
                 | Power10   | 16    | 8 TB   |
 
                 Output:
-                Summary: The table presents technical specifications for the Power10 processor, with columns Processor, Cores and Memory. Processor Power10 - Cores: 16 cores for parallel processing capabilities. Processor Power10 - Memory: 8 TB (terabytes) of RAM, providing substantial memory resources for enterprise workloads and data-intensive applications.
-                Decision: yes
+                {{"summary": "The table presents technical specifications for the Power10 processor, with columns Processor, Cores and Memory. Processor Power10 - Cores: 16 cores for parallel processing capabilities. Processor Power10 - Memory: 8 TB (terabytes) of RAM, providing substantial memory resources for enterprise workloads and data-intensive applications.", "decision": "yes"}}
 
                 Positive example with periods (relevant):
                 Table:
@@ -230,8 +228,7 @@ class TableSummaryConfig(BaseSettings):
                 | Northeast | Target | 11.0 | 12.0 |
 
                 Output:
-                Summary: Table 2: Ridership by corridor, with columns Corridor, Metric, FY21 and FY22. Corridor Northeast - Metric Actual - FY21: 10.1. Corridor Northeast - Metric Actual - FY22: 12.4. Corridor Northeast - Metric Target - FY21: 11.0. Corridor Northeast - Metric Target - FY22: 12.0.
-                Decision: yes
+                {{"summary": "Table 2: Ridership by corridor, with columns Corridor, Metric, FY21 and FY22. Corridor Northeast - Metric Actual - FY21: 10.1. Corridor Northeast - Metric Actual - FY22: 12.4. Corridor Northeast - Metric Target - FY21: 11.0. Corridor Northeast - Metric Target - FY22: 12.0.", "decision": "yes"}}
 
                 Negative example (irrelevant):
                 Table:
@@ -239,8 +236,7 @@ class TableSummaryConfig(BaseSettings):
                 |--------------|------------|
 
                 Output:
-                Summary: Document metadata indicating it was prepared by John Smith.
-                Decision: no
+                {{"summary": "Document metadata indicating it was prepared by John Smith.", "decision": "no"}}
 
                 Now analyze the table below:
 
@@ -288,10 +284,9 @@ class TableSummaryConfig(BaseSettings):
 
                 3. Ausgabe im exakten Format unten:
 
-                Summary: <Ihre äußerst detaillierte Zusammenfassung hier - seien Sie ausführlich und umfassend>
-                Decision: <yes oder no>
+                {{"summary": "<Ihre äußerst detaillierte Zusammenfassung hier - seien Sie ausführlich und umfassend>", "decision": "<yes oder no>"}}
 
-                Geben Sie KEIN JSON, zusätzliche Kommentare oder anderen Text aus.
+                Geben Sie keine zusätzlichen Kommentare oder anderen Text außerhalb des JSON-Objekts aus.
 
                 Beispiele:
 
@@ -302,8 +297,7 @@ class TableSummaryConfig(BaseSettings):
                 | Power10   | 16    | 8 TB     |
 
                 Ausgabe:
-                Summary: Die Tabelle präsentiert technische Spezifikationen für den Power10-Prozessor. Die Prozessorkonfiguration umfasst 16 Kerne für parallele Verarbeitungsfähigkeiten. Die Speicherkapazität unterstützt bis zu 8 TB (Terabyte) RAM und bietet erhebliche Speicherressourcen für Unternehmensworkloads und datenintensive Anwendungen.
-                Decision: yes
+                {{"summary": "Die Tabelle präsentiert technische Spezifikationen für den Power10-Prozessor. Die Prozessorkonfiguration umfasst 16 Kerne für parallele Verarbeitungsfähigkeiten. Die Speicherkapazität unterstützt bis zu 8 TB (Terabyte) RAM und bietet erhebliche Speicherressourcen für Unternehmensworkloads und datenintensive Anwendungen.", "decision": "yes"}}
 
                 Negatives Beispiel (irrelevant):
                 Tabelle:
@@ -311,8 +305,7 @@ class TableSummaryConfig(BaseSettings):
                 |---------------|------------|
 
                 Ausgabe:
-                Summary: Dokument-Metadaten, die angeben, dass es von John Smith erstellt wurde.
-                Decision: no
+                {{"summary": "Dokument-Metadaten, die angeben, dass es von John Smith erstellt wurde.", "decision": "no"}}
 
                 Analysieren Sie nun die folgende Tabelle:
 
@@ -360,10 +353,9 @@ class TableSummaryConfig(BaseSettings):
 
                 3. Fornisci l'output nel formato esatto seguente:
 
-                Summary: <il tuo riassunto estremamente dettagliato qui - sii completo e approfondito>
-                Decision: <yes o no>
+                {{"summary": "<il tuo riassunto estremamente dettagliato qui - sii completo e approfondito>", "decision": "<yes o no>"}}
 
-                NON produrre JSON, commenti aggiuntivi o altro testo.
+                NON produrre commenti aggiuntivi o altro testo al di fuori dell'oggetto JSON.
 
                 Esempi:
 
@@ -374,8 +366,7 @@ class TableSummaryConfig(BaseSettings):
                 | Power10    | 16   | 8 TB    |
 
                 Output:
-                Summary: La tabella presenta le specifiche tecniche del processore Power10. La configurazione del processore include 16 core per capacità di elaborazione parallela. La capacità di memoria supporta fino a 8 TB (terabyte) di RAM, offrendo risorse di memoria significative per carichi di lavoro aziendali e applicazioni ad alta intensità di dati.
-                Decision: yes
+                {{"summary": "La tabella presenta le specifiche tecniche del processore Power10. La configurazione del processore include 16 core per capacità di elaborazione parallela. La capacità di memoria supporta fino a 8 TB (terabyte) di RAM, offrendo risorse di memoria significative per carichi di lavoro aziendali e applicazioni ad alta intensità di dati.", "decision": "yes"}}
 
                 Esempio negativo (irrilevante):
                 Tabella:
@@ -383,8 +374,7 @@ class TableSummaryConfig(BaseSettings):
                 |---------------|------------|
 
                 Output:
-                Summary: Metadati del documento che indicano che è stato preparato da John Smith.
-                Decision: no
+                {{"summary": "Metadati del documento che indicano che è stato preparato da John Smith.", "decision": "no"}}
 
                 Ora analizza la tabella seguente:
 
@@ -432,10 +422,9 @@ class TableSummaryConfig(BaseSettings):
 
                 3. Produisez la sortie au format exact ci-dessous :
 
-                Summary: <votre résumé extrêmement détaillé ici - soyez complet et exhaustif>
-                Decision: <yes ou no>
+                {{"summary": "<votre résumé extrêmement détaillé ici - soyez complet et exhaustif>", "decision": "<yes ou no>"}}
 
-                Ne produisez PAS de JSON, de commentaires supplémentaires ou d'autre texte.
+                Ne produisez PAS de commentaires supplémentaires ni d'autre texte en dehors de l'objet JSON.
 
                 Exemples :
 
@@ -446,8 +435,7 @@ class TableSummaryConfig(BaseSettings):
                 | Power10    | 16    | 8 TB    |
 
                 Sortie:
-                Summary: Le tableau présente les spécifications techniques du processeur Power10. La configuration du processeur comprend 16 cœurs pour des capacités de traitement parallèle. La capacité mémoire prend en charge jusqu'à 8 TB (téraoctets) de RAM, offrant des ressources mémoire importantes pour les charges de travail d'entreprise et les applications intensives en données.
-                Decision: yes
+                {{"summary": "Le tableau présente les spécifications techniques du processeur Power10. La configuration du processeur comprend 16 cœurs pour des capacités de traitement parallèle. La capacité mémoire prend en charge jusqu'à 8 TB (téraoctets) de RAM, offrant des ressources mémoire importantes pour les charges de travail d'entreprise et les applications intensives en données.", "decision": "yes"}}
 
                 Exemple négatif (non pertinent) :
                 Tableau:
@@ -455,8 +443,7 @@ class TableSummaryConfig(BaseSettings):
                 |---------------|------------|
 
                 Sortie:
-                Summary: Métadonnées du document indiquant qu'il a été préparé par John Smith.
-                Decision: no
+                {{"summary": "Métadonnées du document indiquant qu'il a été préparé par John Smith.", "decision": "no"}}
 
                 Analysez maintenant le tableau suivant :
 
@@ -508,11 +495,10 @@ class TableSummaryConfig(BaseSettings):
 
                 3. 以下の正確な形式で出力してください：
 
-                Summary: <ここに非常に詳細な要約を記述してください。冗長かつ包括的に>
-                Decision: <yes または no>
+                {{"summary": "<ここに非常に詳細な要約を記述してください。冗長かつ包括的に>", "decision": "<yes または no>"}}
 
-                JSON、追加のコメント、またはその他のテキストを出力しないでください。
-                重要：出力ラベル（「Summary:」と「Decision:」）は必ず英語のままにしてください。翻訳しないでください。
+                JSONオブジェクト以外の追加のコメントやテキストを出力しないでください。
+                重要：JSONのキー（「summary」と「decision」）と decision の値（「yes」または「no」）は必ず英語のままにしてください。翻訳しないでください。
 
                 例：
 
@@ -523,8 +509,7 @@ class TableSummaryConfig(BaseSettings):
                 | Power10    | 16     | 8 TB   |
 
                 出力：
-                Summary: この表はPower10プロセッサの技術仕様を示しています。プロセッサ構成には並列処理能力のための16コアが含まれています。メモリ容量は最大8 TB（テラバイト）のRAMをサポートしており、エンタープライズワークロードおよびデータ集約型アプリケーションに対して大規模なメモリリソースを提供します。
-                Decision: yes
+                {{"summary": "この表はPower10プロセッサの技術仕様を示しています。プロセッサ構成には並列処理能力のための16コアが含まれています。メモリ容量は最大8 TB（テラバイト）のRAMをサポートしており、エンタープライズワークロードおよびデータ集約型アプリケーションに対して大規模なメモリリソースを提供します。", "decision": "yes"}}
 
                 否定的な例（関連なし）：
                 表：
@@ -532,8 +517,7 @@ class TableSummaryConfig(BaseSettings):
                 |----------|------------|
 
                 出力：
-                Summary: John Smithによって作成されたことを示すドキュメントのメタデータ。
-                Decision: no
+                {{"summary": "John Smithによって作成されたことを示すドキュメントのメタデータ。", "decision": "no"}}
 
                 次の表を分析してください：
 

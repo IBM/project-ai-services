@@ -262,6 +262,43 @@ class TestProcessTableRowChunking:
 
         assert table_count == 0
 
+    @patch("digitize.processing.tables.summarize_and_classify_tables")
+    @patch("digitize.processing.tables.settings")
+    def test_failed_and_dropped_chunks_are_logged(self, mock_settings, mock_summarize):
+        """Every failed chunk and every dropped chunk is named in the logs."""
+        from common.lang_utils import LanguageCodes
+
+        english = Mock()
+        english.prompt = "English prompt {content}"
+        english.max_tokens = 1024
+        table_summary = MagicMock()
+        table_summary.english = english
+        mock_settings.table_summary = table_summary
+
+        def fake_summarize(markdowns, *args, **kwargs):
+            n = len(markdowns)
+            assert n >= 3
+            summaries = [f"summary {i}" for i in range(n)]
+            decisions = [True] * n
+            summaries[1], decisions[1] = "No summary.", False
+            return summaries, decisions, {1: "Failed to process table 1: Invalid table summary response"}
+
+        mock_summarize.side_effect = fake_summarize
+
+        converted_doc = Mock()
+        converted_doc.tables = [_mock_table(_make_table(30), "Table 1", 3)]
+
+        with patch.object(Path, "write_text"), patch("digitize.processing.tables.logger") as mock_logger:
+            _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        assert any(
+            "Table chunk 2/" in w and "failed and has no summary" in w and "Invalid table summary response" in w
+            for w in warnings
+        )
+        infos = [c.args[0] for c in mock_logger.info.call_args_list]
+        assert any("Dropping chunk 2 of table" in m for m in infos)
+        assert any("dropped chunk numbers: [2]" in m for m in infos)
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.settings")
@@ -334,14 +371,19 @@ class TestEnrichedTableSummaryPrompts:
         assert "column header" in prompt
         assert "FY22" in prompt  # period keyword guidance / example
 
-    def test_prompt_output_labels_unchanged(self):
-        """The response parser depends on the 'Summary:' / 'Decision:' labels."""
+    def test_prompts_request_json_output_with_schema_keys(self):
+        """Prompts must ask for the JSON keys enforced by TABLE_SUMMARY_SCHEMA and render cleanly."""
         from digitize.settings import settings
 
         for language in ["english", "german", "italian", "french", "japanese"]:
             prompt = getattr(settings.table_summary, language).prompt
-            assert "Summary:" in prompt
-            assert "Decision:" in prompt
+            rendered = prompt.format(content="| A | B |")
+            assert '{"summary":' in rendered, language
+            assert '"decision":' in rendered, language
+            assert "| A | B |" in rendered, language
+            # the old line-label output format must be gone
+            assert "\nSummary:" not in rendered, language
+            assert "\nDecision:" not in rendered, language
 
     def test_table_chunk_max_tokens_default(self):
         from digitize.settings import settings
