@@ -9,14 +9,14 @@ pipeline {
             description: 'OpenSearch version to build (e.g. 3.8.0)'
         )
         string(
-            name: 'BUILD_SCRIPTS_BRANCH',
-            defaultValue: '',
-            description: 'Branch of irapandey/build-scripts to check out. If set, clones irapandey/build-scripts at this branch; if left blank, clones ppc64le/build-scripts at master.'
+            name: 'BUILD_SCRIPTS_REPO',
+            defaultValue: 'https://github.com/ppc64le/build-scripts.git',
+            description: 'build-scripts repository to clone (HTTPS GitHub URL). Change only to test a fork, e.g. https://github.com/<user>/build-scripts.git'
         )
-        booleanParam(
-            name: 'PUSH_RELEASE_TAG',
-            defaultValue: false,
-            description: 'Also tag and push the image as icr.io/ai-services-cicd/opensearch:<version>-ppc64le'
+        string(
+            name: 'BUILD_SCRIPTS_BRANCH',
+            defaultValue: 'master',
+            description: 'Branch of the build-scripts repository to check out.'
         )
     }
 
@@ -39,15 +39,13 @@ pipeline {
 
         // Git repositories
         OPENSEARCH_BUILD_REPO = "https://github.com/opensearch-project/opensearch-build.git"
-        BUILD_SCRIPTS_REPO    = "https://github.com/irapandey/build-scripts.git"
 
         // Workspace
         BUILD_DIR   = "${WORKSPACE}/opensearch-build"
         SCRIPTS_DIR = "${WORKSPACE}/build-scripts"
 
         // IBM Container Registry
-        // Pushes <OPENSEARCH_VERSION>-<ARCHITECTURE>-<BUILD_NUMBER> to ai-services-private for each build run
-        // Pushes <OPENSEARCH_VERSION>-<ARCHITECTURE> to ai-services-cicd when PUSH_RELEASE_TAG toggle is enabled
+        // Pushes <OPENSEARCH_VERSION>-<ARCHITECTURE>-<BUILD_NUMBER> to ai-services-cicd for each build run
         ICR_REGISTRY           = "icr.io"
         IMAGE_NAME             = "icr.io/ai-services-cicd/opensearch"
     }
@@ -63,12 +61,11 @@ pipeline {
                     def ver = params.OPENSEARCH_VERSION
 
                     env.OPENSEARCH_BUILD_BRANCH = ver
-                    if (params.BUILD_SCRIPTS_BRANCH?.trim()) {
-                        env.BUILD_SCRIPTS_REPO   = 'https://github.com/irapandey/build-scripts.git'
-                        env.BUILD_SCRIPTS_BRANCH = params.BUILD_SCRIPTS_BRANCH.trim()
-                    } else {
-                        env.BUILD_SCRIPTS_REPO   = 'https://github.com/ppc64le/build-scripts.git'
-                        env.BUILD_SCRIPTS_BRANCH = 'master'
+                    env.BUILD_SCRIPTS_REPO   = params.BUILD_SCRIPTS_REPO?.trim() ?: 'https://github.com/ppc64le/build-scripts.git'
+                    env.BUILD_SCRIPTS_BRANCH = params.BUILD_SCRIPTS_BRANCH?.trim() ?: 'master'
+
+                    if (!(env.BUILD_SCRIPTS_REPO ==~ /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?$/)) {
+                        error "BUILD_SCRIPTS_REPO must be an HTTPS GitHub URL, got: ${env.BUILD_SCRIPTS_REPO}"
                     }
                     env.DOCKERFILE_DIR          = "o/opensearch-project-opensearch-build/Dockerfiles/${ver}_ubi9.7"
                     env.PATCH_FILE              = "${env.DOCKERFILE_DIR}/ppc64le-${ver}-ai-services.patch"
@@ -77,6 +74,7 @@ pipeline {
                     env.IMAGE_TAG               = "${ver}-${env.ARCHITECTURE}-${env.BUILD_NUMBER}"
 
                     echo "OpenSearch version : ${ver}"
+                    echo "Build-scripts repo  : ${env.BUILD_SCRIPTS_REPO}"
                     echo "Build-scripts branch: ${env.BUILD_SCRIPTS_BRANCH}"
                     echo "Dockerfile dir      : ${env.DOCKERFILE_DIR}"
                     echo "Image tag           : ${env.IMAGE_TAG}"
@@ -412,41 +410,6 @@ pipeline {
 
                         podman logout ${ICR_REGISTRY}
                     """
-                }
-
-                script {
-                    if (params.PUSH_RELEASE_TAG) {
-                        def releaseTag = "${IMAGE_NAME}:${OPENSEARCH_VERSION}-${ARCHITECTURE}"
-
-                        sh """
-                            set -euo pipefail
-                            echo "Tagging image as ${releaseTag}..."
-                            podman tag ${IMAGE_NAME}:${IMAGE_TAG} ${releaseTag}
-                        """
-
-                        withCredentials([
-                            string(
-                                credentialsId: 'ais-private-icr',
-                                variable: 'IBM_CLOUD_APIKEY'
-                            )
-                        ]) {
-                            sh """
-                                set -euo pipefail
-
-                                set +x
-                                echo "\$IBM_CLOUD_APIKEY" | podman login \
-                                    -u iamapikey \
-                                    --password-stdin \
-                                    ${ICR_REGISTRY}
-                                set -x
-
-                                echo "Pushing release tag (${releaseTag})..."
-                                podman push ${releaseTag}
-
-                                podman logout ${ICR_REGISTRY}
-                            """
-                        }
-                    }
                 }
             }
         }
