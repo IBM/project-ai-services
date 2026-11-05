@@ -28,10 +28,64 @@ from digitize.settings import settings
 
 logger = get_logger("processing.tables")
 
+def _parse_row_cells(line: str) -> list[str]:
+    """Parse cells from a markdown table row, preserving cell count."""
+    trimmed = line.strip()
+    if trimmed.startswith('|'):
+        trimmed = trimmed[1:]
+    if trimmed.endswith('|'):
+        trimmed = trimmed[:-1]
+    return [c.strip() for c in trimmed.split('|')]
+
+
+def _format_row_cells(cells: list[str]) -> str:
+    """Format cells back to a markdown table row."""
+    return "| " + " | ".join(cells) + " |"
+
+
+def _merge_header_cells(top_cells: list[str], sub_cells: list[str]) -> list[str]:
+    """Merge top-level group header cells with sub-header cells generically."""
+    max_len = max(len(top_cells), len(sub_cells))
+    merged = []
+    for i in range(max_len):
+        top = top_cells[i] if i < len(top_cells) else ""
+        sub = sub_cells[i] if i < len(sub_cells) else ""
+        if top and sub and top.lower() != sub.lower():
+            if sub.lower().startswith(top.lower()):
+                merged.append(sub)
+            elif top.lower().startswith(sub.lower()):
+                merged.append(top)
+            else:
+                merged.append(f"{top} - {sub}")
+        elif sub:
+            merged.append(sub)
+        elif top:
+            merged.append(top)
+        else:
+            merged.append("")
+    return merged
+
+
+_NUMERIC_VALUE_RE = re.compile(r'^\s*[\$€£¥]?\s*\(?-?\d+(?:,\d{3})*(?:\.\d+)?\)?%?\s*$')
+
+
+def _is_numeric_data_row(cells: list[str]) -> bool:
+    """True if most data columns contain numeric measurement values (e.g., a real data row)."""
+    if len(cells) <= 1:
+        return False
+    data_cells = [c.strip() for c in cells[1:] if c.strip()]
+    if not data_cells:
+        return False
+    numeric_count = sum(1 for c in data_cells if _NUMERIC_VALUE_RE.match(c))
+    return numeric_count > len(data_cells) // 2
+
+
 def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) -> tuple[str, str]:
     """
-    Cleans up markdown tables where the PDF parser accidentally put the caption
-    as the first header row, and the real headers as the first data row.
+    Cleans up markdown tables:
+    1. Detects when the PDF parser accidentally put the caption as the first header row,
+       and the real headers as the first data row.
+    2. Flattens multi-tier/hierarchical headers into single, descriptive column headers.
     """
     if not markdown_table:
         return markdown_table, current_caption
@@ -43,13 +97,14 @@ def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) 
             sep_idx = i
             break
 
+    new_caption = current_caption
+
+    # Step 1: Caption promotion if header row is a caption/repeated title
     if sep_idx > 0 and len(lines) > sep_idx + 1:
         header_line = lines[sep_idx - 1]
         headers = [h.strip() for h in header_line.strip('|').split('|') if h.strip()]
-
         first_data_line = lines[sep_idx + 1]
 
-        # Check if the header row is a repeated string or looks like a caption
         is_repeated_header = len(set(headers)) == 1 and len(headers) >= 1
         starts_with_caption = False
         if headers:
@@ -57,8 +112,6 @@ def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) 
 
         if is_repeated_header or starts_with_caption:
             potential_caption = headers[0] if headers else ""
-
-            # Reconstruct the markdown with the first data row promoted to the header
             new_lines = []
             if sep_idx - 1 > 0:
                 new_lines.extend(lines[:sep_idx - 1])
@@ -67,11 +120,29 @@ def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) 
             new_lines.append(lines[sep_idx])      # Separator
             new_lines.extend(lines[sep_idx + 2:]) # Remaining data rows
 
-            new_markdown = '\n'.join(new_lines)
+            lines = new_lines
             new_caption = current_caption if current_caption else potential_caption
-            return new_markdown, new_caption
+            # Recompute sep_idx after promotion
+            sep_idx = next((i for i, line in enumerate(lines) if '|' in line and '-' in line and not any(c.isalnum() for c in line)), -1)
 
-    return markdown_table, current_caption
+    # Step 2: Multi-level header flattening
+    if sep_idx > 1:
+        # Multiple header rows before the separator
+        header_cells = _parse_row_cells(lines[0])
+        for h_line in lines[1:sep_idx]:
+            header_cells = _merge_header_cells(header_cells, _parse_row_cells(h_line))
+        merged_header = _format_row_cells(header_cells)
+        lines = [merged_header, lines[sep_idx]] + lines[sep_idx + 1:]
+    elif sep_idx == 1 and len(lines) > 2:
+        top_cells = _parse_row_cells(lines[0])
+        sub_cells = _parse_row_cells(lines[2])
+        # If top header has repeated spanning labels and the line below separator is a sub-header row
+        if len(top_cells) > len(set(top_cells)) and not _is_numeric_data_row(sub_cells):
+            merged_header = _format_row_cells(_merge_header_cells(top_cells, sub_cells))
+            lines = [merged_header, lines[1]] + lines[3:]
+
+    new_markdown = '\n'.join(lines)
+    return new_markdown, new_caption
 
 def extract_table_headers(markdown_table: str) -> list[str]:
     """Extract headers from a markdown table.
@@ -377,7 +448,7 @@ def split_markdown_table_into_row_chunks(
     logger.info(f"Row chunking: split {len(row_lines)} rows into {len(chunks)} chunks")
     return chunks
 
-def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None, table_chunk_max_tokens: int = 200):
+def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None, table_chunk_max_tokens: int = 400):
     """Extract, process, and summarize tables found in a document.
 
     Large tables are split into row-group chunks (header and caption repeated) so each
@@ -554,7 +625,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
             'caption': caption,
             'page_number': page_num,
         }
-        for idx, (keep, markdown, summary, caption, page_num) in enumerate(
+        for idx, (keep, _markdown, summary, caption, page_num) in enumerate(
             zip(final_keep, table_markdowns, table_summaries, table_captions_list, table_page_numbers)
         )
         if keep
