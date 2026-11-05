@@ -121,7 +121,7 @@ lines are required.
 
 ```
 services/digitize/
-├── Containerfile          # FROM icr.io/ai-services-cicd/service-base:v0.0.46
+├── Containerfile          # FROM icr.io/ai-services-cicd/service-base:v0.0.48
 ├── Makefile               # TAG=v0.0.81
 ├── requirements.txt       # digitize-only deps (docling/ML stack + existing)
 ├── download_docling_models.py
