@@ -7,7 +7,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.2
 	github.com/aws/smithy-go v1.28.2
-	github.com/aws/smithy-go v1.27.8
 	github.com/blang/semver/v4 v4.0.0
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/huh v0.7.0
