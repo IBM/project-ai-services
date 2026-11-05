@@ -741,4 +741,67 @@ class TestGetConnectorSyncStatus:
         result = self._call(session)
         assert result is None
 
+
+# ===========================================================================
+# prune_connector_jobs — job retention tied to retained sync-log seqs
+# ===========================================================================
+
+class TestPruneConnectorJobs:
+    def _call(self, retained_seqs, job_rows, name="my-conn"):
+        """Run prune_connector_jobs; returns (deleted, session)."""
+        session = MagicMock()
+        session.scalar.return_value = name
+        # scalars(...).all() → retained seqs
+        session.scalars.return_value.all.return_value = retained_seqs
+        # execute #1 → select of candidate jobs, execute #2 → DELETE
+        select_result = MagicMock()
+        select_result.all.return_value = job_rows
+        delete_result = MagicMock()
+        delete_result.rowcount = 99
+        session.execute.side_effect = [select_result, delete_result]
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            return DatabaseManager.prune_connector_jobs(CONNECTOR_ID), session
+
+    def test_deletes_only_jobs_of_evicted_seqs(self):
+        rows = [
+            ("j-old-a", "Connector-my-conn-1-1"),
+            ("j-old-b", "Connector-my-conn-1-2"),
+            ("j-keep", "Connector-my-conn-7-1"),
+        ]
+        _, session = self._call({7, 8}, rows)
+        delete_stmt = session.execute.call_args_list[1][0][0]
+        params = delete_stmt.compile().params
+        assert sorted(next(iter(params.values()))) == ["j-old-a", "j-old-b"]
+
+    def test_ignores_names_that_do_not_match_pattern(self):
+        """Other connectors sharing a name prefix (e.g. 'my-conn-2') must not be touched."""
+        rows = [("j-other", "Connector-my-conn-2-5-1"), ("j-user", "Connector-my-conn-abc")]
+        deleted, session = self._call({7}, rows)
+        assert deleted == 0
+        assert session.execute.call_count == 1  # no DELETE issued
+
+    def test_noop_when_no_sync_logs_retained(self):
+        deleted, session = self._call(set(), [])
+        assert deleted == 0
+        session.execute.assert_not_called()
+
+    def test_noop_when_connector_missing(self):
+        deleted, session = self._call({7}, [], name=None)
+        assert deleted == 0
+        session.execute.assert_not_called()
+
+    def test_select_is_restricted_to_terminal_connector_jobs(self):
+        _, session = self._call({7}, [])
+        sql = str(session.execute.call_args_list[0][0][0].compile())
+        assert "jobs.source" in sql and "jobs.status IN" in sql
+
+    def test_db_error_returns_zero(self):
+        session = MagicMock()
+        session.scalar.side_effect = SQLAlchemyError("boom")
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            assert DatabaseManager.prune_connector_jobs(CONNECTOR_ID) == 0
+
+
 # Made with Bob
