@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	semver "github.com/blang/semver/v4"
-	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -36,21 +35,21 @@ type upgradeVersions struct {
 	availableCSVLabel string
 }
 
-const (
-	yamlDecoderBufSz   = 4096
-	tableColumnPadding = 2
-)
+const yamlDecoderBufSz = 4096
 
-// csvVersionRe matches the semver portion of an OLM CSV name, e.g.
+// versionRe matches the semver portion of an OLM CSV name or channel name, e.g.
 //
 //	rhods-operator.3.5.0   → "3.5.0"
 //	spyre-operator.v1.3.1  → "v1.3.1"
-var csvVersionRe = regexp.MustCompile(`v?(\d+\.\d+\.\d+.*)$`)
+//	stable-3.5             → "3.5"
+//	stable-v1.3            → "v1.3"
+//	fast-v1                → "v1"
+var versionRe = regexp.MustCompile(`v?(\d+(\.\d+)*.*)$`)
 
-// csvVersion extracts a comparable semver from an OLM CSV name.
+// extractVersion extracts a comparable semver from an OLM CSV or channel name.
 // Returns a zero version and false if the name carries no recognisable semver.
-func csvVersion(csvName string) (semver.Version, bool) {
-	m := csvVersionRe.FindString(csvName)
+func extractVersion(name string) (semver.Version, bool) {
+	m := versionRe.FindString(name)
 	if m == "" {
 		return semver.Version{}, false
 	}
@@ -285,80 +284,69 @@ func extractUpgradeVersions(sub *operatorsv1alpha1.Subscription, desired *unstru
 	}
 }
 
-// isDowngrade returns true when the available CSV is semver-older than the current one.
+// isDowngrade returns true when the available CSV or channel is semver-older than the current one.
 func isDowngrade(v upgradeVersions) bool {
-	if v.availableCSV == "" {
-		return false
+	curVer, curOK := extractVersion(v.currentCSV)
+	availVer, availOK := extractVersion(v.availableCSV)
+	if curOK && availOK && availVer.LT(curVer) {
+		return true
 	}
 
-	currentVer, currentOK := csvVersion(v.currentCSV)
-	availableVer, availableOK := csvVersion(v.availableCSV)
+	curChanVer, curChanOK := extractVersion(v.currentChannel)
+	availChanVer, availChanOK := extractVersion(v.availableChannel)
+	if curChanOK && availChanOK && availChanVer.LT(curChanVer) {
+		return true
+	}
 
-	return currentOK && availableOK && availableVer.LT(currentVer)
+	if curOK && availChanOK {
+		availMajorMinor := semver.Version{Major: availChanVer.Major, Minor: availChanVer.Minor}
+		curMajorMinor := semver.Version{Major: curVer.Major, Minor: curVer.Minor}
+		if availMajorMinor.LT(curMajorMinor) {
+			return true
+		}
+	}
+
+	return false
 }
 
-// printUpgradeTable renders a bubbles/table showing current vs available versions.
-func printUpgradeTable(v upgradeVersions, operatorLabel string) {
-	cols := []table.Column{
-		{Title: ""},
-		{Title: "CHANNEL"},
-		{Title: "VERSION (CSV)"},
-	}
-	rows := []table.Row{
-		{"Current  ", v.currentChannel, v.currentCSV},
-		{"Available", v.availableChannel, v.availableCSVLabel},
-	}
-
-	// Compute column widths from content.
-	widths := make([]int, len(cols))
-	for i, col := range cols {
-		widths[i] = len(col.Title)
-	}
-	for _, r := range rows {
-		for i, cell := range r {
-			if len(cell) > widths[i] {
-				widths[i] = len(cell)
+// isUpgrade returns true when the available CSV or channel is semver-newer than the current one.
+func isUpgrade(v upgradeVersions) bool {
+	if v.availableCSV != "" {
+		if curVer, curOK := extractVersion(v.currentCSV); curOK {
+			if availVer, availOK := extractVersion(v.availableCSV); availOK {
+				return availVer.GT(curVer)
 			}
 		}
 	}
-	for i := range cols {
-		cols[i].Width = widths[i] + tableColumnPadding
-	}
 
-	tbl := table.New(
-		table.WithColumns(cols),
-		table.WithRows(rows),
-		table.WithFocused(false),
-		table.WithHeight(len(rows)+1),
-	)
-
-	styles := table.DefaultStyles()
-	styles.Header = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		Padding(0, 1).
-		Bold(true)
-	styles.Cell = lipgloss.NewStyle().Padding(0, 1)
-	styles.Selected = lipgloss.NewStyle()
-	tbl.SetStyles(styles)
-
-	labelStyle := lipgloss.NewStyle().Bold(true)
-	currentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))   // yellow
-	availableStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
-
-	logger.Infoln(labelStyle.Render("\nUpgrade available: " + operatorLabel))
-	for _, line := range strings.Split(tbl.View(), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if strings.Contains(line, "Current") {
-			logger.Infoln(currentStyle.Render(line))
-		} else if strings.Contains(line, "Available") {
-			logger.Infoln(availableStyle.Render(line))
-		} else {
-			logger.Infoln(line)
+	if curChanVer, curOK := extractVersion(v.currentChannel); curOK {
+		if availChanVer, availOK := extractVersion(v.availableChannel); availOK {
+			return availChanVer.GT(curChanVer)
 		}
 	}
+
+	return false
+}
+
+// printUpgradeTable renders a table showing current vs available versions.
+func printUpgradeTable(v upgradeVersions, title string) {
+	logger.Infoln(lipgloss.NewStyle().Bold(true).Render("\n" + title))
+
+	printer := utils.NewTableWriter()
+	defer printer.CloseTableWriter()
+
+	printer.SetCollapseIndices()
+	setUpgradeTableHeaders(printer)
+	populateUpgradeRows(printer, v)
+}
+
+func setUpgradeTableHeaders(printer *utils.Printer) {
+	printer.SetHeaders("", "CHANNEL", "VERSION (CSV)")
+}
+
+func populateUpgradeRows(printer *utils.Printer, v upgradeVersions) {
+	printer.AppendRow("Current  ", v.currentChannel, v.currentCSV)
+	printer.AppendRow("Available", v.availableChannel, v.availableCSVLabel)
 }
 
 // promptAndUpgrade shows the current/available version table, prompts the user,
@@ -377,25 +365,35 @@ func promptAndUpgrade(ctx context.Context, c *openshift.OpenshiftClient, sub *op
 
 	// Block downgrades silently.
 	if isDowngrade(v) {
-		logger.Debugf("%s: skipping, manifest version %s is older than installed %s\n",
-			operatorLabel, v.availableCSV, v.currentCSV)
+		logger.Debugf("%s: skipping, manifest channel/version is older than installed (current: %s/%s, available: %s/%s)\n",
+			operatorLabel, v.currentChannel, v.currentCSV, v.availableChannel, v.availableCSV)
 		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
 
 		return false
 	}
 
-	s.Stop(fmt.Sprintf("%s upgrade available", operatorLabel))
-	printUpgradeTable(v, operatorLabel)
+	upgrade := isUpgrade(v)
+	actionText := "upgrade"
+	actionTitle := "Upgrade available: " + operatorLabel
+	confirmPrompt := fmt.Sprintf("\nUpgrade %s?", operatorLabel)
+	if !upgrade {
+		actionText = "channel update"
+		actionTitle = "Channel update available: " + operatorLabel
+		confirmPrompt = fmt.Sprintf("\nUpdate channel for %s?", operatorLabel)
+	}
 
-	confirmed, err := utils.ConfirmAction(fmt.Sprintf("\nUpgrade %s?", operatorLabel))
+	s.Stop(fmt.Sprintf("%s %s available", operatorLabel, actionText))
+	printUpgradeTable(v, actionTitle)
+
+	confirmed, err := utils.ConfirmAction(confirmPrompt)
 	if err != nil || !confirmed {
-		logger.Infof("Skipping upgrade for %s", operatorLabel)
+		logger.Infof("Skipping %s for %s", actionText, operatorLabel)
 
 		return false
 	}
 
 	if err := upgradeSubscription(ctx, c, sub, v.availableChannel, v.availableCSV); err != nil {
-		logger.Warningf("Failed to upgrade %s: %v", operatorLabel, err)
+		logger.Warningf("Failed to update subscription for %s: %v", operatorLabel, err)
 
 		return false
 	}
