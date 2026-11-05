@@ -238,7 +238,7 @@ Digitize registers its error handler only for `HTTPException`, so its request-va
 
 The forecast endpoints are keyed by `connector_id`, because each connector is trained into forecasters. The service never exposes Triton: clients call these endpoints and the service forwards the request to Triton.
 
-#### GET /v1/forecast/{connector_id} — List the Forecasters of a Connector
+#### GET /v1/forecast/{connector_id or forecast_name} — List the Forecasters of a Connector
 
 Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
 
@@ -273,7 +273,7 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 | 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
 | 500 Internal Server Error            | Database failure.          |
 
-#### POST /v1/forecast/{connector_id} — Run a Forecast
+#### POST /v1/forecast/{connector_id or forecast_name} — Run a Forecast
 
 Runs the connector's newest `ready` forecaster on the rows in the request. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
@@ -466,13 +466,15 @@ Returns the list item plus `connection_details` limited to the safe fields and `
 {
     "connector_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
     "versions": {"ready": [12]},
+    "last_n_jobs"": [{
+        "time": "2026-10-26T09:12:00Z",
+        "status": "completed",
+        "duration": "2026-10-26T09:12:00Z",
+        "message": ""
+  }, ...],
     "training": {
-        "jobs_completed": 5,
-        "jobs_failed": 1,
-        "last_job_status": "completed",
-        "last_duration_seconds": 412,
-        "last_completed_at": "2026-10-26T09:12:00Z",
-        "last_n_messages": ["message1", "message2"]  // n is based on retention here
+        "total_jobs_completed": 5,
+        "total_jobs_failed": 1,
     }
 }
 ```
@@ -1032,6 +1034,7 @@ These are the items we do not have in scope for the initial release of the servi
 1. **CSV Support** Allowing training using data gathered from CSV file(s)
 2. **Multi-Connector Support** Allowing multiple connectors to be served using the same forecast service instance. This would entail using locks for training to ensure that only a single training job runs at one time.
 3. **Redundancy Check** Having a check for new information in the DB. In case of no new information since the last successful training, we should add an ability to skip the training step entirely with an appropriate message in the logs/UI.
+4. **Training/Inferencing Column Mutability** Allowing users to change training or prediction columns for an existing connector
 
 ---
 
