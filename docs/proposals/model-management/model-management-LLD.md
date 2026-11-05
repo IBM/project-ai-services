@@ -1022,7 +1022,7 @@ All endpoints require `Authorization: Bearer <access_token>`. All routes are und
 | Method | Path | Description | Response |
 |---|---|---|---|
 | `GET` | `/api/v1/catalog/models` | List all catalog models, each with supported providers, `component_type`, and metadata. Filter with `?component_type=` | `200 OK` |
-| `GET` | `/api/v1/catalog/models/:id` | Get detailed model specs, architecture, supported languages, license, and strengths for a specific model | `200 OK` |
+| `GET` | `/api/v1/catalog/models/:id` | Get detailed model specs, architecture, about information, license, and supported providers for a specific model | `200 OK` |
 | `GET` | `/api/v1/catalog/models/:id/deploy-options` | Get deployment options for a catalog model (available providers, hardware profiles, resource estimations, schema URLs). Filter with `?provider_id=` and `?runtime=` | `200 OK` |
 
 ### 6.2 Model Runtime Endpoints (polymorphic — `components` + `connectors` tables)
@@ -1281,7 +1281,7 @@ There is no endpoint to read a key back. Internal consumer services do not call 
 
 **Endpoint:** `GET /api/v1/catalog/models/:id`
 
-**Description:** Returns full metadata, license, strengths, supported languages, and supported providers for a specific catalog model when a user clicks on a model card in the catalog.
+**Description:** Returns full metadata, license, about information (strengths, supported languages, etc. matching the service catalog `about` structure), and supported providers for a specific catalog model when a user clicks on a model card in the catalog.
 
 **Path Parameters:**
 
@@ -1303,15 +1303,41 @@ There is no endpoint to read a key back. Internal consumer services do not call 
   "certified_by": "IBM",
   "license": "Apache 2.0",
   "description": "An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. Powers tasks such as prompt-based reasoning, summarization, and answer generation.",
-  "strengths": [
-    "Reliable instruction-following",
-    "Natural conversation and dialogue",
-    "Strong reasoning and tool calling",
-    "Enterprise-grade accuracy"
-  ],
-  "supported_languages": [
-    "English", "Spanish", "French", "German", "Portuguese",
-    "Italian", "Japanese", "Korean", "Chinese", "Arabic"
+  "about": [
+    {
+      "title": "Model strengths",
+      "sections": [
+        {
+          "title": "Strengths",
+          "values": [
+            "Reliable instruction-following",
+            "Natural conversation and dialogue",
+            "Strong reasoning and tool calling",
+            "Enterprise-grade accuracy"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Supported languages",
+      "sections": [
+        {
+          "title": "Languages",
+          "values": [
+            "English",
+            "Spanish",
+            "French",
+            "German",
+            "Portuguese",
+            "Italian",
+            "Japanese",
+            "Korean",
+            "Chinese",
+            "Arabic"
+          ]
+        }
+      ]
+    }
   ],
   "supported_providers": [
     {
@@ -1461,7 +1487,7 @@ Content-Type: application/json
   "provider_id": "vllm-spyre",
   "model": "ibm-granite/granite-3.3-8b-instruct",
   "profile": "compact-4k",
-  "worker_selector": "lpar-1",
+  "worker_name": "lpar-1",
   "params": {}
 }
 ```
@@ -1501,7 +1527,7 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `worker_selector` | string | No | Target worker name (e.g. `"lpar-1"`). Resolved to `workers.id` UUID before storage. Omit to deploy on the control-plane Podman socket |
+| `worker_name` | string | No | Target worker name (e.g. `"lpar-1"`). Resolved to `workers.id` UUID before storage. Omit to deploy on the control-plane Podman socket |
 
 **Polymorphic `params` by `provider_id`:**
 
@@ -1533,7 +1559,7 @@ The `modelmanager` package validates `params` against the provider's parameter s
 |---|---|
 | `400 Bad Request` | Missing required fields, unknown `deployment_type`, unknown `component_type`, or unknown `provider_id` |
 | `401 Unauthorized` | Invalid or missing access token |
-| `404 Not Found` | `worker_selector` refers to an unknown worker name; or `provider_id` not found for the given `component_type` |
+| `404 Not Found` | `worker_name` refers to an unknown worker name; or `provider_id` not found for the given `component_type` |
 | `409 Conflict` | A local model of the same `component_type` is already `Running` or `Deploying`; or a connector with the same `name` already exists |
 | `422 Unprocessable Entity` | Connectivity check failed (remote) |
 | `500 Internal Server Error` | Pod start failure (local); LiteLLM route registration failure (remote) |
@@ -1949,7 +1975,7 @@ catalog configure  (same command that starts postgres, caddy, catalog API)
   All applications share this single gateway instance.
 ```
 
-### Flow: Deploy vLLM — control-plane Podman (no `worker_selector`)
+### Flow: Deploy vLLM — control-plane Podman (no `worker_name`)
 
 ```
 POST /api/v1/models
@@ -1960,7 +1986,7 @@ POST /api/v1/models
         params only carries provider-specific config (e.g. apiKey).
 
   Read assets/components/llm/vllm-spyre/metadata.yaml → deployment_strategy: pod
-  worker_selector absent → look up Local worker UUID → use LocalRuntime (control-plane Podman)
+  worker_name absent → look up Local worker UUID → use LocalRuntime (control-plane Podman)
 
   1. Validate request fields; validate model against models.yaml; validate profile against profiles.yaml
   2. INSERT into components (type=llm, provider=vllm-spyre,
@@ -1988,19 +2014,19 @@ POST /api/v1/models
   8. [async] Probe GET /health?model=ibm-granite/granite-3.3-8b-instruct → UPDATE components.status = 'Running' or 'Error'
 ```
 
-### Flow: Deploy vLLM (Podman + Spyre) — Remote Worker (`worker_selector=lpar-1`)
+### Flow: Deploy vLLM (Podman + Spyre) — Remote Worker (`worker_name=lpar-1`)
 
 ```
 POST /api/v1/models
 { deployment_type: "local", component_type: "llm", name: "granite-llm", provider_id: "vllm-spyre",
   model: "ibm-granite/granite-3.3-8b-instruct", profile: "compact-4k",
-  worker_selector: "lpar-1", params: {} }
+  worker_name: "lpar-1", params: {} }
 
   NOTE: model and profile are top-level request fields — NOT inside params.
         params only carries provider-specific config (e.g. apiKey).
 
   Read assets/components/llm/vllm-spyre/metadata.yaml → deployment_strategy: pod
-  worker_selector = "lpar-1" → workerRepo.GetByName("lpar-1") → worker.ID (UUID) → use RemoteRuntime
+  worker_name = "lpar-1" → workerRepo.GetByName("lpar-1") → worker.ID (UUID) → use RemoteRuntime
   Registry.WorkerInfoByID(worker.ID) → name="lpar-1", address="https://worker-caddy-lpar-1:443"
 
   1. Validate request fields; validate model against models.yaml; validate profile against profiles.yaml;
