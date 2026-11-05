@@ -6,6 +6,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeOpenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
@@ -48,7 +49,7 @@ func JoinAsLocalWorker(ctx context.Context, rt *runtimeOpenshift.OpenshiftClient
 	// internal service DNS endpoint. This avoids routing out through the OpenShift
 	// router/external route. The internal service DNS name is already included in
 	// the gateway's TLS server certificate SANs.
-	gatewayAddr := fmt.Sprintf("%s:%d", workerconstants.OpenShiftGatewayServiceEndpoint(), workerconstants.WorkerGatewayPort)
+	gatewayAddr := fmt.Sprintf("%s:%d", catalogutils.OpenShiftCatalogServiceEndpoint(), workerconstants.WorkerGatewayPort)
 
 	opts := workertypes.OpenshiftWorkerOptions{
 		WorkerConnectionOptions: workertypes.WorkerConnectionOptions{
