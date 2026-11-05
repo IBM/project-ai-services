@@ -394,6 +394,17 @@ class TestEnrichedTableSummaryPrompts:
             assert "\nSummary:" not in rendered, language
             assert "\nDecision:" not in rendered, language
 
+    def test_prompts_ask_for_concise_single_paragraph_summary(self):
+        """Verbose/markdown summaries overflow max_tokens inside the JSON string, so prompts must discourage them."""
+        from digitize.settings import settings
+
+        for language in ["english", "german", "italian", "french", "japanese"]:
+            prompt = getattr(settings.table_summary, language).prompt
+            assert "bullet points, or detailed paragraphs" not in prompt, language
+            assert "be verbose" not in prompt.lower(), language
+            assert "maximum detail" not in prompt.lower(), language
+        assert "ONE plain-text paragraph" in settings.table_summary.english.prompt
+
     def test_table_chunk_max_tokens_default(self):
         from digitize.settings import settings
 
