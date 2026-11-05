@@ -1,0 +1,156 @@
+@use "carbonTokens" as *;
+
+.cardWrapper {
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  position: relative;
+}
+
+.productiveCard {
+  min-height: 360px;
+  border: none;
+  padding: $spacing-05;
+  background-color: $layer;
+  display: flex;
+  flex-direction: column;
+  transition: background-color 150ms ease-in-out;
+
+  &:hover {
+    background-color: $layer-hover;
+  }
+
+  :global(.c4p--card__header) {
+    padding: 0;
+  }
+
+  :global(.c4p--card__body) {
+    padding: 0;
+  }
+
+  :global(.c4p--card__footer) {
+    border: none;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  // Deploy button (secondary slot — renders first in DOM, tertiary style)
+  :global(.c4p--card__footer button:first-child) {
+    background-color: transparent;
+    color: var(--cds-button-primary);
+    border: 1px solid var(--cds-button-primary);
+    width: fit-content;
+    height: auto;
+    box-shadow: none;
+    position: relative;
+    z-index: 2;
+
+    &:hover {
+      background-color: var(--cds-button-tertiary-hover);
+      color: var(--cds-text-on-color);
+      border-color: var(--cds-button-tertiary-hover);
+    }
+
+    &:active {
+      background-color: var(--cds-button-primary-active);
+      color: var(--cds-text-on-color);
+      border-color: var(--cds-button-primary-active);
+    }
+  }
+
+  // Arrow button (primary slot — renders last in DOM)
+  :global(.c4p--card__footer button:last-child) {
+    background-color: transparent;
+    color: var(--cds-text-primary);
+    border: none;
+    box-shadow: none;
+    position: relative;
+    z-index: 2;
+
+    &:hover {
+      background-color: transparent;
+    }
+
+    &:active {
+      background-color: transparent;
+    }
+  }
+}
+
+.cardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-02;
+}
+
+.componentTypeBadge {
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+}
+
+.badgeIcon {
+  color: var(--cds-support-success);
+  min-width: $spacing-05;
+}
+
+.componentTypeLabel {
+  color: var(--cds-text-secondary);
+}
+
+.cardTitle {
+  @include type-style("heading-03");
+}
+
+.certifiedBy {
+  @include type-style("label-01");
+  color: var(--cds-text-secondary);
+}
+
+.description {
+  @include type-style("label-01");
+  color: var(--cds-text-primary);
+  margin-top: $spacing-05;
+  margin-bottom: $spacing-05;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.providerNames {
+  @include type-style("label-01");
+  color: var(--cds-text-secondary);
+  margin-bottom: $spacing-05;
+}
+
+.providerTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-02;
+  position: absolute;
+  // footer height ($spacing-09) + desired gap
+  bottom: calc(#{$spacing-09} + #{$spacing-07});
+  left: $spacing-05;
+  right: $spacing-05;
+}
+
+.skeletonCard {
+  min-height: 360px;
+  background-color: $layer;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-05;
+  padding: $spacing-05;
+  border: none;
+}
+
+.skeletonFooter {
+  width: 100%;
+  height: $spacing-09;
+  margin-top: auto;
+}
