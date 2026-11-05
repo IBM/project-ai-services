@@ -91,16 +91,16 @@ class DigitizeConfig(BaseSettings):
     )
 
     table_chunk_max_tokens: int = Field(
-        default=200,
+        default=400,
         ge=1,
         description=(
             "Approximate max tokens of table markdown (caption + header + rows) per row-group chunk "
             "sent for summarization. Large tables are split into chunks that each repeat the caption "
             "and header. The keyword-enriched prompt expands each cell into its own sentence, so the "
-            "summary is ~3-5x longer than the input; 200 keeps the summary within the 1024-token "
-            "English summarization limit (1024 / 4 ~= 256) so cells are not truncated. Lower it "
-            "(~150) if summaries are cut off; raise it (up to ~250) if chunks are too fragmented. "
-            "Tokens are estimated from characters (~3 chars/token), so the real count can differ by 20-30%."
+            "summary is ~3-5x longer than the input; 400 keeps standard 20-30 row tables intact while "
+            "fitting within summarization limits. Lower it if summaries are cut off; raise it if chunks "
+            "are too fragmented. Tokens are estimated from characters (~3 chars/token), so the real "
+            "count can differ by 20-30%."
         ),
     )
 
@@ -190,11 +190,13 @@ class TableSummaryConfig(BaseSettings):
 
                 KEYWORD-SEARCHABLE SUMMARY RULES (the summary is indexed for keyword and semantic search):
                 - Start with the table caption/title (if any) and list EVERY column header exactly as written
+                - When tables have hierarchical or multi-level headers (e.g. parent section and sub-columns), combine them (e.g. "<row label> - <parent header> - <sub-header>: <value>") so each value is clearly distinguished (e.g. forecast vs actual vs variance vs prior year)
                 - For EVERY row, write a self-contained sentence that repeats the row label(s) AND the column header for EACH value,
                   e.g. "<row label> - <column header>: <value>". Never give a value without its row label and column header
                 - Reuse the exact keywords from the table: entity/row names, categories, regions, years and periods (e.g. FY22),
                   metrics, units, abbreviations, codes and numbers, spelled exactly as in the table
                 - Repeat entity names in each sentence instead of using pronouns or phrases like "the same" or "see above"
+                - Preserve summary and total rows (e.g. Total Revenue, Total Expense, Total Capital Spend) as explicit entries with their exact figures
                 - Preserve the relationships between data: which value belongs to which row, column, period and metric (e.g. actual vs. target/plan)
                 - Do NOT round, aggregate, merge or skip any value, and never write "and so on" or "etc."
 
@@ -270,11 +272,13 @@ class TableSummaryConfig(BaseSettings):
 
                 REGELN FÜR EINE STICHWORT-DURCHSUCHBARE ZUSAMMENFASSUNG (die Zusammenfassung wird für die Stichwort- und semantische Suche indexiert):
                 - Beginnen Sie mit der Tabellenüberschrift/dem Titel (falls vorhanden) und nennen Sie JEDE Spaltenüberschrift genau wie geschrieben
+                - Wenn Tabellen hierarchische oder mehrstufige Überschriften haben (z. B. übergeordnete Gruppe und Unterspalten), kombinieren Sie diese (z. B. "<Zeilenbezeichnung> - <Hauptüberschrift> - <Unterüberschrift>: <Wert>"), damit jeder Wert eindeutig unterschieden wird (z. B. Prognose vs. Ist vs. Abweichung)
                 - Schreiben Sie für JEDE Zeile einen eigenständigen Satz, der die Zeilenbezeichnung(en) UND die Spaltenüberschrift für JEDEN Wert wiederholt,
                   z. B. "<Zeilenbezeichnung> - <Spaltenüberschrift>: <Wert>". Nennen Sie niemals einen Wert ohne Zeilenbezeichnung und Spaltenüberschrift
                 - Verwenden Sie die exakten Stichwörter aus der Tabelle: Entitäts-/Zeilennamen, Kategorien, Regionen, Jahre und Zeiträume,
                   Kennzahlen, Einheiten, Abkürzungen, Codes und Zahlen, genau wie in der Tabelle geschrieben
                 - Wiederholen Sie Entitätsnamen in jedem Satz, statt Pronomen oder Formulierungen wie "dasselbe" oder "siehe oben" zu verwenden
+                - Behalten Sie Summen- und Gesamtzeilen (z. B. Total Revenue, Total Expense) als explizite Einträge mit ihren genauen Werten bei
                 - Bewahren Sie die Beziehungen zwischen den Daten: welcher Wert zu welcher Zeile, Spalte, welchem Zeitraum und welcher Kennzahl gehört (z. B. Ist vs. Soll/Plan)
                 - Runden, aggregieren, verschmelzen oder überspringen Sie KEINE Werte und schreiben Sie niemals "usw." oder "und so weiter"
 
@@ -339,11 +343,13 @@ class TableSummaryConfig(BaseSettings):
 
                 REGOLE PER UN RIASSUNTO RICERCABILE PER PAROLE CHIAVE (il riassunto viene indicizzato per la ricerca per parole chiave e semantica):
                 - Inizia con la didascalia/il titolo della tabella (se presente) ed elenca OGNI intestazione di colonna esattamente come scritta
+                - Quando le tabelle presentano intestazioni gerarchiche o a più livelli (ad es. gruppo principale e sotto-colonne), combinale (ad es. "<etichetta riga> - <intestazione principale> - <sotto-intestazione>: <valore>") in modo da distinguere chiaramente ogni valore (ad es. previsione vs. effettivo vs. varianza)
                 - Per OGNI riga scrivi una frase autonoma che ripete l'etichetta della riga E l'intestazione di colonna per OGNI valore,
                   ad es. "<etichetta riga> - <intestazione colonna>: <valore>". Non indicare mai un valore senza etichetta di riga e intestazione di colonna
                 - Riutilizza le parole chiave esatte della tabella: nomi di entità/righe, categorie, regioni, anni e periodi,
                   metriche, unità, abbreviazioni, codici e numeri, scritti esattamente come nella tabella
                 - Ripeti i nomi delle entità in ogni frase invece di usare pronomi o espressioni come "lo stesso" o "vedi sopra"
+                - Preserva le righe di riepilogo e totali (ad es. Total Revenue, Total Expense) come voci esplicite con i loro valori esatti
                 - Preserva le relazioni tra i dati: quale valore appartiene a quale riga, colonna, periodo e metrica (ad es. effettivo vs. obiettivo/piano)
                 - NON arrotondare, aggregare, unire né omettere alcun valore e non scrivere mai "eccetera" o "e così via"
 
@@ -408,11 +414,13 @@ class TableSummaryConfig(BaseSettings):
 
                 RÈGLES POUR UN RÉSUMÉ RECHERCHABLE PAR MOTS-CLÉS (le résumé est indexé pour la recherche par mots-clés et sémantique) :
                 - Commencez par la légende/le titre du tableau (le cas échéant) et listez CHAQUE en-tête de colonne exactement tel qu'écrit
+                - Lorsque les tableaux comportent des en-têtes hiérarchiques ou à plusieurs niveaux (par ex. groupe parent et sous-colonnes), combinez-les (par ex. "<libellé de ligne> - <en-tête parent> - <sous-en-tête> : <valeur>") afin de distinguer clairement chaque valeur (par ex. prévision vs. réel vs. écart)
                 - Pour CHAQUE ligne, écrivez une phrase autonome qui répète le libellé de la ligne ET l'en-tête de colonne pour CHAQUE valeur,
                   par ex. "<libellé de ligne> - <en-tête de colonne> : <valeur>". N'indiquez jamais une valeur sans libellé de ligne ni en-tête de colonne
                 - Réutilisez les mots-clés exacts du tableau : noms d'entités/de lignes, catégories, régions, années et périodes,
                   indicateurs, unités, abréviations, codes et nombres, écrits exactement comme dans le tableau
                 - Répétez les noms d'entités dans chaque phrase au lieu d'utiliser des pronoms ou des expressions comme "idem" ou "voir ci-dessus"
+                - Conservez les lignes de totaux et de synthèse (par ex. Total Revenue, Total Expense) en tant qu'entrées explicites avec leurs valeurs exactes
                 - Préservez les relations entre les données : quelle valeur appartient à quelle ligne, colonne, période et indicateur (par ex. réel vs. objectif/prévision)
                 - N'arrondissez, n'agrégez, ne fusionnez et n'omettez AUCUNE valeur, et n'écrivez jamais "etc."
 
@@ -481,11 +489,13 @@ class TableSummaryConfig(BaseSettings):
 
                 キーワード検索可能な要約のルール（要約はキーワード検索とセマンティック検索のためにインデックス化されます）：
                 - 表のキャプション/タイトル（ある場合）から始め、すべての列見出しを表記どおりに列挙してください
+                - 階層型または複数レベルの見出し（例：親グループとサブ列）がある場合は、それらを結合して各値を明確に区別してください（例：「<行ラベル> - <親見出し> - <子見出し>：<値>」、予測と実績と差異など）
                 - すべての行について、各値ごとに行ラベルと列見出しを繰り返す、単独で意味が通じる文を書いてください。
                   例：「<行ラベル> - <列見出し>：<値>」。行ラベルと列見出しのない値を単独で記述しないでください
                 - 表中の正確なキーワードを再利用してください：エンティティ名/行名、カテゴリ、地域、年度・期間、
                   指標、単位、略語、コード、数値を表の表記どおりに記述してください
                 - 代名詞や「同上」「上記参照」のような表現を使わず、各文でエンティティ名を繰り返してください
+                - 合計行や集計行（例：「Total Revenue」「Total Expense」）を正確な数値とともに明示的な項目として保持してください
                 - データ間の関係を保持してください：どの値がどの行、列、期間、指標に属するか（例：実績と目標/計画）
                 - 値を丸めたり、集約したり、統合したり、省略したりしないでください。「など」「等」で済ませないでください
 

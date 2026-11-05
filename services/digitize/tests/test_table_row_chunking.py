@@ -408,4 +408,44 @@ class TestEnrichedTableSummaryPrompts:
     def test_table_chunk_max_tokens_default(self):
         from digitize.settings import settings
 
-        assert settings.digitize.table_chunk_max_tokens == 200
+        assert settings.digitize.table_chunk_max_tokens == 400
+
+    def test_prompts_instruct_multi_level_headers_and_totals(self):
+        """Prompts must instruct combining multi-level headers and preserving total rows."""
+        from digitize.settings import settings
+
+        assert "hierarchical or multi-level headers" in settings.table_summary.english.prompt
+        assert "Total Revenue" in settings.table_summary.english.prompt
+
+
+@pytest.mark.unit
+class TestCleanMarkdownTableMultiLevelHeaders:
+    def test_flattens_multi_header_lines_before_separator(self):
+        from digitize.processing.tables import clean_markdown_table_and_caption
+
+        table = (
+            "| Region | Region | Sales | Sales |\n"
+            "| North | South | Q1 | Q2 |\n"
+            "|---|---|---|---|\n"
+            "| 10 | 20 | 30 | 40 |"
+        )
+        cleaned, _ = clean_markdown_table_and_caption(table, "")
+        lines = cleaned.split("\n")
+        assert lines[0] == "| Region - North | Region - South | Sales - Q1 | Sales - Q2 |"
+        assert lines[1] == "|---|---|---|---|"
+        assert lines[2] == "| 10 | 20 | 30 | 40 |"
+
+    def test_flattens_subheaders_below_separator(self):
+        from digitize.processing.tables import clean_markdown_table_and_caption
+
+        table = (
+            "| Department | Actual | Actual | Target | Target |\n"
+            "|---|---|---|---|---|\n"
+            "| Unit | Q1 | Q2 | Q1 | Q2 |\n"
+            "| Engineering | 100 | 120 | 110 | 130 |"
+        )
+        cleaned, _ = clean_markdown_table_and_caption(table, "")
+        lines = cleaned.split("\n")
+        assert lines[0] == "| Department - Unit | Actual - Q1 | Actual - Q2 | Target - Q1 | Target - Q2 |"
+        assert lines[1] == "|---|---|---|---|---|"
+        assert lines[2] == "| Engineering | 100 | 120 | 110 | 130 |"
