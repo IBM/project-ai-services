@@ -27,7 +27,7 @@ func TestValidateCreateRequest(t *testing.T) {
 		wantMsg string
 	}{
 		{"valid", func(*apimodels.CreateModelRequest) {}, ""},
-		{"name bad chars", func(r *apimodels.CreateModelRequest) { r.Name = "a!b" }, "name must contain only"},
+		{"name bad chars", func(r *apimodels.CreateModelRequest) { r.Name = "a!b" }, "Model name may only contain"},
 	}
 
 	for _, tt := range tests {

@@ -3,20 +3,17 @@ package modelservice
 import (
 	"context"
 	"fmt"
-	"regexp"
 
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
-var nameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-
 // validateCreateRequest performs the checks on a create request that are not expressed as
 // binding tags on apimodels.CreateModelRequest (required fields, name length and deployment_type
 // are enforced there). It is a pure function so it can be tested without any service dependencies.
 func validateCreateRequest(req apimodels.CreateModelRequest) error {
-	if !nameRegex.MatchString(req.Name) {
-		return validators.BadRequest("name must contain only letters, numbers, hyphens, and underscores")
+	if err := validators.ValidateResourceName("Model name", req.Name); err != nil {
+		return err
 	}
 
 	// TODO(model-validation): validate req.Model against the catalog models (the upcoming

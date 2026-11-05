@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const validWatsonxKey = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR" // 44 chars
+
 // The /tokenize passthrough is registered by default for every remote model with an api_base.
 func TestPlanRemote_TokenizePassthroughByDefault(t *testing.T) {
 	planner := NewModelPlanner(setupTestCatalogProvider(t), worker.NewResolver(nil))

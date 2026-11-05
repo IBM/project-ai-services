@@ -97,7 +97,16 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		return nil, fmt.Errorf("failed to scope catalog provider: %w", err)
 	}
 
-	comp, sensitive, err := validateLocalParams(ctx, provider, req)
+	comp, err := provider.LoadComponent(req.ComponentType, req.ProviderID)
+	if err != nil {
+		return nil, validators.NotFound("provider %q not found for component type %q", req.ProviderID, req.ComponentType)
+	}
+
+	if comp.LiteLLM == nil {
+		return nil, validators.BadRequest("provider %q of component type %q does not serve models", req.ProviderID, req.ComponentType)
+	}
+
+	sensitive, err := validators.ValidateComponentParams(ctx, provider, req.ComponentType, req.ProviderID, req.Params)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +188,7 @@ func loadLocalValues(provider *catalog.CatalogProvider, req apimodels.CreateMode
 
 // PlanRemote validates a remote-model request against the provider's schema and builds its route.
 func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModelRequest) (*types.RemotePlan, error) {
-	sensitive, err := validateRemoteParams(ctx, p.catalogProvider, req)
+	sensitive, err := validators.ValidateConnectorParams(ctx, p.catalogProvider, constants.ConnectorTypeModels, req.ProviderID, req.Params)
 	if err != nil {
 		return nil, err
 	}

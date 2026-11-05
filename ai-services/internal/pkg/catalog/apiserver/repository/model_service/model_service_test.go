@@ -339,7 +339,7 @@ func TestCreateModel_Validation_InvalidFields(t *testing.T) {
 		wantMsg string
 	}{
 		{"invalid component_type", func(r *apimodels.CreateModelRequest) { r.ComponentType = "database" }, "invalid component_type"},
-		{"invalid name", func(r *apimodels.CreateModelRequest) { r.Name = "a!" }, "name must contain only"},
+		{"invalid name", func(r *apimodels.CreateModelRequest) { r.Name = "a!" }, "Model name may only contain"},
 	}
 
 	for _, tt := range tests {
