@@ -464,28 +464,45 @@ class TestInsertSyncLog:
         # First execute: INSERT … RETURNING seq → scalar_one() returns 3
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 3
-        # Second execute: UPDATE connectors SET status='syncing'
+        # Second execute: DELETE evicting old sync logs
+        # Third execute: UPDATE connectors SET status='syncing'
         update_result = MagicMock()
-        session.execute.side_effect = [insert_result, update_result]
+        session.execute.side_effect = [insert_result, MagicMock(), update_result]
 
         from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             seq = init_sync_log_and_update_connector(CONNECTOR_ID)
         assert seq == 3
-        assert session.execute.call_count == 2
+        assert session.execute.call_count == 3
 
     def test_sets_connector_status_syncing(self):
         """Both the INSERT and the connectors UPDATE must happen in the same session."""
         session = MagicMock()
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 1
-        session.execute.side_effect = [insert_result, MagicMock()]
+        session.execute.side_effect = [insert_result, MagicMock(), MagicMock()]
 
         from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             init_sync_log_and_update_connector(CONNECTOR_ID)
-        # Two DB calls: INSERT log row + UPDATE connector status
-        assert session.execute.call_count == 2
+        # Three DB calls: INSERT log row + DELETE old logs + UPDATE connector status
+        assert session.execute.call_count == 3
+
+    def test_evicts_old_sync_logs_beyond_retention(self):
+        """After inserting, a DELETE scoped to this connector must evict rows beyond the retention window."""
+        session = MagicMock()
+        insert_result = MagicMock()
+        insert_result.scalar_one.return_value = 9
+        session.execute.side_effect = [insert_result, MagicMock(), MagicMock()]
+
+        from digitize.utils.db import init_sync_log_and_update_connector
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            init_sync_log_and_update_connector(CONNECTOR_ID)
+
+        delete_stmt = session.execute.call_args_list[1][0][0]
+        compiled = str(delete_stmt.compile())
+        assert compiled.startswith("DELETE FROM connector_sync_logs")
+        assert "NOT IN" in compiled
 
     def test_clears_message_on_open_sync(self):
         """Opening a sync log must clear the message field on the connector row."""
@@ -493,7 +510,7 @@ class TestInsertSyncLog:
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 1
         update_result = MagicMock()
-        session.execute.side_effect = [insert_result, update_result]
+        session.execute.side_effect = [insert_result, MagicMock(), update_result]
 
         from digitize.utils.db import init_sync_log_and_update_connector
         from digitize.db.models import Connector
@@ -502,8 +519,8 @@ class TestInsertSyncLog:
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             init_sync_log_and_update_connector(CONNECTOR_ID)
 
-        # Inspect the UPDATE statement sent to the connector row (second execute call)
-        update_call_args = session.execute.call_args_list[1]
+        # Inspect the UPDATE statement sent to the connector row (third execute call)
+        update_call_args = session.execute.call_args_list[2]
         stmt = update_call_args[0][0]  # first positional arg
         compiled = stmt.compile(compile_kwargs={"literal_binds": True})
         assert "message" in str(compiled).lower()

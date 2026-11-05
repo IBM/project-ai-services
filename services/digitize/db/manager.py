@@ -7,7 +7,7 @@ Provides CRUD operations with proper error handling and transaction management.
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, cast
-from sqlalchemy import select, update, delete, func, or_, and_, exists, case
+from sqlalchemy import select, update, delete, func, or_, and_, exists, case, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -24,6 +24,9 @@ from digitize.models import JobStatus, DocStatus
 from digitize.connectors.models import ConnectorStatus, SyncLogStatus
 
 logger = get_logger("db_repository")
+
+# Number of most-recent sync-log rows retained per connector; older rows are evicted.
+SYNC_LOG_RETENTION = 5
 
 # Sentinel used by update_connector to distinguish "not supplied" from explicit None.
 _UNSET: object = object()
@@ -1336,10 +1339,61 @@ class DatabaseManager:
                 )
                 seq: int = session.execute(stmt).scalar_one()
                 logger.debug(f"insert_sync_log: connector={connector_id!r} seq={seq}")
+                # Evict everything beyond the latest SYNC_LOG_RETENTION rows (incl. this one).
+                keep = (
+                    select(ConnectorSyncLog.seq)
+                    .where(ConnectorSyncLog.connector_id == connector_id)
+                    .order_by(ConnectorSyncLog.seq.desc())
+                    .limit(SYNC_LOG_RETENTION)
+                )
+                session.execute(
+                    delete(ConnectorSyncLog).where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq.not_in(keep),
+                    )
+                )
                 return seq
         except SQLAlchemyError as e:
             logger.error(f"DB error in insert_sync_log({connector_id}): {e}", exc_info=True)
             raise
+
+    @staticmethod
+    def prune_all_sync_logs() -> int:
+        """
+        Delete, for every connector, all sync-log rows except the latest
+        SYNC_LOG_RETENTION (by seq). Returns the number of rows deleted.
+        """
+        try:
+            with get_db_session() as session:
+                ranked = (
+                    select(
+                        ConnectorSyncLog.connector_id.label("cid"),
+                        ConnectorSyncLog.seq.label("seq"),
+                        func.row_number()
+                        .over(
+                            partition_by=ConnectorSyncLog.connector_id,
+                            order_by=ConnectorSyncLog.seq.desc(),
+                        )
+                        .label("rn"),
+                    )
+                ).subquery()
+                stale = select(ranked.c.cid, ranked.c.seq).where(
+                    ranked.c.rn > SYNC_LOG_RETENTION
+                )
+                result = cast(
+                    CursorResult,
+                    session.execute(
+                        delete(ConnectorSyncLog).where(
+                            tuple_(ConnectorSyncLog.connector_id, ConnectorSyncLog.seq).in_(stale)
+                        )
+                    ),
+                )
+                if result.rowcount:
+                    logger.info(f"prune_all_sync_logs: evicted {result.rowcount} old sync log row(s)")
+                return result.rowcount
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in prune_all_sync_logs: {e}", exc_info=True)
+            return 0
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:

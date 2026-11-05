@@ -1666,6 +1666,11 @@ def reset_syncing_connectors(error: str = "Service restarted during sync tick") 
     return db_manager.reset_syncing_connectors(error=error)
 
 
+def prune_all_sync_logs() -> int:
+    """Evict all but the latest SYNC_LOG_RETENTION sync logs per connector."""
+    return db_manager.prune_all_sync_logs()
+
+
 def close_open_sync_log(connector_id: str, error: str) -> bool:
     """
     Close the open sync-log row for *connector_id* with status=FAILED and
