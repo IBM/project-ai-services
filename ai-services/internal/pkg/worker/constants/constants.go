@@ -2,8 +2,6 @@
 // (deploy, join, uninstall, gateway, etc.) to avoid duplication.
 package constants
 
-import catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-
 const (
 	// WorkerAppName is the app name used for Podman worker pods/templates.
 	WorkerAppName = "ai-services"
@@ -106,10 +104,3 @@ const (
 	// WorkerJoinSuccess is the log message emitted by the worker container once the gRPC CommandStream is open.
 	WorkerJoinSuccess = "Opening CommandStream for worker"
 )
-
-// OpenShiftGatewayServiceEndpoint returns the OpenShift service DNS name embedded in the
-// auto-generated gateway server certificate for internal cluster communication.
-// It is a function so it reflects the --namespace flag parsed at runtime.
-func OpenShiftGatewayServiceEndpoint() string {
-	return "catalog-api." + catalogconstants.CatalogNamespace + ".svc.cluster.local"
-}

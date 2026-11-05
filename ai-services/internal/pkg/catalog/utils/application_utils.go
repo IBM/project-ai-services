@@ -37,6 +37,13 @@ func AppNamespace(appID uuid.UUID) string {
 	return catalogconstants.CatalogNamespace + "-" + appID.String()[:8]
 }
 
+// OpenShiftCatalogServiceEndpoint returns the catalog-api service DNS name for
+// internal cluster communication. It is a function so it reflects the
+// --namespace flag parsed at runtime.
+func OpenShiftCatalogServiceEndpoint() string {
+	return "catalog-api." + catalogconstants.CatalogNamespace + ".svc.cluster.local"
+}
+
 // HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".
 // e.g. "llm-2b4410e6", "vector-store-2b4410e6", "chat-c08f9a8b".
 func HelmReleaseName(appID uuid.UUID, id string) string {
