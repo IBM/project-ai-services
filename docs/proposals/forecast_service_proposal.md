@@ -206,7 +206,9 @@ graph LR
 
 | Method     | Endpoint                                | Description                                                                                                                                                    |
 |:-----------|:----------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **GET**    | `/v1/forecast/`           | List the forecasters of a connector with status, schemas and metrics. **NOTE: This endpoint will be removed once multi-connector support is added.**                                                                                          |
 | **GET**    | `/v1/forecast/{connector_id}`           | List the forecasters of a connector with status, schemas and metrics.                                                                                          |
+| **POST**   | `/v1/forecast/`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest `ready` forecaster (or the version specified in `?version=`), and returned with predictions and confidence.**NOTE: This endpoint will be removed once multi-connector support is added.** |
 | **POST**   | `/v1/forecast/{connector_id}`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest `ready` forecaster (or the version specified in `?version=`), and returned with predictions and confidence. |
 | **POST**   | `/v1/connectors`                        | Create a connector (source database connection, secrets encrypted) and queue its training job.                                                                 |
 | **GET**    | `/v1/connectors`                        | List connectors with pagination and a name filter.                                                                                                             |
@@ -253,7 +255,7 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 
 ```json
 {
-    "data": [
+    [
         {
             "version": 12,
             "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
@@ -592,16 +594,14 @@ Returns the list item plus `connection_details` limited to the safe fields and `
 ```json
 {
     "connector_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-    "versions": {"ready": [12]},
     "last_n_jobs"": [{
         "started_at": "2026-10-26T09:12:00Z",
         "finished_at": "2026-10-26T09:12:00Z",
         "status": "completed",
-        "duration": "2026-10-26T09:12:00Z",
         "total_rows": 120000
         "message": ""
   }, ...],
-    "training": {
+    "overall_job_stats": {
         "total_jobs_completed": 5,
         "total_jobs_failed": 1,
     }
