@@ -118,7 +118,9 @@ func TestGetModelDeployOptions(t *testing.T) {
 
 			assert.Equal(t, tt.modelID, opts.ID)
 			assert.Equal(t, tt.wantName, opts.Name)
-			assert.Equal(t, tt.wantType, opts.ComponentType)
+			assert.Equal(t, tt.wantType, opts.ComponentType.ID)
+			assert.NotEmpty(t, opts.ComponentType.Name)
+			assert.NotEmpty(t, opts.ComponentType.ShortName)
 
 			gotProviders := make([]string, 0, len(opts.Providers))
 			for _, pr := range opts.Providers {

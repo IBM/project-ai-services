@@ -1,13 +1,14 @@
-package catalog
+package models_test
 
 import (
 	"context"
 	"testing"
 	"testing/fstest"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 func TestLoadModelsFromFile(t *testing.T) {
@@ -29,30 +30,30 @@ func TestLoadModelsFromFile(t *testing.T) {
 	}
 
 	t.Run("parses entries", func(t *testing.T) {
-		models, err := utils.LoadYAMLList[types.Model](fsys, "llm/p", modelsFileName)
+		got, err := models.List(fsys, "llm/p")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(models) != 2 {
-			t.Fatalf("expected 2 models, got %d", len(models))
+		if len(got) != 2 {
+			t.Fatalf("expected 2 models, got %d", len(got))
 		}
-		if models[0].ID != "org/model-a" || models[0].Description != "line one\n\nline two" {
-			t.Errorf("unexpected first model: %+v", models[0])
+		if got[0].ID != "org/model-a" || got[0].Description != "line one\n\nline two" {
+			t.Errorf("unexpected first model: %+v", got[0])
 		}
-		if !models[1].Default {
+		if !got[1].Default {
 			t.Errorf("expected second model to be default")
 		}
 	})
 
 	t.Run("missing file is not an error", func(t *testing.T) {
-		models, err := utils.LoadYAMLList[types.Model](fsys, "llm/none", modelsFileName)
-		if err != nil || models != nil {
-			t.Fatalf("expected nil, nil; got %v, %v", models, err)
+		got, err := models.List(fsys, "llm/none")
+		if err != nil || got != nil {
+			t.Fatalf("expected nil, nil; got %v, %v", got, err)
 		}
 	})
 
 	t.Run("invalid yaml returns error", func(t *testing.T) {
-		if _, err := utils.LoadYAMLList[types.Model](fsys, "llm/bad", modelsFileName); err == nil {
+		if _, err := models.List(fsys, "llm/bad"); err == nil {
 			t.Fatal("expected parse error")
 		}
 	})
@@ -72,7 +73,7 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("uses default flag", func(t *testing.T) {
 		s := newSchema()
-		injectModelsIntoSchema(s, []types.Model{
+		models.InjectIntoSchema(s, []types.Model{
 			{ID: "a", Title: "A", Description: "da"},
 			{ID: "b", Default: true, Title: "B", Description: "db"},
 		})
@@ -91,7 +92,7 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("falls back to first model", func(t *testing.T) {
 		s := newSchema()
-		injectModelsIntoSchema(s, []types.Model{{ID: "a"}, {ID: "b"}})
+		models.InjectIntoSchema(s, []types.Model{{ID: "a"}, {ID: "b"}})
 		if got := modelField(s)["default"]; got != "a" {
 			t.Errorf("default = %v, want a", got)
 		}
@@ -99,7 +100,7 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("no models is a no-op", func(t *testing.T) {
 		s := newSchema()
-		injectModelsIntoSchema(s, nil)
+		models.InjectIntoSchema(s, nil)
 		if _, ok := modelField(s)["oneOf"]; ok {
 			t.Error("oneOf must not be set")
 		}
@@ -107,7 +108,7 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("schema without model property is a no-op", func(t *testing.T) {
 		s := map[string]any{"properties": map[string]any{"apiKey": map[string]any{}}}
-		injectModelsIntoSchema(s, []types.Model{{ID: "a"}})
+		models.InjectIntoSchema(s, []types.Model{{ID: "a"}})
 		if _, ok := s["properties"].(map[string]any)["model"]; ok {
 			t.Error("model property must not be created")
 		}
@@ -131,7 +132,7 @@ func TestEmbeddedProviderSchemasIncludeModels(t *testing.T) {
 		{"embedding", "vllm-cpu", "ibm-granite/granite-embedding-278m-multilingual", []string{"ibm-granite/granite-embedding-278m-multilingual"}},
 	}
 
-	base, err := NewCatalogProvider(nil)
+	base, err := catalog.NewCatalogProvider(nil)
 	if err != nil {
 		t.Fatalf("failed to create catalog provider: %v", err)
 	}
@@ -149,13 +150,13 @@ func TestEmbeddedProviderSchemasIncludeModels(t *testing.T) {
 					t.Fatalf("GetComponentProviderParams: %v", err)
 				}
 
-				models := map[string]bool{}
-				extractModelsFromSchema(schema, models)
-				if len(models) != len(tc.wantModels) {
-					t.Errorf("models = %v, want %v", models, tc.wantModels)
+				got := map[string]bool{}
+				models.ExtractFromSchema(schema, got)
+				if len(got) != len(tc.wantModels) {
+					t.Errorf("models = %v, want %v", got, tc.wantModels)
 				}
 				for _, m := range tc.wantModels {
-					if !models[m] {
+					if !got[m] {
 						t.Errorf("model %q missing from schema", m)
 					}
 				}
