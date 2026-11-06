@@ -237,7 +237,7 @@ Digitize registers its error handler only for `HTTPException`, so its request-va
 
 The forecast endpoints are keyed by `connector_id`, because each connector is trained into forecasters. The service never exposes Triton: clients call these endpoints and the service forwards the request to Triton.
 
-#### GET /v1/forecast/{connector_id or forecast_name} — List the Forecasters of a Connector
+#### GET /v1/forecast/{connector_id or BLANK for singe connector} — List the Forecasters of a Connector
 
 Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
 
@@ -253,14 +253,15 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 
 ```json
 {
-    "connector_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
     "data": [
         {
             "version": 12,
-            "status": "ready",
+            "table": "table_name",
+            "last_successful_training": "2026-10-26T09:12:00Z"
+            "status": "training",
             "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
             "created_at": "2026-10-26T09:12:00Z",
-            "message": "Ready for use"
+            "message": "Training on {n} number of rows"
         }
     ]
 }
@@ -272,7 +273,7 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 | 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
 | 500 Internal Server Error            | Database failure.          |
 
-#### POST /v1/forecast/{connector_id or forecast_name} — Run a Forecast
+#### POST /v1/forecast/{connector_id or BLANK (for single connector)} — Run a Forecast
 
 Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest `ready` forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
@@ -296,7 +297,7 @@ Runs a forecast against a connector's trained forecaster on the rows in the requ
 curl -X POST http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90ae7 \
   -H "Content-Type: application/json" \
   -d '{
-        "instances": [
+        [
           {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
           {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
         ]
@@ -309,7 +310,7 @@ curl -X POST http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90
 curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90ae7?version=11" \
   -H "Content-Type: application/json" \
   -d '{
-        "instances": [
+        [
           {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
           {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
         ]
@@ -320,7 +321,6 @@ curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f9
 
 ```json
 {
-    "connector_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
     "version": 12,
     "predictions": [
         {"prediction": "N", "confidence": 0.87},
@@ -445,7 +445,6 @@ The list limits (50 default, 200 maximum) match digitize's connector list. The r
             "type": "db2_for_i",
             "created_at": "2026-10-26T08:55:00Z",
             "status": "READY",
-            "last_job_status": "successful"
             "message": ""
         }
     ]
@@ -459,13 +458,15 @@ Returns the list item plus `connection_details` limited to the safe fields and `
 ```json
 {
     "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-    "name": "prod-sales-db",
+    "table": "prod-sales-db",
     "type": "db2_for_i",
+    "target_column": "price",
+    "table": "customers",
     "schedule": "0 0 * * *",
     "connection_details": {"host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro"},
-    "status": "READY",
+    "status": "training",
     "last_trained_at": "2026-10-26T08:55:00Z",
-    "message": "Ready for use",
+    "message": "Training on {n} rows",
     "created_at": "2026-10-26T08:55:00Z",
     "updated_at": "2026-10-26T08:55:00Z"
 }
@@ -493,6 +494,7 @@ Returns the list item plus `connection_details` limited to the safe fields and `
         "finished_at": "2026-10-26T09:12:00Z",
         "status": "completed",
         "duration": "2026-10-26T09:12:00Z",
+        "total_rows": 120000
         "message": ""
   }, ...],
     "training": {
@@ -573,6 +575,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `connector_id` | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.                                                                                                                                                   |
 | `status`       | `queued`, `running`, `completed` or `failed`.                                                                                                                                                                                                          |
 | `message`        | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
+| `total_rows`        | Number of rows used for training the model.                                                      |
 | `result`       | Written when training finishes. The worker writes the algorithm AutoGluon chose, the validation metric and score, the training time in seconds and the rows read. The API adds the number of attempts used. On a failed job only the attempts are set. |
 | `created_at`   | UTC time at which the job was queued.                                                                                                                                                                                                                  |
 | `started_at`   | UTC time at which the job started running.                                                                                                                                                                                                             |
