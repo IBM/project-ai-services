@@ -10,7 +10,6 @@ backend:
     searchMode: "hybrid"
     numChunksPostReranker: 3
     rerank: true
-    systemPrompt: ""
 mcp:
   image: icr.io/ai-services/ai-services-mcp:v0.0.4
   port: "5001"
