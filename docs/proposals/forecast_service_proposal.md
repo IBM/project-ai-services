@@ -337,12 +337,10 @@ Runs a forecast against a connector's trained forecaster on the rows in the requ
 ```bash
 curl -X POST http://localhost:8500/v1/forecast \
   -H "Content-Type: application/json" \
-  -d '{
-        [
+  -d '[
           {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
           {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
-        ]
-      }'
+      ]'
 ```
 
 **Sample request (targeting a specific older retained version):**
@@ -350,12 +348,10 @@ curl -X POST http://localhost:8500/v1/forecast \
 ```bash
 curl -X POST "http://localhost:8500/v1/forecast?version=11" \
   -H "Content-Type: application/json" \
-  -d '{
-        [
+  -d '[
           {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
           {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
-        ]
-      }'
+      ]'
 ```
 
 **Sample response (200):**
@@ -405,12 +401,10 @@ Runs a forecast against a connector's trained forecaster on the rows in the requ
 ```bash
 curl -X POST http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90ae7 \
   -H "Content-Type: application/json" \
-  -d '{
-        [
+  -d '[
           {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
           {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
-        ]
-      }'
+      ]'
 ```
 
 **Sample request (targeting a specific older retained version):**
@@ -418,12 +412,10 @@ curl -X POST http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90
 ```bash
 curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90ae7?version=11" \
   -H "Content-Type: application/json" \
-  -d '{
-        [
+  -d '[
           {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
           {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
-        ]
-      }'
+      ]'
 ```
 
 **Sample response (200):**
