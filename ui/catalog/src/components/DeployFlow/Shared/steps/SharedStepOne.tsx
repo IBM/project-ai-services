@@ -7,7 +7,6 @@ import {
   Toggletip,
   ToggletipButton,
   ToggletipContent,
-  InlineNotification,
   ClickableTile,
   IconButton,
 } from "@carbon/react";
@@ -95,14 +94,12 @@ export interface SharedStepOneProps {
   onChange: (updates: Partial<DeployFormData>) => void;
   version: string;
   versionLabel: string;
-  components: StepOneComponentRow[];
-  onComponentChange: (componentType: string, providerId: string) => void;
+  components?: StepOneComponentRow[];
+  onComponentChange?: (componentType: string, providerId: string) => void;
   onModelChange?: (componentType: string, model: string) => void;
   showNameError?: boolean;
   showWorkerError?: boolean;
   onWorkerErrorReset?: () => void;
-  failedComponentNames?: string[]; // Non-empty → renders an error banner listing the failed component names.
-  onComponentError?: (hasError: boolean) => void;
   workers: WorkerApiResponse[];
   isLoadingWorkers: boolean;
   refetchWorkers: () => void;
@@ -114,14 +111,12 @@ export const SharedStepOne = ({
   onChange,
   version,
   versionLabel,
-  components,
+  components = [],
   onComponentChange,
   onModelChange,
   showNameError = false,
   showWorkerError = false,
   onWorkerErrorReset,
-  failedComponentNames = [],
-  onComponentError,
   workers,
   isLoadingWorkers,
   refetchWorkers,
@@ -215,10 +210,6 @@ export const SharedStepOne = ({
     if (wasSuccess) refetchWorkers();
   };
 
-  useEffect(() => {
-    onComponentError?.(failedComponentNames.length > 0);
-  }, [failedComponentNames, onComponentError]);
-
   // When the worker list refreshes, sync formData if the selected worker is no longer present.
   // Guarded by isLoadingWorkers so we don't reset mid-fetch while workers is still [].
   // Also clears the worker error when a valid worker is auto-selected.
@@ -246,16 +237,6 @@ export const SharedStepOne = ({
       <div className={styles.stepHeader}>
         <h2 className={styles.stepTitle}>{title}</h2>
       </div>
-
-      {failedComponentNames.length > 0 && (
-        <InlineNotification
-          kind="error"
-          title={`Failed to load configurations of ${failedComponentNames.join(", ")}.`}
-          subtitle="Cancel and reopen to try again."
-          lowContrast
-          hideCloseButton
-        />
-      )}
 
       <div className={`${styles.formSection} ${styles.formSectionStepOne}`}>
         <Grid narrow className={styles.formGrid}>
@@ -333,7 +314,7 @@ export const SharedStepOne = ({
                   }: {
                     selectedItem: { id: string; text: string } | null;
                   }) =>
-                    onComponentChange(component.type, selectedItem?.id || ""),
+                    onComponentChange?.(component.type, selectedItem?.id || ""),
                 };
 
             return (
