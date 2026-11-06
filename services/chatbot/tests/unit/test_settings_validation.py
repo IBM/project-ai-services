@@ -105,13 +105,38 @@ class TestSystemPromptValidator:
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     def test_validate_system_prompt_too_long(self):
-        """Test system_prompt that is too long is applied as-is via model_post_init."""
+        """Test system_prompt over 5000 chars is rejected and the default is kept."""
         from chatbot.settings import RAGConfig
         
         long_prompt = "A" * 6000
         config = RAGConfig(system_prompt=long_prompt)
-        # model_post_init applies the prompt to English config without truncation
-        assert len(config.english.system_prompt) == 6000
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
+    
+    @patch('chatbot.settings.misc_utils.SESSION', None)
+    def test_validate_system_prompt_max_length_boundary(self):
+        """Test exactly 5000 chars is accepted and 5001 chars is rejected."""
+        from chatbot.settings import RAGConfig
+        
+        at_limit = "A" * 5000
+        config = RAGConfig(system_prompt=at_limit, llm_validate_custom_system_prompt=False)
+        assert config.english.system_prompt == at_limit
+        
+        config = RAGConfig(system_prompt="A" * 5001, llm_validate_custom_system_prompt=False)
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
+    
+    @patch('chatbot.settings.create_llm_session')
+    @patch('chatbot.settings.misc_utils.SESSION', None)
+    @patch('chatbot.prompt_validator.validate_prompt_with_llm')
+    def test_validate_system_prompt_too_long_skips_llm_validation(
+        self, mock_validate, mock_create_session
+    ):
+        """Test an over-length prompt is rejected before any LLM validation call."""
+        from chatbot.settings import RAGConfig
+        
+        RAGConfig(system_prompt="A" * 5001, llm_validate_custom_system_prompt=True)
+        
+        mock_validate.assert_not_called()
+        mock_create_session.assert_not_called()
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     @patch('common.lang_utils.detect_language')

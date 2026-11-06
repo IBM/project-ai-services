@@ -12,6 +12,9 @@ from common.settings import Settings as CommonSettings
 
 logger = get_logger("settings")
 
+# Maximum length (characters) accepted for a custom system prompt
+MAX_SYSTEM_PROMPT_LENGTH = 5000
+
 # Initialize language detector early for settings validation
 def _ensure_language_detector_initialized():
     """Initialize language detector if not already done."""
@@ -626,6 +629,12 @@ class RAGConfig(BaseSettings):
         """
         # Handle custom system_prompt
         if self.system_prompt:
+            if len(self.system_prompt) > MAX_SYSTEM_PROMPT_LENGTH:
+                logger.warning(
+                    f"Custom system_prompt too long ({len(self.system_prompt)} chars, "
+                    f"max {MAX_SYSTEM_PROMPT_LENGTH}). Falling back to default system prompt."
+                )
+                return
             try:
                 from common.lang_utils import detect_language, LanguageCodes
                 
