@@ -493,6 +493,19 @@ func (p *CatalogProvider) ListComponents() ([]types.Component, error) {
 	return components, nil
 }
 
+// ListComponentsByCategory lists all components whose metadata declares the given category.
+func (p *CatalogProvider) ListComponentsByCategory(category string) []types.Component {
+	snapshot := p.allItems()
+	components := make([]types.Component, 0)
+	for _, item := range snapshot {
+		if item.Component != nil && item.Component.Category == category {
+			components = append(components, *item.Component)
+		}
+	}
+
+	return components
+}
+
 // ListConnectors lists all connectors for a given connector type from cache.
 // Returns an error when the type is not registered.
 func (p *CatalogProvider) ListConnectors(connectorType string) ([]*types.Connector, error) {

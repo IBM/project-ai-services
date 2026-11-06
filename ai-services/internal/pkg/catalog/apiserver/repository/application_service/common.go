@@ -12,6 +12,7 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -25,7 +26,6 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/common"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // DatasourceConnector is the minimal interface used by ApplicationServiceBase for
@@ -112,46 +112,38 @@ type ApplicationServiceBase struct {
 	// where no datasource service is configured).
 	DatasourceService DatasourceConnector
 
-	// WorkerRegistry is used to resolve a remote runtime for worker-hosted applications.
-	WorkerRegistry stream.WorkerRegistry
+	// Workers resolves the worker an application deploys to and the runtime used to reach it.
+	Workers worker.Resolver
 }
 
 // createRuntime returns the runtime.Runtime appropriate for app.
 // Every application has a WorkerID (NOT NULL column, migration 20260801000003). It
 // resolves the worker name and builds a RemoteRuntime over the gRPC CommandStream —
 // this covers both the "Local" worker and actual remote workers.
-func (s *ApplicationServiceBase) createRuntime(app *models.Application) (runtime.Runtime, error) {
+func (s *ApplicationServiceBase) createRuntime(ctx context.Context, app *models.Application) (runtime.Runtime, error) {
 	if app.WorkerID == nil {
 		return nil, fmt.Errorf("application %s has no worker_id: every application must be deployed through a worker", app.ID)
 	}
 
-	if s.WorkerRegistry == nil {
-		return nil, fmt.Errorf("worker deployment not configured on this server")
-	}
-
-	workerName, ok := s.WorkerRegistry.WorkerNameByID(*app.WorkerID)
-	if !ok {
-		return nil, fmt.Errorf("worker %s for application %s is not connected", app.WorkerID, app.ID)
-	}
-
-	rtStr, _ := s.WorkerRegistry.WorkerRuntimeType(workerName)
-	rt, err := runtime.NewRuntimeFactory(runtimeTypes.RuntimeType(rtStr)).CreateRemote(workerName, s.WorkerRegistry, catalogutils.AppNamespace(app.ID))
+	workerName, _, err := s.Workers.Info(ctx, *app.WorkerID)
 	if err != nil {
-		return nil, fmt.Errorf("create remote runtime for worker %q: %w", workerName, err)
+		return nil, err
 	}
 
-	return rt, nil
+	if workerName == "" {
+		return nil, fmt.Errorf("worker %s for application %s is not registered", app.WorkerID, app.ID)
+	}
+
+	return s.Workers.NewRuntime(ctx, workerName, catalogutils.AppNamespace(app.ID))
 }
 
 // buildWorkerInfo resolves the worker name and runtime type for the given worker UUID.
-// Delegates to WorkerRegistry.WorkerInfoByID which tries the live registry first
-// and falls back to the DB for disconnected workers.
+// It also finds workers that are no longer connected.
 func (s *ApplicationServiceBase) buildWorkerInfo(ctx context.Context, workerID uuid.UUID) (*types.ApplicationWorker, error) {
-	if s.WorkerRegistry == nil {
-		return nil, fmt.Errorf("worker registry not configured")
+	name, rtStr, err := s.Workers.Info(ctx, workerID)
+	if err != nil {
+		return nil, err
 	}
-
-	name, rtStr := s.WorkerRegistry.WorkerInfoByID(ctx, workerID)
 
 	return &types.ApplicationWorker{
 		ID:          workerID.String(),
@@ -533,7 +525,7 @@ func (s *ApplicationServiceBase) resolveWorkerID(plan *deployment.DeploymentPlan
 		return nil, fmt.Errorf("worker name is required for application deployment; use --worker to specify a worker (default: %q)", workerconstants.LocalWorkerName)
 	}
 
-	dbID, ok := s.DeploymentPlanner.WorkerDBID(plan.WorkerName)
+	dbID, ok := s.Workers.ID(plan.WorkerName)
 	if !ok {
 		return nil, fmt.Errorf("worker %q is not registered or not connected; run 'worker join' first", plan.WorkerName)
 	}
@@ -760,7 +752,7 @@ func (s *ApplicationServiceBase) resolveRuntimeForCreateApplication(ctx context.
 		req.WorkerName = workerconstants.LocalWorkerName
 	}
 
-	return s.DeploymentPlanner.ResolveRuntimeType(ctx, req.WorkerName)
+	return s.Workers.RuntimeType(ctx, req.WorkerName)
 }
 
 func (s *ApplicationServiceBase) validateCreateApplicationRequest(
@@ -950,7 +942,7 @@ func (s *ApplicationServiceBase) GetApplicationResources(ctx context.Context, id
 		}
 	}
 
-	runtimeClient, err := s.createRuntime(app)
+	runtimeClient, err := s.createRuntime(ctx, app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create runtime client: %w", err)
 	}
@@ -1166,7 +1158,7 @@ func (s *ApplicationServiceBase) ApplicationsPs(ctx context.Context, appID uuid.
 
 	logger.InfofCtx(ctx, "Starting application ps for application ID: %s, name: %s", appID.String(), app.Name)
 
-	rt, err := s.createRuntime(app)
+	rt, err := s.createRuntime(ctx, app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init runtime client: %w", err)
 	}
@@ -1339,7 +1331,7 @@ func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.
 
 	// Resolve the runtime before cancelling or launching the goroutine so that
 	// worker connectivity errors surface synchronously to the HTTP caller.
-	rt, err := s.createRuntime(app)
+	rt, err := s.createRuntime(ctx, app)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve runtime for deletion: %w", err)
 	}

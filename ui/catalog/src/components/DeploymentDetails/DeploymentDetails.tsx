@@ -286,6 +286,7 @@ const DeploymentDetails = ({
           deploymentServices.map((service) => {
             const uiEndpoint = service.endpoints.find((e) => e.type === "ui");
             const apiEndpoint = service.endpoints.find((e) => e.type === "api");
+            const mcpEndpoint = service.endpoints.find((e) => e.type === "mcp");
             const serviceDescription =
               serviceMetadataById[service.catalog_id]?.description ??
               `${service.type} service`;
@@ -299,6 +300,7 @@ const DeploymentDetails = ({
               apiDocumentation: apiEndpoint?.url
                 ? `${apiEndpoint.url}/docs`
                 : "",
+              mcpEndpoint: mcpEndpoint?.url || "",
               interactiveAPIs: service.endpoints
                 .filter((endpoint) => endpoint.type === "ui")
                 .map((endpoint) => endpoint.url),
@@ -945,6 +947,31 @@ const DeploymentDetails = ({
                                   rel="noopener noreferrer"
                                 >
                                   {integrationEndpointsData.apiDocumentation}
+                                </a>
+                              </span>
+                            </div>
+                          )}
+
+                          {integrationEndpointsData.mcpEndpoint && (
+                            <div className={styles.integrationEndpointField}>
+                              <span
+                                className={
+                                  styles.integrationEndpointDetailLabel
+                                }
+                              >
+                                MCP endpoint
+                              </span>
+                              <span
+                                className={
+                                  styles.integrationEndpointDetailValue
+                                }
+                              >
+                                <a
+                                  href={integrationEndpointsData.mcpEndpoint}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {integrationEndpointsData.mcpEndpoint}
                                 </a>
                               </span>
                             </div>

@@ -184,6 +184,46 @@ definitions:
       id:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelRequest:
+    properties:
+      component_type:
+        description: |-
+          ComponentType is a catalog component type whose providers have `category: models`
+          (see the component's metadata.yaml); the valid values come from the catalog.
+        type: string
+      deployment_type:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType'
+        enum:
+        - local
+        - remote
+      model:
+        type: string
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+      params:
+        additionalProperties: {}
+        type: object
+      profile:
+        type: string
+      provider_id:
+        type: string
+      worker_name:
+        type: string
+    required:
+    - component_type
+    - deployment_type
+    - model
+    - name
+    - provider_id
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelResponse:
+    properties:
+      id:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DatasourceApplicationsResponse:
     properties:
       applications:
@@ -241,6 +281,14 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType:
+    enum:
+    - local
+    - remote
+    type: string
+    x-enum-varnames:
+    - DeploymentTypeLocal
+    - DeploymentTypeRemote
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse:
     properties:
       id:
@@ -2512,6 +2560,60 @@ paths:
       summary: Get connected applications for a datasource
       tags:
       - Datasources
+  /models:
+    post:
+      consumes:
+      - application/json
+      description: Creates a model deployment. deployment_type=local starts a pod
+        and registers a LiteLLM route asynchronously (202 Accepted). deployment_type=remote
+        registers an external endpoint connector synchronously (201 Created).
+      parameters:
+      - description: Model creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Remote model connector created
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelResponse'
+        "202":
+          description: Local model deployment initiated
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.CreateModelResponse'
+        "400":
+          description: Invalid request body or validation errors
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Provider or worker not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Model or connector name conflict
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Connectivity check failed
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a model (local pod or remote connector)
+      tags:
+      - Models
   /resources:
     get:
       description: |-

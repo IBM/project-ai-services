@@ -155,35 +155,42 @@ func (v *ApplicationValidator) ValidateComponentVersion(componentType, providerI
 	})
 }
 
-// validateParamsWithSchema is a parameter validator that loads schema and validates params.
-func (v *ApplicationValidator) validateParamsWithSchema(
-	params map[string]any,
-	loadSchema func() (map[string]any, error),
-	contextName string,
-) error {
+// ValidateServiceParams validates service-level params against the service's values.schema.json
+// and returns its sensitive (format: password) field names. Empty params are valid.
+func ValidateServiceParams(ctx context.Context, provider *catalog.CatalogProvider, serviceID string, params map[string]any) (map[string]bool, error) {
 	if len(params) == 0 {
-		return nil
-	}
-	schema, err := loadSchema()
-	if err == nil && len(schema) > 0 {
-		return ValidateParams(params, schema, contextName)
+		return nil, nil
 	}
 
-	return nil
+	schema, err := provider.GetServiceParams(ctx, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load param schema for service %q: %w", serviceID, err)
+	}
+
+	if err := ValidateParams(params, schema, fmt.Sprintf("service '%s'", serviceID)); err != nil {
+		return nil, err
+	}
+
+	return utils.SensitiveFieldsFromSchema(schema), nil
 }
 
-// ValidateServiceParams validates service-level parameters against schema.
-func (v *ApplicationValidator) ValidateServiceParams(ctx context.Context, serviceID string, params map[string]any) error {
-	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetServiceParams(ctx, serviceID)
-	}, fmt.Sprintf("service '%s'", serviceID))
-}
+// ValidateComponentParams validates component params against the provider's values.schema.json
+// and returns its sensitive (format: password) field names. Empty params are valid.
+func ValidateComponentParams(ctx context.Context, provider *catalog.CatalogProvider, componentType, providerID string, params map[string]any) (map[string]bool, error) {
+	if len(params) == 0 {
+		return nil, nil
+	}
 
-// ValidateComponentParams validates component parameters against schema.
-func (v *ApplicationValidator) ValidateComponentParams(ctx context.Context, componentType, providerID string, params map[string]any) error {
-	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetComponentProviderParams(ctx, componentType, providerID)
-	}, fmt.Sprintf("component '%s/%s'", componentType, providerID))
+	schema, err := provider.GetComponentProviderParams(ctx, componentType, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load param schema for component %s/%s: %w", componentType, providerID, err)
+	}
+
+	if err := ValidateParams(params, schema, fmt.Sprintf("component '%s/%s'", componentType, providerID)); err != nil {
+		return nil, err
+	}
+
+	return utils.SensitiveFieldsFromSchema(schema), nil
 }
 
 // validateServiceComponents validates all components in a service.
@@ -265,7 +272,7 @@ func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service 
 	}
 
 	// Validate service-level parameters
-	if err := v.ValidateServiceParams(ctx, service.CatalogID, service.Params); err != nil {
+	if _, err := ValidateServiceParams(ctx, v.provider, service.CatalogID, service.Params); err != nil {
 		return err
 	}
 
@@ -300,7 +307,9 @@ func (v *ApplicationValidator) ValidateSingleComponent(ctx context.Context, comp
 	}
 
 	// Validate component parameters
-	return v.ValidateComponentParams(ctx, component.ComponentType, component.ProviderID, component.Params)
+	_, err = ValidateComponentParams(ctx, v.provider, component.ComponentType, component.ProviderID, component.Params)
+
+	return err
 }
 
 // ValidateServiceDeployment validates a single service deployment request.
@@ -590,9 +599,19 @@ type ConnectorValidator struct {
 	provider *catalog.CatalogProvider
 }
 
-// datasourceNameRe restricts connector names to letters, digits, hyphens, and underscores.
+// resourceNameRe restricts resource names to letters, digits, hyphens, and underscores.
 // This matches the character set allowed by most cloud resource naming conventions.
-var datasourceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var resourceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// ValidateResourceName returns a 400 ValidationError when name contains anything other than
+// letters, digits, hyphens, and underscores. label names the resource in the message, e.g. "Model name".
+func ValidateResourceName(label, name string) error {
+	if !resourceNameRe.MatchString(name) {
+		return BadRequest("%s may only contain letters, digits, hyphens (-), and underscores (_)", label)
+	}
+
+	return nil
+}
 
 // NewConnectorValidator creates a new ConnectorValidator backed by the given catalog provider.
 func NewConnectorValidator(provider *catalog.CatalogProvider) *ConnectorValidator {
@@ -606,43 +625,44 @@ func NewConnectorValidator(provider *catalog.CatalogProvider) *ConnectorValidato
 func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context, req apimodels.CreateDatasourceRequest) error {
 	// Name character validation — case-insensitive duplicate detection is handled at
 	// the DB query level via LOWER(name) = LOWER($1).
-	if !datasourceNameRe.MatchString(req.Name) {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: "Datasource name may only contain letters, digits, hyphens (-), and underscores (_)",
-		}
+	if err := ValidateResourceName("Datasource name", req.Name); err != nil {
+		return err
 	}
 
-	if !v.provider.ConnectorExists(catalogconstants.ConnectorTypeDatasource, req.ProviderID) {
-		return &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("Datasource provider %q not found in catalog", req.ProviderID),
-		}
+	_, err := ValidateConnectorParams(ctx, v.provider, catalogconstants.ConnectorTypeDatasource, req.ProviderID, req.Params)
+
+	return err
+}
+
+// ValidateConnectorParams checks that providerID exists in the catalog under connectorType and
+// that params satisfy the provider's schema.json. It returns the schema's sensitive (format:
+// password) field names. A provider without a schema has no constraints; a provider with one
+// requires params, because ValidateParams skips empty params and required fields would go
+// unchecked.
+func ValidateConnectorParams(ctx context.Context, provider *catalog.CatalogProvider, connectorType, providerID string, params map[string]any) (map[string]bool, error) {
+	if !provider.ConnectorExists(connectorType, providerID) {
+		return nil, NotFound("provider %q not found for connector type %q", providerID, connectorType)
 	}
 
-	rawSchema, err := v.provider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	rawSchema, err := provider.GetConnectorProviderParams(ctx, connectorType, providerID)
 	if err != nil {
-		return fmt.Errorf("failed to load param schema for provider %q: %w", req.ProviderID, err)
+		return nil, fmt.Errorf("failed to load param schema for provider %q: %w", providerID, err)
 	}
 
 	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
 	if err != nil {
-		return fmt.Errorf("failed to decode param schema for provider %q: %w", req.ProviderID, err)
+		return nil, fmt.Errorf("failed to decode param schema for provider %q: %w", providerID, err)
 	}
 
-	if len(schema) == 0 {
-		// No schema defined for this provider — no parameter constraints to enforce.
-		return nil
+	if len(schema) > 0 && len(params) == 0 {
+		return nil, BadRequest("params is required for provider %q", providerID)
 	}
 
-	if len(req.Params) == 0 {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("Params is required for datasource provider %q", req.ProviderID),
-		}
+	if err := ValidateParams(params, schema, fmt.Sprintf("connector '%s/%s'", connectorType, providerID)); err != nil {
+		return nil, err
 	}
 
-	return ValidateParams(req.Params, schema, fmt.Sprintf("datasource provider %q", req.ProviderID))
+	return utils.SensitiveFieldsFromSchema(schema), nil
 }
 
 // Made with Bob
