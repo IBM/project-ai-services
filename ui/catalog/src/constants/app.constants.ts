@@ -34,18 +34,18 @@ export const DEFAULT_RUNTIME = "podman" as const;
 
 export const WORKER_RUNTIME_LABELS: Record<
   string,
-  { short: string; label: string; description: string; disabled?: boolean }
+  { short: string; label: string; description: string }
 > = {
   podman: {
-    short: "RHAIIS",
-    label: "Red Hat Enterprise Linux (RHAIIS)",
+    short: "RHEL",
+    label: "Red Hat Enterprise Linux (RHEL)",
     description:
-      "This mode deploys all services across multiple worker resources with standard or common resource allocation; and runs on the premises of the client, rather than at a remote facility.",
+      "Deploys services as standalone containers directly on a RHEL host using Podman. Ideal for lightweight, single-host deployments.",
   },
   openshift: {
-    short: "RHOAI",
-    label: "Red Hat OpenShift (RHOAI)",
+    short: "OCP",
+    label: "Red Hat OpenShift (OCP)",
     description:
-      "This mode deploys all services into a single worker resource, with additional resource requirements; and runs on the premises of the client, rather than at a remote facility.",
+      "Deploys services as managed workloads on a Red Hat OpenShift cluster. Ideal for Kubernetes-orchestrated, scalable enterprise environments.",
   },
 } as const;
