@@ -28,6 +28,7 @@ COMPONENTS = [
     ("images/caddy", "caddy"),
     ("images/litellm", "litellm"),
     ("images/tools", "tools"),
+    ("images/vllm-rocm", "vllm-rocm"),
     # UI Images
     ("ui/chatbot", "chatbot-ui"),
     ("ui/digitize", "digitize-ui"),
