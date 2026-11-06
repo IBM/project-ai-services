@@ -8,6 +8,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
+// ModelServiceInterface defines the contract for model management business logic.
+type ModelServiceInterface interface {
+	// CreateModel creates a model deployment (local pod or remote connector).
+	CreateModel(ctx context.Context, req apimodels.CreateModelRequest) (*apimodels.CreateModelResponse, error)
+}
+
 // DatasourceServiceInterface defines the contract for datasource connector business logic.
 type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,
