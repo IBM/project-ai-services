@@ -1630,7 +1630,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/catalog/models/{path}": {
+        "/catalog/models/{id}/deploy-options": {
             "get": {
                 "security": [
                     {
@@ -1648,8 +1648,8 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "'{model-id}/deploy-options', e.g. 'ibm-granite/granite-3.3-8b-instruct/deploy-options'",
-                        "name": "path",
+                        "description": "URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },

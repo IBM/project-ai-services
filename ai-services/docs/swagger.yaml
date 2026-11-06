@@ -2213,15 +2213,15 @@ paths:
       summary: Validate a bundle without storing it
       tags:
       - Bundles
-  /catalog/models/{path}:
+  /catalog/models/{id}/deploy-options:
     get:
       description: Lists the providers a catalog model can be deployed with. Local
         providers include the model's hardware profiles; remote providers include
         a link to their settings schema.
       parameters:
-      - description: '''{model-id}/deploy-options'', e.g. ''ibm-granite/granite-3.3-8b-instruct/deploy-options'''
+      - description: URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'
         in: path
-        name: path
+        name: id
         required: true
         type: string
       - description: Return only this provider (e.g., 'vllm-spyre')

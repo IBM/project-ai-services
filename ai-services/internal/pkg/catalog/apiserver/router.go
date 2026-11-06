@@ -25,6 +25,8 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 		gin.SetMode(mode)
 	}
 	router := gin.Default()
+	// Match routes on the raw path so an encoded model id (ibm-granite%2Fgranite-...) fills :id.
+	router.UseRawPath = true
 
 	// Apply RequestID middleware to all routes
 	router.Use(middleware.RequestIDMiddleware())
@@ -87,8 +89,7 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/services/:id/images", catalog.GetServiceImages)
 		g.GET("/services/:id/models", catalog.GetServiceModels)
 		g.GET("/services/:id/steps", catalog.GetServiceSteps)
-		// Wildcard because model IDs contain slashes; serves <model-id>/deploy-options.
-		g.GET("/catalog/models/*path", catalog.GetCatalogModelByPath)
+		g.GET("/catalog/models/:id/deploy-options", catalog.GetModelDeployOptions)
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)
 		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)

@@ -236,31 +236,14 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	c.JSON(http.StatusOK, deployOptions)
 }
 
-const deployOptionsSuffix = "/deploy-options"
-
-// GetCatalogModelByPath serves GET /catalog/models/<model-id>/deploy-options.
-// Model IDs contain slashes (ibm-granite/granite-...), which ":id" can't match,
-// so the route takes the whole tail and we split off "/deploy-options" here.
-// Any other tail is a 404.
-func (h *CatalogHandler) GetCatalogModelByPath(c *gin.Context) {
-	modelID, ok := strings.CutSuffix(strings.Trim(c.Param("path"), "/"), deployOptionsSuffix)
-	if !ok || modelID == "" {
-		c.JSON(http.StatusNotFound, ErrorResponse{Error: "not found"})
-
-		return
-	}
-
-	h.getModelDeployOptions(c, modelID)
-}
-
-// getModelDeployOptions godoc
+// GetModelDeployOptions godoc
 //
 //	@Summary		Get model deploy options
 //	@Description	Lists the providers a catalog model can be deployed with. Local providers include the model's hardware profiles; remote providers include a link to their settings schema.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			path		path		string	true	"'{model-id}/deploy-options', e.g. 'ibm-granite/granite-3.3-8b-instruct/deploy-options'"
+//	@Param			id			path		string	true	"URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'"
 //	@Param			provider_id	query		string	false	"Return only this provider (e.g., 'vllm-spyre')"
 //	@Param			runtime		query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
 //	@Success		200			{object}	types.ModelDeployOptions
@@ -268,8 +251,10 @@ func (h *CatalogHandler) GetCatalogModelByPath(c *gin.Context) {
 //	@Failure		401			{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404			{object}	ErrorResponse	"Model not found in catalog"
 //	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
-//	@Router			/catalog/models/{path} [get]
-func (h *CatalogHandler) getModelDeployOptions(c *gin.Context, modelID string) {
+//	@Router			/catalog/models/{id}/deploy-options [get]
+func (h *CatalogHandler) GetModelDeployOptions(c *gin.Context) {
+	modelID := c.Param("id")
+
 	rt, err := resolveRuntimeParam(c.Query("runtime"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})

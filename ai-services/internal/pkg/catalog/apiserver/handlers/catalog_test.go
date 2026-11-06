@@ -491,8 +491,9 @@ func TestGetArchitectureModels(t *testing.T) {
 
 func TestGetModelDeployOptions(t *testing.T) {
 	router := setupTestRouter()
+	router.UseRawPath = true
 	handler := newTestCatalogHandler(t)
-	router.GET("/api/v1/catalog/models/*path", handler.GetCatalogModelByPath)
+	router.GET("/api/v1/catalog/models/:id/deploy-options", handler.GetModelDeployOptions)
 
 	get := func(url string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -502,8 +503,8 @@ func TestGetModelDeployOptions(t *testing.T) {
 		return w
 	}
 
-	t.Run("model id containing a slash", func(t *testing.T) {
-		w := get("/api/v1/catalog/models/ibm-granite/granite-3.3-8b-instruct/deploy-options?runtime=podman")
+	t.Run("model id containing an encoded slash", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct/deploy-options?runtime=podman")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 		var opts types.ModelDeployOptions
@@ -513,7 +514,7 @@ func TestGetModelDeployOptions(t *testing.T) {
 	})
 
 	t.Run("provider_id filter", func(t *testing.T) {
-		w := get("/api/v1/catalog/models/ibm-granite/granite-3.3-8b-instruct/deploy-options?runtime=podman&provider_id=vllm-cpu")
+		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct/deploy-options?runtime=podman&provider_id=vllm-cpu")
 		require.Equal(t, http.StatusOK, w.Code)
 
 		var opts types.ModelDeployOptions
@@ -523,17 +524,17 @@ func TestGetModelDeployOptions(t *testing.T) {
 	})
 
 	t.Run("invalid runtime", func(t *testing.T) {
-		w := get("/api/v1/catalog/models/ibm-granite/granite-3.3-8b-instruct/deploy-options?runtime=docker")
+		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct/deploy-options?runtime=docker")
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("unknown model", func(t *testing.T) {
-		w := get("/api/v1/catalog/models/no/such-model/deploy-options?runtime=podman")
+		w := get("/api/v1/catalog/models/no%2Fsuch-model/deploy-options?runtime=podman")
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 
-	t.Run("path without deploy-options suffix", func(t *testing.T) {
-		w := get("/api/v1/catalog/models/ibm-granite/granite-3.3-8b-instruct")
+	t.Run("unencoded slash does not match the route", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm-granite/granite-3.3-8b-instruct/deploy-options?runtime=podman")
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }
