@@ -1,7 +1,6 @@
 import { UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
-import { DEFAULT_CONFIG } from '../config/chatbotConfig.js';
 
 const DEFAULT_STREAM_ERROR_MESSAGE =
   '⚠️ Error occurred during active stream. Please contact System Administrator.';
@@ -126,23 +125,12 @@ async function customSendMessage(
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
-    // Make the streaming request using OpenAI client with withResponse to access headers
-    const { data: stream, response } = await client.chat.completions
-      .create(payload)
-      .withResponse();
-
-    // Extract rephrased query from response headers.
-    // The server percent-encodes the value (urllib.parse.quote) so that
-    // non-Latin-1 characters (e.g. Japanese) are safe to transport in
-    // HTTP headers.  Decode it back here before use.
-    const rawRephrasedQuery = response.headers.get('x-rephrased-query');
-    const rephrasedQuery = rawRephrasedQuery
-      ? decodeURIComponent(rawRephrasedQuery)
-      : userInput;
+    const stream = await client.chat.completions.create(payload);
 
     instance.updateIsMessageLoadingCounter('decrease');
 
     let fullText = ''; // to accumulate final message
+    let docs = [];
 
     for await (const chunk of stream) {
       if (isCanceled) break;
@@ -158,7 +146,12 @@ async function customSendMessage(
         throw error;
       }
 
-      const textChunk = chunk.choices[0]?.delta?.content || '';
+      // Re-use retrieved docs directly from the backend's stream chunk
+      if (chunk.docs && Array.isArray(chunk.docs) && chunk.docs.length > 0) {
+        docs = chunk.docs;
+      }
+
+      const textChunk = chunk.choices?.[0]?.delta?.content || '';
 
       if (textChunk) {
         fullText += textChunk;
@@ -204,49 +197,6 @@ async function customSendMessage(
         },
       },
     });
-
-    // Now fetch reference docs using the rephrased query (or original if not rephrased)
-    let docs = [];
-    try {
-      // Fetch chatbot configuration from the config endpoint
-      let mode, topK, rerank;
-
-      try {
-        const configResponse = await axios.get('/config');
-        const config = configResponse.data;
-        mode = config.searchMode || DEFAULT_CONFIG.searchMode;
-        topK = parseInt(
-          config.numChunksPostReranker || String(DEFAULT_CONFIG.topK),
-          10,
-        );
-        rerank = config.rerank === 'true' || config.rerank === true;
-      } catch (configError) {
-        // If config fetch fails, use defaults from shared config
-        console.warn(
-          'Failed to fetch config, using defaults:',
-          configError.message,
-        );
-      }
-
-      const context_response = await axios.post('/v1/similarity-search', {
-        query: rephrasedQuery,
-        mode: mode,
-        top_k: topK,
-        rerank: rerank,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      // get docs out of context_response
-      docs = context_response.data?.results || [];
-    } catch (refError) {
-      // If reference call fails (e.g., query too long), continue without docs
-      // The chat response has already been streamed successfully
-      console.warn(
-        'Reference document retrieval failed:',
-        refError.response?.data?.detail || refError.message,
-      );
-    }
 
     const responseBlocks = [
       {

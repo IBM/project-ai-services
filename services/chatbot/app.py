@@ -320,13 +320,19 @@ def get_perf_metrics(request_id: Optional[str] = None) -> PerfMetricsResponse:
     metrics = perf_registry.get_metrics()
     return PerfMetricsResponse(metrics=metrics)
 
-async def locked_stream(stream_g, perf_stat_dict):
+async def locked_stream(stream_g, perf_stat_dict, docs=None):
     """Asynchronously iterates through a stream generator and yields chunks.
 
     Handles any exceptions raised during streaming and yields a formatted
     error chunk response if a failure occurs mid-stream.
     """
     try:
+        if docs:
+            docs_chunk = {
+                'choices': [],
+                'docs': docs
+            }
+            yield f"data: {json.dumps(docs_chunk)}\n\n"
         async for chunk in iterate_in_threadpool(stream_g):
             yield chunk
     except Exception as e:
@@ -616,7 +622,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     rephrased_query,
                 )
                 # For streaming, release is handled in locked_stream's finally block
-                response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict, docs), media_type="text/event-stream")
                 # Add rephrased query as a custom header if available.
                 # Percent-encode so non-Latin-1 scripts (Japanese, etc.) are safe in headers.
                 if rephrased_query and rephrased_query != current_query:
@@ -656,7 +662,8 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
 
                 response_data = ChatCompletionResponse(
-                    choices=choices
+                    choices=choices,
+                    docs=docs
                 )
                 # Add rephrased query as a custom header if available.
                 # Percent-encode so non-Latin-1 scripts (Japanese, etc.) are safe in headers.
