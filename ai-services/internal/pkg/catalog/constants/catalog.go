@@ -38,6 +38,13 @@ const (
 	MetadataKeyParams = "params"
 )
 
+const (
+	// ConnectorParamsURLFormat takes connector type and provider ID.
+	ConnectorParamsURLFormat = "/api/v1/connectors/%s/providers/%s/params"
+	// ComponentParamsURLFormat takes component type, provider ID and runtime.
+	ComponentParamsURLFormat = "/api/v1/components/%s/providers/%s/params?runtime=%s"
+)
+
 // Connector type constants.
 const (
 	// ConnectorTypeDatasource is the catalog connector type shared by all datasource providers.
@@ -53,6 +60,14 @@ const (
 const (
 	// ConnectorProviderWatsonx is the provider ID for IBM watsonx.ai model connectors.
 	ConnectorProviderWatsonx = "watsonx"
+)
+
+// Model deployment type constants.
+const (
+	// DeploymentTypeLocal means the model runs as a pod on a worker.
+	DeploymentTypeLocal = "local"
+	// DeploymentTypeRemote means the model is hosted externally and only registered.
+	DeploymentTypeRemote = "remote"
 )
 
 // Datasource provider ID constants.
