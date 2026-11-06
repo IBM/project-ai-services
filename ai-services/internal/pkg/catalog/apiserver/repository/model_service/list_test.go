@@ -25,18 +25,20 @@ type mockModelRepo struct {
 
 	listFilters  *dbrepo.ModelFilters
 	countFilters *dbrepo.ModelFilters
+	// listTypes, countTypes and getTypes are the component types passed to each call.
+	listTypes, countTypes, getTypes []string
 	// getID records the last GetByID call.
 	getID uuid.UUID
 }
 
-func (m *mockModelRepo) List(_ context.Context, f *dbrepo.ModelFilters) ([]dbrepo.ModelRow, error) {
-	m.listFilters = f
+func (m *mockModelRepo) List(_ context.Context, f *dbrepo.ModelFilters, componentTypes []string) ([]dbrepo.ModelRow, error) {
+	m.listFilters, m.listTypes = f, componentTypes
 
 	return m.rows, m.err
 }
 
-func (m *mockModelRepo) GetByID(_ context.Context, id uuid.UUID) (*dbrepo.ModelRow, error) {
-	m.getID = id
+func (m *mockModelRepo) GetByID(_ context.Context, id uuid.UUID, componentTypes []string) (*dbrepo.ModelRow, error) {
+	m.getID, m.getTypes = id, componentTypes
 
 	if m.err != nil {
 		return nil, m.err
@@ -51,8 +53,8 @@ func (m *mockModelRepo) GetByID(_ context.Context, id uuid.UUID) (*dbrepo.ModelR
 	return nil, nil
 }
 
-func (m *mockModelRepo) GetCount(_ context.Context, f *dbrepo.ModelFilters) (int, error) {
-	m.countFilters = f
+func (m *mockModelRepo) GetCount(_ context.Context, f *dbrepo.ModelFilters, componentTypes []string) (int, error) {
+	m.countFilters, m.countTypes = f, componentTypes
 
 	return m.total, m.err
 }
@@ -111,6 +113,19 @@ func TestListModels_PassesFiltersAndPaging(t *testing.T) {
 	}
 	assert.Equal(t, want, repo.listFilters)
 	assert.Equal(t, want, repo.countFilters, "count and list must filter identically")
+}
+
+// Only the component types the catalog declares as models count as models.
+func TestListModels_RestrictsToCatalogModelTypes(t *testing.T) {
+	repo := &mockModelRepo{}
+	svc := newListService(t, repo, &mockSvcDepRepo{})
+
+	_, err := svc.ListModels(context.Background(), listRequest())
+	require.NoError(t, err)
+
+	assert.Contains(t, repo.listTypes, "llm")
+	assert.NotContains(t, repo.listTypes, "vector_db", "non-model components are not models")
+	assert.Equal(t, repo.listTypes, repo.countTypes, "count and list must use the same types")
 }
 
 func TestListModels_RejectsUnknownFilters(t *testing.T) {

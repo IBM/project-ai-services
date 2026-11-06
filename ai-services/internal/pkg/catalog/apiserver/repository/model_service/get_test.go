@@ -54,6 +54,8 @@ func TestGetModelByID_Local(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, id, repo.getID)
+	assert.Contains(t, repo.getTypes, "llm", "the lookup is limited to the catalog's model types")
+	assert.NotContains(t, repo.getTypes, "vector_db")
 
 	assert.Equal(t, id.String(), got.ID)
 	assert.Equal(t, apimodels.DeploymentTypeLocal, got.DeploymentType)

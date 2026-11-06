@@ -20,7 +20,7 @@ import (
 // As for applications, a missing model is a 404 and a model created by someone else a 403; an empty
 // createdBy skips the ownership check.
 func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelDetail, error) {
-	row, err := s.modelRepo.GetByID(ctx, id)
+	row, err := s.modelRepo.GetByID(ctx, id, s.modelComponentTypes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model: %w", err)
 	}

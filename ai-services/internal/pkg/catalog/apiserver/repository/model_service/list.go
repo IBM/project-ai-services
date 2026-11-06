@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -31,12 +32,14 @@ func (s *ModelService) ListModels(ctx context.Context, req apimodels.ListModelsR
 		Offset:         (req.Page - 1) * req.PageSize,
 	}
 
-	total, err := s.modelRepo.GetCount(ctx, filters)
+	componentTypes := s.modelComponentTypes()
+
+	total, err := s.modelRepo.GetCount(ctx, filters, componentTypes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count models: %w", err)
 	}
 
-	rows, err := s.modelRepo.List(ctx, filters)
+	rows, err := s.modelRepo.List(ctx, filters, componentTypes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
@@ -101,6 +104,19 @@ func (s *ModelService) connectedServices(ctx context.Context, rows []dbrepo.Mode
 	}
 
 	return counts, nil
+}
+
+// modelComponentTypes returns the component types that are models, from the catalog: the types whose
+// providers declare `category: models`. Only components and connectors of these types are models.
+// The result is never nil, so that a catalog without model types yields no models instead of
+// being read as "no restriction".
+func (s *ModelService) modelComponentTypes() []string {
+	types := helpers.New(s.catalogProvider).ComponentTypes()
+	if types == nil {
+		return []string{}
+	}
+
+	return types
 }
 
 // providerNames maps "<deployment type>/<provider id>" to the provider's display name, taken from

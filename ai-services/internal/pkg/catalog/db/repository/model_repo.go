@@ -51,12 +51,12 @@ type ModelRow struct {
 // ModelRepository reads the unified model list across the components and connectors tables.
 type ModelRepository interface {
 	// List returns one page of models matching the filters.
-	List(ctx context.Context, filters *ModelFilters) ([]ModelRow, error)
+	List(ctx context.Context, filters *ModelFilters, componentTypes []string) ([]ModelRow, error)
 	// GetCount returns the total number of models matching the filters (ignoring Limit and Offset).
-	GetCount(ctx context.Context, filters *ModelFilters) (int, error)
+	GetCount(ctx context.Context, filters *ModelFilters, componentTypes []string) (int, error)
 	// GetByID returns the local or remote model with the given id, whoever created it: the caller
 	// compares ModelRow.CreatedBy with the requesting user. Returns nil, nil when there is no such model.
-	GetByID(ctx context.Context, id uuid.UUID) (*ModelRow, error)
+	GetByID(ctx context.Context, id uuid.UUID, componentTypes []string) (*ModelRow, error)
 }
 
 // modelRepo implements ModelRepository using pgx.
@@ -73,8 +73,9 @@ func NewModelRepository(pool *pgxpool.Pool) ModelRepository {
 // shape. The branches are UNION ALL'd: an id lives in exactly one table, so there is nothing to
 // de-duplicate, and filters, ordering and paging are applied once over the whole set.
 //
-//   - Local rows are the components that carry a name; only POST /models sets one, which keeps
-//     components created by the application pipeline out of the list.
+//   - Local rows are the components. Which of them are models is decided by the caller, from the
+//     catalog: the componentTypes argument keeps only the component types whose providers declare
+//     `category: models`.
 //   - Remote rows are the connectors of type "models", which keeps datasource connectors out.
 //   - The model and params are read from the metadata keys the planner persists.
 //
@@ -97,7 +98,6 @@ var modelUnionQuery = fmt.Sprintf(`
 	       c.updated_at                                AS updated_at
 	FROM components c
 	LEFT JOIN workers w ON w.id = c.worker_id
-	WHERE c.name IS NOT NULL
 	UNION ALL
 	SELECT cn.id,
 	       '%[2]s',
@@ -128,8 +128,8 @@ const modelColumns = "id, deployment_type, name, component_type, provider, model
 	"status, message, worker_id, worker_name, worker_runtime_type, created_by, created_at, updated_at"
 
 // buildModelWhere builds the WHERE clause applied over the union and its positional arguments.
-// The owner clause, when there is an owner, comes first.
-func buildModelWhere(f *ModelFilters) (string, []interface{}) {
+// The owner clause, when there is an owner, comes first, then the model component types.
+func buildModelWhere(f *ModelFilters, componentTypes []string) (string, []interface{}) {
 	var (
 		args    []interface{}
 		clauses []string
@@ -154,6 +154,13 @@ func buildModelWhere(f *ModelFilters) (string, []interface{}) {
 	}
 
 	add("created_by", f.CreatedBy)
+
+	// An empty, non-nil list matches nothing: with no model types there are no models.
+	if componentTypes != nil {
+		args = append(args, componentTypes)
+		clauses = append(clauses, fmt.Sprintf("component_type = ANY($%d)", len(args)))
+	}
+
 	add("deployment_type", f.DeploymentType)
 	add("component_type", f.ComponentType)
 	addAny("provider", f.Providers)
@@ -169,8 +176,8 @@ func buildModelWhere(f *ModelFilters) (string, []interface{}) {
 
 // buildModelListQuery builds the paged SELECT over the union. Newest first, with the id as a
 // tie-breaker so that pages are stable.
-func buildModelListQuery(f *ModelFilters) (string, []interface{}) {
-	where, args := buildModelWhere(f)
+func buildModelListQuery(f *ModelFilters, componentTypes []string) (string, []interface{}) {
+	where, args := buildModelWhere(f, componentTypes)
 
 	query := "SELECT " + modelColumns + " FROM (" + modelUnionQuery + ") m" + where +
 		" ORDER BY created_at DESC, id ASC"
@@ -189,20 +196,29 @@ func buildModelListQuery(f *ModelFilters) (string, []interface{}) {
 }
 
 // buildModelCountQuery builds the COUNT over the same union and filters as the list query.
-func buildModelCountQuery(f *ModelFilters) (string, []interface{}) {
-	where, args := buildModelWhere(f)
+func buildModelCountQuery(f *ModelFilters, componentTypes []string) (string, []interface{}) {
+	where, args := buildModelWhere(f, componentTypes)
 
 	return "SELECT COUNT(*) FROM (" + modelUnionQuery + ") m" + where, args
 }
 
-// buildModelGetQuery builds the lookup of one model over the same union as the list.
-func buildModelGetQuery(id uuid.UUID) (string, []interface{}) {
-	return "SELECT " + modelColumns + " FROM (" + modelUnionQuery + ") m WHERE id = $1", []interface{}{id}
+// buildModelGetQuery builds the lookup of one model over the same union as the list, limited to
+// the model component types when they are given.
+func buildModelGetQuery(id uuid.UUID, componentTypes []string) (string, []interface{}) {
+	query := "SELECT " + modelColumns + " FROM (" + modelUnionQuery + ") m WHERE id = $1"
+	args := []interface{}{id}
+
+	if componentTypes != nil {
+		query += " AND component_type = ANY($2)"
+		args = append(args, componentTypes)
+	}
+
+	return query, args
 }
 
 // GetByID returns the model with the given id, whoever created it.
-func (r *modelRepo) GetByID(ctx context.Context, id uuid.UUID) (*ModelRow, error) {
-	query, args := buildModelGetQuery(id)
+func (r *modelRepo) GetByID(ctx context.Context, id uuid.UUID, componentTypes []string) (*ModelRow, error) {
+	query, args := buildModelGetQuery(id, componentTypes)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -227,8 +243,8 @@ func (r *modelRepo) GetByID(ctx context.Context, id uuid.UUID) (*ModelRow, error
 }
 
 // GetCount returns the total number of models matching the filters.
-func (r *modelRepo) GetCount(ctx context.Context, filters *ModelFilters) (int, error) {
-	query, args := buildModelCountQuery(filters)
+func (r *modelRepo) GetCount(ctx context.Context, filters *ModelFilters, componentTypes []string) (int, error) {
+	query, args := buildModelCountQuery(filters, componentTypes)
 
 	var total int
 	if err := r.pool.QueryRow(ctx, query, args...).Scan(&total); err != nil {
@@ -239,8 +255,8 @@ func (r *modelRepo) GetCount(ctx context.Context, filters *ModelFilters) (int, e
 }
 
 // List returns one page of models matching the filters.
-func (r *modelRepo) List(ctx context.Context, filters *ModelFilters) ([]ModelRow, error) {
-	query, args := buildModelListQuery(filters)
+func (r *modelRepo) List(ctx context.Context, filters *ModelFilters, componentTypes []string) ([]ModelRow, error) {
+	query, args := buildModelListQuery(filters, componentTypes)
 
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
