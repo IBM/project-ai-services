@@ -258,6 +258,16 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
             "version": 12,
             "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
             "created_at": "2026-10-26T09:12:00Z",
+        },
+        {
+            "version": 11,
+            "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+            "created_at": "2026-10-25T09:12:00Z",
+        },
+        {
+            "version": 10,
+            "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+            "created_at": "2026-10-24T09:12:00Z",
         }
     ]
 }
@@ -405,7 +415,7 @@ curl -X POST http://localhost:8500/v1/connectors \
 
 ```json
 {
-    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    "id": "c9e6679-7425-40de-944b-e07fc1f90ae7"
 }
 ```
 
