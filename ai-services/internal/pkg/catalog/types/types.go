@@ -168,14 +168,40 @@ type Component struct {
 	ID            string `yaml:"id" json:"id"`
 	Name          string `yaml:"name" json:"name"`
 	Description   string `yaml:"description" json:"description"`
-	Type          string `yaml:"type" json:"type"`                           // "component"
-	ComponentType string `yaml:"component_type" json:"component_type"`       // "vector_store", "embedding", "llm", etc.
-	ComponentName string `yaml:"component_name" json:"component_name"`       // Display name for component type (e.g., "Vector store", "Large language model")
-	Default       bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
+	Type          string `yaml:"type" json:"type"`        // "component"
+	ComponentType string `yaml:"-" json:"component_type"` // "vector_store", "embedding", "llm", etc.
+	ComponentName string `yaml:"-" json:"component_name"` // Display name for component type (e.g., "Vector store", "Large language model")
+	// ComponentShortName is the short display label for the component type (e.g., "LLM").
+	ComponentShortName string `yaml:"-" json:"component_short_name,omitempty"`
+	Default            bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
 	// Category groups components by purpose, e.g. "models" for components that serve a model.
 	Category string `yaml:"category,omitempty" json:"category,omitempty"`
 	// LiteLLM describes how a "models" component is exposed through the LiteLLM gateway.
 	LiteLLM *LiteLLMConfig `yaml:"litellm,omitempty" json:"-"`
+}
+
+// UnmarshalYAML reads metadata.yaml, where component_type is a block:
+//
+//	component_type:
+//	  id: llm
+//	  name: "Large Language Model (LLM)"
+//	  short_name: "LLM"
+func (c *Component) UnmarshalYAML(value *yaml.Node) error {
+	type plain Component
+	aux := struct {
+		plain         `yaml:",inline"`
+		ComponentType ModelComponentType `yaml:"component_type"`
+	}{}
+	if err := value.Decode(&aux); err != nil {
+		return err
+	}
+
+	*c = Component(aux.plain)
+	c.ComponentType = aux.ComponentType.ID
+	c.ComponentName = aux.ComponentType.Name
+	c.ComponentShortName = aux.ComponentType.ShortName
+
+	return nil
 }
 
 // LiteLLMConfig is the gateway registration settings of a model component provider.
@@ -305,11 +331,32 @@ type ModelDeployProvider struct {
 	Schema         string                   `json:"schema,omitempty"`
 }
 
+// ModelComponentType describes the component type (llm, embedding, ...) a model belongs to.
+type ModelComponentType struct {
+	ID        string `yaml:"id" json:"id"`
+	Name      string `yaml:"name" json:"name"`
+	ShortName string `yaml:"short_name" json:"short_name"`
+}
+
+// UnmarshalYAML accepts either the block form (id/name/short_name) or a bare scalar id (e.g. `llm`),
+// the latter being what user-uploaded bundles use.
+func (m *ModelComponentType) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		m.ID = value.Value
+
+		return nil
+	}
+
+	type plain ModelComponentType
+
+	return value.Decode((*plain)(m))
+}
+
 // ModelDeployOptions is the response of GET /catalog/models/:id/deploy-options.
 type ModelDeployOptions struct {
 	ID            string                `json:"id"`
 	Name          string                `json:"name"`
-	ComponentType string                `json:"component_type"`
+	ComponentType ModelComponentType    `json:"component_type"`
 	Providers     []ModelDeployProvider `json:"providers"`
 }
 

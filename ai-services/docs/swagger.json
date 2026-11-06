@@ -4465,11 +4465,25 @@
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelComponentType": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "short_name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions": {
             "type": "object",
             "properties": {
                 "component_type": {
-                    "type": "string"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelComponentType"
                 },
                 "id": {
                     "type": "string"
