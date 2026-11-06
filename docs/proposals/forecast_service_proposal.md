@@ -256,12 +256,8 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
     "data": [
         {
             "version": 12,
-            "table": "table_name",
-            "last_successful_training": "2026-10-26T09:12:00Z"
-            "status": "training",
             "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
             "created_at": "2026-10-26T09:12:00Z",
-            "message": "Training on {n} number of rows"
         }
     ]
 }
