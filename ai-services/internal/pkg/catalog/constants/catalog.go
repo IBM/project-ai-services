@@ -36,6 +36,11 @@ const (
 	MetadataKeyProfile = "profile"
 	// MetadataKeyParams is the metadata key that holds the non-sensitive provider params of a model.
 	MetadataKeyParams = "params"
+	// MetadataKeyLiteLLM is the metadata key that holds the LiteLLM gateway details of a model.
+	MetadataKeyLiteLLM = "litellm"
+	// MetadataKeyLiteLLMModelID is the key, nested under MetadataKeyLiteLLM, that stores the model ID
+	// LiteLLM assigned on registration.
+	MetadataKeyLiteLLMModelID = "model_id"
 )
 
 // Connector type constants.

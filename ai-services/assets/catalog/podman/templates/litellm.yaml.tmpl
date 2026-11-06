@@ -70,11 +70,24 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
+          # 1. Write the config.yaml inline into temporary scratch space
+          cat << 'EOF' > /tmp/config.yaml
+          litellm_settings:
+            callbacks: ["custom_callbacks.translator_instance"]
+          general_settings:
+            reject_clientside_metadata_tags: true
+          router_settings:
+            enable_tag_filtering: true
+          EOF
+
+          # 2. Export required environment credentials
           export LITELLM_MASTER_KEY=$(cat /etc/secret/litellm-secret/master-key)
           export LITELLM_SALT_KEY=$(cat /etc/secret/litellm-secret/salt-key)
           export DB_PASSWORD=$(cat /etc/secret/litellm-db-secret/db-password)
           export DATABASE_URL="postgresql://{{ .Values.litellm.db.user }}:${DB_PASSWORD}@localhost:5432/{{ .Values.litellm.db.database }}"
-          exec litellm --port {{ .Values.litellm.port }}
+          
+          # 3. Boot LiteLLM pointing directly to our newly minted inline config
+          exec litellm --port {{ .Values.litellm.port }} --config /tmp/config.yaml
       env:
         - name: STORE_MODEL_IN_DB
           value: "True"
