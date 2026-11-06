@@ -88,8 +88,8 @@ func (f *fakeLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.L
 	return "litellm-uuid-123", nil
 }
 
-func (f *fakeLiteLLMClient) DeregisterModel(_ context.Context, litellmModelID string) error {
-	f.deregisteredModels = append(f.deregisteredModels, litellmModelID)
+func (f *fakeLiteLLMClient) DeregisterModel(_ context.Context, modelID string) error {
+	f.deregisteredModels = append(f.deregisteredModels, modelID)
 
 	return nil
 }

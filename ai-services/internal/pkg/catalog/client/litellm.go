@@ -21,10 +21,10 @@ const (
 // LiteLLMClient defines the client interface for LiteLLM Gateway operations.
 type LiteLLMClient interface {
 	RegisterModel(ctx context.Context, req LiteLLMModelNewRequest) (string, error)
-	DeregisterModel(ctx context.Context, litellmModelID string) error
+	DeregisterModel(ctx context.Context, modelID string) error
 	RegisterPassThrough(ctx context.Context, req LiteLLMPassThroughRequest) error
 	DeregisterPassThrough(ctx context.Context, endpointID string) error
-	HealthProbe(ctx context.Context, modelName string) (*LiteLLMHealthResponse, error)
+	HealthProbe(ctx context.Context, modelID string) (*LiteLLMHealthResponse, error)
 }
 
 // LiteLLMModelInfo holds routing mode in /model/new (embedding/rerank).
@@ -141,8 +141,8 @@ func (c *litellmClient) RegisterModel(ctx context.Context, req LiteLLMModelNewRe
 	return resp.ModelID, nil
 }
 
-func (c *litellmClient) DeregisterModel(ctx context.Context, litellmModelID string) error {
-	body := map[string]string{"id": litellmModelID}
+func (c *litellmClient) DeregisterModel(ctx context.Context, modelID string) error {
+	body := map[string]string{"id": modelID}
 	respBytes, statusCode, err := c.doRequest(ctx, http.MethodDelete, "/model/delete", body)
 	if err != nil {
 		return fmt.Errorf("failed to delete route from litellm: %w", err)
@@ -179,8 +179,8 @@ func (c *litellmClient) DeregisterPassThrough(ctx context.Context, endpointID st
 	return nil
 }
 
-func (c *litellmClient) HealthProbe(ctx context.Context, modelName string) (*LiteLLMHealthResponse, error) {
-	path := fmt.Sprintf("/health?model=%s", url.QueryEscape(modelName))
+func (c *litellmClient) HealthProbe(ctx context.Context, modelID string) (*LiteLLMHealthResponse, error) {
+	path := fmt.Sprintf("/health?model_id=%s", url.QueryEscape(modelID))
 	respBytes, statusCode, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("health probe request failed: %w", err)

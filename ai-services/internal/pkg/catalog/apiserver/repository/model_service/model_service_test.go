@@ -161,8 +161,8 @@ func (m *mockLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.L
 	return "litellm-id-" + req.ModelName, nil
 }
 
-func (m *mockLiteLLMClient) DeregisterModel(_ context.Context, litellmModelID string) error {
-	m.deregisteredModels = append(m.deregisteredModels, litellmModelID)
+func (m *mockLiteLLMClient) DeregisterModel(_ context.Context, modelID string) error {
+	m.deregisteredModels = append(m.deregisteredModels, modelID)
 
 	return nil
 }
@@ -474,9 +474,9 @@ func TestCreateModel_Remote(t *testing.T) {
 				},
 			},
 			wantCode: http.StatusUnprocessableEntity,
-			wantMsg:  "invalid watsonx credentials",
+			wantMsg:  "endpoint is unhealthy",
 			check: func(t *testing.T, lite *mockLiteLLMClient, conns *mockConnectorRepo) {
-				assert.Equal(t, []string{"ibm/granite-4-h-small"}, lite.deregisteredModels)
+				assert.Equal(t, []string{"litellm-id-ibm/granite-4-h-small"}, lite.deregisteredModels)
 				assert.Empty(t, conns.connectors, "no connector must be persisted when the probe fails")
 			},
 		},

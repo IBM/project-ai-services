@@ -81,7 +81,7 @@ func (g Gateway) Register(ctx context.Context, r *Route) error {
 	}
 	r.LiteLLMModelID = modelID
 
-	if err := g.probe(ctx, r.Model); err != nil {
+	if err := g.probe(ctx, r.LiteLLMModelID); err != nil {
 		g.Deregister(ctx, *r)
 
 		return err
@@ -116,8 +116,8 @@ func (g Gateway) Deregister(ctx context.Context, r Route) {
 	}
 }
 
-func (g Gateway) probe(ctx context.Context, model string) error {
-	resp, err := g.client.HealthProbe(ctx, model)
+func (g Gateway) probe(ctx context.Context, litellmModelID string) error {
+	resp, err := g.client.HealthProbe(ctx, litellmModelID)
 	if err != nil {
 		return &ProbeError{reason: err.Error()}
 	}
@@ -126,10 +126,5 @@ func (g Gateway) probe(ctx context.Context, model string) error {
 		return nil
 	}
 
-	reason := "no healthy endpoints"
-	if resp != nil && len(resp.UnhealthyEndpoints) > 0 && resp.UnhealthyEndpoints[0].Error != "" {
-		reason = resp.UnhealthyEndpoints[0].Error
-	}
-
-	return &ProbeError{reason: reason}
+	return &ProbeError{reason: "endpoint is unhealthy"}
 }
