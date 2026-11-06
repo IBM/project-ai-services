@@ -206,9 +206,9 @@ graph LR
 
 | Method     | Endpoint                                | Description                                                                                                                                                    |
 |:-----------|:----------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **GET**    | `/v1/forecast/`           | List the forecasters of a connector with status, schemas and metrics. **NOTE: This endpoint will be removed once multi-connector support is added.**                                                                                          |
+| **GET**    | `/v1/forecast`           | List the forecasters of a connector with status, schemas and metrics. **NOTE: This endpoint will be removed once multi-connector support is added.**                                                                                          |
 | **GET**    | `/v1/forecast/{connector_id}`           | List the forecasters of a connector with status, schemas and metrics.                                                                                          |
-| **POST**   | `/v1/forecast/`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest `ready` forecaster (or the version specified in `?version=`), and returned with predictions and confidence.**NOTE: This endpoint will be removed once multi-connector support is added.** |
+| **POST**   | `/v1/forecast`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest `ready` forecaster (or the version specified in `?version=`), and returned with predictions and confidence.**NOTE: This endpoint will be removed once multi-connector support is added.** |
 | **POST**   | `/v1/forecast/{connector_id}`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest `ready` forecaster (or the version specified in `?version=`), and returned with predictions and confidence. |
 | **POST**   | `/v1/connectors`                        | Create a connector (source database connection, secrets encrypted) and queue its training job.                                                                 |
 | **GET**    | `/v1/connectors`                        | List connectors with pagination and a name filter.                                                                                                             |
@@ -239,7 +239,7 @@ Digitize registers its error handler only for `HTTPException`, so its request-va
 
 The forecast endpoints are keyed by `connector_id`, because each connector is trained into forecasters. The service never exposes Triton: clients call these endpoints and the service forwards the request to Triton.
 
-#### GET /v1/forecast/ — List the Forecasters of a Connector
+#### GET /v1/forecast/ — List the Forecasters of the default Connector
 
 Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
 
@@ -254,25 +254,23 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 **Sample response (200):**
 
 ```json
-{
-    [
-        {
-            "version": 12,
-            "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
-            "created_at": "2026-10-26T09:12:00Z",
-        },
-        {
-            "version": 11,
-            "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
-            "created_at": "2026-10-25T09:12:00Z",
-        },
-        {
-            "version": 10,
-            "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
-            "created_at": "2026-10-24T09:12:00Z",
-        }
-    ]
-}
+[
+      {
+          "version": 12,
+          "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
+          "created_at": "2026-10-26T09:12:00Z",
+      },
+      {
+          "version": 11,
+          "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+          "created_at": "2026-10-25T09:12:00Z",
+      },
+      {
+          "version": 10,
+          "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+          "created_at": "2026-10-24T09:12:00Z",
+      }
+]
 ```
 
 | Status                               | Description                |
@@ -280,7 +278,7 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 | 200 OK                               | The list, possibly empty.  |
 | 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
 | 500 Internal Server Error            | Database failure.          |
-#### GET /v1/forecast/{connector_id or BLANK for singe connector} — List the Forecasters of a Connector
+#### GET /v1/forecast/{connector_id} — List the Forecasters of a Connector
 
 Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
 
@@ -295,25 +293,23 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 **Sample response (200):**
 
 ```json
-{
-    "data": [
-        {
-            "version": 12,
-            "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
-            "created_at": "2026-10-26T09:12:00Z",
-        },
-        {
-            "version": 11,
-            "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
-            "created_at": "2026-10-25T09:12:00Z",
-        },
-        {
-            "version": 10,
-            "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
-            "created_at": "2026-10-24T09:12:00Z",
-        }
-    ]
-}
+[
+      {
+          "version": 12,
+          "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
+          "created_at": "2026-10-26T09:12:00Z",
+      },
+      {
+          "version": 11,
+          "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+          "created_at": "2026-10-25T09:12:00Z",
+      },
+      {
+          "version": 10,
+          "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+          "created_at": "2026-10-24T09:12:00Z",
+      }
+]
 ```
 
 | Status                               | Description                |
@@ -322,7 +318,7 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 | 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
 | 500 Internal Server Error            | Database failure.          |
 
-#### POST /v1/forecast/ — Run a Forecast
+#### POST /v1/forecast/ — Run a Forecast on the default connector
 **NOTE: This endpoint will be removed once multiple connector support is added.**
 Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest `ready` forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
@@ -380,7 +376,7 @@ curl -X POST "http://localhost:8500/v1/forecast?version=11" \
 | 503 Service Unavailable (`TRITON_UNAVAILABLE`) | Triton cannot be reached. A new error code: the shared `ErrorCode` enum has none for Triton.       |
 
 
-#### POST /v1/forecast/{connector_id or BLANK (for single connector)} — Run a Forecast
+#### POST /v1/forecast/{connector_id} — Run a Forecast on a Connector
 
 Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest `ready` forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
