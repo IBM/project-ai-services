@@ -343,6 +343,49 @@ class TestSystemPromptValidator:
 
 
 @pytest.mark.unit
+class TestPerLanguageSystemPromptValidator:
+    """The system_prompt validator applies uniformly to every supported language config."""
+
+    LANGUAGES = ["english", "german", "italian", "french", "japanese"]
+
+    @staticmethod
+    def _build(lang, prompt):
+        from chatbot.settings import RAGConfig
+
+        config_cls = getattr(RAGConfig, f"{lang.capitalize()}Config")
+        config = RAGConfig(
+            **{lang: config_cls(system_prompt=prompt)},
+            llm_validate_custom_system_prompt=False
+        )
+        return getattr(config, lang), config_cls
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_custom_prompt_is_stripped_and_kept(self, lang):
+        lang_config, _ = self._build(lang, "  A valid custom system prompt.  ")
+        assert lang_config.system_prompt == "A valid custom system prompt."
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_empty_prompt_falls_back_to_default(self, lang):
+        lang_config, config_cls = self._build(lang, "   \n\t  ")
+        assert lang_config.system_prompt == config_cls.DEFAULT_SYSTEM_PROMPT
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_too_short_prompt_falls_back_to_default(self, lang):
+        lang_config, config_cls = self._build(lang, "Hi")
+        assert lang_config.system_prompt == config_cls.DEFAULT_SYSTEM_PROMPT
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_prompt_over_5000_chars_is_rejected_not_truncated(self, lang):
+        lang_config, config_cls = self._build(lang, "A" * 5001)
+        assert lang_config.system_prompt == config_cls.DEFAULT_SYSTEM_PROMPT
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_prompt_of_exactly_5000_chars_is_kept(self, lang):
+        lang_config, _ = self._build(lang, "A" * 5000)
+        assert lang_config.system_prompt == "A" * 5000
+
+
+@pytest.mark.unit
 class TestLLMConfigValidators:
     """Tests for LLMConfig field validators."""
     
