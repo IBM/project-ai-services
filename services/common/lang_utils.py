@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from typing import Dict
 
@@ -14,6 +15,15 @@ from common.settings import settings
 logger = get_logger("LANG")
 
 _language_detector = None
+
+# Minimum length (characters) accepted for a custom system prompt
+MIN_SYSTEM_PROMPT_LENGTH = 10
+
+# Maximum length (characters) accepted for a custom system prompt
+MAX_SYSTEM_PROMPT_LENGTH = 5000
+
+# Regular expression pattern to strip markdown formatting (bold, code emphasis) from LLM responses
+MARKDOWN_EMPHASIS_RE = re.compile(r"\*\*|__|`")
 
 # ---------------------------------------------------------------------------
 # Language codes

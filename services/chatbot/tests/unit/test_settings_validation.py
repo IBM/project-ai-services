@@ -87,21 +87,19 @@ class TestSystemPromptValidator:
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     def test_validate_system_prompt_whitespace_only(self):
-        """Test system_prompt with whitespace only is applied as-is via model_post_init."""
+        """Test system_prompt with whitespace only is rejected and the default is kept."""
         from chatbot.settings import RAGConfig
         
         config = RAGConfig(system_prompt="   \n\t  ", llm_validate_custom_system_prompt=False)
-        # model_post_init applies the prompt to English config without validation
-        assert config.english.system_prompt == "   \n\t  "
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     def test_validate_system_prompt_too_short(self):
-        """Test system_prompt that is too short is applied as-is via model_post_init."""
+        """Test system_prompt that is too short is rejected and the default is kept."""
         from chatbot.settings import RAGConfig
         
         config = RAGConfig(system_prompt="Hi", llm_validate_custom_system_prompt=False)
-        # model_post_init applies the prompt to English config without validation
-        assert config.english.system_prompt == "Hi"
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     def test_validate_system_prompt_too_long(self):

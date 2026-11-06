@@ -5,14 +5,13 @@ This module provides semantic validation and prompt injection detection
 using the LLM itself to ensure custom prompts are safe and appropriate.
 """
 import json
-import re
 from typing import Tuple, Optional
 from enum import Enum
 
 from common.misc_utils import get_logger
 from common.settings import settings
 from common.llm_utils import get_vllm_headers
-from common.lang_utils import LanguageCodes
+from common.lang_utils import LanguageCodes, MARKDOWN_EMPHASIS_RE
 import common.misc_utils as misc_utils
 
 logger = get_logger("prompt_validator")
@@ -461,9 +460,6 @@ def _call_llm_for_validation(prompt: str, validation_type: str) -> str:
         return ""
 
 
-_MARKDOWN_EMPHASIS_RE = re.compile(r"\*\*|__|`")
-
-
 def _parse_validation_response(
     response_text: str,
     valid_verdict: str,
@@ -497,7 +493,7 @@ def _parse_validation_response(
         
         for line in lines:
             # Drop markdown emphasis (bold/code) some models wrap around keywords, e.g. **VERDICT:** SAFE
-            line = _MARKDOWN_EMPHASIS_RE.sub("", line).strip()
+            line = MARKDOWN_EMPHASIS_RE.sub("", line).strip()
             # Check for verdict keyword
             if line.startswith(f"{keywords['VERDICT']}:"):
                 verdict = line.split(":", 1)[1].strip().upper()
