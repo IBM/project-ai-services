@@ -9,11 +9,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from common.misc_utils import get_logger, create_llm_session
 import common.misc_utils as misc_utils
 from common.settings import Settings as CommonSettings
+from common.lang_utils import MAX_SYSTEM_PROMPT_LENGTH, MIN_SYSTEM_PROMPT_LENGTH
 
 logger = get_logger("settings")
-
-# Maximum length (characters) accepted for a custom system prompt
-MAX_SYSTEM_PROMPT_LENGTH = 5000
 
 # Initialize language detector early for settings validation
 def _ensure_language_detector_initialized():
@@ -629,12 +627,21 @@ class RAGConfig(BaseSettings):
         """
         # Handle custom system_prompt
         if self.system_prompt:
-            if len(self.system_prompt) > MAX_SYSTEM_PROMPT_LENGTH:
+            v_stripped = self.system_prompt.strip()
+            if len(v_stripped) < MIN_SYSTEM_PROMPT_LENGTH:
                 logger.warning(
-                    f"Custom system_prompt too long ({len(self.system_prompt)} chars, "
+                    f"Custom system_prompt too short ({len(v_stripped)} chars). "
+                    f"Falling back to default system prompt."
+                )
+                return
+            if len(v_stripped) > MAX_SYSTEM_PROMPT_LENGTH:
+                logger.warning(
+                    f"Custom system_prompt too long ({len(v_stripped)} chars, "
                     f"max {MAX_SYSTEM_PROMPT_LENGTH}). Falling back to default system prompt."
                 )
                 return
+            
+            self.system_prompt = v_stripped
             try:
                 from common.lang_utils import detect_language, LanguageCodes
                 
@@ -748,7 +755,7 @@ class RAGConfig(BaseSettings):
         """Validate a language config's system_prompt (same rules for every supported language).
 
         Falls back to the language's default prompt when the prompt is empty, shorter
-        than 10 characters, or longer than MAX_SYSTEM_PROMPT_LENGTH. Otherwise the
+        than MIN_SYSTEM_PROMPT_LENGTH characters, or longer than MAX_SYSTEM_PROMPT_LENGTH. Otherwise the
         stripped prompt is kept.
         """
         default_prompt = type(v).DEFAULT_SYSTEM_PROMPT
@@ -763,7 +770,7 @@ class RAGConfig(BaseSettings):
             v.system_prompt = default_prompt
             return v
         
-        if len(v_stripped) < 10:
+        if len(v_stripped) < MIN_SYSTEM_PROMPT_LENGTH:
             logger.warning(
                 f"{lang_name} system_prompt too short ({len(v_stripped)} chars). "
                 "Falling back to default system prompt."
