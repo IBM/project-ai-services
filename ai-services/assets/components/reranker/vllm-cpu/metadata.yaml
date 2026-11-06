@@ -6,8 +6,10 @@ name: "AI Inference on CPU"
 description: "Deploy reranker models on vLLM inference engine (CPU-only)"
 
 # Component type this provider belongs to
-component_type: reranker
-component_name: "Reranker model"
+component_type:
+  id: reranker
+  name: "Reranker Model"
+  short_name: "Reranker"
 category: models
 litellm:
   provider: hosted_vllm

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -148,46 +149,7 @@ func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType,
 	}
 
 	// Extract models from schema
-	extractModelsFromSchema(schema, allModels)
+	models.ExtractFromSchema(schema, allModels)
 
 	return nil
-}
-
-// extractModelsFromSchema extracts model names from a JSON schema.
-// It looks for properties with "model" in the key and extracts values from oneOf/const fields.
-func extractModelsFromSchema(schema map[string]any, modelSet map[string]bool) {
-	// Get properties object
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return
-	}
-
-	// Look for model-related properties
-	for key, value := range properties {
-		if !strings.Contains(strings.ToLower(key), "model") {
-			continue
-		}
-
-		propMap, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Extract models from oneOf field
-		extractModelsFromProperty(propMap, modelSet)
-	}
-}
-
-// extractModelsFromProperty extracts model values from a property's oneOf array.
-func extractModelsFromProperty(propMap map[string]any, modelSet map[string]bool) {
-	// Check for oneOf array with const values
-	if oneOf, ok := propMap["oneOf"].([]any); ok {
-		for _, option := range oneOf {
-			if optMap, ok := option.(map[string]any); ok {
-				if constVal, ok := optMap["const"].(string); ok && constVal != "" {
-					modelSet[constVal] = true
-				}
-			}
-		}
-	}
 }
