@@ -90,7 +90,7 @@ class TestSystemPromptValidator:
         """Test system_prompt with whitespace only is applied as-is via model_post_init."""
         from chatbot.settings import RAGConfig
         
-        config = RAGConfig(system_prompt="   \n\t  ")
+        config = RAGConfig(system_prompt="   \n\t  ", llm_validate_custom_system_prompt=False)
         # model_post_init applies the prompt to English config without validation
         assert config.english.system_prompt == "   \n\t  "
     
@@ -99,7 +99,7 @@ class TestSystemPromptValidator:
         """Test system_prompt that is too short is applied as-is via model_post_init."""
         from chatbot.settings import RAGConfig
         
-        config = RAGConfig(system_prompt="Hi")
+        config = RAGConfig(system_prompt="Hi", llm_validate_custom_system_prompt=False)
         # model_post_init applies the prompt to English config without validation
         assert config.english.system_prompt == "Hi"
     
@@ -146,7 +146,10 @@ class TestSystemPromptValidator:
         
         mock_detect_lang.return_value = "DE"  # German
         
-        config = RAGConfig(system_prompt="Sie sind ein hilfreicher Assistent.")
+        config = RAGConfig(
+            system_prompt="Sie sind ein hilfreicher Assistent.",
+            llm_validate_custom_system_prompt=False
+        )
         # Should be applied to German config
         assert config.german.system_prompt == "Sie sind ein hilfreicher Assistent."
         # English should still have default
@@ -294,7 +297,7 @@ class TestSystemPromptValidator:
     def test_validate_system_prompt_llm_validation_error(
         self, mock_validate, mock_detect_lang, mock_create_session
     ):
-        """Test system_prompt proceeds when LLM validation raises exception."""
+        """Test system_prompt falls back to default when LLM validation raises exception."""
         from chatbot.settings import RAGConfig
         
         mock_detect_lang.return_value = "EN"
@@ -306,8 +309,8 @@ class TestSystemPromptValidator:
             llm_validate_custom_system_prompt=True
         )
         
-        # Should proceed with basic validation only
-        assert config.system_prompt == custom_prompt
+        # A validation error counts as failed: the custom prompt is not applied
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
 
     @patch('common.lang_utils.detect_language')
     @patch('chatbot.prompt_validator.validate_prompt_with_llm')

@@ -679,7 +679,11 @@ class RAGConfig(BaseSettings):
                             f"All validation checks passed"
                         )
                     except Exception as e:
-                        logger.warning(f"Error during LLM validation: {e}. Proceeding with basic validation only.")
+                        logger.warning(
+                            f"Error during LLM validation: {e}. "
+                            f"Falling back to default system prompt."
+                        )
+                        return
                     finally:
                         if created_temp_session and misc_utils.SESSION is not None:
                             try:
