@@ -12,12 +12,16 @@ import (
 func NewModelService(
 	componentRepo dbrepo.ComponentRepository,
 	connectorRepo dbrepo.ConnectorRepository,
+	modelRepo dbrepo.ModelRepository,
+	svcDepRepo dbrepo.ServiceDependencyRepository,
 	workerRegistry stream.WorkerRegistry,
 	catalogProvider *catalog.CatalogProvider,
 ) ModelServiceInterface {
 	return modelservice.NewModelService(
 		componentRepo,
 		connectorRepo,
+		modelRepo,
+		svcDepRepo,
 		worker.NewResolver(workerRegistry),
 		catalogProvider,
 	)

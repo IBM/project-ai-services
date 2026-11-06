@@ -72,6 +72,10 @@ func (m *mockComponentRepo) get(id uuid.UUID) *dbmodels.Component {
 	return &snapshot
 }
 
+func (m *mockComponentRepo) GetByID(_ context.Context, id uuid.UUID) (*dbmodels.Component, error) {
+	return m.get(id), nil
+}
+
 func (m *mockComponentRepo) GetByName(_ context.Context, name string) (*dbmodels.Component, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -241,7 +245,7 @@ func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
 func newTestModelService(t *testing.T, comps dbrepo.ComponentRepository, conns dbrepo.ConnectorRepository, workers worker.Resolver, lite catalogclient.LiteLLMClient) *ModelService {
 	t.Helper()
 
-	svc := NewModelService(comps, conns, workers, setupTestCatalogProvider(t))
+	svc := NewModelService(comps, conns, nil, nil, workers, setupTestCatalogProvider(t))
 	svc.executor = modelsvc.NewModelExecutor(comps, conns, lite)
 
 	return svc

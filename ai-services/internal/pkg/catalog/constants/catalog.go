@@ -139,6 +139,14 @@ const (
 	// DBEncryptionKeyEnv is the environment variable that holds the AES-256 key used to
 	// encrypt sensitive connector credential fields at rest.
 	DBEncryptionKeyEnv = "DB_ENCRYPTION_KEY"
+
+	// LiteLLMPublicEndpointEnv is the environment variable that holds the URL under which the
+	// LiteLLM gateway is reachable by consumers of a model. It is reported as the model's endpoint.
+	LiteLLMPublicEndpointEnv = "LITELLM_PUBLIC_ENDPOINT"
+
+	// ModelEndpointTypeExternal is the type of the model endpoint that consumers outside the
+	// platform call: the public LiteLLM gateway.
+	ModelEndpointTypeExternal = "external"
 )
 
 // Made with Bob
