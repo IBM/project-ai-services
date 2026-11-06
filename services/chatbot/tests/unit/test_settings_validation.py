@@ -87,31 +87,54 @@ class TestSystemPromptValidator:
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     def test_validate_system_prompt_whitespace_only(self):
-        """Test system_prompt with whitespace only is applied as-is via model_post_init."""
+        """Test system_prompt with whitespace only is rejected and the default is kept."""
         from chatbot.settings import RAGConfig
         
-        config = RAGConfig(system_prompt="   \n\t  ")
-        # model_post_init applies the prompt to English config without validation
-        assert config.english.system_prompt == "   \n\t  "
+        config = RAGConfig(system_prompt="   \n\t  ", llm_validate_custom_system_prompt=False)
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     def test_validate_system_prompt_too_short(self):
-        """Test system_prompt that is too short is applied as-is via model_post_init."""
+        """Test system_prompt that is too short is rejected and the default is kept."""
         from chatbot.settings import RAGConfig
         
-        config = RAGConfig(system_prompt="Hi")
-        # model_post_init applies the prompt to English config without validation
-        assert config.english.system_prompt == "Hi"
+        config = RAGConfig(system_prompt="Hi", llm_validate_custom_system_prompt=False)
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     def test_validate_system_prompt_too_long(self):
-        """Test system_prompt that is too long is applied as-is via model_post_init."""
+        """Test system_prompt over 5000 chars is rejected and the default is kept."""
         from chatbot.settings import RAGConfig
         
         long_prompt = "A" * 6000
         config = RAGConfig(system_prompt=long_prompt)
-        # model_post_init applies the prompt to English config without truncation
-        assert len(config.english.system_prompt) == 6000
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
+    
+    @patch('chatbot.settings.misc_utils.SESSION', None)
+    def test_validate_system_prompt_max_length_boundary(self):
+        """Test exactly 5000 chars is accepted and 5001 chars is rejected."""
+        from chatbot.settings import RAGConfig
+        
+        at_limit = "A" * 5000
+        config = RAGConfig(system_prompt=at_limit, llm_validate_custom_system_prompt=False)
+        assert config.english.system_prompt == at_limit
+        
+        config = RAGConfig(system_prompt="A" * 5001, llm_validate_custom_system_prompt=False)
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
+    
+    @patch('chatbot.settings.create_llm_session')
+    @patch('chatbot.settings.misc_utils.SESSION', None)
+    @patch('chatbot.prompt_validator.validate_prompt_with_llm')
+    def test_validate_system_prompt_too_long_skips_llm_validation(
+        self, mock_validate, mock_create_session
+    ):
+        """Test an over-length prompt is rejected before any LLM validation call."""
+        from chatbot.settings import RAGConfig
+        
+        RAGConfig(system_prompt="A" * 5001, llm_validate_custom_system_prompt=True)
+        
+        mock_validate.assert_not_called()
+        mock_create_session.assert_not_called()
     
     @patch('chatbot.settings.misc_utils.SESSION', None)
     @patch('common.lang_utils.detect_language')
@@ -121,7 +144,10 @@ class TestSystemPromptValidator:
         
         mock_detect_lang.return_value = "DE"  # German
         
-        config = RAGConfig(system_prompt="Sie sind ein hilfreicher Assistent.")
+        config = RAGConfig(
+            system_prompt="Sie sind ein hilfreicher Assistent.",
+            llm_validate_custom_system_prompt=False
+        )
         # Should be applied to German config
         assert config.german.system_prompt == "Sie sind ein hilfreicher Assistent."
         # English should still have default
@@ -269,7 +295,7 @@ class TestSystemPromptValidator:
     def test_validate_system_prompt_llm_validation_error(
         self, mock_validate, mock_detect_lang, mock_create_session
     ):
-        """Test system_prompt proceeds when LLM validation raises exception."""
+        """Test system_prompt falls back to default when LLM validation raises exception."""
         from chatbot.settings import RAGConfig
         
         mock_detect_lang.return_value = "EN"
@@ -281,8 +307,8 @@ class TestSystemPromptValidator:
             llm_validate_custom_system_prompt=True
         )
         
-        # Should proceed with basic validation only
-        assert config.system_prompt == custom_prompt
+        # A validation error counts as failed: the custom prompt is not applied
+        assert config.english.system_prompt == RAGConfig.EnglishConfig.DEFAULT_SYSTEM_PROMPT
 
     @patch('common.lang_utils.detect_language')
     @patch('chatbot.prompt_validator.validate_prompt_with_llm')
@@ -312,6 +338,49 @@ class TestSystemPromptValidator:
             if misc_utils.SESSION is not None:
                 misc_utils.SESSION.close()
                 misc_utils.SESSION = None
+
+
+@pytest.mark.unit
+class TestPerLanguageSystemPromptValidator:
+    """The system_prompt validator applies uniformly to every supported language config."""
+
+    LANGUAGES = ["english", "german", "italian", "french", "japanese"]
+
+    @staticmethod
+    def _build(lang, prompt):
+        from chatbot.settings import RAGConfig
+
+        config_cls = getattr(RAGConfig, f"{lang.capitalize()}Config")
+        config = RAGConfig(
+            **{lang: config_cls(system_prompt=prompt)},
+            llm_validate_custom_system_prompt=False
+        )
+        return getattr(config, lang), config_cls
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_custom_prompt_is_stripped_and_kept(self, lang):
+        lang_config, _ = self._build(lang, "  A valid custom system prompt.  ")
+        assert lang_config.system_prompt == "A valid custom system prompt."
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_empty_prompt_falls_back_to_default(self, lang):
+        lang_config, config_cls = self._build(lang, "   \n\t  ")
+        assert lang_config.system_prompt == config_cls.DEFAULT_SYSTEM_PROMPT
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_too_short_prompt_falls_back_to_default(self, lang):
+        lang_config, config_cls = self._build(lang, "Hi")
+        assert lang_config.system_prompt == config_cls.DEFAULT_SYSTEM_PROMPT
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_prompt_over_5000_chars_is_rejected_not_truncated(self, lang):
+        lang_config, config_cls = self._build(lang, "A" * 5001)
+        assert lang_config.system_prompt == config_cls.DEFAULT_SYSTEM_PROMPT
+
+    @pytest.mark.parametrize("lang", LANGUAGES)
+    def test_prompt_of_exactly_5000_chars_is_kept(self, lang):
+        lang_config, _ = self._build(lang, "A" * 5000)
+        assert lang_config.system_prompt == "A" * 5000
 
 
 @pytest.mark.unit
