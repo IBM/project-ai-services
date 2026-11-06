@@ -186,6 +186,10 @@ The Translation Tests validate the `translate-api` service end-to-end, covering 
 
 The translation specs are registered inside the main ordered E2E lifecycle, so the `translation-tests` label selects the lifecycle steps (catalog, login, application create/delete, logout) together with the translation specs. They only run with `--template=translate`; with any other template they are skipped.
 
+Beyond the request/validation checks, the suite runs real async jobs end to end: phase transitions (`chunking` → `translating` → `completed`), completed-job detail, `/result` and `/result/download` (headers and body), markdown/GFM-table preservation, auto-detected source language, context-limit rejection (sync 413) and failed jobs (410 `JOB_FAILED`).
+
+Not automated (need destructive infrastructure changes, non-default service config, or are impractically slow): vLLM semaphore exhausted (429), job semaphore exhausted (429), boot-time recovery of zombie jobs, sync/async behaviour while the vLLM pod is down, and coherence of a multi-chunk document (a run takes ~25 minutes and the model drops sections of very large inputs).
+
 ### Prerequisites
 
 - A ppc64le/Spyre host with Podman, or an existing translate application (see the second mode below).
