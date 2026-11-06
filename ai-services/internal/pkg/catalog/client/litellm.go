@@ -20,10 +20,10 @@ const (
 
 // LiteLLMClient defines the client interface for LiteLLM Gateway operations.
 type LiteLLMClient interface {
-	RegisterModel(ctx context.Context, req LiteLLMModelNewRequest) error
-	DeregisterModel(ctx context.Context, modelName string) error
+	RegisterModel(ctx context.Context, req LiteLLMModelNewRequest) (string, error)
+	DeregisterModel(ctx context.Context, litellmModelID string) error
 	RegisterPassThrough(ctx context.Context, req LiteLLMPassThroughRequest) error
-	DeregisterPassThrough(ctx context.Context, id string) error
+	DeregisterPassThrough(ctx context.Context, endpointID string) error
 	HealthProbe(ctx context.Context, modelName string) (*LiteLLMHealthResponse, error)
 }
 
@@ -41,6 +41,11 @@ type LiteLLMModelNewRequest struct {
 	ModelName     string            `json:"model_name"`
 	LiteLLMParams map[string]any    `json:"litellm_params"`
 	ModelInfo     *LiteLLMModelInfo `json:"model_info,omitempty"`
+}
+
+// LiteLLMModelNewResponse is the response payload from POST /model/new.
+type LiteLLMModelNewResponse struct {
+	ModelID string `json:"model_id"`
 }
 
 // LiteLLMPassThroughRequest is the payload for POST /config/pass_through_endpoint.
@@ -116,20 +121,28 @@ func (c *litellmClient) doRequest(ctx context.Context, method, path string, body
 	return resp.Body(), resp.StatusCode(), nil
 }
 
-func (c *litellmClient) RegisterModel(ctx context.Context, req LiteLLMModelNewRequest) error {
+func (c *litellmClient) RegisterModel(ctx context.Context, req LiteLLMModelNewRequest) (string, error) {
 	respBytes, statusCode, err := c.doRequest(ctx, http.MethodPost, "/model/new", req)
 	if err != nil {
-		return fmt.Errorf("failed to register route with litellm: %w", err)
+		return "", fmt.Errorf("failed to register route with litellm: %w", err)
 	}
 	if statusCode < 200 || statusCode >= 300 {
-		return fmt.Errorf("litellm /model/new returned status %d: %s", statusCode, string(respBytes))
+		return "", fmt.Errorf("litellm /model/new returned status %d: %s", statusCode, string(respBytes))
 	}
 
-	return nil
+	var resp LiteLLMModelNewResponse
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse litellm /model/new response: %w", err)
+	}
+	if resp.ModelID == "" {
+		return "", fmt.Errorf("litellm /model/new response did not contain a model_id: %s", string(respBytes))
+	}
+
+	return resp.ModelID, nil
 }
 
-func (c *litellmClient) DeregisterModel(ctx context.Context, modelName string) error {
-	body := map[string]string{"model_name": modelName}
+func (c *litellmClient) DeregisterModel(ctx context.Context, litellmModelID string) error {
+	body := map[string]string{"id": litellmModelID}
 	respBytes, statusCode, err := c.doRequest(ctx, http.MethodDelete, "/model/delete", body)
 	if err != nil {
 		return fmt.Errorf("failed to delete route from litellm: %w", err)
@@ -153,13 +166,13 @@ func (c *litellmClient) RegisterPassThrough(ctx context.Context, req LiteLLMPass
 	return nil
 }
 
-func (c *litellmClient) DeregisterPassThrough(ctx context.Context, id string) error {
-	body := map[string]string{"id": id}
-	respBytes, statusCode, err := c.doRequest(ctx, http.MethodDelete, "/config/pass_through_endpoint", body)
+func (c *litellmClient) DeregisterPassThrough(ctx context.Context, endpointID string) error {
+	path := fmt.Sprintf("/config/pass_through_endpoint?endpoint_id=%s", url.QueryEscape(endpointID))
+	respBytes, statusCode, err := c.doRequest(ctx, http.MethodDelete, path, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete passthrough endpoint from litellm: %w", err)
 	}
-	if statusCode < 200 || statusCode >= 300 && statusCode != http.StatusNotFound {
+	if statusCode < 200 || (statusCode >= 300 && statusCode != http.StatusNotFound) {
 		return fmt.Errorf("litellm DELETE /config/pass_through_endpoint returned status %d: %s", statusCode, string(respBytes))
 	}
 

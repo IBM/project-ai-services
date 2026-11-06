@@ -8,6 +8,8 @@ const ParamAPIBase = "api_base"
 // Route describes how one model is exposed through the LiteLLM gateway. Both local pods and remote
 // connectors are described by a route, so they share the same register/probe/rollback logic.
 type Route struct {
+	// LiteLLMModelID is the unique ID assigned and returned by LiteLLM /model/new upon registration.
+	LiteLLMModelID string
 	// Tag is the component or connector ID. It tags the LiteLLM model and suffixes the passthrough.
 	Tag string
 	// Provider is the LiteLLM provider prefix (e.g. "watsonx", "hosted_vllm"). It prefixes the

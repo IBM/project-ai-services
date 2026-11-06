@@ -74,20 +74,22 @@ func NewGateway(client catalogclient.LiteLLMClient) Gateway {
 // Register adds the route to LiteLLM and verifies it with a health probe. If the probe fails the
 // route is removed again and a *ProbeError is returned. A failure to register the tokenize
 // passthrough is also an error and triggers the same rollback.
-func (g Gateway) Register(ctx context.Context, r Route) error {
-	if err := g.client.RegisterModel(ctx, modelRequest(r)); err != nil {
+func (g Gateway) Register(ctx context.Context, r *Route) error {
+	modelID, err := g.client.RegisterModel(ctx, modelRequest(*r))
+	if err != nil {
 		return fmt.Errorf("failed to register model in litellm: %w", err)
 	}
+	r.LiteLLMModelID = modelID
 
 	if err := g.probe(ctx, r.Model); err != nil {
-		g.Deregister(ctx, r)
+		g.Deregister(ctx, *r)
 
 		return err
 	}
 
 	if r.TokenizeURL != "" {
-		if err := g.client.RegisterPassThrough(ctx, passThroughRequest(r)); err != nil {
-			g.Deregister(ctx, r)
+		if err := g.client.RegisterPassThrough(ctx, passThroughRequest(*r)); err != nil {
+			g.Deregister(ctx, *r)
 
 			return fmt.Errorf("failed to register tokenize passthrough for %s: %w", r.Tag, err)
 		}
@@ -101,8 +103,10 @@ func (g Gateway) Register(ctx context.Context, r Route) error {
 func (g Gateway) Deregister(ctx context.Context, r Route) {
 	ctx = context.WithoutCancel(ctx)
 
-	if err := g.client.DeregisterModel(ctx, r.Model); err != nil {
-		logger.WarningfCtx(ctx, "failed to deregister litellm model %q: %v", r.Model, err)
+	if r.LiteLLMModelID != "" {
+		if err := g.client.DeregisterModel(ctx, r.LiteLLMModelID); err != nil {
+			logger.WarningfCtx(ctx, "failed to deregister litellm model %q: %v", r.LiteLLMModelID, err)
+		}
 	}
 
 	if r.TokenizeURL != "" {

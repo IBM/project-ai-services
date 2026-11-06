@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
@@ -14,11 +13,6 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-)
-
-const (
-	// localDeployTimeout bounds the whole background deployment (image pull + model download + start).
-	localDeployTimeout = 60 * time.Minute
 )
 
 // ModelExecutor executes already-planned model deployments: it hands local plans to the plan's
@@ -50,9 +44,6 @@ func NewModelExecutor(
 // A caller that needs the steps separately (e.g. to download ahead of starting) can call
 // plan.Deployer.Prepare and plan.Deployer.Start itself and manage status on its own.
 func (e *ModelExecutor) ExecuteLocal(ctx context.Context, plan *types.LocalPlan) {
-	ctx, cancel := context.WithTimeout(ctx, localDeployTimeout)
-	defer cancel()
-
 	defer func() {
 		if r := recover(); r != nil {
 			e.failLocal(ctx, plan, fmt.Errorf("panic: %v", r))
@@ -85,7 +76,7 @@ func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) err
 
 	// LiteLLM is given the egress address the control plane can reach; the DB records the pod's own.
 	updateLocalRoute(plan, eps.Egress)
-	if err := e.gateway.Register(ctx, plan.Route); err != nil {
+	if err := e.gateway.Register(ctx, &plan.Route); err != nil {
 		return err
 	}
 
@@ -122,7 +113,7 @@ func updateLocalRoute(plan *types.LocalPlan, egress string) {
 // ExecuteRemote runs a remote plan synchronously: add the LiteLLM route, verify connectivity and
 // persist a connector. Any failure rolls the route back. A connectivity failure is reported as 422.
 func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePlan) error {
-	if err := e.gateway.Register(ctx, plan.Route); err != nil {
+	if err := e.gateway.Register(ctx, &plan.Route); err != nil {
 		var probeErr *litellm.ProbeError
 		if errors.As(err, &probeErr) {
 			return validators.Unprocessable("%s", probeErr.Error())

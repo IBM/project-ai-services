@@ -155,14 +155,14 @@ type mockLiteLLMClient struct {
 	probeErr           error
 }
 
-func (m *mockLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.LiteLLMModelNewRequest) error {
+func (m *mockLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.LiteLLMModelNewRequest) (string, error) {
 	m.registeredModels = append(m.registeredModels, req)
 
-	return nil
+	return "litellm-id-" + req.ModelName, nil
 }
 
-func (m *mockLiteLLMClient) DeregisterModel(_ context.Context, modelName string) error {
-	m.deregisteredModels = append(m.deregisteredModels, modelName)
+func (m *mockLiteLLMClient) DeregisterModel(_ context.Context, litellmModelID string) error {
+	m.deregisteredModels = append(m.deregisteredModels, litellmModelID)
 
 	return nil
 }
@@ -173,8 +173,8 @@ func (m *mockLiteLLMClient) RegisterPassThrough(_ context.Context, req catalogcl
 	return nil
 }
 
-func (m *mockLiteLLMClient) DeregisterPassThrough(_ context.Context, id string) error {
-	m.deregisteredPass = append(m.deregisteredPass, id)
+func (m *mockLiteLLMClient) DeregisterPassThrough(_ context.Context, endpointID string) error {
+	m.deregisteredPass = append(m.deregisteredPass, endpointID)
 
 	return nil
 }
@@ -763,8 +763,8 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 		// wantAPIBase is the route's api_base; empty means no route may be registered.
 		wantAPIBase  string
 		wantTokenize string
-		// wantDeregistered is the route rolled back after the registration.
-		wantDeregistered     []string
+		// wantDeregistered indicates whether the route should be rolled back after failed registration.
+		wantDeregistered     bool
 		wantDeregisteredPass int
 	}{
 		{
@@ -829,7 +829,7 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 			wantMessage:          "connection refused",
 			wantSteps:            []string{"prepare", "start"},
 			wantAPIBase:          "http://llm-abc:8000/v1",
-			wantDeregistered:     []string{"ibm-granite/granite-3.3-8b-instruct"},
+			wantDeregistered:     true,
 			wantDeregisteredPass: 1,
 		},
 	}
@@ -875,7 +875,11 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 				assert.Equal(t, tt.wantTokenize, tt.lite.registeredPass[0].Target)
 			}
 
-			assert.Equal(t, tt.wantDeregistered, tt.lite.deregisteredModels)
+			if tt.wantDeregistered {
+				assert.Equal(t, []string{"litellm-id-ibm-granite/granite-3.3-8b-instruct"}, tt.lite.deregisteredModels)
+			} else {
+				assert.Empty(t, tt.lite.deregisteredModels)
+			}
 			assert.Len(t, tt.lite.deregisteredPass, tt.wantDeregisteredPass)
 		})
 	}
