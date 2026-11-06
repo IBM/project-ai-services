@@ -1526,6 +1526,8 @@ def init_sync_log_and_update_connector(
     """
     seq = db_manager.insert_sync_log(connector_id, started_at=started_at)
     db_manager.set_connector_sync_status_syncing(connector_id)
+    # Drop terminal connector jobs of sync runs that were just evicted from the log.
+    db_manager.prune_connector_jobs(connector_id)
     return seq
 
 
@@ -1664,6 +1666,16 @@ def reset_syncing_connectors(error: str = "Service restarted during sync tick") 
     Returns the list of affected connector IDs.
     """
     return db_manager.reset_syncing_connectors(error=error)
+
+
+def prune_all_sync_logs() -> int:
+    """Evict all but the latest SYNC_LOG_RETENTION sync logs per connector."""
+    return db_manager.prune_all_sync_logs()
+
+
+def prune_all_connector_jobs() -> int:
+    """Evict terminal connector jobs whose sync run is no longer in connector_sync_logs."""
+    return db_manager.prune_all_connector_jobs()
 
 
 def close_open_sync_log(connector_id: str, error: str) -> bool:
