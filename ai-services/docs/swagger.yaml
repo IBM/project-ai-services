@@ -805,6 +805,50 @@ definitions:
       version:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions:
+    properties:
+      component_type:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      providers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployProvider'
+        type: array
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployProfile:
+    properties:
+      default:
+        type: boolean
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      resources:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources'
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployProvider:
+    properties:
+      default:
+        type: boolean
+      deployment_type:
+        description: '"local" or "remote"'
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      profiles:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployProfile'
+        type: array
+      schema:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:
     properties:
       has_next:
@@ -2169,6 +2213,54 @@ paths:
       summary: Validate a bundle without storing it
       tags:
       - Bundles
+  /catalog/models/{id}/deploy-options:
+    get:
+      description: Lists the providers a catalog model can be deployed with. Local
+        providers include the model's hardware profiles; remote providers include
+        a link to their settings schema.
+      parameters:
+      - description: URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Return only this provider (e.g., 'vllm-spyre')
+        in: query
+        name: provider_id
+        type: string
+      - description: 'Target runtime type: ''podman'' or ''openshift''. Defaults to
+          server runtime when absent.'
+        in: query
+        name: runtime
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions'
+        "400":
+          description: Invalid runtime parameter
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Model not found in catalog
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get model deploy options
+      tags:
+      - Catalog
   /components/{component_type}/providers/{provider_id}/params:
     get:
       description: Retrieves the configuration schema (JSON Schema) for a specific

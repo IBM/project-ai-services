@@ -236,6 +236,56 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	c.JSON(http.StatusOK, deployOptions)
 }
 
+// GetModelDeployOptions godoc
+//
+//	@Summary		Get model deploy options
+//	@Description	Lists the providers a catalog model can be deployed with. Local providers include the model's hardware profiles; remote providers include a link to their settings schema.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id			path		string	true	"URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'"
+//	@Param			provider_id	query		string	false	"Return only this provider (e.g., 'vllm-spyre')"
+//	@Param			runtime		query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200			{object}	types.ModelDeployOptions
+//	@Failure		400			{object}	ErrorResponse	"Invalid runtime parameter"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404			{object}	ErrorResponse	"Model not found in catalog"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/catalog/models/{id}/deploy-options [get]
+func (h *CatalogHandler) GetModelDeployOptions(c *gin.Context) {
+	modelID := c.Param("id")
+
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	provider, err := h.provider.WithRuntime(rt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	deployOptions, err := provider.GetModelDeployOptions(c.Request.Context(), modelID, c.Query("provider_id"))
+	if errors.Is(err, catalog.ErrModelNotFound) {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get deploy options for model '%s': %v", modelID, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, deployOptions)
+}
+
 // GetComponentProviderParams godoc
 //
 //	@Summary		Get component provider parameters
