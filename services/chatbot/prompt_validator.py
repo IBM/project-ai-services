@@ -442,7 +442,7 @@ def _call_llm_for_validation(prompt: str, validation_type: str) -> str:
             f"{llm_endpoint}/v1/chat/completions",
             json=payload,
             headers=get_vllm_headers(api_key),
-            timeout=20.0  # 20 second timeout for validation
+            timeout=30.0  # 30 second timeout for validation
         )
         response.raise_for_status()
         data = response.json() or {}
@@ -560,10 +560,10 @@ def validate_semantic_quality(
     response_text = _call_llm_for_validation(validation_prompt, "Semantic")
     
     if not response_text:
-        # If LLM validation fails, return disabled status (allows fallback to basic validation)
+        # LLM did not respond (timeout/error): validation failed, caller falls back to the default prompt
         return PromptValidationResponse(
-            ValidationResult.VALIDATION_DISABLED,
-            "LLM validation unavailable, using basic validation only"
+            ValidationResult.VALIDATION_ERROR,
+            "LLM validation unavailable (timeout or error)"
         )
     
     # Parse response using shared method
@@ -600,10 +600,10 @@ def detect_prompt_injection(
     response_text = _call_llm_for_validation(validation_prompt, "Injection Detection")
     
     if not response_text:
-        # If LLM validation fails, return disabled status (allows fallback to basic validation)
+        # LLM did not respond (timeout/error): validation failed, caller falls back to the default prompt
         return PromptValidationResponse(
-            ValidationResult.VALIDATION_DISABLED,
-            "LLM injection detection unavailable, using basic validation only"
+            ValidationResult.VALIDATION_ERROR,
+            "LLM injection detection unavailable (timeout or error)"
         )
     
     # Parse response using shared method
