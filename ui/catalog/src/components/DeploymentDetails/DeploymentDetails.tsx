@@ -14,6 +14,7 @@ import {
   SkeletonText,
   SkeletonPlaceholder,
   ToastNotification,
+  CopyButton,
 } from "@carbon/react";
 import ApplicationDatasourcesTable from "./components/ApplicationDatasourcesTable";
 import { PageHeader, ProductiveCard } from "@carbon/ibm-products";
@@ -81,6 +82,7 @@ const DeploymentDetails = ({
   const [integrationFetchError, setIntegrationFetchError] = useState<
     string | null
   >(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
@@ -427,6 +429,16 @@ const DeploymentDetails = ({
     setEditedName(deployment.name);
     setSaveError("");
   };
+  // navigator.clipboard is undefined on non-secure (plain HTTP) pages. Hide the copy button there, since CopyButton would still report "Copied to clipboard".
+  const canCopyToClipboard = Boolean(navigator.clipboard);
+  const handleCopyMcpEndpoint = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyError(null);
+    } catch {
+      setCopyError("Could not copy the MCP endpoint. Please copy it manually.");
+    }
+  };
 
   return (
     <>
@@ -445,6 +457,15 @@ const DeploymentDetails = ({
           title="Failed to update name"
           subtitle={saveError}
           onClose={() => setSaveError("")}
+          className={styles.toastNotification}
+        />
+      )}
+      {copyError && (
+        <ToastNotification
+          kind="error"
+          title="Failed to copy MCP endpoint"
+          subtitle={copyError}
+          onClose={() => setCopyError(null)}
           className={styles.toastNotification}
         />
       )}
@@ -962,17 +983,21 @@ const DeploymentDetails = ({
                                 MCP endpoint
                               </span>
                               <span
-                                className={
-                                  styles.integrationEndpointDetailValue
-                                }
+                                className={`${styles.integrationEndpointDetailValue} ${styles.integrationEndpointCopyValue}`}
                               >
-                                <a
-                                  href={integrationEndpointsData.mcpEndpoint}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  {integrationEndpointsData.mcpEndpoint}
-                                </a>
+                                {integrationEndpointsData.mcpEndpoint}
+                                {canCopyToClipboard && (
+                                  <CopyButton
+                                    size="xs"
+                                    feedback="Copied to clipboard"
+                                    iconDescription="Copy MCP endpoint"
+                                    onClick={() =>
+                                      handleCopyMcpEndpoint(
+                                        integrationEndpointsData.mcpEndpoint,
+                                      )
+                                    }
+                                  />
+                                )}
                               </span>
                             </div>
                           )}
