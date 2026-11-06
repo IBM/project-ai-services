@@ -450,7 +450,7 @@ export const DAStepTwo: React.FC<DAStepProps> = ({
             rerankerComponent = component as Component;
           }
 
-          // Knowledge base components (embedding, vector store, reranker) are already shown in
+          // Knowledge base components (embedding, vector store) are already shown in
           // DAKnowledgeBase at the top of the step — skip them here so they
           // don't appear again in each service card.
           if (isKbComponent) return;

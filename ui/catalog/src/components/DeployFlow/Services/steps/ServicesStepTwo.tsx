@@ -117,19 +117,8 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     (state) => state.providerSchemas,
   );
 
-  // Only LLM gets the dedicated inference-backend path (ServiceConfigCard inferenceComponent).
-  // All other component types — including embedding, vector store, reranker — are routed
-  // through the isCustomComponent path which already renders model + backend dropdowns.
-  const inferenceComponentType = (() => {
-    if (deployOptions.components.some((c) => c.type === COMPONENT_TYPES.LLM))
-      return COMPONENT_TYPES.LLM;
-    // Fall back to the first non-LLM component so the skeleton also covers
-    // deploy-options/service-schema loading for services without an LLM.
-    return (
-      deployOptions.components.find((c) => c.type !== COMPONENT_TYPES.LLM)
-        ?.type ?? null
-    );
-  })();
+  // Ensure the loading skeleton covers initial deploy-options and service-schema
+  const hasComponents = deployOptions.components.length > 0;
 
   // Every component (LLM, embedding, vector store, reranker, custom) can fail to
   // load its models independently — report all of them, not just one.
@@ -148,11 +137,11 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
     runtime,
   ]);
 
-  const inferenceModelsError = failedComponentNames.length > 0;
+  const hasComponentModelsError = failedComponentNames.length > 0;
 
   useEffect(() => {
-    onComponentError?.(inferenceModelsError);
-  }, [inferenceModelsError, onComponentError]);
+    onComponentError?.(hasComponentModelsError);
+  }, [hasComponentModelsError, onComponentError]);
 
   // Seed default model param for the LLM component when its models arrive from
   // the store. Guarded by `if (llmConfig.params?.model) return` so it is
@@ -354,8 +343,8 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   }, [deployOptions.components]);
 
   // isLoadingLlmModels covers LLM model fetching (and deploy-options/schema loading).
-  const isLoadingInferenceOptions =
-    !!inferenceComponentType && !inferenceModelsError && isLoadingLlmModels;
+  const isLoadingLlmOptions =
+    hasComponents && !hasComponentModelsError && isLoadingLlmModels;
 
   // Every non-LLM component (embedding, vector store, reranker, custom) has its own
   // loading flag. Never use an empty model list as a proxy for "still loading" — a
@@ -369,7 +358,7 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
   );
   const isLoadingDynamicOptions =
     !!selectedServiceId &&
-    !inferenceModelsError &&
+    !hasComponentModelsError &&
     dynamicComponents.some(
       (c) =>
         !!componentModelsLoading[`${selectedServiceId}:${c.type}:${runtime}`],
@@ -452,17 +441,17 @@ export const ServicesStepTwo: React.FC<StepProps> = ({
         onResourceStatusChange={onResourceStatusChange}
       />
 
-      {inferenceModelsError && (
+      {hasComponentModelsError && (
         <InlineNotification
           kind="error"
-          title={`Failed to load ${failedComponentNames.join(", ")} models.`}
+          title={`Failed to load configurations of ${failedComponentNames.join(", ")}.`}
           subtitle="Cancel and reopen to try again."
           lowContrast
           hideCloseButton
         />
       )}
 
-      {isLoadingInferenceOptions || isLoadingDynamicOptions ? (
+      {isLoadingLlmOptions || isLoadingDynamicOptions ? (
         <div className={styles.skeletonContent}>
           <SkeletonText width="50%" className={styles.skeletonHeading} />
           <SkeletonText lineCount={3} />

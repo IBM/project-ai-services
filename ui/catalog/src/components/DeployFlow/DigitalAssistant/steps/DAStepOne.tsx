@@ -20,8 +20,6 @@ export const StepOne: React.FC<StepProps> = ({
       onChange={onChange}
       version={deployOptions.version}
       versionLabel="Digital assistant version"
-      components={[]}
-      onComponentChange={() => undefined}
       showNameError={showNameError}
       showWorkerError={showWorkerError}
       onWorkerErrorReset={onWorkerErrorReset}
