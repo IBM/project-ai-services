@@ -477,11 +477,11 @@ def _parse_validation_response(
     
     Args:
         response_text: Raw response text from LLM
-        valid_verdict: Expected verdict string for valid result (e.g., "VALID", "SAFE", "GÜLTIG", "SICHER")
-        invalid_verdict: Expected verdict string for invalid result (e.g., "INVALID", "UNSAFE", "UNGÜLTIG", "UNSICHER")
+        valid_verdict: Expected verdict string for valid result, from the language's VERDICT_VALUES (e.g., "VALID", "SAFE", "GÜLTIG", "VALIDE", "有効")
+        invalid_verdict: Expected verdict string for invalid result, from the language's VERDICT_VALUES (e.g., "INVALID", "UNSAFE", "UNGÜLTIG", "NON VALIDE", "無効")
         invalid_result_type: ValidationResult enum to return for invalid verdict
         validation_type: Type of validation for logging (e.g., "Semantic", "Injection Detection")
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with parsed result
@@ -543,7 +543,7 @@ def validate_semantic_quality(
     Args:
         prompt: The custom prompt to validate
         prompt_type: Type of prompt (e.g., "system", "initial", "query")
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with validation result
@@ -586,7 +586,7 @@ def detect_prompt_injection(
     
     Args:
         prompt: The custom prompt to check for injection attempts
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with detection result
@@ -632,7 +632,7 @@ def validate_prompt_with_llm(
         prompt_type: Type of prompt (e.g., "system", "initial", "query")
         enable_semantic_check: Whether to perform semantic validation
         enable_injection_check: Whether to perform injection detection
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with overall validation result
