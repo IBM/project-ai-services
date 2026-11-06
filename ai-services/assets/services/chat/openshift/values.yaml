@@ -25,19 +25,8 @@ chatbot:
   numChunksPostReranker: 3
   rerank: true
 
-embedding:
-  model:
-    name: ""
-
-reranker:
-  model:
-    name: ""
-
 opensearch:
   numShards: 1
-  auth:
-    username: "admin"
-    password: ""
 
 mcp:
   enabled: true
