@@ -11,5 +11,5 @@ backend:
     numChunksPostReranker: 3
     rerank: true
 mcp:
-  image: icr.io/ai-services/ai-services-mcp:v0.0.4
+  image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.4-1
   port: "5001"
