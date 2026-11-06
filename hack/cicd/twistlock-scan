@@ -103,6 +103,7 @@ def generateImageList() {
         [name: 'litellm', path: 'images/litellm/'],
         [name: 'postgres', path: 'images/postgres/'],
         [name: 'service-base', path: 'images/service-base/'],
+        [name: 'vllm-rocm', path: 'images/vllm-rocm/'],
         [name: 'ai-services', path: 'ai-services/'],
         [name: 'catalog-ui', path: 'ui/catalog/'],
         [name: 'digitize-ui', path: 'ui/digitize/']
