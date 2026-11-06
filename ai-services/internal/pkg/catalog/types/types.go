@@ -171,6 +171,17 @@ type Component struct {
 	ComponentType string `yaml:"component_type" json:"component_type"`       // "vector_store", "embedding", "llm", etc.
 	ComponentName string `yaml:"component_name" json:"component_name"`       // Display name for component type (e.g., "Vector store", "Large language model")
 	Default       bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
+	// Category groups components by purpose, e.g. "models" for components that serve a model.
+	Category string `yaml:"category,omitempty" json:"category,omitempty"`
+	// LiteLLM describes how a "models" component is exposed through the LiteLLM gateway.
+	LiteLLM *LiteLLMConfig `yaml:"litellm,omitempty" json:"-"`
+}
+
+// LiteLLMConfig is the gateway registration settings of a model component provider.
+type LiteLLMConfig struct {
+	Provider    string `yaml:"provider"`      // LiteLLM provider prefix, e.g. "hosted_vllm"
+	ModelMode   string `yaml:"model_mode"`    // LiteLLM model mode, e.g. "chat", "embedding", "rerank"
+	APIBasePath string `yaml:"api_base_path"` // path appended to the model server's address, e.g. "/v1"
 }
 
 // Model is one entry in a provider's models.yaml.
