@@ -1,0 +1,98 @@
+# This Dockerfile references third-party software including ROCm for POWER,
+# vLLM, PyTorch, and Triton.
+
+# vLLM Containerfile for ppc64le with ROCm on UBI10
+#
+# Required build-context files: sitecustomize.py
+#
+# Stages:
+#   base            — ubi10 + Python (EPEL) + venv
+#   rocm-installer  — ROCm from IBM Power Tools DNF repo
+#   wheel-installer — vLLM + Triton wheels
+#   runtime         — final image (venv only, no build tools)
+
+# --- base: ubi10 + Python + venv -------------------------------------
+FROM registry.access.redhat.com/ubi10/ubi:10.2 AS base
+
+ARG PYTHON_VERSION
+
+# EPEL for Python; runtime .so deps for torch/ROCm:
+#   numactl-libs, libstdc++, openblas-serial, libgfortran, libomp, libatomic
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
+        https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm \
+    && dnf install -y --setopt=install_weak_deps=False --nodocs \
+        python${PYTHON_VERSION} \
+        python${PYTHON_VERSION}-libs \
+        python${PYTHON_VERSION}-devel \
+        numactl-libs \
+        libstdc++ \
+        openblas-serial \
+        libgfortran \
+        libomp \
+        libatomic \
+    && dnf clean all
+
+# Prepend venv so bare `python`/`pip` resolve to the venv.
+ENV VIRTUAL_ENV=/opt/vllm \
+    PATH="/opt/vllm/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
+RUN python${PYTHON_VERSION} -m venv ${VIRTUAL_ENV} \
+    && pip install --upgrade pip
+
+# --- rocm-installer: ROCm from IBM Power Tools repo ------------------
+# GPG key and repo file are removed after install.
+FROM base AS rocm-installer
+
+ARG ROCM_GPG_URL
+ARG ROCM_REPO_URL
+
+RUN curl -fsSL -o /tmp/RPM-GPG-KEY-PAMD "${ROCM_GPG_URL}" \
+    && rpm --import /tmp/RPM-GPG-KEY-PAMD \
+    && printf '[rocm-ppc64le]\nname=ROCm ppc64le\nbaseurl=%s\nenabled=1\ngpgcheck=1\ngpgkey=file:///tmp/RPM-GPG-KEY-PAMD\n' \
+        "${ROCM_REPO_URL}" > /etc/yum.repos.d/rocm-ppc64le.repo \
+    && dnf install -y --setopt=install_weak_deps=False --nodocs \
+        rocm-complete \
+        gcc-toolset-15 \
+    && dnf clean all \
+    && rm -f /etc/yum.repos.d/rocm-ppc64le.repo /tmp/RPM-GPG-KEY-PAMD
+
+# --- wheel-installer: vLLM + Triton wheels ---------------------------
+FROM rocm-installer AS wheel-installer
+
+ARG PYTHON_VERSION
+ARG VLLM_VERSION
+ARG ROCM_VERSION
+ARG TRITON_VERSION
+
+RUN pip install --no-cache-dir \
+        "vllm==${VLLM_VERSION}+rocm${ROCM_VERSION}" \
+        "triton==${TRITON_VERSION}" \
+        --prefer-binary \
+        --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/rocm/+simple/ \
+        --extra-index-url https://wheels.developerfirst.ibm.com/ppc64le/linux/+simple/ \
+        --verbose
+
+# amd-smi workaround via sitecustomize.py — runs on every interpreter startup.
+COPY sitecustomize.py /opt/vllm/lib/python${PYTHON_VERSION}/site-packages/sitecustomize.py
+
+# --- runtime: final image --------------------------------------------
+# Based on rocm-installer (not wheel-installer) — wheel build artefacts
+# are excluded; only the populated venv is copied across.
+FROM rocm-installer AS runtime
+
+COPY --from=wheel-installer /opt/vllm /opt/vllm
+
+# ENV is not inherited across FROM — re-declare everything needed at runtime.
+ENV VIRTUAL_ENV=/opt/vllm \
+    PYTHONUNBUFFERED=1 \
+    ROCM_PATH=/opt/rocm \
+    ROCM_HOME=/opt/rocm \
+    LD_LIBRARY_PATH="/opt/rocm/lib" \
+    PATH="/opt/vllm/bin:/opt/rocm/bin:/opt/rh/gcc-toolset-15/root/usr/bin:$PATH"
+
+WORKDIR /workspace
+
+EXPOSE 8000
+
+ENTRYPOINT ["python", "-m", "vllm.entrypoints.openai.api_server"]
