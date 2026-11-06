@@ -3,8 +3,10 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -190,4 +192,68 @@ func extractModelsFromProperty(propMap map[string]any, modelSet map[string]bool)
 			}
 		}
 	}
+}
+
+// GetModelProviders lists the providers a model can be deployed with, as the provider id with its
+// display name, in no particular order. deploymentType selects the kind: "local" for the model components,
+// "remote" for the "models" connectors, and "" for both.
+func (p *CatalogProvider) GetModelProviders(deploymentType string) []types.ProviderInfo {
+	result := make([]types.ProviderInfo, 0)
+
+	add := func(id, name string) {
+		if slices.ContainsFunc(result, func(pr types.ProviderInfo) bool { return pr.ID == id }) {
+			return
+		}
+
+		result = append(result, types.ProviderInfo{ID: id, Name: name})
+	}
+
+	if deploymentType == "" || deploymentType == constants.DeploymentTypeLocal {
+		for _, c := range p.ListComponentsByCategory(constants.ComponentCategoryModels) {
+			add(c.ID, c.Name)
+		}
+	}
+
+	if deploymentType == "" || deploymentType == constants.DeploymentTypeRemote {
+		// ListConnectors errors when no connector of the type is registered: there are no providers.
+		connectors, _ := p.ListConnectors(constants.ConnectorTypeModels)
+		for _, c := range connectors {
+			add(c.ID, c.Name)
+		}
+	}
+
+	return result
+}
+
+// GetModels lists every model the catalog knows, once per model id, in no particular order. The
+// models come from the models.yaml of the model components and the "models" connectors.
+//
+// A model served by several providers is returned as listed by the first one found, so only its
+// provider-independent fields (ID, Name, Title, Description) are meaningful.
+func (p *CatalogProvider) GetModels() ([]types.Model, error) {
+	result := make([]types.Model, 0)
+
+	for _, item := range p.allItems() {
+		isModelComponent := item.Component != nil && item.Component.Category == constants.ComponentCategoryModels
+		isModelConnector := item.Connector != nil && item.Connector.ConnectorType == constants.ConnectorTypeModels
+
+		if !isModelComponent && !isModelConnector {
+			continue
+		}
+
+		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, modelsFileName)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, m := range models {
+			if slices.ContainsFunc(result, func(r types.Model) bool { return r.ID == m.ID }) {
+				continue
+			}
+
+			result = append(result, m)
+		}
+	}
+
+	return result, nil
 }
