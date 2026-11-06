@@ -50,12 +50,12 @@ func (p *CatalogProvider) GetServiceModels(ctx context.Context, serviceID string
 // either a service or an architecture. It tries architecture first, then service.
 // Kept for CLI paths that do not know the type ahead of time.
 func (p *CatalogProvider) GetCatalogModels(ctx context.Context, templateID string, excludeComponentProviders ...string) ([]string, error) {
-	if list, err := p.GetArchitectureModels(ctx, templateID, excludeComponentProviders...); err == nil {
-		return list, nil
+	if models, err := p.GetArchitectureModels(ctx, templateID, excludeComponentProviders...); err == nil {
+		return models, nil
 	}
 
-	if list, err := p.GetServiceModels(ctx, templateID, excludeComponentProviders...); err == nil {
-		return list, nil
+	if models, err := p.GetServiceModels(ctx, templateID, excludeComponentProviders...); err == nil {
+		return models, nil
 	}
 
 	return nil, fmt.Errorf("template '%s' not found as service or architecture: %w", templateID, ErrCatalogItemNotFound)

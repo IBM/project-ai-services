@@ -339,6 +339,7 @@ type ModelComponentType struct {
 
 // UnmarshalYAML accepts either the block form (id/name/short_name) or a bare scalar id (e.g. `llm`),
 // the latter being what user-uploaded bundles use.
+// TODO(BYOS): remove the scalar branch once bundle metadata.yaml moves to the block form.
 func (m *ModelComponentType) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
 		m.ID = value.Value
