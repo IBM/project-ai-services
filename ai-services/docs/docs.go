@@ -2274,6 +2274,101 @@ const docTemplate = `{
             }
         },
         "/models": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves a paginated list of the authenticated user's models: local pod-backed models and remote connector-backed models in one list. Only models created by the caller are returned. All filters are combined with AND.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Models"
+                ],
+                "summary": "List models (local and remote)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by model role (e.g. llm, embedding, reranker)",
+                        "name": "component_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by kind: 'local' or 'remote'",
+                        "name": "deployment_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by provider (e.g. vllm-spyre, watsonx); repeat the parameter to match any of several",
+                        "name": "provider_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by model identifier; repeat the parameter to match any of several",
+                        "name": "model",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status: Downloading, Deploying, Running, Error (local) or connected, offline (remote)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number (1-indexed)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Number of items per page (max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query parameters, or a deployment_type, provider_id, model or status that is not valid",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
@@ -2341,6 +2436,70 @@ const docTemplate = `{
                     },
                     "422": {
                         "description": "Connectivity check failed",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves one of the authenticated user's models. The id is looked up among local models first, then remote ones. Local models include their endpoints; remote models do not, as they are reached through the LiteLLM gateway. Secret params of remote models are never returned. A model created by another user is reported as not found.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Models"
+                ],
+                "summary": "Get a model by ID (local or remote)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelDetail"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid model ID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "User does not own the model",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Model not found",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -3519,6 +3678,143 @@ const docTemplate = `{
                 "updated_at": {
                     "description": "UpdatedAt is the last-update timestamp.",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelApplication": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelDetail": {
+            "type": "object",
+            "properties": {
+                "applications": {
+                    "description": "Applications are the applications that use the model, one entry per application.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelApplication"
+                    }
+                },
+                "connected_services": {
+                    "description": "ConnectedServices is the number of services using the model, as in the list response.",
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deployment_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                },
+                "endpoints": {
+                    "description": "Endpoints are where a local model is called: the public  Omitted for remote models.LiteLLM gateway, whose url is the\nvalue of LITELLM_PUBLIC_ENDPOINT (empty if unset).",
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": {}
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "params": {
+                    "description": "Params are the non-sensitive provider params the model was created with.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "provider": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "worker": {
+                    "description": "Worker is null for remote models and for local models on the control-plane Podman socket.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker"
+                        }
+                    ]
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListItem": {
+            "type": "object",
+            "properties": {
+                "connected_services": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deployment_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "params": {
+                    "description": "Params are the non-sensitive provider params the model was created with.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "provider": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "worker": {
+                    "description": "Worker is null for remote models and for local models on the control-plane Podman socket.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ApplicationWorker"
+                        }
+                    ]
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListItem"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
                 }
             }
         },

@@ -60,6 +60,8 @@ func registerModelRoutes(v1 *gin.RouterGroup, h *handlers.ModelHandler, authMw g
 	g.Use(authMw)
 	{
 		g.POST("", h.CreateModel)
+		g.GET("", h.ListModels)
+		g.GET("/:id", h.GetModelByID)
 	}
 }
 

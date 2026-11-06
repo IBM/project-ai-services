@@ -29,24 +29,33 @@ import (
 type ModelService struct {
 	componentRepo dbrepo.ComponentRepository
 	connectorRepo dbrepo.ConnectorRepository
-	planner       *modelsvc.ModelPlanner
-	executor      *modelsvc.ModelExecutor
+	// modelRepo and svcDepRepo serve the read side (list); catalogProvider supplies display names.
+	modelRepo       dbrepo.ModelRepository
+	svcDepRepo      dbrepo.ServiceDependencyRepository
+	catalogProvider *catalog.CatalogProvider
+	planner         *modelsvc.ModelPlanner
+	executor        *modelsvc.ModelExecutor
 }
 
 // NewModelService creates a new ModelService instance.
-// componentRepo, connectorRepo, workers and catalogProvider are required; workers is used to
+// componentRepo, connectorRepo, modelRepo, svcDepRepo, workers and catalogProvider are required; workers is used to
 // reach the worker that hosts a local model.
 func NewModelService(
 	componentRepo dbrepo.ComponentRepository,
 	connectorRepo dbrepo.ConnectorRepository,
+	modelRepo dbrepo.ModelRepository,
+	svcDepRepo dbrepo.ServiceDependencyRepository,
 	workers worker.Resolver,
 	catalogProvider *catalog.CatalogProvider,
 ) *ModelService {
 	return &ModelService{
-		componentRepo: componentRepo,
-		connectorRepo: connectorRepo,
-		planner:       modelsvc.NewModelPlanner(catalogProvider, workers),
-		executor:      modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
+		componentRepo:   componentRepo,
+		connectorRepo:   connectorRepo,
+		modelRepo:       modelRepo,
+		svcDepRepo:      svcDepRepo,
+		catalogProvider: catalogProvider,
+		planner:         modelsvc.NewModelPlanner(catalogProvider, workers),
+		executor:        modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
 	}
 }
 

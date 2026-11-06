@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,6 +25,24 @@ import (
 
 type mockModelService struct {
 	createModelFunc func(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error)
+	listModelsFunc  func(ctx context.Context, req models.ListModelsRequest) (*models.ModelListResponse, error)
+	getModelFunc    func(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelDetail, error)
+}
+
+func (m *mockModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelDetail, error) {
+	if m.getModelFunc != nil {
+		return m.getModelFunc(ctx, id, createdBy)
+	}
+
+	return &models.ModelDetail{ID: id.String()}, nil
+}
+
+func (m *mockModelService) ListModels(ctx context.Context, req models.ListModelsRequest) (*models.ModelListResponse, error) {
+	if m.listModelsFunc != nil {
+		return m.listModelsFunc(ctx, req)
+	}
+
+	return &models.ModelListResponse{Data: []models.ModelListItem{}}, nil
 }
 
 func (m *mockModelService) CreateModel(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error) {
@@ -39,6 +59,8 @@ func setupModelRouter(svc repository.ModelServiceInterface, tm *auth.TokenManage
 	authMw := middleware.AuthMiddleware(tm, &repository.NoopTokenBlacklist{})
 	h := NewModelHandler(svc)
 	router.POST("/api/v1/models", authMw, h.CreateModel)
+	router.GET("/api/v1/models", authMw, h.ListModels)
+	router.GET("/api/v1/models/:id", authMw, h.GetModelByID)
 
 	return router
 }
@@ -319,4 +341,368 @@ func TestCreateModelStatus(t *testing.T) {
 			assert.Equal(t, tt.want, createModelStatus(tt.deploymentType))
 		})
 	}
+}
+
+func TestListModels(t *testing.T) {
+	tests := []struct {
+		name   string
+		query  string
+		noAuth bool
+		// svcErr is what the model service returns; when nil it returns an empty page.
+		svcErr error
+
+		wantCode        int
+		wantErrContains string
+		wantAbsent      string
+		// wantCalled is whether the request must reach the model service.
+		wantCalled bool
+		checkReq   func(t *testing.T, req models.ListModelsRequest)
+	}{
+		{
+			name:       "defaults are applied and the owner comes from the token",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, 1, req.Page)
+				assert.Equal(t, 20, req.PageSize)
+				assert.Equal(t, "user-123", req.CreatedBy)
+				assert.Empty(t, req.DeploymentType)
+			},
+		},
+		{
+			name:       "all filters are passed to the service",
+			query:      "?component_type=llm&deployment_type=local&provider_id=vllm-spyre&model=ibm-granite/granite&status=Running&page=2&page_size=50",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, "llm", req.ComponentType)
+				assert.Equal(t, models.DeploymentTypeLocal, req.DeploymentType)
+				assert.Equal(t, []string{"vllm-spyre"}, req.ProviderIDs)
+				assert.Equal(t, []string{"ibm-granite/granite"}, req.Models)
+				assert.Equal(t, "Running", req.Status)
+				assert.Equal(t, 2, req.Page)
+				assert.Equal(t, 50, req.PageSize)
+				assert.Equal(t, "user-123", req.CreatedBy)
+			},
+		},
+		{
+			name:       "repeated provider_id and model parameters are all passed",
+			query:      "?provider_id=vllm-spyre&provider_id=watsonx&model=ibm/granite-4-h-small&model=ibm-granite/granite-3.3-8b-instruct",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, []string{"vllm-spyre", "watsonx"}, req.ProviderIDs)
+				assert.Equal(t, []string{"ibm/granite-4-h-small", "ibm-granite/granite-3.3-8b-instruct"}, req.Models)
+			},
+		},
+		{
+			name:       "empty provider_id and model values are not filters",
+			query:      "?provider_id=&model=&model=ibm/granite-4-h-small",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Empty(t, req.ProviderIDs)
+				assert.Equal(t, []string{"ibm/granite-4-h-small"}, req.Models)
+			},
+		},
+		{
+			name:       "a created_by query parameter cannot override the token",
+			query:      "?created_by=someone-else",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, "user-123", req.CreatedBy)
+			},
+		},
+		{
+			name:       "remote deployment type is accepted",
+			query:      "?deployment_type=remote",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, models.DeploymentTypeRemote, req.DeploymentType)
+			},
+		},
+		{
+			name:     "missing token is unauthorized and never reaches the service",
+			noAuth:   true,
+			wantCode: http.StatusUnauthorized,
+		},
+		{
+			// Validating the deployment type is the service's job; the handler only forwards it.
+			name:       "deployment_type is forwarded for the service to validate",
+			query:      "?deployment_type=cloud",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, models.DeploymentType("cloud"), req.DeploymentType)
+			},
+		},
+		{
+			name:            "page_size above the maximum is rejected",
+			query:           "?page_size=101",
+			wantCode:        http.StatusBadRequest,
+			wantErrContains: "page_size",
+		},
+		{
+			name:            "negative page is rejected",
+			query:           "?page=-1",
+			wantCode:        http.StatusBadRequest,
+			wantErrContains: "page",
+		},
+		{
+			name:       "validation error keeps its status",
+			svcErr:     &validators.ValidationError{Code: http.StatusBadRequest, Message: "bad filter"},
+			wantCode:   http.StatusBadRequest,
+			wantCalled: true,
+
+			wantErrContains: "bad filter",
+		},
+		{
+			name:            "internal error is not leaked",
+			svcErr:          errors.New("pq: connection refused to 10.0.0.5"),
+			wantCode:        http.StatusInternalServerError,
+			wantErrContains: "Failed to list models",
+			wantAbsent:      "10.0.0.5",
+			wantCalled:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				called bool
+				gotReq models.ListModelsRequest
+			)
+
+			svc := &mockModelService{
+				listModelsFunc: func(_ context.Context, req models.ListModelsRequest) (*models.ModelListResponse, error) {
+					called = true
+					gotReq = req
+
+					if tt.svcErr != nil {
+						return nil, tt.svcErr
+					}
+
+					return &models.ModelListResponse{Data: []models.ModelListItem{}}, nil
+				},
+			}
+
+			tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+			router := setupModelRouter(svc, tm)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/models"+tt.query, nil)
+
+			if !tt.noAuth {
+				token, _, err := tm.GenerateAccessToken("user-123")
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+			assert.Equal(t, tt.wantCalled, called, "whether the request reached the model service")
+
+			if tt.wantErrContains != "" {
+				var errResp ErrorResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Contains(t, errResp.Error, tt.wantErrContains)
+			}
+
+			if tt.wantAbsent != "" {
+				assert.NotContains(t, w.Body.String(), tt.wantAbsent)
+			}
+
+			if tt.checkReq != nil {
+				tt.checkReq(t, gotReq)
+			}
+		})
+	}
+}
+
+func TestListModels_ResponseShape(t *testing.T) {
+	svc := &mockModelService{
+		listModelsFunc: func(context.Context, models.ListModelsRequest) (*models.ModelListResponse, error) {
+			return &models.ModelListResponse{
+				Data: []models.ModelListItem{{
+					ID:             "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
+					DeploymentType: models.DeploymentTypeRemote,
+					Name:           "prod-watsonx",
+					Provider:       types.ProviderInfo{ID: "watsonx", Name: "Watsonx"},
+					Model:          "ibm/granite-4-h-small",
+					Status:         "connected",
+				}},
+			}, nil
+		},
+	}
+
+	tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+	router := setupModelRouter(svc, tm)
+
+	token, _, err := tm.GenerateAccessToken("user-123")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw struct {
+		Data []map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	require.Len(t, raw.Data, 1)
+
+	item := raw.Data[0]
+	assert.Equal(t, "remote", item["deployment_type"])
+	// Per the LLD, worker is present and null for a remote model.
+	assert.Contains(t, item, "worker")
+	assert.Nil(t, item["worker"])
+	assert.NotContains(t, item, "profile", "profile is not part of the list response")
+	assert.Contains(t, item, "connected_services")
+}
+
+func TestGetModelByID(t *testing.T) {
+	const modelID = "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"
+
+	tests := []struct {
+		name            string
+		path            string
+		noAuth          bool
+		svcErr          error
+		wantCode        int
+		wantCalled      bool
+		wantErrContains string
+		wantAbsent      string
+	}{
+		{name: "found", path: modelID, wantCode: http.StatusOK, wantCalled: true},
+		{name: "malformed id", path: "not-a-uuid", wantCode: http.StatusBadRequest, wantErrContains: "Invalid model ID"},
+		{name: "no token", path: modelID, noAuth: true, wantCode: http.StatusUnauthorized},
+		{
+			name:            "not found",
+			path:            modelID,
+			svcErr:          validators.NotFound("model not found"),
+			wantCode:        http.StatusNotFound,
+			wantCalled:      true,
+			wantErrContains: "model not found",
+		},
+		{
+			name:            "not the owner",
+			path:            modelID,
+			svcErr:          validators.Forbidden("user does not own this model"),
+			wantCode:        http.StatusForbidden,
+			wantCalled:      true,
+			wantErrContains: "does not own",
+		},
+		{
+			name:            "internal error is not leaked",
+			path:            modelID,
+			svcErr:          errors.New("pq: connection refused to 10.0.0.5"),
+			wantCode:        http.StatusInternalServerError,
+			wantCalled:      true,
+			wantErrContains: "Failed to get model",
+			wantAbsent:      "10.0.0.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				called   bool
+				gotID    uuid.UUID
+				gotOwner string
+			)
+
+			svc := &mockModelService{
+				getModelFunc: func(_ context.Context, id uuid.UUID, createdBy string) (*models.ModelDetail, error) {
+					called = true
+					gotID = id
+					gotOwner = createdBy
+
+					if tt.svcErr != nil {
+						return nil, tt.svcErr
+					}
+
+					return &models.ModelDetail{ID: id.String()}, nil
+				},
+			}
+
+			tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+			router := setupModelRouter(svc, tm)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/models/"+tt.path, nil)
+
+			if !tt.noAuth {
+				token, _, err := tm.GenerateAccessToken("user-123")
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+			assert.Equal(t, tt.wantCalled, called, "whether the request reached the model service")
+
+			if tt.wantCalled {
+				assert.Equal(t, modelID, gotID.String())
+				assert.Equal(t, "user-123", gotOwner, "the owner comes from the token, not the request")
+			}
+
+			if tt.wantErrContains != "" {
+				var errResp ErrorResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Contains(t, errResp.Error, tt.wantErrContains)
+			}
+
+			if tt.wantAbsent != "" {
+				assert.NotContains(t, w.Body.String(), tt.wantAbsent)
+			}
+		})
+	}
+}
+
+func TestGetModelByID_ResponseShape(t *testing.T) {
+	svc := &mockModelService{
+		getModelFunc: func(_ context.Context, id uuid.UUID, _ string) (*models.ModelDetail, error) {
+			return &models.ModelDetail{
+				ID:             id.String(),
+				DeploymentType: models.DeploymentTypeRemote,
+				Name:           "prod-watsonx",
+				Provider:       types.ProviderInfo{ID: "watsonx", Name: "Watsonx"},
+				Model:          "ibm/granite-4-h-small",
+				Status:         "connected",
+				Endpoints:      []map[string]any{{"type": "external", "url": "https://litellm.example.com"}},
+				Applications:   []models.ModelApplication{{ID: "a1", Name: "chatbot"}},
+			}, nil
+		},
+	}
+
+	tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+	router := setupModelRouter(svc, tm)
+
+	token, _, err := tm.GenerateAccessToken("user-123")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+
+	assert.Equal(t, "remote", raw["deployment_type"])
+	assert.Contains(t, raw, "worker")
+	assert.Nil(t, raw["worker"])
+	assert.Contains(t, raw, "endpoints")
+	assert.NotContains(t, raw, "profile")
+	assert.Len(t, raw["applications"], 1)
+	assert.Contains(t, raw, "connected_services")
 }
