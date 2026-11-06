@@ -237,6 +237,47 @@ Digitize registers its error handler only for `HTTPException`, so its request-va
 
 The forecast endpoints are keyed by `connector_id`, because each connector is trained into forecasters. The service never exposes Triton: clients call these endpoints and the service forwards the request to Triton.
 
+#### GET /v1/forecast/ — List the Forecasters of a Connector
+
+Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
+
+| Field in each `data` item | Description                                                                                                                       |
+|:--------------------------|:----------------------------------------------------------------------------------------------------------------------------------|
+| `version`                 | The version number (the `jobs.seq` of the training job).                                                                          |
+| `status`                  | `ready` (loaded and served) or `retiring` (being unloaded).                                                                       |
+| `metrics`                 | The validation metric name and score, and the training time in seconds.                                                           |
+| `created_at`              | UTC timestamp at which the forecaster was loaded.                                                                                 |
+| `message`              | Message from data item (if present).                                                                                 |
+
+**Sample response (200):**
+
+```json
+{
+    "data": [
+        {
+            "version": 12,
+            "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
+            "created_at": "2026-10-26T09:12:00Z",
+        },
+        {
+            "version": 11,
+            "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+            "created_at": "2026-10-25T09:12:00Z",
+        },
+        {
+            "version": 10,
+            "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+            "created_at": "2026-10-24T09:12:00Z",
+        }
+    ]
+}
+```
+
+| Status                               | Description                |
+|:-------------------------------------|:---------------------------|
+| 200 OK                               | The list, possibly empty.  |
+| 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
+| 500 Internal Server Error            | Database failure.          |
 #### GET /v1/forecast/{connector_id or BLANK for singe connector} — List the Forecasters of a Connector
 
 Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
@@ -278,6 +319,68 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 | 200 OK                               | The list, possibly empty.  |
 | 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
 | 500 Internal Server Error            | Database failure.          |
+
+#### POST /v1/forecast/ — Run a Forecast
+**NOTE: This endpoint will be removed once multiple connector support is added.**
+Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest `ready` forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
+
+**Query Parameters:**
+
+| Parameter | Type    | Required | Description                                                                                                                                           |
+|:----------|:--------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `version` | integer | No       | Specific retained forecaster version (`jobs.seq`) to run inference against. If omitted, defaults to the newest `ready` forecaster for the connector. |
+
+**Content-Type:** `application/json`
+
+**Sample request (newest ready version by default):**
+
+```bash
+curl -X POST http://localhost:8500/v1/forecast \
+  -H "Content-Type: application/json" \
+  -d '{
+        [
+          {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
+          {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
+        ]
+      }'
+```
+
+**Sample request (targeting a specific older retained version):**
+
+```bash
+curl -X POST "http://localhost:8500/v1/forecast?version=11" \
+  -H "Content-Type: application/json" \
+  -d '{
+        [
+          {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
+          {"REGION": "APAC", "QUANTITY": 3,  "UNIT_PRICE": 249.0}
+        ]
+      }'
+```
+
+**Sample response (200):**
+
+```json
+{
+    "version": 12,
+    "predictions": [
+        {"prediction": "N", "confidence": 0.87},
+        {"prediction": "Y", "confidence": 0.64}
+    ]
+}
+```
+
+- `version` names the forecaster that answered.
+
+| Status                                         | Description                                                                                                                                           |
+|:-----------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 200 OK                                         | One result per row.                                                                                                                                   |
+| 400 Bad Request (`INVALID_REQUEST`)            | A row has a missing/unknown column or wrong type, or `version` query parameter is not a positive integer.                      |
+| 404 Not Found (`RESOURCE_NOT_FOUND`)           | No connector with this ID, the connector has no `ready` forecaster yet, or the specified `version` does not exist or is not `ready` (e.g. `retiring`). |
+| 422 Unprocessable Entity                       | The body is not valid JSON or `instances` is not an array.                                                                                            |
+| 500 Internal Server Error                      | Database failure, or Triton returned an error for the request.                                     |
+| 503 Service Unavailable (`TRITON_UNAVAILABLE`) | Triton cannot be reached. A new error code: the shared `ErrorCode` enum has none for Triton.       |
+
 
 #### POST /v1/forecast/{connector_id or BLANK (for single connector)} — Run a Forecast
 
@@ -340,7 +443,7 @@ curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f9
 | Status                                         | Description                                                                                                                                           |
 |:-----------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 200 OK                                         | One result per row.                                                                                                                                   |
-| 400 Bad Request (`INVALID_REQUEST`)            | `instances` is empty, a row has a missing/unknown column or wrong type, or `version` query parameter is not a positive integer.                      |
+| 400 Bad Request (`INVALID_REQUEST`)            | A row has a missing/unknown column or wrong type, or `version` query parameter is not a positive integer.                      |
 | 404 Not Found (`RESOURCE_NOT_FOUND`)           | No connector with this ID, the connector has no `ready` forecaster yet, or the specified `version` does not exist or is not `ready` (e.g. `retiring`). |
 | 422 Unprocessable Entity                       | The body is not valid JSON or `instances` is not an array.                                                                                            |
 | 500 Internal Server Error                      | Database failure, or Triton returned an error for the request.                                     |
@@ -437,7 +540,7 @@ Duplicate checks run before the insert: a repeated `id` or `name` returns `409`.
 | `offset`  | int    | No       | Records to skip. Default: `0`.               |
 | `name`    | string | No       | Partial, case-insensitive match on the name. |
 
-The list limits (50 default, 200 maximum) match digitize's connector list. The response uses the `{ "pagination": {...}, "data": [...] }` envelope. Digitize's connector list returns `{total, limit, offset, items}` instead.
+The list limits (50 default, 200 maximum) match digitize's connector list. The response uses the `{ "pagination": {...}, "data": [...] }` envelope. Digitize's connector list returns `{total, limit, offset, items}` instead. Possible status values are `{ACCEPTED, TRAINING, TRAINED, FAILED}`
 
 **Sample response (200):**
 
@@ -450,7 +553,10 @@ The list limits (50 default, 200 maximum) match digitize's connector list. The r
             "name": "prod-sales-db",
             "type": "db2_for_i",
             "created_at": "2026-10-26T08:55:00Z",
-            "status": "READY",
+            "last_trained_at": "2026-10-26T08:55:00Z",
+            "status": "training",
+            "table": "prod-sales-db",
+            "target_column": "price",
             "message": ""
         }
     ]
