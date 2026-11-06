@@ -261,6 +261,74 @@ CONFIDENCE: 0.5"""
         
         assert result.result == ValidationResult.VALIDATION_ERROR
 
+    def test_parse_response_with_markdown_bold(self):
+        """LLMs sometimes wrap keywords in markdown bold, e.g. **VERDICT:** SÛR."""
+        response_text = (
+            "**VERDICT:** SÛR  \n"
+            "**RAISON:** Aucun schéma d'injection détecté.  \n"
+            "**CONFIANCE:** 0.98  \n\n"
+            "Explication supplémentaire."
+        )
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="SÛR",
+            invalid_verdict="NON SÛR",
+            invalid_result_type=ValidationResult.UNSAFE_INJECTION,
+            validation_type="Injection Detection",
+            language="FR"
+        )
+
+        assert result.result == ValidationResult.VALID
+        assert result.reason == "Aucun schéma d'injection détecté."
+        assert result._confidence == 0.98
+
+    def test_parse_response_with_markdown_bold_around_colon_and_value(self):
+        """Bold may also wrap the keyword only, or the whole line."""
+        response_text = "**VERDICT**: INVALID\n**REASON: Contradictory instructions.**\n__CONFIDENCE:__ 0.8"
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="VALID",
+            invalid_verdict="INVALID",
+            invalid_result_type=ValidationResult.INVALID_SEMANTIC,
+            validation_type="Semantic"
+        )
+
+        assert result.result == ValidationResult.INVALID_SEMANTIC
+        assert result.reason == "Contradictory instructions."
+        assert result._confidence == 0.8
+
+    def test_parse_response_with_backticks(self):
+        """Inline code formatting around keywords is ignored."""
+        response_text = "`VERDICT:` VALID\n`REASON:` Fine.\n`CONFIDENCE:` 0.9"
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="VALID",
+            invalid_verdict="INVALID",
+            invalid_result_type=ValidationResult.INVALID_SEMANTIC,
+            validation_type="Semantic"
+        )
+
+        assert result.result == ValidationResult.VALID
+        assert result._confidence == 0.9
+
+    def test_parse_response_keeps_single_asterisk_in_reason(self):
+        """Single asterisks (e.g. IBM i pool names like *MACHINE) are not markdown and are preserved."""
+        response_text = "**VERDICT:** SAFE\n**REASON:** Mentions pool *MACHINE only.\n**CONFIDENCE:** 0.9"
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="SAFE",
+            invalid_verdict="UNSAFE",
+            invalid_result_type=ValidationResult.UNSAFE_INJECTION,
+            validation_type="Injection Detection"
+        )
+
+        assert result.result == ValidationResult.VALID
+        assert result.reason == "Mentions pool *MACHINE only."
+
 
 @pytest.mark.unit
 class TestCallLLMForValidation:
