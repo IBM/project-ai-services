@@ -382,8 +382,8 @@ definitions:
         $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType'
       endpoints:
         description: |-
-          Endpoints are where the model, local or remote, is called: the public LiteLLM gateway, whose
-          url is the value of LITELLM_PUBLIC_ENDPOINT (empty if unset).
+          Endpoints are where a local model is called: the public  Omitted for remote models.LiteLLM gateway, whose url is the
+          value of LITELLM_PUBLIC_ENDPOINT (empty if unset).
         items:
           additionalProperties: {}
           type: object
