@@ -12,7 +12,6 @@ metadata:
     ai-services.io/volume: "podman-auth-secret,catalog-secret,catalog-db-encryption-secret,catalog-mtls-encryption-secret,catalog-bundles,catalog-caddy-cert-secret,gateway-pki"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
-    run.oci.keep_original_groups: "1"
     ai-services.io/routes: "8081:catalog-ui:ui, 8080:catalog-api:api"
     # ai-services.io/ports: "{{ .Values.ui.port }}:8081, {{ .Values.backend.port }}:8080"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
@@ -87,13 +86,6 @@ spec:
         failureThreshold: 3
     - name: backend
       image: "{{ .Values.backend.image }}"
-      securityContext:
-        seLinuxOptions:
-          {{- if eq .Values.backend.podman.uri "/run/podman/podman.sock" }}
-          type: ai_services_root.process
-          {{- else }}
-          type: ai_services_nonroot.process
-          {{- end }}
       command: ["/bin/sh", "-c"]
       args:
         - |
@@ -109,8 +101,6 @@ spec:
           value: "info"
         - name: AI_SERVICES_LOG_FORMAT
           value: "service"
-        - name: CONTAINER_HOST
-          value: "unix://{{ .Values.backend.podman.uri }}"
         - name: REGISTRY_AUTH_FILE
           value: "/run/containers/auth.json"
         - name: DB_HOST
@@ -133,6 +123,9 @@ spec:
           value: "{{ .Values.backend.workerGatewayPort }}"
         - name: LOCAL_WORKER
           value: "{{ .Values.backend.localWorker }}"
+        # LiteLLM runs in its own pod; the catalog backend registers model routes through it.
+        - name: LITELLM_ENDPOINT
+          value: "http://{{ .AppName }}--litellm:{{ .Values.litellm.port }}"
       ports:
         - containerPort: 8080
           protocol: TCP
@@ -148,14 +141,9 @@ spec:
         timeoutSeconds: 5
         failureThreshold: 3
       volumeMounts:
-        - name: podman-socket
-          mountPath: {{ .Values.backend.podman.uri }}
         - name: podman-auth
           mountPath: /run/containers/auth.json
           subPath: auth.json
-          readOnly: true
-        - name: iommu-groups
-          mountPath: /sys/kernel/iommu_groups
           readOnly: true
         - name: ai-services-data
           mountPath: {{ .BaseDir }}
@@ -173,28 +161,21 @@ spec:
         - name: catalog-mtls-encryption-secret
           mountPath: /etc/secret/catalog-mtls-encryption-secret
           readOnly: true
+        # The LiteLLM client reads the master key from /etc/secret/litellm-secret/master-key.
+        - name: litellm-secret
+          mountPath: /etc/secret/litellm-secret
+          readOnly: true
         - name: catalog-bundles
           mountPath: /data/catalog-bundles
       resources:
         requests:
-          podman.io/device=/dev/vfio: 4
           memory: "1Gi"
         limits:
           memory: "1Gi"
   volumes:
-    - name: podman-socket
-      hostPath:
-        # For rootless podman: /run/user/$(id -u)/podman/podman.sock
-        # For root podman: /run/podman/podman.sock
-        path: {{ .Values.backend.podman.uri }}
-        type: Socket
     - name: podman-auth
       secret:
         secretName: podman-auth-secret
-    - name: iommu-groups
-      hostPath:
-        path: /sys/kernel/iommu_groups
-        type: Directory
     - name: ai-services-data
       hostPath:
         path: {{ .BaseDir }}
@@ -211,6 +192,12 @@ spec:
     - name: catalog-mtls-encryption-secret
       secret:
         secretName: catalog-mtls-encryption-secret
+    - name: litellm-secret
+      secret:
+        secretName: litellm-secret
+        items:
+          - key: master-key
+            path: master-key
     - name: catalog-bundles
       persistentVolumeClaim:
         claimName: catalog-bundles

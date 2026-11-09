@@ -452,18 +452,18 @@ var _ = ginkgo.BeforeSuite(func() {
 		logger.Infoln("[SETUP] Podman environment verified")
 	}
 
-	// Always perform a full pre-run cleanup before the suite starts.
-	// This ensures the environment is completely fresh regardless of what
-	// a previous run left behind.
+	// Pre-run cleanup: only performed on fresh runs (no --app-name provided).
+	// When --app-name is given the caller owns the running app — we must not
+	// delete it or uninstall the catalog beneath it.
 	//
 	// Flow:
 	//   1. Run 'catalog info' — if catalog is not running, nothing to clean up.
 	//   2. If catalog IS running: log in, delete all existing applications,
 	//      then uninstall the catalog service itself.
-	//   3. The explicit --delete-app flag is kept for backwards compat but is
-	//      now superseded by this always-on cleanup.
 	ginkgo.By("Cleaning up any applications and catalog left over from a previous run")
-	{
+	if providedAppName != "" {
+		logger.Infof("[SETUP] Pre-run cleanup: skipped — using existing application %q", providedAppName)
+	} else {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cleanupCancel()
 
@@ -618,7 +618,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
-		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog configure - using existing application")
 			}
@@ -642,7 +642,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Infof("[TEST] Catalog service is running. Backend URL (from info): %s", catalogBackendURL)
 			}
 		})
-		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog info - using existing application")
 			}
@@ -677,7 +677,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infoln("[TEST] Catalog info output validated successfully!")
 		})
-		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "catalog-login", "mcp-tests"), func() {
+		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-login", "mcp-tests"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog login - using existing application")
 			}
@@ -792,7 +792,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				// Extract URLs from existing application
 				ctx, cancel := withTimeout(5 * time.Minute)
@@ -811,6 +811,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					summarizeBaseURL = cli.ExtractCatalogSummarizeURL(infoOut)
 					gomega.Expect(summarizeBaseURL).NotTo(gomega.BeEmpty(), "Failed to extract summarize URL from existing application")
 					logger.Infof("[TEST] Using existing summarization application: %s (URL: %s)", appName, summarizeBaseURL)
+				} else if templateName == "translate" {
+					translateBaseURL = cli.ExtractCatalogTranslateURL(infoOut)
+					gomega.Expect(translateBaseURL).NotTo(gomega.BeEmpty(), "Failed to extract translate URL from existing application")
+					logger.Infof("[TEST] Using existing translation application: %s (URL: %s)", appName, translateBaseURL)
 				} else if templateName == "digitize" {
 					logger.Infof("[TEST] Using existing digitize application: %s", appName)
 				}
@@ -859,8 +863,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				}
 				logger.Infof("[TEST] RAG application %s created and validated", appName)
-			} else if templateName == "summarize" || templateName == "digitize" || templateName == "extract" {
-				// Deploy standalone service (summarize, digitize, or extract).
+			} else if templateName == "summarize" || templateName == "digitize" || templateName == "extract" || templateName == "translate" {
+				// Deploy standalone service (summarize, digitize, extract, or translate).
 				// URL resolution is deferred to each context's BeforeAll via application info.
 				_, err := cli.CreateApp(
 					ctx,
@@ -874,7 +878,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				logger.Infof("[TEST] %s service %s created successfully", templateName, appName)
 			} else {
-				ginkgo.Fail(fmt.Sprintf("Unsupported template: %s. Supported templates: rag, summarize, digitize, extract", templateName))
+				ginkgo.Fail(fmt.Sprintf("Unsupported template: %s. Supported templates: rag, summarize, digitize, extract, translate", templateName))
 			}
 
 			logger.Infof("[TEST] Application %s created, healthy, and endpoints validated", appName)
@@ -965,8 +969,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	})
 	ginkgo.Context("Runtime Operations", func() {
 		ginkgo.It("stops the application", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
-			if templateName == "summarize" {
-				ginkgo.Skip("Skipping stop/start for summarize template - LLM reload would delay summarization tests")
+			if templateName == "summarize" || templateName == "translate" {
+				ginkgo.Skip("Skipping stop/start for summarize/translate template - LLM reload would delay tests")
 			}
 			ctx, cancel := withTimeout(10 * time.Minute)
 			defer cancel()
@@ -1001,8 +1005,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			logger.Infof("[TEST] Application %s stopped successfully using --pod", appName)
 		})
 		ginkgo.It("starts application pods", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
-			if templateName == "summarize" {
-				ginkgo.Skip("Skipping stop/start for summarize template - LLM reload would delay summarization tests")
+			if templateName == "summarize" || templateName == "translate" {
+				ginkgo.Skip("Skipping stop/start for summarize/translate template - LLM reload would delay tests")
 			}
 			ctx, cancel := withTimeout(10 * time.Minute)
 			defer cancel()
@@ -4490,8 +4494,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			})
 	})
 
+	ginkgo.Context("Translation Service E2E Tests", ginkgo.Label("translation-tests"), translationSpecs)
+
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
-		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "mcp-tests"), func() {
+		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
 			if providedAppName != "" {
 				// The app was provided by the caller - do not delete it so the
 				// caller can inspect or reuse it after the run.
@@ -4507,7 +4513,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[TEST] Application %s deleted successfully", appName)
 		})
-		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "catalog-logout", "mcp-tests"), func() {
+		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-logout", "mcp-tests"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog logout only supported for podman runtime")
 			}

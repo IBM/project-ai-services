@@ -20,10 +20,54 @@ const (
 	CatalogTypeConnectors = "connectors"
 )
 
+// Component category constants, matching the `category` field of a component's metadata.yaml.
+const (
+	// ComponentCategoryModels marks components that serve a model (llm, embedding, reranker, ...).
+	ComponentCategoryModels = "models"
+)
+
+// Model metadata key constants used when persisting model connector metadata.
+const (
+	// MetadataKeyComponentType is the metadata key that stores the component type of a model connector.
+	MetadataKeyComponentType = "component_type"
+	// MetadataKeyModel is the metadata key that stores the model name of a model connector.
+	MetadataKeyModel = "model"
+	// MetadataKeyProfile is the metadata key that stores the deployment profile of a local model.
+	MetadataKeyProfile = "profile"
+	// MetadataKeyParams is the metadata key that holds the non-sensitive provider params of a model.
+	MetadataKeyParams = "params"
+)
+
+const (
+	// ConnectorParamsURLFormat takes connector type and provider ID.
+	ConnectorParamsURLFormat = "/api/v1/connectors/%s/providers/%s/params"
+	// ComponentParamsURLFormat takes component type, provider ID and runtime.
+	ComponentParamsURLFormat = "/api/v1/components/%s/providers/%s/params?runtime=%s"
+)
+
 // Connector type constants.
 const (
 	// ConnectorTypeDatasource is the catalog connector type shared by all datasource providers.
 	ConnectorTypeDatasource = "datasource"
+	// ConnectorTypeModels is the connector type for remote model connectors. It is set server-side
+	// and separates model connectors from datasource connectors in the shared connectors table.
+	ConnectorTypeModels = "models"
+)
+
+// Model connector provider ID constants.
+// These values must match the connector IDs defined in the catalog assets
+// (assets/connectors/models/<id>/metadata.yaml).
+const (
+	// ConnectorProviderWatsonx is the provider ID for IBM watsonx.ai model connectors.
+	ConnectorProviderWatsonx = "watsonx"
+)
+
+// Model deployment type constants.
+const (
+	// DeploymentTypeLocal means the model runs as a pod on a worker.
+	DeploymentTypeLocal = "local"
+	// DeploymentTypeRemote means the model is hosted externally and only registered.
+	DeploymentTypeRemote = "remote"
 )
 
 // Datasource provider ID constants.

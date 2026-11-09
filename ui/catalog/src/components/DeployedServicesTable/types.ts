@@ -85,7 +85,7 @@ export const INITIAL_STATE: AppState = {
   pageSize: 20,
   totalItems: 0,
   isDeleteDialogOpen: false,
-  isConfirmed: false,
+  confirmValue: "",
   isExporting: false,
   rowsData: [],
   selectedRowId: null,
@@ -116,7 +116,7 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ...state,
         rowsData: state.rowsData.filter((r) => r.id !== action.payload),
         isDeleteDialogOpen: false,
-        isConfirmed: false,
+        confirmValue: "",
       };
     case ACTION_TYPES.DEPLOYED_SERVICES_TOGGLE_SERVICE_FILTER:
       // Single-select: selecting same deselects, selecting new replaces previous
