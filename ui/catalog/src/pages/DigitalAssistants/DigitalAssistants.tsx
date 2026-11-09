@@ -1,4 +1,5 @@
-import { Fragment, useReducer, useCallback, useRef } from "react";
+import { Fragment, useReducer, useCallback, useRef, useEffect } from "react";
+import axios from "axios";
 import { api } from "@/api/axios";
 import { APPLICATION_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type { ApplicationDetailsApiResponse } from "@/types/api.types";
@@ -45,6 +46,7 @@ import type { SharedTableAction } from "@/components/Table/types";
 import { DeployFlow } from "@/components/DeployFlow/DigitalAssistant";
 import {
   fetchApplications,
+  fetchAllApplications,
   deleteApplication,
   transformApplicationToRow,
 } from "@/api/applications.api";
@@ -58,10 +60,8 @@ import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
 import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
 import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
-import {
-  filterRowsBySearch,
-  getVisibleHeaders,
-} from "@/components/Table/utils/tableUtils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { getVisibleHeaders } from "@/components/Table/utils/tableUtils";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 // Generic cell renderer wrapper
@@ -152,11 +152,31 @@ const DigitalAssistantsPage = () => {
   const hasTransitionalRowRef = useRef(hasTransitionalRow);
   hasTransitionalRowRef.current = hasTransitionalRow;
 
+  const debouncedSearch = useDebouncedValue(state.search.trim(), 400);
+  const debouncedSearchRef = useRef(debouncedSearch);
+  debouncedSearchRef.current = debouncedSearch;
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Flips to true after the very first successful fetch. Used by showSkeleton
+  // so that all subsequent loads use the dimming overlay instead of the full skeleton.
+  const hasEverLoadedRef = useRef(false);
+
   const loadApplications = useCallback(
-    async (page = pageRef.current, pageSize = pageSizeRef.current) => {
+    async (
+      page = pageRef.current,
+      pageSize = pageSizeRef.current,
+      search = debouncedSearchRef.current,
+    ) => {
       if (!catalogId) {
         return;
       }
+
+      // Cancel previous pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
       // Skip the skeleton while rows are transitional so polling updates statuses in place
       if (!hasTransitionalRowRef.current) {
@@ -165,11 +185,15 @@ const DigitalAssistantsPage = () => {
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
-        const response = await fetchApplications({
-          page,
-          page_size: pageSize,
-          catalog_id: catalogId,
-        });
+        const response = await fetchApplications(
+          {
+            page,
+            page_size: pageSize,
+            catalog_id: catalogId,
+          },
+          search,
+          { signal: controller.signal },
+        );
 
         const rows = response.data.map(transformApplicationToRow);
 
@@ -180,10 +204,11 @@ const DigitalAssistantsPage = () => {
         if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          void loadApplications(totalPages, pageSize);
+          void loadApplications(totalPages, pageSize, search);
           return;
         }
 
+        hasEverLoadedRef.current = true;
         dispatch({
           type: ACTION_TYPES.FETCH_APPLICATIONS_SUCCESS,
           payload: {
@@ -192,6 +217,16 @@ const DigitalAssistantsPage = () => {
           },
         } as AppAction);
       } catch (error) {
+        // The axios interceptor wraps cancellations in a generic Error, so
+        // check the signal itself to ignore superseded requests.
+        if (
+          controller.signal.aborted ||
+          (error instanceof Error && error.name === "AbortError") ||
+          axios.isCancel(error)
+        ) {
+          return;
+        }
+
         const errorMessage =
           error instanceof Error
             ? error.message
@@ -203,10 +238,34 @@ const DigitalAssistantsPage = () => {
     [catalogId],
   );
 
+  const isFirstMount = useRef(true);
+
+  // Trigger search on debounced term changes (resetting page to 1)
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    pageRef.current = 1;
+    dispatch({ type: "SHARED_SET_PAGE", payload: 1 });
+    void loadApplications(1, pageSizeRef.current, debouncedSearch);
+  }, [debouncedSearch, loadApplications]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   // Mount fetch + 2-minute auto-refresh interval (shared hook).
+  // hasData is always true so auto-refresh keeps running on empty/no-match results.
   useAutoRefresh({
     fetchFn: loadApplications,
-    hasData: state.rowsData.length > 0,
+    hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
     hasTransitionalRow,
   });
@@ -259,32 +318,16 @@ const DigitalAssistantsPage = () => {
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: [
-      "name",
-      "status",
-      "uptime",
-      "workerResource",
-      "workerType",
-      "messages",
-    ],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
+    serverSideSearch: true,
     fetchAllRows: async () => {
-      let currentPage = 1;
-      let hasNext = true;
-      const allData: import("@/types/api.types").Application[] = [];
-
-      while (hasNext) {
-        const response = await fetchApplications({
-          page: currentPage,
-          page_size: 100,
-          catalog_id: catalogId,
-        });
-        allData.push(...response.data);
-        hasNext = response.pagination?.has_next ?? false;
-        currentPage++;
-      }
-
+      // Use state.search.trim() (the immediate input value) so the export
+      // always reflects what the user sees in the search box
+      const allData = await fetchAllApplications(
+        catalogId,
+        state.search.trim(),
+      );
       return allData.map(transformApplicationToRow) as unknown as Record<
         string,
         unknown
@@ -293,23 +336,24 @@ const DigitalAssistantsPage = () => {
     dispatch,
   });
 
-  // Apply search filter with shared utility
-  const filteredRows = filterRowsBySearch<Record<string, unknown>>(
-    state.rowsData as unknown as Record<string, unknown>[],
-    state.search,
-    ["name", "status", "uptime", "workerResource", "workerType", "messages"],
-  ) as unknown as DigitalAssistantRow[];
-
   const noApplications =
-    state.rowsData.length === 0 && !state.isLoading && !state.fetchError;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !debouncedSearch;
   const noSearchResults =
-    state.rowsData.length > 0 && filteredRows.length === 0 && !state.fetchError;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !!debouncedSearch;
 
   // Visible headers for the DataTable (shared utility)
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
   const selectedItemName =
     state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
+  // Show the full skeleton only on the very first load
+  const showSkeleton = state.isLoading && !hasEverLoadedRef.current;
 
   // Navigate to DeploymentDetails with integration section pre-selected
   const handleViewIntegration = (rowId: string) => {
@@ -452,7 +496,7 @@ const DigitalAssistantsPage = () => {
             <div className={styles.tableContent}>
               <Grid fullWidth>
                 <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-                  {state.isLoading ? (
+                  {showSkeleton ? (
                     <DataTableSkeleton
                       headers={HEADERS}
                       rowCount={state.pageSize}
@@ -460,7 +504,7 @@ const DigitalAssistantsPage = () => {
                     />
                   ) : (
                     <DataTable
-                      rows={filteredRows}
+                      rows={state.rowsData}
                       headers={visibleHeaders}
                       size="lg"
                     >
@@ -518,7 +562,14 @@ const DigitalAssistantsPage = () => {
                               </Button>
                             </TableToolbarActions>
 
-                            <Table {...getTableProps()}>
+                            <Table
+                              className={
+                                state.isLoading
+                                  ? styles.loadingTable
+                                  : undefined
+                              }
+                              {...getTableProps()}
+                            >
                               <TableHead>
                                 <TableRow>
                                   <TableExpandHeader
@@ -546,7 +597,7 @@ const DigitalAssistantsPage = () => {
                                         getRowProps({
                                           row,
                                         });
-                                      const originalRow = filteredRows.find(
+                                      const originalRow = state.rowsData.find(
                                         (r: DigitalAssistantRow) =>
                                           r.id === row.id,
                                       );
@@ -634,7 +685,7 @@ const DigitalAssistantsPage = () => {
 
                           {!state.isLoading &&
                             state.totalItems > state.pageSize &&
-                            filteredRows.length > 0 && (
+                            state.rowsData.length > 0 && (
                               <Pagination
                                 page={state.page}
                                 pageSize={state.pageSize}
