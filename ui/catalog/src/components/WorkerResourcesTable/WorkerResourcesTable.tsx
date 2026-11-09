@@ -1,4 +1,5 @@
 import { useReducer, useCallback, useRef, useEffect } from "react";
+import axios from "axios";
 import {
   DataTable,
   Table,
@@ -36,10 +37,8 @@ import DeregisterWorkerModal from "./DeregisterWorkerModal";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
 import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
 import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
-import {
-  filterRowsBySearch,
-  getVisibleHeaders,
-} from "@/components/Table/utils/tableUtils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { getVisibleHeaders } from "@/components/Table/utils/tableUtils";
 import {
   fetchWorkerResources,
   fetchAllWorkerResources,
@@ -107,13 +106,35 @@ const WorkerResourcesTable = ({
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
 
+  const debouncedSearch = useDebouncedValue(state.search.trim(), 400);
+  const debouncedSearchRef = useRef(debouncedSearch);
+  debouncedSearchRef.current = debouncedSearch;
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Flips to true after the very first successful fetch. Used by showSkeleton
+  // so that all subsequent loads use the dimming overlay instead of the full skeleton.
+  const hasEverLoadedRef = useRef(false);
+
   const loadWorkers = useCallback(
-    async (page = pageRef.current, pageSize = pageSizeRef.current) => {
+    async (
+      page = pageRef.current,
+      pageSize = pageSizeRef.current,
+      search = debouncedSearchRef.current,
+    ) => {
+      // Cancel previous pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
       dispatch({ type: "SHARED_SET_LOADING", payload: true });
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
-        const response = await fetchWorkerResources(page, pageSize);
+        const response = await fetchWorkerResources(page, pageSize, search, {
+          signal: controller.signal,
+        });
         const rows = response.data.map(transformWorkerToRow);
         const totalItems = response.pagination.total_items;
 
@@ -121,15 +142,26 @@ const WorkerResourcesTable = ({
         if (page > totalPages) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          void loadWorkers(totalPages, pageSize);
+          void loadWorkers(totalPages, pageSize, search);
           return;
         }
 
+        hasEverLoadedRef.current = true;
         dispatch({
           type: ACTION_TYPES.FETCH_WORKERS_SUCCESS,
           payload: { rows, total: totalItems },
         });
       } catch (error) {
+        // The axios interceptor wraps cancellations in a generic Error, so
+        // check the signal itself to ignore superseded requests.
+        if (
+          controller.signal.aborted ||
+          (error instanceof Error && error.name === "AbortError") ||
+          axios.isCancel(error)
+        ) {
+          return;
+        }
+
         const errorMessage =
           error instanceof Error
             ? error.message
@@ -140,6 +172,29 @@ const WorkerResourcesTable = ({
     },
     [],
   );
+
+  const isFirstMount = useRef(true);
+
+  // Trigger search on debounced term changes (resetting page to 1)
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    pageRef.current = 1;
+    dispatch({ type: "SHARED_SET_PAGE", payload: 1 });
+    void loadWorkers(1, pageSizeRef.current, debouncedSearch);
+  }, [debouncedSearch, loadWorkers]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const selectedRowSnapshot = useRef<WorkerResourceRow | undefined>(undefined);
   const selectedRow = state.rowsData.find((r) => r.id === state.selectedRowId);
@@ -171,9 +226,10 @@ const WorkerResourcesTable = ({
     }
   }, [state.selectedRowId, state.rowsData, loadWorkers]);
 
+  // Mount fetch + 2-minute auto-refresh.
   useAutoRefresh({
     fetchFn: loadWorkers,
-    hasData: state.rowsData.length > 0,
+    hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
     refreshTrigger,
   });
@@ -188,11 +244,13 @@ const WorkerResourcesTable = ({
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: ["name", "status", "runtime_label", "message"],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
+    serverSideSearch: true,
     fetchAllRows: async () => {
-      const allData = await fetchAllWorkerResources();
+      // Use state.search.trim() (the immediate input value) so the export
+      // always reflects what the user sees in the search box
+      const allData = await fetchAllWorkerResources(state.search.trim());
       return allData.map(transformWorkerToRow) as unknown as Record<
         string,
         unknown
@@ -201,18 +259,21 @@ const WorkerResourcesTable = ({
     dispatch,
   });
 
-  const filteredRows = filterRowsBySearch<Record<string, unknown>>(
-    state.rowsData as unknown as Record<string, unknown>[],
-    state.search,
-    ["name", "status", "runtime_label", "message"],
-  ) as unknown as WorkerResourceRow[];
-
   const noData =
-    state.rowsData.length === 0 && !state.isLoading && !state.fetchError;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !debouncedSearch;
   const noSearchResults =
-    state.rowsData.length > 0 && filteredRows.length === 0 && !state.fetchError;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !!debouncedSearch;
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
+
+  // Show the full skeleton only on the very first load
+  const showSkeleton = state.isLoading && !hasEverLoadedRef.current;
 
   useEffect(() => {
     if (!registerError) return;
@@ -267,14 +328,18 @@ const WorkerResourcesTable = ({
       <div className={styles.tableContent}>
         <Grid fullWidth>
           <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-            {state.isLoading ? (
+            {showSkeleton ? (
               <DataTableSkeleton
                 headers={HEADERS}
                 rowCount={state.pageSize}
                 columnCount={HEADERS.length}
               />
             ) : (
-              <DataTable rows={filteredRows} headers={visibleHeaders} size="lg">
+              <DataTable
+                rows={state.rowsData}
+                headers={visibleHeaders}
+                size="lg"
+              >
                 {({
                   rows,
                   headers,
@@ -322,7 +387,12 @@ const WorkerResourcesTable = ({
                         </Button>
                       </TableToolbarActions>
 
-                      <Table {...getTableProps()}>
+                      <Table
+                        className={
+                          state.isLoading ? styles.loadingTable : undefined
+                        }
+                        {...getTableProps()}
+                      >
                         <TableHead>
                           <TableRow>
                             {headers.map((header) => {
@@ -344,7 +414,7 @@ const WorkerResourcesTable = ({
                               const { key: rowKey, ...rowProps } = getRowProps({
                                 row,
                               });
-                              const originalRow = filteredRows.find(
+                              const originalRow = state.rowsData.find(
                                 (r) => r.id === row.id,
                               );
 
@@ -384,7 +454,7 @@ const WorkerResourcesTable = ({
 
                     {!state.isLoading &&
                       state.totalItems > state.pageSize &&
-                      filteredRows.length > 0 && (
+                      state.rowsData.length > 0 && (
                         <Pagination
                           page={state.page}
                           pageSize={state.pageSize}
