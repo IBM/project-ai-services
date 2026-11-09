@@ -33,6 +33,7 @@ EXTRA_PACKAGES=(
     "certifi>=2026.10.19"
     "filelock>=4.2.1"
     "dnspython>=2.9.0"
+    "oauthlib>=4.0.1"
 )
 
 # ---------------------------------------------------------------------------
@@ -74,10 +75,12 @@ for REL_PATH in "${TOML_FILES[@]}"; do
     for PKG in "${PPC64LE_EXCLUDE_PACKAGES[@]}"; do
         if grep -q "$PKG" "$REL_PATH"; then
             echo "Patching in $REL_PATH: $PKG"
-            sed -i -E '/'"$PKG"'/ {
+            # -i.sedbak (no space) works on both GNU and BSD/macOS sed
+            sed -i.sedbak -E '/'"$PKG"'/ {
                 /;/ s/("[^"]+)(".*)/\1 and platform_machine != '\''ppc64le'\''\2/
                 /;/! s/("[^"]+)(".*)/\1; platform_machine != '\''ppc64le'\''\2/
             }' "$REL_PATH"
+            rm -f "${REL_PATH}.sedbak"
         fi
     done
 done
@@ -123,7 +126,8 @@ for REL_PATH in "${TOML_FILES[@]}"; do
         NEW_STR="${BUMP#*|}"
         if grep -q "${OLD_STR}" "$REL_PATH"; then
             echo "Bumping in $REL_PATH: ${OLD_STR} → ${NEW_STR}"
-            sed -i "s|${OLD_STR}|${NEW_STR}|g" "$REL_PATH"
+            sed -i.sedbak "s|${OLD_STR}|${NEW_STR}|g" "$REL_PATH"
+            rm -f "${REL_PATH}.sedbak"
         else
             echo "WARNING: '${OLD_STR}' not found in $REL_PATH — upstream may have already changed this."
         fi

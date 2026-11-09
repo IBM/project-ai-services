@@ -46,9 +46,6 @@ RUN tar -xzf v${VERSION}.tar.gz && \
 	--extra proxy \
 	--extra semantic-router \
 	-o requirements.txt && \
-# Pin indirect dependency oauthlib to 4.0.1 (the resolver picks a lower version) \
-    sed -i '/^oauthlib==/d' requirements.txt && \
-    echo "oauthlib==4.0.1" >> requirements.txt && \
     cat requirements.txt
 
 WORKDIR /build/litellm-${VERSION}
