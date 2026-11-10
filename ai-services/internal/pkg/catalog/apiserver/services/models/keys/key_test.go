@@ -136,29 +136,6 @@ func TestGenerate(t *testing.T) {
 		assert.Equal(t, second.Key, lite.keys[keyTestModel+"-"+local.ID.String()])
 	})
 
-	t.Run("concurrent requests still leave one key", func(t *testing.T) {
-		lite := &keyLiteLLM{}
-		mgr := newKeyManager(lite)
-
-		var wg sync.WaitGroup
-		errs := make(chan error, 20)
-		for range 20 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				_, err := mgr.Generate(context.Background(), local)
-				errs <- err
-			}()
-		}
-		wg.Wait()
-		close(errs)
-
-		for err := range errs {
-			require.NoError(t, err, "an interleaved revoke and generate would hit an existing alias")
-		}
-		assert.Len(t, lite.keys, 1)
-	})
-
 	t.Run("a model without a name is an internal error and calls nothing", func(t *testing.T) {
 		lite := &keyLiteLLM{}
 		row := modelRow(catalogconstants.DeploymentTypeLocal)

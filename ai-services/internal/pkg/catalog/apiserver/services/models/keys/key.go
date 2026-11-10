@@ -5,7 +5,6 @@ package keys
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
@@ -23,7 +22,6 @@ const (
 // Manager generates the public LiteLLM keys of models.
 type Manager struct {
 	litellm catalogclient.LiteLLMClient
-	locks   aliasLocks
 }
 
 // NewManager creates a key manager. litellm creates and revokes the keys.
@@ -31,37 +29,15 @@ func NewManager(litellm catalogclient.LiteLLMClient) *Manager {
 	return &Manager{litellm: litellm}
 }
 
-// aliasLocks serialises work per key alias, so two concurrent key requests for one model ID cannot
-// interleave their revoke and generate calls. It is per process: the catalog API runs as a single
-// instance, and LiteLLM's alias uniqueness still rejects a second key if that ever changes.
-type aliasLocks struct {
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
-}
-
-// lock blocks until the lock for name is held and returns the function that releases it.
-func (m *aliasLocks) lock(name string) func() {
-	m.mu.Lock()
-	l, ok := m.locks[name]
-	if !ok {
-		if m.locks == nil {
-			m.locks = map[string]*sync.Mutex{}
-		}
-		l = &sync.Mutex{}
-		m.locks[name] = l
-	}
-	m.mu.Unlock()
-
-	l.Lock()
-
-	return l.Unlock
-}
-
 // Generate generates the public LiteLLM key of a model, local or remote.
 //
 // The model must already be one the caller may use: Generate does not check ownership. The key is
 // aliased "<modelName>-<id>", which LiteLLM keeps unique. Any existing key with that alias is revoked first, so
 // at most one public key exists per ID. The key is returned once and is neither stored nor logged.
+//
+// Concurrent requests for one ID are not serialised: if their revoke and generate calls interleave,
+// LiteLLM rejects the second key because its alias exists, and that request fails with a 502 asking
+// the caller to retry. There is still never more than one key.
 //
 // Errors of type *validators.ValidationError carry the HTTP status to return; any other error is
 // an internal failure.
@@ -71,10 +47,6 @@ func (m *Manager) Generate(ctx context.Context, model *dbrepo.ModelRow) (*apimod
 	}
 
 	alias := fmt.Sprintf("%s-%s", model.Model, model.ID)
-
-	// The lock covers the revoke and the generate, so a concurrent request cannot slip a key in
-	// between them.
-	defer m.locks.lock(alias)()
 
 	key, err := m.rotatePublicKey(ctx, model.ID, alias, model.Model)
 	if err != nil {
