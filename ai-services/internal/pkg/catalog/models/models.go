@@ -120,21 +120,18 @@ func SetInfo(result *types.ModelDeployOptions, name, componentType string) {
 	}
 }
 
-// SetComponentTypeNames fills the component type's display names from the first component of that type.
+// SetComponentTypeNames fills the component type's display names from the components of that type.
 func SetComponentTypeNames(result *types.ModelDeployOptions, components []types.Component) {
 	ct := &result.ComponentType
 	for _, c := range components {
-		if ct.Name != "" && ct.ShortName != "" {
-			return
-		}
-		if c.ComponentType != ct.ID {
+		if c.ComponentType.ID != ct.ID {
 			continue
 		}
 		if ct.Name == "" {
-			ct.Name = c.ComponentName
+			ct.Name = c.ComponentType.Name
 		}
 		if ct.ShortName == "" {
-			ct.ShortName = c.ComponentShortName
+			ct.ShortName = c.ComponentType.ShortName
 		}
 		if ct.Name != "" && ct.ShortName != "" {
 			return

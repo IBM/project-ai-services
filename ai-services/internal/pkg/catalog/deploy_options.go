@@ -239,13 +239,13 @@ func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, compo
 	var componentName string
 
 	for _, comp := range allComponents {
-		if comp.ComponentType != componentType {
+		if comp.ComponentType.ID != componentType {
 			continue
 		}
 
 		// Get component name from first matching component
-		if componentName == "" && comp.ComponentName != "" {
-			componentName = comp.ComponentName
+		if componentName == "" && comp.ComponentType.Name != "" {
+			componentName = comp.ComponentType.Name
 		}
 
 		// Build provider with version, resources and schema

@@ -165,43 +165,17 @@ type ServiceSummary struct {
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
 type Component struct {
-	ID            string `yaml:"id" json:"id"`
-	Name          string `yaml:"name" json:"name"`
-	Description   string `yaml:"description" json:"description"`
-	Type          string `yaml:"type" json:"type"`        // "component"
-	ComponentType string `yaml:"-" json:"component_type"` // "vector_store", "embedding", "llm", etc.
-	ComponentName string `yaml:"-" json:"component_name"` // Display name for component type (e.g., "Vector store", "Large language model")
-	// ComponentShortName is the short display label for the component type (e.g., "LLM").
-	ComponentShortName string `yaml:"-" json:"component_short_name,omitempty"`
-	Default            bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
+	ID          string `yaml:"id" json:"id"`
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+	Type        string `yaml:"type" json:"type"` // "component"
+	// ComponentType is the component type this provider belongs to ("vector_store", "embedding", "llm", etc.).
+	ComponentType ComponentType `yaml:"component_type" json:"component_type"`
+	Default       bool          `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
 	// Category groups components by purpose, e.g. "models" for components that serve a model.
 	Category string `yaml:"category,omitempty" json:"category,omitempty"`
 	// LiteLLM describes how a "models" component is exposed through the LiteLLM gateway.
 	LiteLLM *LiteLLMConfig `yaml:"litellm,omitempty" json:"-"`
-}
-
-// UnmarshalYAML reads metadata.yaml, where component_type is a block:
-//
-//	component_type:
-//	  id: llm
-//	  name: "Large language model (LLM)"
-//	  short_name: "LLM"
-func (c *Component) UnmarshalYAML(value *yaml.Node) error {
-	type plain Component
-	aux := struct {
-		plain         `yaml:",inline"`
-		ComponentType ComponentType `yaml:"component_type"`
-	}{}
-	if err := value.Decode(&aux); err != nil {
-		return err
-	}
-
-	*c = Component(aux.plain)
-	c.ComponentType = aux.ComponentType.ID
-	c.ComponentName = aux.ComponentType.Name
-	c.ComponentShortName = aux.ComponentType.ShortName
-
-	return nil
 }
 
 // LiteLLMConfig is the gateway registration settings of a model component provider.

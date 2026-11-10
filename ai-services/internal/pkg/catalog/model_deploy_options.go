@@ -75,7 +75,7 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 		return nil
 	}
 
-	models.SetInfo(result, model.Name, item.Component.ComponentType)
+	models.SetInfo(result, model.Name, item.Component.ComponentType.ID)
 
 	// No profiles in models.yaml: a legacy per-app component (e.g. llm/watsonx), not deployable on its own.
 	if len(model.Profiles) == 0 {
@@ -83,7 +83,7 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 	}
 	// No metadata file for this runtime: provider is unsupported here.
 	// Any other failure (e.g. corrupt YAML) is a real error and must surface.
-	md, err := p.LoadComponentRuntimeMetadata(item.Component.ComponentType, item.Component.ID)
+	md, err := p.LoadComponentRuntimeMetadata(item.Component.ComponentType.ID, item.Component.ID)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -142,8 +142,8 @@ func (p *CatalogProvider) buildLocalModelProvider(ctx context.Context, item *cat
 	}
 
 	// Omit the schema link when the provider has no settings to fill in.
-	if schema, err := p.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID); err == nil && hasNonEmptyProperties(schema) {
-		provider.Schema = fmt.Sprintf(constants.ComponentParamsURLFormat, comp.ComponentType, comp.ID, runtimeType)
+	if schema, err := p.GetComponentProviderParams(ctx, comp.ComponentType.ID, comp.ID); err == nil && hasNonEmptyProperties(schema) {
+		provider.Schema = fmt.Sprintf(constants.ComponentParamsURLFormat, comp.ComponentType.ID, comp.ID, runtimeType)
 	}
 
 	return provider, nil

@@ -103,7 +103,7 @@ func (p *CatalogProvider) collectComponentsModels(ctx context.Context, dependenc
 // collectComponentsByTypeModels collects models for all components of a specific type.
 func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, componentType string, components []types.Component, allModels map[string]bool, excludeComponentProviders []string) error {
 	for _, comp := range components {
-		if comp.ComponentType != componentType {
+		if comp.ComponentType.ID != componentType {
 			continue
 		}
 
@@ -111,7 +111,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 		excluded := false
 		for _, excludedID := range excludeComponentProviders {
 			if strings.EqualFold(comp.ID, excludedID) {
-				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID)
+				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType.ID, comp.ID)
 				excluded = true
 
 				break
@@ -121,8 +121,8 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 			continue
 		}
 
-		if err := p.addComponentModels(ctx, comp.ComponentType, comp.ID, allModels); err != nil {
-			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType, comp.ID, err)
+		if err := p.addComponentModels(ctx, comp.ComponentType.ID, comp.ID, allModels); err != nil {
+			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType.ID, comp.ID, err)
 		}
 	}
 

@@ -227,9 +227,9 @@ func TestSetInfo(t *testing.T) {
 
 func TestSetComponentTypeNames(t *testing.T) {
 	components := []types.Component{
-		{ComponentType: "embedding", ComponentName: "Embedding", ComponentShortName: "EMB"},
-		{ComponentType: "llm", ComponentName: "Large language model", ComponentShortName: "LLM"},
-		{ComponentType: "llm", ComponentName: "Second", ComponentShortName: "2nd"},
+		{ComponentType: types.ComponentType{ID: "embedding", Name: "Embedding", ShortName: "EMB"}},
+		{ComponentType: types.ComponentType{ID: "llm", Name: "Large language model", ShortName: "LLM"}},
+		{ComponentType: types.ComponentType{ID: "llm", Name: "Second", ShortName: "2nd"}},
 	}
 
 	t.Run("fills names from first component of matching type", func(t *testing.T) {

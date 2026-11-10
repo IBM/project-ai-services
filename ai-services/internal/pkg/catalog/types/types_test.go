@@ -170,7 +170,7 @@ func TestComponentTypeUnmarshalYAML(t *testing.T) {
 }
 
 func TestComponentUnmarshalYAML(t *testing.T) {
-	t.Run("block component_type populates type, name and short name", func(t *testing.T) {
+	t.Run("block component_type populates id, name and short name", func(t *testing.T) {
 		in := `
 id: vllm-cpu
 name: vLLM CPU
@@ -194,7 +194,7 @@ litellm:
 		if c.ID != "vllm-cpu" || c.Name != "vLLM CPU" || c.Type != "component" || !c.Default || c.Category != "models" {
 			t.Errorf("plain fields not decoded: %+v", c)
 		}
-		if c.ComponentType != "llm" || c.ComponentName != "Large language model (LLM)" || c.ComponentShortName != "LLM" {
+		if c.ComponentType != (ComponentType{ID: "llm", Name: "Large language model (LLM)", ShortName: "LLM"}) {
 			t.Errorf("component type fields wrong: %+v", c)
 		}
 		if c.LiteLLM == nil || c.LiteLLM.Provider != "hosted_vllm" || c.LiteLLM.ModelMode != "chat" {
@@ -207,7 +207,7 @@ litellm:
 		if err := yaml.Unmarshal([]byte("id: x\ncomponent_type: llm\n"), &c); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if c.ID != "x" || c.ComponentType != "llm" || c.ComponentName != "" || c.ComponentShortName != "" {
+		if c.ID != "x" || c.ComponentType != (ComponentType{ID: "llm"}) {
 			t.Errorf("got %+v", c)
 		}
 	})
@@ -217,7 +217,7 @@ litellm:
 		if err := yaml.Unmarshal([]byte("id: x\n"), &c); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if c.ComponentType != "" || c.ComponentName != "" {
+		if c.ComponentType != (ComponentType{}) {
 			t.Errorf("got %+v", c)
 		}
 	})
