@@ -4471,7 +4471,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelComponentType": {
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType": {
             "type": "object",
             "properties": {
                 "id": {
@@ -4489,7 +4489,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "component_type": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelComponentType"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
                 },
                 "id": {
                     "type": "string"

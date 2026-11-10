@@ -123,12 +123,12 @@ func (p *CatalogProvider) buildLocalModelProvider(ctx context.Context, item *cat
 	}
 	profilesByID := profiles.ByID(allProfiles)
 
-	var cpu, storage int
+	var base types.Resources
 	if md.Resources != nil {
-		cpu, storage = md.Resources.CPU, md.Resources.Storage
+		base.CPU, base.Storage = md.Resources.CPU, md.Resources.Storage
 	}
 
-	deployProfiles, err := models.BuildDeployProfiles(model, profilesByID, comp.ID, cpu, storage)
+	deployProfiles, err := models.BuildDeployProfiles(model, profilesByID, comp.ID, base)
 	if err != nil {
 		return nil, err
 	}

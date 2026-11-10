@@ -142,6 +142,87 @@ about:
 	}
 }
 
+func TestComponentTypeUnmarshalYAML(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    ComponentType
+		wantErr bool
+	}{
+		{"scalar id", `llm`, ComponentType{ID: "llm"}, false},
+		{"block form", "id: llm\nname: Large Language Model\nshort_name: LLM\n", ComponentType{ID: "llm", Name: "Large Language Model", ShortName: "LLM"}, false},
+		{"block with only id", "id: embedding\n", ComponentType{ID: "embedding"}, false},
+		{"invalid node kind", "- a\n- b\n", ComponentType{}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got ComponentType
+			err := yaml.Unmarshal([]byte(tt.in), &got)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComponentUnmarshalYAML(t *testing.T) {
+	t.Run("block component_type populates type, name and short name", func(t *testing.T) {
+		in := `
+id: vllm-cpu
+name: vLLM CPU
+description: d
+type: component
+default: true
+category: models
+component_type:
+  id: llm
+  name: "Large Language Model (LLM)"
+  short_name: "LLM"
+litellm:
+  provider: hosted_vllm
+  model_mode: chat
+  api_base_path: /v1
+`
+		var c Component
+		if err := yaml.Unmarshal([]byte(in), &c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.ID != "vllm-cpu" || c.Name != "vLLM CPU" || c.Type != "component" || !c.Default || c.Category != "models" {
+			t.Errorf("plain fields not decoded: %+v", c)
+		}
+		if c.ComponentType != "llm" || c.ComponentName != "Large Language Model (LLM)" || c.ComponentShortName != "LLM" {
+			t.Errorf("component type fields wrong: %+v", c)
+		}
+		if c.LiteLLM == nil || c.LiteLLM.Provider != "hosted_vllm" || c.LiteLLM.ModelMode != "chat" {
+			t.Errorf("litellm not decoded: %+v", c.LiteLLM)
+		}
+	})
+
+	t.Run("scalar component_type (bundle form) sets only the id", func(t *testing.T) {
+		var c Component
+		if err := yaml.Unmarshal([]byte("id: x\ncomponent_type: llm\n"), &c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.ID != "x" || c.ComponentType != "llm" || c.ComponentName != "" || c.ComponentShortName != "" {
+			t.Errorf("got %+v", c)
+		}
+	})
+
+	t.Run("missing component_type leaves fields empty", func(t *testing.T) {
+		var c Component
+		if err := yaml.Unmarshal([]byte("id: x\n"), &c); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.ComponentType != "" || c.ComponentName != "" {
+			t.Errorf("got %+v", c)
+		}
+	})
+}
+
 // Helper function to find substring position
 func findSubstring(s, substr string) int {
 	for i := 0; i <= len(s)-len(substr); i++ {

@@ -190,7 +190,7 @@ func (c *Component) UnmarshalYAML(value *yaml.Node) error {
 	type plain Component
 	aux := struct {
 		plain         `yaml:",inline"`
-		ComponentType ModelComponentType `yaml:"component_type"`
+		ComponentType ComponentType `yaml:"component_type"`
 	}{}
 	if err := value.Decode(&aux); err != nil {
 		return err
@@ -331,8 +331,8 @@ type ModelDeployProvider struct {
 	Schema         string                   `json:"schema,omitempty"`
 }
 
-// ModelComponentType describes the component type (llm, embedding, ...) a model belongs to.
-type ModelComponentType struct {
+// ComponentType describes a component type (llm, embedding, vector_store, ...) by id and display names.
+type ComponentType struct {
 	ID        string `yaml:"id" json:"id"`
 	Name      string `yaml:"name" json:"name"`
 	ShortName string `yaml:"short_name" json:"short_name"`
@@ -341,14 +341,14 @@ type ModelComponentType struct {
 // UnmarshalYAML accepts either the block form (id/name/short_name) or a bare scalar id (e.g. `llm`),
 // the latter being what user-uploaded bundles use.
 // TODO(BYOS): remove the scalar branch once bundle metadata.yaml moves to the block form.
-func (m *ModelComponentType) UnmarshalYAML(value *yaml.Node) error {
+func (m *ComponentType) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind == yaml.ScalarNode {
 		m.ID = value.Value
 
 		return nil
 	}
 
-	type plain ModelComponentType
+	type plain ComponentType
 
 	return value.Decode((*plain)(m))
 }
@@ -357,7 +357,7 @@ func (m *ModelComponentType) UnmarshalYAML(value *yaml.Node) error {
 type ModelDeployOptions struct {
 	ID            string                `json:"id"`
 	Name          string                `json:"name"`
-	ComponentType ModelComponentType    `json:"component_type"`
+	ComponentType ComponentType         `json:"component_type"`
 	Providers     []ModelDeployProvider `json:"providers"`
 }
 

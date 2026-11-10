@@ -1,17 +1,16 @@
-package models_test
+package models
 
 import (
-	"context"
+	"reflect"
 	"testing"
 	"testing/fstest"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
-func TestLoadModelsFromFile(t *testing.T) {
+func TestList(t *testing.T) {
 	fsys := fstest.MapFS{
 		"llm/p/models.yaml": &fstest.MapFile{Data: []byte(`
 - id: org/model-a
@@ -30,7 +29,7 @@ func TestLoadModelsFromFile(t *testing.T) {
 	}
 
 	t.Run("parses entries", func(t *testing.T) {
-		got, err := models.List(fsys, "llm/p")
+		got, err := List(fsys, "llm/p")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -46,20 +45,52 @@ func TestLoadModelsFromFile(t *testing.T) {
 	})
 
 	t.Run("missing file is not an error", func(t *testing.T) {
-		got, err := models.List(fsys, "llm/none")
+		got, err := List(fsys, "llm/none")
 		if err != nil || got != nil {
 			t.Fatalf("expected nil, nil; got %v, %v", got, err)
 		}
 	})
 
 	t.Run("invalid yaml returns error", func(t *testing.T) {
-		if _, err := models.List(fsys, "llm/bad"); err == nil {
+		if _, err := List(fsys, "llm/bad"); err == nil {
 			t.Fatal("expected parse error")
 		}
 	})
 }
 
-func TestInjectModelsIntoSchema(t *testing.T) {
+func TestFind(t *testing.T) {
+	fsys := fstest.MapFS{
+		"llm/p/models.yaml":   &fstest.MapFile{Data: []byte("- id: a\n- id: b\n  title: B\n")},
+		"llm/bad/models.yaml": &fstest.MapFile{Data: []byte("not: [a list")},
+	}
+
+	t.Run("found", func(t *testing.T) {
+		m, err := Find(fsys, "llm/p", "b")
+		if err != nil || m == nil || m.Title != "B" {
+			t.Fatalf("got %+v, %v", m, err)
+		}
+	})
+
+	t.Run("not listed", func(t *testing.T) {
+		if m, err := Find(fsys, "llm/p", "zzz"); err != nil || m != nil {
+			t.Fatalf("expected nil, nil; got %+v, %v", m, err)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		if m, err := Find(fsys, "llm/none", "a"); err != nil || m != nil {
+			t.Fatalf("expected nil, nil; got %+v, %v", m, err)
+		}
+	})
+
+	t.Run("invalid yaml returns error", func(t *testing.T) {
+		if _, err := Find(fsys, "llm/bad", "a"); err == nil {
+			t.Fatal("expected parse error")
+		}
+	})
+}
+
+func TestInjectIntoSchema(t *testing.T) {
 	newSchema := func() map[string]any {
 		return map[string]any{
 			"properties": map[string]any{
@@ -73,7 +104,7 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("uses default flag", func(t *testing.T) {
 		s := newSchema()
-		models.InjectIntoSchema(s, []types.Model{
+		InjectIntoSchema(s, []types.Model{
 			{ID: "a", Title: "A", Description: "da"},
 			{ID: "b", Default: true, Title: "B", Description: "db"},
 		})
@@ -92,7 +123,7 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("falls back to first model", func(t *testing.T) {
 		s := newSchema()
-		models.InjectIntoSchema(s, []types.Model{{ID: "a"}, {ID: "b"}})
+		InjectIntoSchema(s, []types.Model{{ID: "a"}, {ID: "b"}})
 		if got := modelField(s)["default"]; got != "a" {
 			t.Errorf("default = %v, want a", got)
 		}
@@ -100,7 +131,7 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("no models is a no-op", func(t *testing.T) {
 		s := newSchema()
-		models.InjectIntoSchema(s, nil)
+		InjectIntoSchema(s, nil)
 		if _, ok := modelField(s)["oneOf"]; ok {
 			t.Error("oneOf must not be set")
 		}
@@ -108,64 +139,221 @@ func TestInjectModelsIntoSchema(t *testing.T) {
 
 	t.Run("schema without model property is a no-op", func(t *testing.T) {
 		s := map[string]any{"properties": map[string]any{"apiKey": map[string]any{}}}
-		models.InjectIntoSchema(s, []types.Model{{ID: "a"}})
+		InjectIntoSchema(s, []types.Model{{ID: "a"}})
 		if _, ok := s["properties"].(map[string]any)["model"]; ok {
 			t.Error("model property must not be created")
 		}
 	})
 }
 
-// TestEmbeddedProviderSchemasIncludeModels verifies that, for every runtime, the
-// merged schema of each embedded model provider exposes its models from models.yaml.
-func TestEmbeddedProviderSchemasIncludeModels(t *testing.T) {
+func TestExtractFromSchema(t *testing.T) {
 	tests := []struct {
-		componentType string
-		providerID    string
-		wantDefault   string
-		wantModels    []string
+		name   string
+		schema map[string]any
+		want   map[string]bool
 	}{
-		{"llm", "vllm-spyre", "ibm-granite/granite-4.1-8b-fp8", []string{"ibm-granite/granite-3.3-8b-instruct", "ibm-granite/granite-4.1-8b-fp8"}},
-		{"llm", "vllm-cpu", "ibm-granite/granite-4.1-8b", []string{"ibm-granite/granite-3.3-8b-instruct", "ibm-granite/granite-4.1-8b"}},
-		{"llm", "watsonx", "ibm/granite-4-h-small", []string{"ibm/granite-4-h-small"}},
-		{"reranker", "vllm-spyre", "BAAI/bge-reranker-v2-m3", []string{"BAAI/bge-reranker-v2-m3"}},
-		{"reranker", "vllm-cpu", "BAAI/bge-reranker-v2-m3", []string{"BAAI/bge-reranker-v2-m3"}},
-		{"embedding", "vllm-cpu", "ibm-granite/granite-embedding-278m-multilingual", []string{"ibm-granite/granite-embedding-278m-multilingual"}},
+		{
+			name: "collects const values from model properties",
+			schema: map[string]any{"properties": map[string]any{
+				"model": map[string]any{"oneOf": []any{
+					map[string]any{"const": "a"},
+					map[string]any{"const": "b"},
+				}},
+				"embedding_model": map[string]any{"oneOf": []any{map[string]any{"const": "c"}}},
+			}},
+			want: map[string]bool{"a": true, "b": true, "c": true},
+		},
+		{
+			name: "ignores non-model keys, empty and non-string consts",
+			schema: map[string]any{"properties": map[string]any{
+				"apiKey": map[string]any{"oneOf": []any{map[string]any{"const": "x"}}},
+				"model": map[string]any{"oneOf": []any{
+					map[string]any{"const": ""},
+					map[string]any{"const": 1},
+					"not-a-map",
+				}},
+			}},
+			want: map[string]bool{},
+		},
+		{
+			name:   "no properties",
+			schema: map[string]any{},
+			want:   map[string]bool{},
+		},
+		{
+			name:   "model property without oneOf",
+			schema: map[string]any{"properties": map[string]any{"model": map[string]any{"type": "string"}}},
+			want:   map[string]bool{},
+		},
 	}
 
-	base, err := catalog.NewCatalogProvider(nil)
-	if err != nil {
-		t.Fatalf("failed to create catalog provider: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := map[string]bool{}
+			ExtractFromSchema(tt.schema, got)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetInfo(t *testing.T) {
+	t.Run("sets name and type id when empty", func(t *testing.T) {
+		r := &types.ModelDeployOptions{}
+		SetInfo(r, "Granite", "llm")
+		if r.Name != "Granite" || r.ComponentType.ID != "llm" {
+			t.Errorf("got %+v", r)
+		}
+	})
+
+	t.Run("first provider wins", func(t *testing.T) {
+		r := &types.ModelDeployOptions{}
+		SetInfo(r, "Granite", "llm")
+		SetInfo(r, "Other", "embedding")
+		if r.Name != "Granite" || r.ComponentType.ID != "llm" {
+			t.Errorf("got %+v", r)
+		}
+	})
+
+	t.Run("fills only the missing field", func(t *testing.T) {
+		r := &types.ModelDeployOptions{Name: "Preset"}
+		SetInfo(r, "Granite", "llm")
+		if r.Name != "Preset" || r.ComponentType.ID != "llm" {
+			t.Errorf("got %+v", r)
+		}
+	})
+}
+
+func TestSetComponentTypeNames(t *testing.T) {
+	components := []types.Component{
+		{ComponentType: "embedding", ComponentName: "Embedding", ComponentShortName: "EMB"},
+		{ComponentType: "llm", ComponentName: "Large language model", ComponentShortName: "LLM"},
+		{ComponentType: "llm", ComponentName: "Second", ComponentShortName: "2nd"},
 	}
 
-	for _, rt := range []runtimeTypes.RuntimeType{runtimeTypes.RuntimeTypePodman, runtimeTypes.RuntimeTypeOpenShift} {
-		provider, err := base.WithRuntime(rt.String())
+	t.Run("fills names from first component of matching type", func(t *testing.T) {
+		r := &types.ModelDeployOptions{ComponentType: types.ComponentType{ID: "llm"}}
+		SetComponentTypeNames(r, components)
+		if r.ComponentType.Name != "Large language model" || r.ComponentType.ShortName != "LLM" {
+			t.Errorf("got %+v", r.ComponentType)
+		}
+	})
+
+	t.Run("keeps existing names", func(t *testing.T) {
+		r := &types.ModelDeployOptions{ComponentType: types.ComponentType{ID: "llm", Name: "Keep", ShortName: "K"}}
+		SetComponentTypeNames(r, components)
+		if r.ComponentType.Name != "Keep" || r.ComponentType.ShortName != "K" {
+			t.Errorf("got %+v", r.ComponentType)
+		}
+	})
+
+	t.Run("no matching component leaves names empty", func(t *testing.T) {
+		r := &types.ModelDeployOptions{ComponentType: types.ComponentType{ID: "reranker"}}
+		SetComponentTypeNames(r, components)
+		if r.ComponentType.Name != "" || r.ComponentType.ShortName != "" {
+			t.Errorf("got %+v", r.ComponentType)
+		}
+	})
+}
+
+func TestBuildDeployProfiles(t *testing.T) {
+	byID := map[string]profiles.Profile{
+		"p1": {ID: "p1", Name: "P1", Description: "d1", Default: true, Params: profiles.Param{
+			Resources: profiles.Resources{Memory: 100, Accelerators: map[string]int{"ibm.com/spyre_pf": 4}},
+		}},
+		"p2": {ID: "p2", Name: "P2", Params: profiles.Param{Resources: profiles.Resources{Memory: 200}}},
+	}
+
+	t.Run("maps profiles in model order with cpu and storage", func(t *testing.T) {
+		got, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"p2", "p1"}}, byID, "prov", types.Resources{CPU: 2, Storage: 10})
 		if err != nil {
-			t.Fatalf("WithRuntime(%s): %v", rt, err)
+			t.Fatalf("unexpected error: %v", err)
 		}
-
-		for _, tc := range tests {
-			t.Run(rt.String()+"/"+tc.componentType+"/"+tc.providerID, func(t *testing.T) {
-				schema, err := provider.GetComponentProviderParams(context.Background(), tc.componentType, tc.providerID)
-				if err != nil {
-					t.Fatalf("GetComponentProviderParams: %v", err)
-				}
-
-				got := map[string]bool{}
-				models.ExtractFromSchema(schema, got)
-				if len(got) != len(tc.wantModels) {
-					t.Errorf("models = %v, want %v", got, tc.wantModels)
-				}
-				for _, m := range tc.wantModels {
-					if !got[m] {
-						t.Errorf("model %q missing from schema", m)
-					}
-				}
-
-				field := schema["properties"].(map[string]any)["model"].(map[string]any)
-				if field["default"] != tc.wantDefault {
-					t.Errorf("default = %v, want %v", field["default"], tc.wantDefault)
-				}
-			})
+		if len(got) != 2 || got[0].ID != "p2" || got[1].ID != "p1" {
+			t.Fatalf("unexpected order: %+v", got)
 		}
+		want := types.Resources{CPU: 2, Memory: 100, Storage: 10, Accelerators: map[string]int{"ibm.com/spyre_pf": 4}}
+		if !reflect.DeepEqual(got[1].Resources, want) {
+			t.Errorf("resources = %+v, want %+v", got[1].Resources, want)
+		}
+		if got[1].Name != "P1" || got[1].Description != "d1" {
+			t.Errorf("unexpected metadata: %+v", got[1])
+		}
+	})
+
+	t.Run("profile default flag used when model has no default_profile", func(t *testing.T) {
+		got, _ := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"p1", "p2"}}, byID, "prov", types.Resources{})
+		if !got[0].Default || got[1].Default {
+			t.Errorf("defaults = %v, %v; want true, false", got[0].Default, got[1].Default)
+		}
+	})
+
+	t.Run("model default_profile overrides profile flag", func(t *testing.T) {
+		got, _ := BuildDeployProfiles(&types.Model{ID: "m", DefaultProfile: "p2", Profiles: []string{"p1", "p2"}}, byID, "prov", types.Resources{})
+		if got[0].Default || !got[1].Default {
+			t.Errorf("defaults = %v, %v; want false, true", got[0].Default, got[1].Default)
+		}
+	})
+
+	t.Run("unknown profile id is an error", func(t *testing.T) {
+		if _, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"nope"}}, byID, "prov", types.Resources{}); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("no profiles gives empty non-nil slice", func(t *testing.T) {
+		got, err := BuildDeployProfiles(&types.Model{ID: "m"}, byID, "prov", types.Resources{})
+		if err != nil || got == nil || len(got) != 0 {
+			t.Errorf("got %v, %v", got, err)
+		}
+	})
+}
+
+func TestFilterAndSortProviders(t *testing.T) {
+	local, remote := constants.DeploymentTypeLocal, constants.DeploymentTypeRemote
+	providers := []types.ModelDeployProvider{
+		{ID: "watsonx", DeploymentType: remote},
+		{ID: "vllm-spyre", DeploymentType: local},
+		{ID: "vllm-cpu", DeploymentType: local, Default: true},
+		{ID: "a-remote", DeploymentType: remote},
+		{ID: "b-local", DeploymentType: local},
 	}
+
+	ids := func(ps []types.ModelDeployProvider) []string {
+		out := make([]string, 0, len(ps))
+		for _, p := range ps {
+			out = append(out, p.ID)
+		}
+
+		return out
+	}
+
+	t.Run("local first, default first, then by id", func(t *testing.T) {
+		got := ids(FilterAndSortProviders(providers, ""))
+		want := []string{"vllm-cpu", "b-local", "vllm-spyre", "a-remote", "watsonx"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("filters by provider id", func(t *testing.T) {
+		got := ids(FilterAndSortProviders(providers, "watsonx"))
+		if !reflect.DeepEqual(got, []string{"watsonx"}) {
+			t.Errorf("got %v", got)
+		}
+	})
+
+	t.Run("unknown provider gives empty non-nil slice", func(t *testing.T) {
+		got := FilterAndSortProviders(providers, "nope")
+		if got == nil || len(got) != 0 {
+			t.Errorf("got %v", got)
+		}
+	})
+
+	t.Run("does not mutate input order", func(t *testing.T) {
+		if providers[0].ID != "watsonx" {
+			t.Errorf("input was reordered: %v", ids(providers))
+		}
+	})
 }

@@ -122,39 +122,46 @@ func SetInfo(result *types.ModelDeployOptions, name, componentType string) {
 
 // SetComponentTypeNames fills the component type's display names from the first component of that type.
 func SetComponentTypeNames(result *types.ModelDeployOptions, components []types.Component) {
+	ct := &result.ComponentType
 	for _, c := range components {
-		if c.ComponentType != result.ComponentType.ID {
+		if ct.Name != "" && ct.ShortName != "" {
+			return
+		}
+		if c.ComponentType != ct.ID {
 			continue
 		}
-		if result.ComponentType.Name == "" {
-			result.ComponentType.Name = c.ComponentName
+		if ct.Name == "" {
+			ct.Name = c.ComponentName
 		}
-		if result.ComponentType.ShortName == "" {
-			result.ComponentType.ShortName = c.ComponentShortName
+		if ct.ShortName == "" {
+			ct.ShortName = c.ComponentShortName
+		}
+		if ct.Name != "" && ct.ShortName != "" {
+			return
 		}
 	}
 }
 
 // BuildDeployProfiles resolves the profile ids listed by model against profilesByID.
-// providerID is only used for error messages.
-func BuildDeployProfiles(model *types.Model, profilesByID map[string]profiles.Profile, providerID string, cpu, storage int) ([]types.ModelDeployProfile, error) {
+// base carries the provider-level resources (CPU, Storage); each profile adds its own
+// Memory and Accelerators on top. providerID is only used for error messages.
+func BuildDeployProfiles(model *types.Model, profilesByID map[string]profiles.Profile, providerID string, base types.Resources) ([]types.ModelDeployProfile, error) {
 	deployProfiles := make([]types.ModelDeployProfile, 0, len(model.Profiles))
 	for _, id := range model.Profiles {
 		pr, ok := profilesByID[id]
 		if !ok {
 			return nil, fmt.Errorf("model '%s' lists profile '%s' which is not defined in %s for provider '%s'", model.ID, id, profiles.FileName, providerID)
 		}
+		res := base // copy, so each profile gets its own resources
+		res.Memory = pr.Params.Resources.Memory
+		res.Accelerators = pr.Params.Resources.Accelerators
+
 		deployProfiles = append(deployProfiles, types.ModelDeployProfile{
 			ID:          pr.ID,
 			Name:        pr.Name,
 			Description: pr.Description,
 			Default:     profiles.IsDefault(model.DefaultProfile, pr),
-			Resources: types.Resources{
-				CPU:          cpu,
-				Memory:       pr.Params.Resources.Memory,
-				Storage:      storage,
-				Accelerators: pr.Params.Resources.Accelerators,
-			},
+			Resources:   res,
 		})
 	}
 

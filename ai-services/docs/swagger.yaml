@@ -911,7 +911,7 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelComponentType:
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType:
     properties:
       id:
         type: string
@@ -923,7 +923,7 @@ definitions:
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions:
     properties:
       component_type:
-        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelComponentType'
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
       id:
         type: string
       name:
