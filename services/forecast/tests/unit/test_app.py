@@ -164,6 +164,10 @@ def error_app():
     def validate(body: Body):
         return body
 
+    @app.get("/triton-bare")
+    def triton_bare():
+        raise_triton_unavailable()
+
     @app.get("/triton")
     def triton():
         raise_triton_unavailable("connection refused")
@@ -179,6 +183,14 @@ def error_app():
     @app.get("/plain-503")
     def plain_503():
         raise HTTPException(status_code=503, detail="not ready")
+
+    @app.get("/route-429")
+    def route_429():
+        raise HTTPException(status_code=429, detail="queue is full")
+
+    @app.get("/route-415")
+    def route_415():
+        raise HTTPException(status_code=415, detail="wrong type")
 
     @app.get("/teapot")
     def teapot():
@@ -222,10 +234,18 @@ def test_triton_unavailable_is_503(error_app):
 
 
 @pytest.mark.unit
+def test_triton_unavailable_without_detail(error_app):
+    response = error_app.get("/triton-bare")
+    assert response.status_code == 503
+    _assert_envelope(response.json(), TRITON_UNAVAILABLE, 503)
+    assert response.json()["error"]["message"] == "Triton cannot be reached"
+
+
+@pytest.mark.unit
 def test_http_exception_uses_envelope(error_app):
     response = error_app.get("/http")
     assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_CONFLICT", 409)
+    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
 
 
 @pytest.mark.unit
@@ -234,6 +254,20 @@ def test_405_raised_by_a_route_is_method_not_allowed(error_app):
     assert response.status_code == 405
     _assert_envelope(response.json(), "METHOD_NOT_ALLOWED", 405)
     assert response.headers["Allow"] == "POST"
+
+
+@pytest.mark.unit
+def test_429_is_server_busy(error_app):
+    response = error_app.get("/route-429")
+    assert response.status_code == 429
+    _assert_envelope(response.json(), "SERVER_BUSY", 429)
+
+
+@pytest.mark.unit
+def test_415_is_unsupported_media_type(error_app):
+    response = error_app.get("/route-415")
+    assert response.status_code == 415
+    _assert_envelope(response.json(), "UNSUPPORTED_MEDIA_TYPE", 415)
 
 
 @pytest.mark.unit
@@ -275,27 +309,41 @@ def test_unexpected_exception_is_500_without_details(error_app):
 @pytest.mark.unit
 def test_settings_defaults(monkeypatch):
     for name in (
-        "MODEL_REPO_PATH", "SCRATCH_DIR", "TRITON_URL", "TRITON_STARTUP_WAIT_S",
+        "MODEL_REPO_PATH", "SCRATCH_DIR", "DATA_DIR", "TRITON_URL", "TRITON_STARTUP_WAIT_S",
         "TRITON_LOAD_TIMEOUT_S", "TRITON_INFER_TIMEOUT_S", "FORECASTER_RETENTION_COUNT",
-        "TRAINING_SCHEDULE", "DEFAULT_TIME_LIMIT_SECONDS", "TRAINING_MAX_ATTEMPTS",
-        "TRAINING_RETRY_DELAY_SECONDS", "MAX_TRAINING_ROWS", "MAX_INFERENCE_ROWS",
-        "LOADER_CHUNK_ROWS", "WORKER_MEMORY_LIMIT_MB",
+        "DEFAULT_TIME_LIMIT_SECONDS", "TRAINING_MAX_ATTEMPTS",
+        "TRAINING_RETRY_DELAY_SECONDS", "MAX_QUEUED_JOBS", "MAX_TRAINING_ROWS",
+        "MAX_INFERENCE_ROWS", "LOADER_CHUNK_ROWS", "WORKER_MEMORY_LIMIT_MB",
     ):
         monkeypatch.delenv(name, raising=False)
 
-    from forecast.settings import ForecastConfig
+    for name in (
+        "DB_ENCRYPTION_KEY", "WORKER_POSTGRES_USER", "WORKER_POSTGRES_PASSWORD",
+        "DB_POOL_SIZE", "DB_MAX_OVERFLOW",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    from forecast.settings import DatabaseConfig, ForecastConfig
+
+    database = DatabaseConfig()
+    assert (database.pool_size, database.max_overflow) == (5, 5)
 
     config = ForecastConfig()
+    assert config.triton_url == ""
+    assert config.db_encryption_key.get_secret_value() == ""
+    assert config.worker_postgres_user == ""
+    assert config.worker_postgres_password.get_secret_value() == ""
     assert str(config.model_repo_path) == "/models"
     assert str(config.scratch_dir) == "/var/cache/forecast/scratch"
+    assert str(config.data_dir) == "/data"
     assert config.triton_startup_wait_s == 120
     assert config.triton_load_timeout_s == 120
     assert config.triton_infer_timeout_s == 30
-    assert config.forecaster_retention_count == 1
-    assert config.training_schedule is None
+    assert config.forecaster_retention_count == 5
     assert config.default_time_limit_seconds == 1800
     assert config.training_max_attempts == 2
     assert config.training_retry_delay_seconds == 60
+    assert config.max_queued_jobs == 10
     assert config.max_training_rows == 10_000_000
     assert config.max_inference_rows == 5000
     assert config.loader_chunk_rows == 100_000
@@ -305,26 +353,24 @@ def test_settings_defaults(monkeypatch):
 @pytest.mark.unit
 def test_settings_read_the_environment(monkeypatch):
     monkeypatch.setenv("TRAINING_MAX_ATTEMPTS", "1")
-    monkeypatch.setenv("TRAINING_SCHEDULE", "0 2 * * *")
+    monkeypatch.setenv("MAX_QUEUED_JOBS", "3")
     monkeypatch.setenv("WORKER_MEMORY_LIMIT_MB", "4096")
 
     from forecast.settings import ForecastConfig
 
     config = ForecastConfig()
     assert config.training_max_attempts == 1
-    assert config.training_schedule == "0 2 * * *"
+    assert config.max_queued_jobs == 3
     assert config.worker_memory_limit_mb == 4096
 
 
 @pytest.mark.unit
-def test_blank_schedule_and_memory_limit_mean_unset(monkeypatch):
-    monkeypatch.setenv("TRAINING_SCHEDULE", "")
+def test_blank_memory_limit_means_unset(monkeypatch):
     monkeypatch.setenv("WORKER_MEMORY_LIMIT_MB", "  ")
 
     from forecast.settings import ForecastConfig
 
     config = ForecastConfig()
-    assert config.training_schedule is None
     assert config.worker_memory_limit_mb is None
 
 
@@ -419,6 +465,20 @@ def test_startup_logs_no_error_with_a_valid_key(caplog):
         with TestClient(forecast_app.app):
             pass
     assert not any("DB_ENCRYPTION_KEY" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.unit
+def test_shutdown_logs_when_closing_the_database_fails(caplog):
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "check_db_reachable", return_value=True), patch.object(
+        forecast_app, "is_triton_ready", return_value=True
+    ), patch.object(
+        forecast_app, "close_db_connections", side_effect=RuntimeError("boom")
+    ), caplog.at_level("ERROR"):
+        with TestClient(forecast_app.app):
+            pass
+    assert any("Error closing database connections" in r.getMessage() for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +611,22 @@ def test_triton_probe_false_on_connection_error():
         assert triton.is_triton_ready() is False
 
 
+@pytest.mark.unit
+def test_triton_probe_failure_logs_the_class_but_not_the_url():
+    import requests
+
+    import forecast.triton as triton
+
+    error = requests.ConnectionError("refused http://user:secret@triton:8000")
+    with patch.object(triton.settings.forecast, "triton_url", "http://triton:8000"), patch(
+        "forecast.triton.requests.get", side_effect=error
+    ), patch.object(triton.logger, "debug") as debug:
+        assert triton.is_triton_ready() is False
+    message = debug.call_args.args[0]
+    assert "ConnectionError" in message
+    assert "secret" not in message
+
+
 # ---------------------------------------------------------------------------
 # Database reachability
 # ---------------------------------------------------------------------------
@@ -643,11 +719,58 @@ def test_db_probe_false_when_the_checker_raises():
 
 
 @pytest.mark.unit
+def test_db_probe_failure_logs_the_class_but_not_the_message():
+    import forecast.db.connection as connection
+
+    def broken():
+        raise RuntimeError("password=secret")
+
+    with patch.object(connection, "_check_db_connection", broken), patch.object(
+        connection.logger, "warning"
+    ) as warning:
+        assert connection.check_db_reachable() is False
+    message = warning.call_args.args[0]
+    assert "RuntimeError" in message
+    assert "secret" not in message
+
+
+@pytest.mark.unit
+def test_db_probe_timeout_is_logged():
+    import threading
+
+    import forecast.db.connection as connection
+
+    release = threading.Event()
+
+    def hanging_checker():
+        release.wait(5)
+        return True
+
+    try:
+        with patch.object(connection, "_check_db_connection", hanging_checker), patch.object(
+            connection.logger, "warning"
+        ) as warning:
+            assert connection.check_db_reachable(timeout=0.05) is False
+        assert "did not answer" in warning.call_args.args[0]
+    finally:
+        release.set()
+
+
+@pytest.mark.unit
 def test_close_db_connections_is_safe_without_engine():
     import forecast.db.connection as connection
 
     with patch.object(connection, "_close_db_connections", None):
         connection.close_db_connections()
+
+
+@pytest.mark.unit
+def test_close_db_connections_calls_the_closer():
+    import forecast.db.connection as connection
+
+    with patch.object(connection, "_close_db_connections") as closer:
+        connection.close_db_connections()
+    closer.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

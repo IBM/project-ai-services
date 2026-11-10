@@ -3,7 +3,10 @@ from typing import Optional
 
 import requests
 
+from common.misc_utils import get_logger
 from forecast.settings import settings
+
+logger = get_logger("forecast_triton")
 
 # The probe must never hold up /health, so it has its own short timeout.
 HEALTH_TIMEOUT_S = 2
@@ -29,6 +32,8 @@ def is_triton_ready() -> bool:
         return False
     try:
         response = requests.get(f"{url}/v2/health/ready", timeout=HEALTH_TIMEOUT_S)
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        # Only the exception class is logged: the message can contain the URL.
+        logger.debug(f"Triton readiness probe failed: {type(exc).__name__}")
         return False
     return response.status_code == 200

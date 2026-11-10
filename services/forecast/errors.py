@@ -31,18 +31,20 @@ def raise_triton_unavailable(detail: Optional[str] = None) -> NoReturn:
 
 
 # Code for an HTTPException whose detail is a plain string. The shared handler maps
-# 409 to RESOURCE_LOCKED and 503 to LLM_UNAVAILABLE; neither fits this service, so
-# the table lives here. Routes that need a specific code pass a structured detail.
+# 503 to LLM_UNAVAILABLE, which does not fit this service, so the table lives here.
+# 409 and 429 use the codes of the connector API (RESOURCE_LOCKED, SERVER_BUSY).
+# Routes that need a specific code pass a structured detail.
 _STATUS_TO_CODE = {
     400: ErrorCode.INVALID_REQUEST.value,
     401: ErrorCode.AUTHENTICATION_FAILED.value,
     403: ErrorCode.FORBIDDEN.value,
     404: ErrorCode.RESOURCE_NOT_FOUND.value,
     405: ErrorCode.METHOD_NOT_ALLOWED.value,
-    409: ErrorCode.RESOURCE_CONFLICT.value,
+    409: ErrorCode.RESOURCE_LOCKED.value,
     413: ErrorCode.REQUEST_TOO_LARGE.value,
+    415: ErrorCode.UNSUPPORTED_MEDIA_TYPE.value,
     422: ErrorCode.INVALID_REQUEST.value,
-    429: ErrorCode.RATE_LIMIT_EXCEEDED.value,
+    429: ErrorCode.SERVER_BUSY.value,
     503: SERVICE_UNAVAILABLE,
     507: ErrorCode.INSUFFICIENT_STORAGE.value,
 }

@@ -1,7 +1,8 @@
 """
 Configuration settings for the Forecast service.
 
-Every variable in the Configuration section of the proposal is read here.
+Every variable in the Configuration section of the proposal is read here,
+except POSTGRES_HOST/PORT/DB/USER/PASSWORD, which common.db.connection reads.
 Values can be overridden via environment variables of the same name.
 """
 from pathlib import Path
@@ -25,6 +26,11 @@ class ForecastConfig(BaseSettings):
     scratch_dir: Path = Field(
         default=Path("/var/cache/forecast/scratch"),
         description="Local training scratch, not shared",
+    )
+
+    data_dir: Path = Field(
+        default=Path("/data"),
+        description="Read-only root of CSV training files; CSV paths in jobs are relative to it",
     )
 
     # Secrets
@@ -60,14 +66,9 @@ class ForecastConfig(BaseSettings):
 
     # Retention and training
     forecaster_retention_count: int = Field(
-        default=1,
+        default=5,
         ge=1,
         description="Forecasters kept per connector, and finished runs kept per connector",
-    )
-
-    training_schedule: Optional[str] = Field(
-        default=None,
-        description="Cron expression (5 fields, UTC) for scheduled training; unset means first training only",
     )
 
     default_time_limit_seconds: int = Field(
@@ -86,6 +87,12 @@ class ForecastConfig(BaseSettings):
         default=60,
         ge=0,
         description="Wait between two attempts of the same job",
+    )
+
+    max_queued_jobs: int = Field(
+        default=10,
+        ge=1,
+        description="Queued jobs accepted before POST /v1/connectors returns 429",
     )
 
     max_training_rows: int = Field(
@@ -124,7 +131,7 @@ class ForecastConfig(BaseSettings):
         description="Password of the restricted forecast_worker role",
     )
 
-    @field_validator("training_schedule", "worker_memory_limit_mb", mode="before")
+    @field_validator("worker_memory_limit_mb", mode="before")
     @classmethod
     def blank_means_unset(cls, value):
         """Treat an empty or blank environment value as unset."""

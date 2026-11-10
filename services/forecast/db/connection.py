@@ -11,7 +11,10 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Optional
 
 from common.db.connection import get_connection_manager
+from common.misc_utils import get_logger
 from forecast.settings import settings
+
+logger = get_logger("forecast_db")
 
 # /health must answer even when the database host does not respond. The engine
 # has no connect timeout (the pool timeout is 30 seconds), so the probe is capped
@@ -41,7 +44,9 @@ def _run_probe(result: Future) -> None:
     """Run the database check and store its outcome in the given future."""
     try:
         result.set_result(bool(_check_db_connection()))
-    except Exception:
+    except Exception as exc:
+        # Only the exception class is logged: the message can contain the host or credentials.
+        logger.warning(f"Database probe failed: {type(exc).__name__}")
         result.set_result(False)
 
 
@@ -63,6 +68,7 @@ def check_db_reachable(timeout: float = DB_PROBE_TIMEOUT_S) -> bool:
     try:
         return probe.result(timeout=timeout)
     except FutureTimeoutError:
+        logger.warning(f"Database probe did not answer within {timeout}s")
         return False
 
 
