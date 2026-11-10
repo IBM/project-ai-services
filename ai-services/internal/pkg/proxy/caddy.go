@@ -98,11 +98,6 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, 
 
 	domain := route.Domain + "." + domainSuffix
 
-	// Verify Caddy is reachable before attempting registration.
-	if err := c.HealthCheck(ctx); err != nil {
-		return "", fmt.Errorf("caddy health check failed: %w", err)
-	}
-
 	routeConfig := map[string]any{
 		"@id":   route.ID,
 		"match": []map[string]any{{"host": []string{domain}}},
@@ -113,24 +108,8 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, 
 		"terminal": route.Terminal,
 	}
 
-	idURL, err := url.JoinPath(c.adminURL, "id", route.ID)
-	if err != nil {
+	if err := c.createRouteIfAbsent(ctx, c.serverName, route.ID, routeConfig); err != nil {
 		return "", err
-	}
-
-	// Check if route already exists
-	checkResp, err := c.httpClient.R().SetContext(ctx).Get(idURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to check route existence: %w", err)
-	}
-
-	if checkResp.StatusCode() == http.StatusOK {
-		// Route already exists, skip registration
-		logger.DebugfCtx(ctx, "Route %s already exists, skipping registration\n", route.ID)
-	} else {
-		if err := c.createRoute(ctx, c.serverName, routeConfig); err != nil {
-			return "", err
-		}
 	}
 
 	httpsPort := utils.GetEnv(CaddyHTTPSPortEnvVar, DefaultHTTPSPort)
