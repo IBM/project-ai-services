@@ -13,16 +13,33 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
-// listStatuses are the statuses a model can have: the component statuses of local models and
-// the connector statuses of remote ones.
-var listStatuses = []string{
-	string(dbmodels.ComponentStatusInitializing),
-	string(dbmodels.ComponentStatusDownloading),
-	string(dbmodels.ComponentStatusDeploying),
-	string(dbmodels.ComponentStatusRunning),
-	string(dbmodels.ComponentStatusError),
-	string(dbmodels.ConnectorStatusConnected),
-	string(dbmodels.ConnectorStatusOffline),
+// localStatuses are the statuses of local models (component statuses); remoteStatuses are the
+// statuses of remote ones (connector statuses).
+var (
+	localStatuses = []string{
+		string(dbmodels.ComponentStatusInitializing),
+		string(dbmodels.ComponentStatusDownloading),
+		string(dbmodels.ComponentStatusDeploying),
+		string(dbmodels.ComponentStatusRunning),
+		string(dbmodels.ComponentStatusError),
+	}
+	remoteStatuses = []string{
+		string(dbmodels.ConnectorStatusConnected),
+		string(dbmodels.ConnectorStatusOffline),
+	}
+)
+
+// statusesFor returns the statuses a model of the deployment type can have; without a deployment
+// type, any model can match, so it returns both sets.
+func statusesFor(deploymentType constants.DeploymentType) []string {
+	switch deploymentType {
+	case constants.DeploymentTypeLocal:
+		return localStatuses
+	case constants.DeploymentTypeRemote:
+		return remoteStatuses
+	default:
+		return slices.Concat(localStatuses, remoteStatuses)
+	}
 }
 
 // validateCreateRequest performs the checks on a create request that are not expressed as
@@ -65,7 +82,8 @@ func (s *ModelService) ensureNameAvailable(ctx context.Context, name string) err
 // validateListRequest rejects filters that can never match: a deployment type that is neither
 // local nor remote, a provider or model the catalog does not know, or a status no model can have.
 // Empty filters are not applied and so not checked; of the multi-value filters, every value must
-// be valid. The providers are checked against those of the requested deployment type, if any.
+// be valid. The providers and the status are checked against those of the requested deployment
+// type, if any: status=connected&deployment_type=local can never match.
 //
 // component_type is not validated yet.
 func (s *ModelService) validateListRequest(req apimodels.ListModelsRequest) error {
@@ -81,8 +99,8 @@ func (s *ModelService) validateListRequest(req apimodels.ListModelsRequest) erro
 		return err
 	}
 
-	if req.Status != "" && !slices.Contains(listStatuses, req.Status) {
-		return validators.BadRequest("invalid status %q; must be one of: %s", req.Status, strings.Join(listStatuses, ", "))
+	if statuses := statusesFor(req.DeploymentType); req.Status != "" && !slices.Contains(statuses, req.Status) {
+		return validators.BadRequest("invalid status %q; must be one of: %s", req.Status, strings.Join(statuses, ", "))
 	}
 
 	return nil

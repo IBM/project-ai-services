@@ -157,6 +157,20 @@ func TestListModels_RejectsUnknownFilters(t *testing.T) {
 		},
 		{"unknown model", func(r *apimodels.ListModelsRequest) { r.Models = []string{"no/such-model"} }, `invalid model "no/such-model"`},
 		{"unknown status", func(r *apimodels.ListModelsRequest) { r.Status = "Sleeping" }, `invalid status "Sleeping"`},
+		{
+			"remote status asked as local",
+			func(r *apimodels.ListModelsRequest) {
+				r.Status, r.DeploymentType = "connected", constants.DeploymentTypeLocal
+			},
+			`invalid status "connected"`,
+		},
+		{
+			"local status asked as remote",
+			func(r *apimodels.ListModelsRequest) {
+				r.Status, r.DeploymentType = "Running", constants.DeploymentTypeRemote
+			},
+			`invalid status "Running"`,
+		},
 		{"status is case sensitive", func(r *apimodels.ListModelsRequest) { r.Status = "running" }, `invalid status "running"`},
 	}
 
@@ -200,6 +214,12 @@ func TestListModels_AcceptsKnownFilters(t *testing.T) {
 		{"remote-only model", func(r *apimodels.ListModelsRequest) { r.Models = []string{"ibm/granite-4-h-small"} }},
 		{"local status", func(r *apimodels.ListModelsRequest) { r.Status = "Downloading" }},
 		{"remote status", func(r *apimodels.ListModelsRequest) { r.Status = "offline" }},
+		{"status with matching local type", func(r *apimodels.ListModelsRequest) {
+			r.Status, r.DeploymentType = "Running", constants.DeploymentTypeLocal
+		}},
+		{"status with matching remote type", func(r *apimodels.ListModelsRequest) {
+			r.Status, r.DeploymentType = "connected", constants.DeploymentTypeRemote
+		}},
 	}
 
 	for _, tt := range tests {
