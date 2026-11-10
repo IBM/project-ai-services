@@ -9,6 +9,14 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
+// SetSkipUpgrade enables or disables skipping the operator upgrade prompt flow
+// for the given runtime.
+func SetSkipUpgrade(rt types.RuntimeType, skip bool) {
+	if rt == types.RuntimeTypeOpenShift {
+		openshift.SetSkipUpgrade(skip)
+	}
+}
+
 // BootstrapFactory creates bootstrap instances based on configuration.
 type BootstrapFactory struct {
 	runtimeType types.RuntimeType

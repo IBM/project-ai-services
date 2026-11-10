@@ -5,8 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
+	semver "github.com/blang/semver/v4"
+	"github.com/charmbracelet/lipgloss"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -16,14 +19,48 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	apiyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	yamlDecoderBufSz = 4096
-)
+// upgradeVersions holds the current and available version information for display.
+type upgradeVersions struct {
+	currentChannel   string
+	currentCSV       string
+	availableChannel string
+	availableCSV     string
+	// availableCSVLabel is availableCSV or "(latest in channel)" when unset.
+	availableCSVLabel string
+}
+
+const yamlDecoderBufSz = 4096
+
+// versionRe matches the semver portion of an OLM CSV name or channel name, e.g.
+//
+//	rhods-operator.3.5.0   → "3.5.0"
+//	spyre-operator.v1.3.1  → "v1.3.1"
+//	stable-3.5             → "3.5"
+//	stable-v1.3            → "v1.3"
+//	fast-v1                → "v1"
+var versionRe = regexp.MustCompile(`v?(\d+(\.\d+)*.*)$`)
+
+// extractVersion extracts a comparable semver from an OLM CSV or channel name.
+// Returns a zero version and false if the name carries no recognisable semver.
+func extractVersion(name string) (semver.Version, bool) {
+	m := versionRe.FindString(name)
+	if m == "" {
+		return semver.Version{}, false
+	}
+
+	v, err := semver.ParseTolerant(m)
+	if err != nil {
+		return semver.Version{}, false
+	}
+
+	return v, true
+}
 
 var (
 	s *spinner.Spinner
@@ -168,40 +205,236 @@ func handleSubscriptionPostApply(ctx context.Context, c *openshift.OpenshiftClie
 	return nil
 }
 
+// isCSVReady reports whether the subscription's installed CSV is in Succeeded phase.
+func isCSVReady(ctx context.Context, c *openshift.OpenshiftClient, sub *operatorsv1alpha1.Subscription) bool {
+	if sub.Status.InstalledCSV == "" {
+		return false
+	}
+
+	csv := &operatorsv1alpha1.ClusterServiceVersion{}
+	err := c.Client.Get(ctx, client.ObjectKey{
+		Name:      sub.Status.InstalledCSV,
+		Namespace: sub.Namespace,
+	}, csv)
+
+	return err == nil && csv.Status.Phase == operatorsv1alpha1.CSVPhaseSucceeded
+}
+
+// handleExistingSubscription decides what to do when a matching subscription is
+// already present on the cluster. Returns true if the caller should skip the apply.
+func handleExistingSubscription(ctx context.Context, c *openshift.OpenshiftClient, sub *operatorsv1alpha1.Subscription, object *unstructured.Unstructured) bool {
+	// CSV hasn't landed yet — skip silently.
+	if sub.Status.InstalledCSV == "" {
+		return true
+	}
+
+	csvReady := isCSVReady(ctx, c, sub)
+	operatorLabel := getOperatorLabel(sub.Spec.Package)
+
+	if !skipUpgrade && csvReady {
+		// promptAndUpgrade returns true when an upgrade was confirmed and applied —
+		// in that case the caller should NOT skip so waitForOperator picks up the new CSV.
+		return !promptAndUpgrade(ctx, c, sub, object, operatorLabel)
+	}
+
+	if csvReady {
+		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
+	}
+
+	return true
+}
+
 // shouldSkipSubscription checks if a subscription should be skipped because it already exists.
-// If it exists and is ready, prints a message. Returns true if the subscription should be skipped.
+// Unless skipUpgrade is set, when the operator is ready the user is prompted to upgrade.
+// Returns true if the resource should be skipped (i.e. no SSA apply needed).
 func shouldSkipSubscription(ctx context.Context, c *openshift.OpenshiftClient, object *unstructured.Unstructured) bool {
 	packageName, found, err := unstructured.NestedString(object.Object, "spec", "name")
 	if err != nil || !found || packageName == "" || cachedSubscriptionList == nil {
 		return false
 	}
 
-	// Check if any subscription has the same package name
-	for _, sub := range cachedSubscriptionList.Items {
+	for i := range cachedSubscriptionList.Items {
+		sub := &cachedSubscriptionList.Items[i]
 		if sub.Spec.Package != packageName {
 			continue
 		}
 
-		// Found existing subscription, check its status
-		if sub.Status.InstalledCSV == "" {
-			return true
-		}
-
-		// Get the CSV to check if it's ready
-		csv := &operatorsv1alpha1.ClusterServiceVersion{}
-		if err := c.Client.Get(ctx, client.ObjectKey{
-			Name:      sub.Status.InstalledCSV,
-			Namespace: sub.Namespace,
-		}, csv); err == nil && csv.Status.Phase == operatorsv1alpha1.CSVPhaseSucceeded {
-			// Get operator label from constants
-			operatorLabel := getOperatorLabel(packageName)
-			s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
-		}
-
-		return true
+		return handleExistingSubscription(ctx, c, sub, object)
 	}
 
 	return false
+}
+
+// extractUpgradeVersions pulls version fields from the subscription and desired manifest.
+func extractUpgradeVersions(sub *operatorsv1alpha1.Subscription, desired *unstructured.Unstructured) upgradeVersions {
+	desiredChannel, _, _ := unstructured.NestedString(desired.Object, "spec", "channel")
+	desiredCSV, _, _ := unstructured.NestedString(desired.Object, "spec", "startingCSV")
+
+	label := desiredCSV
+	if label == "" {
+		label = "(latest in channel)"
+	}
+
+	return upgradeVersions{
+		currentChannel:    sub.Spec.Channel,
+		currentCSV:        sub.Status.InstalledCSV,
+		availableChannel:  desiredChannel,
+		availableCSV:      desiredCSV,
+		availableCSVLabel: label,
+	}
+}
+
+// isDowngrade returns true when the available CSV or channel is semver-older than the current one.
+func isDowngrade(v upgradeVersions) bool {
+	curVer, curOK := extractVersion(v.currentCSV)
+	availVer, availOK := extractVersion(v.availableCSV)
+	if curOK && availOK && availVer.LT(curVer) {
+		return true
+	}
+
+	curChanVer, curChanOK := extractVersion(v.currentChannel)
+	availChanVer, availChanOK := extractVersion(v.availableChannel)
+	if curChanOK && availChanOK && availChanVer.LT(curChanVer) {
+		return true
+	}
+
+	if curOK && availChanOK {
+		availMajorMinor := semver.Version{Major: availChanVer.Major, Minor: availChanVer.Minor}
+		curMajorMinor := semver.Version{Major: curVer.Major, Minor: curVer.Minor}
+		if availMajorMinor.LT(curMajorMinor) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isUpgrade returns true when the available CSV or channel is semver-newer than the current one.
+func isUpgrade(v upgradeVersions) bool {
+	if v.availableCSV != "" {
+		if curVer, curOK := extractVersion(v.currentCSV); curOK {
+			if availVer, availOK := extractVersion(v.availableCSV); availOK {
+				return availVer.GT(curVer)
+			}
+		}
+	}
+
+	if curChanVer, curOK := extractVersion(v.currentChannel); curOK {
+		if availChanVer, availOK := extractVersion(v.availableChannel); availOK {
+			return availChanVer.GT(curChanVer)
+		}
+	}
+
+	return false
+}
+
+// printUpgradeTable renders a table showing current vs available versions.
+func printUpgradeTable(v upgradeVersions, title string) {
+	logger.Infoln(lipgloss.NewStyle().Bold(true).Render("\n" + title))
+
+	printer := utils.NewTableWriter()
+	defer printer.CloseTableWriter()
+
+	printer.SetCollapseIndices()
+	setUpgradeTableHeaders(printer)
+	populateUpgradeRows(printer, v)
+}
+
+func setUpgradeTableHeaders(printer *utils.Printer) {
+	printer.SetHeaders("", "CHANNEL", "VERSION (CSV)")
+}
+
+func populateUpgradeRows(printer *utils.Printer, v upgradeVersions) {
+	currentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))   // yellow
+	availableStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+
+	printer.AppendRow(
+		currentStyle.Render("Current  "),
+		currentStyle.Render(v.currentChannel),
+		currentStyle.Render(v.currentCSV),
+	)
+	printer.AppendRow(
+		availableStyle.Render("Available"),
+		availableStyle.Render(v.availableChannel),
+		availableStyle.Render(v.availableCSVLabel),
+	)
+}
+
+// promptAndUpgrade shows the current/available version table, prompts the user,
+// and applies the subscription patch if confirmed.
+// Returns true if the upgrade was applied (caller should proceed with waitForOperator),
+// false if skipped (caller should treat the subscription as already handled).
+func promptAndUpgrade(ctx context.Context, c *openshift.OpenshiftClient, sub *operatorsv1alpha1.Subscription, desired *unstructured.Unstructured, operatorLabel string) bool {
+	v := extractUpgradeVersions(sub, desired)
+
+	// Already at the desired version — nothing to do.
+	if v.currentChannel == v.availableChannel && (v.availableCSV == "" || v.currentCSV == v.availableCSV) {
+		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
+
+		return false
+	}
+
+	// Block downgrades silently.
+	if isDowngrade(v) {
+		logger.Debugf("%s: skipping, manifest channel/version is older than installed (current: %s/%s, available: %s/%s)\n",
+			operatorLabel, v.currentChannel, v.currentCSV, v.availableChannel, v.availableCSV)
+		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
+
+		return false
+	}
+
+	upgrade := isUpgrade(v)
+	actionText := "upgrade"
+	actionTitle := "Upgrade available: " + operatorLabel
+	confirmPrompt := fmt.Sprintf("\nUpgrade %s?", operatorLabel)
+	if !upgrade {
+		actionText = "channel update"
+		actionTitle = "Channel update available: " + operatorLabel
+		confirmPrompt = fmt.Sprintf("\nUpdate channel for %s?", operatorLabel)
+	}
+
+	s.Stop(fmt.Sprintf("%s %s available", operatorLabel, actionText))
+	printUpgradeTable(v, actionTitle)
+
+	confirmed, err := utils.ConfirmAction(confirmPrompt)
+	if err != nil || !confirmed {
+		logger.Infof("Skipping %s for %s", actionText, operatorLabel)
+
+		return false
+	}
+
+	if err := upgradeSubscription(ctx, c, sub, v.availableChannel, v.availableCSV); err != nil {
+		logger.Warningf("Failed to update subscription for %s: %v", operatorLabel, err)
+
+		return false
+	}
+
+	logger.Infof("Subscription for %s updated — waiting for new version to roll out", operatorLabel)
+
+	return true
+}
+
+// upgradeSubscription patches an existing Subscription's channel and startingCSV
+// so that OLM picks up the upgrade.
+func upgradeSubscription(ctx context.Context, c *openshift.OpenshiftClient, sub *operatorsv1alpha1.Subscription, channel, startingCSV string) error {
+	patch := fmt.Sprintf(`{"spec":{"channel":%q,"startingCSV":%q}}`, channel, startingCSV)
+
+	existing := &operatorsv1alpha1.Subscription{}
+	existing.Name = sub.Name
+	existing.Namespace = sub.Namespace
+
+	if err := c.Client.Patch(ctx,
+		existing,
+		client.RawPatch(k8stypes.MergePatchType, []byte(patch)),
+	); err != nil {
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("missing required permissions to patch subscription %s/%s", sub.Namespace, sub.Name)
+		}
+
+		return fmt.Errorf("patch failed: %w", err)
+	}
+
+	return nil
 }
 
 // fetchOperatorByPackage fetches the CSV for an operator by package name.
