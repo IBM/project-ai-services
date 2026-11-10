@@ -133,6 +133,8 @@ func TestGenerate(t *testing.T) {
 
 			assert.Equal(t, alias, lite.genReq.KeyAlias)
 			assert.Equal(t, []string{keyTestModel}, lite.genReq.Models)
+			assert.Equal(t, catalogclient.LiteLLMKeyMetadata{Tags: []string{id.String()}}, lite.genReq.Metadata,
+				"the key is pinned to its own deployment by tag")
 			assert.Equal(t, alias, lite.deleted[len(lite.deleted)-1], "the old key is revoked by the same alias")
 		}
 

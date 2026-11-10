@@ -87,7 +87,7 @@ func (m *Manager) Generate(ctx context.Context, id uuid.UUID, createdBy string) 
 	// between them.
 	defer m.locks.lock(alias)()
 
-	key, err := m.rotatePublicKey(ctx, alias, model)
+	key, err := m.rotatePublicKey(ctx, id, alias, model)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (m *Manager) Generate(ctx context.Context, id uuid.UUID, createdBy string) 
 }
 
 // rotatePublicKey revokes the key with the given alias, if any, and generates a new one.
-func (m *Manager) rotatePublicKey(ctx context.Context, alias, model string) (string, error) {
+func (m *Manager) rotatePublicKey(ctx context.Context, id uuid.UUID, alias, model string) (string, error) {
 	// Revoking first is what keeps the number of public keys at one. A "not found" answer is
 	// handled by the client: it only means no key existed yet.
 	if err := m.litellm.DeleteKeysByAlias(ctx, []string{alias}); err != nil {
@@ -108,6 +108,9 @@ func (m *Manager) rotatePublicKey(ctx context.Context, alias, model string) (str
 	key, err := m.litellm.GenerateKey(ctx, catalogclient.LiteLLMKeyGenerateRequest{
 		KeyAlias: alias,
 		Models:   []string{model},
+		// The ID is the tag the model's LiteLLM route was registered with, so the key reaches
+		// only that deployment and not other deployments of the same model name.
+		Metadata: catalogclient.LiteLLMKeyMetadata{Tags: []string{id.String()}},
 	})
 	if err != nil {
 		logger.ErrorfCtx(ctx, "failed to generate public key %q: %v", alias, err)

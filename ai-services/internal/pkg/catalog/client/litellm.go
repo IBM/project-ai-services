@@ -36,8 +36,16 @@ type LiteLLMClient interface {
 // LiteLLMKeyGenerateRequest is the payload for POST /key/generate. No duration is sent, so the
 // key never expires.
 type LiteLLMKeyGenerateRequest struct {
-	KeyAlias string   `json:"key_alias"`
-	Models   []string `json:"models"`
+	KeyAlias string             `json:"key_alias"`
+	Models   []string           `json:"models"`
+	Metadata LiteLLMKeyMetadata `json:"metadata"`
+}
+
+// LiteLLMKeyMetadata is the metadata of a virtual key. Tags are the deployment IDs the key may
+// reach: with tag filtering enabled, a request made with the key only goes to routes whose
+// litellm_params.tags contain one of them.
+type LiteLLMKeyMetadata struct {
+	Tags []string `json:"tags"`
 }
 
 // LiteLLMKeyGenerateResponse is the response payload from POST /key/generate.
