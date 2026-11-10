@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,7 +35,7 @@ func (m *mockModelService) GetModelByID(ctx context.Context, id uuid.UUID, creat
 		return m.getModelFunc(ctx, id, createdBy)
 	}
 
-	return &models.ModelDetail{ID: id.String()}, nil
+	return &models.ModelDetail{ModelBase: models.ModelBase{ID: id.String()}}, nil
 }
 
 func (m *mockModelService) ListModels(ctx context.Context, req models.ListModelsRequest) (*models.ModelListResponse, error) {
@@ -68,7 +69,7 @@ func setupModelRouter(svc repository.ModelServiceInterface, tm *auth.TokenManage
 // validModelPayload is a request that passes the handler's binding rules.
 func validModelPayload() models.CreateModelRequest {
 	return models.CreateModelRequest{
-		DeploymentType: models.DeploymentTypeLocal,
+		DeploymentType: constants.DeploymentTypeLocal,
 		ComponentType:  "llm",
 		Name:           "granite-llm",
 		ProviderID:     "vllm-spyre",
@@ -113,7 +114,7 @@ func TestCreateModel(t *testing.T) {
 			wantAbsent: "deployment_type", // the response carries only the id
 			wantCalled: true,
 			checkReq: func(t *testing.T, req models.CreateModelRequest) {
-				assert.Equal(t, models.DeploymentTypeLocal, req.DeploymentType)
+				assert.Equal(t, constants.DeploymentTypeLocal, req.DeploymentType)
 				assert.Equal(t, "llm", req.ComponentType)
 				assert.Equal(t, "granite-llm", req.Name)
 				assert.Equal(t, "vllm-spyre", req.ProviderID)
@@ -125,7 +126,7 @@ func TestCreateModel(t *testing.T) {
 		{
 			name: "remote model is created synchronously",
 			mutate: func(r *models.CreateModelRequest) {
-				r.DeploymentType = models.DeploymentTypeRemote
+				r.DeploymentType = constants.DeploymentTypeRemote
 				r.Name = "prod-watsonx"
 				r.ProviderID = "watsonx"
 				r.Model = "ibm/granite-4-h-small"
@@ -140,7 +141,7 @@ func TestCreateModel(t *testing.T) {
 			wantID:     remoteID,
 			wantCalled: true,
 			checkReq: func(t *testing.T, req models.CreateModelRequest) {
-				assert.Equal(t, models.DeploymentTypeRemote, req.DeploymentType)
+				assert.Equal(t, constants.DeploymentTypeRemote, req.DeploymentType)
 				assert.Equal(t, "prod-watsonx", req.Name)
 				assert.Equal(t, "watsonx", req.ProviderID)
 				assert.Equal(t, "ibm/granite-4-h-small", req.Model)
@@ -213,7 +214,7 @@ func TestCreateModel(t *testing.T) {
 				Code:    http.StatusUnprocessableEntity,
 				Message: "Health probe failed for remote model endpoint",
 			},
-			mutate:     func(r *models.CreateModelRequest) { r.DeploymentType = models.DeploymentTypeRemote },
+			mutate:     func(r *models.CreateModelRequest) { r.DeploymentType = constants.DeploymentTypeRemote },
 			wantCode:   http.StatusUnprocessableEntity,
 			wantErr:    "Health probe failed for remote model endpoint",
 			wantCalled: true,
@@ -238,7 +239,7 @@ func TestCreateModel(t *testing.T) {
 		{
 			name:       "internal error is not leaked",
 			svcErr:     errors.New("litellm returned status 500: secret upstream body"),
-			mutate:     func(r *models.CreateModelRequest) { r.DeploymentType = models.DeploymentTypeRemote },
+			mutate:     func(r *models.CreateModelRequest) { r.DeploymentType = constants.DeploymentTypeRemote },
 			wantCode:   http.StatusInternalServerError,
 			wantErr:    "Failed to create model",
 			wantAbsent: "secret upstream body",
@@ -329,11 +330,11 @@ func TestCreateModel(t *testing.T) {
 func TestCreateModelStatus(t *testing.T) {
 	tests := []struct {
 		name           string
-		deploymentType models.DeploymentType
+		deploymentType constants.DeploymentType
 		want           int
 	}{
-		{"local deployments continue in the background", models.DeploymentTypeLocal, http.StatusAccepted},
-		{"remote registrations complete before responding", models.DeploymentTypeRemote, http.StatusCreated},
+		{"local deployments continue in the background", constants.DeploymentTypeLocal, http.StatusAccepted},
+		{"remote registrations complete before responding", constants.DeploymentTypeRemote, http.StatusCreated},
 	}
 
 	for _, tt := range tests {
@@ -376,7 +377,7 @@ func TestListModels(t *testing.T) {
 			wantCalled: true,
 			checkReq: func(t *testing.T, req models.ListModelsRequest) {
 				assert.Equal(t, "llm", req.ComponentType)
-				assert.Equal(t, models.DeploymentTypeLocal, req.DeploymentType)
+				assert.Equal(t, constants.DeploymentTypeLocal, req.DeploymentType)
 				assert.Equal(t, []string{"vllm-spyre"}, req.ProviderIDs)
 				assert.Equal(t, []string{"ibm-granite/granite"}, req.Models)
 				assert.Equal(t, "Running", req.Status)
@@ -420,7 +421,7 @@ func TestListModels(t *testing.T) {
 			wantCode:   http.StatusOK,
 			wantCalled: true,
 			checkReq: func(t *testing.T, req models.ListModelsRequest) {
-				assert.Equal(t, models.DeploymentTypeRemote, req.DeploymentType)
+				assert.Equal(t, constants.DeploymentTypeRemote, req.DeploymentType)
 			},
 		},
 		{
@@ -435,7 +436,7 @@ func TestListModels(t *testing.T) {
 			wantCode:   http.StatusOK,
 			wantCalled: true,
 			checkReq: func(t *testing.T, req models.ListModelsRequest) {
-				assert.Equal(t, models.DeploymentType("cloud"), req.DeploymentType)
+				assert.Equal(t, constants.DeploymentType("cloud"), req.DeploymentType)
 			},
 		},
 		{
@@ -526,14 +527,14 @@ func TestListModels_ResponseShape(t *testing.T) {
 	svc := &mockModelService{
 		listModelsFunc: func(context.Context, models.ListModelsRequest) (*models.ModelListResponse, error) {
 			return &models.ModelListResponse{
-				Data: []models.ModelListItem{{
+				Data: []models.ModelListItem{{ModelBase: models.ModelBase{
 					ID:             "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f",
-					DeploymentType: models.DeploymentTypeRemote,
+					DeploymentType: constants.DeploymentTypeRemote,
 					Name:           "prod-watsonx",
 					Provider:       types.ProviderInfo{ID: "watsonx", Name: "Watsonx"},
 					Model:          "ibm/granite-4-h-small",
 					Status:         "connected",
-				}},
+				}}},
 			}, nil
 		},
 	}
@@ -627,7 +628,7 @@ func TestGetModelByID(t *testing.T) {
 						return nil, tt.svcErr
 					}
 
-					return &models.ModelDetail{ID: id.String()}, nil
+					return &models.ModelDetail{ModelBase: models.ModelBase{ID: id.String()}}, nil
 				},
 			}
 
@@ -670,14 +671,16 @@ func TestGetModelByID_ResponseShape(t *testing.T) {
 	svc := &mockModelService{
 		getModelFunc: func(_ context.Context, id uuid.UUID, _ string) (*models.ModelDetail, error) {
 			return &models.ModelDetail{
-				ID:             id.String(),
-				DeploymentType: models.DeploymentTypeRemote,
-				Name:           "prod-watsonx",
-				Provider:       types.ProviderInfo{ID: "watsonx", Name: "Watsonx"},
-				Model:          "ibm/granite-4-h-small",
-				Status:         "connected",
-				Endpoints:      []map[string]any{{"type": "external", "url": "https://litellm.example.com"}},
-				Applications:   []models.ModelApplication{{ID: "a1", Name: "chatbot"}},
+				ModelBase: models.ModelBase{
+					ID:             id.String(),
+					DeploymentType: constants.DeploymentTypeRemote,
+					Name:           "prod-watsonx",
+					Provider:       types.ProviderInfo{ID: "watsonx", Name: "Watsonx"},
+					Model:          "ibm/granite-4-h-small",
+					Status:         "connected",
+				},
+				Endpoints:    []models.ModelEndpoint{{Type: "external", URL: "https://litellm.example.com"}},
+				Applications: []models.ModelApplication{{ID: "a1", Name: "chatbot"}},
 			}, nil
 		},
 	}

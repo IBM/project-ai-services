@@ -3,7 +3,6 @@ package modelservice
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 
@@ -11,7 +10,6 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
@@ -46,43 +44,22 @@ func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy
 	}
 
 	detail := &apimodels.ModelDetail{
-		ID:                row.ID.String(),
-		DeploymentType:    apimodels.DeploymentType(row.DeploymentType),
-		Name:              row.Name,
-		Provider:          providerInfo(*row, s.providerNames()),
-		Worker:            workerInfo(*row),
-		Model:             row.Model,
-		Params:            row.Params,
-		Status:            row.Status,
-		Message:           row.Message,
-		Applications:      applications,
-		CreatedAt:         row.CreatedAt,
-		UpdatedAt:         row.UpdatedAt,
-		Endpoints:         modelEndpoints(),
-		ConnectedServices: counts[row.ID],
+		ModelBase:    toModelBase(*row, s.providerNames(), counts[row.ID]),
+		Applications: applications,
+		Endpoints:    s.modelEndpoints(),
 	}
 
 	return detail, nil
 }
 
 // modelEndpoints returns the endpoint through which a model, local or remote, is called: the public
-// LiteLLM gateway.
-// The url is the value of LITELLM_PUBLIC_ENDPOINT exactly as set, empty when it is not.
-func modelEndpoints() []map[string]any {
-	return []map[string]any{{
-		"type": constants.ModelEndpointTypeExternal,
-		"url":  os.Getenv(constants.LiteLLMPublicEndpointEnv),
+// model gateway.
+// The url is the configured gateway public endpoint exactly as given, empty when it is not set.
+func (s *ModelService) modelEndpoints() []apimodels.ModelEndpoint {
+	return []apimodels.ModelEndpoint{{
+		Type: constants.ModelEndpointTypeExternal,
+		URL:  s.gatewayPublicEndpoint,
 	}}
-}
-
-// modelDependencyType is how services link to a model: local models as components, remote ones
-// as connectors.
-func modelDependencyType(row dbrepo.ModelRow) dbmodels.DependencyType {
-	if row.DeploymentType == constants.DeploymentTypeLocal {
-		return dbmodels.DependencyTypeComponent
-	}
-
-	return dbmodels.DependencyTypeConnector
 }
 
 // modelApplications returns the applications that use a model, one entry per application, sorted

@@ -18,21 +18,21 @@ import (
 // Every empty field is not added to the WHERE clause.
 // The values of one multi-value filter (Providers, Models) are OR'd; different filters are AND'd.
 type ModelFilters struct {
-	CreatedBy      string   // Optional: filter by created_by (owner)
-	DeploymentType string   // Optional: "local" (components) or "remote" (connectors)
-	ComponentType  string   // Optional: model role, e.g. "llm"
-	Providers      []string // Optional: provider ids, e.g. "vllm-spyre"; a model matches any of them
-	Models         []string // Optional: model identifiers; a model matches any of them
-	Status         string   // Optional: component or connector status
-	Limit          int      // Optional: maximum number of records to return
-	Offset         int      // Optional: number of records to skip
+	CreatedBy      string                   // Optional: filter by created_by (owner)
+	DeploymentType constants.DeploymentType // Optional: "local" (components) or "remote" (connectors)
+	ComponentType  string                   // Optional: model role, e.g. "llm"
+	Providers      []string                 // Optional: provider ids, e.g. "vllm-spyre"; a model matches any of them
+	Models         []string                 // Optional: model identifiers; a model matches any of them
+	Status         string                   // Optional: component or connector status
+	Limit          int                      // Optional: maximum number of records to return
+	Offset         int                      // Optional: number of records to skip
 }
 
 // ModelRow is one model of the unified local + remote list.
 // Remote rows have no WorkerID, WorkerName or WorkerRuntimeType.
 type ModelRow struct {
 	ID                uuid.UUID
-	DeploymentType    string
+	DeploymentType    constants.DeploymentType
 	Name              string
 	ComponentType     string
 	Provider          string
@@ -161,7 +161,7 @@ func buildModelWhere(f *ModelFilters, componentTypes []string) (string, []interf
 		clauses = append(clauses, fmt.Sprintf("component_type = ANY($%d)", len(args)))
 	}
 
-	add("deployment_type", f.DeploymentType)
+	add("deployment_type", string(f.DeploymentType))
 	add("component_type", f.ComponentType)
 	addAny("provider", f.Providers)
 	addAny("model", f.Models)

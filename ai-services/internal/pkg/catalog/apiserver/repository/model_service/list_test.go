@@ -3,6 +3,7 @@ package modelservice
 import (
 	"context"
 	"errors"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"net/http"
 	"testing"
 	"time"
@@ -89,7 +90,7 @@ func (m *mockSvcDepRepo) GetLinkedServiceEndpoints(_ context.Context, _ uuid.UUI
 func newListService(t *testing.T, repo *mockModelRepo, deps *mockSvcDepRepo) *ModelService {
 	t.Helper()
 
-	return NewModelService(nil, nil, repo, deps, nil, setupTestCatalogProvider(t))
+	return NewModelService(nil, nil, repo, deps, nil, setupTestCatalogProvider(t), "")
 }
 
 func listRequest() apimodels.ListModelsRequest {
@@ -102,7 +103,7 @@ func TestListModels_PassesFiltersAndPaging(t *testing.T) {
 
 	_, err := svc.ListModels(context.Background(), apimodels.ListModelsRequest{
 		Page: 3, PageSize: 10, CreatedBy: "alice", ComponentType: "llm",
-		DeploymentType: apimodels.DeploymentTypeLocal, ProviderIDs: []string{"vllm-spyre", "vllm-cpu"},
+		DeploymentType: constants.DeploymentTypeLocal, ProviderIDs: []string{"vllm-spyre", "vllm-cpu"},
 		Models: []string{"ibm-granite/granite-3.3-8b-instruct", "ibm/granite-4-h-small"}, Status: "Running",
 	})
 	require.NoError(t, err)
@@ -150,7 +151,7 @@ func TestListModels_RejectsUnknownFilters(t *testing.T) {
 		{
 			"remote provider asked as local",
 			func(r *apimodels.ListModelsRequest) {
-				r.ProviderIDs, r.DeploymentType = []string{"watsonx"}, apimodels.DeploymentTypeLocal
+				r.ProviderIDs, r.DeploymentType = []string{"watsonx"}, constants.DeploymentTypeLocal
 			},
 			`invalid provider_id "watsonx"`,
 		},
@@ -183,8 +184,8 @@ func TestListModels_AcceptsKnownFilters(t *testing.T) {
 		name   string
 		mutate func(*apimodels.ListModelsRequest)
 	}{
-		{"local deployment type", func(r *apimodels.ListModelsRequest) { r.DeploymentType = apimodels.DeploymentTypeLocal }},
-		{"remote deployment type", func(r *apimodels.ListModelsRequest) { r.DeploymentType = apimodels.DeploymentTypeRemote }},
+		{"local deployment type", func(r *apimodels.ListModelsRequest) { r.DeploymentType = constants.DeploymentTypeLocal }},
+		{"remote deployment type", func(r *apimodels.ListModelsRequest) { r.DeploymentType = constants.DeploymentTypeRemote }},
 		{"local provider", func(r *apimodels.ListModelsRequest) { r.ProviderIDs = []string{"vllm-spyre"} }},
 		{"remote provider", func(r *apimodels.ListModelsRequest) { r.ProviderIDs = []string{"watsonx"} }},
 		{"local and remote providers together", func(r *apimodels.ListModelsRequest) {
@@ -194,7 +195,7 @@ func TestListModels_AcceptsKnownFilters(t *testing.T) {
 			r.Models = []string{"ibm/granite-4-h-small", "ibm-granite/granite-3.3-8b-instruct"}
 		}},
 		{"provider with matching type", func(r *apimodels.ListModelsRequest) {
-			r.ProviderIDs, r.DeploymentType = []string{"hosted_vllm"}, apimodels.DeploymentTypeRemote
+			r.ProviderIDs, r.DeploymentType = []string{"hosted_vllm"}, constants.DeploymentTypeRemote
 		}},
 		{"remote-only model", func(r *apimodels.ListModelsRequest) { r.Models = []string{"ibm/granite-4-h-small"} }},
 		{"local status", func(r *apimodels.ListModelsRequest) { r.Status = "Downloading" }},
@@ -280,14 +281,14 @@ func TestListModels_LocalAndRemoteItems(t *testing.T) {
 	local, remote := resp.Data[0], resp.Data[1]
 
 	assert.Equal(t, localID.String(), local.ID)
-	assert.Equal(t, apimodels.DeploymentTypeLocal, local.DeploymentType)
+	assert.Equal(t, constants.DeploymentTypeLocal, local.DeploymentType)
 	assert.Equal(t, "vllm-spyre", local.Provider.ID)
 	assert.NotEqual(t, "vllm-spyre", local.Provider.Name, "the display name comes from the catalog")
 	require.NotNil(t, local.Worker)
 	assert.Equal(t, types.ApplicationWorker{ID: "w-1", Name: "lpar-1", RuntimeType: "podman"}, *local.Worker)
 	assert.Equal(t, 2, local.ConnectedServices, "local models are counted as component dependencies")
 
-	assert.Equal(t, apimodels.DeploymentTypeRemote, remote.DeploymentType)
+	assert.Equal(t, constants.DeploymentTypeRemote, remote.DeploymentType)
 	assert.Nil(t, remote.Worker)
 	assert.Equal(t, "connected", remote.Status)
 	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", remote.Params["api_base"])

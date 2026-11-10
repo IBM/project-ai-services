@@ -1,6 +1,7 @@
 package modelservice
 
 import (
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"net/http"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 
 func validRequest() apimodels.CreateModelRequest {
 	return apimodels.CreateModelRequest{
-		DeploymentType: apimodels.DeploymentTypeLocal,
+		DeploymentType: constants.DeploymentTypeLocal,
 		ComponentType:  "llm",
 		Name:           "granite-llm",
 		ProviderID:     "vllm-cpu",

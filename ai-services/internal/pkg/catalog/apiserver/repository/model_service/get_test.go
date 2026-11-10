@@ -21,7 +21,19 @@ import (
 func newGetService(t *testing.T, repo *mockModelRepo, comps *mockComponentRepo, deps *mockSvcDepRepo) *ModelService {
 	t.Helper()
 
-	return NewModelService(comps, nil, repo, deps, nil, setupTestCatalogProvider(t))
+	return NewModelService(comps, nil, repo, deps, nil, setupTestCatalogProvider(t), "")
+}
+
+const testGatewayEndpoint = "https://litellm.example.com"
+
+// newGetServiceWithGateway is newGetService with a configured gateway public endpoint.
+func newGetServiceWithGateway(t *testing.T, repo *mockModelRepo, deps *mockSvcDepRepo, endpoint string) *ModelService {
+	t.Helper()
+
+	svc := newGetService(t, repo, nil, deps)
+	svc.gatewayPublicEndpoint = endpoint
+
+	return svc
 }
 
 func TestGetModelByID_Local(t *testing.T) {
@@ -36,8 +48,6 @@ func TestGetModelByID_Local(t *testing.T) {
 		CreatedBy: "alice", CreatedAt: created, UpdatedAt: created,
 	}}}
 
-	t.Setenv(constants.LiteLLMPublicEndpointEnv, "https://litellm.example.com")
-
 	deps := &mockSvcDepRepo{linked: map[dbmodels.DependencyType][]dbrepo.LinkedServiceRow{
 		dbmodels.DependencyTypeComponent: {
 			{ApplicationID: uuid.MustParse("22222222-2222-2222-2222-222222222222"), ApplicationName: "zeta-app"},
@@ -50,7 +60,7 @@ func TestGetModelByID_Local(t *testing.T) {
 		dbmodels.DependencyTypeComponent: {id: 3},
 	}}
 
-	got, err := newGetService(t, repo, nil, deps).GetModelByID(context.Background(), id, "alice")
+	got, err := newGetServiceWithGateway(t, repo, deps, testGatewayEndpoint).GetModelByID(context.Background(), id, "alice")
 	require.NoError(t, err)
 
 	assert.Equal(t, id, repo.getID)
@@ -58,7 +68,7 @@ func TestGetModelByID_Local(t *testing.T) {
 	assert.NotContains(t, repo.getTypes, "vector_db")
 
 	assert.Equal(t, id.String(), got.ID)
-	assert.Equal(t, apimodels.DeploymentTypeLocal, got.DeploymentType)
+	assert.Equal(t, constants.DeploymentTypeLocal, got.DeploymentType)
 	assert.Equal(t, "granite-llm", got.Name)
 	assert.Equal(t, "vllm-spyre", got.Provider.ID)
 	assert.NotEqual(t, "vllm-spyre", got.Provider.Name, "the display name comes from the catalog")
@@ -67,7 +77,7 @@ func TestGetModelByID_Local(t *testing.T) {
 	assert.Equal(t, map[string]any{"max_len": 4096}, got.Params)
 	assert.Equal(t, "Running", got.Status)
 	assert.Equal(t, "Model running", got.Message)
-	assert.Equal(t, []map[string]any{{"type": "external", "url": "https://litellm.example.com"}}, got.Endpoints)
+	assert.Equal(t, []apimodels.ModelEndpoint{{Type: "external", URL: testGatewayEndpoint}}, got.Endpoints)
 	assert.Equal(t, []apimodels.ModelApplication{
 		{ID: "11111111-1111-1111-1111-111111111111", Name: "alpha-app"},
 		{ID: "22222222-2222-2222-2222-222222222222", Name: "zeta-app"},
@@ -76,26 +86,22 @@ func TestGetModelByID_Local(t *testing.T) {
 	assert.Equal(t, created, got.CreatedAt)
 }
 
-// The endpoint is always reported, local or remote, even when the variable is not set.
-func TestGetModelByID_EndpointWithoutEnv(t *testing.T) {
-	t.Setenv(constants.LiteLLMPublicEndpointEnv, "")
-
-	for _, deploymentType := range []string{"local", "remote"} {
-		t.Run(deploymentType, func(t *testing.T) {
+// The endpoint is always reported, local or remote, even when no gateway endpoint is configured.
+func TestGetModelByID_EndpointNotConfigured(t *testing.T) {
+	for _, deploymentType := range []constants.DeploymentType{constants.DeploymentTypeLocal, constants.DeploymentTypeRemote} {
+		t.Run(string(deploymentType), func(t *testing.T) {
 			id := uuid.New()
 			repo := &mockModelRepo{rows: []dbrepo.ModelRow{{ID: id, DeploymentType: deploymentType, Provider: "watsonx", CreatedBy: "alice"}}}
 
 			got, err := newGetService(t, repo, nil, &mockSvcDepRepo{}).GetModelByID(context.Background(), id, "alice")
 			require.NoError(t, err)
 
-			assert.Equal(t, []map[string]any{{"type": "external", "url": ""}}, got.Endpoints)
+			assert.Equal(t, []apimodels.ModelEndpoint{{Type: "external", URL: ""}}, got.Endpoints)
 		})
 	}
 }
 
 func TestGetModelByID_Remote(t *testing.T) {
-	t.Setenv(constants.LiteLLMPublicEndpointEnv, "https://litellm.example.com")
-
 	id := uuid.New()
 
 	repo := &mockModelRepo{rows: []dbrepo.ModelRow{{
@@ -115,13 +121,13 @@ func TestGetModelByID_Remote(t *testing.T) {
 		dbmodels.DependencyTypeComponent: {id: 9},
 	}}
 
-	got, err := newGetService(t, repo, nil, deps).GetModelByID(context.Background(), id, "alice")
+	got, err := newGetServiceWithGateway(t, repo, deps, testGatewayEndpoint).GetModelByID(context.Background(), id, "alice")
 	require.NoError(t, err)
 
-	assert.Equal(t, apimodels.DeploymentTypeRemote, got.DeploymentType)
+	assert.Equal(t, constants.DeploymentTypeRemote, got.DeploymentType)
 	assert.Equal(t, "Watsonx", got.Provider.Name)
 	assert.Nil(t, got.Worker)
-	assert.Equal(t, []map[string]any{{"type": "external", "url": "https://litellm.example.com"}}, got.Endpoints,
+	assert.Equal(t, []apimodels.ModelEndpoint{{Type: "external", URL: testGatewayEndpoint}}, got.Endpoints,
 		"a remote model is called through the same LiteLLM endpoint")
 	assert.Equal(t, "https://us-south.ml.cloud.ibm.com", got.Params["api_base"])
 	require.Len(t, got.Applications, 1)

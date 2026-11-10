@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,7 +13,7 @@ import (
 func TestGetModelProviders(t *testing.T) {
 	tests := []struct {
 		name           string
-		deploymentType string
+		deploymentType constants.DeploymentType
 		want           []types.ProviderInfo
 	}{
 		{

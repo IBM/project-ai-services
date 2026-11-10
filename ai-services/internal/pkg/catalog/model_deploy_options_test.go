@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +49,7 @@ func TestGetModelDeployOptions(t *testing.T) {
 			wantProviders: []string{"vllm-spyre", "vllm-cpu", "hosted_vllm"},
 			check: func(t *testing.T, opts *types.ModelDeployOptions) {
 				spyre := opts.Providers[0]
-				assert.Equal(t, "local", spyre.DeploymentType)
+				assert.Equal(t, constants.DeploymentTypeLocal, spyre.DeploymentType)
 				assert.True(t, spyre.Default)
 				assert.Equal(t, "/api/v1/components/llm/providers/vllm-spyre/params?runtime=podman", spyre.Schema)
 				require.Len(t, spyre.Profiles, 3)
@@ -61,7 +62,7 @@ func TestGetModelDeployOptions(t *testing.T) {
 				assert.Equal(t, 1, spyre.Profiles[2].Resources.Accelerators["ibm.com/spyre_pf"])
 
 				remote := opts.Providers[2]
-				assert.Equal(t, "remote", remote.DeploymentType)
+				assert.Equal(t, constants.DeploymentTypeRemote, remote.DeploymentType)
 				assert.Empty(t, remote.Profiles)
 				assert.Equal(t, "/api/v1/connectors/models/providers/hosted_vllm/params", remote.Schema)
 			},

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -67,8 +69,8 @@ func (s *ModelService) ensureNameAvailable(ctx context.Context, name string) err
 //
 // component_type is not validated yet.
 func (s *ModelService) validateListRequest(req apimodels.ListModelsRequest) error {
-	if t := req.DeploymentType; t != "" && t != apimodels.DeploymentTypeLocal && t != apimodels.DeploymentTypeRemote {
-		return validators.BadRequest("deployment_type must be '%s' or '%s'", apimodels.DeploymentTypeLocal, apimodels.DeploymentTypeRemote)
+	if t := req.DeploymentType; t != "" && t != constants.DeploymentTypeLocal && t != constants.DeploymentTypeRemote {
+		return validators.BadRequest("deployment_type must be '%s' or '%s'", constants.DeploymentTypeLocal, constants.DeploymentTypeRemote)
 	}
 
 	if err := s.validateProviderIDs(req.ProviderIDs, req.DeploymentType); err != nil {
@@ -87,12 +89,12 @@ func (s *ModelService) validateListRequest(req apimodels.ListModelsRequest) erro
 }
 
 // validateProviderIDs checks that every provider is one the catalog offers for the deployment type.
-func (s *ModelService) validateProviderIDs(providerIDs []string, deploymentType apimodels.DeploymentType) error {
+func (s *ModelService) validateProviderIDs(providerIDs []string, deploymentType constants.DeploymentType) error {
 	if len(providerIDs) == 0 {
 		return nil
 	}
 
-	providers := s.catalogProvider.GetModelProviders(string(deploymentType))
+	providers := s.catalogProvider.GetModelProviders(deploymentType)
 	known := make([]string, 0, len(providers))
 
 	for _, p := range providers {

@@ -197,7 +197,7 @@ func extractModelsFromProperty(propMap map[string]any, modelSet map[string]bool)
 // GetModelProviders lists the providers a model can be deployed with, as the provider id with its
 // display name, in no particular order. deploymentType selects the kind: "local" for the model components,
 // "remote" for the "models" connectors, and "" for both.
-func (p *CatalogProvider) GetModelProviders(deploymentType string) []types.ProviderInfo {
+func (p *CatalogProvider) GetModelProviders(deploymentType constants.DeploymentType) []types.ProviderInfo {
 	result := make([]types.ProviderInfo, 0)
 
 	add := func(id, name string) {

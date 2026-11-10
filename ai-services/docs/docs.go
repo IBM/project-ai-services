@@ -2456,7 +2456,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves one of the authenticated user's models. The id is looked up among local models first, then remote ones. Local models include their endpoints; remote models do not, as they are reached through the LiteLLM gateway. Secret params of remote models are never returned. A model created by another user is reported as not found.",
+                "description": "Retrieves one of the authenticated user's models. The id is looked up among local models first, then remote ones. Local and remote models alike are reached through the model gateway, whose public endpoint is returned in endpoints. Secret params of remote models are never returned. Accessing a model created by another user returns 403 Forbidden.",
                 "produces": [
                     "application/json"
                 ],
@@ -3461,7 +3461,7 @@ const docTemplate = `{
                     ],
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType"
                         }
                     ]
                 },
@@ -3580,17 +3580,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType": {
-            "type": "string",
-            "enum": [
-                "local",
-                "remote"
-            ],
-            "x-enum-varnames": [
-                "DeploymentTypeLocal",
-                "DeploymentTypeRemote"
-            ]
-        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse": {
             "type": "object",
             "properties": {
@@ -3703,21 +3692,20 @@ const docTemplate = `{
                     }
                 },
                 "connected_services": {
-                    "description": "ConnectedServices is the number of services using the model, as in the list response.",
+                    "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"
                 },
                 "created_at": {
                     "type": "string"
                 },
                 "deployment_type": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType"
                 },
                 "endpoints": {
-                    "description": "Endpoints are where a local model is called: the public  Omitted for remote models.LiteLLM gateway, whose url is the\nvalue of LITELLM_PUBLIC_ENDPOINT (empty if unset).",
+                    "description": "Endpoints are where the model is called. Local and remote models alike are reached through\nthe public model gateway.",
                     "type": "array",
                     "items": {
-                        "type": "object",
-                        "additionalProperties": {}
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelEndpoint"
                     }
                 },
                 "id": {
@@ -3756,17 +3744,30 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelEndpoint": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "description": "Type is the kind of endpoint, e.g. \"external\" for the public model gateway.",
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListItem": {
             "type": "object",
             "properties": {
                 "connected_services": {
+                    "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"
                 },
                 "created_at": {
                     "type": "string"
                 },
                 "deployment_type": {
-                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeploymentType"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType"
                 },
                 "id": {
                     "type": "string"
@@ -4028,6 +4029,17 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType": {
+            "type": "string",
+            "enum": [
+                "local",
+                "remote"
+            ],
+            "x-enum-varnames": [
+                "DeploymentTypeLocal",
+                "DeploymentTypeRemote"
+            ]
         },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Application": {
             "type": "object",
@@ -4507,7 +4519,11 @@ const docTemplate = `{
                 },
                 "deployment_type": {
                     "description": "\"local\" or \"remote\"",
-                    "type": "string"
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType"
+                        }
+                    ]
                 },
                 "id": {
                     "type": "string"

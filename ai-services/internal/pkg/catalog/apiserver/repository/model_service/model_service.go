@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
@@ -35,11 +37,15 @@ type ModelService struct {
 	catalogProvider *catalog.CatalogProvider
 	planner         *modelsvc.ModelPlanner
 	executor        *modelsvc.ModelExecutor
+	// gatewayPublicEndpoint is the URL consumers call models at, reported as the model's endpoint.
+	// Empty when it is not configured.
+	gatewayPublicEndpoint string
 }
 
 // NewModelService creates a new ModelService instance.
 // componentRepo, connectorRepo, modelRepo, svcDepRepo, workers and catalogProvider are required; workers is used to
-// reach the worker that hosts a local model.
+// reach the worker that hosts a local model. gatewayPublicEndpoint is the public URL of the model
+// gateway, reported as the endpoint of every model; it may be empty.
 func NewModelService(
 	componentRepo dbrepo.ComponentRepository,
 	connectorRepo dbrepo.ConnectorRepository,
@@ -47,15 +53,17 @@ func NewModelService(
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	workers worker.Resolver,
 	catalogProvider *catalog.CatalogProvider,
+	gatewayPublicEndpoint string,
 ) *ModelService {
 	return &ModelService{
-		componentRepo:   componentRepo,
-		connectorRepo:   connectorRepo,
-		modelRepo:       modelRepo,
-		svcDepRepo:      svcDepRepo,
-		catalogProvider: catalogProvider,
-		planner:         modelsvc.NewModelPlanner(catalogProvider, workers),
-		executor:        modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
+		componentRepo:         componentRepo,
+		connectorRepo:         connectorRepo,
+		modelRepo:             modelRepo,
+		svcDepRepo:            svcDepRepo,
+		catalogProvider:       catalogProvider,
+		planner:               modelsvc.NewModelPlanner(catalogProvider, workers),
+		executor:              modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
+		gatewayPublicEndpoint: gatewayPublicEndpoint,
 	}
 }
 
@@ -81,7 +89,7 @@ func (s *ModelService) CreateModel(ctx context.Context, req apimodels.CreateMode
 		return nil, err
 	}
 
-	if req.DeploymentType == apimodels.DeploymentTypeLocal {
+	if req.DeploymentType == constants.DeploymentTypeLocal {
 		return s.createLocalModel(ctx, req)
 	}
 

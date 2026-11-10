@@ -4,7 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -103,11 +104,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	// Reject up front: a list without an owner must never reach the service.
 	userID := c.GetString(middleware.CtxUserIDKey)
 
-	// A non-numeric value is read as 0 and falls back to the default, like ListApplications.
-	page, _ := strconv.Atoi(c.Query("page"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-
-	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
+	page, pageSize, err := parsePagination(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 
@@ -118,7 +115,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 		Page:           page,
 		PageSize:       pageSize,
 		ComponentType:  c.Query("component_type"),
-		DeploymentType: models.DeploymentType(c.Query("deployment_type")),
+		DeploymentType: constants.DeploymentType(c.Query("deployment_type")),
 		ProviderIDs:    queryValues(c, "provider_id"),
 		Models:         queryValues(c, "model"),
 		Status:         c.Query("status"),
@@ -144,7 +141,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 // GetModelByID godoc
 //
 //	@Summary		Get a model by ID (local or remote)
-//	@Description	Retrieves one of the authenticated user's models. The id is looked up among local models first, then remote ones. Local models include their endpoints; remote models do not, as they are reached through the LiteLLM gateway. Secret params of remote models are never returned. A model created by another user is reported as not found.
+//	@Description	Retrieves one of the authenticated user's models. The id is looked up among local models first, then remote ones. Local and remote models alike are reached through the model gateway, whose public endpoint is returned in endpoints. Secret params of remote models are never returned. Accessing a model created by another user returns 403 Forbidden.
 //	@Tags			Models
 //	@Produce		json
 //	@Security		BearerAuth
@@ -200,8 +197,8 @@ func queryValues(c *gin.Context, key string) []string {
 
 // createModelStatus maps a deployment type to its success status: local deployments continue
 // in the background (202), remote registrations complete before responding (201).
-func createModelStatus(t models.DeploymentType) int {
-	if t == models.DeploymentTypeLocal {
+func createModelStatus(t constants.DeploymentType) int {
+	if t == constants.DeploymentTypeLocal {
 		return http.StatusAccepted
 	}
 

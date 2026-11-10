@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -296,12 +297,12 @@ type ModelDeployProfile struct {
 
 // ModelDeployProvider is a provider (local or remote) a model can be deployed through.
 type ModelDeployProvider struct {
-	ID             string               `json:"id"`
-	Name           string               `json:"name"`
-	DeploymentType string               `json:"deployment_type"` // "local" or "remote"
-	Default        bool                 `json:"default"`
-	Profiles       []ModelDeployProfile `json:"profiles,omitempty"`
-	Schema         string               `json:"schema,omitempty"`
+	ID             string                   `json:"id"`
+	Name           string                   `json:"name"`
+	DeploymentType constants.DeploymentType `json:"deployment_type"` // "local" or "remote"
+	Default        bool                     `json:"default"`
+	Profiles       []ModelDeployProfile     `json:"profiles,omitempty"`
+	Schema         string                   `json:"schema,omitempty"`
 }
 
 // ModelDeployOptions is the response of GET /catalog/models/:id/deploy-options.

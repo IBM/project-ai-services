@@ -3,6 +3,7 @@ package modelservice
 import (
 	"context"
 	"errors"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"maps"
 	"net/http"
 	"sync"
@@ -70,10 +71,6 @@ func (m *mockComponentRepo) get(id uuid.UUID) *dbmodels.Component {
 	snapshot := *c
 
 	return &snapshot
-}
-
-func (m *mockComponentRepo) GetByID(_ context.Context, id uuid.UUID) (*dbmodels.Component, error) {
-	return m.get(id), nil
 }
 
 func (m *mockComponentRepo) GetByName(_ context.Context, name string) (*dbmodels.Component, error) {
@@ -245,7 +242,7 @@ func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
 func newTestModelService(t *testing.T, comps dbrepo.ComponentRepository, conns dbrepo.ConnectorRepository, workers worker.Resolver, lite catalogclient.LiteLLMClient) *ModelService {
 	t.Helper()
 
-	svc := NewModelService(comps, conns, nil, nil, workers, setupTestCatalogProvider(t))
+	svc := NewModelService(comps, conns, nil, nil, workers, setupTestCatalogProvider(t), "")
 	svc.executor = modelsvc.NewModelExecutor(comps, conns, lite)
 
 	return svc
@@ -303,7 +300,7 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 	tests := []struct {
 		name         string
 		controlPlane runtimeTypes.RuntimeType
-		deployment   apimodels.DeploymentType
+		deployment   constants.DeploymentType
 		selector     string
 		// registryRuntimes is the live registry content (worker name -> runtime type).
 		registryRuntimes map[string]string
@@ -311,23 +308,23 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 		{
 			name:         "local model, openshift control plane",
 			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
-			deployment:   apimodels.DeploymentTypeLocal,
+			deployment:   constants.DeploymentTypeLocal,
 		},
 		{
 			name:         "remote model, openshift control plane",
 			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
-			deployment:   apimodels.DeploymentTypeRemote,
+			deployment:   constants.DeploymentTypeRemote,
 		},
 		{
 			name:             "default worker is openshift",
 			controlPlane:     runtimeTypes.RuntimeTypePodman,
-			deployment:       apimodels.DeploymentTypeLocal,
+			deployment:       constants.DeploymentTypeLocal,
 			registryRuntimes: map[string]string{"Local": string(runtimeTypes.RuntimeTypeOpenShift)},
 		},
 		{
 			name:             "selected remote worker is openshift",
 			controlPlane:     runtimeTypes.RuntimeTypePodman,
-			deployment:       apimodels.DeploymentTypeLocal,
+			deployment:       constants.DeploymentTypeLocal,
 			selector:         ocpWorker,
 			registryRuntimes: map[string]string{ocpWorker: string(runtimeTypes.RuntimeTypeOpenShift)},
 		},
@@ -449,7 +446,7 @@ func watsonxParams() map[string]any {
 func TestCreateModel_Remote(t *testing.T) {
 	watsonxRequest := func(name string) apimodels.CreateModelRequest {
 		return apimodels.CreateModelRequest{
-			DeploymentType: apimodels.DeploymentTypeRemote,
+			DeploymentType: constants.DeploymentTypeRemote,
 			ComponentType:  "llm",
 			Name:           name,
 			ProviderID:     "watsonx",
@@ -660,7 +657,7 @@ func newLocalServiceWith(t *testing.T, d types.Deployer, lite *mockLiteLLMClient
 
 func localRequest() apimodels.CreateModelRequest {
 	return apimodels.CreateModelRequest{
-		DeploymentType: apimodels.DeploymentTypeLocal,
+		DeploymentType: constants.DeploymentTypeLocal,
 		ComponentType:  "llm",
 		Name:           "local-granite",
 		ProviderID:     "vllm-cpu",
@@ -1019,7 +1016,7 @@ func TestPlanRemote(t *testing.T) {
 		{
 			name: "openai-style provider derives the tokenize target from api_base",
 			req: apimodels.CreateModelRequest{
-				DeploymentType: apimodels.DeploymentTypeRemote,
+				DeploymentType: constants.DeploymentTypeRemote,
 				ComponentType:  "embedding",
 				Name:           "remote-vllm",
 				ProviderID:     "hosted_vllm",
@@ -1035,7 +1032,7 @@ func TestPlanRemote(t *testing.T) {
 		{
 			name: "watsonx uses its fixed tokenization endpoint",
 			req: apimodels.CreateModelRequest{
-				DeploymentType: apimodels.DeploymentTypeRemote,
+				DeploymentType: constants.DeploymentTypeRemote,
 				ComponentType:  "llm",
 				Name:           "remote-watsonx",
 				ProviderID:     "watsonx",
