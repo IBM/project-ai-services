@@ -36,6 +36,18 @@ const (
 	MetadataKeyProfile = "profile"
 	// MetadataKeyParams is the metadata key that holds the non-sensitive provider params of a model.
 	MetadataKeyParams = "params"
+	// MetadataKeyLiteLLM is the metadata key that holds the LiteLLM gateway details of a model.
+	MetadataKeyLiteLLM = "litellm"
+	// MetadataKeyLiteLLMModelID is the key, nested under MetadataKeyLiteLLM, that stores the model ID
+	// LiteLLM assigned on registration.
+	MetadataKeyLiteLLMModelID = "model_id"
+)
+
+const (
+	// ConnectorParamsURLFormat takes connector type and provider ID.
+	ConnectorParamsURLFormat = "/api/v1/connectors/%s/providers/%s/params"
+	// ComponentParamsURLFormat takes component type, provider ID and runtime.
+	ComponentParamsURLFormat = "/api/v1/components/%s/providers/%s/params?runtime=%s"
 )
 
 // Connector type constants.
@@ -53,6 +65,14 @@ const (
 const (
 	// ConnectorProviderWatsonx is the provider ID for IBM watsonx.ai model connectors.
 	ConnectorProviderWatsonx = "watsonx"
+)
+
+// Model deployment type constants.
+const (
+	// DeploymentTypeLocal means the model runs as a pod on a worker.
+	DeploymentTypeLocal = "local"
+	// DeploymentTypeRemote means the model is hosted externally and only registered.
+	DeploymentTypeRemote = "remote"
 )
 
 // Datasource provider ID constants.
