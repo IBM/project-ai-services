@@ -74,7 +74,7 @@ func NewModelService(
 		executor:        modelsvc.NewModelExecutor(componentRepo, connectorRepo, litellmClient),
 		lister:          list.New(modelRepo, svcDepRepo, catalogProvider),
 		getter:          get.New(svcDepRepo, catalogProvider, gatewayPublicEndpoint),
-		keys:            keys.NewManager(componentRepo, connectorRepo, litellmClient),
+		keys:            keys.NewManager(litellmClient),
 	}
 }
 
@@ -175,6 +175,37 @@ func (s *ModelService) ListModels(ctx context.Context, req apimodels.ListModelsR
 // As for applications, a missing model is a 404 and a model created by someone else a 403; an empty
 // createdBy skips the ownership check. Nothing else about the model is read before it passes.
 func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelDetail, error) {
+	row, err := s.ownedModel(ctx, id, createdBy)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.getter.Detail(ctx, row)
+}
+
+// GenerateModelKey generates the public LiteLLM key of the model identified by id. See
+// keys.Manager.Generate.
+//
+// As for GetModelByID, a missing model is a 404 and a model created by someone else a 403, and
+// nothing is revoked or generated before the check passes. Errors of type *validators.ValidationError
+// carry the HTTP status to return; any other error is an internal failure.
+func (s *ModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.GenerateModelKeyResponse, error) {
+	if vars.RuntimeFactory != nil && vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
+		return nil, validators.BadRequest("models are unsupported on openshift runtime")
+	}
+
+	row, err := s.ownedModel(ctx, id, createdBy)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.keys.Generate(ctx, row)
+}
+
+// ownedModel reads a model, local or remote, and checks that createdBy may use it: a missing model
+// is a 404 and a model created by someone else a 403. An empty createdBy skips the ownership check.
+// The lookup is limited to the model types of the catalog.
+func (s *ModelService) ownedModel(ctx context.Context, id uuid.UUID, createdBy string) (*dbrepo.ModelRow, error) {
 	row, err := s.modelRepo.GetByID(ctx, id, helpers.New(s.catalogProvider).QueryComponentTypes())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get model: %w", err)
@@ -188,18 +219,5 @@ func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy
 		return nil, validators.Forbidden("user does not own this model")
 	}
 
-	return s.getter.Detail(ctx, row)
-}
-
-// GenerateModelKey generates the public LiteLLM key of the model identified by id. See
-// keys.Manager.Generate.
-//
-// Errors of type *validators.ValidationError carry the HTTP status to return; any other error is
-// an internal failure.
-func (s *ModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.GenerateModelKeyResponse, error) {
-	if vars.RuntimeFactory != nil && vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
-		return nil, validators.BadRequest("models are unsupported on openshift runtime")
-	}
-
-	return s.keys.Generate(ctx, id, createdBy)
+	return row, nil
 }

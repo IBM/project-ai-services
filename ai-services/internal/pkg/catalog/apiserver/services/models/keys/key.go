@@ -4,14 +4,12 @@ package keys
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -24,20 +22,13 @@ const (
 
 // Manager generates the public LiteLLM keys of models.
 type Manager struct {
-	componentRepo dbrepo.ComponentRepository
-	connectorRepo dbrepo.ConnectorRepository
-	litellm       catalogclient.LiteLLMClient
-	locks         aliasLocks
+	litellm catalogclient.LiteLLMClient
+	locks   aliasLocks
 }
 
-// NewManager creates a key manager. The repositories resolve a model ID to its model name and
-// owner; litellm creates and revokes the keys.
-func NewManager(
-	componentRepo dbrepo.ComponentRepository,
-	connectorRepo dbrepo.ConnectorRepository,
-	litellm catalogclient.LiteLLMClient,
-) *Manager {
-	return &Manager{componentRepo: componentRepo, connectorRepo: connectorRepo, litellm: litellm}
+// NewManager creates a key manager. litellm creates and revokes the keys.
+func NewManager(litellm catalogclient.LiteLLMClient) *Manager {
+	return &Manager{litellm: litellm}
 }
 
 // aliasLocks serialises work per key alias, so two concurrent key requests for one model ID cannot
@@ -66,33 +57,31 @@ func (m *aliasLocks) lock(name string) func() {
 	return l.Unlock
 }
 
-// Generate generates the public LiteLLM key of the model identified by id.
+// Generate generates the public LiteLLM key of a model, local or remote.
 //
-// id is the ID of a model (a component or a connector). The key is aliased "<modelName>-<id>",
-// which LiteLLM keeps unique. Any existing key with that alias is revoked first, so at most one public key exists per ID. The key is returned once and is
-// neither stored nor logged.
+// The model must already be one the caller may use: Generate does not check ownership. The key is
+// aliased "<modelName>-<id>", which LiteLLM keeps unique. Any existing key with that alias is revoked first, so
+// at most one public key exists per ID. The key is returned once and is neither stored nor logged.
 //
 // Errors of type *validators.ValidationError carry the HTTP status to return; any other error is
 // an internal failure.
-func (m *Manager) Generate(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.GenerateModelKeyResponse, error) {
-	// TODO Reuse the method to fetch model once list is merged
-	model, err := m.modelNameOf(ctx, id, createdBy)
-	if err != nil {
-		return nil, err
+func (m *Manager) Generate(ctx context.Context, model *dbrepo.ModelRow) (*apimodels.GenerateModelKeyResponse, error) {
+	if model.Model == "" {
+		return nil, fmt.Errorf("%s has no model name in its metadata", model.ID)
 	}
 
-	alias := fmt.Sprintf("%s-%s", model, id)
+	alias := fmt.Sprintf("%s-%s", model.Model, model.ID)
 
 	// The lock covers the revoke and the generate, so a concurrent request cannot slip a key in
 	// between them.
 	defer m.locks.lock(alias)()
 
-	key, err := m.rotatePublicKey(ctx, id, alias, model)
+	key, err := m.rotatePublicKey(ctx, model.ID, alias, model.Model)
 	if err != nil {
 		return nil, err
 	}
 
-	return &apimodels.GenerateModelKeyResponse{Key: key, Type: publicKeyType, Model: model}, nil
+	return &apimodels.GenerateModelKeyResponse{Key: key, Type: publicKeyType, Model: model.Model}, nil
 }
 
 // rotatePublicKey revokes the key with the given alias, if any, and generates a new one.
@@ -120,56 +109,4 @@ func (m *Manager) rotatePublicKey(ctx context.Context, id uuid.UUID, alias, mode
 	}
 
 	return key, nil
-}
-
-// modelNameOf resolves a component or connector ID to the name of the model it serves. The ID is
-// looked up in components first, then in connectors; 404 when it is in neither, 403 when the row
-// was created by someone other than userID.
-func (m *Manager) modelNameOf(ctx context.Context, id uuid.UUID, userID string) (string, error) {
-	component, err := m.componentRepo.GetByID(ctx, id)
-	if err != nil {
-		return "", fmt.Errorf("failed to get component: %w", err)
-	}
-	if component != nil {
-		if err := ensureOwner(component.CreatedBy, userID); err != nil {
-			return "", err
-		}
-
-		return modelFromMetadata(component.Metadata, id)
-	}
-
-	connector, err := m.connectorRepo.GetByID(ctx, id, true)
-	if errors.Is(err, dbrepo.ErrConnectorNotFound) {
-		return "", validators.NotFound("model %q not found", id)
-	}
-	if err != nil {
-		return "", fmt.Errorf("failed to get connector: %w", err)
-	}
-	if connector.Type != catalogconstants.ConnectorTypeModels {
-		return "", validators.NotFound("model %q not found", id)
-	}
-	if err := ensureOwner(connector.CreatedBy, userID); err != nil {
-		return "", err
-	}
-
-	return modelFromMetadata(connector.Metadata, id)
-}
-
-// ensureOwner returns a 403 when the row was created by someone other than userID. An empty
-// userID is not checked.
-func ensureOwner(createdBy, userID string) error {
-	if userID != "" && createdBy != userID {
-		return validators.Forbidden("user does not own this model")
-	}
-
-	return nil
-}
-
-func modelFromMetadata(metadata map[string]any, id uuid.UUID) (string, error) {
-	model, _ := metadata[catalogconstants.MetadataKeyModel].(string)
-	if model == "" {
-		return "", fmt.Errorf("%s has no model name in its metadata", id)
-	}
-
-	return model, nil
 }
