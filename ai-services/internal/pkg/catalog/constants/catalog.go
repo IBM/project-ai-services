@@ -67,12 +67,15 @@ const (
 	ConnectorProviderWatsonx = "watsonx"
 )
 
+// DeploymentType selects how a model is provisioned.
+type DeploymentType string
+
 // Model deployment type constants.
 const (
-	// DeploymentTypeLocal means the model runs as a pod on a worker.
-	DeploymentTypeLocal = "local"
-	// DeploymentTypeRemote means the model is hosted externally and only registered.
-	DeploymentTypeRemote = "remote"
+	// DeploymentTypeLocal starts a model pod on a worker and registers a LiteLLM route (async).
+	DeploymentTypeLocal DeploymentType = "local"
+	// DeploymentTypeRemote registers an externally hosted endpoint as a connector (sync).
+	DeploymentTypeRemote DeploymentType = "remote"
 )
 
 // Datasource provider ID constants.
@@ -139,6 +142,14 @@ const (
 	// DBEncryptionKeyEnv is the environment variable that holds the AES-256 key used to
 	// encrypt sensitive connector credential fields at rest.
 	DBEncryptionKeyEnv = "DB_ENCRYPTION_KEY"
+
+	// ModelGatewayPublicEndpointEnv is the environment variable that holds the URL under which the
+	// model gateway is reachable by consumers of a model. It is reported as the model's endpoint.
+	ModelGatewayPublicEndpointEnv = "MODEL_GATEWAY_PUBLIC_ENDPOINT"
+
+	// ModelEndpointTypeExternal is the type of the model endpoint that consumers outside the
+	// platform call: the public model gateway.
+	ModelEndpointTypeExternal = "external"
 )
 
 // Made with Bob

@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -689,6 +691,15 @@ func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// parsePagination reads the page and page_size query parameters and validates them, applying the
+// defaults. A non-numeric value is read as 0 and falls back to the default.
+func parsePagination(c *gin.Context) (page, pageSize int, err error) {
+	page, _ = strconv.Atoi(c.Query("page"))
+	pageSize, _ = strconv.Atoi(c.Query("page_size"))
+
+	return repository.ValidatePaginationParams(page, pageSize)
 }
 
 // resolveRuntimeParam validates the optional ?runtime= query parameter.
