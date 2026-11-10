@@ -8,7 +8,7 @@ description: "Deploy instruct models on vLLM inference engine (CPU-only)"
 # Component type this provider belongs to
 component_type:
   id: llm
-  name: "Large Language Model (LLM)"
+  name: "Large language model (LLM)"
   short_name: "LLM"
 category: models
 litellm:

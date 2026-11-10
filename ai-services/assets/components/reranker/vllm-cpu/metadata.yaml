@@ -8,7 +8,7 @@ description: "Deploy reranker models on vLLM inference engine (CPU-only)"
 # Component type this provider belongs to
 component_type:
   id: reranker
-  name: "Reranker Model"
+  name: "Reranker model"
   short_name: "Reranker"
 category: models
 litellm:

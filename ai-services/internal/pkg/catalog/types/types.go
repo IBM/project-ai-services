@@ -184,7 +184,7 @@ type Component struct {
 //
 //	component_type:
 //	  id: llm
-//	  name: "Large Language Model (LLM)"
+//	  name: "Large language model (LLM)"
 //	  short_name: "LLM"
 func (c *Component) UnmarshalYAML(value *yaml.Node) error {
 	type plain Component

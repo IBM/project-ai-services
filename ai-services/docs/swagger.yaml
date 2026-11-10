@@ -812,6 +812,15 @@ definitions:
       type:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      short_name:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider:
     properties:
       description:
@@ -909,15 +918,6 @@ definitions:
       schema:
         type: string
       version:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType:
-    properties:
-      id:
-        type: string
-      name:
-        type: string
-      short_name:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions:

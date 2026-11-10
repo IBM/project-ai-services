@@ -180,7 +180,7 @@ default: true
 category: models
 component_type:
   id: llm
-  name: "Large Language Model (LLM)"
+  name: "Large language model (LLM)"
   short_name: "LLM"
 litellm:
   provider: hosted_vllm
@@ -194,7 +194,7 @@ litellm:
 		if c.ID != "vllm-cpu" || c.Name != "vLLM CPU" || c.Type != "component" || !c.Default || c.Category != "models" {
 			t.Errorf("plain fields not decoded: %+v", c)
 		}
-		if c.ComponentType != "llm" || c.ComponentName != "Large Language Model (LLM)" || c.ComponentShortName != "LLM" {
+		if c.ComponentType != "llm" || c.ComponentName != "Large language model (LLM)" || c.ComponentShortName != "LLM" {
 			t.Errorf("component type fields wrong: %+v", c)
 		}
 		if c.LiteLLM == nil || c.LiteLLM.Provider != "hosted_vllm" || c.LiteLLM.ModelMode != "chat" {
