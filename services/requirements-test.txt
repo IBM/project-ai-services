@@ -55,7 +55,7 @@ sentence-splitter==1.4
 spacy==3.8.7
 # Japanese model only — requires sudachipy + sudachidict-core for the SudachiPy tokeniser
 https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl
-sudachipy==0.6.11
-sudachidict-core==20260723
+sudachipy==0.7.0
+sudachidict-core==20261015
 
 apscheduler[sqlalchemy]==3.11.3
