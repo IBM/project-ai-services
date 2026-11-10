@@ -1,9 +1,5 @@
 worker:
-<<<<<<< HEAD
   image: icr.io/ai-services-cicd/ai-services:v0.0.418-11
-=======
-  image: icr.io/ai-services-cicd/ai-services:v0.0.418-9
->>>>>>> d1596c8c (version bump)
   runtime: "openshift"
   token: ""
   gatewayAddr: ""
