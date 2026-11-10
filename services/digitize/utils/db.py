@@ -224,9 +224,9 @@ def _document_message(doc) -> Optional[str]:
     """Build the human-readable message shown for shadow (already_exists / skipped) docs."""
     metadata = doc.doc_metadata or {}
     if doc.status == DocStatus.ALREADY_EXISTS.value:
-        return f"Already exists: ingested as {metadata.get('existing_doc_name')}"
+        return f"already exists: ingested as {metadata.get('existing_doc_name')}"
     if doc.status == DocStatus.SKIPPED.value:
-        return f"Skipped: duplicate of in progress {metadata.get('existing_doc_name')}"
+        return f"skipped: duplicate of in progress {metadata.get('existing_doc_name')}"
     return None
 
 

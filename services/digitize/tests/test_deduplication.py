@@ -708,7 +708,7 @@ class TestCategorizeFieldsNewKeys:
 
 @pytest.mark.unit
 class TestGetJobMessagePopulation:
-    """get_job must set message='Already exists: ingested as <name>' for already_exists docs."""
+    """get_job must set message='already exists: ingested as <name>' for already_exists docs."""
 
     def _make_doc_mock(self, status, existing_doc_name=None):
         m = Mock()
@@ -746,7 +746,7 @@ class TestGetJobMessagePopulation:
             result = _real_get_job("job-1")
 
         assert result["documents"][0]["status"] == "skipped"
-        assert result["documents"][0]["message"] == "Skipped: duplicate of in progress original.pdf"
+        assert result["documents"][0]["message"] == "skipped: duplicate of in progress original.pdf"
 
     def test_already_exists_doc_gets_message(self):
         mock_dm = Mock()
@@ -764,7 +764,7 @@ class TestGetJobMessagePopulation:
 
         assert result is not None
         doc_summary = result["documents"][0]
-        assert doc_summary["message"] == "Already exists: ingested as original.pdf"
+        assert doc_summary["message"] == "already exists: ingested as original.pdf"
 
     def test_completed_doc_has_no_message(self):
         mock_dm = Mock()
