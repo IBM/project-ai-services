@@ -156,13 +156,17 @@ func (c *caddyManager) createRouteIfAbsent(ctx context.Context, serverName, rout
 		return fmt.Errorf("failed to check route existence: %w", err)
 	}
 
-	if checkResp.StatusCode() == http.StatusOK {
+	switch checkResp.StatusCode() {
+	case http.StatusOK:
 		logger.DebugfCtx(ctx, "Route %s already exists, skipping registration\n", routeID)
 
 		return nil
+	case http.StatusNotFound:
+		return c.createRoute(ctx, serverName, routeConfig)
+	default:
+		// Caddy could not answer; creating now could duplicate an existing @id.
+		return fmt.Errorf("failed to check route existence: caddy returned status %d for route %s: %s", checkResp.StatusCode(), routeID, checkResp.String())
 	}
-
-	return c.createRoute(ctx, serverName, routeConfig)
 }
 
 // RegisterIngressRoute registers a path-based route on the private mTLS ingress
@@ -182,7 +186,7 @@ func (c *caddyManager) RegisterIngressRoute(ctx context.Context, route IngressRo
 
 	routeConfig := map[string]any{
 		"@id":   route.ID,
-		"match": []map[string]any{{"path": []string{prefix + "/*"}}},
+		"match": []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
 		"handle": []map[string]any{
 			{"handler": "rewrite", "strip_path_prefix": prefix},
 			{
@@ -224,9 +228,11 @@ func (c *caddyManager) RegisterEgressRoute(ctx context.Context, route EgressRout
 		tlsConfig["server_name"] = route.ServerName
 	}
 
+	prefix := strings.TrimRight(route.PathPrefix, "/")
+
 	routeConfig := map[string]any{
 		"@id":   route.ID,
-		"match": []map[string]any{{"path": []string{strings.TrimRight(route.PathPrefix, "/") + "/*"}}},
+		"match": []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
 		"handle": []map[string]any{{
 			"handler":   "reverse_proxy",
 			"transport": map[string]any{"protocol": "http", "tls": tlsConfig},
@@ -263,6 +269,25 @@ func extractDomainFromRoute(rawRoute map[string]any) (string, error) {
 	return domain, nil
 }
 
+// isPathOnlyRoute reports whether the route's first matcher has a non-empty
+// "path" and no "host".
+func isPathOnlyRoute(rawRoute map[string]any) bool {
+	matches, ok := rawRoute["match"].([]any)
+	if !ok || len(matches) == 0 {
+		return false
+	}
+
+	first, ok := matches[0].(map[string]any)
+	if !ok {
+		return false
+	}
+
+	paths, hasPath := first["path"].([]any)
+	_, hasHost := first["host"]
+
+	return hasPath && len(paths) > 0 && !hasHost
+}
+
 // GetRouteByID retrieves a specific route by its ID from Caddy.
 func (c *caddyManager) GetRouteByID(ctx context.Context, routeID string) (*Route, error) {
 	idURL, err := url.JoinPath(c.adminURL, "id", routeID)
@@ -285,6 +310,12 @@ func (c *caddyManager) GetRouteByID(ctx context.Context, routeID string) (*Route
 
 	if resp.StatusCode() != http.StatusOK {
 		return nil, fmt.Errorf("caddy returned status %d for route %s", resp.StatusCode(), routeID)
+	}
+
+	// Private ingress/egress routes match on path, not host: there is no domain
+	// or external URL to report.
+	if isPathOnlyRoute(rawRoute) {
+		return &Route{ID: routeID}, nil
 	}
 
 	domain, err := extractDomainFromRoute(rawRoute)
