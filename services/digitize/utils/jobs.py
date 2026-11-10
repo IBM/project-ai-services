@@ -448,7 +448,7 @@ def request_job_cancellation(job_id: str, *, clean_files: bool = False) -> None:
 
 
 def _fail_unfinished_docs(job_id: str) -> None:
-    """Best-effort: mark non-terminal docs of *job_id* FAILED so they release their checksum claim."""
+    """Best-effort: mark non-terminal docs of *job_id* FAILED so they stop owning their content."""
     try:
         for doc in db_manager.get_documents_by_job_id(job_id):
             if doc.status not in _TERMINAL_DOC_STATUSES:

@@ -395,15 +395,23 @@ class DatabaseManager:
             return None
 
 
+    # A document in one of these states no longer owns its content: the next submission
+    # of the same content is treated as novel and re-points the document_checksum row.
+    _RELEASED_STATUSES = (DocStatus.FAILED.value, DocStatus.CANCELLED.value)
+
     @staticmethod
     def _select_checksum_owner(session, checksum: str, operation: str) -> Optional[Document]:
-        """Return the Document owning (checksum, operation), detached, or None."""
+        """Return the live Document owning (checksum, operation), detached, or None.
+
+        A failed / cancelled owner counts as no owner (the content is novel).
+        """
         owner = session.scalar(
             select(Document)
             .join(DocumentChecksum, DocumentChecksum.doc_id == Document.doc_id)
             .where(
                 DocumentChecksum.checksum == checksum,
                 DocumentChecksum.type == operation,
+                Document.status.notin_(DatabaseManager._RELEASED_STATUSES),
             )
         )
         if owner is not None:
@@ -427,9 +435,11 @@ class DatabaseManager:
         """
         Atomically claim a (checksum, operation) pair for an existing document.
 
-        Performs ``INSERT ... ON CONFLICT (checksum, type) DO NOTHING RETURNING``
-        in a single statement, so of any number of concurrent submissions of the
-        same content exactly one wins. The document row must already exist
+        Performs ``INSERT ... ON CONFLICT (checksum, type) DO UPDATE ... WHERE
+        <current owner failed / cancelled> RETURNING`` in a single statement, so of
+        any number of concurrent submissions of the same content exactly one wins.
+        A row left behind by a failed / cancelled document is re-pointed to *doc_id*;
+        the old document row is left as is. The document row must already exist
         (``document_checksum.doc_id`` is a foreign key).
 
         Returns:
@@ -446,7 +456,15 @@ class DatabaseManager:
                 won = session.execute(
                     pg_insert(DocumentChecksum)
                     .values(checksum=checksum, type=operation, doc_id=doc_id)
-                    .on_conflict_do_nothing(index_elements=["checksum", "type"])
+                    .on_conflict_do_update(
+                        index_elements=["checksum", "type"],
+                        set_={"doc_id": doc_id},
+                        where=DocumentChecksum.doc_id.in_(
+                            select(Document.doc_id).where(
+                                Document.status.in_(DatabaseManager._RELEASED_STATUSES)
+                            )
+                        ),
+                    )
                     .returning(DocumentChecksum.doc_id)
                 ).first()
                 if won is not None:
@@ -605,12 +623,6 @@ class DatabaseManager:
                 result = cast(CursorResult, session.execute(stmt))
                 
                 if result.rowcount > 0:
-                    # A failed / cancelled document must not keep owning its content,
-                    # or the file could never be re-submitted. Same transaction.
-                    if status in (DocStatus.FAILED, DocStatus.CANCELLED):
-                        session.execute(
-                            delete(DocumentChecksum).where(DocumentChecksum.doc_id == doc_id)
-                        )
                     return True
                 else:
                     logger.warning(f"Document not found for update: {doc_id}")

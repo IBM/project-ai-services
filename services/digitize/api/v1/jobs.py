@@ -188,13 +188,15 @@ async def create_job(
         #     to an existing document → silently dropped (that file's record covers it).
         #   - Otherwise the owner of (hash, operation) in document_checksum is looked up:
         #       * owner is completed → `already_exists`;
-        #       * owner is still being processed → `skipped`.
+        #       * owner is still being processed → `skipped`;
+        #       * owner failed / was cancelled (or none) → novel; the atomic claim
+        #         re-points the registry row to this job's new document.
         #   - A digitization request additionally looks at the ingestion owner of the
         #     same content first — no point re-digitizing indexed content.
         #   - Otherwise → novel, processed by this job.
         #
         # This lookup is only a fast path. The authoritative check is the atomic claim
-        # (INSERT ... ON CONFLICT DO NOTHING) made per novel document in
+        # (INSERT ... ON CONFLICT DO UPDATE) made per novel document in
         # initialize_job_state, so concurrent submissions of the same content cannot
         # both win; a loser is turned into an already_exists / skipped record there.
         #

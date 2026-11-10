@@ -1166,8 +1166,6 @@ class DatabaseStatusManager:
                 update_params["metadata"] = merged_metadata
 
         # Perform database update
-        # The document_checksum registry (in_progress → completed / removed) is kept in
-        # step with the document status inside db_manager.update_document.
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
             if not success:

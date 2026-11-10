@@ -198,8 +198,8 @@ class DocumentChecksum(Base):
     Maps to the 'document_checksum' table in PostgreSQL.
 
     A row is claimed atomically (DatabaseManager.claim_file_checksum) once the
-    document row exists, and removed when the document fails or is cancelled
-    (DatabaseManager.update_document).
+    document row exists. When the owner fails or is cancelled the row is kept, but
+    the content counts as novel: the next claim re-points the row to the new document.
 
     The FK to documents(doc_id) ON DELETE CASCADE means registry entries are
     automatically removed when the referenced document is deleted, preventing

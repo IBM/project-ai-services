@@ -1552,7 +1552,8 @@ def _compiled_sql(stmt) -> str:
 
 @pytest.mark.unit
 class TestDatabaseManagerClaimFileChecksum:
-    """claim_file_checksum: one atomic INSERT ... ON CONFLICT DO NOTHING."""
+    """claim_file_checksum: one atomic INSERT ... ON CONFLICT DO UPDATE (only over a
+    failed / cancelled owner)."""
 
     def _claim(self, session):
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
@@ -1566,7 +1567,7 @@ class TestDatabaseManagerClaimFileChecksum:
         assert self._claim(session) is None
         session.scalar.assert_not_called()  # no owner lookup needed
 
-    def test_claim_statement_is_atomic_insert_on_conflict_do_nothing(self):
+    def test_claim_statement_is_atomic_upsert_over_released_owner_only(self):
         session = MagicMock()
         session.execute.return_value.first.return_value = ("doc-1",)
 
@@ -1574,7 +1575,10 @@ class TestDatabaseManagerClaimFileChecksum:
 
         sql = _compiled_sql(session.execute.call_args[0][0])
         assert "INSERT INTO document_checksum" in sql
-        assert "ON CONFLICT (checksum, type) DO NOTHING" in sql
+        assert "ON CONFLICT (checksum, type) DO UPDATE SET doc_id = 'doc-1'" in sql
+        # Re-pointing is only allowed when the current owner failed / was cancelled.
+        assert "WHERE document_checksum.doc_id IN (SELECT documents.doc_id" in sql
+        assert "documents.status IN ('failed', 'cancelled')" in sql
         assert "RETURNING" in sql
         assert session.execute.call_count == 1
 
@@ -1600,6 +1604,7 @@ class TestDatabaseManagerClaimFileChecksum:
         assert "FROM documents JOIN document_checksum ON document_checksum.doc_id = documents.doc_id" in sql
         assert "document_checksum.checksum = 'abc'" in sql
         assert "document_checksum.type = 'ingestion'" in sql
+        assert "documents.status NOT IN ('failed', 'cancelled')" in sql
 
     def test_retries_when_owner_released_between_insert_and_select(self):
         session = MagicMock()
@@ -1687,6 +1692,18 @@ class TestDatabaseManagerGetFileOwner:
         assert "document_checksum.checksum = 'abc'" in sql
         assert "document_checksum.type = 'digitization'" in sql
 
+    def test_failed_or_cancelled_owner_is_ignored(self):
+        """A failed / cancelled owner means the content is novel."""
+        session = MagicMock()
+        session.scalar.return_value = None
+
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_ctx(session)):
+            from digitize.db.manager import DatabaseManager
+            DatabaseManager.get_file_owner("abc", "ingestion")
+
+        sql = _compiled_sql(session.scalar.call_args[0][0])
+        assert "documents.status NOT IN ('failed', 'cancelled')" in sql
+
     def test_db_error_propagates(self):
         from sqlalchemy.exc import SQLAlchemyError
 
@@ -1701,8 +1718,8 @@ class TestDatabaseManagerGetFileOwner:
 
 @pytest.mark.unit
 class TestDatabaseManagerUpdateDocumentChecksumLifecycle:
-    """update_document releases the checksum claim of a failed / cancelled document, same
-    transaction. Completed documents keep it; deletion cascades through the FK."""
+    """update_document never touches document_checksum: a failed / cancelled document
+    keeps its row (the content just counts as novel); only deletion removes it."""
 
     def _update(self, status, rowcount=1):
         session = MagicMock()
@@ -1712,27 +1729,15 @@ class TestDatabaseManagerUpdateDocumentChecksumLifecycle:
             ok = DatabaseManager.update_document("doc-1", status=status)
         return ok, session
 
-    @pytest.mark.parametrize("status", [DocStatus.FAILED, DocStatus.CANCELLED])
-    def test_failed_or_cancelled_removes_checksum(self, status):
-        ok, session = self._update(status)
-
-        assert ok is True
-        assert session.execute.call_count == 2
-        sql = _compiled_sql(session.execute.call_args_list[1][0][0])
-        assert sql.startswith("DELETE FROM document_checksum")
-        assert "document_checksum.doc_id = 'doc-1'" in sql
-
-    @pytest.mark.parametrize(
-        "status",
-        [DocStatus.IN_PROGRESS, DocStatus.ACCEPTED, DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS],
-    )
-    def test_other_status_leaves_checksum_alone(self, status):
+    @pytest.mark.parametrize("status", list(DocStatus))
+    def test_status_update_only_touches_documents(self, status):
         ok, session = self._update(status)
 
         assert ok is True
         assert session.execute.call_count == 1  # only the documents UPDATE
+        assert "document_checksum" not in _compiled_sql(session.execute.call_args[0][0])
 
-    def test_missing_document_does_not_touch_checksum(self):
+    def test_missing_document_returns_false(self):
         ok, session = self._update(DocStatus.FAILED, rowcount=0)
 
         assert ok is False

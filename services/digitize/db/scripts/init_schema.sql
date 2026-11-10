@@ -38,8 +38,9 @@ CREATE TABLE IF NOT EXISTS documents (
 
 -- Checksum registry — one row per unique (file content, operation type), points to the
 -- Document that owns that content, for duplicate detection.
--- The row is claimed atomically (INSERT ... ON CONFLICT DO NOTHING) right after the
--- document row is created, and removed if that document fails or is cancelled.
+-- The row is claimed atomically (INSERT ... ON CONFLICT DO UPDATE) right after the
+-- document row is created. If the owner fails or is cancelled the row is kept, and
+-- the next claim of the same content re-points it to the new document.
 -- ON DELETE CASCADE ensures stale registry entries are automatically removed
 -- when the referenced document is deleted, preventing orphaned hash entries
 -- from blocking future re-ingestion of the same file.
