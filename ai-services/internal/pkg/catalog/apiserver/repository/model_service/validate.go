@@ -20,6 +20,7 @@ var (
 		string(dbmodels.ComponentStatusDownloading),
 		string(dbmodels.ComponentStatusDeploying),
 		string(dbmodels.ComponentStatusRunning),
+		string(dbmodels.ComponentStatusDeleting),
 		string(dbmodels.ComponentStatusError),
 	}
 	remoteStatuses = []string{

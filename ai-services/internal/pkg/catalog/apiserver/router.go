@@ -63,6 +63,7 @@ func registerModelRoutes(v1 *gin.RouterGroup, h *handlers.ModelHandler, authMw g
 		g.GET("", h.ListModels)
 		g.GET("/:id", h.GetModelByID)
 		g.POST("/:id/keys", h.GenerateModelKey)
+		g.DELETE("/:id", h.DeleteModel)
 	}
 }
 

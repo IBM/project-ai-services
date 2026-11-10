@@ -2,6 +2,7 @@ package litellm
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
@@ -75,6 +76,9 @@ type fakeLiteLLMClient struct {
 	registeredReq      catalogclient.LiteLLMModelNewRequest
 	deregisteredModels []string
 	deregisteredPass   []string
+	deletedKeys        []string
+	deleteKeysErr      error
+	calls              []string
 	probeErr           error
 	probeResponse      *catalogclient.LiteLLMHealthResponse
 }
@@ -90,6 +94,7 @@ func (f *fakeLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.L
 
 func (f *fakeLiteLLMClient) DeregisterModel(_ context.Context, modelID string) error {
 	f.deregisteredModels = append(f.deregisteredModels, modelID)
+	f.calls = append(f.calls, "model")
 
 	return nil
 }
@@ -100,8 +105,16 @@ func (f *fakeLiteLLMClient) RegisterPassThrough(_ context.Context, _ catalogclie
 
 func (f *fakeLiteLLMClient) DeregisterPassThrough(_ context.Context, endpointID string) error {
 	f.deregisteredPass = append(f.deregisteredPass, endpointID)
+	f.calls = append(f.calls, "passthrough")
 
 	return nil
+}
+
+func (f *fakeLiteLLMClient) DeleteKeysByAlias(_ context.Context, aliases []string) error {
+	f.deletedKeys = append(f.deletedKeys, aliases...)
+	f.calls = append(f.calls, "key")
+
+	return f.deleteKeysErr
 }
 
 func (f *fakeLiteLLMClient) HealthProbe(_ context.Context, _ string) (*catalogclient.LiteLLMHealthResponse, error) {
@@ -157,8 +170,35 @@ func TestGateway_Deregister_UsesLiteLLMModelID(t *testing.T) {
 	assert.Equal(t, []string{"vllm-token-passthrough-tag-1"}, client.deregisteredPass)
 }
 
-func (f *fakeLiteLLMClient) DeleteKeysByAlias(_ context.Context, _ []string) error {
-	return nil
+func TestGateway_Remove(t *testing.T) {
+	route := Route{LiteLLMModelID: "litellm-1", KeyAlias: "ibm/granite-id-1", Tag: "id-1", Provider: "watsonx"}
+
+	t.Run("removes key, passthrough and model, in that order", func(t *testing.T) {
+		client := &fakeLiteLLMClient{}
+
+		require.NoError(t, NewGateway(client).Remove(context.Background(), route))
+
+		assert.Equal(t, []string{"key", "passthrough", "model"}, client.calls)
+		assert.Equal(t, []string{"ibm/granite-id-1"}, client.deletedKeys)
+		assert.Equal(t, []string{"watsonx-token-passthrough-id-1"}, client.deregisteredPass)
+		assert.Equal(t, []string{"litellm-1"}, client.deregisteredModels)
+	})
+
+	t.Run("skips what cannot be named", func(t *testing.T) {
+		client := &fakeLiteLLMClient{}
+
+		require.NoError(t, NewGateway(client).Remove(context.Background(), Route{Tag: "id-1"}))
+		assert.Empty(t, client.calls)
+	})
+
+	t.Run("a failure stops the removal and is returned", func(t *testing.T) {
+		client := &fakeLiteLLMClient{deleteKeysErr: errors.New("boom")}
+
+		err := NewGateway(client).Remove(context.Background(), route)
+
+		require.ErrorIs(t, err, client.deleteKeysErr)
+		assert.Equal(t, []string{"key"}, client.calls, "nothing after the failed step is removed")
+	})
 }
 
 func (f *fakeLiteLLMClient) GenerateKey(_ context.Context, _ catalogclient.LiteLLMKeyGenerateRequest) (string, error) {
