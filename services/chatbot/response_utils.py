@@ -81,7 +81,6 @@ class ChatChoice(BaseModel):
 class ChatCompletionResponse(BaseModel):
     """Non-streaming chat completion response."""
     choices: list[ChatChoice] = Field(..., description="List of completion choices")
-    docs: Optional[list[dict]] = Field(default=None, description="Retrieved reference documents")
 
     model_config = {
         "json_schema_extra": {
@@ -96,6 +95,14 @@ class ChatCompletionResponse(BaseModel):
             }
         }
     }
+
+
+class ChatCompletionWithDocsResponse(ChatCompletionResponse):
+    """Non-streaming chat completion response including retrieved reference documents.
+
+    Returned only when the request sets the `include_docs=true` query parameter.
+    """
+    docs: list[dict] = Field(default_factory=list, description="Retrieved reference documents")
 
 
 class ModelInfo(BaseModel):

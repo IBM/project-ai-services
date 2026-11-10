@@ -15,6 +15,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     const upstreamResponse = await axios({
       method: 'post',
       url: `${targetURL}/v1/chat/completions`,
+      params: req.query,
       headers: { 'Content-Type': 'application/json' },
       responseType: 'stream',
       data: JSON.stringify(req.body),

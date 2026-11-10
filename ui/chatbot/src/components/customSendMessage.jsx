@@ -125,7 +125,10 @@ async function customSendMessage(
   try {
     instance.updateIsMessageLoadingCounter('increase');
 
-    const stream = await client.chat.completions.create(payload);
+    // Opt in to retrieved docs in the response via the include_docs query param
+    const stream = await client.chat.completions.create(payload, {
+      query: { include_docs: true },
+    });
 
     instance.updateIsMessageLoadingCounter('decrease');
 
