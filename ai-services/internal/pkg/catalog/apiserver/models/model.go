@@ -63,7 +63,7 @@ type ModelListItem struct {
 	// Params are the non-sensitive provider params the model was created with.
 	Params            map[string]any `json:"params,omitempty"`
 	Status            string         `json:"status"`
-	Message           string         `json:"message,omitempty"`
+	Message           string         `json:"message"`
 	ConnectedServices int            `json:"connected_services"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
