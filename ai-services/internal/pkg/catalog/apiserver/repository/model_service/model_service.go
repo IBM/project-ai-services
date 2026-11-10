@@ -4,14 +4,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/get"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/list"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -23,23 +26,25 @@ import (
 //
 // It only orchestrates; like the application flow, the work is split into phases that live in
 // the services/models package:
-//   - validate.go: provider-independent request validation and name uniqueness (this package).
+//   - validate.go: provider-independent request validation, list filter validation and name
+//     uniqueness (this package).
 //   - ModelPlanner:  plan phase, no side effects. Resolves a valid request into a LocalPlan or
 //     RemotePlan (catalog, schema, worker, runtime and deployer lookups).
 //   - ModelExecutor: execute phase. Local plans run in the background through the plan's
 //     runtime-specific Deployer; remote plans run synchronously. Both register the LiteLLM route.
+//   - list.Lister and get.Getter: the read side. They return the models of the caller and the
+//     detail of one model.
 type ModelService struct {
 	componentRepo dbrepo.ComponentRepository
 	connectorRepo dbrepo.ConnectorRepository
-	// modelRepo and svcDepRepo serve the read side (list); catalogProvider supplies display names.
+	// modelRepo reads a model for the ownership check; catalogProvider validates the list filters
+	// against the catalog and scopes that read to the model types.
 	modelRepo       dbrepo.ModelRepository
-	svcDepRepo      dbrepo.ServiceDependencyRepository
 	catalogProvider *catalog.CatalogProvider
 	planner         *modelsvc.ModelPlanner
 	executor        *modelsvc.ModelExecutor
-	// gatewayPublicEndpoint is the URL consumers call models at, reported as the model's endpoint.
-	// Empty when it is not configured.
-	gatewayPublicEndpoint string
+	lister          *list.Lister
+	getter          *get.Getter
 }
 
 // NewModelService creates a new ModelService instance.
@@ -56,14 +61,14 @@ func NewModelService(
 	gatewayPublicEndpoint string,
 ) *ModelService {
 	return &ModelService{
-		componentRepo:         componentRepo,
-		connectorRepo:         connectorRepo,
-		modelRepo:             modelRepo,
-		svcDepRepo:            svcDepRepo,
-		catalogProvider:       catalogProvider,
-		planner:               modelsvc.NewModelPlanner(catalogProvider, workers),
-		executor:              modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
-		gatewayPublicEndpoint: gatewayPublicEndpoint,
+		componentRepo:   componentRepo,
+		connectorRepo:   connectorRepo,
+		modelRepo:       modelRepo,
+		catalogProvider: catalogProvider,
+		planner:         modelsvc.NewModelPlanner(catalogProvider, workers),
+		executor:        modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
+		lister:          list.New(modelRepo, svcDepRepo, catalogProvider),
+		getter:          get.New(svcDepRepo, catalogProvider, gatewayPublicEndpoint),
 	}
 }
 
@@ -147,4 +152,35 @@ func (s *ModelService) createRemoteModel(ctx context.Context, req apimodels.Crea
 	}
 
 	return &apimodels.CreateModelResponse{ID: plan.ConnectorID.String()}, nil
+}
+
+// ListModels returns one page of the caller's models, local and remote, as a single list. It
+// rejects filters that can never match, then lists with list.Lister.
+func (s *ModelService) ListModels(ctx context.Context, req apimodels.ListModelsRequest) (*apimodels.ModelListResponse, error) {
+	if err := s.validateListRequest(req); err != nil {
+		return nil, err
+	}
+
+	return s.lister.List(ctx, req)
+}
+
+// GetModelByID returns one model, local or remote.
+//
+// As for applications, a missing model is a 404 and a model created by someone else a 403; an empty
+// createdBy skips the ownership check. Nothing else about the model is read before it passes.
+func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelDetail, error) {
+	row, err := s.modelRepo.GetByID(ctx, id, helpers.New(s.catalogProvider).QueryComponentTypes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model: %w", err)
+	}
+
+	if row == nil {
+		return nil, validators.NotFound("model %q not found", id)
+	}
+
+	if createdBy != "" && row.CreatedBy != createdBy {
+		return nil, validators.Forbidden("user does not own this model")
+	}
+
+	return s.getter.Detail(ctx, row)
 }

@@ -1,4 +1,5 @@
-package modelservice
+// Package list implements the model list operation.
+package list
 
 import (
 	"context"
@@ -6,20 +7,38 @@ import (
 	"maps"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
-// ListModels returns one page of the caller's models, local and remote, as a single list.
-//
-// The list is scoped to req.CreatedBy, as for applications.
-func (s *ModelService) ListModels(ctx context.Context, req apimodels.ListModelsRequest) (*apimodels.ModelListResponse, error) {
-	if err := s.validateListRequest(req); err != nil {
-		return nil, err
-	}
+// Lister returns pages of models.
+type Lister struct {
+	modelRepo    dbrepo.ModelRepository
+	svcDepRepo   dbrepo.ServiceDependencyRepository
+	modelCatalog helpers.ModelCatalog
+}
 
+// New creates a Lister. catalogProvider supplies the model types and the provider display names.
+func New(
+	modelRepo dbrepo.ModelRepository,
+	svcDepRepo dbrepo.ServiceDependencyRepository,
+	catalogProvider *catalog.CatalogProvider,
+) *Lister {
+	return &Lister{
+		modelRepo:    modelRepo,
+		svcDepRepo:   svcDepRepo,
+		modelCatalog: helpers.New(catalogProvider),
+	}
+}
+
+// List returns one page of the caller's models, local and remote, as a single list.
+//
+// The list is scoped to req.CreatedBy, as for applications. The request must already be validated.
+func (l *Lister) List(ctx context.Context, req apimodels.ListModelsRequest) (*apimodels.ModelListResponse, error) {
 	filters := &dbrepo.ModelFilters{
 		CreatedBy:      req.CreatedBy,
 		DeploymentType: req.DeploymentType,
@@ -31,28 +50,28 @@ func (s *ModelService) ListModels(ctx context.Context, req apimodels.ListModelsR
 		Offset:         (req.Page - 1) * req.PageSize,
 	}
 
-	componentTypes := s.modelComponentTypes()
+	componentTypes := l.modelCatalog.QueryComponentTypes()
 
-	total, err := s.modelRepo.GetCount(ctx, filters, componentTypes)
+	total, err := l.modelRepo.GetCount(ctx, filters, componentTypes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to count models: %w", err)
 	}
 
-	rows, err := s.modelRepo.List(ctx, filters, componentTypes)
+	rows, err := l.modelRepo.List(ctx, filters, componentTypes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models: %w", err)
 	}
 
-	counts, err := s.connectedServices(ctx, rows)
+	counts, err := l.connectedServices(ctx, rows)
 	if err != nil {
 		return nil, err
 	}
 
-	providers := s.providerNames()
+	providers := l.modelCatalog.ProviderNames()
 	items := make([]apimodels.ModelListItem, 0, len(rows))
 
 	for _, row := range rows {
-		items = append(items, toModelListItem(row, providers, counts[row.ID]))
+		items = append(items, toListItem(row, providers, counts[row.ID]))
 	}
 
 	return &apimodels.ModelListResponse{
@@ -64,7 +83,7 @@ func (s *ModelService) ListModels(ctx context.Context, req apimodels.ListModelsR
 // connectedServices counts the services using each model of the page, in one query per
 // dependency type present on the page: local models are linked as components, remote ones as
 // connectors. A type with no model on the page is not queried.
-func (s *ModelService) connectedServices(ctx context.Context, rows []dbrepo.ModelRow) (map[uuid.UUID]int, error) {
+func (l *Lister) connectedServices(ctx context.Context, rows []dbrepo.ModelRow) (map[uuid.UUID]int, error) {
 	groups := []struct {
 		depType dbmodels.DependencyType
 		ids     []uuid.UUID
@@ -74,7 +93,7 @@ func (s *ModelService) connectedServices(ctx context.Context, rows []dbrepo.Mode
 	}
 
 	for _, row := range rows {
-		depType := modelDependencyType(row)
+		depType := helpers.ModelDependencyType(row)
 
 		for i := range groups {
 			if groups[i].depType == depType {
@@ -90,7 +109,7 @@ func (s *ModelService) connectedServices(ctx context.Context, rows []dbrepo.Mode
 			continue
 		}
 
-		got, err := s.svcDepRepo.GetServiceCountByDependency(ctx, g.ids, g.depType)
+		got, err := l.svcDepRepo.GetServiceCountByDependency(ctx, g.ids, g.depType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to count services using models: %w", err)
 		}
@@ -101,7 +120,7 @@ func (s *ModelService) connectedServices(ctx context.Context, rows []dbrepo.Mode
 	return counts, nil
 }
 
-// toModelListItem maps a database row to its API shape.
-func toModelListItem(row dbrepo.ModelRow, providers map[string]string, services int) apimodels.ModelListItem {
-	return apimodels.ModelListItem{ModelBase: toModelBase(row, providers, services)}
+// toListItem maps a database row to its API shape.
+func toListItem(row dbrepo.ModelRow, providers map[string]string, services int) apimodels.ModelListItem {
+	return apimodels.ModelListItem{ModelBase: helpers.ToModelBase(row, providers, services)}
 }

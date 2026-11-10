@@ -6,9 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )

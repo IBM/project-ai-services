@@ -1,37 +1,36 @@
-package modelservice
+package helpers
 
 import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
-// This file holds what the list and get operations share: the catalog lookups and the mapping of a
-// database row to the API shape common to both responses.
+// This file holds what the model list and get operations share: the catalog lookups and the
+// mapping of a database row to the API shape common to both responses.
 
-// modelComponentTypes returns the component types that are models, from the catalog: the types whose
-// providers declare `category: models`. Only components and connectors of these types are models.
-// The result is never nil, so that a catalog without model types yields no models instead of
-// being read as "no restriction".
-func (s *ModelService) modelComponentTypes() []string {
-	types := helpers.New(s.catalogProvider).ComponentTypes()
-	if types == nil {
+// QueryComponentTypes returns the component types that are models, to scope a repository query:
+// only components and connectors of these types are models. Unlike ComponentTypes, the result is
+// never nil, so that a catalog without model types yields no models instead of being read as "no
+// restriction".
+func (m ModelCatalog) QueryComponentTypes() []string {
+	names := m.ComponentTypes()
+	if names == nil {
 		return []string{}
 	}
 
-	return types
+	return names
 }
 
-// providerNames maps "<deployment type>/<provider id>" to the provider's display name, taken from
+// ProviderNames maps "<deployment type>/<provider id>" to the provider's display name, taken from
 // the catalog once per request instead of once per row.
-func (s *ModelService) providerNames() map[string]string {
+func (m ModelCatalog) ProviderNames() map[string]string {
 	names := make(map[string]string)
 
-	for _, deploymentType := range []constants.DeploymentType{constants.DeploymentTypeLocal, constants.DeploymentTypeRemote} {
-		for _, p := range s.catalogProvider.GetModelProviders(deploymentType) {
+	for _, deploymentType := range []catalogconstants.DeploymentType{catalogconstants.DeploymentTypeLocal, catalogconstants.DeploymentTypeRemote} {
+		for _, p := range m.provider.GetModelProviders(deploymentType) {
 			names[providerKey(deploymentType, p.ID)] = p.Name
 		}
 	}
@@ -39,7 +38,7 @@ func (s *ModelService) providerNames() map[string]string {
 	return names
 }
 
-func providerKey(deploymentType constants.DeploymentType, providerID string) string {
+func providerKey(deploymentType catalogconstants.DeploymentType, providerID string) string {
 	return string(deploymentType) + "/" + providerID
 }
 
@@ -63,19 +62,19 @@ func workerInfo(row dbrepo.ModelRow) *types.ApplicationWorker {
 	return &types.ApplicationWorker{ID: row.WorkerID, Name: row.WorkerName, RuntimeType: row.WorkerRuntimeType}
 }
 
-// modelDependencyType is how services link to a model: local models as components, remote ones
+// ModelDependencyType is how services link to a model: local models as components, remote ones
 // as connectors.
-func modelDependencyType(row dbrepo.ModelRow) dbmodels.DependencyType {
-	if row.DeploymentType == constants.DeploymentTypeLocal {
+func ModelDependencyType(row dbrepo.ModelRow) dbmodels.DependencyType {
+	if row.DeploymentType == catalogconstants.DeploymentTypeLocal {
 		return dbmodels.DependencyTypeComponent
 	}
 
 	return dbmodels.DependencyTypeConnector
 }
 
-// toModelBase maps a database row to the fields shared by the list and detail responses.
-// services is the number of services using the model.
-func toModelBase(row dbrepo.ModelRow, providers map[string]string, services int) apimodels.ModelBase {
+// ToModelBase maps a database row to the fields shared by the list and detail responses.
+// providers comes from ProviderNames; services is the number of services using the model.
+func ToModelBase(row dbrepo.ModelRow, providers map[string]string, services int) apimodels.ModelBase {
 	return apimodels.ModelBase{
 		ID:                row.ID.String(),
 		DeploymentType:    row.DeploymentType,

@@ -1083,3 +1083,78 @@ func requireStatus(t *testing.T, err error, code int, msgContains string) {
 	assert.Equal(t, code, valErr.Code)
 	assert.Contains(t, valErr.Message, msgContains)
 }
+
+// mockSvcDepRepo counts the reads made about a model.
+type mockSvcDepRepo struct {
+	dbrepo.ServiceDependencyRepository
+	reads int
+}
+
+func (m *mockSvcDepRepo) GetServiceCountByDependency(context.Context, []uuid.UUID, dbmodels.DependencyType) (map[uuid.UUID]int, error) {
+	m.reads++
+
+	return nil, nil
+}
+
+func (m *mockSvcDepRepo) GetLinkedServiceEndpoints(context.Context, uuid.UUID, dbmodels.DependencyType) ([]dbrepo.LinkedServiceRow, error) {
+	m.reads++
+
+	return nil, nil
+}
+
+func TestGetModelByID_Ownership(t *testing.T) {
+	id := uuid.New()
+	row := dbrepo.ModelRow{ID: id, DeploymentType: "remote", Provider: "watsonx", CreatedBy: "alice"}
+
+	tests := []struct {
+		name      string
+		rows      []dbrepo.ModelRow
+		createdBy string
+		wantCode  int // 0: the model is returned
+	}{
+		{"owner", []dbrepo.ModelRow{row}, "alice", 0},
+		{"empty user skips the check", []dbrepo.ModelRow{row}, "", 0},
+		{"missing", nil, "alice", http.StatusNotFound},
+		{"owned by someone else", []dbrepo.ModelRow{row}, "bob", http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockModelRepo{rows: tt.rows}
+			deps := &mockSvcDepRepo{}
+			svc := NewModelService(nil, nil, repo, deps, nil, setupTestCatalogProvider(t), "")
+
+			got, err := svc.GetModelByID(context.Background(), id, tt.createdBy)
+
+			assert.Equal(t, id, repo.getID)
+			assert.Contains(t, repo.getTypes, "llm", "the lookup is limited to the catalog's model types")
+			assert.NotContains(t, repo.getTypes, "vector_db")
+
+			if tt.wantCode == 0 {
+				require.NoError(t, err)
+				assert.Equal(t, id.String(), got.ID)
+
+				return
+			}
+
+			assert.Nil(t, got)
+
+			var valErr *validators.ValidationError
+			require.ErrorAs(t, err, &valErr)
+			assert.Equal(t, tt.wantCode, valErr.Code)
+			assert.Zero(t, deps.reads, "nothing about the model may be read")
+		})
+	}
+}
+
+func TestGetModelByID_RepositoryError(t *testing.T) {
+	boom := errors.New("boom")
+	svc := NewModelService(nil, nil, &mockModelRepo{err: boom}, &mockSvcDepRepo{}, nil, setupTestCatalogProvider(t), "")
+
+	_, err := svc.GetModelByID(context.Background(), uuid.New(), "alice")
+
+	require.ErrorIs(t, err, boom)
+
+	var valErr *validators.ValidationError
+	assert.False(t, errors.As(err, &valErr), "an internal failure must not look like a client error")
+}
