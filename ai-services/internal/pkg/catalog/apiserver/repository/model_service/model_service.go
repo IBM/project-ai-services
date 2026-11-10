@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/get"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/keys"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/list"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
@@ -34,6 +35,7 @@ import (
 //     runtime-specific Deployer; remote plans run synchronously. Both register the LiteLLM route.
 //   - list.Lister and get.Getter: the read side. They return the models of the caller and the
 //     detail of one model.
+//   - keys.Manager: generates the public LiteLLM key of a model.
 type ModelService struct {
 	componentRepo dbrepo.ComponentRepository
 	connectorRepo dbrepo.ConnectorRepository
@@ -45,6 +47,7 @@ type ModelService struct {
 	executor        *modelsvc.ModelExecutor
 	lister          *list.Lister
 	getter          *get.Getter
+	keys            *keys.Manager
 }
 
 // NewModelService creates a new ModelService instance.
@@ -60,15 +63,18 @@ func NewModelService(
 	catalogProvider *catalog.CatalogProvider,
 	gatewayPublicEndpoint string,
 ) *ModelService {
+	litellmClient := catalogclient.NewLiteLLMClient()
+
 	return &ModelService{
 		componentRepo:   componentRepo,
 		connectorRepo:   connectorRepo,
 		modelRepo:       modelRepo,
 		catalogProvider: catalogProvider,
 		planner:         modelsvc.NewModelPlanner(catalogProvider, workers),
-		executor:        modelsvc.NewModelExecutor(componentRepo, connectorRepo, catalogclient.NewLiteLLMClient()),
+		executor:        modelsvc.NewModelExecutor(componentRepo, connectorRepo, litellmClient),
 		lister:          list.New(modelRepo, svcDepRepo, catalogProvider),
 		getter:          get.New(svcDepRepo, catalogProvider, gatewayPublicEndpoint),
+		keys:            keys.NewManager(componentRepo, connectorRepo, litellmClient),
 	}
 }
 
@@ -183,4 +189,17 @@ func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy
 	}
 
 	return s.getter.Detail(ctx, row)
+}
+
+// GenerateModelKey generates the public LiteLLM key of the model identified by id. See
+// keys.Manager.Generate.
+//
+// Errors of type *validators.ValidationError carry the HTTP status to return; any other error is
+// an internal failure.
+func (s *ModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.GenerateModelKeyResponse, error) {
+	if vars.RuntimeFactory != nil && vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
+		return nil, validators.BadRequest("models are unsupported on openshift runtime")
+	}
+
+	return s.keys.Generate(ctx, id, createdBy)
 }

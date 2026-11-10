@@ -31,6 +31,11 @@ func Conflict(format string, args ...any) *ValidationError {
 	return newError(http.StatusConflict, format, args...)
 }
 
+// BadGateway returns an error that maps to HTTP 502.
+func BadGateway(format string, args ...any) *ValidationError {
+	return newError(http.StatusBadGateway, format, args...)
+}
+
 // Unprocessable returns an error that maps to HTTP 422.
 func Unprocessable(format string, args ...any) *ValidationError {
 	return newError(http.StatusUnprocessableEntity, format, args...)

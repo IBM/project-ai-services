@@ -281,6 +281,15 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GenerateModelKeyResponse:
+    properties:
+      key:
+        type: string
+      model:
+        type: string
+      type:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse:
     properties:
       id:
@@ -2934,6 +2943,53 @@ paths:
       security:
       - BearerAuth: []
       summary: Get a model by ID (local or remote)
+      tags:
+      - Models
+  /models/{id}/keys:
+    post:
+      description: Generates a LiteLLM key for the model. Any existing key for it
+        is revoked, so only one key is valid at a time. The key is returned once and
+        cannot be retrieved again.
+      parameters:
+      - description: Model (component or connector) ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Public key generated
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GenerateModelKeyResponse'
+        "400":
+          description: Invalid model ID, or openshift runtime
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User is not the model creator
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Model not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "502":
+          description: LiteLLM failed; the old key may already be revoked, so retry
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Generate a public key for a model
       tags:
       - Models
   /resources:

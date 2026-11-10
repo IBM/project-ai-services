@@ -156,3 +156,11 @@ func TestGateway_Deregister_UsesLiteLLMModelID(t *testing.T) {
 	assert.Equal(t, []string{"litellm-saved-id"}, client.deregisteredModels)
 	assert.Equal(t, []string{"vllm-token-passthrough-tag-1"}, client.deregisteredPass)
 }
+
+func (f *fakeLiteLLMClient) DeleteKeysByAlias(_ context.Context, _ []string) error {
+	return nil
+}
+
+func (f *fakeLiteLLMClient) GenerateKey(_ context.Context, _ catalogclient.LiteLLMKeyGenerateRequest) (string, error) {
+	return "", nil
+}

@@ -1158,3 +1158,11 @@ func TestGetModelByID_RepositoryError(t *testing.T) {
 	var valErr *validators.ValidationError
 	assert.False(t, errors.As(err, &valErr), "an internal failure must not look like a client error")
 }
+
+func (m *mockLiteLLMClient) DeleteKeysByAlias(_ context.Context, _ []string) error {
+	return nil
+}
+
+func (m *mockLiteLLMClient) GenerateKey(_ context.Context, _ catalogclient.LiteLLMKeyGenerateRequest) (string, error) {
+	return "", nil
+}
