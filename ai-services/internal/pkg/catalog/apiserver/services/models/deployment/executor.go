@@ -112,18 +112,18 @@ func (e *ModelExecutor) saveLiteLLMModelID(ctx context.Context, plan *types.Loca
 		return fmt.Errorf("component %s not found to save litellm model id", plan.ComponentID)
 	}
 
-	comp.Metadata = withLiteLLMModelID(comp.Metadata, plan.Route.LiteLLMModelID)
+	metadata := liteLLMMetadata(comp.Metadata, plan.Route.LiteLLMModelID)
 
-	if err := e.componentRepo.Update(ctx, comp); err != nil {
+	if err := e.componentRepo.UpdateMetadata(ctx, plan.ComponentID, metadata); err != nil {
 		return fmt.Errorf("failed to save litellm model id: %w", err)
 	}
 
 	return nil
 }
 
-// withLiteLLMModelID adds {"litellm": {"model_id": <id>}} to metadata, keeping every other key, and
+// liteLLMMetadata adds {"litellm": {"model_id": <id>}} to metadata, keeping every other key, and
 // returns it. A nil metadata is replaced by a new map.
-func withLiteLLMModelID(metadata map[string]any, modelID string) map[string]any {
+func liteLLMMetadata(metadata map[string]any, modelID string) map[string]any {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
@@ -174,7 +174,7 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 		Provider:  plan.Req.ProviderID,
 		Status:    dbmodels.ConnectorStatusConnected,
 		CreatedBy: plan.Req.CreatedBy,
-		Metadata:  withLiteLLMModelID(plan.Metadata, plan.Route.LiteLLMModelID),
+		Metadata:  liteLLMMetadata(plan.Metadata, plan.Route.LiteLLMModelID),
 	}
 	if err := e.connectorRepo.Insert(ctx, connector); err != nil {
 		e.gateway.Deregister(ctx, plan.Route)

@@ -117,6 +117,17 @@ func (m *mockComponentRepo) UpdateEndpoints(_ context.Context, id uuid.UUID, end
 	return nil
 }
 
+func (m *mockComponentRepo) UpdateMetadata(_ context.Context, id uuid.UUID, metadata map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if c, ok := m.byID[id]; ok {
+		c.Metadata = maps.Clone(metadata)
+	}
+
+	return nil
+}
+
 func (m *mockComponentRepo) GetByID(_ context.Context, id uuid.UUID) (*dbmodels.Component, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -131,17 +142,6 @@ func (m *mockComponentRepo) GetByID(_ context.Context, id uuid.UUID) (*dbmodels.
 	snapshot.Metadata = maps.Clone(c.Metadata)
 
 	return &snapshot, nil
-}
-
-func (m *mockComponentRepo) Update(_ context.Context, comp *dbmodels.Component) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if c, ok := m.byID[comp.ID]; ok {
-		c.Metadata = maps.Clone(comp.Metadata)
-	}
-
-	return nil
 }
 
 type mockConnectorRepo struct {

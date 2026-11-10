@@ -11,7 +11,7 @@ metadata:
     ai-services.io/volume: "litellm-secret,litellm-db-secret,litellm-db-data"
     ai-services.io/volume-skip-cleanup: "true"
   annotations:
-    ai-services.io/routes: "{{ .Values.litellm.port }}:litellm-api:api"
+    ai-services.io/routes: "{{ .Values.litellm.port }}:model-gateway:api"
 spec:
   restartPolicy: always
   containers:
