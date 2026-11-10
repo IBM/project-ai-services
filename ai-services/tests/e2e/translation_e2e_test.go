@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +23,18 @@ import (
 const (
 	translateShortTimeout = 30 * time.Second
 	translateSyncTimeout  = 2 * time.Minute
+	// translateJobTimeout bounds a small async job (submit, translate, fetch result).
+	translateJobTimeout = 10 * time.Minute
+	// phasePollInterval is how often job_metadata.phase is sampled; short enough to catch the
+	// brief chunking phase of a small document.
+	phasePollInterval = time.Second
+
+	// englishMarkdown is an English document with enough text for language auto-detection.
+	englishMarkdown = "# Quarterly Update\n\n" +
+		"The operations team completed the warehouse migration ahead of schedule. " +
+		"Customers reported faster deliveries and fewer errors during the quarter.\n\n" +
+		"## Next Steps\n\n" +
+		"We will continue to invest in automation and expand our network across Europe next year.\n"
 
 	// oversizedUploadBytes exceeds the default MAX_UPLOAD_SIZE_MB (10 MB).
 	oversizedUploadBytes = 11 * 1024 * 1024
@@ -30,6 +43,16 @@ const (
 // translateBaseURL is resolved from TRANSLATE_URL, from the existing application in BeforeSuite,
 // or from 'application info' in the BeforeAll below.
 var translateBaseURL string
+
+// translatedJob is an async job that has reached a terminal state, with the data fetched for it.
+type translatedJob struct {
+	ID     string
+	Detail *translation.JobDetailResponse
+	Result *translation.JobResultResponse // nil for a failed job
+}
+
+// Jobs created once in the BeforeAll of their Context and shared by the specs in it.
+var completedTXT, completedMD, failedJob translatedJob
 
 // rawJobGetFn is the signature shared by the raw GET helpers for a single job resource.
 type rawJobGetFn func(ctx context.Context, baseURL, jobID string) ([]byte, int, error)
@@ -219,6 +242,81 @@ func expectRunningOrDone(get rawJobGetFn) {
 	logger.Infof("[TRANSLATE] immediate check on job %s: status=%d", jobResp.JobID, statusCode)
 }
 
+// readFixture returns the content of a fixture file, failing the spec when it cannot be read.
+func readFixture(path string) string {
+	data, err := os.ReadFile(path)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	return string(data)
+}
+
+// runJob submits filePath as an async job, waits for it to complete and fetches its result.
+func runJob(filePath, sourceLang, targetLang string, timeout time.Duration) translatedJob {
+	ctx, cancel := translateCtx(timeout)
+	defer cancel()
+
+	created, err := translation.CreateJob(ctx, translateBaseURL, filePath, sourceLang, targetLang, "")
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	detail, err := translation.WaitForJobCompletion(ctx, translateBaseURL, created.JobID, timeout)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	result, err := translation.GetJobResult(ctx, translateBaseURL, created.JobID)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	logger.Infof("[TRANSLATE] job %s completed (%s -> %s)", created.JobID, sourceLang, targetLang)
+
+	return translatedJob{ID: created.JobID, Detail: detail, Result: result}
+}
+
+// runTempJob is runJob for generated content: it writes content to a temp file named after
+// pattern, runs the job and removes the file again.
+func runTempJob(pattern, content, sourceLang, targetLang string, timeout time.Duration) translatedJob {
+	file, err := common.CreateTempFile(pattern, content)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	defer func() { _ = os.Remove(file) }()
+
+	return runJob(file, sourceLang, targetLang, timeout)
+}
+
+// expectDownload downloads the result of a completed job and asserts the attachment headers and that
+// the body is exactly the translation returned by GET /result.
+func expectDownload(job translatedJob, wantMIME, wantExt string) {
+	ctx, cancel := translateCtx(translateShortTimeout)
+	defer cancel()
+
+	resp, err := translation.DownloadJobResult(ctx, translateBaseURL, job.ID)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	baseName := strings.TrimSuffix(job.Detail.DocumentName, "."+wantExt)
+
+	gomega.Expect(resp.Header.Get("Content-Type")).To(gomega.HavePrefix(wantMIME))
+	gomega.Expect(resp.Header.Get("Content-Type")).To(gomega.ContainSubstring("charset=utf-8"))
+	gomega.Expect(resp.Header.Get("Content-Disposition")).To(gomega.And(
+		gomega.HavePrefix("attachment"),
+		gomega.ContainSubstring(fmt.Sprintf(`filename="%s_translated.%s"`, baseName, wantExt)),
+	))
+	gomega.Expect(string(resp.Body)).To(gomega.Equal(job.Result.Data.Translation))
+}
+
+// expectJobGone calls get for the shared failed job and asserts 410 with error code JOB_FAILED.
+func expectJobGone(get rawJobGetFn) {
+	ctx, cancel := translateCtx(translateShortTimeout)
+	defer cancel()
+
+	respBody, statusCode, err := get(ctx, translateBaseURL, failedJob.ID)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(statusCode).To(gomega.Equal(http.StatusGone))
+
+	var errResp common.ServiceErrorResponse
+
+	gomega.Expect(json.Unmarshal(respBody, &errResp)).To(gomega.Succeed())
+	gomega.Expect(errResp.Error.Code).To(gomega.Equal("JOB_FAILED"))
+	gomega.Expect(errResp.Error.Message).To(gomega.ContainSubstring("Job failed"))
+	logger.Infof("[TRANSLATE] failed job %s returned 410: %s", failedJob.ID, errResp.Error.Message)
+}
+
 // ── Translation test suite ────────────────────────────────────────────────────
 
 // translationSpecs holds the translation specs. It is registered as a Context inside the
@@ -326,6 +424,16 @@ func translationSpecs() {
 		ginkgo.It("same source and target language returns 400",
 			ginkgo.Label("translate", "sync", "validation"), func() {
 				expectSyncError("How are you?", "English", "English", http.StatusBadRequest, "differ")
+			})
+	})
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// 3b. Synchronous Translation — Limit Errors
+	// ═══════════════════════════════════════════════════════════════════════════
+	ginkgo.Context("Synchronous Translation - Limit Errors", func() {
+		ginkgo.It("input exceeding the model context window returns 413",
+			ginkgo.Label("translate", "sync", "limit"), func() {
+				expectSyncError(translation.OversizedText(), "auto", "German", http.StatusRequestEntityTooLarge, "context limit")
 			})
 	})
 
@@ -486,6 +594,181 @@ func translationSpecs() {
 		ginkgo.It("get result for unknown job_id returns 404",
 			ginkgo.Label("translate", "result"), func() {
 				expectNotFound(translation.GetJobResultRaw)
+			})
+	})
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// 10. Completed Jobs — detail, phases, result, download and quality checks
+	//     One German .txt job and one English .md job are translated once in BeforeAll
+	//     and shared by the specs below.
+	// ═══════════════════════════════════════════════════════════════════════════
+	ginkgo.Context("Completed Jobs", func() {
+		ginkgo.BeforeAll(func() {
+			completedTXT = runJob(translation.GetGermanTXTPath(), "German", "English", translateJobTimeout)
+			completedMD = runJob(translation.GetTestMDPath(), "", "German", translateJobTimeout)
+		})
+
+		ginkgo.It("job phases advance chunking -> translating -> completed",
+			ginkgo.Label("translate", "async", "lifecycle"), func() {
+				ctx, cancel := translateCtx(translateJobTimeout)
+				defer cancel()
+
+				created, err := translation.CreateJob(ctx, translateBaseURL, translation.GetTestMDPath(), "", "German", "")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				snapshots, err := translation.ObserveJob(ctx, translateBaseURL, created.JobID, translateJobTimeout, phasePollInterval)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(snapshots).NotTo(gomega.BeEmpty())
+
+				lastRank := -1
+
+				for _, snap := range snapshots {
+					if snap.Status == common.JobStatusInProgress {
+						gomega.Expect(snap.CompletedAt).To(gomega.BeNil(), "completed_at must be null while in_progress")
+					}
+
+					if snap.Metadata == nil || snap.Metadata.Phase == "" {
+						continue
+					}
+
+					rank, known := translation.JobPhaseRank(snap.Metadata.Phase)
+					gomega.Expect(known).To(gomega.BeTrue(), "unexpected phase %q", snap.Metadata.Phase)
+					gomega.Expect(rank).To(gomega.BeNumerically(">=", lastRank), "phase %q went backwards", snap.Metadata.Phase)
+
+					lastRank = rank
+				}
+
+				final := snapshots[len(snapshots)-1]
+				gomega.Expect(final.Status).To(gomega.Equal(common.JobStatusCompleted))
+				gomega.Expect(final.CompletedAt).NotTo(gomega.BeNil())
+				gomega.Expect(final.Metadata).NotTo(gomega.BeNil())
+				gomega.Expect(final.Metadata.Phase).To(gomega.Equal("completed"))
+				gomega.Expect(final.Metadata.Chunking.ChunkCount).To(gomega.BeNumerically(">", 0))
+				logger.Infof("[TRANSLATE] job %s observed over %d polls", created.JobID, len(snapshots))
+			})
+
+		ginkgo.It("detail of a completed job reports phase completed with full job details",
+			ginkgo.Label("translate", "async", "lifecycle"), func() {
+				ctx, cancel := translateCtx(translateShortTimeout)
+				defer cancel()
+
+				detail, err := translation.GetJobDetail(ctx, translateBaseURL, completedTXT.ID)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(detail.JobID).To(gomega.Equal(completedTXT.ID))
+				gomega.Expect(detail.Status).To(gomega.Equal(common.JobStatusCompleted))
+				gomega.Expect(detail.SourceLanguage).To(gomega.Equal("german"))
+				gomega.Expect(detail.TargetLanguage).To(gomega.Equal("english"))
+				gomega.Expect(detail.InputType).To(gomega.Equal("txt"))
+				gomega.Expect(detail.DocumentName).To(gomega.Equal("german_text.txt"))
+				gomega.Expect(detail.SubmittedAt).NotTo(gomega.BeEmpty())
+				gomega.Expect(detail.CompletedAt).NotTo(gomega.BeNil())
+				gomega.Expect(detail.Error).To(gomega.BeNil())
+				gomega.Expect(detail.Metadata).NotTo(gomega.BeNil())
+				gomega.Expect(detail.Metadata.Phase).To(gomega.Equal("completed"))
+			})
+
+		ginkgo.It("result of a completed .txt job carries translation, languages and token usage",
+			ginkgo.Label("translate", "result"), func() {
+				result := completedTXT.Result
+				gomega.Expect(result.Data.Translation).NotTo(gomega.BeEmpty())
+				gomega.Expect(result.Data.Translation).NotTo(gomega.Equal(readFixture(translation.GetGermanTXTPath())))
+				gomega.Expect(result.Data.SourceLanguage).To(gomega.Equal("german"))
+				gomega.Expect(result.Data.TargetLanguage).To(gomega.Equal("english"))
+				gomega.Expect(result.Data.InputType).To(gomega.Equal("txt"))
+				gomega.Expect(result.Data.DocumentName).To(gomega.Equal("german_text.txt"))
+				gomega.Expect(result.Usage.InputTokens).To(gomega.BeNumerically(">", 0))
+				gomega.Expect(result.Usage.OutputTokens).To(gomega.BeNumerically(">", 0))
+				gomega.Expect(result.Usage.TotalTokens).To(gomega.Equal(result.Usage.InputTokens + result.Usage.OutputTokens))
+			})
+
+		ginkgo.It("result of a completed .md job preserves headings and bullet list",
+			ginkgo.Label("translate", "result", "quality"), func() {
+				original := translation.AnalyzeMarkdown(readFixture(translation.GetTestMDPath()))
+				translated := translation.AnalyzeMarkdown(completedMD.Result.Data.Translation)
+
+				gomega.Expect(original.Headings).To(gomega.BeNumerically(">", 0))
+				gomega.Expect(original.Bullets).To(gomega.BeNumerically(">", 0))
+				gomega.Expect(translated.Headings).To(gomega.Equal(original.Headings))
+				gomega.Expect(translated.Bullets).To(gomega.Equal(original.Bullets))
+			})
+
+		ginkgo.It("GFM table structure is preserved and its header is translated",
+			ginkgo.Label("translate", "result", "quality"), func() {
+				source := readFixture(translation.GetTestMDPath())
+				translated := completedMD.Result.Data.Translation
+				original := translation.AnalyzeMarkdown(source)
+				got := translation.AnalyzeMarkdown(translated)
+
+				gomega.Expect(original.SeparatorRows).To(gomega.BeNumerically(">", 0))
+				gomega.Expect(got.SeparatorRows).To(gomega.Equal(original.SeparatorRows), "separator row must be intact")
+				gomega.Expect(got.TableRowPipes).To(gomega.Equal(original.TableRowPipes),
+					"table must keep the same number of rows and columns")
+				gomega.Expect(translation.FirstTableRow(translated)).NotTo(gomega.Equal(translation.FirstTableRow(source)),
+					"table header cells must be translated")
+			})
+
+		ginkgo.It("download of a completed .txt job returns the translation as a text attachment",
+			ginkgo.Label("translate", "download"), func() {
+				expectDownload(completedTXT, "text/plain", "txt")
+			})
+
+		ginkgo.It("download of a completed .md job returns the translation as a markdown attachment",
+			ginkgo.Label("translate", "download"), func() {
+				expectDownload(completedMD, "text/markdown", "md")
+			})
+
+		ginkgo.It("auto-detected source language is resolved in the result, never reported as auto",
+			ginkgo.Label("translate", "result", "quality"), func() {
+				job := runTempJob("translate-english-*.md", englishMarkdown, "", "German", translateJobTimeout)
+
+				gomega.Expect(job.Result.Data.SourceLanguage).To(gomega.Equal("english"))
+				gomega.Expect(job.Detail.SourceLanguage).To(gomega.Equal("english"))
+			})
+	})
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// 11. Failed Jobs — result and download return 410 JOB_FAILED
+	//     A table larger than the model context window cannot be split by the chunker,
+	//     so the job fails before any translation call - no need to stop the LLM.
+	// ═══════════════════════════════════════════════════════════════════════════
+	ginkgo.Context("Failed Jobs", func() {
+		ginkgo.BeforeAll(func() {
+			ctx, cancel := translateCtx(translateJobTimeout)
+			defer cancel()
+
+			file, err := common.CreateTempFile("translate-oversized-*.md", translation.OversizedTable())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			defer func() { _ = os.Remove(file) }()
+
+			created, err := translation.CreateJob(ctx, translateBaseURL, file, "English", "German", "")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			failedJob.ID = created.JobID
+
+			detail, waitErr := translation.WaitForJobCompletion(ctx, translateBaseURL, created.JobID, translateJobTimeout)
+			gomega.Expect(waitErr).To(gomega.HaveOccurred(), "an oversized table must fail the job")
+			gomega.Expect(detail).NotTo(gomega.BeNil())
+
+			failedJob.Detail = detail
+		})
+
+		ginkgo.It("job detail reports status failed with an error message",
+			ginkgo.Label("translate", "async", "lifecycle"), func() {
+				gomega.Expect(failedJob.Detail.Status).To(gomega.Equal(common.JobStatusFailed))
+				gomega.Expect(failedJob.Detail.Error).NotTo(gomega.BeNil())
+				gomega.Expect(*failedJob.Detail.Error).NotTo(gomega.BeEmpty())
+				gomega.Expect(failedJob.Detail.CompletedAt).NotTo(gomega.BeNil())
+			})
+
+		ginkgo.It("get result of a failed job returns 410 JOB_FAILED",
+			ginkgo.Label("translate", "result"), func() {
+				expectJobGone(translation.GetJobResultRaw)
+			})
+
+		ginkgo.It("download from a failed job returns 410 JOB_FAILED",
+			ginkgo.Label("translate", "download"), func() {
+				expectJobGone(translation.GetJobResultDownloadRaw)
 			})
 	})
 
