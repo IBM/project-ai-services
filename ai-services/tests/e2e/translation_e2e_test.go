@@ -786,4 +786,9 @@ func translationSpecs() {
 				expectNotFound(translation.GetJobResultDownloadRaw)
 			})
 	})
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// 10. MCP Sidecar — health, tools/list and the sync → async job → result flow
+	// ═══════════════════════════════════════════════════════════════════════════
+	ginkgo.Context("MCP Sidecar", ginkgo.Label("mcp-tests"), mcpTranslateSpecs)
 }
