@@ -1338,26 +1338,6 @@ There is no endpoint to read a key back. Internal consumer services do not call 
         }
       ]
     }
-  ],
-  "supported_providers": [
-    {
-      "id": "vllm-spyre",
-      "name": "Red Hat AI Inference with Spyre",
-      "deployment_type": "local",
-      "accelerator_type": "ibm.com/spyre_pf"
-    },
-    {
-      "id": "vllm-cpu",
-      "name": "AI Inference on CPU",
-      "deployment_type": "local",
-      "accelerator_type": null
-    },
-    {
-      "id": "watsonx",
-      "name": "IBM watsonx.ai",
-      "deployment_type": "remote",
-      "accelerator_type": null
-    }
   ]
 }
 ```
