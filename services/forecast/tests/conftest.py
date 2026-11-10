@@ -24,3 +24,19 @@ def mock_diagnostic_crash_handler():
     """Keep DISABLE_CRASH_HANDLER set for any late-bound code paths."""
     with patch.dict(os.environ, {"DISABLE_CRASH_HANDLER": "1"}):
         yield
+
+
+@pytest.fixture(autouse=True)
+def enable_logger_propagation():
+    """Ensure named loggers propagate to root so pytest's caplog captures records."""
+    import logging
+
+    loggers = [logging.getLogger(name) for name in ("forecast_server", "forecast_db", "forecast_triton")]
+    original_flags = [logger.propagate for logger in loggers]
+    for logger in loggers:
+        logger.propagate = True
+    try:
+        yield
+    finally:
+        for logger, original in zip(loggers, original_flags):
+            logger.propagate = original
