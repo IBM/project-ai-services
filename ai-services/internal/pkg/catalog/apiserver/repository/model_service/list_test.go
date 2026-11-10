@@ -298,6 +298,55 @@ func TestListModels_LocalAndRemoteItems(t *testing.T) {
 	assert.Equal(t, []uuid.UUID{remoteID}, deps.asked[dbmodels.DependencyTypeConnector])
 }
 
+// A dependency type with no model on the page is not queried.
+func TestListModels_SkipsDependencyTypesWithoutModels(t *testing.T) {
+	localID, remoteID := uuid.New(), uuid.New()
+
+	tests := []struct {
+		name         string
+		rows         []dbrepo.ModelRow
+		wantAsked    []dbmodels.DependencyType
+		wantNotAsked dbmodels.DependencyType
+	}{
+		{
+			name:         "only local models",
+			rows:         []dbrepo.ModelRow{{ID: localID, DeploymentType: constants.DeploymentTypeLocal}},
+			wantAsked:    []dbmodels.DependencyType{dbmodels.DependencyTypeComponent},
+			wantNotAsked: dbmodels.DependencyTypeConnector,
+		},
+		{
+			name:         "only remote models",
+			rows:         []dbrepo.ModelRow{{ID: remoteID, DeploymentType: constants.DeploymentTypeRemote}},
+			wantAsked:    []dbmodels.DependencyType{dbmodels.DependencyTypeConnector},
+			wantNotAsked: dbmodels.DependencyTypeComponent,
+		},
+		{
+			name:      "no models",
+			rows:      nil,
+			wantAsked: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := &mockSvcDepRepo{}
+
+			_, err := newListService(t, &mockModelRepo{rows: tt.rows}, deps).ListModels(context.Background(), listRequest())
+			require.NoError(t, err)
+
+			assert.Len(t, deps.asked, len(tt.wantAsked))
+
+			for _, depType := range tt.wantAsked {
+				assert.Contains(t, deps.asked, depType)
+			}
+
+			if tt.wantNotAsked != "" {
+				assert.NotContains(t, deps.asked, tt.wantNotAsked)
+			}
+		})
+	}
+}
+
 // A model must still be listed when the catalog no longer knows its provider
 // (e.g. a removed bundle), instead of failing the whole page.
 func TestListModels_FallsBackToProviderIDWhenCatalogHasNoEntry(t *testing.T) {

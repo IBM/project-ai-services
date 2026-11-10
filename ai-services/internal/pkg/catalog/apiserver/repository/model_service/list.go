@@ -62,22 +62,35 @@ func (s *ModelService) ListModels(ctx context.Context, req apimodels.ListModelsR
 }
 
 // connectedServices counts the services using each model of the page, in one query per
-// dependency type: local models are linked as components, remote ones as connectors.
+// dependency type present on the page: local models are linked as components, remote ones as
+// connectors. A type with no model on the page is not queried.
 func (s *ModelService) connectedServices(ctx context.Context, rows []dbrepo.ModelRow) (map[uuid.UUID]int, error) {
-	idsByType := map[dbmodels.DependencyType][]uuid.UUID{
-		dbmodels.DependencyTypeComponent: nil,
-		dbmodels.DependencyTypeConnector: nil,
+	groups := []struct {
+		depType dbmodels.DependencyType
+		ids     []uuid.UUID
+	}{
+		{depType: dbmodels.DependencyTypeComponent},
+		{depType: dbmodels.DependencyTypeConnector},
 	}
 
 	for _, row := range rows {
 		depType := modelDependencyType(row)
-		idsByType[depType] = append(idsByType[depType], row.ID)
+
+		for i := range groups {
+			if groups[i].depType == depType {
+				groups[i].ids = append(groups[i].ids, row.ID)
+			}
+		}
 	}
 
 	counts := make(map[uuid.UUID]int, len(rows))
 
-	for depType, ids := range idsByType {
-		got, err := s.svcDepRepo.GetServiceCountByDependency(ctx, ids, depType)
+	for _, g := range groups {
+		if len(g.ids) == 0 {
+			continue
+		}
+
+		got, err := s.svcDepRepo.GetServiceCountByDependency(ctx, g.ids, g.depType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to count services using models: %w", err)
 		}
