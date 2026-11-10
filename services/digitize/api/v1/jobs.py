@@ -265,9 +265,7 @@ async def create_job(
                         f"File '{filename}' is currently being processed in active "
                         f"job_id={owner.job_id} (doc_id={owner.doc_id}, hash={file_hash[:20]}...)"
                     )
-                    in_progress_summaries.append(
-                        f"'{filename}' (doc: {owner.doc_id}, job: {owner.job_id})"
-                    )
+                    in_progress_summaries.append(f"'{filename}' (doc: {owner.doc_id})")
                     skipped_files.append(record)
                 else:
                     logger.info(

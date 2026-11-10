@@ -708,7 +708,7 @@ class TestCategorizeFieldsNewKeys:
 
 @pytest.mark.unit
 class TestGetJobMessagePopulation:
-    """get_job must set message='Already ingested as <name>' for already_exists docs."""
+    """get_job must set message='Already exists: ingested as <name>' for already_exists docs."""
 
     def _make_doc_mock(self, status, existing_doc_name=None):
         m = Mock()
@@ -746,10 +746,7 @@ class TestGetJobMessagePopulation:
             result = _real_get_job("job-1")
 
         assert result["documents"][0]["status"] == "skipped"
-        assert (
-            result["documents"][0]["message"]
-            == "Skipped: Being ingested via Job job-abc as file original.pdf"
-        )
+        assert result["documents"][0]["message"] == "Skipped: duplicate of in progress original.pdf"
 
     def test_already_exists_doc_gets_message(self):
         mock_dm = Mock()
@@ -767,7 +764,7 @@ class TestGetJobMessagePopulation:
 
         assert result is not None
         doc_summary = result["documents"][0]
-        assert doc_summary["message"] == "Already ingested as original.pdf"
+        assert doc_summary["message"] == "Already exists: ingested as original.pdf"
 
     def test_completed_doc_has_no_message(self):
         mock_dm = Mock()
@@ -1317,7 +1314,7 @@ class TestDuplicateDetectionEndpoint:
         assert "completed-doc-id" in response.text
         assert "Currently being processed" in response.text
         assert "active-doc-id" in response.text
-        assert "active-job-id" in response.text
+        assert "active-job-id" not in response.text
 
     def test_mixed_completed_active_and_novel_returns_202(self, jobs_test_client, monkeypatch):
         """Completed + active + novel files: only the novel file is processed; the
@@ -1525,7 +1522,8 @@ class TestDuplicateDetectionEndpoint:
         )
 
         assert response.status_code == 409
-        assert "ing-job" in response.text
+        assert "ing-doc" in response.text
+        assert "ing-job" not in response.text
 
 
 # ============================================================================
