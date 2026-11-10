@@ -3,6 +3,7 @@ package modelservice
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"sync"
 	"testing"
@@ -114,6 +115,33 @@ func (m *mockComponentRepo) UpdateEndpoints(_ context.Context, id uuid.UUID, end
 	}
 
 	return nil
+}
+
+func (m *mockComponentRepo) UpdateMetadata(_ context.Context, id uuid.UUID, metadata map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if c, ok := m.byID[id]; ok {
+		c.Metadata = maps.Clone(metadata)
+	}
+
+	return nil
+}
+
+func (m *mockComponentRepo) GetByID(_ context.Context, id uuid.UUID) (*dbmodels.Component, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c, ok := m.byID[id]
+	if !ok {
+		return nil, nil
+	}
+
+	// Return a copy with its own metadata map, like a fresh DB read.
+	snapshot := *c
+	snapshot.Metadata = maps.Clone(c.Metadata)
+
+	return &snapshot, nil
 }
 
 type mockConnectorRepo struct {
@@ -452,6 +480,7 @@ func TestCreateModel_Remote(t *testing.T) {
 				assert.Equal(t, "models", conn.Type)
 				assert.Equal(t, "llm", conn.Metadata["component_type"])
 				assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
+				assert.Equal(t, map[string]any{"model_id": "litellm-id-ibm/granite-4-h-small"}, conn.Metadata["litellm"])
 
 				params, ok := conn.Metadata["params"].(map[string]any)
 				require.True(t, ok, "provider params are nested under \"params\"")
@@ -760,6 +789,9 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 		wantSteps     []string
 		// wantHistory is the status history after the insert; nil skips the check.
 		wantHistory []dbmodels.ComponentStatus
+		// wantLiteLLMModelID is the id saved under metadata["litellm"]["model_id"]; empty means
+		// the key must be absent.
+		wantLiteLLMModelID string
 		// wantAPIBase is the route's api_base; empty means no route may be registered.
 		wantAPIBase  string
 		wantTokenize string
@@ -772,12 +804,13 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 			deployer: fakeDeployer{endpoint: "llm-abc:8000"},
 			lite:     &mockLiteLLMClient{},
 
-			wantStatus:    dbmodels.ComponentStatusRunning,
-			wantEndpoints: []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
-			wantSteps:     []string{"prepare", "start"},
-			wantHistory:   []dbmodels.ComponentStatus{dbmodels.ComponentStatusDeploying, dbmodels.ComponentStatusRunning},
-			wantAPIBase:   "http://llm-abc:8000/v1",
-			wantTokenize:  "http://llm-abc:8000/tokenize",
+			wantStatus:         dbmodels.ComponentStatusRunning,
+			wantEndpoints:      []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
+			wantSteps:          []string{"prepare", "start"},
+			wantHistory:        []dbmodels.ComponentStatus{dbmodels.ComponentStatusDeploying, dbmodels.ComponentStatusRunning},
+			wantLiteLLMModelID: "litellm-id-ibm-granite/granite-3.3-8b-instruct",
+			wantAPIBase:        "http://llm-abc:8000/v1",
+			wantTokenize:       "http://llm-abc:8000/tokenize",
 		},
 		{
 			// The DB records the pod's own address while LiteLLM is pointed at the egress the
@@ -786,11 +819,12 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 			deployer: fakeDeployer{endpoint: "llm-abc:8000", egress: "egress.cp:8080"},
 			lite:     &mockLiteLLMClient{},
 
-			wantStatus:    dbmodels.ComponentStatusRunning,
-			wantEndpoints: []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
-			wantSteps:     []string{"prepare", "start"},
-			wantAPIBase:   "http://egress.cp:8080/v1",
-			wantTokenize:  "http://egress.cp:8080/tokenize",
+			wantStatus:         dbmodels.ComponentStatusRunning,
+			wantEndpoints:      []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
+			wantSteps:          []string{"prepare", "start"},
+			wantLiteLLMModelID: "litellm-id-ibm-granite/granite-3.3-8b-instruct",
+			wantAPIBase:        "http://egress.cp:8080/v1",
+			wantTokenize:       "http://egress.cp:8080/tokenize",
 		},
 		{
 			name:     "download failure is an error that never reaches deploying and never starts pods",
@@ -856,6 +890,15 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, tt.wantHistory, repo.statusHistory(id),
 					"the insert already recorded Downloading; the executor records the later phases")
+			}
+
+			// The id is added next to the metadata written at insert, never in place of it.
+			if tt.wantLiteLLMModelID == "" {
+				assert.NotContains(t, comp.Metadata, "litellm")
+			} else {
+				assert.Equal(t, map[string]any{"model_id": tt.wantLiteLLMModelID}, comp.Metadata["litellm"])
+				assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", comp.Metadata["model"], "original metadata is kept")
+				assert.Contains(t, comp.Metadata, "params", "original metadata is kept")
 			}
 
 			if tt.wantAPIBase == "" {

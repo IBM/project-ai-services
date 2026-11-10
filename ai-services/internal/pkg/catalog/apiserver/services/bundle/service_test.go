@@ -108,6 +108,9 @@ func (m *mockComponentRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ model
 func (m *mockComponentRepo) UpdateEndpoints(_ context.Context, _ uuid.UUID, _ []map[string]any) error {
 	panic("unexpected")
 }
+func (m *mockComponentRepo) UpdateMetadata(_ context.Context, _ uuid.UUID, _ map[string]any) error {
+	panic("unexpected")
+}
 func (m *mockComponentRepo) Delete(_ context.Context, _ uuid.UUID) error { panic("unexpected") }
 func (m *mockComponentRepo) ExistsByTypeAndProvider(ctx context.Context, componentType, provider string) (bool, error) {
 	return m.existsByTypeAndProvider(ctx, componentType, provider)
