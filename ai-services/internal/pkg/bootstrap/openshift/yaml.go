@@ -345,8 +345,19 @@ func setUpgradeTableHeaders(printer *utils.Printer) {
 }
 
 func populateUpgradeRows(printer *utils.Printer, v upgradeVersions) {
-	printer.AppendRow("Current  ", v.currentChannel, v.currentCSV)
-	printer.AppendRow("Available", v.availableChannel, v.availableCSVLabel)
+	currentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))   // yellow
+	availableStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+
+	printer.AppendRow(
+		currentStyle.Render("Current  "),
+		currentStyle.Render(v.currentChannel),
+		currentStyle.Render(v.currentCSV),
+	)
+	printer.AppendRow(
+		availableStyle.Render("Available"),
+		availableStyle.Render(v.availableChannel),
+		availableStyle.Render(v.availableCSVLabel),
+	)
 }
 
 // promptAndUpgrade shows the current/available version table, prompts the user,
