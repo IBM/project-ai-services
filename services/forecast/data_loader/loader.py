@@ -20,6 +20,7 @@ from forecast.data_loader.config import (
 )
 from forecast.data_loader.db2_client import Db2Client
 from forecast.data_loader.exceptions import (
+    ConnectorDecryptionError,
     DBColumnNotFoundError,
     RowLimitExceededError,
 )
@@ -230,3 +231,41 @@ def load_db2_to_parquet(
             max_training_rows=max_training_rows,
             compression=compression,
         )
+
+
+def load_connector_to_parquet(
+    connector_id: str,
+    connector_type: str,
+    encrypted_connection_details: Dict[str, Any],
+    table: str,
+    columns: Sequence[str],
+    output_path: str | Path,
+    schema: Optional[str] = None,
+    where_clause: Optional[str] = None,
+    batch_size: int = DEFAULT_LOADER_CHUNK_ROWS,
+    max_training_rows: int = DEFAULT_MAX_TRAINING_ROWS,
+    compression: str = DEFAULT_PARQUET_COMPRESSION,
+) -> ExtractResult:
+    """Decrypt connector configuration with DB_ENCRYPTION_KEY and extract to Parquet.
+
+    Raises ConnectorDecryptionError naming the connector without leaking credentials
+    if decryption fails.
+    """
+    from forecast.encryption import decrypt_secrets
+
+    try:
+        decrypted_config = decrypt_secrets(connector_type, encrypted_connection_details)
+    except Exception as exc:
+        raise ConnectorDecryptionError(connector_id) from exc
+
+    return load_db2_to_parquet(
+        connection_config=decrypted_config,
+        table=table,
+        columns=columns,
+        output_path=output_path,
+        schema=schema,
+        where_clause=where_clause,
+        batch_size=batch_size,
+        max_training_rows=max_training_rows,
+        compression=compression,
+    )

@@ -16,6 +16,8 @@ from forecast.data_loader.config import (
 )
 from forecast.data_loader.db2_client import ColumnInfo, Db2Client
 from forecast.data_loader.exceptions import (
+    ConnectorDecryptionError,
+    ConnectorNotFoundError,
     DataLoaderError,
     DBAuthError,
     DBColumnNotFoundError,
@@ -24,7 +26,12 @@ from forecast.data_loader.exceptions import (
     ParquetWriteError,
     RowLimitExceededError,
 )
-from forecast.data_loader.loader import Db2DataLoader, ExtractResult, load_db2_to_parquet
+from forecast.data_loader.loader import (
+    Db2DataLoader,
+    ExtractResult,
+    load_connector_to_parquet,
+    load_db2_to_parquet,
+)
 from forecast.data_loader.parquet_store import (
     ParquetBatchWriter,
     build_arrow_schema,
@@ -35,6 +42,8 @@ __all__ = [
     "ColumnInfo",
     "DEFAULT_CONNECT_TIMEOUT_S",
     "DEFAULT_LOADER_CHUNK_ROWS",
+    "ConnectorDecryptionError",
+    "ConnectorNotFoundError",
     "DEFAULT_MAPEPIRE_PORT",
     "DEFAULT_MAX_TRAINING_ROWS",
     "DEFAULT_PARQUET_COMPRESSION",
@@ -52,6 +61,7 @@ __all__ = [
     "ParquetWriteError",
     "RowLimitExceededError",
     "build_arrow_schema",
+    "load_connector_to_parquet",
     "load_db2_to_parquet",
     "map_db_type_to_arrow",
 ]
