@@ -203,7 +203,7 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 			continue
 		}
 
-		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, modelsFileName)
+		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, constants.ModelsFileName)
 		if err != nil {
 			return nil, err
 		}

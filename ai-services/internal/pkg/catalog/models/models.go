@@ -13,12 +13,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-// FileName is the models file inside a provider's asset directory.
-const FileName = "models.yaml"
-
 // List returns the models in dir/models.yaml. A missing file means no models (nil, nil).
 func List(fsys fs.FS, dir string) ([]types.Model, error) {
-	return utils.LoadYAMLList[types.Model](fsys, dir, FileName)
+	return utils.LoadYAMLList[types.Model](fsys, dir, constants.ModelsFileName)
 }
 
 // Find returns modelID's entry from dir/models.yaml, or nil if it isn't listed.
