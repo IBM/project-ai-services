@@ -126,10 +126,11 @@ const (
 )
 
 const (
-	ArgParamCaddyHTTPSPort     = "caddy.httpsPort"
-	ArgParamCaddyFileContent   = "caddy.caddyFileContent"
-	ArgParamSSLCertFileContent = "caddy.sslCertContent"
-	ArgParamSSLKeyFileContent  = "caddy.sslKeyContent"
+	ArgParamCaddyHTTPSPort          = "caddy.httpsPort"
+	ArgParamCaddyPrivateIngressPort = "caddy.privateIngressPort"
+	ArgParamCaddyFileContent        = "caddy.caddyFileContent"
+	ArgParamSSLCertFileContent      = "caddy.sslCertContent"
+	ArgParamSSLKeyFileContent       = "caddy.sslKeyContent"
 )
 
 const (
@@ -137,16 +138,17 @@ const (
 )
 
 const (
-	TokenFlag             = "token"
-	BaseDirFlag           = "basedir"
-	HTTPSPortFlag         = "https-port"
-	DomainNameFlag        = "domain-name"
-	SSLCertFlag           = "ssl-cert"
-	SSLKeyFlag            = "ssl-key"
-	AddHostFlag           = "add-host"
-	SkipLocalWorkerFlag   = "skip-local-worker"
-	WorkerGatewayPortFlag = "workergateway-port"
-	TimeoutFlag           = "timeout"
+	TokenFlag              = "token"
+	BaseDirFlag            = "basedir"
+	HTTPSPortFlag          = "https-port"
+	PrivateIngressPortFlag = "private-ingress-port"
+	DomainNameFlag         = "domain-name"
+	SSLCertFlag            = "ssl-cert"
+	SSLKeyFlag             = "ssl-key"
+	AddHostFlag            = "add-host"
+	SkipLocalWorkerFlag    = "skip-local-worker"
+	WorkerGatewayPortFlag  = "workergateway-port"
+	TimeoutFlag            = "timeout"
 
 	ResetPasswordFlag   = "reset-password"
 	ResetPodmanAuthFlag = "reset-podman-auth"

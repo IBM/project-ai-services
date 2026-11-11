@@ -209,4 +209,10 @@ This project is part of the IBM Project AI Services.
 
 `react-table` v7 is unmaintained — in v8 it was moved to `@tanstack/react-table`, which Carbon has not yet adopted. **Remove this override once `@carbon/ibm-products` migrates to `@tanstack/react-table`.**
 
+### `minimatch` override in `package.json`
+
+`eslint` and `typescript-eslint` (via `@typescript-eslint/typescript-estree`) depend on `minimatch@10`, which is affected by a denial-of-service advisory ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)) fixed in `11.0.1`. The `overrides` block forces `minimatch@^11.0.4` so `npm audit` stays clean. `minimatch@11` requires Node `20 || >=22`.
+
+ESLint 10 does not fix this on its own, because it still depends on `minimatch@10`, and `eslint-plugin-react` does not yet support ESLint 10. **Remove this override once `eslint` and `typescript-eslint` depend on `minimatch@>=11.0.1`.**
+
 ---

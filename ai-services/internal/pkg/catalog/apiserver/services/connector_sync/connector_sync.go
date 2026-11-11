@@ -16,12 +16,10 @@ import (
 
 	catalogpkg "github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	datasourceservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/datasource_service"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
-	pkgutils "github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
@@ -73,22 +71,14 @@ func NewConnectorSyncJob(
 	// The schema is static — it never changes while the process is running.
 	sensitiveFields := make(map[string]map[string]bool, len(testers))
 	for providerID := range testers {
-		rawSchema, err := catalogProvider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, providerID)
+		fields, err := datasourceservice.SensitiveFieldsForProvider(ctx, catalogProvider, providerID)
 		if err != nil {
-			logger.WarningfCtx(ctx, "ConnectorSyncJob: failed to load schema for provider %q, sensitive fields will be empty: %v", providerID, err)
+			logger.WarningfCtx(ctx, "ConnectorSyncJob: failed to fetch sensitive fields, sensitive fields for provider %q will be empty: %v", providerID, err)
 			sensitiveFields[providerID] = map[string]bool{}
 
 			continue
 		}
-
-		schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
-		if err != nil {
-			logger.WarningfCtx(ctx, "ConnectorSyncJob: failed to parse schema for provider %q, sensitive fields will be empty: %v", providerID, err)
-			sensitiveFields[providerID] = map[string]bool{}
-
-			continue
-		}
-		sensitiveFields[providerID] = catalogutils.SensitiveFieldsFromSchema(schema)
+		sensitiveFields[providerID] = fields
 	}
 
 	return &ConnectorSyncJob{
