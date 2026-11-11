@@ -1,29 +1,11 @@
 --- a/pyproject.toml
 +++ b/pyproject.toml
-@@ -3,7 +3,7 @@
- version = "1.106.4"
- description = "Library to easily interface with LLM API providers"
- readme = "README.md"
--requires-python = ">=3.10, <3.15"
-+requires-python = ">=3.11, <3.15"
- license = "MIT"
- license-files = ["LICENSE"]
- authors = [
-@@ -15,7 +15,7 @@
-     # When changing a floor, verify it installs + imports on every supported
-     # Python with: `uv pip install --resolution=lowest-direct .`
-     "fastuuid>=0.14.0,<1.0",
--    "filelock>=3.16.1,<4.0",
-+    "filelock>=4.2.1",
-     "httpx[http2]>=0.28.0,<1.0",
-     "openai>=2.20.0,<3.0.0",
-     "python-dotenv>=1.0.0,<2.0",
 @@ -79,15 +79,16 @@
-     "httpx2>=2.5.0,<3",
+     "httpx2>=2.10.0,<3",
      "pydantic>=2.12.0,<3",
-     "litellm-proxy-extras==0.4.108",
--    "litellm-enterprise==0.1.76.post1",
-+    "litellm-enterprise==0.1.76.post1; platform_machine != 'ppc64le'",
+     "litellm-proxy-extras==0.4.110",
+-    "litellm-enterprise==0.1.79.post1",
++    "litellm-enterprise==0.1.79.post1; platform_machine != 'ppc64le'",
      "RestrictedPython>=8.5,<9.0",
      "rich>=13.9.4,<14.0",
      "InquirerPy>=0.3.4,<1.0",
@@ -37,23 +19,3 @@
  ]
  # Thin client install for the `lite` CLI on developer laptops. The CLI's heavy
  # imports are all guarded, so it runs on the base SDK plus these packages, and
---- a/packaging/litellm-core/pyproject.toml
-+++ b/packaging/litellm-core/pyproject.toml
-@@ -3,7 +3,7 @@
- version = "1.105.0"
- description = "Library to easily interface with LLM API providers"
- readme = "README.md"
--requires-python = ">=3.10, <3.15"
-+requires-python = ">=3.11, <3.15"
- license = "MIT"
- license-files = ["LICENSE"]
- authors = [
-@@ -11,7 +11,7 @@
- ]
- dependencies = [
-     "fastuuid>=0.14.0,<1.0",
--    "filelock>=3.16.1,<4.0",
-+    "filelock>=4.2.1",
-     "httpx[http2]>=0.28.0,<1.0",
-     "openai>=2.20.0,<3.0.0",
-     "python-dateutil>=2.8.2,<3.0",

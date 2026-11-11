@@ -31,6 +31,7 @@ cd "${WORKDIR}/prisma-engines"
 export RUSTFLAGS="--cap-lints allow -A ambiguous_glob_imports"
 patch -p1 < ../prisma/prisma.patch
 cargo update -p time@0.3.25
-cargo build --release --bin query-engine
-cargo build --release --bin schema-engine
+cargo build --release \
+    --bin query-engine \
+    --bin schema-engine
 cargo build --release -p query-engine-node-api
