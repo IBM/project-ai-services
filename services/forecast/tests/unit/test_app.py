@@ -8,9 +8,11 @@ Tests cover:
    unexpected exceptions
  - TRITON_UNAVAILABLE
  - Settings defaults and the blank-means-unset rule
+ - Startup checks: DB_ENCRYPTION_KEY validation and the TRITON_URL check
  - The worker command line
 """
 
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -33,10 +35,10 @@ from forecast.errors import (
 
 @pytest.fixture(autouse=True)
 def _startup_dependencies_stubbed():
-    """Give every app startup a valid key and no network call to Triton.
+    """Give every app startup a valid key and a stubbed TRITON_URL check.
 
-    Startup validates DB_ENCRYPTION_KEY and the TRITON_URL check makes a request, so
-    tests that start the app need both settled. Tests that need another value patch it again.
+    Startup validates DB_ENCRYPTION_KEY and checks TRITON_URL, so tests that start
+    the app need both settled. Tests that need another value patch it again.
     """
     from forecast.settings import settings
 
@@ -364,7 +366,7 @@ def test_secrets_are_not_printed(monkeypatch):
 
 @pytest.mark.unit
 def test_cipher_requires_a_key():
-    from forecast.encryption import EncryptionKeyError, validate_cipher
+    from forecast.utils.encryption import EncryptionKeyError, validate_cipher
     from forecast.settings import settings
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
@@ -375,7 +377,7 @@ def test_cipher_requires_a_key():
 @pytest.mark.unit
 @pytest.mark.parametrize("key", ["short", "x" * 31, "x" * 33])
 def test_cipher_rejects_a_key_that_is_not_32_bytes(key):
-    from forecast.encryption import EncryptionKeyError, validate_cipher
+    from forecast.utils.encryption import EncryptionKeyError, validate_cipher
     from forecast.settings import settings
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr(key)):
@@ -385,7 +387,7 @@ def test_cipher_rejects_a_key_that_is_not_32_bytes(key):
 
 @pytest.mark.unit
 def test_cipher_round_trips_with_a_32_byte_key():
-    from forecast.encryption import validate_cipher
+    from forecast.utils.encryption import validate_cipher
     from forecast.settings import settings
 
     with patch.object(
@@ -398,7 +400,7 @@ def test_cipher_round_trips_with_a_32_byte_key():
 
 @pytest.mark.unit
 def test_key_error_message_does_not_contain_the_key():
-    from forecast.encryption import EncryptionKeyError, validate_cipher
+    from forecast.utils.encryption import EncryptionKeyError, validate_cipher
     from forecast.settings import settings
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr("topsecretvalue")):
@@ -410,7 +412,7 @@ def test_key_error_message_does_not_contain_the_key():
 @pytest.mark.unit
 @pytest.mark.parametrize("key", ["", "x" * 31])
 def test_startup_fails_fast_without_a_valid_key(key):
-    from forecast.encryption import EncryptionKeyError
+    from forecast.utils.encryption import EncryptionKeyError
     import forecast.app as forecast_app
     from forecast.settings import settings
 
@@ -432,7 +434,15 @@ def test_startup_logs_no_error_with_a_valid_key(caplog):
     ), caplog.at_level("ERROR"):
         with TestClient(forecast_app.app):
             pass
-    assert not any("DB_ENCRYPTION_KEY" in record.getMessage() for record in caplog.records)
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@pytest.mark.unit
+def test_close_db_connections_is_a_no_op_without_a_connection_manager():
+    import forecast.db.connection as connection
+
+    with patch.object(connection, "_close_db_connections", None):
+        connection.close_db_connections()
 
 
 @pytest.mark.unit
@@ -458,19 +468,16 @@ def test_shutdown_logs_when_closing_the_database_fails(caplog):
     ["http://triton:8000", "https://triton:8000/", "HTTP://triton:8000", "  http://triton:8000  "],
 )
 def test_triton_url_with_a_scheme_is_accepted(url):
-    import forecast.triton as triton
+    import forecast.triton_client.triton as triton
 
-    with patch.object(triton.settings.forecast, "triton_url", url), patch(
-        "forecast.triton.requests.get"
-    ) as get:
-        get.return_value.status_code = 200
+    with patch.object(triton.settings.forecast, "triton_url", url):
         assert triton.triton_url_check() is None
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("url", ["triton:8000", "localhost:8000", "10.0.0.5:8000", "ftp://triton:8000"])
 def test_triton_url_without_http_scheme_is_a_problem(url):
-    import forecast.triton as triton
+    import forecast.triton_client.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", url):
         problem = triton.triton_url_check()
@@ -480,7 +487,7 @@ def test_triton_url_without_http_scheme_is_a_problem(url):
 @pytest.mark.unit
 @pytest.mark.parametrize("url", ["", "   "])
 def test_empty_triton_url_is_a_problem(url):
-    import forecast.triton as triton
+    import forecast.triton_client.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", url):
         assert "not set" in triton.triton_url_check()
@@ -488,16 +495,17 @@ def test_empty_triton_url_is_a_problem(url):
 
 @pytest.mark.unit
 def test_triton_url_problem_does_not_echo_the_value():
-    import forecast.triton as triton
+    import forecast.triton_client.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", "user:hunter2@triton:8000"):
-        assert "hunter2" not in triton.triton_url_check()
+        problem = triton.triton_url_check()
+    assert problem and "hunter2" not in problem
 
 
 @pytest.mark.unit
 def test_startup_reports_a_bad_triton_url_as_a_configuration_error(caplog):
     import forecast.app as forecast_app
-    import forecast.triton as triton
+    import forecast.triton_client.triton as triton
     from forecast.settings import settings
 
     # The real check runs here, so the autouse stub is replaced for this test only.
@@ -521,7 +529,7 @@ def test_startup_reports_a_bad_triton_url_as_a_configuration_error(caplog):
 
 @pytest.mark.unit
 def test_worker_requires_a_job_id():
-    from forecast.worker import parse_args
+    from forecast.triton_client.worker import parse_args
 
     with pytest.raises(SystemExit):
         parse_args([])
@@ -529,14 +537,14 @@ def test_worker_requires_a_job_id():
 
 @pytest.mark.unit
 def test_worker_parses_the_job_id():
-    from forecast.worker import parse_args
+    from forecast.triton_client.worker import parse_args
 
     assert parse_args(["0f8fad5b-d9cb-469f-a165-70867728950e"]).job_id == "0f8fad5b-d9cb-469f-a165-70867728950e"
 
 
 @pytest.mark.unit
 def test_worker_exits_non_zero_until_implemented(capsys):
-    from forecast.worker import main
+    from forecast.triton_client.worker import main
 
     assert main(["job-1"]) == 1
     assert "not implemented" in capsys.readouterr().err

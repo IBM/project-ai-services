@@ -28,9 +28,9 @@ from forecast.settings import settings
 set_log_level(settings.common.app.log_level)
 
 from forecast.db.connection import close_db_connections
-from forecast.encryption import validate_cipher
 from forecast.errors import register_exception_handlers
-from forecast.triton import triton_url_check
+from forecast.triton_client.triton import triton_url_check
+from forecast.utils.encryption import validate_cipher
 
 logger = get_logger("forecast_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -48,14 +48,13 @@ async def lifespan(app: FastAPI):
     configure_uvicorn_logging(settings.common.app.log_level, ["/health"])
     logger.info("Forecast service starting up...")
 
-    # A bad TRITON_URL can never work, so it is reported at startup.
-    triton_problem = triton_url_check()
-    if triton_problem:
-        logger.error(f"{triton_problem}. Forecast requests will fail until this is fixed.")
-
     # Fail fast: without a valid key the service cannot store connector secrets, so
     # the error stops startup instead of surfacing on the first connector request.
     validate_cipher()
+
+    triton_problem = triton_url_check()
+    if triton_problem:
+        logger.error(f"{triton_problem}. Forecast requests will fail until this is fixed.")
 
     yield
 

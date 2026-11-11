@@ -74,7 +74,7 @@ class ForecastConfig(BaseSettings):
     default_time_limit_seconds: int = Field(
         default=1800,
         ge=1,
-        description="Time limit applied to each training attempt",
+        description="Time limit applied to each training job",
     )
 
     training_max_attempts: int = Field(

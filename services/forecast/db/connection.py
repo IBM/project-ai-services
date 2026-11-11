@@ -15,7 +15,7 @@ from forecast.settings import settings
     SessionLocal,
     ScopedSession,
     get_db_session,
-    _check_db_connection,
+    _,
     _close_db_connections,
 ) = get_connection_manager("database", settings)
 

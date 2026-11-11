@@ -3,8 +3,8 @@ Encryption key for connector secrets.
 
 The key is read from DB_ENCRYPTION_KEY, as Digitize does, and must be exactly
 32 bytes (AES-256-GCM). The value is used as it is: it is not base64-decoded.
-Without a valid key every operation that needs the cipher raises
-``EncryptionKeyError``, so a connector cannot be created.
+``validate_cipher()`` runs in the application lifespan, so a missing or invalid
+key stops the service before it serves requests.
 """
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
