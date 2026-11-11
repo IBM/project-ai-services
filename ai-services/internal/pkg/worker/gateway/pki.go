@@ -33,24 +33,16 @@ const (
 	workerCertTTL = 365 * 24 * time.Hour // 1 year
 
 	serialBitSize = 128
-	dirPerm       = 0o700
-	certPerm      = 0o644
-	keyPerm       = 0o600
-
-	// ServerKeyPlaintextFile is the decrypted copy of server.key written next to
-	// it so Caddy (which cannot decrypt our AES-GCM key files) can serve the
-	// private ingress with the gateway server certificate.
-	ServerKeyPlaintextFile = "server.key.pem"
-
-	// plaintextKeyPerm is the mode of the plaintext key copy. It must be readable
-	// by the Caddy container user, which differs from the user that writes the
-	// file (catalog process), so 0600 would make it unreadable to Caddy.
-	// The volume is mounted only into the catalog and Caddy pods.
-	plaintextKeyPerm = 0o644
-
-	// traversableDirPerm lets the Caddy user reach the files in the PKI directory.
-	// The private keys inside stay protected by their own file modes.
-	traversableDirPerm = 0o755
+	// dirPerm lets the Caddy container user (a different uid from the catalog
+	// process) reach the files in the PKI directory.
+	dirPerm  = 0o755
+	certPerm = 0o644
+	// keyPerm is the mode of the AES-GCM encrypted server.key, which the Caddy
+	// container user must read so the encrypted_file Caddy module can decrypt it in
+	// memory. ca.key is never read by Caddy and keeps caKeyPerm.
+	keyPerm = 0o644
+	// caKeyPerm is the mode of the encrypted CA signing key. Only the catalog reads it.
+	caKeyPerm = 0o600
 )
 
 // pkiResult groups the four pieces of PKI material the gateway needs.
@@ -63,21 +55,34 @@ type pkiResult struct {
 
 // loadOrGeneratePKI loads the four PKI files from pkiDir when they all exist,
 // or generates a new ECDSA P-256 root CA and server certificate on first start.
+// Either way, the directory and server.key are then made readable for Caddy.
 func loadOrGeneratePKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	caKeyPath := filepath.Join(pkiDir, "ca.key")
 	caCrtPath := filepath.Join(pkiDir, "ca.crt")
 	srvKeyPath := filepath.Join(pkiDir, "server.key")
 	srvCrtPath := filepath.Join(pkiDir, "server.crt")
 
+	var (
+		res pkiResult
+		err error
+	)
+
 	if fileExists(caKeyPath) && fileExists(caCrtPath) && fileExists(srvKeyPath) && fileExists(srvCrtPath) {
 		logger.InfofCtx(ctx, "worker gateway: PKI files found in %s, loading existing material", pkiDir)
 
-		return loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath)
+		res, err = loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath)
+	} else {
+		logger.InfofCtx(ctx, "worker gateway: PKI directory empty or incomplete — generating new CA and server certificate in %s", pkiDir)
+
+		res, err = generateAndPersistPKI(ctx, pkiDir, runtimeType)
+	}
+	if err != nil {
+		return pkiResult{}, err
 	}
 
-	logger.InfofCtx(ctx, "worker gateway: PKI directory empty or incomplete — generating new CA and server certificate in %s", pkiDir)
+	ensureCaddyReadable(ctx, pkiDir)
 
-	return generateAndPersistPKI(ctx, pkiDir, runtimeType)
+	return res, nil
 }
 
 // generateCA creates a new ECDSA P-256 root CA key and certificate.
@@ -156,7 +161,7 @@ func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []b
 		perm os.FileMode
 		data []byte
 	}{
-		{filepath.Join(pkiDir, "ca.key"), keyPerm, []byte(caKeyEnc)},
+		{filepath.Join(pkiDir, "ca.key"), caKeyPerm, []byte(caKeyEnc)},
 		{filepath.Join(pkiDir, "ca.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER})},
 		{filepath.Join(pkiDir, "server.key"), keyPerm, []byte(srvKeyEnc)},
 		{filepath.Join(pkiDir, "server.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvCertDER})},
@@ -170,21 +175,21 @@ func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []b
 	return nil
 }
 
-// writePlaintextServerKey writes the plaintext PEM of the server private key to
-// pkiDir/ServerKeyPlaintextFile for Caddy. It runs every time PKI material is
-// generated or loaded so the copy always matches server.key.
-func writePlaintextServerKey(pkiDir string, srvKeyPEM []byte) error {
-	// The directory is created 0700, which would stop the Caddy user from reaching
-	// the files inside. Best effort: if we do not own the directory, the files'
-	// own permissions still apply.
-	_ = os.Chmod(pkiDir, traversableDirPerm)
-
-	path := filepath.Join(pkiDir, ServerKeyPlaintextFile)
-	if err := os.WriteFile(path, srvKeyPEM, plaintextKeyPerm); err != nil { //nolint:gosec // must be readable by the Caddy user, see plaintextKeyPerm
-		return fmt.Errorf("write %s: %w", ServerKeyPlaintextFile, err)
+// ensureCaddyReadable makes the PKI directory and the encrypted server.key readable
+// by the Caddy container user. os.WriteFile and os.MkdirAll only apply a mode when
+// they create something, so a catalog installed before this change still has a 0700
+// directory and a 0600 server.key; this runs on every start to fix them.
+// It is best effort: a failure is logged but must not stop the gateway from starting
+// (it only affects Caddy's private ingress). ca.key is deliberately left at 0600.
+func ensureCaddyReadable(ctx context.Context, pkiDir string) {
+	if err := os.Chmod(pkiDir, dirPerm); err != nil { //nolint:gosec // Caddy runs as a different uid and must traverse the directory
+		logger.WarningfCtx(ctx, "worker gateway: cannot make %s readable for Caddy: %v", pkiDir, err)
 	}
 
-	return nil
+	keyPath := filepath.Join(pkiDir, "server.key")
+	if err := os.Chmod(keyPath, keyPerm); err != nil { //nolint:gosec // the file is AES-GCM encrypted; Caddy decrypts it in memory
+		logger.WarningfCtx(ctx, "worker gateway: cannot make %s readable for Caddy: %v", keyPath, err)
+	}
 }
 
 // generateAndPersistPKI creates a new ECDSA P-256 root CA and signs a server
@@ -256,10 +261,6 @@ func generateAndPersistPKI(ctx context.Context, pkiDir string, runtimeType types
 	srvKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: srvKeyDER})
 
 	if err := writePKIFiles(pkiDir, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER, secret); err != nil {
-		return empty, err
-	}
-
-	if err := writePlaintextServerKey(pkiDir, srvKeyPEM); err != nil {
 		return empty, err
 	}
 
@@ -350,10 +351,6 @@ func loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath string) (pkiResult, er
 
 	srvKeyPEM, err := loadServerKeyPEM(srvKeyPath, secret)
 	if err != nil {
-		return empty, err
-	}
-
-	if err := writePlaintextServerKey(filepath.Dir(srvKeyPath), srvKeyPEM); err != nil {
 		return empty, err
 	}
 

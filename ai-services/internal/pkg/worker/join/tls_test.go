@@ -28,16 +28,8 @@ func writeTestCredentials(t *testing.T) string {
 	return dir
 }
 
-func TestWriteTLSMaterial_WritesPlaintextKeyForCaddy(t *testing.T) {
+func TestWriteTLSMaterial_KeyStaysEncryptedAndCaddyReadable(t *testing.T) {
 	dir := writeTestCredentials(t)
-
-	plain, err := os.ReadFile(filepath.Join(dir, tlsKeyPlaintextFile))
-	if err != nil {
-		t.Fatalf("read %s: %v", tlsKeyPlaintextFile, err)
-	}
-	if !strings.Contains(string(plain), "PRIVATE KEY") {
-		t.Errorf("%s must hold a plaintext PEM key", tlsKeyPlaintextFile)
-	}
 
 	enc, err := os.ReadFile(filepath.Join(dir, tlsKeyFile))
 	if err != nil {
@@ -47,27 +39,32 @@ func TestWriteTLSMaterial_WritesPlaintextKeyForCaddy(t *testing.T) {
 		t.Errorf("%s must stay encrypted at rest", tlsKeyFile)
 	}
 
-	info, err := os.Stat(filepath.Join(dir, tlsKeyPlaintextFile))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o044 != 0o044 {
-		t.Errorf("%s mode %v: must be group/other readable for the Caddy user", tlsKeyPlaintextFile, info.Mode().Perm())
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), "PRIVATE KEY") {
+			t.Errorf("%s holds a plaintext private key; none may be written to disk", e.Name())
+		}
 	}
-	dirInfo, err := os.Stat(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dirInfo.Mode().Perm()&0o055 != 0o055 {
-		t.Errorf("dir mode %v: must be traversable by the Caddy user", dirInfo.Mode().Perm())
-	}
+
+	assertCaddyReadable(t, dir)
 }
 
-// TestLoadClientCert_RefreshesPlaintextKey covers worker restarts: the worker
-// re-decrypts tls.key on every start, so the Caddy copy is restored if it is gone.
-func TestLoadClientCert_RefreshesPlaintextKey(t *testing.T) {
+// TestLoadClientCert_FixesPermissionsOfExistingInstall covers workers installed
+// before the encrypted_file Caddy module: they have a 0700 directory and a 0600 key,
+// which the Caddy user cannot read.
+func TestLoadClientCert_FixesPermissionsOfExistingInstall(t *testing.T) {
 	dir := writeTestCredentials(t)
-	if err := os.Remove(filepath.Join(dir, tlsKeyPlaintextFile)); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, tlsKeyFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,13 +72,31 @@ func TestLoadClientCert_RefreshesPlaintextKey(t *testing.T) {
 		t.Fatalf("loadClientCert: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, tlsKeyPlaintextFile)); err != nil {
-		t.Errorf("%s was not restored: %v", tlsKeyPlaintextFile, err)
+	assertCaddyReadable(t, dir)
+}
+
+func assertCaddyReadable(t *testing.T, dir string) {
+	t.Helper()
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirInfo.Mode().Perm()&0o055 != 0o055 {
+		t.Errorf("dir mode %v: must be traversable by the Caddy user", dirInfo.Mode().Perm())
+	}
+
+	keyInfo, err := os.Stat(filepath.Join(dir, tlsKeyFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyInfo.Mode().Perm()&0o044 != 0o044 {
+		t.Errorf("%s mode %v: the encrypted key must be readable by the Caddy user", tlsKeyFile, keyInfo.Mode().Perm())
 	}
 }
 
-// TestWorkerCaddyfile_PrivateIngressUsesWorkerTLSFiles keeps the Caddyfile paths in
-// step with the file names the worker writes.
+// TestWorkerCaddyfile_PrivateIngressUsesWorkerTLSFiles keeps the Caddyfile in step
+// with the file names the worker writes, and checks that no plaintext key is used.
 func TestWorkerCaddyfile_PrivateIngressUsesWorkerTLSFiles(t *testing.T) {
 	raw, err := assets.WorkerFS.ReadFile("worker/podman/Caddyfile.tmpl")
 	if err != nil {
@@ -89,13 +104,18 @@ func TestWorkerCaddyfile_PrivateIngressUsesWorkerTLSFiles(t *testing.T) {
 	}
 
 	want := []string{
-		filepath.Join(workerconstants.WorkerTLSDir, tlsCertFile),
-		filepath.Join(workerconstants.WorkerTLSDir, tlsKeyPlaintextFile),
+		"get_certificate encrypted_file",
+		"cert        " + filepath.Join(workerconstants.WorkerTLSDir, tlsCertFile),
+		"key         " + filepath.Join(workerconstants.WorkerTLSDir, tlsKeyFile),
+		"secret_file /etc/secret/worker-mtls-encryption-secret/mtls-encryption-key",
 		"trusted_ca_cert_file " + filepath.Join(workerconstants.WorkerTLSDir, caCertFile),
 	}
 	for _, s := range want {
 		if !strings.Contains(string(raw), s) {
 			t.Errorf("worker Caddyfile.tmpl does not reference %q", s)
 		}
+	}
+	if strings.Contains(string(raw), ".pem") {
+		t.Error("worker Caddyfile.tmpl must not reference a plaintext key file")
 	}
 }
