@@ -161,15 +161,18 @@ const DigitalAssistantsPage = () => {
   // so that all subsequent loads use the dimming overlay instead of the full skeleton.
   const hasEverLoadedRef = useRef(false);
 
+  // `silent` skips the loading state; only background refreshes set it
   const loadApplications = useCallback(
     async (
       page = pageRef.current,
       pageSize = pageSizeRef.current,
       search = debouncedSearchRef.current,
+      options?: { silent?: boolean },
     ) => {
       if (!catalogId) {
         return;
       }
+      const silent = options?.silent ?? false;
 
       // Cancel previous pending requests
       if (abortControllerRef.current) {
@@ -178,8 +181,7 @@ const DigitalAssistantsPage = () => {
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
-      // Skip the skeleton while rows are transitional so polling updates statuses in place
-      if (!hasTransitionalRowRef.current) {
+      if (!silent) {
         dispatch({ type: "SHARED_SET_LOADING", payload: true });
       }
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
@@ -204,7 +206,7 @@ const DigitalAssistantsPage = () => {
         if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          void loadApplications(totalPages, pageSize, search);
+          void loadApplications(totalPages, pageSize, search, { silent });
           return;
         }
 
@@ -238,6 +240,18 @@ const DigitalAssistantsPage = () => {
     [catalogId],
   );
 
+  // Used by useAutoRefresh; silent while rows are transitional
+  const refreshApplications = useCallback(
+    () =>
+      loadApplications(
+        pageRef.current,
+        pageSizeRef.current,
+        debouncedSearchRef.current,
+        { silent: hasTransitionalRowRef.current },
+      ),
+    [loadApplications],
+  );
+
   const isFirstMount = useRef(true);
 
   // Trigger search on debounced term changes (resetting page to 1)
@@ -264,7 +278,7 @@ const DigitalAssistantsPage = () => {
   // Mount fetch + 2-minute auto-refresh interval (shared hook).
   // hasData is always true so auto-refresh keeps running on empty/no-match results.
   useAutoRefresh({
-    fetchFn: loadApplications,
+    fetchFn: refreshApplications,
     hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
     hasTransitionalRow,
@@ -683,10 +697,15 @@ const DigitalAssistantsPage = () => {
                             />
                           </TableContainer>
 
-                          {!state.isLoading &&
-                            state.totalItems > state.pageSize &&
+                          {state.totalItems > state.pageSize &&
                             state.rowsData.length > 0 && (
                               <Pagination
+                                className={
+                                  state.isLoading
+                                    ? styles.loadingTable
+                                    : undefined
+                                }
+                                disabled={state.isLoading}
                                 page={state.page}
                                 pageSize={state.pageSize}
                                 pageSizes={[20, 30, 50]}
