@@ -67,7 +67,7 @@ def _make_config(**overrides) -> S3ConnectorConfig:
         delimiter="",
         verify_ssl=False,
         download_concurrency=2,
-        allowed_extensions=[".pdf", ".docx"],
+        allowed_extensions=[".pdf", ".docx", ".html", ".md", ".txt"],
     )
     defaults.update(overrides)
     return S3ConnectorConfig(**defaults)
@@ -307,19 +307,42 @@ class TestS3ScannerScan:
         page = self._make_page([
             self._make_obj("docs/report.pdf", "abc123"),
             self._make_obj("docs/manual.docx", "def456"),
+            self._make_obj("docs/page.html", "ghi789"),
+            self._make_obj("docs/notes.md", "jkl012"),
+            self._make_obj("docs/readme.txt", "mno345"),
         ])
         scanner._client = _make_mock_client([page])
 
         result = scanner.scan()
 
-        assert result == [("docs/report.pdf", "abc123"), ("docs/manual.docx", "def456")]
+        assert result == [
+            ("docs/report.pdf", "abc123"),
+            ("docs/manual.docx", "def456"),
+            ("docs/page.html", "ghi789"),
+            ("docs/notes.md", "jkl012"),
+            ("docs/readme.txt", "mno345"),
+        ]
+
+    def test_returns_md_and_txt_files(self):
+        cfg = _make_config(allowed_extensions=[".md", ".txt"])
+        scanner = S3Scanner(cfg)
+        page = self._make_page([
+            self._make_obj("docs/notes.md", "m1"),
+            self._make_obj("docs/readme.TXT", "t1"),
+            self._make_obj("docs/report.pdf", "p1"),
+        ])
+        scanner._client = _make_mock_client([page])
+
+        result = scanner.scan()
+
+        assert result == [("docs/notes.md", "m1"), ("docs/readme.TXT", "t1")]
 
     def test_skips_non_document_extensions(self):
         cfg = _make_config()
         scanner = S3Scanner(cfg)
         page = self._make_page([
             self._make_obj("report.pdf", "aaa"),
-            self._make_obj("readme.txt", "bbb"),
+            self._make_obj("data.csv", "bbb"),
             self._make_obj("archive.zip", "ccc"),
         ])
         scanner._client = _make_mock_client([page])
@@ -328,7 +351,7 @@ class TestS3ScannerScan:
         keys = [r[0] for r in result]
 
         assert "report.pdf" in keys
-        assert "readme.txt" not in keys
+        assert "data.csv" not in keys
         assert "archive.zip" not in keys
 
     def test_strips_etag_quotes(self):
@@ -509,7 +532,7 @@ def _make_sftp_config(**overrides) -> "SSHConnectorConfig":
         username="user",
         private_key=_FAKE_PEM,
         remote_path="/data",
-        allowed_extensions=[".pdf", ".docx"],
+        allowed_extensions=[".pdf", ".docx", ".html", ".md", ".txt"],
     )
     defaults.update(overrides)
     return SSHConnectorConfig(**defaults)
@@ -531,7 +554,13 @@ class TestSSHConnectorConfig:
         assert cfg.port == 22
         assert cfg.username == "user"
         assert cfg.remote_path == "/data"
-        assert cfg.allowed_extensions == [".pdf", ".docx"]
+        assert cfg.allowed_extensions == [".pdf", ".docx", ".html", ".md", ".txt"]
+
+    def test_default_allowed_extensions_include_md_and_txt(self):
+        from digitize.connectors.scanners.config import SSHConnectorConfig
+        expected = [".pdf", ".docx", ".html", ".md", ".txt"]
+        assert S3ConnectorConfig.model_fields["allowed_extensions"].default_factory() == expected
+        assert SSHConnectorConfig.model_fields["allowed_extensions"].default_factory() == expected
 
     def test_default_port_is_22(self):
         cfg = _make_sftp_config()
@@ -740,14 +769,20 @@ class TestSSHScannerScan:
         mock_sftp = MagicMock()
         mock_ssh = MagicMock()
 
-        # /data contains report.pdf and manual.docx — give each a unique md5
+        # /data contains report.pdf, manual.docx, page.html, notes.md, readme.txt — give each a unique md5
         mock_sftp.listdir_attr.return_value = [
             self._make_stat("report.pdf"),
             self._make_stat("manual.docx"),
+            self._make_stat("page.html"),
+            self._make_stat("notes.md"),
+            self._make_stat("readme.txt"),
         ]
         _md5s = {
             "/data/report.pdf": "aabbccdd11223344aabbccdd11223344",
             "/data/manual.docx": "11223344aabbccdd11223344aabbccdd",
+            "/data/page.html": "55667788aabbccdd55667788aabbccdd",
+            "/data/notes.md": "99887766aabbccdd99887766aabbccdd",
+            "/data/readme.txt": "33445566aabbccdd33445566aabbccdd",
         }
         def exec_command_side_effect(cmd):
             path = shlex.split(cmd)[1]
@@ -766,6 +801,40 @@ class TestSSHScannerScan:
         paths = [r[0] for r in result]
         assert "/data/report.pdf" in paths
         assert "/data/manual.docx" in paths
+        assert "/data/page.html" in paths
+        assert "/data/notes.md" in paths
+        assert "/data/readme.txt" in paths
+
+    def test_scan_includes_md_and_txt(self):
+        scanner = _make_ssh_scanner()
+        scanner._cfg.allowed_extensions = [".pdf", ".md", ".txt"]
+        mock_sftp = MagicMock()
+        mock_ssh = MagicMock()
+
+        mock_sftp.listdir_attr.return_value = [
+            self._make_stat("notes.md"),
+            self._make_stat("readme.txt"),
+            self._make_stat("archive.zip"),
+        ]
+        _md5s = {
+            "/data/notes.md": "aabbccdd11223344aabbccdd11223344",
+            "/data/readme.txt": "11223344aabbccdd11223344aabbccdd",
+        }
+
+        def exec_command_side_effect(cmd):
+            path = shlex.split(cmd)[1]
+            stdout = MagicMock()
+            stdout.read.return_value = f"{_md5s[path]}  {path}".encode()
+            stdout.channel.recv_exit_status.return_value = 0
+            stderr = MagicMock()
+            stderr.read.return_value = b""
+            return (None, stdout, stderr)
+
+        mock_ssh.exec_command.side_effect = exec_command_side_effect
+        self._attach(scanner, mock_sftp, mock_ssh)
+
+        paths = [r[0] for r in scanner.scan()]
+        assert paths == ["/data/notes.md", "/data/readme.txt"]
 
     def test_scan_filters_non_allowed_extensions(self):
         scanner = _make_ssh_scanner()
@@ -774,7 +843,7 @@ class TestSSHScannerScan:
 
         mock_sftp.listdir_attr.return_value = [
             self._make_stat("report.pdf"),
-            self._make_stat("readme.txt"),
+            self._make_stat("data.csv"),
             self._make_stat("archive.zip"),
         ]
         stdout = MagicMock()
@@ -788,7 +857,7 @@ class TestSSHScannerScan:
         result = scanner.scan()
         paths = [r[0] for r in result]
         assert any(p.endswith(".pdf") for p in paths)
-        assert not any(p.endswith(".txt") for p in paths)
+        assert not any(p.endswith(".csv") for p in paths)
         assert not any(p.endswith(".zip") for p in paths)
 
     def test_scan_recurses_into_subdirectories(self):

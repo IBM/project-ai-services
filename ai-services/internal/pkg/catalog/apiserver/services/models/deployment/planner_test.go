@@ -2,6 +2,7 @@ package deployment
 
 import (
 	"context"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"testing"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -27,7 +28,7 @@ func TestPlanRemote_TokenizePassthroughByDefault(t *testing.T) {
 	planner := NewModelPlanner(setupTestCatalogProvider(t), worker.NewResolver(nil))
 
 	plan, err := planner.PlanRemote(context.Background(), apimodels.CreateModelRequest{
-		DeploymentType: apimodels.DeploymentTypeRemote,
+		DeploymentType: constants.DeploymentTypeRemote,
 		ComponentType:  "llm",
 		Name:           "remote-vllm",
 		ProviderID:     "hosted_vllm",
@@ -43,7 +44,7 @@ func TestPlanRemote_WatsonxTokenizeTarget(t *testing.T) {
 	planner := NewModelPlanner(setupTestCatalogProvider(t), worker.NewResolver(nil))
 
 	plan, err := planner.PlanRemote(context.Background(), apimodels.CreateModelRequest{
-		DeploymentType: apimodels.DeploymentTypeRemote,
+		DeploymentType: constants.DeploymentTypeRemote,
 		ComponentType:  "llm",
 		Name:           "remote-watsonx",
 		ProviderID:     "watsonx",

@@ -351,6 +351,7 @@ const getStatusIcon = (status: string) => {
     case DOC_STATUS.CHUNKED:
       return <InProgress size={16} className={styles.statusIconProgress} />;
     case DOC_STATUS.ALREADY_EXISTS:
+    case DOC_STATUS.SKIPPED:
     case DOC_STATUS.COMPLETED_WITH_ERRORS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case DOC_STATUS.CANCELLED:
@@ -686,9 +687,7 @@ const DocumentListPage = () => {
       name: doc.name || doc.filename || "N/A",
       status: (
         <div className={styles.statusCell}>
-          {!hasError && getStatusIcon(doc.status)}
-          <span className={styles.statusText}>{doc.status}</span>
-          {hasError && (
+          {hasError ? (
             <Tooltip
               align="bottom"
               autoAlign={true}
@@ -700,10 +699,13 @@ const DocumentListPage = () => {
                 className={styles.errorInfoButton}
                 aria-label="Error details"
               >
-                <ErrorFilled size={16} className={styles.errorInfoIcon} />
+                {getStatusIcon(doc.status)}
               </button>
             </Tooltip>
+          ) : (
+            getStatusIcon(doc.status)
           )}
+          <span className={styles.statusText}>{doc.status}</span>
         </div>
       ),
       submitted_at: doc.submitted_at

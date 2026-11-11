@@ -151,7 +151,36 @@ class TestChatCompletionNonStreaming:
         assert len(data["choices"]) > 0
         assert "message" in data["choices"][0]
         assert "content" in data["choices"][0]["message"]
-    
+
+    def test_docs_excluded_by_default(
+        self, test_client, valid_chat_request,
+        mock_search_only, mock_validate_query_length,
+        mock_detect_language, mock_query_vllm_non_stream,
+        mock_query_vllm_models
+    ):
+        """Default response shape is unchanged (no docs field)"""
+        response = test_client.post("/v1/chat/completions", json=valid_chat_request)
+
+        assert response.status_code == 200
+        assert "docs" not in response.json()
+
+    def test_docs_included_with_query_param(
+        self, test_client, valid_chat_request,
+        mock_search_only, mock_validate_query_length,
+        mock_detect_language, mock_query_vllm_non_stream,
+        mock_query_vllm_models
+    ):
+        """include_docs=true adds the docs field"""
+        response = test_client.post(
+            "/v1/chat/completions?include_docs=true", json=valid_chat_request
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "choices" in data
+        assert isinstance(data["docs"], list)
+        assert len(data["docs"]) > 0
+
     def test_empty_messages_returns_400(self, test_client):
         """Test empty messages list returns 400"""
         response = test_client.post(
@@ -375,7 +404,25 @@ class TestChatCompletionNonStreaming:
 @pytest.mark.unit
 class TestChatCompletionStreaming:
     """Tests for POST /v1/chat/completions (streaming)"""
-    
+
+    def test_streaming_docs_only_with_query_param(
+        self, test_client, valid_chat_request_streaming,
+        mock_search_only, mock_validate_query_length,
+        mock_detect_language, mock_query_vllm_stream,
+        mock_query_vllm_models
+    ):
+        """Docs chunk is emitted only when include_docs=true"""
+        default = test_client.post(
+            "/v1/chat/completions", json=valid_chat_request_streaming
+        )
+        assert '"docs"' not in default.content.decode()
+
+        with_docs = test_client.post(
+            "/v1/chat/completions?include_docs=true",
+            json=valid_chat_request_streaming,
+        )
+        assert '"docs"' in with_docs.content.decode()
+
     def test_successful_streaming_response(
         self, test_client, valid_chat_request_streaming,
         mock_search_only, mock_validate_query_length,

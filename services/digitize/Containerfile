@@ -1,12 +1,5 @@
 FROM icr.io/ai-services-cicd/service-base:v0.0.48
 
-RUN microdnf install -y lcms2-devel openblas-devel freetype libicu libjpeg-turbo && \
-    curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    rpm -ivh /tmp/epel-release.rpm && \
-    rm -f /tmp/epel-release.rpm && \
-    microdnf install -y spatialindex-devel && \
-    microdnf clean all
-
 WORKDIR /opt/services/digitize
 
 ENV PYTHONPATH=/opt/services
@@ -27,7 +20,15 @@ ENV HF_HUB_DISABLE_XET=1
 
 # The base venv ships without pip; bootstrap it via ensurepip only to install the
 # service deps, then strip it again so the runtime image stays pip-free.
-RUN source /var/venv/bin/activate && \
+# spatialindex-devel (required by rtree) is not in the default RHEL UBI repos;
+# add the EPEL 9 repository to make it available, then remove the RPM afterwards.
+RUN microdnf install -y freetype libicu && \
+    curl -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    rpm -ivh /tmp/epel-release.rpm && \
+    rm -f /tmp/epel-release.rpm && \
+    microdnf install -y spatialindex && \
+    microdnf clean all && \
+    source /var/venv/bin/activate && \
     python -m ensurepip --upgrade && \
     python -m pip install --upgrade pip && \
     python -m pip install -r requirements.txt \

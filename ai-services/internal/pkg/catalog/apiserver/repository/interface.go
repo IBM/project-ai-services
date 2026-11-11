@@ -12,6 +12,17 @@ import (
 type ModelServiceInterface interface {
 	// CreateModel creates a model deployment (local pod or remote connector).
 	CreateModel(ctx context.Context, req apimodels.CreateModelRequest) (*apimodels.CreateModelResponse, error)
+	// ListModels returns a paginated, filtered list of the caller's models, local and remote.
+	// req.CreatedBy is required and scopes the list to that user.
+	ListModels(ctx context.Context, req apimodels.ListModelsRequest) (*apimodels.ModelListResponse, error)
+	// GetModelByID returns one model, local or remote, owned by createdBy. A missing model is a
+	// *validators.ValidationError with 404, and another user's model one with 403.
+	GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelDetail, error)
+	// GenerateModelKey generates the public LiteLLM key of the model identified by id, revoking
+	// the previous key with the same alias first so at most one exists. The key is returned once
+	// and never stored. Returns a *validators.ValidationError: 403 when createdBy is not the model's creator, 404 when id is
+	// unknown, 502 when LiteLLM fails.
+	GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.GenerateModelKeyResponse, error)
 }
 
 // DatasourceServiceInterface defines the contract for datasource connector business logic.
