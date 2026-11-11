@@ -22,45 +22,19 @@ import (
 )
 
 const (
-	dirPerm  = 0o700
+	// dirPerm lets the Caddy container user (a different uid from the worker
+	// process) reach the files in the TLS directory.
+	dirPerm  = 0o755
 	certPerm = 0o644
-	keyPerm  = 0o600
+	// keyPerm is the mode of the AES-GCM encrypted tls.key. The Caddy container
+	// user must be able to read it so the encrypted_file Caddy module can decrypt
+	// it in memory; the file never holds a plaintext key.
+	keyPerm = 0o644
 
 	tlsCertFile = "tls.crt"
 	tlsKeyFile  = "tls.key"
 	caCertFile  = "ca.crt"
-
-	// tlsKeyPlaintextFile is the decrypted copy of tls.key written next to it so
-	// Caddy (which cannot decrypt our AES-GCM key files) can serve the private
-	// ingress with the worker certificate.
-	tlsKeyPlaintextFile = "tls.key.pem"
-
-	// plaintextKeyPerm is the mode of the plaintext key copy. It must be readable
-	// by the Caddy container user, which differs from the worker process user, so
-	// 0600 would make it unreadable to Caddy. The worker-tls volume is mounted
-	// only into the worker and Caddy pods.
-	plaintextKeyPerm = 0o644
-
-	// traversableDirPerm lets the Caddy user reach the files in the TLS directory.
-	// The private keys inside stay protected by their own file modes.
-	traversableDirPerm = 0o755
 )
-
-// writePlaintextTLSKey writes the plaintext PEM of the worker private key to
-// dir/tlsKeyPlaintextFile for Caddy. It is called every time the encrypted key is
-// decrypted (first join and every reconnect) so the copy always matches tls.key.
-func writePlaintextTLSKey(dir string, keyPEM []byte) error {
-	// The directory is created 0700, which would stop the Caddy user from reaching
-	// the files inside. Best effort: if we do not own the directory, the files'
-	// own permissions still apply.
-	_ = os.Chmod(dir, traversableDirPerm)
-
-	if err := os.WriteFile(filepath.Join(dir, tlsKeyPlaintextFile), keyPEM, plaintextKeyPerm); err != nil { //nolint:gosec // must be readable by the Caddy user, see plaintextKeyPerm
-		return fmt.Errorf("write %s: %w", tlsKeyPlaintextFile, err)
-	}
-
-	return nil
-}
 
 // workerTLSDir returns the directory holding the worker's mTLS material.
 // It defaults to workerconstants.WorkerTLSDir and can be overridden with the
@@ -96,6 +70,23 @@ func generateKeyAndCSR() (keyPEM, csrPEM []byte, err error) {
 	return keyPEM, csrPEM, nil
 }
 
+// ensureCaddyReadable makes the TLS directory and the encrypted tls.key readable by
+// the Caddy container user. os.WriteFile and os.MkdirAll only apply a mode when
+// they create something, so workers installed before this change still have a
+// 0700 directory and a 0600 key; this runs on every start to fix them.
+// It is best effort: a failure is logged but must not stop the worker from
+// connecting to the control plane (it only affects Caddy's private ingress).
+func ensureCaddyReadable(dir string) {
+	if err := os.Chmod(dir, dirPerm); err != nil { //nolint:gosec // Caddy runs as a different uid and must traverse the directory
+		logger.Warningf("worker join: cannot make %s readable for Caddy: %v", dir, err)
+	}
+
+	keyPath := filepath.Join(dir, tlsKeyFile)
+	if err := os.Chmod(keyPath, keyPerm); err != nil { //nolint:gosec // the file is AES-GCM encrypted; Caddy decrypts it in memory
+		logger.Warningf("worker join: cannot make %s readable for Caddy: %v", keyPath, err)
+	}
+}
+
 // loadClientCert loads the worker's mTLS key pair from tlsDir.
 // tls.key is stored encrypted; it is decrypted in memory before building the
 // tls.Certificate so the plaintext key is never written to disk unprotected.
@@ -115,15 +106,13 @@ func loadClientCert(tlsDir string) (tls.Certificate, error) {
 		return tls.Certificate{}, fmt.Errorf("load mTLS credentials: read %s: %w", tlsKeyFile, err)
 	}
 
+	ensureCaddyReadable(tlsDir)
+
 	keyPEMStr, err := catalogutils.Decrypt(string(keyEnc), secret)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("load mTLS credentials: decrypt %s: %w", tlsKeyFile, err)
 	}
 	keyPEM := []byte(keyPEMStr)
-
-	if err := writePlaintextTLSKey(tlsDir, keyPEM); err != nil {
-		return tls.Certificate{}, fmt.Errorf("load mTLS credentials: %w", err)
-	}
 
 	cert, err := tls.X509KeyPair(certPEMBytes, keyPEM)
 	if err != nil {
@@ -217,8 +206,7 @@ func writeTLSMaterial(dir string, certPEM, keyPEM, caCertPEM []byte) error {
 		}
 	}
 
-	// Write the plaintext key alongside the encrypted one so Caddy can read it.
-	return writePlaintextTLSKey(dir, keyPEM)
+	return nil
 }
 
 // hasValidTLSCredentials returns true when the on-disk credentials in tlsDir

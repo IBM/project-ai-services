@@ -26,15 +26,22 @@
 
 # Private ingress for service-to-service traffic (mTLS enforced).
 # Serves the worker certificate and trusts only client certificates signed by the
-# platform CA. tls.key.pem is the plaintext copy of the encrypted tls.key, written
-# by the worker process once it has registered with the control plane.
+# platform CA. tls.key is AES-GCM encrypted; the encrypted_file module decrypts it
+# in memory on each handshake, so no plaintext key is ever written to disk. The
+# files are written by the worker once it has registered with the control plane;
+# until then handshakes on this port fail and then succeed with no Caddy reload.
 :9443 {
 	handle /internal/health {
 		# @id internal-private-health
 		respond "OK" 200
 	}
 
-	tls /data/worker-tls/tls.crt /data/worker-tls/tls.key.pem {
+	tls {
+		get_certificate encrypted_file {
+			cert        /data/worker-tls/tls.crt
+			key         /data/worker-tls/tls.key
+			secret_file /etc/secret/worker-mtls-encryption-secret/mtls-encryption-key
+		}
 		client_auth {
 			mode require_and_verify
 			trusted_ca_cert_file /data/worker-tls/ca.crt

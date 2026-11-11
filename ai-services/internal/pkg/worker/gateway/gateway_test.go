@@ -6,7 +6,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -530,31 +529,38 @@ func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 	}
 }
 
-// TestGenerateAndPersistPKI_PlaintextServerKey checks that Caddy gets a readable,
-// unencrypted copy of the server key, and that the encrypted original is untouched.
-func TestGenerateAndPersistPKI_PlaintextServerKey(t *testing.T) {
+// TestGenerateAndPersistPKI_NoPlaintextKeyOnDisk checks that the server key is only
+// ever stored encrypted, and that only the server key (not the CA signing key) is
+// made readable for the Caddy user.
+func TestGenerateAndPersistPKI_NoPlaintextKeyOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DOMAIN_SUFFIX", "example.com")
 	t.Setenv(workerconstants.MTLSEncryptionKeyEnv, "test-mtls-secret")
 
-	if _, err := generateAndPersistPKI(t.Context(), dir, "podman"); err != nil {
-		t.Fatalf("generateAndPersistPKI: %v", err)
+	if _, err := loadOrGeneratePKI(t.Context(), dir, "podman"); err != nil {
+		t.Fatalf("loadOrGeneratePKI: %v", err)
 	}
 
-	assertPlaintextKeyMatchesCert(t, dir)
-
-	enc, err := os.ReadFile(filepath.Join(dir, "server.key"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("read server.key: %v", err)
+		t.Fatal(err)
 	}
-	if bytes.Contains(enc, []byte("PRIVATE KEY")) {
-		t.Error("server.key must stay encrypted at rest")
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(data, []byte("PRIVATE KEY")) {
+			t.Errorf("%s holds a plaintext private key; none may be written to disk", e.Name())
+		}
 	}
+
+	assertCaddyReadablePKI(t, dir)
 }
 
-// TestLoadPKI_RefreshesPlaintextServerKey checks the plaintext copy is rewritten on
-// restart, so a deleted or stale copy never leaves Caddy without a key.
-func TestLoadPKI_RefreshesPlaintextServerKey(t *testing.T) {
+// TestLoadOrGeneratePKI_FixesPermissionsOfExistingInstall covers a catalog installed
+// before the encrypted_file Caddy module: 0700 directory and 0600 server.key.
+func TestLoadOrGeneratePKI_FixesPermissionsOfExistingInstall(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DOMAIN_SUFFIX", "example.com")
 	t.Setenv(workerconstants.MTLSEncryptionKeyEnv, "test-mtls-secret")
@@ -562,46 +568,45 @@ func TestLoadPKI_RefreshesPlaintextServerKey(t *testing.T) {
 	if _, err := generateAndPersistPKI(t.Context(), dir, "podman"); err != nil {
 		t.Fatalf("generateAndPersistPKI: %v", err)
 	}
-	if err := os.Remove(filepath.Join(dir, ServerKeyPlaintextFile)); err != nil {
-		t.Fatalf("remove plaintext key: %v", err)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "server.key"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
 	if _, err := loadOrGeneratePKI(t.Context(), dir, "podman"); err != nil {
 		t.Fatalf("loadOrGeneratePKI: %v", err)
 	}
 
-	assertPlaintextKeyMatchesCert(t, dir)
+	assertCaddyReadablePKI(t, dir)
 }
 
-func assertPlaintextKeyMatchesCert(t *testing.T, dir string) {
+func assertCaddyReadablePKI(t *testing.T, dir string) {
 	t.Helper()
 
-	certPEM, err := os.ReadFile(filepath.Join(dir, "server.crt"))
-	if err != nil {
-		t.Fatalf("read server.crt: %v", err)
-	}
-	keyPath := filepath.Join(dir, ServerKeyPlaintextFile)
-	keyPEM, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", ServerKeyPlaintextFile, err)
-	}
-	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
-		t.Errorf("%s does not pair with server.crt: %v", ServerKeyPlaintextFile, err)
-	}
-
-	info, err := os.Stat(keyPath)
-	if err != nil {
-		t.Fatalf("stat %s: %v", ServerKeyPlaintextFile, err)
-	}
-	if info.Mode().Perm()&0o044 != 0o044 {
-		t.Errorf("%s mode %v: must be group/other readable for the Caddy user", ServerKeyPlaintextFile, info.Mode().Perm())
-	}
 	dirInfo, err := os.Stat(dir)
 	if err != nil {
 		t.Fatalf("stat %s: %v", dir, err)
 	}
 	if dirInfo.Mode().Perm()&0o055 != 0o055 {
 		t.Errorf("dir mode %v: must be traversable by the Caddy user", dirInfo.Mode().Perm())
+	}
+
+	srvInfo, err := os.Stat(filepath.Join(dir, "server.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if srvInfo.Mode().Perm()&0o044 != 0o044 {
+		t.Errorf("server.key mode %v: the encrypted key must be readable by the Caddy user", srvInfo.Mode().Perm())
+	}
+
+	caInfo, err := os.Stat(filepath.Join(dir, "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caInfo.Mode().Perm()&0o077 != 0 {
+		t.Errorf("ca.key mode %v: the CA signing key must stay private to its owner", caInfo.Mode().Perm())
 	}
 }
 
@@ -728,14 +733,19 @@ func TestCatalogCaddyfile_PrivateIngressUsesGatewayPKI(t *testing.T) {
 	}
 
 	want := []string{
-		filepath.Join(workerconstants.GatewayPKIDir, "server.crt"),
-		filepath.Join(workerconstants.GatewayPKIDir, ServerKeyPlaintextFile),
+		"get_certificate encrypted_file",
+		"cert        " + filepath.Join(workerconstants.GatewayPKIDir, "server.crt"),
+		"key         " + filepath.Join(workerconstants.GatewayPKIDir, "server.key"),
+		"secret_file /etc/secret/catalog-mtls-encryption-secret/mtls-encryption-key",
 		"trusted_ca_cert_file " + filepath.Join(workerconstants.GatewayPKIDir, "ca.crt"),
 	}
 	for _, s := range want {
 		if !strings.Contains(string(raw), s) {
 			t.Errorf("catalog Caddyfile.tmpl does not reference %q", s)
 		}
+	}
+	if strings.Contains(string(raw), ".pem") {
+		t.Error("catalog Caddyfile.tmpl must not reference a plaintext key file")
 	}
 }
 
