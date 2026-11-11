@@ -336,7 +336,7 @@ pods:
     alias: MY_SERVICE_PORT                   # becomes {{ .MY_SERVICE_PORT }} in templates
 ```
 
-> See [`assets/applications/rag/podman/steps/vars_file.yaml`](assets/applications/rag/podman/steps/vars_file.yaml) for a real multi-service example.
+> See [`assets/applications/rag-dev/podman/steps/vars_file.yaml`](assets/applications/rag-dev/podman/steps/vars_file.yaml) for a real multi-service example.
 
 **`containers` — expose container status:**
 
@@ -419,7 +419,7 @@ hosts:
 > **Reference — full steps trees:**
 > Podman: [`assets/services/chat/podman/steps/`](assets/services/chat/podman/steps/) · [`assets/services/summarize/podman/steps/`](assets/services/summarize/podman/steps/)
 > OpenShift: [`assets/services/chat/openshift/steps/`](assets/services/chat/openshift/steps/) · [`assets/services/summarize/openshift/steps/`](assets/services/summarize/openshift/steps/)
-> Application (multi-service): [`assets/applications/rag/podman/steps/`](assets/applications/rag/podman/steps/) · [`assets/applications/rag/openshift/steps/`](assets/applications/rag/openshift/steps/)
+> Application (multi-service): [`assets/applications/rag-dev/podman/steps/`](assets/applications/rag-dev/podman/steps/) · [`assets/applications/rag-dev/openshift/steps/`](assets/applications/rag-dev/openshift/steps/)
 
 ---
 
