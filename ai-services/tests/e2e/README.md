@@ -123,6 +123,7 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
 | `translation-tests` | Translation service lifecycle plus synchronous (`POST /v1/translate`) and asynchronous jobs (`/v1/translate/jobs`) API coverage (requires `--template=translate`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
+| `sanity-0.4` | Quick happy-path release sanity for a patch branch: RAG (ingest + Q&A), extract, digitize, summarize. See [Running Release Sanity Tests](#running-release-sanity-tests) |
 | `mcp-tests` | **Umbrella label** — all MCP sidecar tests (health checks + tools/list). Podman-only. |
 | `mcp-health` | MCP `/health` endpoint checks for chat, digitize, and similarity sidecars |
 | `mcp-tools` | MCP `tools/list` checks — verifies each sidecar loaded its OpenAPI spec and registered tools |
@@ -443,6 +444,58 @@ ginkgo -r -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
   --label-filter="app-backup-restore" --timeout=3h \
   ./tests/e2e -- --app-name=<appname> --runtime=<runtime>
 ```
+
+## Running Release Sanity Tests
+
+The `sanity-0.4` label selects a quick, happy-path-only pass over the existing suite, intended to
+validate a patch of a release branch. The test code always comes from the current checkout (`main`);
+only the `ai-services` binary - and therefore the templates and images embedded in it - comes from
+the patch branch.
+
+What runs, in order (19 specs, all in `e2e_suite_test.go` / `sanity_test.go`):
+
+1. Existing lifecycle specs carrying the label: help, bootstrap configure/validate, catalog configure/info/login, RAG app create, `application ps` / `info` / pod health.
+2. **RAG**: ingest `test_doc.pdf`, then ask fixed questions (same prompts as backup/restore) and assert each answer is non-empty and grounded in the document. The RAG app is then deleted to free its Spyre cards.
+3. **Extract**: deploy the extract service, run one sync and one async extraction.
+4. **Digitize**: deploy the digitize service, digitize a PDF and run an ingestion job.
+5. **Summarize**: deploy the summarize service, run one sync and one PDF (async) summarization.
+6. Catalog logout and uninstall.
+
+Each service stage deploys and deletes its own app, so the same Spyre cards are reused.
+
+### Patch branch
+
+Set `PATCH_BRANCH` (branch or tag) to build the binary from that branch. `PATCH_REPO_URL` overrides the
+repository (default `https://github.com/IBM/project-ai-services.git`). `AI_SERVICES_BIN` still takes
+precedence if set.
+
+### 4 or 5 Spyre cards
+
+Same as the full suite - use `CREATE_PARAMS`:
+
+| Cards | Setting |
+|---|---|
+| 5 | leave `CREATE_PARAMS` unset (template default) |
+| 4 | `export CREATE_PARAMS="reranker.vllm-cpu=true"` |
+
+### Command
+
+```bash
+export PATCH_BRANCH=release-0.4          # or a patch branch/tag, e.g. release-0.4.1
+export CREATE_PARAMS="reranker.vllm-cpu=true"   # 4-card setup; omit for 5 cards
+make test-generate-report APP_RUNTIME=podman TEST_ARGS='--label-filter=sanity-0.4 --timeout=4h'
+```
+
+OR
+
+```bash
+PATCH_BRANCH=release-0.4 ginkgo -r --procs=1 -tags "exclude_graphdriver_btrfs containers_image_openpgp remote" \
+  --label-filter="sanity-0.4" --timeout=4h ./tests/e2e -- --runtime=podman
+```
+
+Requires the registry and catalog variables listed above (`REGISTRY_*`, `CATALOG_PASSWORD`).
+Podman runtime and the default `rag` template only; do not pass `--app-name`. The sanity-only stages skip
+themselves in any other setup, so they never delete apps during a normal full-suite run.
 
 ## Running Failure Tests
 

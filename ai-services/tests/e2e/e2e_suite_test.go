@@ -533,7 +533,7 @@ var _ = ginkgo.AfterSuite(func() {
 
 var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 	ginkgo.Context("Environment & CLI Sanity Tests", func() {
-		ginkgo.It("runs help command", ginkgo.Label("spyre-independent"), func() {
+		ginkgo.It("runs help command", ginkgo.Label("spyre-independent", "sanity-0.4"), func() {
 			output, err := cli.HelpCommand(ctx, cfg, []string{"help"})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateHelpCommandOutput(output)).To(gomega.Succeed())
@@ -594,7 +594,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Bootstrap Steps", func() {
-		ginkgo.It("runs bootstrap configure", ginkgo.Label("spyre-dependent", "summarization-tests", "mcp-tests"), func() {
+		ginkgo.It("runs bootstrap configure", ginkgo.Label("spyre-dependent", "summarization-tests", "mcp-tests", "sanity-0.4"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping bootstrap configure - using existing application")
 			}
@@ -602,7 +602,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapConfigureOutput(output, appRuntime)).To(gomega.Succeed())
 		})
-		ginkgo.It("runs bootstrap validate", ginkgo.Label("spyre-dependent", "summarization-tests", "mcp-tests"), func() {
+		ginkgo.It("runs bootstrap validate", ginkgo.Label("spyre-dependent", "summarization-tests", "mcp-tests", "sanity-0.4"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping bootstrap validate - using existing application")
 			}
@@ -618,7 +618,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateBootstrapFullOutput(output, appRuntime)).To(gomega.Succeed())
 		})
-		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
+		ginkgo.It("ensures catalog service is running", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests", "sanity-0.4"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog configure - using existing application")
 			}
@@ -642,7 +642,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				logger.Infof("[TEST] Catalog service is running. Backend URL (from info): %s", catalogBackendURL)
 			}
 		})
-		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
+		ginkgo.It("verifies catalog info output", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests", "sanity-0.4"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog info - using existing application")
 			}
@@ -677,7 +677,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infoln("[TEST] Catalog info output validated successfully!")
 		})
-		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-login", "mcp-tests"), func() {
+		ginkgo.It("verifies catalog login", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-login", "mcp-tests", "sanity-0.4"), func() {
 			if providedAppName != "" {
 				ginkgo.Skip("Skipping catalog login - using existing application")
 			}
@@ -792,7 +792,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 	ginkgo.Context("Application Creation", func() {
-		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
+		ginkgo.It("creates application with specified template and validates endpoints", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests", "sanity-0.4"), func() {
 			if providedAppName != "" {
 				// Extract URLs from existing application
 				ctx, cancel := withTimeout(5 * time.Minute)
@@ -829,7 +829,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			catalogLoginWithDiscovery(ctx, true)
 
 			cliOptions := cli.CreateOptions{
-				SkipModelDownload: false,
+				// In a sanity run models were already downloaded in a prior full e2e
+				// run or pre-staged on the machine. Skipping in-create model download
+				// removes the concurrent I/O from model-download containers running
+				// alongside component pod deployments, which prevents podman socket
+				// saturation on resource-constrained machines.
+				SkipModelDownload: isSanityRun(),
 				ImagePullPolicy:   "IfNotPresent",
 			}
 			// Handle different templates
@@ -890,7 +895,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				ginkgo.Skip("Skipping observability specs - using existing application")
 			}
 		})
-		ginkgo.It("verifies application ps output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+		ginkgo.It("verifies application ps output", ginkgo.Label("spyre-dependent", "summarization-tests", "sanity-0.4"), func() {
 			ctx, cancel := withTimeout(5 * time.Minute)
 			defer cancel()
 
@@ -904,7 +909,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(cli.ValidateApplicationPS(appPsWideOutput)).To(gomega.Succeed())
 		})
-		ginkgo.It("verifies application info output", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+		ginkgo.It("verifies application info output", ginkgo.Label("spyre-dependent", "summarization-tests", "sanity-0.4"), func() {
 			ctx, cancel := withTimeout(5 * time.Minute)
 			defer cancel()
 
@@ -914,7 +919,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(cli.ValidateApplicationInfo(infoOutput, appName, templateName)).To(gomega.Succeed())
 			logger.Infof("[TEST] Application info output validated successfully!")
 		})
-		ginkgo.It("Verifies pods existence, health status  and restart count", ginkgo.Label("spyre-dependent", "summarization-tests"), func() {
+		ginkgo.It("Verifies pods existence, health status  and restart count", ginkgo.Label("spyre-dependent", "summarization-tests", "sanity-0.4"), func() {
 			if !podmanReady {
 				ginkgo.Skip("Podman not available - will be installed via bootstrap configure")
 			}
@@ -4057,444 +4062,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		})
 	})
 
-	ginkgo.Context("MCP Sidecar Tests", ginkgo.Label("mcp-tests"), func() {
-		// MCP sidecars are registered as Caddy routes with type="mcp" only on the
-		// podman catalog path.  Skip the entire context on any other runtime.
-		ginkgo.BeforeEach(func() {
-			if appRuntime != "podman" {
-				ginkgo.Skip("[MCP] MCP sidecar tests are podman-only — skipping for runtime: " + appRuntime)
-			}
-		})
-
-		// resolveInfoOutput calls 'application info' once with a short timeout
-		// and is used by the health-check specs to get the current URL list.
-		resolveInfoOutput := func() string {
-			infoCtx, infoCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer infoCancel()
-			out, err := cli.ApplicationInfo(infoCtx, cfg, appName, appRuntime)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[MCP] application info failed")
-
-			return out
-		}
-
-		// validateMCPHealth is the shared assertion for a single sidecar's /health.
-		// mcpURL may be the full MCP endpoint (e.g. https://host/mcp) or just the
-		// base URL (https://host).  /health is always served at the root, so strip
-		// any trailing /mcp path before appending /health.
-		validateMCPHealth := func(mcpURL, label string) {
-			gomega.Expect(mcpURL).NotTo(gomega.BeEmpty(),
-				"[MCP] %s MCP URL not found in application info — sidecar may not be deployed", label)
-
-			baseURL := strings.TrimSuffix(mcpURL, "/mcp")
-			url := baseURL + "/health"
-			healthCtx, healthCancel := context.WithTimeout(context.Background(), mcpRequestTimeout)
-			defer healthCancel()
-
-			req, err := http.NewRequestWithContext(healthCtx, http.MethodGet, url, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[MCP] failed to build request for %s", url)
-
-			resp, err := common.GetHTTPClient(common.HTTPClientConfig{
-				Timeout:            mcpRequestTimeout,
-				InsecureSkipVerify: true,
-			}).Do(req)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[MCP] GET %s failed", url)
-			defer func() { _ = resp.Body.Close() }()
-
-			gomega.Expect(resp.StatusCode).To(gomega.Equal(http.StatusOK),
-				"[MCP] %s /health returned HTTP %d", label, resp.StatusCode)
-
-			var body struct {
-				Status    string `json:"status"`
-				Transport string `json:"transport"`
-				SDK       string `json:"sdk"`
-				Version   string `json:"version"`
-			}
-			gomega.Expect(json.NewDecoder(resp.Body).Decode(&body)).To(gomega.Succeed(),
-				"[MCP] %s /health response body could not be decoded", label)
-
-			gomega.Expect(body.Status).To(gomega.Equal("ok"),
-				"[MCP] %s sidecar health status is not 'ok'", label)
-			gomega.Expect(body.Transport).To(gomega.Equal("streamable-http"),
-				"[MCP] %s sidecar transport is not 'streamable-http'", label)
-			gomega.Expect(body.SDK).NotTo(gomega.BeEmpty(),
-				"[MCP] %s sidecar health response missing 'sdk' field", label)
-			gomega.Expect(body.Version).NotTo(gomega.BeEmpty(),
-				"[MCP] %s sidecar health response missing 'version' field", label)
-
-			logger.Infof("[MCP] %s sidecar healthy at %s (sdk=%s version=%s)",
-				label, baseURL, body.SDK, body.Version)
-		}
-
-		// health checks
-
-		ginkgo.It("chat MCP sidecar /health returns ok",
-			ginkgo.Label("spyre-dependent", "mcp-health"),
-			func() {
-				infoOutput := resolveInfoOutput()
-				validateMCPHealth(cli.ExtractChatMCPURL(infoOutput), "chat")
-			})
-
-		ginkgo.It("digitize MCP sidecar /health returns ok",
-			ginkgo.Label("spyre-dependent", "mcp-health"),
-			func() {
-				infoOutput := resolveInfoOutput()
-				validateMCPHealth(cli.ExtractDigitizeMCPURL(infoOutput), "digitize")
-			})
-
-		ginkgo.It("similarity MCP sidecar /health returns ok",
-			ginkgo.Label("spyre-dependent", "mcp-health"),
-			func() {
-				infoOutput := resolveInfoOutput()
-				validateMCPHealth(cli.ExtractSimilarityMCPURL(infoOutput), "similarity")
-			})
-
-		ginkgo.It("summarize MCP sidecar /health returns ok",
-			ginkgo.Label("spyre-dependent", "mcp-health", "summarization-tests"),
-			func() {
-				if templateName != "summarize" {
-					ginkgo.Skip("[MCP] summarize MCP sidecar only present in the summarize template")
-				}
-				infoOutput := resolveInfoOutput()
-				validateMCPHealth(cli.ExtractSummarizeMCPURL(infoOutput), "summarize")
-			})
-
-		// ── TC-5 through TC-7: tools/list checks ─────────────────────────────
-		//
-		// Sends MCP initialize + tools/list to each sidecar and asserts that at
-		// least one tool is registered with a name and inputSchema.  A passing
-		// /health check does not guarantee the OpenAPI spec loaded correctly —
-		// this spec does.
-
-		validateMCPToolsList := func(mcpURL, label string) {
-			gomega.Expect(mcpURL).NotTo(gomega.BeEmpty(),
-				"[MCP] %s MCP URL not found in application info — sidecar may not be deployed", label)
-
-			endpoint := mcpURL
-			if !strings.HasSuffix(endpoint, "/mcp") {
-				endpoint = strings.TrimSuffix(endpoint, "/") + "/mcp"
-			}
-
-			tools, err := mcpToolsForEndpoint(endpoint)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-				"[MCP] %s: tools/list handshake failed", label)
-			gomega.Expect(tools).NotTo(gomega.BeEmpty(),
-				"[MCP] %s: tools/list returned 0 tools — OpenAPI spec may not have loaded", label)
-
-			logger.Infof("[MCP] %s: %d tool(s) registered", label, len(tools))
-			for _, tool := range tools {
-				name, _ := tool["name"].(string)
-				gomega.Expect(name).NotTo(gomega.BeEmpty(),
-					"[MCP] %s: tool entry has empty name: %v", label, tool)
-				gomega.Expect(tool["inputSchema"]).NotTo(gomega.BeNil(),
-					"[MCP] %s: tool %q missing inputSchema", label, name)
-				logger.Infof("[MCP] %s:   tool=%q", label, name)
-			}
-		}
-
-		ginkgo.It("chat MCP sidecar tools/list returns registered tools",
-			ginkgo.Label("spyre-dependent", "mcp-tools"),
-			func() {
-				infoOutput := resolveInfoOutput()
-				validateMCPToolsList(cli.ExtractChatMCPURL(infoOutput), "chat")
-			})
-
-		ginkgo.It("digitize MCP sidecar tools/list returns registered tools",
-			ginkgo.Label("spyre-dependent", "mcp-tools"),
-			func() {
-				infoOutput := resolveInfoOutput()
-				validateMCPToolsList(cli.ExtractDigitizeMCPURL(infoOutput), "digitize")
-			})
-
-		ginkgo.It("similarity MCP sidecar tools/list returns registered tools",
-			ginkgo.Label("spyre-dependent", "mcp-tools"),
-			func() {
-				infoOutput := resolveInfoOutput()
-				validateMCPToolsList(cli.ExtractSimilarityMCPURL(infoOutput), "similarity")
-			})
-
-		ginkgo.It("summarize MCP sidecar tools/list returns registered tools",
-			ginkgo.Label("spyre-dependent", "mcp-tools", "summarization-tests"),
-			func() {
-				if templateName != "summarize" {
-					ginkgo.Skip("[MCP] summarize MCP sidecar only present in the summarize template")
-				}
-				infoOutput := resolveInfoOutput()
-				validateMCPToolsList(cli.ExtractSummarizeMCPURL(infoOutput), "summarize")
-			})
-
-		// ── MCP end-to-end flow ──────────────────────────────────────────────
-		//
-		// Drives ingestion, chat completions and similarity search through the
-		// MCP sidecars only (create_digitize_job → get_digitize_job →
-		// chat_completion → similarity_search).
-		//
-		// Argument shapes accepted by the sidecar (mcp/internal/tool/provider.go):
-		//   - request body → "prototype" for create_*/replace_* operations, "data" otherwise
-		//   - query params → {"query": {...}}
-		//   - path params  → top-level keys (e.g. "job_id")
-		// The sidecars run with --auth-passthrough, so mcpCallTool forwards the
-		// catalog bearer token on every tools/call.
-
-		ginkgo.Context("MCP end-to-end flow: ingest → chat completions → similarity search",
-			ginkgo.Label("spyre-dependent", "mcp-flow"),
-			ginkgo.Ordered,
-			func() {
-				// Written by earlier specs and read by later ones; ginkgo.Ordered
-				// guarantees sequential execution within this context.
-				var (
-					digitizeEndpoint string
-					chatEndpoint     string
-					simEndpoint      string
-					digitizeRESTURL  string
-					mcpJobID         string
-				)
-
-				const mcpFlowIngestTimeout = 20 * time.Minute //nolint:mnd
-				const mcpFlowChatTimeout = 8 * time.Minute    //nolint:mnd
-				const mcpFlowSimTimeout = 2 * time.Minute     //nolint:mnd
-				const mcpFlowPollInterval = 15 * time.Second  //nolint:mnd
-				const mcpFlowCleanupTimeout = 2 * time.Minute //nolint:mnd
-
-				// A question test_doc.pdf can answer. A vague question such as "what is
-				// this document about" can score below the chatbot's retrieval
-				// threshold and return the "no documents" fallback instead of an answer.
-				const mcpFlowQuestion = "What are the key features of Power11?"
-				// Chatbot fallback when retrieval yields nothing (services/chatbot/app.py).
-				const mcpFlowNoDocsMessage = "No documents found in the knowledge base for this query."
-
-				// mcpToolText returns content[0].text of a tools/call response and
-				// fails the spec on JSON-RPC errors, tool errors, or an upstream
-				// service error envelope (the sidecar does not check HTTP status).
-				mcpToolText := func(raw []byte, tool string) string {
-					text, err := mcpParseToolText(raw)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-						"[MCP-FLOW] %s: unusable tools/call response", tool)
-					gomega.Expect(mcpUpstreamError(text)).To(gomega.Succeed(),
-						"[MCP-FLOW] %s: upstream service error", tool)
-
-					return text
-				}
-
-				// cleanDigitizeDocs removes every ingested document. The digitize
-				// service rejects a file whose hash already completed ingestion with
-				// 409, so this runs before (fresh start) and after (do not break the
-				// Digitization specs that reuse test_doc.pdf).
-				cleanDigitizeDocs := func(when string) {
-					if digitizeRESTURL == "" {
-						logger.Warningf("[MCP-FLOW] digitize REST URL unknown — skipping %s document cleanup", when)
-
-						return
-					}
-					cleanCtx, cleanCancel := context.WithTimeout(context.Background(), mcpFlowCleanupTimeout)
-					defer cleanCancel()
-					if err := digitization.DeleteAllDocuments(cleanCtx, digitizeRESTURL); err != nil {
-						logger.Warningf("[MCP-FLOW] %s document cleanup failed (non-fatal): %v", when, err)
-					}
-				}
-
-				ginkgo.BeforeAll(func() {
-					_, tokenErr := mcpBearerToken()
-					gomega.Expect(tokenErr).NotTo(gomega.HaveOccurred(),
-						"[MCP-FLOW] sidecars use --auth-passthrough, a catalog token is required")
-
-					infoOutput := resolveInfoOutput()
-					digitizeEndpoint = cli.ExtractDigitizeMCPURL(infoOutput)
-					chatEndpoint = cli.ExtractChatMCPURL(infoOutput)
-					simEndpoint = cli.ExtractSimilarityMCPURL(infoOutput)
-
-					gomega.Expect(digitizeEndpoint).NotTo(gomega.BeEmpty(),
-						"[MCP-FLOW] digitize MCP URL not found — sidecar may not be deployed")
-					gomega.Expect(chatEndpoint).NotTo(gomega.BeEmpty(),
-						"[MCP-FLOW] chat MCP URL not found — sidecar may not be deployed")
-					gomega.Expect(simEndpoint).NotTo(gomega.BeEmpty(),
-						"[MCP-FLOW] similarity MCP URL not found — sidecar may not be deployed")
-
-					digitizeEndpoint = mcpEnsureEndpoint(digitizeEndpoint)
-					chatEndpoint = mcpEnsureEndpoint(chatEndpoint)
-					simEndpoint = mcpEnsureEndpoint(simEndpoint)
-					digitizeRESTURL = cli.ExtractDigitizeURL(infoOutput)
-
-					logger.Infof("[MCP-FLOW] endpoints resolved — digitize=%s chat=%s similarity=%s",
-						digitizeEndpoint, chatEndpoint, simEndpoint)
-
-					cleanDigitizeDocs("pre-ingest")
-				})
-
-				ginkgo.AfterAll(func() {
-					cleanDigitizeDocs("post-flow")
-				})
-
-				// ── Step 1: document ingestion ─────────────────────────────────────────────────────────
-				ginkgo.It("should ingest a document via the digitize MCP sidecar",
-					func() {
-						pdfPath := digitization.GetTestPDFPath()
-						gomega.Expect(pdfPath).NotTo(gomega.BeEmpty(),
-							"[MCP-FLOW] GetTestPDFPath() returned empty string")
-
-						pdfBytes, readErr := os.ReadFile(pdfPath)
-						gomega.Expect(readErr).NotTo(gomega.HaveOccurred(),
-							"[MCP-FLOW] could not read test PDF at %s", pdfPath)
-
-						ingestCtx, ingestCancel := context.WithTimeout(ctx, mcpFlowIngestTimeout)
-						defer ingestCancel()
-
-						// "prototype" is the body key for create_* operations. The sidecar
-						// base64-decodes each files[] entry and rebuilds a multipart upload
-						// (filename and MIME type come from the %PDF magic bytes).
-						// operation/output_format/job_name are query parameters and must be
-						// nested under "query"; output_format is one of txt|md|json.
-						logger.Infof("[MCP-FLOW] calling MCP tool create_digitize_job on %s (POST /v1/jobs, operation=ingestion, file=%s, %d bytes)",
-							digitizeEndpoint, filepath.Base(pdfPath), len(pdfBytes))
-						raw, err := mcpCallTool(ingestCtx, digitizeEndpoint, "create_digitize_job", map[string]any{
-							"prototype": map[string]any{
-								"files": []string{mcpBase64File(pdfBytes)},
-							},
-							"query": map[string]any{
-								"operation":     "ingestion",
-								"output_format": "json",
-								"job_name":      "e2e-mcp-flow-ingest",
-							},
-						})
-						gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-							"[MCP-FLOW] create_digitize_job tool call failed")
-
-						text := mcpToolText(raw, "create_digitize_job")
-						logger.Infof("[MCP-FLOW] create_digitize_job response: %.300s", text)
-						var jobResp digitization.JobCreatedResponse
-						gomega.Expect(json.Unmarshal([]byte(text), &jobResp)).To(gomega.Succeed(),
-							"[MCP-FLOW] could not unmarshal JobCreatedResponse from: %s", text)
-						gomega.Expect(jobResp.JobID).NotTo(gomega.BeEmpty(),
-							"[MCP-FLOW] create_digitize_job response missing job_id: %s", text)
-
-						mcpJobID = jobResp.JobID
-						logger.Infof("[MCP-FLOW] ingestion job submitted — job_id=%s", mcpJobID)
-					})
-
-				// ── Step 2: wait for the ingestion job ─────────────────────────────────────────────
-				ginkgo.It("should complete the ingestion job, checked via the digitize MCP sidecar",
-					func() {
-						gomega.Expect(mcpJobID).NotTo(gomega.BeEmpty(),
-							"[MCP-FLOW] mcpJobID not set — the ingestion step must pass first")
-
-						pollCtx, pollCancel := context.WithTimeout(ctx, mcpFlowIngestTimeout)
-						defer pollCancel()
-
-						var last digitization.JobStatusResponse
-
-						logger.Infof("[MCP-FLOW] polling MCP tool get_digitize_job on %s (GET /v1/jobs/%s)",
-							digitizeEndpoint, mcpJobID)
-
-						// Stop on any terminal state so a failed job fails fast instead of
-						// burning the whole timeout; transient poll errors return "".
-						gomega.Eventually(func() string {
-							raw, pollErr := mcpCallTool(pollCtx, digitizeEndpoint, "get_digitize_job", map[string]any{
-								"job_id": mcpJobID,
-							})
-							if pollErr != nil {
-								logger.Warningf("[MCP-FLOW] get_digitize_job poll error: %v", pollErr)
-
-								return ""
-							}
-
-							text, parseErr := mcpParseToolText(raw)
-							if parseErr != nil {
-								logger.Warningf("[MCP-FLOW] get_digitize_job bad response: %v", parseErr)
-
-								return ""
-							}
-
-							var status digitization.JobStatusResponse
-							if unmarshalErr := json.Unmarshal([]byte(text), &status); unmarshalErr != nil {
-								logger.Warningf("[MCP-FLOW] get_digitize_job unexpected body: %s", text)
-
-								return ""
-							}
-
-							last = status
-							logger.Infof("[MCP-FLOW] job %s status: %s", mcpJobID, status.Status)
-
-							return status.Status
-						}, mcpFlowIngestTimeout, mcpFlowPollInterval).Should(
-							gomega.BeElementOf("completed", "completed_with_errors", "failed", "cancelled"),
-							"[MCP-FLOW] ingestion job %s did not reach a terminal state in time", mcpJobID)
-
-						gomega.Expect(last.Status).To(gomega.Equal("completed"),
-							"[MCP-FLOW] ingestion job %s ended as %q (error=%v, documents=%+v)",
-							mcpJobID, last.Status, last.Error, last.Documents)
-
-						logger.Infof("[MCP-FLOW] ingestion job %s completed", mcpJobID)
-					})
-
-				// ── Step 3: chat completion ──────────────────────────────────────────────────────────────
-				ginkgo.It("should answer a question about the ingested document via the chat MCP sidecar",
-					func() {
-						chatCtx, chatCancel := context.WithTimeout(ctx, mcpFlowChatTimeout)
-						defer chatCancel()
-
-						// chat_completion has a non-create_ operationId, so its body key
-						// is "data".
-						logger.Infof("[MCP-FLOW] calling MCP tool chat_completion on %s (POST /v1/chat/completions), question=%q",
-							chatEndpoint, mcpFlowQuestion)
-						raw, err := mcpCallTool(chatCtx, chatEndpoint, "chat_completion", map[string]any{
-							"data": map[string]any{
-								"messages": []map[string]string{
-									{"role": "user", "content": mcpFlowQuestion},
-								},
-								"stream": false,
-							},
-						})
-						gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-							"[MCP-FLOW] chat_completion tool call failed")
-
-						text := mcpToolText(raw, "chat_completion")
-						logger.Infof("[MCP-FLOW] chat_completion response: %.300s", text)
-						var chatResp rag.ChatCompletionResponse
-						gomega.Expect(json.Unmarshal([]byte(text), &chatResp)).To(gomega.Succeed(),
-							"[MCP-FLOW] could not unmarshal chat completion from: %s", text)
-						gomega.Expect(chatResp.Choices).NotTo(gomega.BeEmpty(),
-							"[MCP-FLOW] chat completion returned no choices: %s", text)
-
-						answer := chatResp.Choices[0].Message.Content
-						gomega.Expect(answer).NotTo(gomega.BeEmpty(),
-							"[MCP-FLOW] chat completion answer is empty")
-						gomega.Expect(answer).NotTo(gomega.Equal(mcpFlowNoDocsMessage),
-							"[MCP-FLOW] chat returned the 'no documents found' fallback — retrieval found nothing above the score threshold for %q", mcpFlowQuestion)
-
-						logger.Infof("[MCP-FLOW] chat answer (first 200 chars): %.200s", answer)
-					})
-
-				// ── Step 4: similarity search ───────────────────────────────────────────────────────────
-				ginkgo.It("should return similar chunks for the question via the similarity MCP sidecar",
-					func() {
-						simCtx, simCancel := context.WithTimeout(ctx, mcpFlowSimTimeout)
-						defer simCancel()
-
-						// similarity_search also uses the "data" body key.
-						logger.Infof("[MCP-FLOW] calling MCP tool similarity_search on %s (POST /v1/similarity-search), query=%q",
-							simEndpoint, mcpFlowQuestion)
-						raw, err := mcpCallTool(simCtx, simEndpoint, "similarity_search", map[string]any{
-							"data": map[string]any{
-								"query": mcpFlowQuestion,
-							},
-						})
-						gomega.Expect(err).NotTo(gomega.HaveOccurred(),
-							"[MCP-FLOW] similarity_search tool call failed")
-
-						text := mcpToolText(raw, "similarity_search")
-						logger.Infof("[MCP-FLOW] similarity_search response: %.300s", text)
-						var simResp similarity.SimilaritySearchResponse
-						gomega.Expect(json.Unmarshal([]byte(text), &simResp)).To(gomega.Succeed(),
-							"[MCP-FLOW] could not unmarshal SimilaritySearchResponse from: %s", text)
-						gomega.Expect(simResp.Results).NotTo(gomega.BeEmpty(),
-							"[MCP-FLOW] similarity search returned 0 results after document ingestion")
-
-						logger.Infof("[MCP-FLOW] similarity search returned %d result(s), top score=%.4f",
-							len(simResp.Results), simResp.Results[0].Score)
-					})
-			})
-	})
-
-	ginkgo.Context("Translation Service E2E Tests", ginkgo.Label("translation-tests"), translationSpecs)
+	defineSanityContexts()
 
 	ginkgo.Context("Application Teardown", ginkgo.Ordered, func() {
 		ginkgo.It("deletes the application", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "mcp-tests"), func() {
@@ -4513,7 +4081,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[TEST] Application %s deleted successfully", appName)
 		})
-		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-logout", "mcp-tests"), func() {
+		ginkgo.It("logs out from the catalog after application delete", ginkgo.Label("spyre-dependent", "summarization-tests", "extraction-tests", "translation-tests", "catalog-logout", "mcp-tests", "sanity-0.4"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog logout only supported for podman runtime")
 			}
@@ -4532,7 +4100,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(cli.ValidateCatalogLogoutOutput(output)).To(gomega.Succeed())
 			logger.Infof("[TEARDOWN] Catalog logout successful")
 		})
-		ginkgo.It("uninstalls the catalog service", ginkgo.Label("spyre-dependent", "mcp-tests"), func() {
+		ginkgo.It("uninstalls the catalog service", ginkgo.Label("spyre-dependent", "mcp-tests", "sanity-0.4"), func() {
 			if appRuntime != "podman" {
 				ginkgo.Skip("catalog uninstall only supported for podman runtime")
 			}
