@@ -14,7 +14,7 @@ This section serves as an executive quick-reference for the core components and 
 
 | Component / Operator | Supported Runtime(s) | Channel / Version | Image & Registry Path |
 | :--- | :--- | :--- | :--- |
-| **vLLM (IBM Spyre AIU)** | Podman & OpenShift | `v3.5.0` (Red Hat AI Inference) | `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.3` |
+| **vLLM (IBM Spyre AIU)** | Podman & OpenShift | `v3.5.3` (Red Hat AI Inference) | `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.3` |
 | **vLLM (CPU-Only)** | Podman | `v0.31.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.31.0` |
 | **vLLM (CPU-Only)** | OpenShift | `v0.31.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.31.0` |
 | **IBM Spyre Operator** | OpenShift | `stable-v1.4` (v1.4.0) | Managed via Subscription |
