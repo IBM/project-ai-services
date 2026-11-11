@@ -3,6 +3,8 @@ package modelservice
 import (
 	"context"
 	"errors"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"maps"
 	"net/http"
 	"sync"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/keys"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -116,6 +119,33 @@ func (m *mockComponentRepo) UpdateEndpoints(_ context.Context, id uuid.UUID, end
 	return nil
 }
 
+func (m *mockComponentRepo) UpdateMetadata(_ context.Context, id uuid.UUID, metadata map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if c, ok := m.byID[id]; ok {
+		c.Metadata = maps.Clone(metadata)
+	}
+
+	return nil
+}
+
+func (m *mockComponentRepo) GetByID(_ context.Context, id uuid.UUID) (*dbmodels.Component, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c, ok := m.byID[id]
+	if !ok {
+		return nil, nil
+	}
+
+	// Return a copy with its own metadata map, like a fresh DB read.
+	snapshot := *c
+	snapshot.Metadata = maps.Clone(c.Metadata)
+
+	return &snapshot, nil
+}
+
 type mockConnectorRepo struct {
 	dbrepo.ConnectorRepository
 	connectors map[string]*dbmodels.Connector
@@ -153,6 +183,8 @@ type mockLiteLLMClient struct {
 	deregisteredPass   []string
 	probeResponse      *catalogclient.LiteLLMHealthResponse
 	probeErr           error
+	deletedKeys        []string
+	generatedKeys      []catalogclient.LiteLLMKeyGenerateRequest
 }
 
 func (m *mockLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.LiteLLMModelNewRequest) (string, error) {
@@ -213,7 +245,7 @@ func setupTestCatalogProvider(t *testing.T) *catalog.CatalogProvider {
 func newTestModelService(t *testing.T, comps dbrepo.ComponentRepository, conns dbrepo.ConnectorRepository, workers worker.Resolver, lite catalogclient.LiteLLMClient) *ModelService {
 	t.Helper()
 
-	svc := NewModelService(comps, conns, workers, setupTestCatalogProvider(t))
+	svc := NewModelService(comps, conns, nil, nil, workers, setupTestCatalogProvider(t), "")
 	svc.executor = modelsvc.NewModelExecutor(comps, conns, lite)
 
 	return svc
@@ -271,7 +303,7 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 	tests := []struct {
 		name         string
 		controlPlane runtimeTypes.RuntimeType
-		deployment   apimodels.DeploymentType
+		deployment   constants.DeploymentType
 		selector     string
 		// registryRuntimes is the live registry content (worker name -> runtime type).
 		registryRuntimes map[string]string
@@ -279,23 +311,23 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 		{
 			name:         "local model, openshift control plane",
 			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
-			deployment:   apimodels.DeploymentTypeLocal,
+			deployment:   constants.DeploymentTypeLocal,
 		},
 		{
 			name:         "remote model, openshift control plane",
 			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
-			deployment:   apimodels.DeploymentTypeRemote,
+			deployment:   constants.DeploymentTypeRemote,
 		},
 		{
 			name:             "default worker is openshift",
 			controlPlane:     runtimeTypes.RuntimeTypePodman,
-			deployment:       apimodels.DeploymentTypeLocal,
+			deployment:       constants.DeploymentTypeLocal,
 			registryRuntimes: map[string]string{"Local": string(runtimeTypes.RuntimeTypeOpenShift)},
 		},
 		{
 			name:             "selected remote worker is openshift",
 			controlPlane:     runtimeTypes.RuntimeTypePodman,
-			deployment:       apimodels.DeploymentTypeLocal,
+			deployment:       constants.DeploymentTypeLocal,
 			selector:         ocpWorker,
 			registryRuntimes: map[string]string{ocpWorker: string(runtimeTypes.RuntimeTypeOpenShift)},
 		},
@@ -417,7 +449,7 @@ func watsonxParams() map[string]any {
 func TestCreateModel_Remote(t *testing.T) {
 	watsonxRequest := func(name string) apimodels.CreateModelRequest {
 		return apimodels.CreateModelRequest{
-			DeploymentType: apimodels.DeploymentTypeRemote,
+			DeploymentType: constants.DeploymentTypeRemote,
 			ComponentType:  "llm",
 			Name:           name,
 			ProviderID:     "watsonx",
@@ -452,6 +484,7 @@ func TestCreateModel_Remote(t *testing.T) {
 				assert.Equal(t, "models", conn.Type)
 				assert.Equal(t, "llm", conn.Metadata["component_type"])
 				assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
+				assert.Equal(t, map[string]any{"model_id": "litellm-id-ibm/granite-4-h-small"}, conn.Metadata["litellm"])
 
 				params, ok := conn.Metadata["params"].(map[string]any)
 				require.True(t, ok, "provider params are nested under \"params\"")
@@ -627,7 +660,7 @@ func newLocalServiceWith(t *testing.T, d types.Deployer, lite *mockLiteLLMClient
 
 func localRequest() apimodels.CreateModelRequest {
 	return apimodels.CreateModelRequest{
-		DeploymentType: apimodels.DeploymentTypeLocal,
+		DeploymentType: constants.DeploymentTypeLocal,
 		ComponentType:  "llm",
 		Name:           "local-granite",
 		ProviderID:     "vllm-cpu",
@@ -760,6 +793,9 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 		wantSteps     []string
 		// wantHistory is the status history after the insert; nil skips the check.
 		wantHistory []dbmodels.ComponentStatus
+		// wantLiteLLMModelID is the id saved under metadata["litellm"]["model_id"]; empty means
+		// the key must be absent.
+		wantLiteLLMModelID string
 		// wantAPIBase is the route's api_base; empty means no route may be registered.
 		wantAPIBase  string
 		wantTokenize string
@@ -772,12 +808,13 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 			deployer: fakeDeployer{endpoint: "llm-abc:8000"},
 			lite:     &mockLiteLLMClient{},
 
-			wantStatus:    dbmodels.ComponentStatusRunning,
-			wantEndpoints: []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
-			wantSteps:     []string{"prepare", "start"},
-			wantHistory:   []dbmodels.ComponentStatus{dbmodels.ComponentStatusDeploying, dbmodels.ComponentStatusRunning},
-			wantAPIBase:   "http://llm-abc:8000/v1",
-			wantTokenize:  "http://llm-abc:8000/tokenize",
+			wantStatus:         dbmodels.ComponentStatusRunning,
+			wantEndpoints:      []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
+			wantSteps:          []string{"prepare", "start"},
+			wantHistory:        []dbmodels.ComponentStatus{dbmodels.ComponentStatusDeploying, dbmodels.ComponentStatusRunning},
+			wantLiteLLMModelID: "litellm-id-ibm-granite/granite-3.3-8b-instruct",
+			wantAPIBase:        "http://llm-abc:8000/v1",
+			wantTokenize:       "http://llm-abc:8000/tokenize",
 		},
 		{
 			// The DB records the pod's own address while LiteLLM is pointed at the egress the
@@ -786,11 +823,12 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 			deployer: fakeDeployer{endpoint: "llm-abc:8000", egress: "egress.cp:8080"},
 			lite:     &mockLiteLLMClient{},
 
-			wantStatus:    dbmodels.ComponentStatusRunning,
-			wantEndpoints: []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
-			wantSteps:     []string{"prepare", "start"},
-			wantAPIBase:   "http://egress.cp:8080/v1",
-			wantTokenize:  "http://egress.cp:8080/tokenize",
+			wantStatus:         dbmodels.ComponentStatusRunning,
+			wantEndpoints:      []map[string]any{{"type": "internal", "url": "http://llm-abc:8000"}},
+			wantSteps:          []string{"prepare", "start"},
+			wantLiteLLMModelID: "litellm-id-ibm-granite/granite-3.3-8b-instruct",
+			wantAPIBase:        "http://egress.cp:8080/v1",
+			wantTokenize:       "http://egress.cp:8080/tokenize",
 		},
 		{
 			name:     "download failure is an error that never reaches deploying and never starts pods",
@@ -856,6 +894,15 @@ func TestCreateModel_Local_Lifecycle(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, tt.wantHistory, repo.statusHistory(id),
 					"the insert already recorded Downloading; the executor records the later phases")
+			}
+
+			// The id is added next to the metadata written at insert, never in place of it.
+			if tt.wantLiteLLMModelID == "" {
+				assert.NotContains(t, comp.Metadata, "litellm")
+			} else {
+				assert.Equal(t, map[string]any{"model_id": tt.wantLiteLLMModelID}, comp.Metadata["litellm"])
+				assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", comp.Metadata["model"], "original metadata is kept")
+				assert.Contains(t, comp.Metadata, "params", "original metadata is kept")
 			}
 
 			if tt.wantAPIBase == "" {
@@ -972,7 +1019,7 @@ func TestPlanRemote(t *testing.T) {
 		{
 			name: "openai-style provider derives the tokenize target from api_base",
 			req: apimodels.CreateModelRequest{
-				DeploymentType: apimodels.DeploymentTypeRemote,
+				DeploymentType: constants.DeploymentTypeRemote,
 				ComponentType:  "embedding",
 				Name:           "remote-vllm",
 				ProviderID:     "hosted_vllm",
@@ -988,7 +1035,7 @@ func TestPlanRemote(t *testing.T) {
 		{
 			name: "watsonx uses its fixed tokenization endpoint",
 			req: apimodels.CreateModelRequest{
-				DeploymentType: apimodels.DeploymentTypeRemote,
+				DeploymentType: constants.DeploymentTypeRemote,
 				ComponentType:  "llm",
 				Name:           "remote-watsonx",
 				ProviderID:     "watsonx",
@@ -1038,4 +1085,154 @@ func requireStatus(t *testing.T, err error, code int, msgContains string) {
 	require.ErrorAs(t, err, &valErr)
 	assert.Equal(t, code, valErr.Code)
 	assert.Contains(t, valErr.Message, msgContains)
+}
+
+// mockSvcDepRepo counts the reads made about a model.
+type mockSvcDepRepo struct {
+	dbrepo.ServiceDependencyRepository
+	reads int
+}
+
+func (m *mockSvcDepRepo) GetServiceCountByDependency(context.Context, []uuid.UUID, dbmodels.DependencyType) (map[uuid.UUID]int, error) {
+	m.reads++
+
+	return nil, nil
+}
+
+func (m *mockSvcDepRepo) GetLinkedServiceEndpoints(context.Context, uuid.UUID, dbmodels.DependencyType) ([]dbrepo.LinkedServiceRow, error) {
+	m.reads++
+
+	return nil, nil
+}
+
+func TestGetModelByID_Ownership(t *testing.T) {
+	id := uuid.New()
+	row := dbrepo.ModelRow{ID: id, DeploymentType: "remote", Provider: "watsonx", CreatedBy: "alice"}
+
+	tests := []struct {
+		name      string
+		rows      []dbrepo.ModelRow
+		createdBy string
+		wantCode  int // 0: the model is returned
+	}{
+		{"owner", []dbrepo.ModelRow{row}, "alice", 0},
+		{"empty user skips the check", []dbrepo.ModelRow{row}, "", 0},
+		{"missing", nil, "alice", http.StatusNotFound},
+		{"owned by someone else", []dbrepo.ModelRow{row}, "bob", http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockModelRepo{rows: tt.rows}
+			deps := &mockSvcDepRepo{}
+			svc := NewModelService(nil, nil, repo, deps, nil, setupTestCatalogProvider(t), "")
+
+			got, err := svc.GetModelByID(context.Background(), id, tt.createdBy)
+
+			assert.Equal(t, id, repo.getID)
+			assert.Contains(t, repo.getTypes, "llm", "the lookup is limited to the catalog's model types")
+			assert.NotContains(t, repo.getTypes, "vector_db")
+
+			if tt.wantCode == 0 {
+				require.NoError(t, err)
+				assert.Equal(t, id.String(), got.ID)
+
+				return
+			}
+
+			assert.Nil(t, got)
+
+			var valErr *validators.ValidationError
+			require.ErrorAs(t, err, &valErr)
+			assert.Equal(t, tt.wantCode, valErr.Code)
+			assert.Zero(t, deps.reads, "nothing about the model may be read")
+		})
+	}
+}
+
+func TestGetModelByID_RepositoryError(t *testing.T) {
+	boom := errors.New("boom")
+	svc := NewModelService(nil, nil, &mockModelRepo{err: boom}, &mockSvcDepRepo{}, nil, setupTestCatalogProvider(t), "")
+
+	_, err := svc.GetModelByID(context.Background(), uuid.New(), "alice")
+
+	require.ErrorIs(t, err, boom)
+
+	var valErr *validators.ValidationError
+	assert.False(t, errors.As(err, &valErr), "an internal failure must not look like a client error")
+}
+
+func (m *mockLiteLLMClient) DeleteKeysByAlias(_ context.Context, aliases []string) error {
+	m.deletedKeys = append(m.deletedKeys, aliases...)
+
+	return nil
+}
+
+func (m *mockLiteLLMClient) GenerateKey(_ context.Context, req catalogclient.LiteLLMKeyGenerateRequest) (string, error) {
+	m.generatedKeys = append(m.generatedKeys, req)
+
+	return "sk-test", nil
+}
+
+func TestGenerateModelKey_Ownership(t *testing.T) {
+	id := uuid.New()
+	row := dbrepo.ModelRow{ID: id, DeploymentType: "remote", Provider: "watsonx", Model: "ibm/granite", CreatedBy: "alice"}
+
+	tests := []struct {
+		name      string
+		rows      []dbrepo.ModelRow
+		createdBy string
+		wantCode  int // 0: the key is generated
+	}{
+		{"owner", []dbrepo.ModelRow{row}, "alice", 0},
+		{"empty user skips the check", []dbrepo.ModelRow{row}, "", 0},
+		{"missing", nil, "alice", http.StatusNotFound},
+		{"owned by someone else", []dbrepo.ModelRow{row}, "bob", http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockModelRepo{rows: tt.rows}
+			lite := &mockLiteLLMClient{}
+			svc := NewModelService(nil, nil, repo, nil, nil, setupTestCatalogProvider(t), "")
+			svc.keys = keys.NewManager(lite)
+
+			got, err := svc.GenerateModelKey(context.Background(), id, tt.createdBy)
+
+			assert.Equal(t, id, repo.getID)
+			assert.Contains(t, repo.getTypes, "llm", "the lookup is limited to the catalog's model types")
+			assert.NotContains(t, repo.getTypes, "vector_db")
+
+			if tt.wantCode == 0 {
+				require.NoError(t, err)
+				assert.Equal(t, "sk-test", got.Key)
+				assert.Equal(t, "ibm/granite", got.Model)
+				assert.Equal(t, []string{"ibm/granite-" + id.String()}, lite.deletedKeys)
+				require.Len(t, lite.generatedKeys, 1)
+				assert.Equal(t, []string{id.String()}, lite.generatedKeys[0].Metadata.Tags)
+
+				return
+			}
+
+			assert.Nil(t, got)
+			requireStatus(t, err, tt.wantCode, "")
+			assert.Empty(t, lite.deletedKeys, "an existing key must not be revoked")
+			assert.Empty(t, lite.generatedKeys)
+		})
+	}
+}
+
+func TestGenerateModelKey_RepositoryError(t *testing.T) {
+	boom := errors.New("boom")
+	lite := &mockLiteLLMClient{}
+	svc := NewModelService(nil, nil, &mockModelRepo{err: boom}, nil, nil, setupTestCatalogProvider(t), "")
+	svc.keys = keys.NewManager(lite)
+
+	_, err := svc.GenerateModelKey(context.Background(), uuid.New(), "alice")
+
+	require.ErrorIs(t, err, boom)
+
+	var valErr *validators.ValidationError
+	assert.False(t, errors.As(err, &valErr), "an internal failure must not look like a client error")
+	assert.Empty(t, lite.deletedKeys)
 }

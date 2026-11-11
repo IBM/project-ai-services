@@ -485,7 +485,7 @@ const DigitalAssistantsPage = () => {
           fullWidthGrid="xl"
           navigation={
             <TabList aria-label="Digital assistants tabs">
-              <Tab>Deployments</Tab>
+              <Tab>Digital assistant deployments</Tab>
               <Tab>About</Tab>
             </TabList>
           }

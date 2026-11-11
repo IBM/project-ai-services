@@ -51,7 +51,7 @@ def build_scanner(connector_row: Any) -> BaseScanner:
         Any object (ORM model, dataclass, or dict) that exposes:
           - ``.type``               → str  (e.g. ``"object_storage"``, ``"file_system"``)
           - ``.connection_details`` → dict  (encrypted as stored in the DB)
-          - ``.allowed_extensions`` → list[str]  (e.g. ``[".pdf", ".docx"]``)
+          - ``.allowed_extensions`` → list[str]  (e.g. ``[".pdf", ".docx", ".html", ".md", ".txt"]``)
 
         A plain dict with those keys is also accepted.
 
@@ -69,12 +69,12 @@ def build_scanner(connector_row: Any) -> BaseScanner:
         connector_type: str = connector_row["type"]
         connection_details: dict = connector_row.get("connection_details", {})
         allowed_extensions: list[str] = connector_row.get(
-            "allowed_extensions", [".pdf", ".docx"]
+            "allowed_extensions", [".pdf", ".docx", ".html", ".md", ".txt"]
         )
     else:
         connector_type = connector_row.type
         connection_details = connector_row.connection_details or {}
-        allowed_extensions = connector_row.allowed_extensions or [".pdf", ".docx"]
+        allowed_extensions = connector_row.allowed_extensions or [".pdf", ".docx", ".html", ".md", ".txt"]
 
     connection_details = decrypt_secrets(connector_type, connection_details)
 

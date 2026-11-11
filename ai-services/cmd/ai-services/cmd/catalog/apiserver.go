@@ -137,6 +137,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	compRepo := repository.NewComponentRepository(pool)
 	svcDepRepo := repository.NewServiceDependencyRepository(pool)
 	connectorRepo := repository.NewConnectorRepository(pool)
+	modelRepo := repository.NewModelRepository(pool)
 
 	catalogProvider, err := catalog.NewCatalogProvider(bundleRepo)
 	if err != nil {
@@ -152,7 +153,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
 	}
 
-	modelSvc := apirepository.NewModelService(compRepo, connectorRepo, workerReg, catalogProvider)
+	modelSvc := apirepository.NewModelService(compRepo, connectorRepo, modelRepo, svcDepRepo, workerReg, catalogProvider)
 
 	stopBackgroundServices, err := startBackgroundServices(ctx, appRepo, svcRepo, compRepo, svcDepRepo, connectorRepo, catalogProvider, workerReg, encryptionKey)
 	if err != nil {

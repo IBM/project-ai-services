@@ -395,6 +395,7 @@ const getDocStatusIcon = (status: string) => {
     case DOC_STATUS.CHUNKED:
       return <InProgress size={16} className={styles.statusIconProgress} />;
     case DOC_STATUS.ALREADY_EXISTS:
+    case DOC_STATUS.SKIPPED:
     case DOC_STATUS.COMPLETED_WITH_ERRORS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case DOC_STATUS.CANCELLED:
@@ -533,7 +534,7 @@ const JobMonitorPage = () => {
       if (error.response?.status === 409) {
         const detail =
           error.response?.data?.detail ||
-          "All submitted files have already been ingested.";
+          "All submitted files are already ingested or currently being ingested.";
         dispatch({
           type: "SET_UPLOAD_STATUS",
           payload: {
@@ -830,9 +831,7 @@ const JobMonitorPage = () => {
       ),
       status: (
         <div className={styles.statusCell}>
-          {getStatusIcon(jobStatus)}
-          <span className={styles.statusText}>{jobStatus}</span>
-          {hasError && (
+          {hasError ? (
             <Tooltip
               align="bottom"
               autoAlign={true}
@@ -844,10 +843,13 @@ const JobMonitorPage = () => {
                 className={styles.errorInfoButton}
                 aria-label="Error details"
               >
-                <ErrorFilled size={16} className={styles.errorInfoIcon} />
+                {getStatusIcon(jobStatus)}
               </button>
             </Tooltip>
+          ) : (
+            getStatusIcon(jobStatus)
           )}
+          <span className={styles.statusText}>{jobStatus}</span>
         </div>
       ),
       started: job.submitted_at

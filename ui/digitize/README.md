@@ -4,7 +4,7 @@ A modern React application built with IBM Carbon Design System to provide a user
 
 ## Features
 
-- **Document Upload**: Upload PDF documents for ingestion or digitization
+- **Document Upload**: Upload PDF, DOCX, HTML, Markdown, or text documents for ingestion or digitization
 - **Job Monitoring**: Track the status of document processing jobs
 - **Document Management**: View, search, and manage processed documents
 - **IBM Carbon Design**: Professional UI with IBM's design system
@@ -105,7 +105,7 @@ npm run preview
    - **Ingestion**: Process and store documents in vector database
    - **Digitization**: Convert documents to text/markdown/JSON format
 3. For digitization, select output format (JSON, Markdown, or Text)
-4. Select PDF file(s) to upload
+4. Select PDF, DOCX, HTML, MD, or TXT file(s) to upload
 5. Click "Upload" to start processing
 
 ### Monitor Jobs

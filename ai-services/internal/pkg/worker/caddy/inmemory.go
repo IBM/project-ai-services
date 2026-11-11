@@ -47,6 +47,26 @@ func (m *inMemoryProxyManager) UnregisterRoute(_ context.Context, routeID string
 	return nil
 }
 
+// RegisterIngressRoute records the route; the in-memory table has no servers.
+func (m *inMemoryProxyManager) RegisterIngressRoute(_ context.Context, route proxy.IngressRoute) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.routes[route.ID] = proxy.Route{ID: route.ID, Upstream: route.Upstream, Terminal: route.Terminal}
+
+	return nil
+}
+
+// RegisterEgressRoute records the route; the in-memory table has no servers.
+func (m *inMemoryProxyManager) RegisterEgressRoute(_ context.Context, route proxy.EgressRoute) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.routes[route.ID] = proxy.Route{ID: route.ID, Upstream: route.DialUpstream}
+
+	return nil
+}
+
 func (m *inMemoryProxyManager) HealthCheck(_ context.Context) error { return nil }
 
 func (m *inMemoryProxyManager) GetRouteByID(_ context.Context, routeID string) (*proxy.Route, error) {

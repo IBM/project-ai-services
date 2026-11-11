@@ -21,7 +21,7 @@ from digitize.db.models import (
 )
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
-from digitize.connectors.models import ConnectorStatus, SyncLogStatus
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus, LAST_SYNC_ERROR_PREFIX
 
 logger = get_logger("db_repository")
 
@@ -395,89 +395,91 @@ class DatabaseManager:
             return None
 
 
-    @staticmethod
-    def upsert_file_checksum(checksum: str, doc_id: str) -> None:
-        """
-        Insert or ignore a (checksum, doc_id) pair into document_checksum.
-
-        Called once a document reaches COMPLETED status so that subsequent
-        uploads of the same content can be detected via find_completed_document_by_hash.
-
-        Args:
-            checksum: MD5 hex digest string.
-            doc_id: The completed document's primary key.
-        """
-        try:
-            with get_db_session() as session:
-                stmt = (
-                    pg_insert(DocumentChecksum)
-                    .values(checksum=checksum, doc_id=doc_id)
-                    .on_conflict_do_update(
-                        index_elements=["checksum"],
-                        set_={"doc_id": doc_id},
-                    )
-                )
-                session.execute(stmt)
-                logger.debug(f"Upserted checksum registry: checksum={checksum[:20]}... doc_id={doc_id}")
-        except SQLAlchemyError as e:
-            logger.error(f"DB error upserting checksum for {checksum[:20]}...: {e}", exc_info=True)
+    # A document in one of these states no longer owns its content: the next submission
+    # of the same content is treated as novel and re-points the document_checksum row.
+    _RELEASED_STATUSES = (DocStatus.FAILED.value, DocStatus.CANCELLED.value)
 
     @staticmethod
-    def find_completed_document_by_hash(
-        file_hash: str,
-        operation: str = "ingestion",
-    ) -> Optional[Document]:
+    def _select_checksum_owner(session, checksum: str, operation: str) -> Optional[Document]:
+        """Return the live Document owning (checksum, operation), detached, or None.
+
+        A failed / cancelled owner counts as no owner (the content is novel).
         """
-        Find the completed document of the given operation type with a matching
-        file hash, using the document_checksum lookup table.
+        owner = session.scalar(
+            select(Document)
+            .join(DocumentChecksum, DocumentChecksum.doc_id == Document.doc_id)
+            .where(
+                DocumentChecksum.checksum == checksum,
+                DocumentChecksum.type == operation,
+                Document.status.notin_(DatabaseManager._RELEASED_STATUSES),
+            )
+        )
+        if owner is not None:
+            # Eagerly load attributes before the session closes.
+            _ = (owner.doc_id, owner.job_id, owner.name, owner.type, owner.status)
+            session.expunge(owner)
+        return owner
 
-        Only documents with status='completed' and the specified type are considered.
-        Failed and in-progress documents are deliberately excluded so that a previous
-        failed attempt does not prevent re-processing of the same file.
+    @staticmethod
+    def get_file_owner(checksum: str, operation: str) -> Optional[Document]:
+        """
+        Look up the document that owns a (checksum, operation) pair without claiming it.
 
-        Args:
-            file_hash: MD5 hex digest string.
-            operation: Document type to match — 'ingestion' or 'digitization'.
+        Raises on database failure: a failed lookup must not be treated as "novel".
+        """
+        with get_db_session() as session:
+            return DatabaseManager._select_checksum_owner(session, checksum, operation)
+
+    @staticmethod
+    def claim_file_checksum(checksum: str, operation: str, doc_id: str) -> Optional[Document]:
+        """
+        Atomically claim a (checksum, operation) pair for an existing document.
+
+        Performs ``INSERT ... ON CONFLICT (checksum, type) DO UPDATE ... WHERE
+        <current owner failed / cancelled> RETURNING`` in a single statement, so of
+        any number of concurrent submissions of the same content exactly one wins.
+        A row left behind by a failed / cancelled document is re-pointed to *doc_id*;
+        the old document row is left as is. The document row must already exist
+        (``document_checksum.doc_id`` is a foreign key).
 
         Returns:
-            The matching Document ORM object (attributes eagerly loaded and
-            expunged from session), or None if no completed duplicate exists.
+            ``None`` if the claim was won. Otherwise the owning Document (detached).
+
+        Raises:
+            SQLAlchemyError: on database failure. Unlike a plain lookup, a failed
+            claim must not be treated as "novel" — that would reopen the race.
         """
-        try:
-            with get_db_session() as session:
-                stmt = (
-                    select(Document)
-                    .join(
-                        DocumentChecksum,
-                        DocumentChecksum.doc_id == Document.doc_id,
+        with get_db_session() as session:
+            # The owner can be released (its document failed) between our conflicting
+            # INSERT and the SELECT below; if so, simply try to claim again.
+            for _ in range(3):
+                won = session.execute(
+                    pg_insert(DocumentChecksum)
+                    .values(checksum=checksum, type=operation, doc_id=doc_id)
+                    .on_conflict_do_update(
+                        index_elements=["checksum", "type"],
+                        set_={"doc_id": doc_id},
+                        where=DocumentChecksum.doc_id.in_(
+                            select(Document.doc_id).where(
+                                Document.status.in_(DatabaseManager._RELEASED_STATUSES)
+                            )
+                        ),
                     )
-                    .where(
-                        DocumentChecksum.checksum == file_hash,
-                        Document.type == operation,
-                        Document.status == DocStatus.COMPLETED.value,
-                    )
-                    .limit(1)
-                )
-                doc = session.scalar(stmt)
-                if doc:
-                    # Eagerly load all attributes before session closes to prevent
-                    # DetachedInstanceError in the caller.
-                    _ = (
-                        doc.doc_id, doc.job_id, doc.name, doc.type,
-                        doc.status, doc.source, doc.output_format,
-                        doc.submitted_at, doc.completed_at, doc.error, doc.doc_metadata,
-                    )
-                    session.expunge(doc)
+                    .returning(DocumentChecksum.doc_id)
+                ).first()
+                if won is not None:
                     logger.debug(
-                        f"Duplicate detected: file_hash={file_hash[:20]}... "
-                        f"matches doc_id={doc.doc_id}"
+                        f"Claimed checksum {checksum[:20]}... ({operation}) for doc_id={doc_id}"
                     )
-                return doc
-        except SQLAlchemyError as e:
-            logger.error(f"DB error in hash lookup for {file_hash[:20]}...: {e}", exc_info=True)
-            # Do NOT raise — a lookup failure must not block ingestion.
-            # If the DB is unavailable the caller treats the file as novel.
-            return None
+                    return None
+
+                owner = DatabaseManager._select_checksum_owner(session, checksum, operation)
+                if owner is not None:
+                    return owner
+
+            raise RuntimeError(
+                f"Could not claim or read checksum {checksum[:20]}... ({operation})"
+            )
 
 
     @staticmethod
@@ -511,9 +513,13 @@ class DatabaseManager:
                 if status:
                     filters.append(Document.status == status)
                 else:
-                    # Exclude already_exists docs from the global listing — they are
-                    # job-scoped audit records, not real ingested documents.
-                    filters.append(Document.status != DocStatus.ALREADY_EXISTS.value)
+                    # Exclude already_exists / skipped docs from the global listing — they
+                    # are job-scoped audit records, not real ingested documents.
+                    filters.append(
+                        Document.status.notin_(
+                            [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                        )
+                    )
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 if exclude_connector_sourced:
@@ -636,7 +642,7 @@ class DatabaseManager:
         Also removes:
         - The checksum registry entry (so the hash can be re-registered on
           re-ingestion of the same file).
-        - Any 'already_exists' shadow documents whose metadata points to this
+        - Any 'already_exists'/'skipped' shadow documents whose metadata points to this
           doc_id as their existing_doc_id, since those placeholder rows have
           no meaning once the original document is gone.
         - Any conversion_tasks rows that reference this doc_id.
@@ -655,7 +661,7 @@ class DatabaseManager:
                     delete(DocumentChecksum).where(DocumentChecksum.doc_id == doc_id)
                 )
 
-                # Remove any already_exists shadow docs that reference this document.
+                # Remove any already_exists/skipped shadow docs that reference this document.
                 # These placeholder rows are created when a duplicate file is submitted;
                 # their metadata stores the original doc_id under 'existing_doc_id'.
                 # Once the original is deleted they become stale, so clean them up too.
@@ -750,7 +756,7 @@ class DatabaseManager:
                     delete(DocumentChecksum).where(DocumentChecksum.doc_id.in_(doc_ids))
                 )
 
-                # Remove already_exists shadow docs that reference any of these docs.
+                # Remove already_exists / skipped shadow docs that reference any of these docs.
                 session.execute(
                     delete(Document).where(
                         Document.doc_metadata["existing_doc_id"].as_string().in_(doc_ids)
@@ -907,6 +913,49 @@ class DatabaseManager:
             raise
         except SQLAlchemyError as e:
             logger.error(f"DB error updating connector {connector_id}: {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def update_connector_total_files_and_progress_message(
+        connector_id: str, total_files: int, message: str
+    ) -> None:
+        """
+        Update total_files and, unless the connector holds a failure message
+        from a previous sync, the progress message.
+
+        A message starting with LAST_SYNC_ERROR_PREFIX is sticky until a sync
+        completes successfully, so it is preserved here.
+
+        Raises FileNotFoundError if no connector with the given id exists.
+        """
+        try:
+            with get_db_session() as session:
+                result = session.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(
+                        total_files=total_files,
+                        message=case(
+                            (
+                                or_(
+                                    Connector.message.is_(None),
+                                    ~Connector.message.startswith(LAST_SYNC_ERROR_PREFIX),
+                                ),
+                                message,
+                            ),
+                            else_=Connector.message,
+                        ),
+                    )
+                )
+                if result.rowcount == 0:
+                    raise FileNotFoundError(f"Connector id={connector_id!r} not found")
+        except FileNotFoundError:
+            raise
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in update_connector_total_files_and_progress_message({connector_id}): {e}",
+                exc_info=True,
+            )
             raise
 
     @staticmethod
@@ -1343,7 +1392,11 @@ class DatabaseManager:
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
-        """Set status=SYNCING and clear message on the connector row (never for DELETE_PENDING)."""
+        """Set status=SYNCING on the connector row (never for DELETE_PENDING).
+
+        The message is intentionally left untouched so a failure from the
+        previous sync stays visible until a sync completes successfully.
+        """
         try:
             with get_db_session() as session:
                 session.execute(
@@ -1352,7 +1405,7 @@ class DatabaseManager:
                         Connector.id == connector_id,
                         Connector.status != ConnectorStatus.DELETE_PENDING,
                     )
-                    .values(status=ConnectorStatus.SYNCING, message=None)
+                    .values(status=ConnectorStatus.SYNCING)
                 )
         except SQLAlchemyError as e:
             logger.error(f"DB error in set_connector_sync_status_syncing({connector_id}): {e}", exc_info=True)
@@ -1425,8 +1478,9 @@ class DatabaseManager:
         CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can retry;
         any other status (e.g. COMPLETED) is written through verbatim.
 
-        ``message`` carries error detail on failure/cancel paths and is
-        cleared to NULL on a successful completion.
+        ``message`` carries error detail on the failure path. It is cleared to
+        NULL only on a successful completion; a cancelled sync (no message)
+        leaves any previous failure message in place.
 
         A connector in DELETE_PENDING is never modified, so a tick finishing
         after a DELETE request cannot overwrite the pending deletion.
@@ -1441,8 +1495,11 @@ class DatabaseManager:
                 values: Dict[str, Any] = {
                     "last_sync_at": last_sync_at or datetime.now(timezone.utc),
                     "status": connector_sync_status,
-                    "message": message if status != SyncLogStatus.COMPLETED else None,
                 }
+                if status == SyncLogStatus.COMPLETED:
+                    values["message"] = None
+                elif message is not None:
+                    values["message"] = message
                 session.execute(
                     update(Connector)
                     .where(
