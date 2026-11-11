@@ -99,14 +99,14 @@ rag_similarity_port = int(cfg.get("rag_similarity_port", 7070))
 rag_ui_port = int(cfg.get("rag_ui_port", 3000))
 opensearch_img = str(cfg.get("opensearch_image", "docker.io/opensearchproject/opensearch:3.2.0"))
 opensearch_port = int(cfg.get("opensearch_port", 9200))
-# Local development default only (matches assets/applications/rag-cpu/podman/values.yaml).
+# Local development default only (matches assets/applications/rag-dev/podman/values.yaml).
 opensearch_pass = str(cfg.get("opensearch_password", "AiServices@12345"))
 rag_docs_dir = str(cfg.get("rag_docs_dir", ""))
 digitize_port = int(cfg.get("digitize_port", 4000))
 digitize_ui_port = int(cfg.get("digitize_ui_port", 4001))
 digitize_db_img = str(cfg.get("digitize_db_image", "docker.io/library/postgres:16-alpine"))
 digitize_db_port = int(cfg.get("digitize_db_port", 5433))  # not 5432: the catalog Tiltfile uses it
-# Local development default only (matches assets/applications/rag-cpu/podman/values.yaml).
+# Local development default only (matches assets/applications/rag-dev/podman/values.yaml).
 digitize_db_pass = str(cfg.get("digitize_db_password", "Aiservicesdb@1234"))
 
 if llm_provider == "watsonx" and not (watsonx_url and watsonx_project_id and watsonx_api_key):
@@ -117,7 +117,7 @@ rag_venv = "hack/tilt/.venv"
 model_server_url = "http://localhost:{}".format(model_server_port)
 
 # Environment shared by every process that uses services/common (same variables as the
-# podman pod templates in ai-services/assets/applications/rag-cpu/podman/templates).
+# podman pod templates in ai-services/assets/applications/rag-dev/podman/templates).
 rag_env = """
     export PYTHONPATH="$(pwd)/services"
     export LLM_ENDPOINT="{ms}/llm"
