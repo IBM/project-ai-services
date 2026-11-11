@@ -1,10 +1,10 @@
 ui:
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.60
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.64
 
 backend:
   # @hidden
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.38
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.41
   # @hidden
   log_level: "INFO"
   # @description Custom initial system prompt for conversational RAG. Leave empty to use default. Must be at least 10 characters.
@@ -12,7 +12,7 @@ backend:
 
 summarize:
   # @hidden
-  image: icr.io/ai-services-cicd/summarize-service:v0.0.29
+  image: icr.io/ai-services-cicd/summarize-service:v0.0.31
   # @hidden
   log_level: "INFO"
   # @description Database name for the SUMMARIZE service. Default is "summarize_metadata".
@@ -20,13 +20,13 @@ summarize:
 
 similarity:
   # @hidden
-  image: icr.io/ai-services-cicd/similarity-service:v0.0.22
+  image: icr.io/ai-services-cicd/similarity-service:v0.0.23
   # @hidden
   log_level: "INFO"
 
 digitize:
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-service:v0.0.82
+  image: icr.io/ai-services-cicd/digitize-service:v0.0.88
   # @hidden
   log_level: "INFO"
   # @description Database name for the DIGITIZE service. Default is "digitize_metadata".
@@ -34,7 +34,7 @@ digitize:
 
 digitizeUi:
   # @hidden
-  image: icr.io/ai-services-cicd/digitize-ui:v0.0.41
+  image: icr.io/ai-services-cicd/digitize-ui:v0.0.46
 
 instruct:
   # @hidden
@@ -91,12 +91,14 @@ opensearch:
   auth:
     username: "admin"
     # @description Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.
-    password: "AiServices@12345"
+    # @generate:password
+    password: ""
 
 postgres:
   # @hidden
-  image: icr.io/ai-services-cicd/postgres:18-7
+  image: icr.io/ai-services-cicd/postgres:18-8
   # @description Sets the storage limit for the PostgreSQL service (Default: 5Gi). Override by passing a value with a unit suffix (e.g., Mi, Gi).
   storage: 5Gi
   # @description Password for PostgreSQL default 'postgres' user authentication. Must be at least 8 characters. Use this to override the default password.
-  password: "Aiservicesdb@1234"
+  # @generate:password
+  password: ""

@@ -26,8 +26,6 @@ export interface AppState extends BaseTableState<DataSourceConnectorRow> {
   selectedConnectorId: string | null;
   detailsPanelMode: DetailsPanelMode;
   isDetailsPanelOpen: boolean;
-  // Text typed into the Remove confirmation input
-  confirmTextValue: string;
   // Error message shown inside the Remove modal
   modalDeleteError: string;
 }
@@ -38,7 +36,6 @@ export const ACTION_TYPES = {
   FETCH_CONNECTORS_SUCCESS: "FETCH_CONNECTORS_SUCCESS",
   OPEN_DETAILS_PANEL: "OPEN_DETAILS_PANEL",
   CLOSE_DETAILS_PANEL: "CLOSE_DETAILS_PANEL",
-  SET_CONFIRM_TEXT: "SET_CONFIRM_TEXT",
   SET_MODAL_DELETE_ERROR: "SET_MODAL_DELETE_ERROR",
 } as const;
 
@@ -55,7 +52,6 @@ export type AppAction =
       payload: { id: string; mode: DetailsPanelMode };
     }
   | { type: typeof ACTION_TYPES.CLOSE_DETAILS_PANEL }
-  | { type: typeof ACTION_TYPES.SET_CONFIRM_TEXT; payload: string }
   | { type: typeof ACTION_TYPES.SET_MODAL_DELETE_ERROR; payload: string };
 
 export const HEADERS: DataTableHeader[] = [
@@ -66,12 +62,6 @@ export const HEADERS: DataTableHeader[] = [
   { header: "Messages", key: "messages" },
   { header: "", key: "actions" },
 ];
-
-// Status column sort order — offline floats to the top
-export const STATUS_SORT_ORDER: Record<ConnectorStatus, number> = {
-  offline: 1,
-  connected: 2,
-};
 
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
@@ -88,7 +78,7 @@ export const INITIAL_STATE: AppState = {
   pageSize: 20,
   totalItems: 0,
   isDeleteDialogOpen: false,
-  isConfirmed: false,
+  confirmValue: "",
   rowsData: [],
   selectedRowId: null,
   toastOpen: false,
@@ -109,7 +99,6 @@ export const INITIAL_STATE: AppState = {
   selectedConnectorId: null,
   detailsPanelMode: "view",
   isDetailsPanelOpen: false,
-  confirmTextValue: "",
 };
 
 function ownCases(state: AppState, action: AppAction): AppState {
@@ -118,9 +107,7 @@ function ownCases(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         ...setLoading(false),
-        rowsData: [...action.payload.rows].sort(
-          (a, b) => STATUS_SORT_ORDER[a.status] - STATUS_SORT_ORDER[b.status],
-        ),
+        rowsData: action.payload.rows,
         totalItems: action.payload.pagination.total_items,
         fetchError: null,
       };
@@ -136,8 +123,6 @@ function ownCases(state: AppState, action: AppAction): AppState {
         ...state,
         isDetailsPanelOpen: false,
       };
-    case ACTION_TYPES.SET_CONFIRM_TEXT:
-      return { ...state, confirmTextValue: action.payload };
     case ACTION_TYPES.SET_MODAL_DELETE_ERROR:
       return { ...state, modalDeleteError: action.payload };
     default:

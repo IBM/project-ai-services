@@ -1,0 +1,5 @@
+## extract-service specific dependencies
+##
+
+## Validation
+jsonschema==4.26.0

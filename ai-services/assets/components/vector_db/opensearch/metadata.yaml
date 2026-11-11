@@ -6,6 +6,8 @@ name: "OpenSearch"
 description: "Distributed search and analytics engine for vector storage"
 
 # Component type this provider belongs to
-component_type: vector_store
-component_name: "Vector store"
+component_type:
+  id: vector_store
+  name: "Vector store"
+  short_name: "Vector store"
 default: true

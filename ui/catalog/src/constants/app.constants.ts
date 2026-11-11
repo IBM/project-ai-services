@@ -13,6 +13,19 @@ export const COMPONENT_TYPES = {
 export type ComponentType =
   (typeof COMPONENT_TYPES)[keyof typeof COMPONENT_TYPES];
 
+export const DEPLOYMENT_STATUS = {
+  INITIALIZING: "Initializing",
+  DOWNLOADING: "Downloading",
+  DEPLOYING: "Deploying",
+  RUNNING: "Running",
+  DELETING: "Deleting",
+  STOPPED: "Stopped",
+  ERROR: "Error",
+} as const;
+
+export type DeploymentStatus =
+  (typeof DEPLOYMENT_STATUS)[keyof typeof DEPLOYMENT_STATUS];
+
 // The worker name used by the local (same-node) deployment target.
 export const LOCAL_WORKER_NAME = "Local";
 
@@ -21,18 +34,18 @@ export const DEFAULT_RUNTIME = "podman" as const;
 
 export const WORKER_RUNTIME_LABELS: Record<
   string,
-  { short: string; label: string; description: string; disabled?: boolean }
+  { short: string; label: string; description: string }
 > = {
   podman: {
-    short: "RHAIIS",
-    label: "Red Hat Enterprise Linux (RHAIIS)",
+    short: "RHEL",
+    label: "Red Hat Enterprise Linux (RHEL)",
     description:
-      "This mode deploys all services across multiple worker resources with standard or common resource allocation; and runs on the premises of the client, rather than at a remote facility.",
+      "Deploys services as standalone containers directly on a RHEL host using Podman. Ideal for lightweight, single-host deployments.",
   },
   openshift: {
-    short: "RHOAI",
-    label: "Red Hat OpenShift (RHOAI)",
+    short: "OCP",
+    label: "Red Hat OpenShift (OCP)",
     description:
-      "This mode deploys all services into a single worker resource, with additional resource requirements; and runs on the premises of the client, rather than at a remote facility.",
+      "Deploys services as managed workloads on a Red Hat OpenShift cluster. Ideal for Kubernetes-orchestrated, large-scale deployments.",
   },
 } as const;

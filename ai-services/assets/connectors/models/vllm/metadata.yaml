@@ -1,0 +1,9 @@
+# Connector identification
+type: connector
+id: hosted_vllm
+name: "VLLM"
+description: "Connect to models hosted on VLLM"
+
+# Connector type this provider belongs to
+connector_type: models
+connector_name: "Models"

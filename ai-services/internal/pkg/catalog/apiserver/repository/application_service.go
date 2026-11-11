@@ -7,6 +7,7 @@ import (
 	appservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/application_service"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -45,8 +46,9 @@ var LoadAppWithOwnership = appservice.LoadAppWithOwnership
 //   - datasourceSvc is wired into ApplicationServiceBase so that after a successful
 //     deployment the connectors are automatically attached to eligible services.
 //
-// Both parameters are optional (nil is accepted); when nil the respective feature is
-// skipped silently, preserving backward compatibility for test callers.
+// Both parameters may be nil. When connectorRepo is nil, create requests that carry
+// connector refs are rejected with an error; requests without connector refs are unaffected.
+// When datasourceSvc is nil, post-deploy connector attachment is skipped.
 func NewApplicationService(
 	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
@@ -67,18 +69,20 @@ func NewApplicationService(
 		validator = validator.WithConnectorRepo(connectorRepo)
 	}
 
+	workers := worker.NewResolver(reg)
+
 	return &appservice.ApplicationServiceBase{
 		AppRepo:               appRepo,
 		ServiceRepo:           serviceRepo,
 		ComponentRepo:         componentRepo,
 		ServiceDependencyRepo: serviceDependencyRepo,
 		Provider:              provider,
-		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo).WithWorkerRegistry(reg),
-		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo).WithWorkerRegistry(reg),
+		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo, workers),
+		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo, workers),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validator,
 		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
-		WorkerRegistry:        reg,
+		Workers:               workers,
 		DatasourceService:     datasourceSvc,
 	}
 }

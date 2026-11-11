@@ -26,7 +26,6 @@ def create_indexing_handler(
     emb_model_dict: dict,
     status_mgr: Optional[DatabaseStatusManager],
     doc_id_dict: Optional[dict],
-    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ):
     """
     Create an indexing handler that can be called immediately after chunking of a document.
@@ -35,7 +34,6 @@ def create_indexing_handler(
         emb_model_dict: Dictionary containing embedding model configuration
         status_mgr: Status manager for updating document status
         doc_id_dict: Mapping of document names to IDs
-        file_checksum_dict: Optional mapping of filename -> md5 hex digest
 
     Returns:
         Callable that handles indexing of a single document's chunks
@@ -105,17 +103,11 @@ def create_indexing_handler(
                     f"Indexing Done: updating doc metadata to {final_doc_status.value} "
                     f"for document: {doc_id}"
                 )
-                file_hash = (
-                    file_checksum_dict.get(Path(path).name)
-                    if file_checksum_dict else None
-                )
                 metadata_update = {
                     "status": final_doc_status,
                     "completed_at": get_utc_timestamp(),
                     "timing_in_secs": {"indexing": round(indexing_time, 2)},
                 }
-                if file_hash:
-                    metadata_update["file_hash"] = file_hash
                 status_mgr.update_doc_metadata(doc_id, metadata_update)
                 status_mgr.update_job_progress(doc_id, final_doc_status, JobStatus.IN_PROGRESS)
 
@@ -156,7 +148,6 @@ def ingest(
     directory_path: Path,
     job_id: Optional[str] = None,
     doc_id_dict: Optional[dict] = None,
-    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ):
     """Injest documents in the specified directory path.
 
@@ -198,7 +189,7 @@ def ingest(
 
         # Create indexing handler for immediate indexing after chunking
         indexing_handler = create_indexing_handler(
-            emb_model_dict, status_mgr, doc_id_dict, file_checksum_dict
+            emb_model_dict, status_mgr, doc_id_dict
         )
 
         # CHECK 1: abort before launching pipeline if cancellation was requested

@@ -9,12 +9,13 @@ const (
 
 // ArgParam keys used only by the Podman deployment.
 const (
-	ArgParamRuntime               = "backend.runtime"
-	ArgParamPodmanAuthFileContent = "backend.podman.authFileContent"
-	ArgParamPodmanURI             = "backend.podman.uri"
-	ArgParamCaddyHTTPSPort        = "caddy.httpsPort"
-	ArgParamLocalWorker           = "backend.localWorker"
-	ArgParamCaddyFileContent      = "caddy.caddyFileContent"
-	ArgParamSSLCertFileContent    = "caddy.sslCertContent"
-	ArgParamSSLKeyFileContent     = "caddy.sslKeyContent"
+	ArgParamRuntime                 = "backend.runtime"
+	ArgParamPodmanAuthFileContent   = "backend.podman.authFileContent"
+	ArgParamPodmanURI               = "backend.podman.uri"
+	ArgParamCaddyHTTPSPort          = "caddy.httpsPort"
+	ArgParamCaddyPrivateIngressPort = "caddy.privateIngressPort"
+	ArgParamLocalWorker             = "backend.localWorker"
+	ArgParamCaddyFileContent        = "caddy.caddyFileContent"
+	ArgParamSSLCertFileContent      = "caddy.sslCertContent"
+	ArgParamSSLKeyFileContent       = "caddy.sslKeyContent"
 )

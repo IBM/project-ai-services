@@ -4,21 +4,43 @@
 	servers :443 {
 		name {{ .CaddyServerName }}
 	}
+
+	servers :9443 {
+		name private_mtls_ingress
+	}
+
+	servers :8080 {
+		name private_mtls_egress
+	}
 }
 
 :443 {
 	# 1. This initializes the routes array natively so it's never empty
 	handle /internal/health {
-        # @id internal-health
-        respond "OK" 200
-    }
+		# @id internal-health
+		respond "OK" 200
+	}
 
 	tls internal
 }
 
-# Internal health check endpoint (Bypasses automatic HTTPS redirection)
+# Private ingress for service-to-service traffic (mTLS enforced)
+:9443 {
+	handle /internal/health {
+		# @id internal-private-health
+		respond "OK" 200
+	}
+
+	tls internal {
+		client_auth {
+			mode require_and_verify
+		}
+	}
+}
+
+# Internal health check endpoint and private egress (Bypasses automatic HTTPS redirection)
 :8080 {
-    respond /health "OK" 200
+	respond /health "OK" 200
 }
 
 # This file serves as the base configuration

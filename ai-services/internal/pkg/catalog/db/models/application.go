@@ -39,6 +39,8 @@ type ComponentStatus string
 
 const (
 	ComponentStatusInitializing ComponentStatus = "Initializing"
+	ComponentStatusDownloading  ComponentStatus = "Downloading"
+	ComponentStatusDeploying    ComponentStatus = "Deploying"
 	ComponentStatusRunning      ComponentStatus = "Running"
 	ComponentStatusError        ComponentStatus = "Error"
 )

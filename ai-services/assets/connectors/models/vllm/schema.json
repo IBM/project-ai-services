@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_base"],
+  "properties": {
+    "api_base": {
+      "type": "string",
+      "title": "API Endpoint",
+      "description": "Base URL of the VLLM endpoint.",
+      "format": "uri"
+    },
+    "api_key": {
+      "type": "string",
+      "title": "VLLM API Key",
+      "description": "API key to authenticate and connect to the VLLM endpoint.",
+      "format": "password",
+      "minLength": 1
+    }
+  }
+}

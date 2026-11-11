@@ -7,7 +7,7 @@ Provides CRUD operations with proper error handling and transaction management.
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, cast
-from sqlalchemy import select, update, delete, func, or_, and_, exists
+from sqlalchemy import select, update, delete, func, or_, and_, exists, case
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -27,6 +27,15 @@ logger = get_logger("db_repository")
 
 # Sentinel used by update_connector to distinguish "not supplied" from explicit None.
 _UNSET: object = object()
+
+# Connector list ordering by status: out of sync first, then in-progress
+# states (syncing / delete pending), then up to date. Unlisted statuses rank last.
+_CONNECTOR_STATUS_PRIORITY = case(
+    (Connector.status == ConnectorStatus.OUT_OF_SYNC, 0),
+    (Connector.status.in_([ConnectorStatus.SYNCING, ConnectorStatus.DELETE_PENDING]), 1),
+    (Connector.status == ConnectorStatus.UP_TO_DATE, 2),
+    else_=3,
+)
 
 
 class DatabaseManager:
@@ -386,89 +395,91 @@ class DatabaseManager:
             return None
 
 
-    @staticmethod
-    def upsert_file_checksum(checksum: str, doc_id: str) -> None:
-        """
-        Insert or ignore a (checksum, doc_id) pair into document_checksum.
-
-        Called once a document reaches COMPLETED status so that subsequent
-        uploads of the same content can be detected via find_completed_document_by_hash.
-
-        Args:
-            checksum: MD5 hex digest string.
-            doc_id: The completed document's primary key.
-        """
-        try:
-            with get_db_session() as session:
-                stmt = (
-                    pg_insert(DocumentChecksum)
-                    .values(checksum=checksum, doc_id=doc_id)
-                    .on_conflict_do_update(
-                        index_elements=["checksum"],
-                        set_={"doc_id": doc_id},
-                    )
-                )
-                session.execute(stmt)
-                logger.debug(f"Upserted checksum registry: checksum={checksum[:20]}... doc_id={doc_id}")
-        except SQLAlchemyError as e:
-            logger.error(f"DB error upserting checksum for {checksum[:20]}...: {e}", exc_info=True)
+    # A document in one of these states no longer owns its content: the next submission
+    # of the same content is treated as novel and re-points the document_checksum row.
+    _RELEASED_STATUSES = (DocStatus.FAILED.value, DocStatus.CANCELLED.value)
 
     @staticmethod
-    def find_completed_document_by_hash(
-        file_hash: str,
-        operation: str = "ingestion",
-    ) -> Optional[Document]:
+    def _select_checksum_owner(session, checksum: str, operation: str) -> Optional[Document]:
+        """Return the live Document owning (checksum, operation), detached, or None.
+
+        A failed / cancelled owner counts as no owner (the content is novel).
         """
-        Find the completed document of the given operation type with a matching
-        file hash, using the document_checksum lookup table.
+        owner = session.scalar(
+            select(Document)
+            .join(DocumentChecksum, DocumentChecksum.doc_id == Document.doc_id)
+            .where(
+                DocumentChecksum.checksum == checksum,
+                DocumentChecksum.type == operation,
+                Document.status.notin_(DatabaseManager._RELEASED_STATUSES),
+            )
+        )
+        if owner is not None:
+            # Eagerly load attributes before the session closes.
+            _ = (owner.doc_id, owner.job_id, owner.name, owner.type, owner.status)
+            session.expunge(owner)
+        return owner
 
-        Only documents with status='completed' and the specified type are considered.
-        Failed and in-progress documents are deliberately excluded so that a previous
-        failed attempt does not prevent re-processing of the same file.
+    @staticmethod
+    def get_file_owner(checksum: str, operation: str) -> Optional[Document]:
+        """
+        Look up the document that owns a (checksum, operation) pair without claiming it.
 
-        Args:
-            file_hash: MD5 hex digest string.
-            operation: Document type to match — 'ingestion' or 'digitization'.
+        Raises on database failure: a failed lookup must not be treated as "novel".
+        """
+        with get_db_session() as session:
+            return DatabaseManager._select_checksum_owner(session, checksum, operation)
+
+    @staticmethod
+    def claim_file_checksum(checksum: str, operation: str, doc_id: str) -> Optional[Document]:
+        """
+        Atomically claim a (checksum, operation) pair for an existing document.
+
+        Performs ``INSERT ... ON CONFLICT (checksum, type) DO UPDATE ... WHERE
+        <current owner failed / cancelled> RETURNING`` in a single statement, so of
+        any number of concurrent submissions of the same content exactly one wins.
+        A row left behind by a failed / cancelled document is re-pointed to *doc_id*;
+        the old document row is left as is. The document row must already exist
+        (``document_checksum.doc_id`` is a foreign key).
 
         Returns:
-            The matching Document ORM object (attributes eagerly loaded and
-            expunged from session), or None if no completed duplicate exists.
+            ``None`` if the claim was won. Otherwise the owning Document (detached).
+
+        Raises:
+            SQLAlchemyError: on database failure. Unlike a plain lookup, a failed
+            claim must not be treated as "novel" — that would reopen the race.
         """
-        try:
-            with get_db_session() as session:
-                stmt = (
-                    select(Document)
-                    .join(
-                        DocumentChecksum,
-                        DocumentChecksum.doc_id == Document.doc_id,
+        with get_db_session() as session:
+            # The owner can be released (its document failed) between our conflicting
+            # INSERT and the SELECT below; if so, simply try to claim again.
+            for _ in range(3):
+                won = session.execute(
+                    pg_insert(DocumentChecksum)
+                    .values(checksum=checksum, type=operation, doc_id=doc_id)
+                    .on_conflict_do_update(
+                        index_elements=["checksum", "type"],
+                        set_={"doc_id": doc_id},
+                        where=DocumentChecksum.doc_id.in_(
+                            select(Document.doc_id).where(
+                                Document.status.in_(DatabaseManager._RELEASED_STATUSES)
+                            )
+                        ),
                     )
-                    .where(
-                        DocumentChecksum.checksum == file_hash,
-                        Document.type == operation,
-                        Document.status == DocStatus.COMPLETED.value,
-                    )
-                    .limit(1)
-                )
-                doc = session.scalar(stmt)
-                if doc:
-                    # Eagerly load all attributes before session closes to prevent
-                    # DetachedInstanceError in the caller.
-                    _ = (
-                        doc.doc_id, doc.job_id, doc.name, doc.type,
-                        doc.status, doc.source, doc.output_format,
-                        doc.submitted_at, doc.completed_at, doc.error, doc.doc_metadata,
-                    )
-                    session.expunge(doc)
+                    .returning(DocumentChecksum.doc_id)
+                ).first()
+                if won is not None:
                     logger.debug(
-                        f"Duplicate detected: file_hash={file_hash[:20]}... "
-                        f"matches doc_id={doc.doc_id}"
+                        f"Claimed checksum {checksum[:20]}... ({operation}) for doc_id={doc_id}"
                     )
-                return doc
-        except SQLAlchemyError as e:
-            logger.error(f"DB error in hash lookup for {file_hash[:20]}...: {e}", exc_info=True)
-            # Do NOT raise — a lookup failure must not block ingestion.
-            # If the DB is unavailable the caller treats the file as novel.
-            return None
+                    return None
+
+                owner = DatabaseManager._select_checksum_owner(session, checksum, operation)
+                if owner is not None:
+                    return owner
+
+            raise RuntimeError(
+                f"Could not claim or read checksum {checksum[:20]}... ({operation})"
+            )
 
 
     @staticmethod
@@ -502,9 +513,13 @@ class DatabaseManager:
                 if status:
                     filters.append(Document.status == status)
                 else:
-                    # Exclude already_exists docs from the global listing — they are
-                    # job-scoped audit records, not real ingested documents.
-                    filters.append(Document.status != DocStatus.ALREADY_EXISTS.value)
+                    # Exclude already_exists / skipped docs from the global listing — they
+                    # are job-scoped audit records, not real ingested documents.
+                    filters.append(
+                        Document.status.notin_(
+                            [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                        )
+                    )
                 if name:
                     filters.append(Document.name.ilike(f"%{name}%"))
                 if exclude_connector_sourced:
@@ -627,7 +642,7 @@ class DatabaseManager:
         Also removes:
         - The checksum registry entry (so the hash can be re-registered on
           re-ingestion of the same file).
-        - Any 'already_exists' shadow documents whose metadata points to this
+        - Any 'already_exists'/'skipped' shadow documents whose metadata points to this
           doc_id as their existing_doc_id, since those placeholder rows have
           no meaning once the original document is gone.
         - Any conversion_tasks rows that reference this doc_id.
@@ -646,7 +661,7 @@ class DatabaseManager:
                     delete(DocumentChecksum).where(DocumentChecksum.doc_id == doc_id)
                 )
 
-                # Remove any already_exists shadow docs that reference this document.
+                # Remove any already_exists/skipped shadow docs that reference this document.
                 # These placeholder rows are created when a duplicate file is submitted;
                 # their metadata stores the original doc_id under 'existing_doc_id'.
                 # Once the original is deleted they become stale, so clean them up too.
@@ -741,7 +756,7 @@ class DatabaseManager:
                     delete(DocumentChecksum).where(DocumentChecksum.doc_id.in_(doc_ids))
                 )
 
-                # Remove already_exists shadow docs that reference any of these docs.
+                # Remove already_exists / skipped shadow docs that reference any of these docs.
                 session.execute(
                     delete(Document).where(
                         Document.doc_metadata["existing_doc_id"].as_string().in_(doc_ids)
@@ -1007,7 +1022,8 @@ class DatabaseManager:
         name: Optional[str] = None,
     ) -> tuple[List[Connector], int]:
         """
-        Return paginated connectors ordered by attached_at descending.
+        Return paginated connectors ordered by status priority (out of sync,
+        then syncing / delete pending, then up to date), then attached_at descending.
 
         Args:
             name: Optional case-insensitive substring match on connector name.
@@ -1026,7 +1042,7 @@ class DatabaseManager:
                 ).scalar() or 0
                 stmt = (
                     base
-                    .order_by(Connector.attached_at.desc())
+                    .order_by(_CONNECTOR_STATUS_PRIORITY, Connector.attached_at.desc())
                     .limit(limit)
                     .offset(offset)
                 )

@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -228,6 +230,56 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get deploy options for service '%s': %v", serviceID, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, deployOptions)
+}
+
+// GetModelDeployOptions godoc
+//
+//	@Summary		Get model deploy options
+//	@Description	Lists the providers a catalog model can be deployed with. Local providers include the model's hardware profiles; remote providers include a link to their settings schema.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id			path		string	true	"URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'"
+//	@Param			provider_id	query		string	false	"Return only this provider (e.g., 'vllm-spyre')"
+//	@Param			runtime		query		string	false	"Target runtime type: 'podman' or 'openshift'. Defaults to server runtime when absent."
+//	@Success		200			{object}	types.ModelDeployOptions
+//	@Failure		400			{object}	ErrorResponse	"Invalid runtime parameter"
+//	@Failure		401			{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404			{object}	ErrorResponse	"Model not found in catalog"
+//	@Failure		500			{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/catalog/models/{id}/deploy-options [get]
+func (h *CatalogHandler) GetModelDeployOptions(c *gin.Context) {
+	modelID := c.Param("id")
+
+	rt, err := resolveRuntimeParam(c.Query("runtime"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	provider, err := h.provider.WithRuntime(rt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+
+	deployOptions, err := provider.GetModelDeployOptions(c.Request.Context(), modelID, c.Query("provider_id"))
+	if errors.Is(err, catalog.ErrModelNotFound) {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get deploy options for model '%s': %v", modelID, err),
 		})
 
 		return
@@ -639,6 +691,15 @@ func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// parsePagination reads the page and page_size query parameters and validates them, applying the
+// defaults. A non-numeric value is read as 0 and falls back to the default.
+func parsePagination(c *gin.Context) (page, pageSize int, err error) {
+	page, _ = strconv.Atoi(c.Query("page"))
+	pageSize, _ = strconv.Atoi(c.Query("page_size"))
+
+	return repository.ValidatePaginationParams(page, pageSize)
 }
 
 // resolveRuntimeParam validates the optional ?runtime= query parameter.

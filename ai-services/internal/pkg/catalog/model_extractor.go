@@ -3,8 +3,11 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -100,7 +103,7 @@ func (p *CatalogProvider) collectComponentsModels(ctx context.Context, dependenc
 // collectComponentsByTypeModels collects models for all components of a specific type.
 func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, componentType string, components []types.Component, allModels map[string]bool, excludeComponentProviders []string) error {
 	for _, comp := range components {
-		if comp.ComponentType != componentType {
+		if comp.ComponentType.ID != componentType {
 			continue
 		}
 
@@ -108,7 +111,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 		excluded := false
 		for _, excludedID := range excludeComponentProviders {
 			if strings.EqualFold(comp.ID, excludedID) {
-				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID)
+				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType.ID, comp.ID)
 				excluded = true
 
 				break
@@ -118,8 +121,8 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 			continue
 		}
 
-		if err := p.addComponentModels(ctx, comp.ComponentType, comp.ID, allModels); err != nil {
-			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType, comp.ID, err)
+		if err := p.addComponentModels(ctx, comp.ComponentType.ID, comp.ID, allModels); err != nil {
+			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType.ID, comp.ID, err)
 		}
 	}
 
@@ -148,46 +151,71 @@ func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType,
 	}
 
 	// Extract models from schema
-	extractModelsFromSchema(schema, allModels)
+	models.ExtractFromSchema(schema, allModels)
 
 	return nil
 }
 
-// extractModelsFromSchema extracts model names from a JSON schema.
-// It looks for properties with "model" in the key and extracts values from oneOf/const fields.
-func extractModelsFromSchema(schema map[string]any, modelSet map[string]bool) {
-	// Get properties object
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return
-	}
+// GetModelProviders lists the providers a model can be deployed with, as the provider id with its
+// display name, in no particular order. deploymentType selects the kind: "local" for the model components,
+// "remote" for the "models" connectors, and "" for both.
+func (p *CatalogProvider) GetModelProviders(deploymentType constants.DeploymentType) []types.ProviderInfo {
+	result := make([]types.ProviderInfo, 0)
 
-	// Look for model-related properties
-	for key, value := range properties {
-		if !strings.Contains(strings.ToLower(key), "model") {
-			continue
+	add := func(id, name string) {
+		if slices.ContainsFunc(result, func(pr types.ProviderInfo) bool { return pr.ID == id }) {
+			return
 		}
 
-		propMap, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Extract models from oneOf field
-		extractModelsFromProperty(propMap, modelSet)
+		result = append(result, types.ProviderInfo{ID: id, Name: name})
 	}
+
+	if deploymentType == "" || deploymentType == constants.DeploymentTypeLocal {
+		for _, c := range p.ListComponentsByCategory(constants.ComponentCategoryModels) {
+			add(c.ID, c.Name)
+		}
+	}
+
+	if deploymentType == "" || deploymentType == constants.DeploymentTypeRemote {
+		// ListConnectors errors when no connector of the type is registered: there are no providers.
+		connectors, _ := p.ListConnectors(constants.ConnectorTypeModels)
+		for _, c := range connectors {
+			add(c.ID, c.Name)
+		}
+	}
+
+	return result
 }
 
-// extractModelsFromProperty extracts model values from a property's oneOf array.
-func extractModelsFromProperty(propMap map[string]any, modelSet map[string]bool) {
-	// Check for oneOf array with const values
-	if oneOf, ok := propMap["oneOf"].([]any); ok {
-		for _, option := range oneOf {
-			if optMap, ok := option.(map[string]any); ok {
-				if constVal, ok := optMap["const"].(string); ok && constVal != "" {
-					modelSet[constVal] = true
-				}
+// GetModels lists every model the catalog knows, once per model id, in no particular order. The
+// models come from the models.yaml of the model components and the "models" connectors.
+//
+// A model served by several providers is returned as listed by the first one found, so only its
+// provider-independent fields (ID, Name, Title, Description) are meaningful.
+func (p *CatalogProvider) GetModels() ([]types.Model, error) {
+	result := make([]types.Model, 0)
+
+	for _, item := range p.allItems() {
+		isModelComponent := item.Component != nil && item.Component.Category == constants.ComponentCategoryModels
+		isModelConnector := item.Connector != nil && item.Connector.ConnectorType == constants.ConnectorTypeModels
+
+		if !isModelComponent && !isModelConnector {
+			continue
+		}
+
+		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, constants.ModelsFileName)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, m := range models {
+			if slices.ContainsFunc(result, func(r types.Model) bool { return r.ID == m.ID }) {
+				continue
 			}
+
+			result = append(result, m)
 		}
 	}
+
+	return result, nil
 }

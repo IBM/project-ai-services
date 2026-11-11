@@ -92,6 +92,9 @@ func (m *mockComponentRepo) Insert(_ context.Context, _ *models.Component) error
 func (m *mockComponentRepo) GetByID(_ context.Context, _ uuid.UUID) (*models.Component, error) {
 	panic("unexpected")
 }
+func (m *mockComponentRepo) GetByName(_ context.Context, _ string) (*models.Component, error) {
+	panic("unexpected")
+}
 func (m *mockComponentRepo) GetAll(_ context.Context) ([]models.Component, error) {
 	panic("unexpected")
 }
@@ -103,6 +106,9 @@ func (m *mockComponentRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ model
 	panic("unexpected")
 }
 func (m *mockComponentRepo) UpdateEndpoints(_ context.Context, _ uuid.UUID, _ []map[string]any) error {
+	panic("unexpected")
+}
+func (m *mockComponentRepo) UpdateMetadata(_ context.Context, _ uuid.UUID, _ map[string]any) error {
 	panic("unexpected")
 }
 func (m *mockComponentRepo) Delete(_ context.Context, _ uuid.UUID) error { panic("unexpected") }
@@ -163,6 +169,19 @@ func TestProcessBundle_InvalidMetadataYAML(t *testing.T) {
 	archive := buildArchive(t, map[string]string{"metadata.yaml": "id: svc\ntype: service\n"}, true) // missing version
 	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'version' is required")
+}
+func TestProcessBundle_SpoofedCertifiedBy(t *testing.T) {
+	repo := &mockBundleRepo{
+		getActiveByCatalogID: func(_ context.Context, _, _ string) (*models.CatalogBundle, error) {
+			return nil, nil
+		},
+	}
+	svc := NewBundleService(repo, nil, nil, nil)
+
+	meta := "id: svc\ntype: service\nname: n\ndescription: d\nversion: 1.0.0\nstandalone: true\nabout:\n  - s\ncertified_by: \"IBM\\u200B\"\n"
+	archive := buildArchive(t, map[string]string{"metadata.yaml": meta}, true)
+	_, err := svc.ProcessBundle(context.Background(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "unsupported character")
 }
 
 func TestProcessBundle_ConflictReturns409(t *testing.T) {
@@ -322,6 +341,13 @@ func TestReplaceBundle_InvalidMetadataYAML(t *testing.T) {
 	archive := buildArchive(t, map[string]string{"metadata.yaml": "id: my-service\ntype: service\n"}, true)
 	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'version' is required")
+}
+func TestReplaceBundle_SpoofedCertifiedBy(t *testing.T) {
+	svc := NewBundleService(&mockBundleRepo{}, nil, nil, nil)
+	meta := "id: my-service\ntype: service\nname: n\ndescription: d\nversion: 2.0.0\nstandalone: true\nabout:\n  - s\ncertified_by: \"IBM\\u200B\"\n"
+	archive := buildArchive(t, map[string]string{"metadata.yaml": meta}, true)
+	_, err := svc.ReplaceBundle(context.Background(), existingServiceRecord(), bytes.NewReader(archive), "admin")
+	assertValidationError(t, err, http.StatusUnprocessableEntity, "unsupported character")
 }
 
 func TestReplaceBundle_CatalogIDMismatch(t *testing.T) {

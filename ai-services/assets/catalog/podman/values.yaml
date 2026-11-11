@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.105
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.115
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.453
+  image: icr.io/ai-services-cicd/ai-services:v0.0.485
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false
@@ -21,7 +21,7 @@ backend:
 
 db:
   port: ""
-  image: icr.io/ai-services-cicd/postgres:18-7
+  image: icr.io/ai-services-cicd/postgres:18-8
   user: "postgres"
   database: "ai_services"
   password: ""
@@ -32,9 +32,10 @@ db:
       memory: "1Gi"
 
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.7-1
+  image: icr.io/ai-services-cicd/caddy:v2.11.8-0
   adminPort: ""
   httpsPort: ""
+  privateIngressPort: ""
   # caddyFileContent: Generated from the 'Caddyfile.tmpl' template
   caddyFileContent: ""
   # Populated from the certificate content specified via '--ssl-cert' during catalog configuration
@@ -43,7 +44,10 @@ caddy:
   sslKeyContent: ""
 
 litellm:
-  image: "icr.io/ai-services-cicd/litellm:v1.106.4-0"
+  image: "icr.io/ai-services-cicd/litellm:v1.106.4-1"
+  # port: port the LiteLLM proxy listens on. The catalog backend reaches it as
+  # http://<app>--litellm:<port> through the LITELLM_ENDPOINT env var.
+  port: "4000"
   # @generate:password length=32, special=false
   masterKey: ""
   # @generate:password length=64, special=false
