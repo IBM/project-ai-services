@@ -46,6 +46,6 @@ export const WORKER_RUNTIME_LABELS: Record<
     short: "OCP",
     label: "Red Hat OpenShift (OCP)",
     description:
-      "Deploys services as managed workloads on a Red Hat OpenShift cluster. Ideal for Kubernetes-orchestrated, scalable enterprise environments.",
+      "Deploys services as managed workloads on a Red Hat OpenShift cluster. Ideal for Kubernetes-orchestrated, large-scale deployments.",
   },
 } as const;
