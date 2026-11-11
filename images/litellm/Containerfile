@@ -2,15 +2,16 @@
 FROM registry.access.redhat.com/ubi9/ubi:9.8 as builder
 
 ARG VERSION=${VERSION}
+ARG PYTHON_VERSION=3.12
 
 # 1. Install heavy build dependencies (gcc, rust, etc.)
 RUN dnf -y update && \
     dnf -y install \
         wget \
         patch \
-        python3.12 \
-        python3.12-pip \
-        python3.12-devel \
+        python${PYTHON_VERSION} \
+        python${PYTHON_VERSION}-pip \
+        python${PYTHON_VERSION}-devel \
         gcc \
         gcc-c++ \
         openssl-devel \
@@ -21,8 +22,10 @@ WORKDIR /build
 
 COPY pre-requirements.txt patches ./
 
-# 2. Install Pre-requistes
-RUN python3.12 -m pip install -r pre-requirements.txt \
+# 2. Install Pre-requisites
+# UV_PYTHON tells uv which interpreter to use for all subsequent uv commands
+ENV UV_PYTHON=${PYTHON_VERSION}
+RUN python${PYTHON_VERSION} -m pip install -r pre-requirements.txt \
 	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
 	--prefer-binary
 
@@ -51,7 +54,7 @@ WORKDIR /build/litellm-${VERSION}
 RUN --mount=type=cache,target=/root/.cache/pip \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | /usr/bin/sh -s -- -y && \
     source "$HOME/.cargo/env" && rustup install 1.94.1 && rustup default 1.94.1 && \
-    python3.12 -m pip wheel -r requirements.txt \
+    python${PYTHON_VERSION} -m pip wheel -r requirements.txt \
 	-w /wheels \
 	--extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux/ \
 	--prefer-binary && \
@@ -61,6 +64,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 
 ARG VERSION=${VERSION}
+ARG PYTHON_VERSION=3.12
 
 ENV DISABLE_ADMIN_UI=true \
     LITELLM_NON_ROOT=true
@@ -68,14 +72,14 @@ ENV DISABLE_ADMIN_UI=true \
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels,ro \
     microdnf -y update && \
     microdnf -y install \
-        python3.12 \
-        python3.12-pip && \
-    python3.12 -m pip install --no-cache-dir --no-index \
+        python${PYTHON_VERSION} \
+        python${PYTHON_VERSION}-pip && \
+    python${PYTHON_VERSION} -m pip install --no-cache-dir --no-index \
 	--find-links=/wheels  \
 	litellm[proxy,semantic-router]==${VERSION} && \
-    python3.12 -m pip cache purge && \
-    microdnf remove -y python3.12-pip && \
-    microdnf clean all 
+    python${PYTHON_VERSION} -m pip cache purge && \
+    microdnf remove -y python${PYTHON_VERSION}-pip && \
+    microdnf clean all
 
 USER 1001
 
