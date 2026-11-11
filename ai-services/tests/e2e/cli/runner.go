@@ -37,8 +37,10 @@ const (
 	svcSimilarityMCP   = "similarity-mcp"
 	svcSummarizeAPI    = "summarize-api"
 	svcExtractAPI      = "extract-api"
+	svcExtractMCP      = "extract-mcp"
 	svcSummarizeMCP    = "summarize-mcp"
 	svcTranslateAPI    = "translate-api"
+	svcTranslateMCP    = "translate-mcp"
 )
 
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
@@ -452,6 +454,18 @@ func ExtractSimilarityMCPURL(infoOutput string) string {
 // The hostname always contains "summarize-mcp" for the catalog (podman) path.
 func ExtractSummarizeMCPURL(infoOutput string) string {
 	return extractURLBySubstring(infoOutput, svcSummarizeMCP)
+}
+
+// ExtractExtractMCPURL extracts the extract MCP sidecar URL from 'application info' output.
+// The hostname always contains "extract-mcp" for the catalog (podman) path.
+func ExtractExtractMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcExtractMCP)
+}
+
+// ExtractTranslateMCPURL extracts the translate MCP sidecar URL from 'application info' output.
+// The hostname always contains "translate-mcp" for the catalog (podman) path.
+func ExtractTranslateMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcTranslateMCP)
 }
 
 // ExtractCatalogTranslateURL parses the 'application info' output for the translate service URL.

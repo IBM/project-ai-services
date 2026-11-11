@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -102,7 +103,7 @@ func (p *CatalogProvider) collectComponentsModels(ctx context.Context, dependenc
 // collectComponentsByTypeModels collects models for all components of a specific type.
 func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, componentType string, components []types.Component, allModels map[string]bool, excludeComponentProviders []string) error {
 	for _, comp := range components {
-		if comp.ComponentType != componentType {
+		if comp.ComponentType.ID != componentType {
 			continue
 		}
 
@@ -110,7 +111,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 		excluded := false
 		for _, excludedID := range excludeComponentProviders {
 			if strings.EqualFold(comp.ID, excludedID) {
-				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID)
+				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType.ID, comp.ID)
 				excluded = true
 
 				break
@@ -120,8 +121,8 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 			continue
 		}
 
-		if err := p.addComponentModels(ctx, comp.ComponentType, comp.ID, allModels); err != nil {
-			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType, comp.ID, err)
+		if err := p.addComponentModels(ctx, comp.ComponentType.ID, comp.ID, allModels); err != nil {
+			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType.ID, comp.ID, err)
 		}
 	}
 
@@ -150,48 +151,9 @@ func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType,
 	}
 
 	// Extract models from schema
-	extractModelsFromSchema(schema, allModels)
+	models.ExtractFromSchema(schema, allModels)
 
 	return nil
-}
-
-// extractModelsFromSchema extracts model names from a JSON schema.
-// It looks for properties with "model" in the key and extracts values from oneOf/const fields.
-func extractModelsFromSchema(schema map[string]any, modelSet map[string]bool) {
-	// Get properties object
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return
-	}
-
-	// Look for model-related properties
-	for key, value := range properties {
-		if !strings.Contains(strings.ToLower(key), "model") {
-			continue
-		}
-
-		propMap, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Extract models from oneOf field
-		extractModelsFromProperty(propMap, modelSet)
-	}
-}
-
-// extractModelsFromProperty extracts model values from a property's oneOf array.
-func extractModelsFromProperty(propMap map[string]any, modelSet map[string]bool) {
-	// Check for oneOf array with const values
-	if oneOf, ok := propMap["oneOf"].([]any); ok {
-		for _, option := range oneOf {
-			if optMap, ok := option.(map[string]any); ok {
-				if constVal, ok := optMap["const"].(string); ok && constVal != "" {
-					modelSet[constVal] = true
-				}
-			}
-		}
-	}
 }
 
 // GetModelProviders lists the providers a model can be deployed with, as the provider id with its
@@ -241,7 +203,7 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 			continue
 		}
 
-		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, modelsFileName)
+		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, constants.ModelsFileName)
 		if err != nil {
 			return nil, err
 		}

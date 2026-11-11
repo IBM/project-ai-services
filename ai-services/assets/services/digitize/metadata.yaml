@@ -74,6 +74,9 @@ about:
         values:
           - "PDF"
           - "DOCX"
+          - "HTML"
+          - "Markdown"
+          - "Text"
       - title: "Content"
         values:
           - "Text"

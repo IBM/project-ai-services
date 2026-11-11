@@ -15,6 +15,7 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/keys"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -182,6 +183,8 @@ type mockLiteLLMClient struct {
 	deregisteredPass   []string
 	probeResponse      *catalogclient.LiteLLMHealthResponse
 	probeErr           error
+	deletedKeys        []string
+	generatedKeys      []catalogclient.LiteLLMKeyGenerateRequest
 }
 
 func (m *mockLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.LiteLLMModelNewRequest) (string, error) {
@@ -1157,4 +1160,79 @@ func TestGetModelByID_RepositoryError(t *testing.T) {
 
 	var valErr *validators.ValidationError
 	assert.False(t, errors.As(err, &valErr), "an internal failure must not look like a client error")
+}
+
+func (m *mockLiteLLMClient) DeleteKeysByAlias(_ context.Context, aliases []string) error {
+	m.deletedKeys = append(m.deletedKeys, aliases...)
+
+	return nil
+}
+
+func (m *mockLiteLLMClient) GenerateKey(_ context.Context, req catalogclient.LiteLLMKeyGenerateRequest) (string, error) {
+	m.generatedKeys = append(m.generatedKeys, req)
+
+	return "sk-test", nil
+}
+
+func TestGenerateModelKey_Ownership(t *testing.T) {
+	id := uuid.New()
+	row := dbrepo.ModelRow{ID: id, DeploymentType: "remote", Provider: "watsonx", Model: "ibm/granite", CreatedBy: "alice"}
+
+	tests := []struct {
+		name      string
+		rows      []dbrepo.ModelRow
+		createdBy string
+		wantCode  int // 0: the key is generated
+	}{
+		{"owner", []dbrepo.ModelRow{row}, "alice", 0},
+		{"empty user skips the check", []dbrepo.ModelRow{row}, "", 0},
+		{"missing", nil, "alice", http.StatusNotFound},
+		{"owned by someone else", []dbrepo.ModelRow{row}, "bob", http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &mockModelRepo{rows: tt.rows}
+			lite := &mockLiteLLMClient{}
+			svc := NewModelService(nil, nil, repo, nil, nil, setupTestCatalogProvider(t), "")
+			svc.keys = keys.NewManager(lite)
+
+			got, err := svc.GenerateModelKey(context.Background(), id, tt.createdBy)
+
+			assert.Equal(t, id, repo.getID)
+			assert.Contains(t, repo.getTypes, "llm", "the lookup is limited to the catalog's model types")
+			assert.NotContains(t, repo.getTypes, "vector_db")
+
+			if tt.wantCode == 0 {
+				require.NoError(t, err)
+				assert.Equal(t, "sk-test", got.Key)
+				assert.Equal(t, "ibm/granite", got.Model)
+				assert.Equal(t, []string{"ibm/granite-" + id.String()}, lite.deletedKeys)
+				require.Len(t, lite.generatedKeys, 1)
+				assert.Equal(t, []string{id.String()}, lite.generatedKeys[0].Metadata.Tags)
+
+				return
+			}
+
+			assert.Nil(t, got)
+			requireStatus(t, err, tt.wantCode, "")
+			assert.Empty(t, lite.deletedKeys, "an existing key must not be revoked")
+			assert.Empty(t, lite.generatedKeys)
+		})
+	}
+}
+
+func TestGenerateModelKey_RepositoryError(t *testing.T) {
+	boom := errors.New("boom")
+	lite := &mockLiteLLMClient{}
+	svc := NewModelService(nil, nil, &mockModelRepo{err: boom}, nil, nil, setupTestCatalogProvider(t), "")
+	svc.keys = keys.NewManager(lite)
+
+	_, err := svc.GenerateModelKey(context.Background(), uuid.New(), "alice")
+
+	require.ErrorIs(t, err, boom)
+
+	var valErr *validators.ValidationError
+	assert.False(t, errors.As(err, &valErr), "an internal failure must not look like a client error")
+	assert.Empty(t, lite.deletedKeys)
 }

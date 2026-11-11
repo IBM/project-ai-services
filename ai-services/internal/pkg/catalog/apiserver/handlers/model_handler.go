@@ -181,6 +181,53 @@ func (h *ModelHandler) GetModelByID(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GenerateModelKey godoc
+//
+//	@Summary		Generate a public key for a model
+//	@Description	Generates a LiteLLM key for the model. Any existing key for it is revoked, so only one key is valid at a time. The key is returned once and cannot be retrieved again.
+//	@Tags			Models
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string							true	"Model (component or connector) ID"
+//	@Success		201	{object}	models.GenerateModelKeyResponse	"Public key generated"
+//	@Failure		400	{object}	ErrorResponse					"Invalid model ID, or openshift runtime"
+//	@Failure		401	{object}	ErrorResponse					"Unauthorized"
+//	@Failure		403	{object}	ErrorResponse					"User is not the model creator"
+//	@Failure		404	{object}	ErrorResponse					"Model not found"
+//	@Failure		500	{object}	ErrorResponse					"Internal Server Error"
+//	@Failure		502	{object}	ErrorResponse					"LiteLLM failed; the old key may already be revoked, so retry"
+//	@Router			/models/{id}/keys [post]
+func (h *ModelHandler) GenerateModelKey(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid model ID format"})
+
+		return
+	}
+
+	resp, err := h.modelService.GenerateModelKey(ctx, id, c.GetString(middleware.CtxUserIDKey))
+	if err != nil {
+		var valErr *validators.ValidationError
+		if errors.As(err, &valErr) {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		// The error never carries the key, but internal details are still logged, not returned.
+		logger.ErrorfCtx(ctx, "failed to generate key for model %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to generate model key"})
+
+		return
+	}
+
+	// The key is shown once: forbid any cache from keeping it.
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, resp)
+}
+
 // queryValues returns the values of a repeatable query parameter (?model=a&model=b), without the
 // empty ones, so that "?model=" is the same as not filtering.
 func queryValues(c *gin.Context, key string) []string {
