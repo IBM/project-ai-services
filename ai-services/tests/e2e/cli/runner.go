@@ -15,25 +15,12 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/project-ai-services/ai-services/tests/e2e/bootstrap"
 	"github.com/project-ai-services/ai-services/tests/e2e/common"
 	"github.com/project-ai-services/ai-services/tests/e2e/config"
-)
-
-// Catalog service ID and endpoint type constants used to look up URLs via the catalog API.
-// These match the catalog_id values in the service metadata YAML files and the route
-// type field written to the database by the podman deployer.
-const (
-	catalogSvcChat       = "chat"
-	catalogSvcDigitize   = "digitize"
-	catalogSvcSimilarity = "similarity"
-	endpointTypeAPI      = "api"
-	endpointTypeUI       = "ui"
 )
 
 // Service name substrings used to identify catalog URLs in 'application info' output.
@@ -43,10 +30,15 @@ const (
 const (
 	svcChatBotBackend  = "chat-bot-backend"
 	svcChatBotUI       = "chat-bot-ui"
+	svcChatBotMCP      = "chat-bot-mcp"
 	svcDigitizeBackend = "digitize-backend"
+	svcDigitizeMCP     = "digitize-mcp"
 	svcSimilarityAPI   = "similarity-api"
+	svcSimilarityMCP   = "similarity-mcp"
 	svcSummarizeAPI    = "summarize-api"
 	svcExtractAPI      = "extract-api"
+	svcSummarizeMCP    = "summarize-mcp"
+	svcTranslateAPI    = "translate-api"
 )
 
 // ptyWinRows and ptyWinCols define the PTY window size used by runWithPTY.
@@ -238,71 +230,6 @@ func CreateRAGAppAndValidate(
 	logger.Infof("[UI] Chatbot UI available at: %s", chatbotUiURL)
 
 	return output, nil
-}
-
-// AppEndpoints holds the service endpoint URLs resolved from the catalog API.
-// Keys are catalog service IDs (e.g. "chat", "digitize", "similarity").
-// Values are maps of endpoint type → URL (e.g. "api" → "https://...").
-type AppEndpoints map[string]map[string]string
-
-// ChatBackendURL returns the chat service API (backend) URL.
-func (e AppEndpoints) ChatBackendURL() string { return e[catalogSvcChat][endpointTypeAPI] }
-
-// ChatUIURL returns the chat service UI URL.
-func (e AppEndpoints) ChatUIURL() string { return e[catalogSvcChat][endpointTypeUI] }
-
-// DigitizeURL returns the digitize service API (backend) URL.
-func (e AppEndpoints) DigitizeURL() string { return e[catalogSvcDigitize][endpointTypeAPI] }
-
-// SimilarityURL returns the similarity service API URL.
-func (e AppEndpoints) SimilarityURL() string { return e[catalogSvcSimilarity][endpointTypeAPI] }
-
-// CatalogGetApplicationEndpoints fetches endpoint URLs for a named application via the catalog REST API.
-func CatalogGetApplicationEndpoints(appName string) (AppEndpoints, error) {
-	appClient, err := client.NewApplicationClient(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("catalog client init: %w", err)
-	}
-
-	list, err := appClient.ListApplications(context.Background(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("list applications: %w", err)
-	}
-
-	for _, app := range list.Data {
-		if app.Name == appName {
-			return buildAppEndpoints(app.Services), nil
-		}
-	}
-
-	return nil, fmt.Errorf("application %q not found via catalog API", appName)
-}
-
-// buildAppEndpoints converts a service list into an AppEndpoints map.
-func buildAppEndpoints(services []types.ApplicationService) AppEndpoints {
-	eps := make(AppEndpoints)
-	for _, svc := range services {
-		svcEps := collectEndpoints(svc.Endpoints)
-		if len(svcEps) > 0 {
-			eps[svc.CatalogID] = svcEps
-		}
-	}
-
-	return eps
-}
-
-// collectEndpoints extracts type→URL pairs from an endpoint list.
-func collectEndpoints(endpoints []map[string]any) map[string]string {
-	result := make(map[string]string)
-	for _, ep := range endpoints {
-		epType, _ := ep["type"].(string)
-		epURL, _ := ep["url"].(string)
-		if epType != "" && epURL != "" {
-			result[epType] = epURL
-		}
-	}
-
-	return result
 }
 
 // getRAGURLs returns backend and UI URLs for a deployed RAG application.
@@ -501,6 +428,39 @@ func ExtractCatalogSummarizeURL(infoOutput string) string {
 // ExtractExtractURL parses the 'application info' output for the entity extraction service URL.
 func ExtractExtractURL(infoOutput string) string {
 	return extractURLBySubstring(infoOutput, svcExtractAPI)
+}
+
+// ExtractChatMCPURL extracts the chat-bot MCP sidecar URL from 'application info' output.
+// The hostname always contains "chat-bot-mcp" for the catalog (podman) path.
+func ExtractChatMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcChatBotMCP)
+}
+
+// ExtractDigitizeMCPURL extracts the digitize MCP sidecar URL from 'application info' output.
+// The hostname always contains "digitize-mcp" for the catalog (podman) path.
+func ExtractDigitizeMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcDigitizeMCP)
+}
+
+// ExtractSimilarityMCPURL extracts the similarity MCP sidecar URL from 'application info' output.
+// The hostname always contains "similarity-mcp" for the catalog (podman) path.
+func ExtractSimilarityMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcSimilarityMCP)
+}
+
+// ExtractSummarizeMCPURL extracts the summarize MCP sidecar URL from 'application info' output.
+// The hostname always contains "summarize-mcp" for the catalog (podman) path.
+func ExtractSummarizeMCPURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcSummarizeMCP)
+}
+
+// ExtractCatalogTranslateURL parses the 'application info' output for the translate service URL.
+//
+// Actual output line:
+//
+//	"- Translate API is available to use at https://translate-api-<slug>.<domain>."
+func ExtractCatalogTranslateURL(infoOutput string) string {
+	return extractURLBySubstring(infoOutput, svcTranslateAPI)
 }
 
 // getOpenShiftRouteURLs fetches OpenShift routes for the given application namespace

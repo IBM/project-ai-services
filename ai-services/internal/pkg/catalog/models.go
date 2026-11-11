@@ -1,34 +1,10 @@
 package catalog
 
 import (
-	"errors"
-	"fmt"
-	"io/fs"
-	"path"
-
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
-	"go.yaml.in/yaml/v3"
 )
 
 const modelsFileName = "models.yaml"
-
-// loadModelsFromFile reads models.yaml from the provider's root directory.
-func loadModelsFromFile(itemFS fs.FS, providerPath string) ([]types.Model, error) {
-	data, err := fs.ReadFile(itemFS, path.Join(providerPath, modelsFileName))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", modelsFileName, err)
-	}
-
-	var models []types.Model
-	if err := yaml.Unmarshal(data, &models); err != nil {
-		return nil, fmt.Errorf("failed to parse %s: %w", modelsFileName, err)
-	}
-
-	return models, nil
-}
 
 // injectModelsIntoSchema sets properties.model.oneOf and properties.model.default
 // on the decoded values.schema.json from the given models. It is a no-op when

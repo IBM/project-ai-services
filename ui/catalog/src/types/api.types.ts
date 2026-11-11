@@ -247,6 +247,7 @@ export interface DeployIntegrationEndpoints {
   description: string;
   baseURL: string;
   apiDocumentation: string;
+  mcpEndpoint: string;
   interactiveAPIs: string[];
 }
 

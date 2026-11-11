@@ -44,11 +44,12 @@ func ResetWorkerCertificate(ctx context.Context, sslCertPath, sslKeyPath string)
 
 	// Re-deploy the worker pod with the new SSL certificate paths.
 	opts.Setup = workertypes.Options{
-		BaseDir:     podmanOpts.BaseDir,
-		DomainName:  podmanOpts.DomainName,
-		HTTPSPort:   podmanOpts.HTTPSPort,
-		SSLCertPath: sslCertPath,
-		SSLKeyPath:  sslKeyPath,
+		BaseDir:            podmanOpts.BaseDir,
+		DomainName:         podmanOpts.DomainName,
+		HTTPSPort:          podmanOpts.HTTPSPort,
+		PrivateIngressPort: podmanOpts.PrivateIngressPort,
+		SSLCertPath:        sslCertPath,
+		SSLKeyPath:         sslKeyPath,
 	}
 
 	if err := DeployWorker(ctx, opts); err != nil {

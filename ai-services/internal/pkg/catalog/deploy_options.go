@@ -8,6 +8,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // GetArchitectureDeployOptions returns deploy options for all services in an architecture.
@@ -366,7 +367,7 @@ func (p *CatalogProvider) GetComponentProviderParams(ctx context.Context, compon
 	}
 
 	// Models are defined once in the provider-root models.yaml and injected into the schema's model field.
-	models, err := loadModelsFromFile(itemFS, componentPath)
+	models, err := utils.LoadYAMLList[types.Model](itemFS, componentPath, modelsFileName)
 	if err != nil {
 		return nil, err
 	}
