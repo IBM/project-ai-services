@@ -190,12 +190,13 @@ func (p *CatalogProvider) GetModelProviders(deploymentType constants.DeploymentT
 // GetModels lists every model the catalog knows, once per model id, in no particular order. The
 // models come from the models.yaml of the model components and the "models" connectors.
 //
-// A model served by several providers is returned as listed by the first one found, so only its
-// provider-independent fields (ID, Name, Title, Description) are meaningful.
+// A model served by several providers is returned as listed by the first one in item-key order
+// ("type/id"), so the result is stable. Only its provider-independent fields (ID, Name, Title,
+// Description) are meaningful.
 func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 	result := make([]types.Model, 0)
 
-	for _, item := range p.allItems() {
+	for _, item := range p.sortedItems() {
 		if !isModelItem(item) {
 			continue
 		}
@@ -219,7 +220,7 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 
 // GetModel returns modelID as GetModels lists it, or ErrModelNotFound if the catalog doesn't list it.
 func (p *CatalogProvider) GetModel(modelID string) (*types.Model, error) {
-	for _, item := range p.allItems() {
+	for _, item := range p.sortedItems() {
 		model, err := findModel(item, modelID)
 		if err != nil {
 			return nil, err

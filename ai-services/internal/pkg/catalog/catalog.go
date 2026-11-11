@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	texttemplate "text/template"
@@ -345,6 +347,18 @@ func (p *CatalogProvider) allItems() map[string]*catalogItem {
 	}
 
 	return snapshot
+}
+
+// sortedItems returns the cached items ordered by key ("type/id"), the same order ModelCatalog.Components uses.
+// Loops that keep the first match use it so they give the same answer on every call.
+func (p *CatalogProvider) sortedItems() []*catalogItem {
+	items := p.allItems()
+	result := make([]*catalogItem, 0, len(items))
+	for _, k := range slices.Sorted(maps.Keys(items)) {
+		result = append(result, items[k])
+	}
+
+	return result
 }
 
 // LoadArchitecture loads an architecture by ID from cache.

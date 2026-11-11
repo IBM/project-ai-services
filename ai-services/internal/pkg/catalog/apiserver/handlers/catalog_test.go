@@ -510,6 +510,12 @@ func TestListCatalogModels(t *testing.T) {
 
 	assert.Contains(t, ids, "ibm-granite/granite-3.3-8b-instruct")
 	assert.True(t, slices.IsSorted(ids), "models are sorted by id")
+
+	for _, m := range list {
+		if m.ID == "ibm-granite/granite-3.3-8b-instruct" {
+			assert.Equal(t, "granite-3.3-8b-instruct", m.Title, "component entry wins over connector entry")
+		}
+	}
 }
 
 func TestGetCatalogModel(t *testing.T) {
@@ -536,9 +542,17 @@ func TestGetCatalogModel(t *testing.T) {
 		assert.Equal(t, "Granite 3.3 8B Instruct", m.Name)
 	})
 
-	t.Run("remote-only model", func(t *testing.T) {
-		w := get("/api/v1/catalog/models/ibm%2Fgranite-4-h-small")
-		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	// The model is listed by components (which set a title) and by a connector (which doesn't).
+	// The component entry must win on every call, not whichever the map iteration reaches first.
+	t.Run("model served by several providers is stable", func(t *testing.T) {
+		for range 20 {
+			w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct")
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			var m types.Model
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
+			require.Equal(t, "granite-3.3-8b-instruct", m.Title)
+		}
 	})
 
 	t.Run("unknown model", func(t *testing.T) {
