@@ -191,8 +191,9 @@ async def create_job(
         #       * owner is still being processed → `skipped`;
         #       * owner failed / was cancelled (or none) → novel; the atomic claim
         #         re-points the registry row to this job's new document.
-        #   - A digitization request additionally looks at the ingestion owner of the
-        #     same content first — no point re-digitizing indexed content.
+        #   - Ingestion and digitization are independent: the registry is keyed on
+        #     (hash, operation), so already-ingested content does not block a
+        #     digitization (the user may want another output format), and vice versa.
         #   - Otherwise → novel, processed by this job.
         #
         # This lookup is only a fast path. The authoritative check is the atomic claim
@@ -247,15 +248,9 @@ async def create_job(
                     )
                 continue
 
-            owner = None
-            if operation == models.OperationType.DIGITIZATION:
-                owner = await asyncio.to_thread(
-                    db_manager.get_file_owner, file_hash, models.OperationType.INGESTION.value
-                )
-            if owner is None:
-                owner = await asyncio.to_thread(
-                    db_manager.get_file_owner, file_hash, operation.value
-                )
+            owner = await asyncio.to_thread(
+                db_manager.get_file_owner, file_hash, operation.value
+            )
 
             if owner is not None:
                 seen_checksums[file_hash] = None

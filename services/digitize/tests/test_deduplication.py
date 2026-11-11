@@ -28,7 +28,7 @@ Coverage areas
 4. api/v1/jobs.py     – 409 when ALL files already exist
                       – 202 with mixed batch (some novel, some already-exist)
                       – read-only owner lookup; novel file hashes handed to initialize_job_state
-                      – digitization also checks the ingestion owner
+                      – ingestion and digitization dedup independently (neither blocks the other)
 5. db/manager.py      – claim_file_checksum (atomic INSERT ... ON CONFLICT DO NOTHING)
                       – get_file_owner (read-only lookup, joins documents)
                       – update_document checksum lifecycle (claim removed on fail+cancel)
@@ -434,7 +434,8 @@ class TestInitializeJobStateAlreadyExists:
     def _owner_doc(doc_id="owner-doc", name="orig.pdf", status="completed", job_id="owner-job"):
         return SimpleNamespace(doc_id=doc_id, name=name, status=status, job_id=job_id)
 
-    def _run_with_claims(self, claim_results, documents_info, file_checksum_dict, **kwargs):
+    def _run_with_claims(self, claim_results, documents_info, file_checksum_dict,
+                         operation=OperationType.INGESTION, **kwargs):
         mock_create_doc = Mock()
         mock_dbm = Mock()
         mock_dbm.claim_file_checksum = Mock(side_effect=claim_results)
@@ -444,13 +445,42 @@ class TestInitializeJobStateAlreadyExists:
             from digitize.utils.jobs import initialize_job_state
             result = initialize_job_state(
                 job_id="job-1",
-                operation=OperationType.INGESTION,
+                operation=operation,
                 output_format=OutputFormat.JSON,
                 documents_info=documents_info,
                 file_checksum_dict=file_checksum_dict,
                 **kwargs,
             )
         return result, mock_create_doc, mock_dbm
+
+    def test_digitization_claim_uses_digitization_key(self):
+        """The atomic claim is scoped to the job's own operation, so it can't collide
+        with an ingestion owner of the same content."""
+        result, _, mock_dbm = self._run_with_claims(
+            [None], ["a.pdf"], {"a.pdf": "ha"}, operation=OperationType.DIGITIZATION
+        )
+        assert [c.args for c in mock_dbm.claim_file_checksum.call_args_list] == [
+            ("ha", "digitization", result["a.pdf"])
+        ]
+
+    def test_digitization_lost_claim_to_completed_digitization_becomes_already_exists(self):
+        already_exists = []
+        _, mock_create_doc, mock_dbm = self._run_with_claims(
+            [self._owner_doc()], ["a.pdf"], {"a.pdf": "ha"},
+            operation=OperationType.DIGITIZATION, already_exists_files=already_exists,
+        )
+        mock_dbm.delete_document.assert_called_once()
+        assert len(already_exists) == 1
+        assert mock_create_doc.call_args_list[-1].kwargs["initial_status"] == DocStatus.ALREADY_EXISTS
+
+    def test_digitization_lost_claim_to_in_progress_digitization_becomes_skipped(self):
+        skipped = []
+        _, mock_create_doc, _ = self._run_with_claims(
+            [self._owner_doc(status="in_progress")], ["a.pdf"], {"a.pdf": "ha"},
+            operation=OperationType.DIGITIZATION, skipped_files=skipped,
+        )
+        assert len(skipped) == 1
+        assert mock_create_doc.call_args_list[-1].kwargs["initial_status"] == DocStatus.SKIPPED
 
     def test_no_file_checksum_dict_means_no_claims(self):
         result, _, mock_dbm = self._run_with_claims([], ["a.pdf"], None)
@@ -1114,13 +1144,15 @@ class TestDuplicateDetectionEndpoint:
         already_exists_arg = init_call.kwargs.get("already_exists_files", [])
         assert already_exists_arg == []
 
-    def test_digitization_also_checks_ingestion_hash(self, jobs_test_client, monkeypatch):
-        """A file already ingested must block a digitization request of the same content."""
+    def test_digitization_allowed_when_content_already_ingested(self, jobs_test_client, monkeypatch):
+        """A file already ingested must NOT block a digitization request of the same
+        content (the user may want md/txt/json output)."""
         import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
 
         ingested_doc = _owner("ingested-doc", "report.pdf")
 
-        # the ingestion-type lookup returns a match
+        # Simulate the real table: only the 'ingestion' key is taken.
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         mock_hash_db.get_file_owner = Mock(
@@ -1133,7 +1165,11 @@ class TestDuplicateDetectionEndpoint:
             files=[self._pdf("report.pdf")],
         )
 
-        assert response.status_code == 409
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert init_call.kwargs["filenames"] == ["report.pdf"]
+        assert init_call.kwargs["already_exists_files"] == []
+        assert init_call.kwargs["skipped_files"] == []
 
     def test_all_files_novel_returns_202(self, jobs_test_client, monkeypatch):
         import digitize.api.v1.jobs as jobs_router_module
@@ -1469,7 +1505,7 @@ class TestDuplicateDetectionEndpoint:
         assert response.status_code == 500
         cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).assert_not_called()
 
-    def test_digitization_looks_up_ingestion_then_digitization(self, jobs_test_client, monkeypatch):
+    def test_digitization_only_looks_up_digitization(self, jobs_test_client, monkeypatch):
         import digitize.api.v1.jobs as jobs_router_module
 
         mock_hash_db = Mock()
@@ -1482,9 +1518,7 @@ class TestDuplicateDetectionEndpoint:
         )
 
         assert response.status_code == 202
-        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == [
-            "ingestion", "digitization",
-        ]
+        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == ["digitization"]
 
     def test_ingestion_ignores_digitization_owner(self, jobs_test_client, monkeypatch):
         """A digitization of the same content must not block ingestion: ingestion only
@@ -1506,8 +1540,8 @@ class TestDuplicateDetectionEndpoint:
         assert response.status_code == 202
         assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == ["ingestion"]
 
-    def test_digitization_blocked_by_in_progress_ingestion(self, jobs_test_client, monkeypatch):
-        """The reverse direction is blocked: content being ingested is not re-digitized."""
+    def test_digitization_allowed_when_ingestion_in_progress(self, jobs_test_client, monkeypatch):
+        """Content currently being ingested does not block a digitization either."""
         import digitize.api.v1.jobs as jobs_router_module
 
         mock_hash_db = Mock()
@@ -1521,9 +1555,114 @@ class TestDuplicateDetectionEndpoint:
             "/v1/jobs?operation=digitization&output_format=json", files=[self._pdf("r.pdf")]
         )
 
+        assert response.status_code == 202
+
+    def test_digitization_blocked_by_existing_digitization(self, jobs_test_client, monkeypatch):
+        """Digitization still dedups against its own (hash, 'digitization') row."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        dig_doc = _owner("dig-doc", "r.pdf")
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: dig_doc if op == "digitization" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json", files=[self._pdf("r.pdf")]
+        )
+
+        assert response.status_code == 409
+        assert "dig-doc" in response.text
+
+    def test_ingestion_blocked_by_existing_ingestion(self, jobs_test_client, monkeypatch):
+        """Ingestion still dedups against its own (hash, 'ingestion') row."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        ing_doc = _owner("ing-doc", "r.pdf")
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: ing_doc if op == "ingestion" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion", files=[self._pdf("r.pdf")]
+        )
+
         assert response.status_code == 409
         assert "ing-doc" in response.text
-        assert "ing-job" not in response.text
+
+    def test_digitization_blocked_by_in_progress_digitization_is_skipped_409(self, jobs_test_client, monkeypatch):
+        """Same-operation in-flight duplicate (the `skipped` case) still blocks."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        dig_doc = _owner("dig-doc", "r.pdf", "in_progress", "dig-job")
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: dig_doc if op == "digitization" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=json", files=[self._pdf("r.pdf")]
+        )
+
+        assert response.status_code == 409
+        assert "Currently being processed" in response.text
+
+    def test_ingestion_allowed_when_digitization_in_progress_or_completed(self, jobs_test_client, monkeypatch):
+        """Digitize -> ingest: neither a completed nor an in-flight digitization blocks."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        for status in ("completed", "in_progress"):
+            dig_doc = _owner("dig-doc", "r.pdf", status, "dig-job")
+            mock_hash_db = Mock()
+            mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+            mock_hash_db.get_file_owner = Mock(
+                side_effect=lambda h, op, d=dig_doc: d if op == "digitization" else None
+            )
+            monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+            response = jobs_test_client.post(
+                "/v1/jobs?operation=ingestion", files=[self._pdf("r.pdf")]
+            )
+
+            assert response.status_code == 202, status
+
+    def test_intra_job_duplicates_unaffected_by_other_operation_owner(self, jobs_test_client, monkeypatch):
+        """Within one ingestion job, same-content files are still deduped (second one
+        recorded as skipped) even when a digitization owner exists for that content."""
+        import digitize.api.v1.jobs as jobs_router_module
+        import digitize.app as digitize_app
+
+        dig_doc = _owner("dig-doc", "doc1.pdf")
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: dig_doc if op == "digitization" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        same = b"%PDF-1.4 identical"
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion",
+            files=[
+                ("files", ("doc1.pdf", same, "application/pdf")),
+                ("files", ("doc2.pdf", same, "application/pdf")),
+            ],
+        )
+
+        assert response.status_code == 202
+        init_call = cast(AsyncMock, digitize_app.dg_util.initialize_and_launch).call_args
+        assert init_call.kwargs["filenames"] == ["doc1.pdf"]
+        assert [f.filename for f in init_call.kwargs["skipped_files"]] == ["doc2.pdf"]
+        assert init_call.kwargs["already_exists_files"] == []
+        # the in-batch duplicate is resolved without any registry lookup
+        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == ["ingestion"]
 
 
 # ============================================================================
