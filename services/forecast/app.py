@@ -52,9 +52,7 @@ async def lifespan(app: FastAPI):
     # the error stops startup instead of surfacing on the first connector request.
     validate_cipher()
 
-    triton_problem = triton_url_check()
-    if triton_problem:
-        logger.error(f"{triton_problem}. Forecast requests will fail until this is fixed.")
+    triton_url_check()
 
     yield
 
