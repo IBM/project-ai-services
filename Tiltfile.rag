@@ -303,7 +303,7 @@ local_resource(
 )
 
 # -----------------------------------------------------------------------------
-# Chatbot UI (Vite dev server; vite.tilt.config.js routes to chatbot/similarity like nginx does)
+# Chatbot UI (Vite dev server; vite.tilt.config.js routes to the chatbot like nginx does)
 # -----------------------------------------------------------------------------
 local_resource(
     name="rag-chatbot-ui",
@@ -315,9 +315,8 @@ local_resource(
             npm install
         fi
         export RAG_CHATBOT_URL="http://localhost:{chatbot}"
-        export RAG_SIMILARITY_URL="http://localhost:{similarity}"
         exec npx vite --config vite.tilt.config.js --host 0.0.0.0 --port {ui}
-    """.format(chatbot=rag_chatbot_port, similarity=rag_similarity_port, ui=rag_ui_port),
+    """.format(chatbot=rag_chatbot_port, ui=rag_ui_port),
     resource_deps=["rag-chatbot"],
     labels=["rag", "frontend"],
     links=[link("http://localhost:{}".format(rag_ui_port), "RAG Chatbot UI")],

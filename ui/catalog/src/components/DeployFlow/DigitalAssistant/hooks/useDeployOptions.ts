@@ -9,6 +9,7 @@ import {
 } from "@/api/applications.api";
 import { dedupe } from "@/utils/requestManager";
 import { WORKER_RUNTIME_LABELS } from "@/constants";
+import { getKnowledgeBaseComponents } from "../utils/knowledgeBase";
 
 /** Extracts LLMOption entries for a single provider from its resolved schema. */
 function extractModelsFromSchema(
@@ -155,7 +156,11 @@ export const useDeployOptions = (open: boolean, runtime: string) => {
       }
     };
 
-    deployOptions.global_components.forEach((c) =>
+    // Global components (vector_store, embedding) + reranker (used in Knowledge Base)
+    // are fetched eagerly so their models are available for the Knowledge Base dropdowns.
+    const kbComponents = getKnowledgeBaseComponents(deployOptions);
+
+    kbComponents.forEach((c) =>
       c.providers.forEach((p) => visitGlobal(c.type, p.id)),
     );
     deployOptions.services.forEach((s) =>
@@ -213,7 +218,7 @@ export const useDeployOptions = (open: boolean, runtime: string) => {
     // No fetches needed — build model lists from cache; no .finally callbacks will fire.
     if (globalPairsToFetch.length === 0) {
       const modelsByType: Record<string, LLMOption[]> = {};
-      deployOptions.global_components.forEach((component) => {
+      kbComponents.forEach((component) => {
         modelsByType[component.type] = [];
         component.providers.forEach((provider) => {
           const cached = getProviderParams(
@@ -262,7 +267,7 @@ export const useDeployOptions = (open: boolean, runtime: string) => {
     void Promise.allSettled([
       ...globalPairsToFetch.map(({ componentType, providerId }) => {
         const key = `${componentType}:${providerId}`;
-        const provider = deployOptions.global_components
+        const provider = kbComponents
           .find((c) => c.type === componentType)
           ?.providers.find((p) => p.id === providerId);
         // Clear any stale error before retrying so the banner doesn't flash while in-flight
