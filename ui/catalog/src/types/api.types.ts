@@ -29,6 +29,20 @@ export interface AboutSection {
   sections?: AboutSectionItem[];
 }
 
+export interface CatalogAboutSubSection {
+  title: string;
+  value: string;
+}
+
+export interface CatalogAboutSection {
+  title: string;
+  value?: string;
+  values?: string[] | CatalogAboutSubSection[];
+  sections?: CatalogAboutSection[];
+  ctaLabel?: string;
+  url?: string;
+}
+
 export interface ArchitectureDetailsResponse {
   id: string;
   name: string;

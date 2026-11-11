@@ -1,19 +1,6 @@
 import { api } from "@/api/axios";
 import { SERVICE_ENDPOINTS } from "@/constants/api-endpoints.constants";
-
-export interface AboutSection {
-  title: string;
-  value?: string;
-  values?: string[] | AboutSubSection[];
-  sections?: AboutSection[];
-  ctaLabel?: string;
-  url?: string;
-}
-
-export interface AboutSubSection {
-  title: string;
-  value: string;
-}
+import type { CatalogAboutSection } from "@/types/api.types";
 
 export interface ServiceDetailsData {
   id: string;
@@ -23,7 +10,7 @@ export interface ServiceDetailsData {
   certified_by?: string;
   architectures?: string[];
   standalone?: boolean;
-  about?: AboutSection[];
+  about?: CatalogAboutSection[];
 }
 
 export async function fetchServiceDetails(

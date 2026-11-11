@@ -13,6 +13,7 @@ export interface ModelCardProps {
   certifiedBy: string;
   providers: ModelProvider[];
   onDeploy?: (id: string) => void;
+  onLearnMore?: (id: string) => void;
 }
 
 const ModelCard = ({
@@ -23,6 +24,7 @@ const ModelCard = ({
   certifiedBy,
   providers,
   onDeploy,
+  onLearnMore,
 }: ModelCardProps) => {
   const providerNames = [...new Set(providers.map((p) => p.name))].join(", ");
   const providerTags = [
@@ -36,7 +38,10 @@ const ModelCard = ({
         primaryButtonText={" "}
         secondaryButtonIcon={Deploy}
         secondaryButtonText="Deploy"
+        onPrimaryButtonClick={() => onLearnMore?.(id)}
+        onClick={() => onLearnMore?.(id)}
         onSecondaryButtonClick={() => onDeploy?.(id)}
+        clickZone="two"
         className={styles.productiveCard}
       >
         <div className={styles.cardHeader}>
@@ -46,7 +51,7 @@ const ModelCard = ({
               {componentType.short_name}
             </span>
           </span>
-          <h1 className={styles.cardTitle}>{name}</h1>
+          <h3 className={styles.cardTitle}>{name}</h3>
           <span className={styles.certifiedBy}>By {certifiedBy}</span>
         </div>
         <p className={styles.description}>{description}</p>

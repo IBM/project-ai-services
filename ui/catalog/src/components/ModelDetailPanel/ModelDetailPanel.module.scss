@@ -1,0 +1,61 @@
+@use "carbonTokens" as *;
+
+.componentTypeBadge {
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  color: var(--cds-text-primary);
+}
+
+.checkIcon {
+  color: var(--cds-support-success);
+  flex-shrink: 0;
+}
+
+.section {
+  margin-bottom: $spacing-02;
+}
+
+.sectionTitle {
+  @include type-style("heading-02");
+  color: var(--cds-text-primary);
+  margin: 0 0 $spacing-05 0;
+}
+
+.divider {
+  border: 1px solid var(--cds-border-subtle-01);
+  margin: $spacing-06 0;
+}
+
+.providerList {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.providerCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-04;
+  background-color: var(--cds-layer-01);
+  border: 1px solid var(--cds-border-subtle-01);
+}
+
+.providerInfo {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-02;
+}
+
+.providerName {
+  @include type-style("body-compact-01");
+  color: var(--cds-text-primary);
+}
+
+.providerMeta {
+  display: flex;
+  align-items: center;
+  gap: $spacing-02;
+}

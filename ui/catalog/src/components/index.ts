@@ -18,6 +18,12 @@ export { default as ConnectorDetailsPanel } from "./ConnectorDetailsPanel";
 export type { ConnectorDetailsPanelProps } from "./ConnectorDetailsPanel";
 export { default as WorkerResourcesTable } from "./WorkerResourcesTable";
 export type { WorkerResourcesTableProps } from "./WorkerResourcesTable";
+export { default as ModelCard } from "./ModelCard/ModelCard";
+export type { ModelCardProps } from "./ModelCard/ModelCard";
+export { default as ModelDetailPanel } from "./ModelDetailPanel";
+export type { ModelDetailPanelProps } from "./ModelDetailPanel";
+export { CatalogDetailPanel } from "./CatalogDetailPanel";
+export type { CatalogDetailPanelProps } from "./CatalogDetailPanel";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
   DeployFormData,
