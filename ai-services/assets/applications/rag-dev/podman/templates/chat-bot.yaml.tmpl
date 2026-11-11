@@ -22,16 +22,6 @@ spec:
           value: "{{ .AppName  }}--chat-bot"
         - name: BACKEND_PORT
           value: "5000"
-        - name: SIMILARITY_SEARCH_HOST
-          value: "{{ .AppName  }}--similarity-api"
-        - name: SIMILARITY_SEARCH_PORT
-          value: "7000"
-        - name: CHATBOT_SEARCH_MODE
-          value: "{{ .Values.chatbot.searchMode }}"
-        - name: CHATBOT_NUM_CHUNKS_POST_RERANKER
-          value: "{{ .Values.chatbot.numChunksPostReranker }}"
-        - name: CHATBOT_RERANK
-          value: "{{ .Values.chatbot.rerank }}"
       ports:
         - containerPort: 3000
           protocol: TCP
