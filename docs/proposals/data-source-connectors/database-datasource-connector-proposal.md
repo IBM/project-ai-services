@@ -21,7 +21,6 @@
    - 6.4 [Catalog API Server Enforcement and Validation Rules](#64-catalog-api-server-enforcement-and-validation-rules)
    - 6.5 [Filtering Available Connectors and Datasources by Service Type](#65-filtering-available-connectors-and-datasources-by-service-type)
    - 6.6 [API Models and Deploy Options Propagation](#66-api-models-and-deploy-options-propagation)
-   - 6.7 [UI Guardrails and User Experience](#67-ui-guardrails-and-user-experience)
 
 ---
 
@@ -274,30 +273,30 @@ To provide clean namespacing and avoid polluting the root metadata with multiple
 
 ```yaml
 datasource:
-  required: <boolean>            # Default: false
-  allow_connect: <boolean>       # Default: true (post-creation connect)
-  allow_disconnect: <boolean>    # Default: true if required=false, false if required=true
-  supported_providers: <list>    # Default: [] (all supported)
+  required: <boolean> # Default: false
+  allow_connect: <boolean> # Default: true (post-creation connect)
+  allow_disconnect: <boolean> # Default: true if required=false, false if required=true
+  supported_providers: <list> # Default: [] (all supported)
 ```
 
 #### Settings Reference
 
-| Setting | Type | Default | Description |
-| ------- | ---- | ------- | ----------- |
-| `datasource` | `object` | `nil` (omitted) | If present, indicates the service supports datasources. If omitted, the service does not accept datasources. |
-| `datasource.required` | `boolean` | `false` | When `true`, the service **cannot be created without a datasource**. At least one valid datasource connector must be specified during application creation. |
-| `datasource.allow_connect` | `boolean` | `true` | When `false`, disables connecting/attaching datasources post-application creation. Connect UI actions and API endpoints are blocked. |
-| `datasource.allow_disconnect` | `boolean` | `true` (if `required: false`)<br/>`false` (if `required: true`) | When `false`, disables disconnecting/detaching datasources post-application creation. Disconnect UI actions and API endpoints are blocked. |
-| `datasource.supported_providers` | `list[string]` | `[]` (all supported) | Whitelist of compatible datasource provider IDs (e.g., `[file_system, object_storage]` or `[ibmi-db2, postgresql]`). If omitted or empty, all providers are supported by default. |
+| Setting                          | Type           | Default                                                         | Description                                                                                                                                                                       |
+| -------------------------------- | -------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `datasource`                     | `object`       | `nil` (omitted)                                                 | If present, indicates the service supports datasources. If omitted, the service does not accept datasources.                                                                      |
+| `datasource.required`            | `boolean`      | `false`                                                         | When `true`, the service **cannot be created without a datasource**. At least one valid datasource connector must be specified during application creation.                       |
+| `datasource.allow_connect`       | `boolean`      | `true`                                                          | When `false`, disables connecting/attaching datasources post-application creation. Connect UI actions and API endpoints are blocked.                                              |
+| `datasource.allow_disconnect`    | `boolean`      | `true` (if `required: false`)<br/>`false` (if `required: true`) | When `false`, disables disconnecting/detaching datasources post-application creation. Disconnect UI actions and API endpoints are blocked.                                        |
+| `datasource.supported_providers` | `list[string]` | `[]` (all supported)                                            | Whitelist of compatible datasource provider IDs (e.g., `[file_system, object_storage]` or `[ibmi-db2, postgresql]`). If omitted or empty, all providers are supported by default. |
 
 #### Lifecycle and Compatibility Matrix
 
-| Service Type | `datasource` present? | `required` | `allow_connect` | `allow_disconnect` | `supported_providers` | UI & API Lifecycle Behavior |
-| ------------ | :-------------------: | :--------: | :-------------: | :----------------: | :-------------------: | --------------------------- |
-| **Mandatory DB Service (e.g., DB Query)** | `Yes` | `true` | `false` | `false` | `[ibmi-db2, postgresql]` | Required at creation (filtered to DBs). "Connect Data Source" and "Disconnect" disabled post-creation. |
-| **Dynamic File Service (Digitize)** | `Yes` | `false` | `true` | `true` | `[file_system, object_storage]` | Optional at creation. Connect and disconnect available post-creation (filtered to file providers). |
-| **Static Fixed Service** | `Yes` | `false` | `false` | `false` | `[...]` | Optional at creation. If configured at creation, locked against post-creation changes. |
-| **Non-Datasource Service (Chat)** | `No` (omitted) | — | — | — | — | No datasource capabilities. All datasource UI options and API routes blocked. |
+| Service Type                              | `datasource` present? | `required` | `allow_connect` | `allow_disconnect` |      `supported_providers`      | UI & API Lifecycle Behavior                                                                            |
+| ----------------------------------------- | :-------------------: | :--------: | :-------------: | :----------------: | :-----------------------------: | ------------------------------------------------------------------------------------------------------ |
+| **Mandatory DB Service (e.g., DB Query)** |         `Yes`         |   `true`   |     `false`     |      `false`       |    `[ibmi-db2, postgresql]`     | Required at creation (filtered to DBs). "Connect Data Source" and "Disconnect" disabled post-creation. |
+| **Dynamic File Service (Digitize)**       |         `Yes`         |  `false`   |     `true`      |       `true`       | `[file_system, object_storage]` | Optional at creation. Connect and disconnect available post-creation (filtered to file providers).     |
+| **Static Fixed Service**                  |         `Yes`         |  `false`   |     `false`     |      `false`       |             `[...]`             | Optional at creation. If configured at creation, locked against post-creation changes.                 |
+| **Non-Datasource Service (Chat)**         |    `No` (omitted)     |     —      |        —        |         —          |                —                | No datasource capabilities. All datasource UI options and API routes blocked.                          |
 
 ---
 
@@ -484,18 +483,3 @@ type DeployOptionsService struct {
 ```
 
 ---
-
-### 6.7 UI Guardrails and User Experience
-
-Surfacing the `datasource` configuration in `GET /api/v1/services/{id}/deploy-options` enables consistent, intuitive guardrails across UI workflows:
-
-1. **Application Creation Wizard:**
-   - When `datasource.required` is `true`, the UI marks the datasource selection step as **Required** (displaying a required indicator and validation message).
-   - The "Deploy / Create Application" button remains disabled until a valid datasource is selected.
-   - The datasource picker dropdown automatically queries `GET /api/v1/datasources?service_type=<service_id>` to show only compatible datasource instances.
-2. **Application Details Page — Connect Action:**
-   - If `datasource.allow_connect` is `false`, the **"Connect Data Source"** button/menu item is hidden or disabled with a tooltip:
-     > _"This service requires datasource configuration during creation and does not support connecting datasources post-deployment."_
-3. **Application Details Page — Disconnect Action:**
-   - If `datasource.allow_disconnect` is `false`, the **"Disconnect"** option on the attached datasource card/row is disabled with a tooltip:
-     > _"This datasource cannot be disconnected because the service requires an active datasource to function."_
