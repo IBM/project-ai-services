@@ -590,6 +590,7 @@ def get_all_documents_paginated(
                 "name": doc.name,
                 "type": doc.type,
                 "status": doc.status,
+                "output_format": doc.output_format,
                 "submitted_at": doc.submitted_at.isoformat().replace("+00:00", "Z")
             }
             for doc in documents

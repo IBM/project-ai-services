@@ -89,6 +89,7 @@ class DocumentListItem(BaseModel):
     name: str
     type: str
     status: str
+    output_format: Optional[str] = None
     submitted_at: Optional[str] = None
 
 
