@@ -830,9 +830,7 @@ const JobMonitorPage = () => {
       ),
       status: (
         <div className={styles.statusCell}>
-          {getStatusIcon(jobStatus)}
-          <span className={styles.statusText}>{jobStatus}</span>
-          {hasError && (
+          {hasError ? (
             <Tooltip
               align="bottom"
               autoAlign={true}
@@ -844,10 +842,13 @@ const JobMonitorPage = () => {
                 className={styles.errorInfoButton}
                 aria-label="Error details"
               >
-                <ErrorFilled size={16} className={styles.errorInfoIcon} />
+                {getStatusIcon(jobStatus)}
               </button>
             </Tooltip>
+          ) : (
+            getStatusIcon(jobStatus)
           )}
+          <span className={styles.statusText}>{jobStatus}</span>
         </div>
       ),
       started: job.submitted_at
