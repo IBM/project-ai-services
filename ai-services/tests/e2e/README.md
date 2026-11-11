@@ -124,9 +124,10 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `translation-tests` | Translation service lifecycle plus synchronous (`POST /v1/translate`) and asynchronous jobs (`/v1/translate/jobs`) API coverage (requires `--template=translate`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
 | `sanity-0.4` | Quick happy-path release sanity for a patch branch: RAG (ingest + Q&A), extract, digitize, summarize. See [Running Release Sanity Tests](#running-release-sanity-tests) |
-| `mcp-tests` | **Umbrella label** — all MCP sidecar tests (health checks + tools/list). Podman-only. |
-| `mcp-health` | MCP `/health` endpoint checks for chat, digitize, and similarity sidecars |
+| `mcp-tests` | **Umbrella label** — all MCP sidecar tests (health checks, tools/list, flows). Podman-only. |
+| `mcp-health` | MCP `/health` endpoint checks for the chat, digitize, similarity, summarize, translate, and extract sidecars |
 | `mcp-tools` | MCP `tools/list` checks — verifies each sidecar loaded its OpenAPI spec and registered tools |
+| `mcp-flow` | MCP end-to-end flows driven through the sidecars only: ingest → chat → similarity (rag), sync/async translation (translate), sync/async extraction (extract) |
 | `failure-test` | **Umbrella label** — all negative-path tests across bootstrap, catalog, and similarity. **Skipped by default** unless `--run-failure-tests` is passed; use `--label-filter="failure-test"` to further narrow once unlocked |
 | `bootstrap-failure` | Bootstrap domain failure tests only (`bootstrap_failure_test.go`) — requires `--run-failure-tests` |
 | `catalog-failure` | Catalog domain failure tests only (`catalog_failure_test.go`) — requires `--run-failure-tests` |
@@ -135,8 +136,14 @@ Use Ginkgo label filters to run only the part of the suite you need.
 ### Running MCP Sidecar Tests
 
 The MCP sidecar tests verify that the `mcp-sidecar` container deployed alongside
-each service (chat, digitize, similarity) is healthy and that its OpenAPI spec
-loaded correctly by exercising the `tools/list` MCP endpoint.
+each service (chat, digitize, similarity, summarize, translate, extract) is healthy
+and that its OpenAPI spec loaded correctly by exercising the `tools/list` MCP endpoint.
+The `mcp-flow` specs additionally call the tools end to end.
+
+The translate and extract sidecar specs live inside the `Translation Service E2E Tests`
+and `Entity Extraction Tests` contexts, so they only run when the application is created
+from the matching template (`--template=translate` / `--template=extract`). With the
+default `rag` template they are skipped.
 
 **Prerequisites**
 
@@ -157,6 +164,16 @@ export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
 ginkgo -r -tags "$TAGS" \
   --label-filter="mcp-tests" --timeout=45m \
   ./tests/e2e -- --runtime=podman
+
+# Translate sidecar (health + tools/list + sync/async flow) — template must be set explicitly
+ginkgo -r -tags "$TAGS" \
+  --label-filter="mcp-tests && translation-tests" --timeout=1h \
+  ./tests/e2e -- --template=translate --runtime=podman
+
+# Extract sidecar (health + tools/list + sync/async flow)
+ginkgo -r -tags "$TAGS" \
+  --label-filter="mcp-tests && extraction-tests" --timeout=1h \
+  ./tests/e2e -- --template=extract --runtime=podman
 ```
 
 ### Running Summarization Tests Only

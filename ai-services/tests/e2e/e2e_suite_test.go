@@ -3758,6 +3758,11 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			logger.Infof("[TEST] ✓ malformed JSON correctly rejected with status %d", statusCode)
 		})
+
+		// MCP sidecar specs for the extract template (health, tools/list, sync → async job → result).
+		// Nested here so they inherit the template guard, catalog login and health wait above.
+		ginkgo.Context("MCP Sidecar", ginkgo.Label("mcp-tests"), mcpExtractSpecs)
+
 	})
 
 	ginkgo.Context("Async Entity Extraction Tests", ginkgo.Label("extraction-tests", "extraction-async"), func() {
