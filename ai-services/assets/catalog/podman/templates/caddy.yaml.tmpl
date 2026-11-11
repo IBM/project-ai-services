@@ -48,10 +48,14 @@ spec:
           mountPath: /data:z
         - name: caddy-data
           mountPath: /config:z
-        # Gateway CA, server cert and the plaintext server key (server.key.pem) used by
-        # the :9443 private ingress. Written by the catalog pod, which starts first.
+        # Gateway CA, server cert and the AES-GCM encrypted server key (server.key) used
+        # by the :9443 private ingress. Written by the catalog pod, which starts first.
         - name: gateway-pki
           mountPath: /data/gateway-pki
+          readOnly: true
+        # Secret the encrypted_file module uses to decrypt server.key in memory.
+        - name: catalog-mtls-encryption-secret
+          mountPath: /etc/secret/catalog-mtls-encryption-secret
           readOnly: true
         {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
         - name: caddy-certs
@@ -79,6 +83,9 @@ spec:
     - name: gateway-pki
       persistentVolumeClaim:
         claimName: "gateway-pki"
+    - name: catalog-mtls-encryption-secret
+      secret:
+        secretName: catalog-mtls-encryption-secret
     {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
     - name: caddy-certs
       secret:
