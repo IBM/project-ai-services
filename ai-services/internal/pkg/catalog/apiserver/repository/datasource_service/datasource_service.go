@@ -485,6 +485,18 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 		return uuid.Nil, err
 	}
 
+	// Verify the connector's provider is allowed by every target service's datasource.supported_providers.
+	for _, svc := range linkedServices {
+		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
+		if loadErr != nil {
+			return uuid.Nil, fmt.Errorf("failed to load catalog service %q: %w", svc.ServiceCatalogID, loadErr)
+		}
+
+		if err := validators.ValidateProviderSupported(catalogSvc, connector.Provider, svc.ServiceCatalogID); err != nil {
+			return uuid.Nil, err
+		}
+	}
+
 	connectionDetails, err := s.decryptedConnectionDetails(ctx, connector)
 	if err != nil {
 		return uuid.Nil, err

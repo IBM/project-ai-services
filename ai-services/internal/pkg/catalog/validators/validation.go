@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -495,7 +496,7 @@ func (v *ApplicationValidator) validateOneConnectorRef(
 	if ref.Type == catalogconstants.ConnectorTypeDatasource && !acceptsDatasource {
 		return &ValidationError{
 			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("service %q does not accept datasource connectors (accepts_datasource is not set)", serviceCatalogID),
+			Message: fmt.Sprintf("service %q does not accept datasource connectors", serviceCatalogID),
 		}
 	}
 
@@ -552,35 +553,28 @@ func validateConnectorInDB(
 		}
 	}
 
-	// Provider check: when datasource.supported_providers is non-empty, verify the referenced connector's
-	// provider field is in the allowlist.
-	if catalogService != nil && catalogService.Datasource != nil && len(catalogService.Datasource.SupportedProviders) > 0 {
-		if !isProviderSupported(connector.Provider, catalogService.Datasource.SupportedProviders) {
-			return &ValidationError{
-				Code: http.StatusBadRequest,
-				Message: fmt.Sprintf(
-					"provider %s is not supported by service %s; supported providers: %v",
-					connector.Provider, serviceCatalogID, catalogService.Datasource.SupportedProviders,
-				),
-			}
+	return ValidateProviderSupported(catalogService, connector.Provider, serviceCatalogID)
+}
+
+// ValidateProviderSupported verifies that the datasource provider is allowed by the service's
+// datasource.supported_providers. An empty or absent allowlist permits every provider.
+func ValidateProviderSupported(catalogService *types.Service, provider, serviceCatalogID string) error {
+	if catalogService == nil || catalogService.Datasource == nil {
+		return nil
+	}
+
+	ds := catalogService.Datasource
+	if len(ds.SupportedProviders) > 0 && !slices.Contains(ds.SupportedProviders, provider) {
+		return &ValidationError{
+			Code: http.StatusBadRequest,
+			Message: fmt.Sprintf(
+				"provider %s is not supported by service %s; supported providers: %v",
+				provider, serviceCatalogID, ds.SupportedProviders,
+			),
 		}
 	}
 
 	return nil
-}
-
-// isProviderSupported checks whether the given provider is in the allowlist.
-func isProviderSupported(provider string, supported []string) bool {
-	if len(supported) == 0 {
-		return true
-	}
-	for _, p := range supported {
-		if p == provider {
-			return true
-		}
-	}
-
-	return false
 }
 
 // seenComponent records the first occurrence of a component type/provider pair
