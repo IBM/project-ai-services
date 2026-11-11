@@ -25,6 +25,7 @@ import {
   TextInput,
   InlineLoading,
   Tooltip,
+  Tag,
 } from "@carbon/react";
 import {
   Renew,
@@ -332,6 +333,7 @@ const documentListReducer = (
 
 const headers = [
   { key: "name", header: "Document Name" },
+  { key: "output_format", header: "Output Format" },
   { key: "status", header: "Status" },
   { key: "submitted_at", header: "Submitted" },
   { key: "view_action", header: "" },
@@ -640,6 +642,7 @@ const DocumentListPage = () => {
       // Create rows for export (excluding action columns)
       const exportRows = state.documents.map((doc) => ({
         name: doc.name || doc.filename || "N/A",
+        output_format: doc.output_format || "N/A",
         status: doc.status,
         submitted_at: doc.submitted_at
           ? new Date(doc.submitted_at).toLocaleString("en-US", {
@@ -685,6 +688,13 @@ const DocumentListPage = () => {
     return {
       id: doc.id,
       name: doc.name || doc.filename || "N/A",
+      output_format: doc.output_format ? (
+        <Tag type="cool-gray" size="md">
+          {doc.output_format}
+        </Tag>
+      ) : (
+        "N/A"
+      ),
       status: (
         <div className={styles.statusCell}>
           {hasError ? (
