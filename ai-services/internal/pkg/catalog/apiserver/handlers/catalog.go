@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -246,7 +245,7 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Success		200	{array}		types.Model
+//	@Success		200	{array}		types.ModelSummary
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/catalog/models [get]
@@ -260,20 +259,23 @@ func (h *CatalogHandler) ListModels(c *gin.Context) {
 		return
 	}
 
-	slices.SortFunc(models, func(a, b types.Model) int { return strings.Compare(a.ID, b.ID) })
+	summaries := make([]types.ModelSummary, 0, len(models))
+	for _, m := range models {
+		summaries = append(summaries, m.Summary())
+	}
 
-	c.JSON(http.StatusOK, models)
+	c.JSON(http.StatusOK, summaries)
 }
 
 // GetCatalogModel godoc
 //
 //	@Summary		Get a catalog model
-//	@Description	Returns one model of the catalog. Where several providers serve the model, the entry of the first one found is returned.
+//	@Description	Returns one model of the catalog, with its license, certification and about details. Where several providers serve the model, the entry of the first one found is returned.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
 //	@Param			id	path		string	true	"URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'"
-//	@Success		200	{object}	types.Model
+//	@Success		200	{object}	types.ModelDetail
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		404	{object}	ErrorResponse	"Model not found in catalog"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
@@ -282,12 +284,13 @@ func (h *CatalogHandler) GetCatalogModel(c *gin.Context) {
 	modelID := c.Param("id")
 
 	model, err := h.provider.GetModel(modelID)
-	if errors.Is(err, catalog.ErrModelNotFound) {
-		c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
-
-		return
-	}
 	if err != nil {
+		if errors.Is(err, catalog.ErrModelNotFound) {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
+
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to get model '%s': %v", modelID, err),
 		})
@@ -295,7 +298,7 @@ func (h *CatalogHandler) GetCatalogModel(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, model)
+	c.JSON(http.StatusOK, model.Detail())
 }
 
 // GetModelDeployOptions godoc

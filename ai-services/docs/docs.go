@@ -1651,7 +1651,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model"
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary"
                             }
                         }
                     },
@@ -1677,7 +1677,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns one model of the catalog. Where several providers serve the model, the entry of the first one found is returned.",
+                "description": "Returns one model of the catalog, with its license, certification and about details. Where several providers serve the model, the entry of the first one found is returned.",
                 "produces": [
                     "application/json"
                 ],
@@ -1698,7 +1698,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model"
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail"
                         }
                     },
                     "401": {
@@ -4752,31 +4752,6 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model": {
-            "type": "object",
-            "properties": {
-                "default": {
-                    "description": "whether this is the default model for the provider",
-                    "type": "boolean"
-                },
-                "description": {
-                    "description": "markdown description",
-                    "type": "string"
-                },
-                "id": {
-                    "description": "full model name, e.g. \"ibm-granite/granite-4.1-8b-fp8\"",
-                    "type": "string"
-                },
-                "name": {
-                    "description": "human-readable name",
-                    "type": "string"
-                },
-                "title": {
-                    "description": "short display name",
-                    "type": "string"
-                }
-            }
-        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions": {
             "type": "object",
             "properties": {
@@ -4844,6 +4819,53 @@ const docTemplate = `{
                     }
                 },
                 "schema": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail": {
+            "type": "object",
+            "properties": {
+                "about": {},
+                "certified_by": {
+                    "type": "string"
+                },
+                "default": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "title": {
                     "type": "string"
                 }
             }

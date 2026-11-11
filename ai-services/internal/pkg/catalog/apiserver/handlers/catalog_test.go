@@ -500,8 +500,16 @@ func TestListCatalogModels(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	var list []types.Model
+	var list []types.ModelSummary
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+
+	var raw []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	for _, item := range raw {
+		assert.NotContains(t, item, "about", "the list view leaves out about")
+		assert.NotContains(t, item, "license")
+		assert.NotContains(t, item, "certified_by")
+	}
 
 	ids := make([]string, 0, len(list))
 	for _, m := range list {
@@ -536,10 +544,13 @@ func TestGetCatalogModel(t *testing.T) {
 		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-		var m types.Model
+		var m types.ModelDetail
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
 		assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", m.ID)
 		assert.Equal(t, "Granite 3.3 8B Instruct", m.Name)
+		assert.Equal(t, "Apache-2.0", m.License)
+		assert.Equal(t, "IBM", m.CertifiedBy)
+		assert.NotEmpty(t, m.About, "the get-by-id view includes about")
 	})
 
 	// The model is listed by components (which set a title) and by a connector (which doesn't).
@@ -549,7 +560,7 @@ func TestGetCatalogModel(t *testing.T) {
 			w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct")
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-			var m types.Model
+			var m types.ModelDetail
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
 			require.Equal(t, "granite-3.3-8b-instruct", m.Title)
 		}

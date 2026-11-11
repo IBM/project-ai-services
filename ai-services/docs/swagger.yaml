@@ -938,24 +938,6 @@ definitions:
       version:
         type: string
     type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model:
-    properties:
-      default:
-        description: whether this is the default model for the provider
-        type: boolean
-      description:
-        description: markdown description
-        type: string
-      id:
-        description: full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
-        type: string
-      name:
-        description: human-readable name
-        type: string
-      title:
-        description: short display name
-        type: string
-    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions:
     properties:
       component_type:
@@ -999,6 +981,37 @@ definitions:
           $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployProfile'
         type: array
       schema:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail:
+    properties:
+      about: {}
+      certified_by:
+        type: string
+      default:
+        type: boolean
+      description:
+        type: string
+      id:
+        type: string
+      license:
+        type: string
+      name:
+        type: string
+      title:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary:
+    properties:
+      default:
+        type: boolean
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      title:
         type: string
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:
@@ -2376,7 +2389,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model'
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary'
             type: array
         "401":
           description: Unauthorized - Invalid or missing access token
@@ -2393,8 +2406,9 @@ paths:
       - Catalog
   /catalog/models/{id}:
     get:
-      description: Returns one model of the catalog. Where several providers serve
-        the model, the entry of the first one found is returned.
+      description: Returns one model of the catalog, with its license, certification
+        and about details. Where several providers serve the model, the entry of the
+        first one found is returned.
       parameters:
       - description: URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'
         in: path
@@ -2407,7 +2421,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model'
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail'
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:

@@ -187,7 +187,7 @@ func (p *CatalogProvider) GetModelProviders(deploymentType constants.DeploymentT
 	return result
 }
 
-// GetModels lists every model the catalog knows, once per model id, in no particular order. The
+// GetModels lists every model the catalog knows, once per model id, sorted by id. The
 // models come from the models.yaml of the model components and the "models" connectors.
 //
 // A model served by several providers is returned as listed by the first one in item-key order
@@ -214,6 +214,8 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 			result = append(result, m)
 		}
 	}
+
+	slices.SortFunc(result, func(a, b types.Model) int { return strings.Compare(a.ID, b.ID) })
 
 	return result, nil
 }
