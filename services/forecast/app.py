@@ -14,7 +14,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Request, Response, status
+from fastapi import FastAPI, Request, status
 
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 from common.misc_utils import (
@@ -27,10 +27,10 @@ from forecast.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
-from forecast.db.connection import check_db_reachable, close_db_connections
-from forecast.encryption import EncryptionKeyError, get_cipher
+from forecast.db.connection import close_db_connections
+from forecast.encryption import validate_cipher
 from forecast.errors import register_exception_handlers
-from forecast.triton import is_triton_ready, triton_url_problem
+from forecast.triton import triton_url_check
 
 logger = get_logger("forecast_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -48,24 +48,14 @@ async def lifespan(app: FastAPI):
     configure_uvicorn_logging(settings.common.app.log_level, ["/health"])
     logger.info("Forecast service starting up...")
 
-    # The service starts even when PostgreSQL or Triton is down, because
-    # /health reports both. Only a warning is logged here.
-    if not check_db_reachable():
-        logger.warning("PostgreSQL is not reachable; /health will report 503")
-    # A bad TRITON_URL can never work, so it is reported as a configuration error
-    # instead of the "not reachable" warning, which would point at the network.
-    triton_problem = triton_url_problem()
+    # A bad TRITON_URL can never work, so it is reported at startup.
+    triton_problem = triton_url_check()
     if triton_problem:
         logger.error(f"{triton_problem}. Forecast requests will fail until this is fixed.")
-    elif not is_triton_ready():
-        logger.warning("Triton is not reachable; forecast requests will fail until it is")
 
-    # A missing or invalid key does not stop the service, but creating a connector
-    # needs it and fails until it is fixed.
-    try:
-        get_cipher()
-    except EncryptionKeyError as exc:
-        logger.error(f"{exc} Creating connectors will fail until this is fixed.")
+    # Fail fast: without a valid key the service cannot store connector secrets, so
+    # the error stops startup instead of surfacing on the first connector request.
+    validate_cipher()
 
     yield
 
@@ -123,29 +113,19 @@ async def add_request_id(request: Request, call_next):
 
 @app.get(
     "/health",
+    status_code=status.HTTP_200_OK,
     tags=["health"],
     summary="Health check",
-    description=(
-        "Returns 200 when PostgreSQL is reachable and 503 when it is not. "
-        "The response also reports Triton. An unreachable Triton does not make "
-        "the service unhealthy, because training and connector management still work."
-    ),
+    description="Check if the service is running and healthy. Used for liveness probes.",
+    response_description="Service health status",
 )
-def health_check(response: Response):
-    """Report PostgreSQL and Triton reachability."""
-    postgres_ok = check_db_reachable()
-    triton_ok = is_triton_ready()
+async def health_check():
+    """Perform a basic health check.
 
-    if not postgres_ok:
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-
-    return {
-        "status": "ok" if postgres_ok else "unavailable",
-        "checks": {
-            "postgres": "ok" if postgres_ok else "error",
-            "triton": "ok" if triton_ok else "unreachable",
-        },
-    }
+    Returns:
+        dict: A dictionary indicating the service is running and healthy.
+    """
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 Unit tests for the Forecast service skeleton.
 
 Tests cover:
- - GET /health: PostgreSQL and Triton reachability
+ - GET /health: fixed ok response
  - Middleware: X-Request-ID injection
  - Error envelope for unknown paths, wrong methods, validation errors and
    unexpected exceptions
@@ -31,14 +31,27 @@ from forecast.errors import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _startup_dependencies_stubbed():
+    """Give every app startup a valid key and no network call to Triton.
+
+    Startup validates DB_ENCRYPTION_KEY and the TRITON_URL check makes a request, so
+    tests that start the app need both settled. Tests that need another value patch it again.
+    """
+    from forecast.settings import settings
+
+    with patch.object(
+        settings.forecast, "db_encryption_key", SecretStr("0123456789abcdef0123456789abcdef")
+    ), patch("forecast.app.triton_url_check", return_value=None):
+        yield
+
+
 @pytest.fixture
 def client():
-    """TestClient for the real app, with startup probes and health probes patched."""
+    """TestClient for the real app, with the database close patched out."""
     import forecast.app as forecast_app
 
-    with patch.object(forecast_app, "check_db_reachable", return_value=True), patch.object(
-        forecast_app, "is_triton_ready", return_value=True
-    ), patch.object(forecast_app, "close_db_connections"):
+    with patch.object(forecast_app, "close_db_connections"):
         with TestClient(forecast_app.app) as test_client:
             yield test_client
 
@@ -59,51 +72,8 @@ def _assert_envelope(body: dict, code: str, status: int):
 def test_health_ok(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "checks": {"postgres": "ok", "triton": "ok"}}
+    assert response.json() == {"status": "ok"}
 
-
-@pytest.mark.unit
-def test_health_triton_unreachable_is_still_200():
-    import forecast.app as forecast_app
-
-    with patch.object(forecast_app, "check_db_reachable", return_value=True), patch.object(
-        forecast_app, "is_triton_ready", return_value=False
-    ), patch.object(forecast_app, "close_db_connections"):
-        with TestClient(forecast_app.app) as test_client:
-            response = test_client.get("/health")
-    assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "checks": {"postgres": "ok", "triton": "unreachable"},
-    }
-
-
-@pytest.mark.unit
-def test_health_postgres_down_is_503():
-    import forecast.app as forecast_app
-
-    with patch.object(forecast_app, "check_db_reachable", return_value=False), patch.object(
-        forecast_app, "is_triton_ready", return_value=True
-    ), patch.object(forecast_app, "close_db_connections"):
-        with TestClient(forecast_app.app) as test_client:
-            response = test_client.get("/health")
-    assert response.status_code == 503
-    assert response.json() == {
-        "status": "unavailable",
-        "checks": {"postgres": "error", "triton": "ok"},
-    }
-
-
-@pytest.mark.unit
-def test_service_starts_when_postgres_and_triton_are_down():
-    """Startup must not fail: /health is the place that reports both."""
-    import forecast.app as forecast_app
-
-    with patch.object(forecast_app, "check_db_reachable", return_value=False), patch.object(
-        forecast_app, "is_triton_ready", return_value=False
-    ), patch.object(forecast_app, "close_db_connections"):
-        with TestClient(forecast_app.app) as test_client:
-            assert test_client.get("/health").status_code == 503
 
 
 # ---------------------------------------------------------------------------
@@ -394,62 +364,62 @@ def test_secrets_are_not_printed(monkeypatch):
 
 @pytest.mark.unit
 def test_cipher_requires_a_key():
-    from forecast.encryption import EncryptionKeyError, get_cipher
+    from forecast.encryption import EncryptionKeyError, validate_cipher
     from forecast.settings import settings
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
         with pytest.raises(EncryptionKeyError, match="not found"):
-            get_cipher()
+            validate_cipher()
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("key", ["short", "x" * 31, "x" * 33])
 def test_cipher_rejects_a_key_that_is_not_32_bytes(key):
-    from forecast.encryption import EncryptionKeyError, get_cipher
+    from forecast.encryption import EncryptionKeyError, validate_cipher
     from forecast.settings import settings
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr(key)):
         with pytest.raises(EncryptionKeyError, match="32 bytes"):
-            get_cipher()
+            validate_cipher()
 
 
 @pytest.mark.unit
 def test_cipher_round_trips_with_a_32_byte_key():
-    from forecast.encryption import get_cipher
+    from forecast.encryption import validate_cipher
     from forecast.settings import settings
 
     with patch.object(
         settings.forecast, "db_encryption_key", SecretStr("0123456789abcdef0123456789abcdef")
     ):
-        cipher = get_cipher()
+        cipher = validate_cipher()
     nonce = b"0" * 12
     assert cipher.decrypt(nonce, cipher.encrypt(nonce, b"secret", None), None) == b"secret"
 
 
 @pytest.mark.unit
 def test_key_error_message_does_not_contain_the_key():
-    from forecast.encryption import EncryptionKeyError, get_cipher
+    from forecast.encryption import EncryptionKeyError, validate_cipher
     from forecast.settings import settings
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr("topsecretvalue")):
         with pytest.raises(EncryptionKeyError) as raised:
-            get_cipher()
+            validate_cipher()
     assert "topsecretvalue" not in str(raised.value)
 
 
 @pytest.mark.unit
-def test_startup_logs_an_error_without_a_key_and_still_starts(caplog):
+@pytest.mark.parametrize("key", ["", "x" * 31])
+def test_startup_fails_fast_without_a_valid_key(key):
+    from forecast.encryption import EncryptionKeyError
     import forecast.app as forecast_app
     from forecast.settings import settings
 
-    with patch.object(forecast_app, "check_db_reachable", return_value=True), patch.object(
-        forecast_app, "is_triton_ready", return_value=True
-    ), patch.object(forecast_app, "close_db_connections"), patch.object(
-        settings.forecast, "db_encryption_key", SecretStr("")
-    ), caplog.at_level("ERROR"):
-        with TestClient(forecast_app.app) as test_client:
-            assert test_client.get("/health").status_code == 200
-    assert any("DB_ENCRYPTION_KEY" in record.getMessage() for record in caplog.records)
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        settings.forecast, "db_encryption_key", SecretStr(key)
+    ):
+        with pytest.raises(EncryptionKeyError):
+            with TestClient(forecast_app.app):
+                pass
 
 
 @pytest.mark.unit
@@ -457,9 +427,7 @@ def test_startup_logs_no_error_with_a_valid_key(caplog):
     import forecast.app as forecast_app
     from forecast.settings import settings
 
-    with patch.object(forecast_app, "check_db_reachable", return_value=True), patch.object(
-        forecast_app, "is_triton_ready", return_value=True
-    ), patch.object(forecast_app, "close_db_connections"), patch.object(
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
         settings.forecast, "db_encryption_key", SecretStr("0123456789abcdef0123456789abcdef")
     ), caplog.at_level("ERROR"):
         with TestClient(forecast_app.app):
@@ -471,9 +439,7 @@ def test_startup_logs_no_error_with_a_valid_key(caplog):
 def test_shutdown_logs_when_closing_the_database_fails(caplog):
     import forecast.app as forecast_app
 
-    with patch.object(forecast_app, "check_db_reachable", return_value=True), patch.object(
-        forecast_app, "is_triton_ready", return_value=True
-    ), patch.object(
+    with patch.object(
         forecast_app, "close_db_connections", side_effect=RuntimeError("boom")
     ), caplog.at_level("ERROR"):
         with TestClient(forecast_app.app):
@@ -494,8 +460,11 @@ def test_shutdown_logs_when_closing_the_database_fails(caplog):
 def test_triton_url_with_a_scheme_is_accepted(url):
     import forecast.triton as triton
 
-    with patch.object(triton.settings.forecast, "triton_url", url):
-        assert triton.triton_url_problem() is None
+    with patch.object(triton.settings.forecast, "triton_url", url), patch(
+        "forecast.triton.requests.get"
+    ) as get:
+        get.return_value.status_code = 200
+        assert triton.triton_url_check() is None
 
 
 @pytest.mark.unit
@@ -504,7 +473,7 @@ def test_triton_url_without_http_scheme_is_a_problem(url):
     import forecast.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", url):
-        problem = triton.triton_url_problem()
+        problem = triton.triton_url_check()
     assert problem and "http://" in problem
 
 
@@ -514,7 +483,7 @@ def test_empty_triton_url_is_a_problem(url):
     import forecast.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", url):
-        assert "not set" in triton.triton_url_problem()
+        assert "not set" in triton.triton_url_check()
 
 
 @pytest.mark.unit
@@ -522,255 +491,27 @@ def test_triton_url_problem_does_not_echo_the_value():
     import forecast.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", "user:hunter2@triton:8000"):
-        assert "hunter2" not in triton.triton_url_problem()
-
-
-def _start_app_with_triton_url(url, caplog):
-    import forecast.app as forecast_app
-    from forecast.settings import settings
-
-    with patch.object(forecast_app, "check_db_reachable", return_value=True), patch.object(
-        forecast_app, "close_db_connections"
-    ), patch.object(settings.forecast, "triton_url", url), patch.object(
-        settings.forecast, "db_encryption_key", SecretStr("0123456789abcdef0123456789abcdef")
-    ), caplog.at_level("WARNING"):
-        with TestClient(forecast_app.app) as test_client:
-            response = test_client.get("/health")
-    return response
+        assert "hunter2" not in triton.triton_url_check()
 
 
 @pytest.mark.unit
 def test_startup_reports_a_bad_triton_url_as_a_configuration_error(caplog):
-    response = _start_app_with_triton_url("triton:8000", caplog)
+    import forecast.app as forecast_app
+    import forecast.triton as triton
+    from forecast.settings import settings
+
+    # The real check runs here, so the autouse stub is replaced for this test only.
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        forecast_app, "triton_url_check", triton.triton_url_check
+    ), patch.object(settings.forecast, "triton_url", "triton:8000"), caplog.at_level("ERROR"):
+        with TestClient(forecast_app.app) as test_client:
+            response = test_client.get("/health")
 
     errors = [r for r in caplog.records if r.levelname == "ERROR" and "TRITON_URL" in r.getMessage()]
     assert len(errors) == 1
     assert "triton:8000" not in errors[0].getMessage()
-    assert not any("not reachable" in r.getMessage() and "Triton" in r.getMessage() for r in caplog.records)
-    # /health keeps its documented values and the service stays up.
     assert response.status_code == 200
-    assert response.json()["checks"]["triton"] == "unreachable"
-
-
-@pytest.mark.unit
-def test_startup_warns_when_a_valid_triton_url_is_not_reachable(caplog):
-    import requests
-
-    with patch("forecast.triton.requests.get", side_effect=requests.ConnectionError("down")):
-        _start_app_with_triton_url("http://triton:8000", caplog)
-
-    assert not any("TRITON_URL" in r.getMessage() for r in caplog.records)
-    assert any(r.levelname == "WARNING" and "Triton is not reachable" in r.getMessage() for r in caplog.records)
-
-
-# ---------------------------------------------------------------------------
-# Triton probe
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_triton_probe_false_without_url():
-    import forecast.triton as triton
-
-    with patch.object(triton.settings.forecast, "triton_url", ""):
-        assert triton.is_triton_ready() is False
-
-
-@pytest.mark.unit
-def test_triton_probe_true_on_200():
-    import forecast.triton as triton
-
-    with patch.object(triton.settings.forecast, "triton_url", "http://triton:8000/"), patch(
-        "forecast.triton.requests.get"
-    ) as get:
-        get.return_value.status_code = 200
-        assert triton.is_triton_ready() is True
-        get.assert_called_once_with("http://triton:8000/v2/health/ready", timeout=triton.HEALTH_TIMEOUT_S)
-
-
-@pytest.mark.unit
-def test_triton_probe_false_on_non_200():
-    import forecast.triton as triton
-
-    with patch.object(triton.settings.forecast, "triton_url", "http://triton:8000"), patch(
-        "forecast.triton.requests.get"
-    ) as get:
-        get.return_value.status_code = 503
-        assert triton.is_triton_ready() is False
-
-
-@pytest.mark.unit
-def test_triton_probe_false_on_connection_error():
-    import requests
-
-    import forecast.triton as triton
-
-    with patch.object(triton.settings.forecast, "triton_url", "http://triton:8000"), patch(
-        "forecast.triton.requests.get", side_effect=requests.ConnectionError("refused")
-    ):
-        assert triton.is_triton_ready() is False
-
-
-@pytest.mark.unit
-def test_triton_probe_failure_logs_the_class_but_not_the_url():
-    import requests
-
-    import forecast.triton as triton
-
-    error = requests.ConnectionError("refused http://user:secret@triton:8000")
-    with patch.object(triton.settings.forecast, "triton_url", "http://triton:8000"), patch(
-        "forecast.triton.requests.get", side_effect=error
-    ), patch.object(triton.logger, "debug") as debug:
-        assert triton.is_triton_ready() is False
-    message = debug.call_args.args[0]
-    assert "ConnectionError" in message
-    assert "secret" not in message
-
-
-# ---------------------------------------------------------------------------
-# Database reachability
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _no_probe_left_in_flight():
-    """Start every test without a database probe left over from an earlier one."""
-    import forecast.db.connection as connection
-
-    connection._probe_in_flight = None
-    yield
-    connection._probe_in_flight = None
-
-
-@pytest.mark.unit
-def test_db_reachable_false_without_connection_settings():
-    import forecast.db.connection as connection
-
-    with patch.object(connection, "_check_db_connection", None):
-        assert connection.check_db_reachable() is False
-
-
-@pytest.mark.unit
-def test_db_reachable_follows_the_checker():
-    import forecast.db.connection as connection
-
-    with patch.object(connection, "_check_db_connection", lambda: True):
-        assert connection.check_db_reachable() is True
-    with patch.object(connection, "_check_db_connection", lambda: False):
-        assert connection.check_db_reachable() is False
-
-
-@pytest.mark.unit
-def test_db_probe_gives_up_when_the_database_does_not_answer():
-    import threading
-    import time
-
-    import forecast.db.connection as connection
-
-    release = threading.Event()
-    calls = []
-
-    def hanging_checker():
-        calls.append(1)
-        release.wait(5)
-        return True
-
-    try:
-        with patch.object(connection, "_check_db_connection", hanging_checker):
-            started = time.monotonic()
-            assert connection.check_db_reachable(timeout=0.1) is False
-            assert time.monotonic() - started < 2
-
-            # A second call waits on the probe that is still running.
-            assert connection.check_db_reachable(timeout=0.1) is False
-            assert len(calls) == 1
-    finally:
-        release.set()
-
-
-@pytest.mark.unit
-def test_db_probe_recovers_after_a_hung_probe_finishes():
-    import threading
-
-    import forecast.db.connection as connection
-
-    release = threading.Event()
-
-    def slow_then_fast():
-        release.wait(5)
-        return True
-
-    with patch.object(connection, "_check_db_connection", slow_then_fast):
-        assert connection.check_db_reachable(timeout=0.05) is False
-        release.set()
-        assert connection.check_db_reachable(timeout=2) is True
-        assert connection.check_db_reachable(timeout=2) is True
-
-
-@pytest.mark.unit
-def test_db_probe_false_when_the_checker_raises():
-    import forecast.db.connection as connection
-
-    def broken():
-        raise RuntimeError("boom")
-
-    with patch.object(connection, "_check_db_connection", broken):
-        assert connection.check_db_reachable() is False
-
-
-@pytest.mark.unit
-def test_db_probe_failure_logs_the_class_but_not_the_message():
-    import forecast.db.connection as connection
-
-    def broken():
-        raise RuntimeError("password=secret")
-
-    with patch.object(connection, "_check_db_connection", broken), patch.object(
-        connection.logger, "warning"
-    ) as warning:
-        assert connection.check_db_reachable() is False
-    message = warning.call_args.args[0]
-    assert "RuntimeError" in message
-    assert "secret" not in message
-
-
-@pytest.mark.unit
-def test_db_probe_timeout_is_logged():
-    import threading
-
-    import forecast.db.connection as connection
-
-    release = threading.Event()
-
-    def hanging_checker():
-        release.wait(5)
-        return True
-
-    try:
-        with patch.object(connection, "_check_db_connection", hanging_checker), patch.object(
-            connection.logger, "warning"
-        ) as warning:
-            assert connection.check_db_reachable(timeout=0.05) is False
-        assert "did not answer" in warning.call_args.args[0]
-    finally:
-        release.set()
-
-
-@pytest.mark.unit
-def test_close_db_connections_is_safe_without_engine():
-    import forecast.db.connection as connection
-
-    with patch.object(connection, "_close_db_connections", None):
-        connection.close_db_connections()
-
-
-@pytest.mark.unit
-def test_close_db_connections_calls_the_closer():
-    import forecast.db.connection as connection
-
-    with patch.object(connection, "_close_db_connections") as closer:
-        connection.close_db_connections()
-    closer.assert_called_once_with()
+    assert response.json() == {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ logger = get_logger("forecast_triton")
 HEALTH_TIMEOUT_S = 2
 
 
-def triton_url_problem() -> Optional[str]:
+def triton_url_check() -> Optional[str]:
     """Return what is wrong with TRITON_URL, or None when it can be used.
 
     The value is not echoed, because a URL can carry credentials.
@@ -22,18 +22,9 @@ def triton_url_problem() -> Optional[str]:
         return "TRITON_URL is not set"
     if not url.lower().startswith(("http://", "https://")):
         return "TRITON_URL must start with http:// or https://"
-    return None
-
-
-def is_triton_ready() -> bool:
-    """Return True when Triton answers GET /v2/health/ready with 200."""
-    url = settings.forecast.triton_url.rstrip("/")
-    if not url:
-        return False
     try:
         response = requests.get(f"{url}/v2/health/ready", timeout=HEALTH_TIMEOUT_S)
     except requests.RequestException as exc:
         # Only the exception class is logged: the message can contain the URL.
-        logger.debug(f"Triton readiness probe failed: {type(exc).__name__}")
-        return False
-    return response.status_code == 200
+        return f"Triton readiness probe failed: {type(exc).__name__}"
+    return None

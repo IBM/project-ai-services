@@ -15,7 +15,7 @@ class EncryptionKeyError(RuntimeError):
     """Raised when DB_ENCRYPTION_KEY is missing or is not 32 bytes."""
 
 
-def get_cipher() -> AESGCM:
+def validate_cipher() -> AESGCM:
     """Return the AES-256-GCM cipher built from DB_ENCRYPTION_KEY."""
     raw = settings.forecast.db_encryption_key.get_secret_value()
     if not raw:
