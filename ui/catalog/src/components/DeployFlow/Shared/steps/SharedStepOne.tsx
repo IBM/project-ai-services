@@ -335,20 +335,16 @@ export const SharedStepOne = ({
             <p className={styles.deploymentSectionHeading}>Deployment type</p>
             <div className={styles.deploymentTypeGrid}>
               {Object.entries(WORKER_RUNTIME_LABELS).map(
-                ([value, { label, description, disabled }]) => {
-                  const isSelected =
-                    !disabled && formData.deploymentType === value;
+                ([value, { label, description }]) => {
+                  const isSelected = formData.deploymentType === value;
                   return (
                     <ClickableTile
                       key={value}
                       id={`deployment-type-${value}`}
                       className={`${styles.deploymentTypeTile} ${
                         isSelected ? styles.deploymentTypeTileSelected : ""
-                      } ${disabled ? styles.deploymentTypeTileDisabled : ""}`}
-                      disabled={disabled}
-                      onClick={() =>
-                        !disabled && handleDeploymentTypeChange(value)
-                      }
+                      }`}
+                      onClick={() => handleDeploymentTypeChange(value)}
                     >
                       {isSelected && (
                         <div className={styles.deploymentTypeTileCheck}>

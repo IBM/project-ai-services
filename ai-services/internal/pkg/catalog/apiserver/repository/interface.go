@@ -8,6 +8,18 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
+// ModelServiceInterface defines the contract for model management business logic.
+type ModelServiceInterface interface {
+	// CreateModel creates a model deployment (local pod or remote connector).
+	CreateModel(ctx context.Context, req apimodels.CreateModelRequest) (*apimodels.CreateModelResponse, error)
+	// ListModels returns a paginated, filtered list of the caller's models, local and remote.
+	// req.CreatedBy is required and scopes the list to that user.
+	ListModels(ctx context.Context, req apimodels.ListModelsRequest) (*apimodels.ModelListResponse, error)
+	// GetModelByID returns one model, local or remote, owned by createdBy. A missing model is a
+	// *validators.ValidationError with 404, and another user's model one with 403.
+	GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelDetail, error)
+}
+
 // DatasourceServiceInterface defines the contract for datasource connector business logic.
 type DatasourceServiceInterface interface {
 	// CreateDatasource validates the request, tests the connection, encrypts credentials,

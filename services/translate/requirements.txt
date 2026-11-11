@@ -1,0 +1,4 @@
+## translate-service specific dependencies
+##
+
+httpx==0.28.1

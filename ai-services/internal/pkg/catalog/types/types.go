@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -164,21 +165,36 @@ type ServiceSummary struct {
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
 type Component struct {
-	ID            string `yaml:"id" json:"id"`
-	Name          string `yaml:"name" json:"name"`
-	Description   string `yaml:"description" json:"description"`
-	Type          string `yaml:"type" json:"type"`                           // "component"
-	ComponentType string `yaml:"component_type" json:"component_type"`       // "vector_store", "embedding", "llm", etc.
-	ComponentName string `yaml:"component_name" json:"component_name"`       // Display name for component type (e.g., "Vector store", "Large language model")
-	Default       bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
+	ID          string `yaml:"id" json:"id"`
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+	Type        string `yaml:"type" json:"type"` // "component"
+	// ComponentType is the component type this provider belongs to ("vector_store", "embedding", "llm", etc.).
+	ComponentType ComponentType `yaml:"component_type" json:"component_type"`
+	Default       bool          `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
+	// Category groups components by purpose, e.g. "models" for components that serve a model.
+	Category string `yaml:"category,omitempty" json:"category,omitempty"`
+	// LiteLLM describes how a "models" component is exposed through the LiteLLM gateway.
+	LiteLLM *LiteLLMConfig `yaml:"litellm,omitempty" json:"-"`
+}
+
+// LiteLLMConfig is the gateway registration settings of a model component provider.
+type LiteLLMConfig struct {
+	Provider    string `yaml:"provider"`      // LiteLLM provider prefix, e.g. "hosted_vllm"
+	ModelMode   string `yaml:"model_mode"`    // LiteLLM model mode, e.g. "chat", "embedding", "rerank"
+	APIBasePath string `yaml:"api_base_path"` // path appended to the model server's address, e.g. "/v1"
 }
 
 // Model is one entry in a provider's models.yaml.
 type Model struct {
-	ID          string `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
-	Default     bool   `yaml:"default" json:"default"`         // whether this is the default model for the provider
-	Title       string `yaml:"title" json:"title"`             // short display name
-	Description string `yaml:"description" json:"description"` // markdown description
+	ID             string   `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
+	Default        bool     `yaml:"default" json:"default"`         // whether this is the default model for the provider
+	Title          string   `yaml:"title" json:"title"`             // short display name
+	Name           string   `yaml:"name" json:"name"`               // human-readable name
+	ComponentType  string   `yaml:"component_type" json:"-"`        // model role; set in connector models.yaml only
+	Description    string   `yaml:"description" json:"description"` // markdown description
+	DefaultProfile string   `yaml:"default_profile" json:"-"`       // default hardware profile ID; local providers only
+	Profiles       []string `yaml:"profiles" json:"-"`              // supported hardware profile IDs; local providers only
 }
 
 // ComponentSummary represents a component for list API responses.
@@ -268,6 +284,55 @@ type DeployOptionsService struct {
 	Components        []DeployOptionsComponent `json:"components"`
 	Resources         *Resources               `json:"resources,omitempty"`
 	AcceptsDatasource bool                     `json:"accepts_datasource,omitempty"`
+}
+
+// ModelDeployProfile is a hardware profile a model can be deployed with.
+type ModelDeployProfile struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Default     bool      `json:"default"`
+	Resources   Resources `json:"resources"`
+}
+
+// ModelDeployProvider is a provider (local or remote) a model can be deployed through.
+type ModelDeployProvider struct {
+	ID             string                   `json:"id"`
+	Name           string                   `json:"name"`
+	DeploymentType constants.DeploymentType `json:"deployment_type"` // "local" or "remote"
+	Default        bool                     `json:"default"`
+	Profiles       []ModelDeployProfile     `json:"profiles,omitempty"`
+	Schema         string                   `json:"schema,omitempty"`
+}
+
+// ComponentType describes a component type (llm, embedding, vector_store, ...) by id and display names.
+type ComponentType struct {
+	ID        string `yaml:"id" json:"id"`
+	Name      string `yaml:"name" json:"name"`
+	ShortName string `yaml:"short_name" json:"short_name"`
+}
+
+// UnmarshalYAML accepts either the block form (id/name/short_name) or a bare scalar id (e.g. `llm`),
+// the latter being what user-uploaded bundles use.
+// TODO(BYOS): remove the scalar branch once bundle metadata.yaml moves to the block form.
+func (m *ComponentType) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		m.ID = value.Value
+
+		return nil
+	}
+
+	type plain ComponentType
+
+	return value.Decode((*plain)(m))
+}
+
+// ModelDeployOptions is the response of GET /catalog/models/:id/deploy-options.
+type ModelDeployOptions struct {
+	ID            string                `json:"id"`
+	Name          string                `json:"name"`
+	ComponentType ComponentType         `json:"component_type"`
+	Providers     []ModelDeployProvider `json:"providers"`
 }
 
 // DeployOptionsArchitecture represents deploy options for an architecture.
