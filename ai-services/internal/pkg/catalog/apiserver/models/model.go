@@ -95,3 +95,11 @@ type ModelListResponse struct {
 	Data       []ModelListItem          `json:"data"`
 	Pagination types.PaginationMetadata `json:"pagination"`
 }
+
+// GenerateModelKeyResponse represents the response body returned for POST /api/v1/models/{id}/keys.
+// Key is the raw LiteLLM bearer token; it is shown once and never stored or logged.
+type GenerateModelKeyResponse struct {
+	Key   string `json:"key"`
+	Type  string `json:"type"`
+	Model string `json:"model"`
+}

@@ -28,6 +28,16 @@ type mockModelService struct {
 	createModelFunc func(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error)
 	listModelsFunc  func(ctx context.Context, req models.ListModelsRequest) (*models.ModelListResponse, error)
 	getModelFunc    func(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelDetail, error)
+
+	generateModelKeyFunc func(ctx context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error)
+}
+
+func (m *mockModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error) {
+	if m.generateModelKeyFunc != nil {
+		return m.generateModelKeyFunc(ctx, id, createdBy)
+	}
+
+	return &models.GenerateModelKeyResponse{Key: "sk-test", Type: "public", Model: "m"}, nil
 }
 
 func (m *mockModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelDetail, error) {
@@ -62,6 +72,7 @@ func setupModelRouter(svc repository.ModelServiceInterface, tm *auth.TokenManage
 	router.POST("/api/v1/models", authMw, h.CreateModel)
 	router.GET("/api/v1/models", authMw, h.ListModels)
 	router.GET("/api/v1/models/:id", authMw, h.GetModelByID)
+	router.POST("/api/v1/models/:id/keys", authMw, h.GenerateModelKey)
 
 	return router
 }
@@ -708,4 +719,99 @@ func TestGetModelByID_ResponseShape(t *testing.T) {
 	assert.NotContains(t, raw, "profile")
 	assert.Len(t, raw["applications"], 1)
 	assert.Contains(t, raw, "connected_services")
+}
+
+func TestGenerateModelKey(t *testing.T) {
+	const modelID = "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"
+
+	tests := []struct {
+		name     string
+		path     string
+		noAuth   bool
+		svcErr   error
+		wantCode int
+		wantErr  string
+		wantCall bool
+	}{
+		{name: "key is generated", path: modelID, wantCode: http.StatusCreated, wantCall: true},
+		{name: "missing token is unauthorized", path: modelID, noAuth: true, wantCode: http.StatusUnauthorized},
+		{name: "malformed id is rejected", path: "not-a-uuid", wantCode: http.StatusBadRequest, wantErr: "Invalid model ID format"},
+		{
+			name:     "validation error keeps its status and message",
+			path:     modelID,
+			svcErr:   validators.NotFound("model not found"),
+			wantCode: http.StatusNotFound,
+			wantErr:  "model not found",
+			wantCall: true,
+		},
+		{
+			name:     "gateway failure is a 502",
+			path:     modelID,
+			svcErr:   validators.BadGateway("LiteLLM failed"),
+			wantCode: http.StatusBadGateway,
+			wantErr:  "LiteLLM failed",
+			wantCall: true,
+		},
+		{
+			name:     "internal error is hidden",
+			path:     modelID,
+			svcErr:   errors.New("db password leaked"),
+			wantCode: http.StatusInternalServerError,
+			wantErr:  "Failed to generate model key",
+			wantCall: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				called    bool
+				gotID     uuid.UUID
+				gotUserID string
+			)
+
+			svc := &mockModelService{
+				generateModelKeyFunc: func(_ context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error) {
+					called, gotID, gotUserID = true, id, createdBy
+					if tt.svcErr != nil {
+						return nil, tt.svcErr
+					}
+
+					return &models.GenerateModelKeyResponse{Key: "sk-abc", Type: "public", Model: "ibm-granite/granite-3.3-8b-instruct"}, nil
+				},
+			}
+
+			tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+			router := setupModelRouter(svc, tm)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/models/"+tt.path+"/keys", nil)
+			if !tt.noAuth {
+				token, _, err := tm.GenerateAccessToken("user-123")
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+			assert.Equal(t, tt.wantCall, called)
+
+			if tt.wantErr != "" {
+				var errResp ErrorResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Equal(t, tt.wantErr, errResp.Error)
+			}
+
+			if tt.wantCode == http.StatusCreated {
+				var resp models.GenerateModelKeyResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+				assert.Equal(t, "sk-abc", resp.Key)
+				assert.Equal(t, "public", resp.Type)
+				assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+				assert.Equal(t, modelID, gotID.String())
+				assert.Equal(t, "user-123", gotUserID, "the creator comes from the token")
+			}
+		})
+	}
 }
