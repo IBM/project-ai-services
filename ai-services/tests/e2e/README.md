@@ -121,12 +121,43 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `digitization-tests` | Digitization API coverage against an existing or suite-created application |
 | `similarity-tests` | Similarity API health and `/v1/similarity-search` behavior |
 | `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
+| `translation-tests` | Translation service lifecycle plus synchronous (`POST /v1/translate`) and asynchronous jobs (`/v1/translate/jobs`) API coverage (requires `--template=translate`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
 | `sanity-0.4` | Quick happy-path release sanity for a patch branch: RAG (ingest + Q&A), extract, digitize, summarize. See [Running Release Sanity Tests](#running-release-sanity-tests) |
+| `mcp-tests` | **Umbrella label** — all MCP sidecar tests (health checks + tools/list). Podman-only. |
+| `mcp-health` | MCP `/health` endpoint checks for chat, digitize, and similarity sidecars |
+| `mcp-tools` | MCP `tools/list` checks — verifies each sidecar loaded its OpenAPI spec and registered tools |
 | `failure-test` | **Umbrella label** — all negative-path tests across bootstrap, catalog, and similarity. **Skipped by default** unless `--run-failure-tests` is passed; use `--label-filter="failure-test"` to further narrow once unlocked |
 | `bootstrap-failure` | Bootstrap domain failure tests only (`bootstrap_failure_test.go`) — requires `--run-failure-tests` |
 | `catalog-failure` | Catalog domain failure tests only (`catalog_failure_test.go`) — requires `--run-failure-tests` |
 | `similarity-failure` | Similarity domain failure tests only (`similarity_failure_test.go`) — requires `--run-failure-tests` |
+
+### Running MCP Sidecar Tests
+
+The MCP sidecar tests verify that the `mcp-sidecar` container deployed alongside
+each service (chat, digitize, similarity) is healthy and that its OpenAPI spec
+loaded correctly by exercising the `tools/list` MCP endpoint.
+
+**Prerequisites**
+
+- A running RAG application (podman runtime) with all services healthy.
+
+```bash
+# Run all MCP tests (health + tools/list) — deploys a fresh app automatically
+make test TEST_ARGS="--label-filter=mcp-tests --timeout=45m" APP_RUNTIME=podman
+
+# Run only /health endpoint checks
+make test TEST_ARGS="--label-filter=mcp-health --timeout=10m" APP_NAME=<appname> APP_RUNTIME=podman
+
+# Run only tools/list checks
+make test TEST_ARGS="--label-filter=mcp-tools --timeout=10m" APP_NAME=<appname> APP_RUNTIME=podman
+
+# Using ginkgo CLI directly
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+ginkgo -r -tags "$TAGS" \
+  --label-filter="mcp-tests" --timeout=45m \
+  ./tests/e2e -- --runtime=podman
+```
 
 ### Running Summarization Tests Only
 
@@ -148,6 +179,78 @@ go run github.com/onsi/ginkgo/v2/ginkgo \
 ginkgo -r -tags "$TAGS" \
   --label-filter="summarization-tests" --timeout=3h \
   ./tests/e2e -- --app-name=<appname> --template=summarize --runtime=podman
+```
+
+## Running Translation Tests
+
+The Translation Tests validate the `translate-api` service end-to-end, covering the synchronous API (`POST /v1/translate`) and the asynchronous jobs API (`POST/GET/DELETE /v1/translate/jobs`, job listing, result and download). They also cover negative paths such as invalid languages, unsupported file types, oversized uploads and unknown job IDs.
+
+The translation specs are registered inside the main ordered E2E lifecycle, so the `translation-tests` label selects the lifecycle steps (catalog, login, application create/delete, logout) together with the translation specs. They only run with `--template=translate`; with any other template they are skipped.
+
+Beyond the request/validation checks, the suite runs real async jobs end to end: phase transitions (`chunking` → `translating` → `completed`), completed-job detail, `/result` and `/result/download` (headers and body), markdown/GFM-table preservation, auto-detected source language, context-limit rejection (sync 413) and failed jobs (410 `JOB_FAILED`).
+
+Not automated (need destructive infrastructure changes, non-default service config, or are impractically slow): vLLM semaphore exhausted (429), job semaphore exhausted (429), boot-time recovery of zombie jobs, sync/async behaviour while the vLLM pod is down, and coherence of a multi-chunk document (a run takes ~25 minutes and the model drops sections of very large inputs).
+
+### Prerequisites
+
+- A ppc64le/Spyre host with Podman, or an existing translate application (see the second mode below).
+- `CATALOG_PASSWORD` must be set — the suite runs `catalog login` automatically.
+- Registry credentials must be set when the suite deploys the application itself (`REGISTRY_URL`, `REGISTRY_USER_NAME`, `REGISTRY_PASSWORD`).
+- The Ginkgo CLI version must match the module version (`v2.28.1`) if you use the `ginkgo` command.
+
+### Environment variables
+
+```bash
+# Required
+export CATALOG_PASSWORD="<your-catalog-admin-password>"
+
+# Required only for a from-scratch run (suite pulls the images)
+export REGISTRY_URL="icr.io"
+export REGISTRY_USER_NAME="<your-icr-username>"
+export REGISTRY_PASSWORD="<your-icr-api-key>"
+
+# Optional — defaults to true (self-signed certs)
+export CATALOG_INSECURE=true
+
+# Optional — skip URL discovery and point the specs at an already reachable translate-api
+# export TRANSLATE_URL="https://<host>:<port>"
+```
+
+### Run modes
+
+| Mode | When to use | Flags |
+|---|---|---|
+| From scratch | The suite cleans up any leftover applications and catalog, redeploys the catalog, creates a `translate-app-<runID>` application, runs all specs, then deletes the application. | `-template=translate` |
+| Existing application | Validate an application that is already running. The suite does **not** create or delete it and skips the pre-run cleanup. | `-app-name=<appname> -template=translate` |
+
+> **Note:** `make test` does not forward `-template`, so run the translation tests with `go test` or the `ginkgo` CLI as shown below.
+
+### Commands to Run Translation Tests
+
+Run these from the `ai-services/` directory.
+
+```bash
+export CATALOG_PASSWORD="<your-catalog-admin-password>"
+
+# From scratch — deploys a fresh translate application, runs the specs, then deletes it
+go test ./tests/e2e/... -v \
+  -template translate -runtime podman \
+  --ginkgo.label-filter="translation-tests" \
+  -timeout 90m
+
+# Against an existing application
+go test ./tests/e2e/... -v \
+  -app-name <appname> -template translate -runtime podman \
+  --ginkgo.label-filter="translation-tests" \
+  -timeout 90m
+
+# Using ginkgo CLI directly
+export TAGS="exclude_graphdriver_btrfs containers_image_openpgp remote"
+ginkgo -r --procs=1 -tags "$TAGS" \
+  --label-filter="translation-tests" \
+  --timeout=90m --v \
+  ./tests/e2e \
+  -- -app-name=<appname> -template=translate -runtime=podman
 ```
 
 ## Running Entity Extraction Tests

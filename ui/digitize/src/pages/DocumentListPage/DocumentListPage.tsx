@@ -686,9 +686,7 @@ const DocumentListPage = () => {
       name: doc.name || doc.filename || "N/A",
       status: (
         <div className={styles.statusCell}>
-          {!hasError && getStatusIcon(doc.status)}
-          <span className={styles.statusText}>{doc.status}</span>
-          {hasError && (
+          {hasError ? (
             <Tooltip
               align="bottom"
               autoAlign={true}
@@ -700,10 +698,13 @@ const DocumentListPage = () => {
                 className={styles.errorInfoButton}
                 aria-label="Error details"
               >
-                <ErrorFilled size={16} className={styles.errorInfoIcon} />
+                {getStatusIcon(doc.status)}
               </button>
             </Tooltip>
+          ) : (
+            getStatusIcon(doc.status)
           )}
+          <span className={styles.statusText}>{doc.status}</span>
         </div>
       ),
       submitted_at: doc.submitted_at

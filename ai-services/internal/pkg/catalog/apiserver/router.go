@@ -20,11 +20,13 @@ import (
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, workerRepo dbrepo.WorkerRepository, workerGatewayPort int, datasourceSvc repository.DatasourceServiceInterface, bundleService bundlesvc.BundleServiceInterface, catalogProvider *catalog.CatalogProvider) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, workerRepo dbrepo.WorkerRepository, workerGatewayPort int, datasourceSvc repository.DatasourceServiceInterface, bundleService bundlesvc.BundleServiceInterface, catalogProvider *catalog.CatalogProvider, modelService repository.ModelServiceInterface) *gin.Engine {
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
 	router := gin.Default()
+	// Match routes on the raw path so an encoded model id (ibm-granite%2Fgranite-...) fills :id.
+	router.UseRawPath = true
 
 	// Apply RequestID middleware to all routes
 	router.Use(middleware.RequestIDMiddleware())
@@ -48,8 +50,19 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	registerWorkerRoutes(v1, handlers.NewWorkerHandler(workerReg, workerRepo, vars.RuntimeFactory.GetRuntimeType(), workerGatewayPort), auth)
 	registerDatasourceRoutes(v1, datasourceH, auth)
 	registerBundleRoutes(v1, handlers.NewBundleHandler(bundleService), auth)
+	registerModelRoutes(v1, handlers.NewModelHandler(modelService), auth)
 
 	return router
+}
+
+func registerModelRoutes(v1 *gin.RouterGroup, h *handlers.ModelHandler, authMw gin.HandlerFunc) {
+	g := v1.Group("models")
+	g.Use(authMw)
+	{
+		g.POST("", h.CreateModel)
+		g.GET("", h.ListModels)
+		g.GET("/:id", h.GetModelByID)
+	}
 }
 
 func registerAuthRoutes(v1 *gin.RouterGroup, h *handlers.AuthHandler, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist) {
@@ -78,6 +91,7 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/services/:id/images", catalog.GetServiceImages)
 		g.GET("/services/:id/models", catalog.GetServiceModels)
 		g.GET("/services/:id/steps", catalog.GetServiceSteps)
+		g.GET("/catalog/models/:id/deploy-options", catalog.GetModelDeployOptions)
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)
 		g.GET("/connectors/:connector_type/providers/:provider_id/params", catalog.GetConnectorProviderParams)

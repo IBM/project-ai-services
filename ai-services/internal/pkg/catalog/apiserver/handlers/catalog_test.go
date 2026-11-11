@@ -489,4 +489,54 @@ func TestGetArchitectureModels(t *testing.T) {
 	}
 }
 
+func TestGetModelDeployOptions(t *testing.T) {
+	router := setupTestRouter()
+	router.UseRawPath = true
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/catalog/models/:id/deploy-options", handler.GetModelDeployOptions)
+
+	get := func(url string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		router.ServeHTTP(w, req)
+
+		return w
+	}
+
+	t.Run("model id containing an encoded slash", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct/deploy-options?runtime=podman")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var opts types.ModelDeployOptions
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &opts))
+		assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", opts.ID)
+		assert.NotEmpty(t, opts.Providers)
+	})
+
+	t.Run("provider_id filter", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct/deploy-options?runtime=podman&provider_id=vllm-cpu")
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var opts types.ModelDeployOptions
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &opts))
+		require.Len(t, opts.Providers, 1)
+		assert.Equal(t, "vllm-cpu", opts.Providers[0].ID)
+	})
+
+	t.Run("invalid runtime", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct/deploy-options?runtime=docker")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("unknown model", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/no%2Fsuch-model/deploy-options?runtime=podman")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("unencoded slash does not match the route", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm-granite/granite-3.3-8b-instruct/deploy-options?runtime=podman")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
 // Made with Bob

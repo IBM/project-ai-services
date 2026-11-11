@@ -31,6 +31,9 @@ type ComponentRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ComponentStatus, message string) error
 	// UpdateEndpoints updates only the endpoints of a component.
 	UpdateEndpoints(ctx context.Context, id uuid.UUID, endpoints []map[string]any) error
+	// UpdateMetadata updates only the metadata of a component. It replaces the stored metadata, so
+	// a caller that wants to keep existing keys must start from GetByID's Metadata.
+	UpdateMetadata(ctx context.Context, id uuid.UUID, metadata map[string]any) error
 	// Delete removes a component from the database.
 	Delete(ctx context.Context, id uuid.UUID) error
 	// ExistsByTypeAndProvider reports whether any row in the components table has the given type and provider.
@@ -373,6 +376,32 @@ func (r *componentRepo) UpdateEndpoints(ctx context.Context, id uuid.UUID, endpo
 	_, err = r.pool.Exec(ctx, query, endpointsJSON, id)
 	if err != nil {
 		return fmt.Errorf("failed to update component endpoints: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateMetadata updates only the metadata of a component.
+func (r *componentRepo) UpdateMetadata(ctx context.Context, id uuid.UUID, metadata map[string]any) error {
+	query := `
+		UPDATE components
+		SET metadata = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+
+	// Marshal metadata to JSONB
+	var metadataJSON []byte
+	var err error
+	if metadata != nil {
+		metadataJSON, err = json.Marshal(metadata)
+		if err != nil {
+			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+	}
+
+	_, err = r.pool.Exec(ctx, query, metadataJSON, id)
+	if err != nil {
+		return fmt.Errorf("failed to update component metadata: %w", err)
 	}
 
 	return nil

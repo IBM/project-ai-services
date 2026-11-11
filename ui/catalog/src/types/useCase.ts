@@ -4,7 +4,7 @@ export interface UseCase {
   description: string;
   creator: string;
   domain: string;
-  architectures: string[];
+  services: string[];
   assets: string[];
   tag: string[];
   demo?: string;

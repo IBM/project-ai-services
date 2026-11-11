@@ -5,6 +5,7 @@ on:
     paths:
       - 'mcp/**'
       - .github/workflows/mcp-go.yaml
+      - .github/workflows/go-checks.yml
     branches:
       - main
       - 'release-*'
@@ -21,3 +22,4 @@ jobs:
     uses: ./.github/workflows/go-checks.yml
     with:
       working-directory: 'mcp'
+      skipSwaggerValidation: true

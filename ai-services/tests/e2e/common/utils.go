@@ -70,8 +70,16 @@ func DrainAndClose(body io.ReadCloser) {
 	_ = body.Close()
 }
 
-// DoRequest sends an HTTP request and returns (responseBody, statusCode, error).
-func DoRequest(ctx context.Context, method, url string, body *bytes.Buffer, contentType string, config HTTPClientConfig) ([]byte, int, error) {
+// HTTPResponse is a fully read HTTP response, including headers.
+type HTTPResponse struct {
+	Body       []byte
+	StatusCode int
+	Header     http.Header
+}
+
+// DoRequestFull sends an HTTP request and returns the full response (body, status and headers).
+// The response is nil when the request itself could not be sent.
+func DoRequestFull(ctx context.Context, method, url string, body *bytes.Buffer, contentType string, config HTTPClientConfig) (*HTTPResponse, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = body
@@ -79,7 +87,7 @@ func DoRequest(ctx context.Context, method, url string, body *bytes.Buffer, cont
 
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if contentType != "" {
@@ -89,16 +97,31 @@ func DoRequest(ctx context.Context, method, url string, body *bytes.Buffer, cont
 	client := GetHTTPClient(config)
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer DrainAndClose(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("failed to read response: %w", err)
+		return &HTTPResponse{StatusCode: resp.StatusCode, Header: resp.Header}, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	return respBody, resp.StatusCode, nil
+	return &HTTPResponse{Body: respBody, StatusCode: resp.StatusCode, Header: resp.Header}, nil
+}
+
+// DoRequest sends an HTTP request and returns (responseBody, statusCode, error).
+func DoRequest(ctx context.Context, method, url string, body *bytes.Buffer, contentType string, config HTTPClientConfig) ([]byte, int, error) {
+	resp, err := DoRequestFull(ctx, method, url, body, contentType, config)
+	if resp == nil {
+		return nil, 0, err
+	}
+
+	return resp.Body, resp.StatusCode, err
+}
+
+// DoGETFull sends a GET request and returns the full response including headers.
+func DoGETFull(ctx context.Context, url string, config HTTPClientConfig) (*HTTPResponse, error) {
+	return DoRequestFull(ctx, http.MethodGet, url, nil, "", config)
 }
 
 // DoGET sends a GET request.
@@ -205,6 +228,32 @@ func ExpectErrorResponse(body []byte, statusCode, successStatus int) (*ErrorResp
 	return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
 }
 
+// ServiceErrorResponse is the error envelope returned by services whose error code is a string
+// and whose status is the numeric HTTP status.
+// Shape: {"error":{"code":"EMPTY_INPUT","message":"...","status":400}}.
+type ServiceErrorResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Status  int    `json:"status"`
+	} `json:"error,omitempty"`
+}
+
+// ExpectErrorAs parses an error body into T when statusCode != successStatus.
+// Returns an error if the server unexpectedly returned a success status.
+func ExpectErrorAs[T any](body []byte, statusCode, successStatus int) (*T, error) {
+	if statusCode == successStatus {
+		return nil, fmt.Errorf("unexpected success with status code %d: %s", statusCode, string(body))
+	}
+
+	var errResp T
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		return nil, fmt.Errorf("failed to parse error response (status %d): %w, body: %s", statusCode, err, string(body))
+	}
+
+	return &errResp, nil
+}
+
 // GetTestPDFPath returns the absolute path to the shared test PDF fixture (test_doc.pdf)
 // located at ingestion/docs/test_doc.pdf relative to the e2e tests root.
 // Returns an empty string if the caller location cannot be resolved.
@@ -216,6 +265,18 @@ func GetTestPDFPath() string {
 
 	// common/ is one level below the e2e root; ingestion/docs is a sibling of common/.
 	return filepath.Join(filepath.Dir(filepath.Dir(filename)), "ingestion", "docs", "test_doc.pdf")
+}
+
+// PathFromCaller joins elem onto the directory of the source file that calls it, so fixtures
+// can be located independent of the working directory. Returns an empty string if the caller
+// location cannot be resolved.
+func PathFromCaller(elem ...string) string {
+	_, filename, _, ok := runtime.Caller(1)
+	if !ok {
+		return ""
+	}
+
+	return filepath.Join(append([]string{filepath.Dir(filename)}, elem...)...)
 }
 
 // IsResourceLockedError reports whether err is an HTTP 409 resource-lock error.
