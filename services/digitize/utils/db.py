@@ -38,6 +38,8 @@ from digitize.db.models import (
     DocumentSource,
     JobSource,
 )
+from digitize.connectors.models import LAST_SYNC_ERROR_PREFIX
+
 from digitize.db.manager import db_manager
 from digitize.db.connection import engine
 
@@ -1522,7 +1524,8 @@ def init_sync_log_and_update_connector(
     Initialise a new sync run across two tables:
       - connector_sync_log: inserts a new row with status=STARTED and an
         auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
-      - connector: sets status=SYNCING on the matching row.
+      - connector: sets status=SYNCING on the matching row (message is kept so
+        a previous failure stays visible).
 
     Returns the generated seq value.
     """
@@ -1547,7 +1550,8 @@ def finalize_sync_log_and_update_connector(
         and optional file counts / error message.
       - connector: UPDATEs last_sync_at to now, status to the terminal
         state, and message — CANCELLED/FAILED both map to OUT_OF_SYNC so
-        the scheduler can retry; COMPLETED clears message to NULL.
+        the scheduler can retry; COMPLETED clears message to NULL, FAILED
+        sets it, CANCELLED leaves it unchanged.
 
     Returns True on success, False if the sync-log row was not found.
     """
@@ -1564,7 +1568,7 @@ def finalize_sync_log_and_update_connector(
     )
     if not found:
         return False
-    connector_message = f"Error from last sync: {error}" if error else None
+    connector_message = f"{LAST_SYNC_ERROR_PREFIX} {error}" if error else None
     db_manager.update_connector_after_sync(
         connector_id, status=status, last_sync_at=now, message=connector_message
     )
@@ -1574,8 +1578,12 @@ def finalize_sync_log_and_update_connector(
 def update_connector_total_files_and_message(
     connector_id: str, total_files: int, message: str
 ) -> None:
-    """Update total_files and message on the connector row in a single DB call."""
-    db_manager.update_connector(connector_id=connector_id, total_files=total_files, message=message)
+    """Update total_files and message on the connector row in a single DB call.
+
+    A failure message left by a previous sync is preserved (sticky until a
+    sync completes successfully); only total_files is updated in that case.
+    """
+    db_manager.update_connector_total_files_and_progress_message(connector_id, total_files, message)
 
 
 def set_connector_message(connector_id: str, error: Optional[str]) -> None:
