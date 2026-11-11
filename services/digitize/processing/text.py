@@ -2,9 +2,9 @@
 Text processing: extraction from PDF, DOCX, HTML, Markdown, and text converted documents.
 
 Responsibilities:
-- process_text      — PDF text extraction with TOC / font-size header levels
-- process_text_docx — DOCX text extraction with TOC / fallback header levels
-- process_text_html — HTML/Markdown/text extraction with heading level mapping
+- process_text             — PDF text extraction with TOC / font-size header levels
+- process_text_docx        — DOCX text extraction with TOC / fallback header levels
+- process_text_html_md_txt — HTML/Markdown/text extraction with heading level mapping
 """
 
 import json
@@ -21,7 +21,7 @@ excluded_labels = {
 
 
 def _build_structured_text(converted_doc, src_path, out_path, resolve_header, page_count):
-    """Shared by process_text_docx / process_text_html (page-less formats).
+    """Shared by process_text_docx / process_text_html_md_txt (page-less formats).
 
     resolve_header(text_obj, last_level) -> (header_text, new_last_level)
     """
@@ -82,7 +82,7 @@ def process_text_docx(converted_doc, docx_path, out_path):
     return _build_structured_text(converted_doc, docx_path, out_path, resolve, page_count)
 
 
-def process_text_html(converted_doc, html_path, out_path):
+def process_text_html_md_txt(converted_doc, doc_path, out_path):
     """
     Process text content from HTML, Markdown, and plain-text files.
     Extracts structured text and maps headings to markdown-style hashes
@@ -98,7 +98,7 @@ def process_text_html(converted_doc, html_path, out_path):
 
     chars = sum(len(t.text) for t in converted_doc.texts) if converted_doc.texts else 0
     page_count = max(1, math.ceil(chars / CHARS_PER_PAGE))
-    return _build_structured_text(converted_doc, html_path, out_path, resolve, page_count)
+    return _build_structured_text(converted_doc, doc_path, out_path, resolve, page_count)
 
 
 def process_text(converted_doc, doc_path, out_path):

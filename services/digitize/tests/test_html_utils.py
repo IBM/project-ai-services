@@ -1,5 +1,5 @@
 """
-Unit tests for HTML text processing in digitize.processing.text.
+Unit tests for HTML, Markdown, and plain text processing in digitize.processing.text.
 """
 
 import json
@@ -12,7 +12,7 @@ import pytest
 from digitize.processing.text import (
     _build_structured_text,
     process_text_docx,
-    process_text_html,
+    process_text_html_md_txt,
 )
 
 
@@ -24,11 +24,11 @@ def _make_text_obj(label: str, text: str, level: int | None = None):
 
 
 @pytest.mark.unit
-class TestProcessTextHtml:
-    """Tests for process_text_html function."""
+class TestProcessTextHtmlMdTxt:
+    """Tests for process_text_html_md_txt function."""
 
-    def test_process_text_html_headings_mapping(self, tmp_path):
-        """Test that HTML title and section headers are mapped with markdown hashes."""
+    def test_process_text_html_md_txt_headings_mapping(self, tmp_path):
+        """Test that HTML/MD title and section headers are mapped with markdown hashes."""
         texts = [
             _make_text_obj("title", "Main Page Title"),
             _make_text_obj("text", "Some introductory paragraph."),
@@ -40,7 +40,7 @@ class TestProcessTextHtml:
         doc = SimpleNamespace(texts=texts)
         out_path = tmp_path / "out.json"
 
-        page_count, process_time = process_text_html(doc, "sample.html", out_path)
+        page_count, process_time = process_text_html_md_txt(doc, "sample.html", out_path)
 
         assert page_count >= 1
         assert process_time >= 0.0
@@ -80,7 +80,7 @@ class TestProcessTextHtml:
             "font_size": None,
         }
 
-    def test_process_text_html_excludes_labels(self, tmp_path):
+    def test_process_text_html_md_txt_excludes_labels(self, tmp_path):
         """Test that caption, page_header, page_footer, footnote, and reference are excluded."""
         texts = [
             _make_text_obj("title", "Doc Title"),
@@ -94,31 +94,31 @@ class TestProcessTextHtml:
         doc = SimpleNamespace(texts=texts)
         out_path = tmp_path / "out.json"
 
-        page_count, _ = process_text_html(doc, "sample.html", out_path)
+        page_count, _ = process_text_html_md_txt(doc, "sample.html", out_path)
 
         records = json.loads(out_path.read_text(encoding="utf-8"))
         assert len(records) == 2
         assert records[0]["text"] == "# Doc Title"
         assert records[1]["text"] == "Body content"
 
-    def test_process_text_html_empty_doc(self, tmp_path):
+    def test_process_text_html_md_txt_empty_doc(self, tmp_path):
         """Test that empty texts list writes empty JSON and returns page_count >= 1."""
         doc = SimpleNamespace(texts=[])
         out_path = tmp_path / "out.json"
 
-        page_count, process_time = process_text_html(doc, "empty.html", out_path)
+        page_count, process_time = process_text_html_md_txt(doc, "empty.html", out_path)
 
         assert page_count == 1
         assert process_time == 0.0
         assert json.loads(out_path.read_text(encoding="utf-8")) == []
 
-    def test_process_text_html_page_count_estimation(self, tmp_path):
+    def test_process_text_html_md_txt_page_count_estimation(self, tmp_path):
         """Test that page count estimation handles large text accurately (3000 chars per page)."""
         long_text = "A" * 7000  # ceil(7000 / 3000) = 3 pages
         doc = SimpleNamespace(texts=[_make_text_obj("text", long_text)])
         out_path = tmp_path / "out.json"
 
-        page_count, _ = process_text_html(doc, "long.html", out_path)
+        page_count, _ = process_text_html_md_txt(doc, "long.html", out_path)
         assert page_count == 3
 
 
@@ -151,16 +151,16 @@ class TestProcessConvertedDocumentDispatch:
 
     @patch("digitize.processing.orchestrator.process_table")
     @patch("digitize.processing.orchestrator.detect_document_language")
-    @patch("digitize.processing.orchestrator.process_text_html")
+    @patch("digitize.processing.orchestrator.process_text_html_md_txt")
     @patch("digitize.processing.orchestrator.process_text_docx")
     @patch("digitize.processing.orchestrator.process_text")
     @patch("digitize.processing.orchestrator.DoclingDocument.load_from_json")
-    def test_dispatches_to_html_processor_for_html(
+    def test_dispatches_to_html_md_txt_processor_for_html(
         self,
         mock_load,
         mock_process_text,
         mock_process_docx,
-        mock_process_html,
+        mock_process_html_md_txt,
         mock_detect_lang,
         mock_process_table,
         tmp_path,
@@ -168,7 +168,7 @@ class TestProcessConvertedDocumentDispatch:
         from digitize.processing.orchestrator import process_converted_document
 
         mock_load.return_value = Mock()
-        mock_process_html.return_value = (2, 0.12)
+        mock_process_html_md_txt.return_value = (2, 0.12)
         mock_detect_lang.return_value = "EN"
         mock_process_table.return_value = (0, 0.05, {})
 
@@ -190,7 +190,7 @@ class TestProcessConvertedDocumentDispatch:
             doc_id="doc1",
         )
 
-        mock_process_html.assert_called_once()
+        mock_process_html_md_txt.assert_called_once()
         mock_process_docx.assert_not_called()
         mock_process_text.assert_not_called()
         assert res[2] == 2  # page_count
@@ -198,16 +198,16 @@ class TestProcessConvertedDocumentDispatch:
     @pytest.mark.parametrize("doc_path", ["notes.md", "notes.txt", "NOTES.MD"])
     @patch("digitize.processing.orchestrator.process_table")
     @patch("digitize.processing.orchestrator.detect_document_language")
-    @patch("digitize.processing.orchestrator.process_text_html")
+    @patch("digitize.processing.orchestrator.process_text_html_md_txt")
     @patch("digitize.processing.orchestrator.process_text_docx")
     @patch("digitize.processing.orchestrator.process_text")
     @patch("digitize.processing.orchestrator.DoclingDocument.load_from_json")
-    def test_dispatches_to_html_processor_for_md_and_txt(
+    def test_dispatches_to_html_md_txt_processor_for_md_and_txt(
         self,
         mock_load,
         mock_process_text,
         mock_process_docx,
-        mock_process_html,
+        mock_process_html_md_txt,
         mock_detect_lang,
         mock_process_table,
         doc_path,
@@ -216,7 +216,7 @@ class TestProcessConvertedDocumentDispatch:
         from digitize.processing.orchestrator import process_converted_document
 
         mock_load.return_value = Mock()
-        mock_process_html.return_value = (1, 0.1)
+        mock_process_html_md_txt.return_value = (1, 0.1)
         mock_detect_lang.return_value = "EN"
         mock_process_table.return_value = (0, 0.05, {})
 
@@ -235,14 +235,14 @@ class TestProcessConvertedDocumentDispatch:
             doc_id="doc4",
         )
 
-        mock_process_html.assert_called_once()
+        mock_process_html_md_txt.assert_called_once()
         mock_process_docx.assert_not_called()
         mock_process_text.assert_not_called()
         assert res[2] == 1
 
     @patch("digitize.processing.orchestrator.process_table")
     @patch("digitize.processing.orchestrator.detect_document_language")
-    @patch("digitize.processing.orchestrator.process_text_html")
+    @patch("digitize.processing.orchestrator.process_text_html_md_txt")
     @patch("digitize.processing.orchestrator.process_text_docx")
     @patch("digitize.processing.orchestrator.process_text")
     @patch("digitize.processing.orchestrator.DoclingDocument.load_from_json")
@@ -251,7 +251,7 @@ class TestProcessConvertedDocumentDispatch:
         mock_load,
         mock_process_text,
         mock_process_docx,
-        mock_process_html,
+        mock_process_html_md_txt,
         mock_detect_lang,
         mock_process_table,
         tmp_path,
@@ -281,13 +281,13 @@ class TestProcessConvertedDocumentDispatch:
         )
 
         mock_process_docx.assert_called_once()
-        mock_process_html.assert_not_called()
+        mock_process_html_md_txt.assert_not_called()
         mock_process_text.assert_not_called()
         assert res[2] == 3
 
     @patch("digitize.processing.orchestrator.process_table")
     @patch("digitize.processing.orchestrator.detect_document_language")
-    @patch("digitize.processing.orchestrator.process_text_html")
+    @patch("digitize.processing.orchestrator.process_text_html_md_txt")
     @patch("digitize.processing.orchestrator.process_text_docx")
     @patch("digitize.processing.orchestrator.process_text")
     @patch("digitize.processing.orchestrator.DoclingDocument.load_from_json")
@@ -296,7 +296,7 @@ class TestProcessConvertedDocumentDispatch:
         mock_load,
         mock_process_text,
         mock_process_docx,
-        mock_process_html,
+        mock_process_html_md_txt,
         mock_detect_lang,
         mock_process_table,
         tmp_path,
@@ -326,6 +326,6 @@ class TestProcessConvertedDocumentDispatch:
         )
 
         mock_process_text.assert_called_once()
-        mock_process_html.assert_not_called()
+        mock_process_html_md_txt.assert_not_called()
         mock_process_docx.assert_not_called()
         assert res[2] == 10

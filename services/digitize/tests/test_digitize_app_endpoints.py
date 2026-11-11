@@ -364,11 +364,13 @@ class TestCreateJobs:
 
         assert response.status_code == 415
 
-    def test_mixed_pdf_docx_and_html_ingestion(self, digitize_test_client):
-        """Test ingestion job with PDF, DOCX, and HTML files."""
+    def test_mixed_all_formats_ingestion(self, digitize_test_client):
+        """Test ingestion job with PDF, DOCX, HTML, Markdown, and text files."""
         pdf_header = b"%PDF-1.4 test"
         docx_header = b"PK\x03\x04\x14\x00\x06\x00"
         html_content = b"<!DOCTYPE html><html><body><h1>Title</h1></body></html>"
+        md_content = b"# Markdown Title\n\nSome content"
+        txt_content = b"Plain text content"
 
         response = digitize_test_client.post(
             "/v1/jobs?operation=ingestion",
@@ -376,6 +378,8 @@ class TestCreateJobs:
                 ("files", ("document.pdf", pdf_header, "application/pdf")),
                 ("files", ("document.docx", docx_header, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
                 ("files", ("document.html", html_content, "text/html")),
+                ("files", ("document.md", md_content, "text/markdown")),
+                ("files", ("document.txt", txt_content, "text/plain")),
             ],
         )
 
