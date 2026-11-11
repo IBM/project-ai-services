@@ -439,6 +439,10 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 		return nil
 	}
 
+	if err := validateMaxConnectionsAtCreation(service, catalogService); err != nil {
+		return err
+	}
+
 	if connectorRepo == nil {
 		return errors.New("connector repository is not configured; cannot validate connector refs")
 	}
@@ -554,6 +558,51 @@ func validateConnectorInDB(
 	}
 
 	return ValidateProviderSupported(catalogService, connector.Provider, serviceCatalogID)
+}
+
+// validateMaxConnectionsAtCreation enforces datasource.max_connections at application-creation time.
+// It checks that the number of datasource connector refs supplied for the service does not exceed the limit.
+func validateMaxConnectionsAtCreation(service apimodels.Service, catalogService *types.Service) error {
+	if catalogService == nil || catalogService.Datasource == nil || catalogService.Datasource.MaxConnections == nil {
+		return nil
+	}
+
+	max := *catalogService.Datasource.MaxConnections
+	var count int
+
+	for _, ref := range service.Connectors {
+		if ref.Type == catalogconstants.ConnectorTypeDatasource {
+			count++
+		}
+	}
+
+	if count > max {
+		return BadRequest(
+			"service %q allows at most %d datasource(s), but %d were provided",
+			service.CatalogID, max, count,
+		)
+	}
+
+	return nil
+}
+
+// ValidateMaxConnectionsOnConnect enforces datasource.max_connections for a post-creation connect
+// request. existingCount is the number of datasources already attached to the target service.
+// Returns a *ValidationError with 422 when the limit would be exceeded.
+func ValidateMaxConnectionsOnConnect(catalogService *types.Service, serviceCatalogID string, existingCount int) error {
+	if catalogService == nil || catalogService.Datasource == nil || catalogService.Datasource.MaxConnections == nil {
+		return nil
+	}
+
+	max := *catalogService.Datasource.MaxConnections
+	if existingCount >= max {
+		return Unprocessable(
+			"service %q already has the maximum of %d connected datasource(s)",
+			serviceCatalogID, max,
+		)
+	}
+
+	return nil
 }
 
 // ValidateProviderSupported verifies that the datasource provider is allowed by the service's
