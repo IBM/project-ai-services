@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -487,6 +488,63 @@ func TestGetArchitectureModels(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestListCatalogModels(t *testing.T) {
+	router := setupTestRouter()
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/catalog/models", handler.ListModels)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/catalog/models", nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var list []types.Model
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+
+	ids := make([]string, 0, len(list))
+	for _, m := range list {
+		ids = append(ids, m.ID)
+	}
+
+	assert.Contains(t, ids, "ibm-granite/granite-3.3-8b-instruct")
+	assert.True(t, slices.IsSorted(ids), "models are sorted by id")
+}
+
+func TestGetCatalogModel(t *testing.T) {
+	router := setupTestRouter()
+	router.UseRawPath = true
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/catalog/models/:id", handler.GetCatalogModel)
+
+	get := func(url string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		router.ServeHTTP(w, req)
+
+		return w
+	}
+
+	t.Run("model id containing an encoded slash", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var m types.Model
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
+		assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", m.ID)
+		assert.Equal(t, "Granite 3.3 8B Instruct", m.Name)
+	})
+
+	t.Run("remote-only model", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/ibm%2Fgranite-4-h-small")
+		assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+
+	t.Run("unknown model", func(t *testing.T) {
+		w := get("/api/v1/catalog/models/no%2Fsuch-model")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
 }
 
 func TestGetModelDeployOptions(t *testing.T) {

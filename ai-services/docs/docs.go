@@ -1630,6 +1630,98 @@ const docTemplate = `{
                 }
             }
         },
+        "/catalog/models": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists every model the catalog knows, once per model id, sorted by id. Covers the models of local model components and of remote model connectors.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "List catalog models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/catalog/models/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one model of the catalog. Where several providers serve the model, the entry of the first one found is returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get a catalog model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Model not found in catalog",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/catalog/models/{id}/deploy-options": {
             "get": {
                 "security": [
@@ -4656,6 +4748,31 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Model": {
+            "type": "object",
+            "properties": {
+                "default": {
+                    "description": "whether this is the default model for the provider",
+                    "type": "boolean"
+                },
+                "description": {
+                    "description": "markdown description",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "full model name, e.g. \"ibm-granite/granite-4.1-8b-fp8\"",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "human-readable name",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "short display name",
                     "type": "string"
                 }
             }

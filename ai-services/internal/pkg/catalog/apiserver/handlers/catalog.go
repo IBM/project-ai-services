@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -236,6 +237,65 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, deployOptions)
+}
+
+// ListModels godoc
+//
+//	@Summary		List catalog models
+//	@Description	Lists every model the catalog knows, once per model id, sorted by id. Covers the models of local model components and of remote model connectors.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Success		200	{array}		types.Model
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/catalog/models [get]
+func (h *CatalogHandler) ListModels(c *gin.Context) {
+	models, err := h.provider.GetModels()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to list catalog models: %v", err),
+		})
+
+		return
+	}
+
+	slices.SortFunc(models, func(a, b types.Model) int { return strings.Compare(a.ID, b.ID) })
+
+	c.JSON(http.StatusOK, models)
+}
+
+// GetCatalogModel godoc
+//
+//	@Summary		Get a catalog model
+//	@Description	Returns one model of the catalog. Where several providers serve the model, the entry of the first one found is returned.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'"
+//	@Success		200	{object}	types.Model
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Model not found in catalog"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/catalog/models/{id} [get]
+func (h *CatalogHandler) GetCatalogModel(c *gin.Context) {
+	modelID := c.Param("id")
+
+	model, err := h.provider.GetModel(modelID)
+	if errors.Is(err, catalog.ErrModelNotFound) {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
+
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get model '%s': %v", modelID, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, model)
 }
 
 // GetModelDeployOptions godoc
