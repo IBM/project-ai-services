@@ -41,6 +41,7 @@ import {
   fetchAllModels,
   transformModelDeploymentToRow,
 } from "@/api/models.api";
+import sharedStyles from "@/components/Table/table.shared.module.scss";
 import styles from "./ModelsTable.module.scss";
 
 // ─── Generic cell renderer wrapper ───────────────────────────────────────────
@@ -203,6 +204,10 @@ const ModelsTable = ({
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
+  const filterSlot = (
+    <h6 className={sharedStyles.overflowMenuHeading}>Filter</h6>
+  );
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -270,6 +275,8 @@ const ModelsTable = ({
                             payload: DEFAULT_VISIBLE_COLUMNS,
                           })
                         }
+                        filterSlot={filterSlot}
+                        filterLabel="Filter"
                       >
                         <Button
                           kind="primary"

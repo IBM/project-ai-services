@@ -18,6 +18,7 @@ export interface ModelDeploymentRow {
   backend: string;
   workerResource: string;
   servicesCount: number;
+  messages: string;
   actions: string;
 }
 
@@ -34,7 +35,7 @@ export type AppAction = {
   payload: { rows: ModelDeploymentRow[]; total: number };
 };
 
-// Table headers — 7 visible columns + actions overflow
+// Table headers — 8 visible columns + actions overflow
 export const HEADERS: DataTableHeader[] = [
   { header: "Instance name", key: "name" },
   { header: "Status", key: "status" },
@@ -43,6 +44,7 @@ export const HEADERS: DataTableHeader[] = [
   { header: "Backend", key: "backend" },
   { header: "Worker resource", key: "workerResource" },
   { header: "Services", key: "servicesCount" },
+  { header: "Messages", key: "messages" },
   { header: "", key: "actions" },
 ];
 
@@ -54,6 +56,7 @@ export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   backend: true,
   workerResource: true,
   servicesCount: true,
+  messages: true,
 };
 
 export const INITIAL_STATE: AppState = {
@@ -62,7 +65,7 @@ export const INITIAL_STATE: AppState = {
   pageSize: 20,
   totalItems: 0,
   isDeleteDialogOpen: false,
-  isConfirmed: false,
+  confirmValue: "",
   isExporting: false,
   rowsData: [],
   selectedRowId: null,

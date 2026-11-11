@@ -626,11 +626,17 @@ export interface ModelProfile {
   params?: ModelProfileParams;
 }
 
+export interface ModelComponentType {
+  id: string;
+  name: string;
+  short_name: string;
+}
+
 export interface ModelDeployment {
   id: string;
   deployment_type: "local" | "remote";
   name: string;
-  component_type: string;
+  component_type: ModelComponentType;
   provider: ModelProvider;
   worker: ModelWorker | null;
   model: string;
@@ -638,6 +644,7 @@ export interface ModelDeployment {
   api_base?: string;
   project_id?: string;
   status: string;
+  message?: string;
   connected_services: number;
   created_at: string;
   updated_at: string;

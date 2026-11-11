@@ -6,7 +6,7 @@
   :global(.cds--data-table) {
     width: 100%;
 
-    // Compact auto-sizing for name, status, model, type, backend, worker resource
+    // Compact auto-sizing for name, status, model, type, backend, worker resource, services
     :global(th:nth-child(1)),
     :global(td:nth-child(1)),
     :global(th:nth-child(2)),
@@ -18,7 +18,9 @@
     :global(th:nth-child(5)),
     :global(td:nth-child(5)),
     :global(th:nth-child(6)),
-    :global(td:nth-child(6)) {
+    :global(td:nth-child(6)),
+    :global(th:nth-child(7)),
+    :global(td:nth-child(7)) {
       width: 1%;
       white-space: nowrap;
     }
@@ -31,6 +33,10 @@
       text-align: right;
     }
   }
+}
+
+.squareTag {
+  border-radius: 4px;
 }
 
 .noDataContent {

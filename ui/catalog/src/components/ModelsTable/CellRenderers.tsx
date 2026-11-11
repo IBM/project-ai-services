@@ -7,9 +7,12 @@ import {
   ActionCell as SharedActionCell,
   NameCell as SharedNameCell,
   StatusCell,
+  MessageCell,
 } from "@/components/Table/components/CellRenderers";
+import { DEPLOYMENT_STATUS } from "@/constants/app.constants";
+import styles from "./ModelsTable.module.scss";
 
-export { StatusCell };
+export { StatusCell, MessageCell };
 
 interface CellRendererProps {
   value: unknown;
@@ -50,16 +53,30 @@ export const ActionCell = ({ rowId, rowData }: CellRendererProps) => (
     onDelete={() => {
       /* delete not yet wired */
     }}
-    isDeleteEnabled={() => false}
+    isDeleteEnabled={(status) =>
+      status === DEPLOYMENT_STATUS.RUNNING || status === DEPLOYMENT_STATUS.ERROR
+    }
   />
 );
 
-// Renders component_type as an outlined pill tag (e.g. "LLM", "Embedding")
+// Renders component_type as a gray square tag (e.g. "LLM", "Embedding")
 export const TypeCell = ({ value }: CellRendererProps): React.ReactElement => {
-  const label = String(value ?? "").toUpperCase();
+  const label = String(value ?? "");
   return (
-    <Tag type="outline" size="sm">
+    <Tag type="gray" size="sm" className={styles.squareTag}>
       {label}
+    </Tag>
+  );
+};
+
+// Renders services count as a gray square tag (e.g. 2, 3)
+export const ServicesCountCell = ({
+  value,
+}: CellRendererProps): React.ReactElement => {
+  const count = typeof value === "number" ? value : Number(value ?? 0);
+  return (
+    <Tag type="gray" size="sm" className={styles.squareTag}>
+      {count}
     </Tag>
   );
 };
@@ -76,6 +93,7 @@ export const CELL_RENDERERS: Record<string, CellRendererComponent> = {
   componentType: TypeCell,
   backend: TextCell,
   workerResource: TextCell,
-  servicesCount: TextCell,
+  servicesCount: ServicesCountCell,
+  messages: MessageCell as CellRendererComponent,
   actions: ActionCell,
 };
