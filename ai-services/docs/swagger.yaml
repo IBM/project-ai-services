@@ -862,6 +862,12 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings:
     properties:
+      max_connections:
+        description: |-
+          MaxConnections is the maximum number of datasources that may be attached to the service at any
+          one time (creation-time and post-creation connections combined). nil means unlimited.
+          Must be >= 1 when set.
+        type: integer
       required:
         type: boolean
       supported_providers:

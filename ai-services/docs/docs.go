@@ -4466,6 +4466,10 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings": {
             "type": "object",
             "properties": {
+                "max_connections": {
+                    "description": "MaxConnections is the maximum number of datasources that may be attached to the service at any\none time (creation-time and post-creation connections combined). nil means unlimited.\nMust be \u003e= 1 when set.",
+                    "type": "integer"
+                },
                 "required": {
                     "type": "boolean"
                 },
