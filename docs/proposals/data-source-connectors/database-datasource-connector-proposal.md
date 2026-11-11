@@ -277,6 +277,7 @@ datasource:
   allow_connect: <boolean> # Default: true (post-creation connect)
   allow_disconnect: <boolean> # Default: true if required=false, false if required=true
   supported_providers: <list> # Default: [] (all supported)
+  max_connections: <integer> # Default: unset (unlimited)
 ```
 
 #### Settings Reference
@@ -288,15 +289,16 @@ datasource:
 | `datasource.allow_connect`       | `boolean`      | `true`                                                          | When `false`, disables connecting/attaching datasources post-application creation. Connect UI actions and API endpoints are blocked.                                              |
 | `datasource.allow_disconnect`    | `boolean`      | `true` (if `required: false`)<br/>`false` (if `required: true`) | When `false`, disables disconnecting/detaching datasources post-application creation. Disconnect UI actions and API endpoints are blocked.                                        |
 | `datasource.supported_providers` | `list[string]` | `[]` (all supported)                                            | Whitelist of compatible datasource provider IDs (e.g., `[file_system, object_storage]` or `[ibmi-db2, postgresql]`). If omitted or empty, all providers are supported by default. |
+| `datasource.max_connections`     | `integer`      | unset (unlimited)                                               | Maximum number of datasources that can be connected to the service at any time (creation-time and post-creation connections combined). Must be `>= 1` when present. If omitted, any number of datasources can be connected. |
 
 #### Lifecycle and Compatibility Matrix
 
-| Service Type                              | `datasource` present? | `required` | `allow_connect` | `allow_disconnect` |      `supported_providers`      | UI & API Lifecycle Behavior                                                                            |
-| ----------------------------------------- | :-------------------: | :--------: | :-------------: | :----------------: | :-----------------------------: | ------------------------------------------------------------------------------------------------------ |
-| **Mandatory DB Service (e.g., DB Query)** |         `Yes`         |   `true`   |     `false`     |      `false`       |    `[ibmi-db2, postgresql]`     | Required at creation (filtered to DBs). "Connect Data Source" and "Disconnect" disabled post-creation. |
-| **Dynamic File Service (Digitize)**       |         `Yes`         |  `false`   |     `true`      |       `true`       | `[file_system, object_storage]` | Optional at creation. Connect and disconnect available post-creation (filtered to file providers).     |
-| **Static Fixed Service**                  |         `Yes`         |  `false`   |     `false`     |      `false`       |             `[...]`             | Optional at creation. If configured at creation, locked against post-creation changes.                 |
-| **Non-Datasource Service (Chat)**         |    `No` (omitted)     |     —      |        —        |         —          |                —                | No datasource capabilities. All datasource UI options and API routes blocked.                          |
+| Service Type                              | `datasource` present? | `required` | `allow_connect` | `allow_disconnect` |      `supported_providers`      | `max_connections` | UI & API Lifecycle Behavior                                                                            |
+| ----------------------------------------- | :-------------------: | :--------: | :-------------: | :----------------: | :-----------------------------: | :---------------: | ------------------------------------------------------------------------------------------------------ |
+| **Mandatory DB Service (e.g., DB Query)** |         `Yes`         |   `true`   |     `false`     |      `false`       |    `[ibmi-db2, postgresql]`     |        `1`        | Required at creation (filtered to DBs), limited to one datasource. "Connect Data Source" and "Disconnect" disabled post-creation. |
+| **Dynamic File Service (Digitize)**       |         `Yes`         |  `false`   |     `true`      |       `true`       | `[file_system, object_storage]` |      unset        | Optional at creation. Connect and disconnect available post-creation (filtered to file providers). No limit on datasource count. |
+| **Static Fixed Service**                  |         `Yes`         |  `false`   |     `false`     |      `false`       |             `[...]`             |      unset        | Optional at creation. If configured at creation, locked against post-creation changes.                 |
+| **Non-Datasource Service (Chat)**         |    `No` (omitted)     |     —      |        —        |         —          |                —                |         —         | No datasource capabilities. All datasource UI options and API routes blocked.                          |
 
 ---
 
@@ -319,6 +321,7 @@ datasource:
   supported_providers:
     - ibmi-db2
     - postgresql
+  max_connections: 1
 ```
 
 #### Example 2: Document Processing Service with Optional Dynamic Datasources (`metadata.yaml`)
@@ -337,6 +340,7 @@ datasource:
   supported_providers:
     - file_system
     - object_storage
+  # max_connections omitted: any number of datasources can be connected
 ```
 
 ---
@@ -353,7 +357,9 @@ flowchart TD
         C -- No --> D["Reject 400 Bad Request:<br/>Datasource required for service"]
         C -- Yes --> E{"Provider in<br/>supported_providers?"}
         E -- No --> F["Reject 400 Bad Request:<br/>Unsupported datasource provider"]
-        E -- Yes --> G["Proceed with Deployment"]
+        E -- Yes --> E2{"max_connections set and<br/>datasource count > max?"}
+        E2 -- Yes --> F2["Reject 400 Bad Request:<br/>Max connections exceeded"]
+        E2 -- No --> G["Proceed with Deployment"]
         B -- No --> H{"Datasource connector<br/>provided?"}
         H -- Yes --> E
         H -- No --> G
@@ -366,7 +372,9 @@ flowchart TD
         L -- Yes --> M["Reject 422 Unprocessable Entity:<br/>Post-creation connect disabled"]
         L -- No --> N{"Provider in<br/>supported_providers?"}
         N -- No --> O["Reject 400 Bad Request:<br/>Unsupported datasource provider"]
-        N -- Yes --> P["Attach Datasource & Propagate"]
+        N -- Yes --> N2{"max_connections set and<br/>connected count >= max?"}
+        N2 -- Yes --> O2["Reject 422 Unprocessable Entity:<br/>Max connections reached"]
+        N2 -- No --> P["Attach Datasource & Propagate"]
     end
 
     subgraph PostCreationDisconnect ["Post-Creation Disconnect: DELETE /api/v1/applications/:id/datasources/:datasource_id"]
@@ -390,6 +398,12 @@ flowchart TD
     "error": "Service 'digitize' does not support 'ibmi-db2' datasources. Supported types: [file_system, object_storage]"
   }
   ```
+- **Max Connections Check:** If `datasource.max_connections` is set and the number of datasource references supplied for the service exceeds it, the request is rejected with `400 Bad Request`. If unset, no limit is applied:
+  ```json
+  {
+    "error": "Service 'db-query' allows at most 1 datasource(s), but 2 were provided."
+  }
+  ```
 
 #### 2. Post-Creation Connect Validation (`PUT /api/v1/applications/:id/datasources/:datasource_id`)
 
@@ -401,6 +415,12 @@ flowchart TD
   }
   ```
 - **Provider Compatibility Check:** If the datasource provider is not in `datasource.supported_providers`, reject with `400 Bad Request`.
+- **Max Connections Check:** If `datasource.max_connections` is set and the service already has that many datasources connected, reject with `422 Unprocessable Entity`. If unset, no limit is applied:
+  ```json
+  {
+    "error": "Service 'digitize' already has the maximum of 5 connected datasource(s)."
+  }
+  ```
 
 #### 3. Post-Creation Disconnect Validation (`DELETE /api/v1/applications/:id/datasources/:datasource_id`)
 
@@ -452,6 +472,7 @@ type DatasourceConfig struct {
     AllowConnect       *bool    `yaml:"allow_connect,omitempty" json:"allow_connect,omitempty"`
     AllowDisconnect    *bool    `yaml:"allow_disconnect,omitempty" json:"allow_disconnect,omitempty"`
     SupportedProviders []string `yaml:"supported_providers,omitempty" json:"supported_providers,omitempty"`
+    MaxConnections     *int     `yaml:"max_connections,omitempty" json:"max_connections,omitempty"` // nil = unlimited
 }
 
 // Service represents a deployable AI service catalog definition.
@@ -470,6 +491,7 @@ type DeployOptionsDatasource struct {
     AllowConnect       bool     `json:"allow_connect"`
     AllowDisconnect    bool     `json:"allow_disconnect"`
     SupportedProviders []string `json:"supported_providers,omitempty"`
+    MaxConnections     *int     `json:"max_connections,omitempty"` // omitted = unlimited
 }
 
 // DeployOptionsService surfaces service configuration and constraints to deployment workflows.
