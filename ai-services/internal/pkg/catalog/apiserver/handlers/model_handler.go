@@ -235,7 +235,7 @@ func (h *ModelHandler) GenerateModelKey(c *gin.Context) {
 //	@Tags			Models
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Param			id	path		string	true	"Model ID"
+//	@Param			id	path		string						true	"Model ID"
 //	@Success		202	{object}	models.DeleteModelResponse	"Local model undeploy initiated"
 //	@Success		204	"Remote model deleted"
 //	@Failure		400	{object}	ErrorResponse	"Invalid model ID format"
