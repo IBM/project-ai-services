@@ -165,13 +165,13 @@ type ServiceSummary struct {
 
 // Component represents an infrastructure component (vector_store, embedding, llm, etc.).
 type Component struct {
-	ID            string `yaml:"id" json:"id"`
-	Name          string `yaml:"name" json:"name"`
-	Description   string `yaml:"description" json:"description"`
-	Type          string `yaml:"type" json:"type"`                           // "component"
-	ComponentType string `yaml:"component_type" json:"component_type"`       // "vector_store", "embedding", "llm", etc.
-	ComponentName string `yaml:"component_name" json:"component_name"`       // Display name for component type (e.g., "Vector store", "Large language model")
-	Default       bool   `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
+	ID          string `yaml:"id" json:"id"`
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+	Type        string `yaml:"type" json:"type"` // "component"
+	// ComponentType is the component type this provider belongs to ("vector_store", "embedding", "llm", etc.).
+	ComponentType ComponentType `yaml:"component_type" json:"component_type"`
+	Default       bool          `yaml:"default,omitempty" json:"default,omitempty"` // Whether this is the default provider for this component type
 	// Category groups components by purpose, e.g. "models" for components that serve a model.
 	Category string `yaml:"category,omitempty" json:"category,omitempty"`
 	// LiteLLM describes how a "models" component is exposed through the LiteLLM gateway.
@@ -305,11 +305,33 @@ type ModelDeployProvider struct {
 	Schema         string                   `json:"schema,omitempty"`
 }
 
+// ComponentType describes a component type (llm, embedding, vector_store, ...) by id and display names.
+type ComponentType struct {
+	ID        string `yaml:"id" json:"id"`
+	Name      string `yaml:"name" json:"name"`
+	ShortName string `yaml:"short_name" json:"short_name"`
+}
+
+// UnmarshalYAML accepts either the block form (id/name/short_name) or a bare scalar id (e.g. `llm`),
+// the latter being what user-uploaded bundles use.
+// TODO(BYOS): remove the scalar branch once bundle metadata.yaml moves to the block form.
+func (m *ComponentType) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		m.ID = value.Value
+
+		return nil
+	}
+
+	type plain ComponentType
+
+	return value.Decode((*plain)(m))
+}
+
 // ModelDeployOptions is the response of GET /catalog/models/:id/deploy-options.
 type ModelDeployOptions struct {
 	ID            string                `json:"id"`
 	Name          string                `json:"name"`
-	ComponentType string                `json:"component_type"`
+	ComponentType ComponentType         `json:"component_type"`
 	Providers     []ModelDeployProvider `json:"providers"`
 }
 

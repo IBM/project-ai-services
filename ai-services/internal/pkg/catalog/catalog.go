@@ -295,7 +295,7 @@ func parseComponent(ctx context.Context, path, appPath string, itemFS fs.FS, dat
 
 	// Use composite key for components: {component_type}/{id}
 	// This allows same ID across different component types
-	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ID)
+	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType.ID, comp.ID)
 	items[componentKey] = &catalogItem{
 		Path:      appPath,
 		Component: &comp,
@@ -450,7 +450,7 @@ func ToComponentSummary(component *types.Component) types.ComponentSummary {
 		ID:            component.ID,
 		Name:          component.Name,
 		Description:   component.Description,
-		ComponentType: component.ComponentType,
+		ComponentType: component.ComponentType.ID,
 	}
 }
 

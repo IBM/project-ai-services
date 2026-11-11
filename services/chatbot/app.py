@@ -37,6 +37,7 @@ from chatbot.backend_utils import search_only, validate_query_length
 from chatbot.response_utils import (
     ChatCompletionRequest,
     ChatCompletionResponse,
+    ChatCompletionWithDocsResponse,
     ChatChoice,
     ChatMessage,
     DBStatusResponse,
@@ -320,13 +321,19 @@ def get_perf_metrics(request_id: Optional[str] = None) -> PerfMetricsResponse:
     metrics = perf_registry.get_metrics()
     return PerfMetricsResponse(metrics=metrics)
 
-async def locked_stream(stream_g, perf_stat_dict):
+async def locked_stream(stream_g, perf_stat_dict, docs=None):
     """Asynchronously iterates through a stream generator and yields chunks.
 
     Handles any exceptions raised during streaming and yields a formatted
     error chunk response if a failure occurs mid-stream.
     """
     try:
+        if docs:
+            docs_chunk = {
+                'choices': [],
+                'docs': docs
+            }
+            yield f"data: {json.dumps(docs_chunk)}\n\n"
         async for chunk in iterate_in_threadpool(stream_g):
             yield chunk
     except Exception as e:
@@ -382,6 +389,8 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
 - Query rephrasing: Automatically rephrases follow-up questions using conversation context
 
 **Authentication**: Requires API key in Authorization header (Bearer token) if vLLM authentication is enabled.
+
+**Reference Documents**: Set the `include_docs=true` query parameter to also receive the retrieved documents. Non-streaming responses add a `docs` field; streaming responses emit a leading `data: {"choices":[],"docs":[...]}` event. Without it, the response is unchanged.
 
 **Response Headers**:
 - `X-Rephrased-Query`: Contains the rephrased query when conversation history is used (only if different from original)
@@ -481,7 +490,7 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
         503: http_error_responses[503]
     }
 )
-async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
+async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
     """Generate a chat completion response using Retrieval-Augmented Generation (RAG).
 
     Performs query validation, language detection, document retrieval from the
@@ -616,7 +625,7 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                     rephrased_query,
                 )
                 # For streaming, release is handled in locked_stream's finally block
-                response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+                response = StreamingResponse(locked_stream(vllm_stream, perf_stat_dict, docs if include_docs else None), media_type="text/event-stream")
                 # Add rephrased query as a custom header if available.
                 # Percent-encode so non-Latin-1 scripts (Japanese, etc.) are safe in headers.
                 if rephrased_query and rephrased_query != current_query:
@@ -655,16 +664,22 @@ async def chat_completion(req: ChatCompletionRequest, credentials: Optional[HTTP
                             message_content = message_dict.get("content", "")
                             choices.append(ChatChoice(message=ChatMessage(content=message_content)))
 
-                response_data = ChatCompletionResponse(
-                    choices=choices
-                )
+                if include_docs:
+                    response_data = ChatCompletionWithDocsResponse(choices=choices, docs=docs)
+                else:
+                    response_data = ChatCompletionResponse(choices=choices)
                 # Add rephrased query as a custom header if available.
                 # Percent-encode so non-Latin-1 scripts (Japanese, etc.) are safe in headers.
-                if rephrased_query and rephrased_query != current_query:
+                # The docs variant is always returned as a raw Response, since the route's
+                # response_model would otherwise strip the extra `docs` field.
+                if include_docs or (rephrased_query and rephrased_query != current_query):
+                    headers = {}
+                    if rephrased_query and rephrased_query != current_query:
+                        headers["X-Rephrased-Query"] = quote(rephrased_query)
                     return Response(
                         content=response_data.model_dump_json(),
                         media_type="application/json",
-                        headers={"X-Rephrased-Query": quote(rephrased_query)}
+                        headers=headers
                     )
                 return response_data
 
