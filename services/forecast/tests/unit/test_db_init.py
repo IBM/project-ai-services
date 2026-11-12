@@ -80,7 +80,7 @@ class TestSchemaFile:
             "id", "seq", "connector_id", "status", "message", "result",
             "created_at", "started_at", "finished_at",
         },
-        "forecasters": {"id", "connector_id", "job_id", "version", "status", "metrics", "created_at"},
+        "forecasters": {"id", "connector_id", "job_id", "version", "metrics", "created_at"},
     }
 
     @pytest.mark.parametrize("table", sorted(EXPECTED_COLUMNS))
@@ -129,12 +129,6 @@ class TestSchemaFile:
     def test_job_status_is_limited_to_the_uppercase_values(self):
         assert re.search(
             r"chk_jobs_status CHECK \(status IN \('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED'\)\)",
-            SCHEMA,
-        )
-
-    def test_forecaster_status_is_limited_to_the_uppercase_values(self):
-        assert re.search(
-            r"chk_forecasters_status CHECK \(status IN \('READY', 'RETIRING', 'DELETED'\)\)",
             SCHEMA,
         )
 

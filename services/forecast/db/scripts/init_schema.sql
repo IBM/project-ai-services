@@ -73,15 +73,14 @@ CREATE INDEX IF NOT EXISTS idx_jobs_connector_created
 
 -- Forecasters: one row per forecaster loaded into Triton.
 -- The row outlives its job: deleting an old job only clears job_id.
+-- A row's presence means the forecaster is loaded and ready; delete the row to retire it.
 CREATE TABLE IF NOT EXISTS forecasters (
     id            UUID        PRIMARY KEY,
     connector_id  UUID        NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
     job_id        UUID        REFERENCES jobs(id) ON DELETE SET NULL,
     version       BIGINT      NOT NULL,
-    status        TEXT        NOT NULL,
     metrics       JSONB,                                   -- algorithm and training_seconds, copied from the job's result
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_forecasters_status CHECK (status IN ('READY', 'RETIRING', 'DELETED')),
     CONSTRAINT uq_forecasters_connector_version UNIQUE (connector_id, version)
 );
 
