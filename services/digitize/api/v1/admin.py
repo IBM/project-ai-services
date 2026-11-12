@@ -97,7 +97,11 @@ async def import_metadata(payload: models.ImportRequest):
         500: http_error_responses[500],
     },
     summary="Export metadata from PostgreSQL",
-    description="Export job and document metadata from PostgreSQL as JSON for backup and restore workflows.",
+    description=(
+        "Export user jobs, user documents and the document_checksum registry from PostgreSQL "
+        "as JSON for backup and restore workflows. Connector data is not exported. "
+        "limit/offset paginate the combined sequence jobs, documents, document_checksums."
+    ),
     response_description="Exported metadata with summary and pagination details",
 )
 async def export_metadata(
