@@ -1,7 +1,7 @@
 import type { DataTableHeader } from "@carbon/react";
 import { DETAILS_PANEL_MODES } from "@/constants";
-import type { DetailsPanelMode as AppDetailsPanelMode } from "@/constants";
-import type { ConnectorStatus, PaginationMetadata } from "@/types/api.types";
+import type { ConnectorStatus, DetailsPanelMode } from "@/constants";
+import type { PaginationMetadata } from "@/types/api.types";
 import type {
   BaseTableState,
   SharedTableAction,
@@ -31,8 +31,6 @@ export interface AppState extends BaseTableState<DataSourceConnectorRow> {
   // Error message shown inside the Remove modal
   modalDeleteError: string;
 }
-
-export type DetailsPanelMode = AppDetailsPanelMode;
 
 export const ACTION_TYPES = {
   FETCH_CONNECTORS_SUCCESS: "FETCH_CONNECTORS_SUCCESS",

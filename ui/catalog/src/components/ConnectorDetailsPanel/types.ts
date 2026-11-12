@@ -1,9 +1,6 @@
 import type { DataSourceDetailResponse } from "@/types/api.types";
 import type { ConnectorField } from "@/components/AddDataSourceModal/schemaUtils";
-import type { DetailsPanelMode as AppDetailsPanelMode } from "@/constants";
 export type { ConnectorField };
-
-export type DetailsPanelMode = AppDetailsPanelMode;
 
 /** How the authentication section is displayed. */
 export type AuthSectionState =

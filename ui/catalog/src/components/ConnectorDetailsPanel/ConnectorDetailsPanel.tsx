@@ -29,7 +29,7 @@ import {
   deriveConnectionField,
   parseMessageCheckType,
 } from "./types";
-import type { DetailsPanelMode } from "./types";
+import type { DetailsPanelMode } from "@/constants";
 import {
   fetchDataSourceById,
   updateDataSourceAuth,
