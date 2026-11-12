@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
@@ -144,12 +145,16 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 	// 3. Call Register with token + CSR.
 	// The worker reports its own DOMAIN_SUFFIX so the gateway can embed
 	// <workerName>.<domainSuffix> as a SAN in the signed certificate.
+	domainSuffix := os.Getenv(proxy.DomainSuffixEnvVar)
+	if domainSuffix == "" && rt == types.RuntimeTypePodman {
+		logger.WarningfCtx(ctx, "worker join: %s is not set; the worker certificate will have no DNS SAN and private-ingress hostname verification will fail", proxy.DomainSuffixEnvVar)
+	}
 	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
 	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: opts.Token,
 		RuntimeType:    rt.String(),
 		CsrPem:         csrPEM,
-		Metadata:       map[string]string{workerconstants.MetaKeyDomainSuffix: os.Getenv("DOMAIN_SUFFIX")},
+		Metadata:       map[string]string{workerconstants.MetaKeyDomainSuffix: domainSuffix},
 	})
 	if err != nil {
 		return "", fmt.Errorf("worker join: register RPC: %w", err)
@@ -177,6 +182,8 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 // this worker; it is empty on reconnect (the gateway will read it from the message).
 func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, gatewayAddr, workerName string) error {
 	tlsDir := workerTLSDir()
+	// Covers both paths into here: existing credentials and freshly registered ones.
+	ensureCaddyReadable(tlsDir)
 	cert, err := loadClientCert(tlsDir)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)
