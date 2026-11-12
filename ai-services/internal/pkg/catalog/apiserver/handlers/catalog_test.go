@@ -559,8 +559,16 @@ func TestListCatalogModels(t *testing.T) {
 		for _, m := range filtered {
 			assert.Equal(t, "reranker", m.ComponentType.ID)
 		}
+	})
 
-		assert.Empty(t, get("/api/v1/catalog/models?component_type=nope"))
+	t.Run("unknown component_type is rejected", func(t *testing.T) {
+		for _, ct := range []string{"nope", "vector_db"} {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, "/api/v1/catalog/models?component_type="+ct, nil)
+			router.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code, ct)
+			assert.Contains(t, w.Body.String(), "component_type")
+		}
 	})
 }
 

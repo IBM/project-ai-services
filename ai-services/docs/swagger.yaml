@@ -2415,6 +2415,10 @@ paths:
             items:
               $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry'
             type: array
+        "400":
+          description: Invalid component_type
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":
           description: Unauthorized - Invalid or missing access token
           schema:

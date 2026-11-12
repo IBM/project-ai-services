@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -248,11 +249,21 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 //	@Security		BearerAuth
 //	@Param			component_type	query		string	false	"Only models of this role: 'llm', 'embedding' or 'reranker'. Omit for all."
 //	@Success		200				{array}		types.ModelCatalogEntry
+//	@Failure		400				{object}	ErrorResponse	"Invalid component_type"
 //	@Failure		401				{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
 //	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/catalog/models [get]
 func (h *CatalogHandler) ListModels(c *gin.Context) {
-	entries, err := h.provider.ListModelCatalog(c.Query("component_type"))
+	componentType := c.Query("component_type")
+	if componentType != "" {
+		if err := helpers.New(h.provider).ValidateType(componentType); err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+			return
+		}
+	}
+
+	entries, err := h.provider.ListModelCatalog(componentType)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to list catalog models: %v", err),

@@ -1663,6 +1663,12 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "400": {
+                        "description": "Invalid component_type",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
                     "401": {
                         "description": "Unauthorized - Invalid or missing access token",
                         "schema": {
