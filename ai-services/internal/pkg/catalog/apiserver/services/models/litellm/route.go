@@ -15,6 +15,9 @@ type Route struct {
 	// Provider is the LiteLLM provider prefix (e.g. "watsonx", "hosted_vllm"). It prefixes the
 	// passthrough ID so a route can be told apart by provider.
 	Provider string
+	// KeyAlias is the alias of the model's public LiteLLM key, "<model>-<id>". It is only set when a
+	// route is removed, by the deletion planner, and is empty when the key cannot be named.
+	KeyAlias string
 	// Mode is the LiteLLM model mode ("chat", "embedding", "rerank", ...), from component metadata.
 	Mode string
 	// Model is the name consumers use; UpstreamModel is the provider-prefixed name LiteLLM forwards.
