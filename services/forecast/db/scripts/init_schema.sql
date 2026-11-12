@@ -9,16 +9,17 @@
 CREATE SCHEMA IF NOT EXISTS scheduler;
 
 -- Connectors: connection details of one source database.
--- Safe fields are stored in plaintext inside config, secret fields are encrypted.
+-- Safe fields are stored in plaintext inside connection_details, secret fields are encrypted.
 CREATE TABLE IF NOT EXISTS connectors (
-    id          UUID         PRIMARY KEY,
-    name        VARCHAR(255) NOT NULL UNIQUE,
-    type        TEXT         NOT NULL,
-    config      JSONB        NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    status      TEXT         NOT NULL,
-    message     TEXT,
+    id                 UUID         PRIMARY KEY,
+    name               VARCHAR(255) NOT NULL UNIQUE,
+    type               TEXT         NOT NULL,
+    connection_details JSONB        NOT NULL DEFAULT '{}',
+    attached_at        TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- When the connector was attached (UTC)
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
+    last_trained_at    TIMESTAMPTZ,                                      -- When training last completed (UTC); NULL until then
+    status             TEXT         NOT NULL,
+    message            TEXT,
     CONSTRAINT chk_connectors_status CHECK (status IN ('ACCEPTED', 'TRAINING', 'TRAINED', 'FAILED'))
 );
 
@@ -32,13 +33,12 @@ CREATE TABLE IF NOT EXISTS training_configs (
     -- cron expression (UTC) when it registers the APScheduler job. NULL: only the
     -- first training runs. Compared in lower case, so the API owns the letter case.
     schedule          TEXT,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_training_configs_schedule CHECK (
         schedule IS NULL OR lower(schedule) IN ('hourly', 'daily', 'weekly', 'monthly', 'yearly')
     )
 );
 
--- Training jobs, also the run history. seq is the forecaster version: the database
+-- Training jobs, also the run history. seq is the primary key and the forecaster version: the database
 -- assigns it (GENERATED ALWAYS), so neither the API nor the worker can pick one.
 -- Deleting a connector sets connector_id to NULL on its jobs. For a QUEUED or
 -- RUNNING job that violates chk_jobs_active_has_connector, so the delete fails.
@@ -50,8 +50,7 @@ CREATE TABLE IF NOT EXISTS training_configs (
 --   attempts          API, after the worker exits (merge onto COALESCE(result, '{}'))
 -- Keys can be missing while a job runs or after it fails.
 CREATE TABLE IF NOT EXISTS jobs (
-    id            UUID        PRIMARY KEY,
-    seq           BIGINT      GENERATED ALWAYS AS IDENTITY,
+    seq           BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     connector_id  UUID        REFERENCES connectors(id) ON DELETE SET NULL,
     status        TEXT        NOT NULL,
     message       TEXT,
@@ -75,13 +74,12 @@ CREATE INDEX IF NOT EXISTS idx_jobs_connector_created
 -- The row outlives its job: deleting an old job only clears job_id.
 -- A row's presence means the forecaster is loaded and ready; delete the row to retire it.
 CREATE TABLE IF NOT EXISTS forecasters (
-    id            UUID        PRIMARY KEY,
     connector_id  UUID        NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
-    job_id        UUID        REFERENCES jobs(id) ON DELETE SET NULL,
+    job_id        BIGINT      REFERENCES jobs(seq) ON DELETE SET NULL,
     version       BIGINT      NOT NULL,
     metrics       JSONB,                                   -- algorithm and training_seconds, copied from the job's result
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_forecasters_connector_version UNIQUE (connector_id, version)
+    PRIMARY KEY (connector_id, version)
 );
 
 -- Trigger function to keep connectors.updated_at current on every UPDATE

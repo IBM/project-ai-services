@@ -60,7 +60,7 @@ def _table_columns(table: str) -> set[str]:
         line = line.split("--")[0].strip()
         if not line:
             continue
-        if depth == 0 and not line.upper().startswith("CONSTRAINT"):
+        if depth == 0 and not line.upper().startswith(("CONSTRAINT", "PRIMARY KEY")):
             columns.add(line.split()[0])
         depth += line.count("(") - line.count(")")
     return columns
@@ -70,17 +70,17 @@ class TestSchemaFile:
     # The columns of the Database Tables section of the proposal.
     EXPECTED_COLUMNS = {
         "connectors": {
-            "id", "name", "type", "config", "created_at", "updated_at", "status", "message",
+            "id", "name", "type", "connection_details", "attached_at", "updated_at",
+            "last_trained_at", "status", "message",
         },
         "training_configs": {
-            "connector_id", "source_table", "target_column", "input_columns",
-            "schedule", "created_at",
+            "connector_id", "source_table", "target_column", "input_columns", "schedule",
         },
         "jobs": {
-            "id", "seq", "connector_id", "status", "message", "result",
+            "seq", "connector_id", "status", "message", "result",
             "created_at", "started_at", "finished_at",
         },
-        "forecasters": {"id", "connector_id", "job_id", "version", "metrics", "created_at"},
+        "forecasters": {"connector_id", "job_id", "version", "metrics", "created_at"},
     }
 
     @pytest.mark.parametrize("table", sorted(EXPECTED_COLUMNS))
@@ -111,7 +111,7 @@ class TestSchemaFile:
         assert "CREATE SCHEMA IF NOT EXISTS scheduler;" in SCHEMA
 
     def test_seq_is_an_identity_column(self):
-        assert re.search(r"seq\s+BIGINT\s+GENERATED ALWAYS AS IDENTITY", SCHEMA)
+        assert re.search(r"seq\s+BIGINT\s+GENERATED ALWAYS AS IDENTITY PRIMARY KEY", SCHEMA)
 
     def test_single_running_job_index(self):
         assert re.search(
@@ -146,14 +146,14 @@ class TestSchemaFile:
             SCHEMA,
         )
 
-    def test_forecasters_are_unique_per_connector_and_version(self):
-        assert re.search(r"UNIQUE \(connector_id, version\)", SCHEMA)
+    def test_forecasters_are_keyed_by_connector_and_version(self):
+        assert re.search(r"PRIMARY KEY \(connector_id, version\)", SCHEMA)
 
     def test_foreign_key_delete_rules(self):
         assert re.search(
             r"connector_id\s+UUID\s+REFERENCES connectors\(id\) ON DELETE SET NULL", SCHEMA
         )
-        assert re.search(r"job_id\s+UUID\s+REFERENCES jobs\(id\) ON DELETE SET NULL", SCHEMA)
+        assert re.search(r"job_id\s+BIGINT\s+REFERENCES jobs\(seq\) ON DELETE SET NULL", SCHEMA)
 
 
 class TestWorkerRole:
@@ -192,7 +192,7 @@ class TestWorkerRole:
             'GRANT USAGE ON SCHEMA public TO "forecast_worker"',
             'GRANT SELECT ON connectors TO "forecast_worker"',
             'GRANT SELECT ON training_configs TO "forecast_worker"',
-            'GRANT SELECT (id, seq, connector_id, status) ON jobs TO "forecast_worker"',
+            'GRANT SELECT (seq, connector_id, status) ON jobs TO "forecast_worker"',
             'GRANT UPDATE (result, message) ON jobs TO "forecast_worker"',
         ]
 

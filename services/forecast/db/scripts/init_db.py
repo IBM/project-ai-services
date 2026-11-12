@@ -64,7 +64,7 @@ def setup_worker_role(
         sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(role),
         sql.SQL("GRANT SELECT ON connectors TO {}").format(role),
         sql.SQL("GRANT SELECT ON training_configs TO {}").format(role),
-        sql.SQL("GRANT SELECT (id, seq, connector_id, status) ON jobs TO {}").format(role),
+        sql.SQL("GRANT SELECT (seq, connector_id, status) ON jobs TO {}").format(role),
         sql.SQL("GRANT UPDATE (result, message) ON jobs TO {}").format(role),
     ]
 
