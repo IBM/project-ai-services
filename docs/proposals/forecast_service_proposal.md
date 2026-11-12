@@ -675,8 +675,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `connector_id` | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.                                                                                                                                                   |
 | `status`       | `queued`, `running`, `completed` or `failed`.                                                                                                                                                                                                          |
 | `message`        | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
-| `total_rows`        | Number of rows used for training the model.                                                      |
-| `result`       | Written when training finishes. The worker writes the algorithm AutoGluon chose, the validation metric and score, the training time in seconds and the rows read. The API adds the number of attempts used. On a failed job only the attempts are set. |
+| `result`       | JSON object. The worker writes `rows_read` (the number of rows available for training) once, when the data load finishes. When training finishes it overwrites the object with `rows_read` repeated plus `algorithm` (the algorithm AutoGluon chose), `metric`, `validation_score` and `training_seconds`. The API adds `attempts` after the worker exits. A failed job keeps `rows_read` if the failure came after the load, and always has `attempts`. Readers must tolerate missing keys. |
 | `created_at`   | UTC time at which the job was queued.                                                                                                                                                                                                                  |
 | `started_at`   | UTC time at which the job started running.                                                                                                                                                                                                             |
 | `finished_at`  | UTC time at which the job completed or failed.                                                                                                                                                                                                         |
@@ -760,6 +759,7 @@ sequenceDiagram
     A->>W: spawn (own process group, time and memory limits)
     W->>DB: read job, training config and connector row, decrypt its secrets
     W->>S: read-only query with the connector's details, stream rows
+    W->>DB: write job result (rows read)
     W->>W: AutoGluon training, ONNX export
 
     alt worker exits 0
