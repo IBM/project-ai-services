@@ -52,10 +52,7 @@ async def lifespan(app: FastAPI):
     # the error stops startup instead of surfacing on the first connector request.
     validate_cipher()
 
-    triton_err = triton_url_check()
-    if triton_err:
-        logger.error(f"Error when validating triton URL: {triton_err}")
-        raise RuntimeError(triton_err)
+    triton_url_check()
 
     yield
 

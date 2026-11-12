@@ -11,7 +11,7 @@ def triton_url_check() -> Optional[str]:
     """
     url = settings.forecast.triton_url.strip()
     if not url:
-        return "TRITON_URL is not set"
+        raise RuntimeError("TRITON_URL is not set")
     if not url.lower().startswith(("http://", "https://")):
-        return "TRITON_URL must start with http:// or https://"
+        raise RuntimeError("TRITON_URL must start with http:// or https://")
     return None

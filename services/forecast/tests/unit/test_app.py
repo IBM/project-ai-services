@@ -480,8 +480,8 @@ def test_triton_url_without_http_scheme_is_a_problem(url):
     import forecast.triton_client.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", url):
-        problem = triton.triton_url_check()
-    assert problem and "http://" in problem
+        with pytest.raises(RuntimeError, match="must start with http"):
+            triton.triton_url_check()
 
 
 @pytest.mark.unit
@@ -490,7 +490,8 @@ def test_empty_triton_url_is_a_problem(url):
     import forecast.triton_client.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", url):
-        assert "not set" in triton.triton_url_check()
+        with pytest.raises(RuntimeError, match="not set"):
+            triton.triton_url_check()
 
 
 @pytest.mark.unit
@@ -498,12 +499,13 @@ def test_triton_url_problem_does_not_echo_the_value():
     import forecast.triton_client.triton as triton
 
     with patch.object(triton.settings.forecast, "triton_url", "user:hunter2@triton:8000"):
-        problem = triton.triton_url_check()
-    assert problem and "hunter2" not in problem
+        with pytest.raises(RuntimeError) as raised:
+            triton.triton_url_check()
+    assert "hunter2" not in str(raised.value)
 
 
 @pytest.mark.unit
-def test_startup_fails_on_a_bad_triton_url_without_echoing_it(caplog):
+def test_startup_fails_on_a_bad_triton_url_without_echoing_it():
     import forecast.app as forecast_app
     import forecast.triton_client.triton as triton
     from forecast.settings import settings
@@ -511,14 +513,12 @@ def test_startup_fails_on_a_bad_triton_url_without_echoing_it(caplog):
     # The real check runs here, so the autouse stub is replaced for this test only.
     with patch.object(forecast_app, "close_db_connections"), patch.object(
         forecast_app, "triton_url_check", triton.triton_url_check
-    ), patch.object(settings.forecast, "triton_url", "triton:8000"), caplog.at_level("ERROR"):
-        with pytest.raises(Exception, match="must start with http"):
+    ), patch.object(settings.forecast, "triton_url", "triton:8000"):
+        with pytest.raises(RuntimeError) as raised:
             with TestClient(forecast_app.app):
                 pass
-
-    errors = [r for r in caplog.records if r.levelname == "ERROR" and "TRITON_URL" in r.getMessage()]
-    assert len(errors) == 1
-    assert "triton:8000" not in errors[0].getMessage()
+    assert "must start with http" in str(raised.value)
+    assert "triton:8000" not in str(raised.value)
 
 
 # ---------------------------------------------------------------------------
