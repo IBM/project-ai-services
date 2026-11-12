@@ -938,6 +938,34 @@ definitions:
       version:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry:
+    properties:
+      certified_by:
+        type: string
+      component_type:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      providers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider'
+        type: array
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider:
+    properties:
+      deployment_type:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType'
+        description: '"local" or "remote"'
+      id:
+        type: string
+      name:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions:
     properties:
       component_type:
@@ -982,6 +1010,26 @@ definitions:
         type: array
       schema:
         type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail:
+    properties:
+      about: {}
+      certified_by:
+        type: string
+      component_type:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
+      description:
+        type: string
+      id:
+        type: string
+      license:
+        type: string
+      name:
+        type: string
+      providers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider'
+        type: array
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:
     properties:
@@ -2347,6 +2395,77 @@ paths:
       summary: Validate a bundle without storing it
       tags:
       - Bundles
+  /catalog/models:
+    get:
+      description: Lists every deployable model of the catalog, once per model id,
+        sorted by id, with the providers that serve it. Covers the models of local
+        model components and of remote model connectors.
+      parameters:
+      - description: 'Only models of this role: ''llm'', ''embedding'' or ''reranker''.
+          Omit for all.'
+        in: query
+        name: component_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry'
+            type: array
+        "400":
+          description: Invalid component_type
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List catalog models
+      tags:
+      - Catalog
+  /catalog/models/{id}:
+    get:
+      description: Returns one model of the catalog with the providers that serve
+        it, its license and its about details.
+      parameters:
+      - description: URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Model not found in catalog
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a catalog model
+      tags:
+      - Catalog
   /catalog/models/{id}/deploy-options:
     get:
       description: Lists the providers a catalog model can be deployed with. Local
