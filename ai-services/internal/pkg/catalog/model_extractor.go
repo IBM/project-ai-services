@@ -196,7 +196,7 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 	result := make([]types.Model, 0)
 
 	for _, item := range p.allItems() {
-		if !isModelItem(item) {
+		if !models.IsModelProvider(item.Component, item.Connector) {
 			continue
 		}
 
@@ -230,7 +230,7 @@ func (p *CatalogProvider) collectModels(modelID string) (map[string]*catalogMode
 	result := map[string]*catalogModel{}
 
 	for _, item := range p.sortedItems() {
-		if !isModelItem(item) {
+		if !models.IsModelProvider(item.Component, item.Connector) {
 			continue
 		}
 
@@ -346,12 +346,4 @@ func (p *CatalogProvider) GetModel(modelID string) (*types.ModelDetail, error) {
 	fillEntry(&detail.ModelCatalogEntry, cm, components)
 
 	return &detail, nil
-}
-
-// isModelItem reports whether the item serves models: a model component or a "models" connector.
-func isModelItem(item *catalogItem) bool {
-	isModelComponent := item.Component != nil && item.Component.Category == constants.ComponentCategoryModels
-	isModelConnector := item.Connector != nil && item.Connector.ConnectorType == constants.ConnectorTypeModels
-
-	return isModelComponent || isModelConnector
 }

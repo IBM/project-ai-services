@@ -102,10 +102,9 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 }
 
 // findModel returns modelID's entry from the item's models.yaml, or nil if the item doesn't list it.
-// Only components and model connectors have a models.yaml; other items return nil.
+// Only model components and model connectors have a models.yaml; other items return nil.
 func findModel(item *catalogItem, modelID string) (*types.Model, error) {
-	isModelConnector := item.Connector != nil && item.Connector.ConnectorType == constants.ConnectorTypeModels
-	if item.Component == nil && !isModelConnector {
+	if !models.IsModelProvider(item.Component, item.Connector) {
 		return nil, nil
 	}
 
