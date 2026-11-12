@@ -5,10 +5,17 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPublicKeyAlias(t *testing.T) {
+	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+
+	assert.Equal(t, "ibm/granite-11111111-2222-3333-4444-555555555555", PublicKeyAlias("ibm/granite", id))
+}
 
 func TestModelRequest(t *testing.T) {
 	r := Route{Tag: "id-1", Mode: "rerank", Model: "m", UpstreamModel: "p/m"}
@@ -188,11 +195,13 @@ func TestGateway_Remove(t *testing.T) {
 		assert.Equal(t, []string{"litellm-1"}, client.deregisteredModels)
 	})
 
-	t.Run("skips what cannot be named", func(t *testing.T) {
+	t.Run("skips only the model that cannot be named", func(t *testing.T) {
 		client := &fakeLiteLLMClient{}
+		noModel := Route{KeyAlias: "ibm/granite-id-1", Tag: "id-1", Provider: "watsonx"}
 
-		require.NoError(t, NewGateway(client).Remove(context.Background(), Route{Tag: "id-1"}))
-		assert.Empty(t, client.calls)
+		require.NoError(t, NewGateway(client).Remove(context.Background(), noModel))
+		assert.Equal(t, []string{"key", "passthrough"}, client.calls)
+		assert.Empty(t, client.deregisteredModels)
 	})
 
 	t.Run("a failure stops the removal and is returned", func(t *testing.T) {

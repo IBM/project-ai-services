@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -46,7 +47,7 @@ func (m *Manager) Generate(ctx context.Context, model *dbrepo.ModelRow) (*apimod
 		return nil, fmt.Errorf("%s has no model name in its metadata", model.ID)
 	}
 
-	alias := fmt.Sprintf("%s-%s", model.Model, model.ID)
+	alias := litellm.PublicKeyAlias(model.Model, model.ID)
 
 	key, err := m.rotatePublicKey(ctx, model.ID, alias, model.Model)
 	if err != nil {
