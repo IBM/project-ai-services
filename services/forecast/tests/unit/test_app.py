@@ -538,12 +538,12 @@ def test_worker_requires_a_job_id():
 def test_worker_parses_the_job_id():
     from forecast.triton_client.worker import parse_args
 
-    assert parse_args(["0f8fad5b-d9cb-469f-a165-70867728950e"]).job_id == "0f8fad5b-d9cb-469f-a165-70867728950e"
+    assert parse_args(["42"]).job_id == 42
 
 
 @pytest.mark.unit
 def test_worker_exits_non_zero_until_implemented(capsys):
     from forecast.triton_client.worker import main
 
-    assert main(["job-1"]) == 1
+    assert main(["1"]) == 1
     assert "not implemented" in capsys.readouterr().err
