@@ -2,7 +2,7 @@
   name: Granite 3.3 8B Instruct
   description: "An 8b-parameter instruction-tuned LLM for reasoning, summarization, and tool-use."
   license: Apache-2.0
-  certified_by: IBM
+  certified_by: BAAI
   component_type: llm
   about:
     - title: "Model strengths"
