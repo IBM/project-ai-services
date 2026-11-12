@@ -116,6 +116,36 @@ func (g Gateway) Deregister(ctx context.Context, r Route) {
 	}
 }
 
+// Remove deletes everything the gateway holds for a model that is being deleted, in this order:
+// its public key, its tokenize passthrough, then the LiteLLM model, so nothing can reach the model
+// through a leftover key or passthrough once the model is gone. Unlike Deregister, a failure is
+// returned so that the model is not forgotten while part of it remains, and a retry starts over.
+// Removing something that is already gone is not an error.
+//
+// The key is skipped when the route has no KeyAlias, and the passthrough when it has no Provider:
+// whether either was created is not recorded, so each is removed whenever it can be named.
+func (g Gateway) Remove(ctx context.Context, r Route) error {
+	if alias := r.KeyAlias; alias != "" {
+		if err := g.client.DeleteKeysByAlias(ctx, []string{alias}); err != nil {
+			return fmt.Errorf("failed to revoke litellm key %q: %w", alias, err)
+		}
+	}
+
+	if r.Provider != "" {
+		if err := g.client.DeregisterPassThrough(ctx, passThroughID(r)); err != nil {
+			return fmt.Errorf("failed to deregister tokenize passthrough %q: %w", passThroughID(r), err)
+		}
+	}
+
+	if r.LiteLLMModelID != "" {
+		if err := g.client.DeregisterModel(ctx, r.LiteLLMModelID); err != nil {
+			return fmt.Errorf("failed to deregister litellm model %q: %w", r.LiteLLMModelID, err)
+		}
+	}
+
+	return nil
+}
+
 func (g Gateway) probe(ctx context.Context, litellmModelID string) error {
 	resp, err := g.client.HealthProbe(ctx, litellmModelID)
 	if err != nil {

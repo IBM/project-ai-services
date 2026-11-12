@@ -2,11 +2,13 @@ package modelservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deletion"
 	modelsvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/get"
@@ -36,18 +38,23 @@ import (
 //   - list.Lister and get.Getter: the read side. They return the models of the caller and the
 //     detail of one model.
 //   - keys.Manager: generates the public LiteLLM key of a model.
+//   - deletion.Planner and deletion.Executor: plan and execute the deletion of a model, with the
+//     same split as above (see services/models/deletion).
 type ModelService struct {
 	componentRepo dbrepo.ComponentRepository
 	connectorRepo dbrepo.ConnectorRepository
+	svcDepRepo    dbrepo.ServiceDependencyRepository
 	// modelRepo reads a model for the ownership check; catalogProvider validates the list filters
 	// against the catalog and scopes that read to the model types.
-	modelRepo       dbrepo.ModelRepository
-	catalogProvider *catalog.CatalogProvider
-	planner         *modelsvc.ModelPlanner
-	executor        *modelsvc.ModelExecutor
-	lister          *list.Lister
-	getter          *get.Getter
-	keys            *keys.Manager
+	modelRepo        dbrepo.ModelRepository
+	catalogProvider  *catalog.CatalogProvider
+	planner          *modelsvc.ModelPlanner
+	executor         *modelsvc.ModelExecutor
+	lister           *list.Lister
+	getter           *get.Getter
+	keys             *keys.Manager
+	deletionPlanner  *deletion.Planner
+	deletionExecutor *deletion.Executor
 }
 
 // NewModelService creates a new ModelService instance.
@@ -66,15 +73,18 @@ func NewModelService(
 	litellmClient := catalogclient.NewLiteLLMClient()
 
 	return &ModelService{
-		componentRepo:   componentRepo,
-		connectorRepo:   connectorRepo,
-		modelRepo:       modelRepo,
-		catalogProvider: catalogProvider,
-		planner:         modelsvc.NewModelPlanner(catalogProvider, workers),
-		executor:        modelsvc.NewModelExecutor(componentRepo, connectorRepo, litellmClient),
-		lister:          list.New(modelRepo, svcDepRepo, catalogProvider),
-		getter:          get.New(svcDepRepo, catalogProvider, gatewayPublicEndpoint),
-		keys:            keys.NewManager(litellmClient),
+		componentRepo:    componentRepo,
+		connectorRepo:    connectorRepo,
+		svcDepRepo:       svcDepRepo,
+		modelRepo:        modelRepo,
+		catalogProvider:  catalogProvider,
+		planner:          modelsvc.NewModelPlanner(catalogProvider, workers),
+		executor:         modelsvc.NewModelExecutor(componentRepo, connectorRepo, litellmClient),
+		lister:           list.New(modelRepo, svcDepRepo, catalogProvider),
+		getter:           get.New(svcDepRepo, catalogProvider, gatewayPublicEndpoint),
+		keys:             keys.NewManager(litellmClient),
+		deletionPlanner:  deletion.NewPlanner(catalogProvider, workers),
+		deletionExecutor: deletion.NewExecutor(componentRepo, connectorRepo, litellmClient),
 	}
 }
 
@@ -220,4 +230,86 @@ func (s *ModelService) ownedModel(ctx context.Context, id uuid.UUID, createdBy s
 	}
 
 	return row, nil
+}
+
+// DeleteModel deletes a model, local or remote, owned by createdBy.
+//
+// A local model is undeployed in the background (the returned response is non-nil, 202 semantics);
+// a remote one is removed before returning (nil response, 204 semantics). A missing model is a 404,
+// another user's model a 403, and a model used by a service, or a local model already being
+// deleted, a 409.
+func (s *ModelService) DeleteModel(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.DeleteModelResponse, error) {
+	row, err := s.ownedModel(ctx, id, createdBy)
+	if err != nil {
+		return nil, err
+	}
+
+	// Checked up front so that nothing is torn down for a model that cannot be deleted. For a
+	// remote model the delete itself re-checks it atomically.
+	counts, err := s.svcDepRepo.GetServiceCountByDependency(ctx, []uuid.UUID{row.ID}, helpers.ModelDependencyType(*row))
+	if err != nil {
+		return nil, fmt.Errorf("failed to count services using model: %w", err)
+	}
+
+	if counts[row.ID] > 0 {
+		return nil, validators.Conflict("model is in use by %d service(s)", counts[row.ID])
+	}
+
+	if row.DeploymentType == constants.DeploymentTypeLocal {
+		return s.deleteLocalModel(ctx, row)
+	}
+
+	return nil, s.deleteRemoteModel(ctx, row)
+}
+
+// deleteLocalModel plans the undeploy, marks the component Deleting and executes the plan in the
+// background. It returns as soon as the status is saved (202 semantics).
+func (s *ModelService) deleteLocalModel(ctx context.Context, row *dbrepo.ModelRow) (*apimodels.DeleteModelResponse, error) {
+	comp, err := s.componentRepo.GetByID(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get component: %w", err)
+	}
+
+	if comp == nil {
+		return nil, validators.NotFound("model %q not found", row.ID)
+	}
+
+	if comp.Status == dbmodels.ComponentStatusDeleting {
+		return nil, validators.Conflict("model is already being deleted")
+	}
+
+	plan, err := s.deletionPlanner.PlanLocal(ctx, comp, row.WorkerName)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.componentRepo.UpdateStatus(ctx, row.ID, dbmodels.ComponentStatusDeleting, ""); err != nil {
+		return nil, fmt.Errorf("failed to mark component deleting: %w", err)
+	}
+
+	// Detach from the request's cancellation (the response is sent before the undeploy ends)
+	// while keeping its values, such as the request ID used by the logger.
+	go s.deletionExecutor.ExecuteLocal(context.WithoutCancel(ctx), plan)
+
+	return &apimodels.DeleteModelResponse{
+		ID:      row.ID.String(),
+		Status:  string(dbmodels.ComponentStatusDeleting),
+		Message: "Undeploy initiated",
+	}, nil
+}
+
+// deleteRemoteModel removes the route and the connector synchronously.
+func (s *ModelService) deleteRemoteModel(ctx context.Context, row *dbrepo.ModelRow) error {
+	// The credentials are not needed, but the metadata that holds the LiteLLM model ID is only
+	// read with them.
+	conn, err := s.connectorRepo.GetByID(ctx, row.ID, true)
+	if errors.Is(err, dbrepo.ErrConnectorNotFound) {
+		return validators.NotFound("model %q not found", row.ID)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to get connector: %w", err)
+	}
+
+	return s.deletionExecutor.ExecuteRemote(ctx, s.deletionPlanner.PlanRemote(conn))
 }
