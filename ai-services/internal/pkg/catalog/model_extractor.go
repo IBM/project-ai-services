@@ -187,16 +187,15 @@ func (p *CatalogProvider) GetModelProviders(deploymentType constants.DeploymentT
 	return result
 }
 
-// GetModels lists every model the catalog knows, once per model id, sorted by id. The
+// GetModels lists every model the catalog knows, once per model id, in no particular order. The
 // models come from the models.yaml of the model components and the "models" connectors.
 //
-// A model served by several providers is returned as listed by the first one in item-key order
-// ("type/id"), so the result is stable. Only its provider-independent fields (ID, Name, Title,
-// Description) are meaningful.
+// A model served by several providers is returned as listed by the first one found, so only its
+// provider-independent fields (ID, Name, Title, Description) are meaningful.
 func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 	result := make([]types.Model, 0)
 
-	for _, item := range p.sortedItems() {
+	for _, item := range p.allItems() {
 		if !isModelItem(item) {
 			continue
 		}
@@ -215,24 +214,138 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 		}
 	}
 
-	slices.SortFunc(result, func(a, b types.Model) int { return strings.Compare(a.ID, b.ID) })
+	return result, nil
+}
+
+// catalogModel is a model with the providers that serve it, as collected from the catalog.
+type catalogModel struct {
+	model         types.Model // the first entry found, components before connectors
+	componentType string
+	providers     []types.ModelDeployProvider
+}
+
+// collectModels gathers the deployable models by id from every model component and "models" connector.
+// modelID, when set, collects only that model.
+func (p *CatalogProvider) collectModels(modelID string) (map[string]*catalogModel, error) {
+	result := map[string]*catalogModel{}
+
+	for _, item := range p.sortedItems() {
+		if !isModelItem(item) {
+			continue
+		}
+
+		listed, err := models.List(item.itemFS, item.Path)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, m := range listed {
+			if modelID != "" && m.ID != modelID {
+				continue
+			}
+
+			provider, componentType, ok := modelProvider(item, m)
+			if !ok {
+				continue
+			}
+
+			cm, seen := result[m.ID]
+			if !seen {
+				cm = &catalogModel{model: m, componentType: componentType}
+				result[m.ID] = cm
+			}
+			cm.providers = append(cm.providers, provider)
+		}
+	}
 
 	return result, nil
 }
 
-// GetModel returns modelID as GetModels lists it, or ErrModelNotFound if the catalog doesn't list it.
-func (p *CatalogProvider) GetModel(modelID string) (*types.Model, error) {
-	for _, item := range p.sortedItems() {
-		model, err := findModel(item, modelID)
-		if err != nil {
-			return nil, err
-		}
-		if model != nil {
-			return model, nil
-		}
+// fillEntry sets the component type (with its display names) and the sorted providers of entry from cm.
+func fillEntry(entry *types.ModelCatalogEntry, cm *catalogModel, components []types.Component) {
+	entry.ComponentType = types.ComponentType{ID: cm.componentType}
+	models.SetComponentTypeNames(&entry.ComponentType, components)
+
+	sorted := models.FilterAndSortProviders(cm.providers, "")
+	entry.Providers = make([]types.ModelCatalogProvider, 0, len(sorted))
+	for _, pr := range sorted {
+		entry.Providers = append(entry.Providers, types.ModelCatalogProvider{ID: pr.ID, Name: pr.Name, DeploymentType: pr.DeploymentType})
+	}
+}
+
+// ListModelCatalog lists the deployable models with the providers that serve them, in no particular order.
+// componentType, when set, keeps only the models of that role (llm, embedding, reranker).
+func (p *CatalogProvider) ListModelCatalog(componentType string) ([]types.ModelCatalogEntry, error) {
+	components, err := p.ListComponents()
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, fmt.Errorf("%w: %s", ErrModelNotFound, modelID)
+	collected, err := p.collectModels("")
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]types.ModelCatalogEntry, 0, len(collected))
+
+	for _, cm := range collected {
+		if componentType != "" && cm.componentType != componentType {
+			continue
+		}
+
+		entry := cm.model.Entry()
+		fillEntry(&entry, cm, components)
+		result = append(result, entry)
+	}
+
+	return result, nil
+}
+
+// modelProvider returns the provider behind item for model m and the model's component type id.
+// ok is false when the item cannot deploy the model on its own.
+func modelProvider(item *catalogItem, m types.Model) (provider types.ModelDeployProvider, componentType string, ok bool) {
+	if item.Connector != nil {
+		return types.ModelDeployProvider{
+			ID:             item.Connector.ID,
+			Name:           item.Connector.Name,
+			DeploymentType: constants.DeploymentTypeRemote,
+		}, m.ComponentType, true
+	}
+
+	if len(m.Profiles) == 0 {
+		return provider, "", false
+	}
+
+	return types.ModelDeployProvider{
+		ID:             item.Component.ID,
+		Name:           item.Component.Name,
+		DeploymentType: constants.DeploymentTypeLocal,
+		Default:        item.Component.Default,
+	}, item.Component.ComponentType.ID, true
+}
+
+// GetModel returns modelID as ListModelCatalog lists it, plus its license and about details,
+// or ErrModelNotFound if the catalog doesn't list it.
+func (p *CatalogProvider) GetModel(modelID string) (*types.ModelDetail, error) {
+	components, err := p.ListComponents()
+	if err != nil {
+		return nil, err
+	}
+
+	collected, err := p.collectModels(modelID)
+	if err != nil {
+		return nil, err
+	}
+
+	cm, ok := collected[modelID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrModelNotFound, modelID)
+	}
+
+	detail := cm.model.Detail()
+	fillEntry(&detail.ModelCatalogEntry, cm, components)
+
+	return &detail, nil
 }
 
 // isModelItem reports whether the item serves models: a model component or a "models" connector.

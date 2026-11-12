@@ -118,8 +118,7 @@ func SetInfo(result *types.ModelDeployOptions, name, componentType string) {
 }
 
 // SetComponentTypeNames fills the component type's display names from the components of that type.
-func SetComponentTypeNames(result *types.ModelDeployOptions, components []types.Component) {
-	ct := &result.ComponentType
+func SetComponentTypeNames(ct *types.ComponentType, components []types.Component) {
 	for _, c := range components {
 		if c.ComponentType.ID != ct.ID {
 			continue

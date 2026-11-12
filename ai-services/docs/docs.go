@@ -1637,7 +1637,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Lists every model the catalog knows, once per model id, sorted by id. Covers the models of local model components and of remote model connectors.",
+                "description": "Lists every deployable model of the catalog, once per model id, sorted by id, with the providers that serve it. Covers the models of local model components and of remote model connectors.",
                 "produces": [
                     "application/json"
                 ],
@@ -1645,13 +1645,21 @@ const docTemplate = `{
                     "Catalog"
                 ],
                 "summary": "List catalog models",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Only models of this role: 'llm', 'embedding' or 'reranker'. Omit for all.",
+                        "name": "component_type",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary"
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry"
                             }
                         }
                     },
@@ -1677,7 +1685,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns one model of the catalog, with its license, certification and about details. Where several providers serve the model, the entry of the first one found is returned.",
+                "description": "Returns one model of the catalog with the providers that serve it, its license and its about details.",
                 "produces": [
                     "application/json"
                 ],
@@ -4752,6 +4760,51 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry": {
+            "type": "object",
+            "properties": {
+                "certified_by": {
+                    "type": "string"
+                },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider"
+                    }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider": {
+            "type": "object",
+            "properties": {
+                "deployment_type": {
+                    "description": "\"local\" or \"remote\"",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType"
+                        }
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions": {
             "type": "object",
             "properties": {
@@ -4830,8 +4883,8 @@ const docTemplate = `{
                 "certified_by": {
                     "type": "string"
                 },
-                "default": {
-                    "type": "boolean"
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
                 },
                 "description": {
                     "type": "string"
@@ -4845,28 +4898,11 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary": {
-            "type": "object",
-            "properties": {
-                "default": {
-                    "type": "boolean"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider"
+                    }
                 }
             }
         },

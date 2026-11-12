@@ -349,13 +349,19 @@ func (p *CatalogProvider) allItems() map[string]*catalogItem {
 	return snapshot
 }
 
-// sortedItems returns the cached items ordered by key ("type/id"), the same order ModelCatalog.Components uses.
+// sortedItems returns the cached items with components before connectors, each ordered by key ("type/id").
 // Loops that keep the first match use it so they give the same answer on every call.
 func (p *CatalogProvider) sortedItems() []*catalogItem {
 	items := p.allItems()
+	keys := slices.Sorted(maps.Keys(items))
 	result := make([]*catalogItem, 0, len(items))
-	for _, k := range slices.Sorted(maps.Keys(items)) {
-		result = append(result, items[k])
+
+	for _, wantConnector := range []bool{false, true} {
+		for _, k := range keys {
+			if (items[k].Connector != nil) == wantConnector {
+				result = append(result, items[k])
+			}
+		}
 	}
 
 	return result

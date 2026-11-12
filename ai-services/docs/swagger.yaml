@@ -938,6 +938,34 @@ definitions:
       version:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry:
+    properties:
+      certified_by:
+        type: string
+      component_type:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      providers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider'
+        type: array
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider:
+    properties:
+      deployment_type:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType'
+        description: '"local" or "remote"'
+      id:
+        type: string
+      name:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions:
     properties:
       component_type:
@@ -988,8 +1016,8 @@ definitions:
       about: {}
       certified_by:
         type: string
-      default:
-        type: boolean
+      component_type:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
       description:
         type: string
       id:
@@ -998,21 +1026,10 @@ definitions:
         type: string
       name:
         type: string
-      title:
-        type: string
-    type: object
-  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary:
-    properties:
-      default:
-        type: boolean
-      description:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      title:
-        type: string
+      providers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider'
+        type: array
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:
     properties:
@@ -2380,8 +2397,15 @@ paths:
       - Bundles
   /catalog/models:
     get:
-      description: Lists every model the catalog knows, once per model id, sorted
-        by id. Covers the models of local model components and of remote model connectors.
+      description: Lists every deployable model of the catalog, once per model id,
+        sorted by id, with the providers that serve it. Covers the models of local
+        model components and of remote model connectors.
+      parameters:
+      - description: 'Only models of this role: ''llm'', ''embedding'' or ''reranker''.
+          Omit for all.'
+        in: query
+        name: component_type
+        type: string
       produces:
       - application/json
       responses:
@@ -2389,7 +2413,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelSummary'
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry'
             type: array
         "401":
           description: Unauthorized - Invalid or missing access token
@@ -2406,9 +2430,8 @@ paths:
       - Catalog
   /catalog/models/{id}:
     get:
-      description: Returns one model of the catalog, with its license, certification
-        and about details. Where several providers serve the model, the entry of the
-        first one found is returned.
+      description: Returns one model of the catalog with the providers that serve
+        it, its license and its about details.
       parameters:
       - description: URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'
         in: path

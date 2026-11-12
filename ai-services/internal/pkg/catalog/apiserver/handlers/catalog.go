@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -241,16 +242,17 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 // ListModels godoc
 //
 //	@Summary		List catalog models
-//	@Description	Lists every model the catalog knows, once per model id, sorted by id. Covers the models of local model components and of remote model connectors.
+//	@Description	Lists every deployable model of the catalog, once per model id, sorted by id, with the providers that serve it. Covers the models of local model components and of remote model connectors.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
-//	@Success		200	{array}		types.ModelSummary
-//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
-//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Param			component_type	query		string	false	"Only models of this role: 'llm', 'embedding' or 'reranker'. Omit for all."
+//	@Success		200				{array}		types.ModelCatalogEntry
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/catalog/models [get]
 func (h *CatalogHandler) ListModels(c *gin.Context) {
-	models, err := h.provider.GetModels()
+	entries, err := h.provider.ListModelCatalog(c.Query("component_type"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{
 			Error: fmt.Sprintf("Failed to list catalog models: %v", err),
@@ -259,18 +261,15 @@ func (h *CatalogHandler) ListModels(c *gin.Context) {
 		return
 	}
 
-	summaries := make([]types.ModelSummary, 0, len(models))
-	for _, m := range models {
-		summaries = append(summaries, m.Summary())
-	}
+	slices.SortFunc(entries, func(a, b types.ModelCatalogEntry) int { return strings.Compare(a.ID, b.ID) })
 
-	c.JSON(http.StatusOK, summaries)
+	c.JSON(http.StatusOK, entries)
 }
 
 // GetCatalogModel godoc
 //
 //	@Summary		Get a catalog model
-//	@Description	Returns one model of the catalog, with its license, certification and about details. Where several providers serve the model, the entry of the first one found is returned.
+//	@Description	Returns one model of the catalog with the providers that serve it, its license and its about details.
 //	@Tags			Catalog
 //	@Produce		json
 //	@Security		BearerAuth
@@ -298,7 +297,7 @@ func (h *CatalogHandler) GetCatalogModel(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, model.Detail())
+	c.JSON(http.StatusOK, model)
 }
 
 // GetModelDeployOptions godoc

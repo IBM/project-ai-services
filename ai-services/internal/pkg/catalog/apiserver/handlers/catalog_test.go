@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"testing"
 
@@ -495,35 +496,72 @@ func TestListCatalogModels(t *testing.T) {
 	handler := newTestCatalogHandler(t)
 	router.GET("/api/v1/catalog/models", handler.ListModels)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/catalog/models", nil)
-	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	get := func(url string) []types.ModelCatalogEntry {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	var list []types.ModelSummary
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+		var list []types.ModelCatalogEntry
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
 
-	var raw []map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
-	for _, item := range raw {
-		assert.NotContains(t, item, "about", "the list view leaves out about")
-		assert.NotContains(t, item, "license")
-		assert.NotContains(t, item, "certified_by")
+		return list
 	}
 
+	list := get("/api/v1/catalog/models")
+	byID := map[string]types.ModelCatalogEntry{}
 	ids := make([]string, 0, len(list))
 	for _, m := range list {
+		byID[m.ID] = m
 		ids = append(ids, m.ID)
 	}
-
-	assert.Contains(t, ids, "ibm-granite/granite-3.3-8b-instruct")
 	assert.True(t, slices.IsSorted(ids), "models are sorted by id")
 
-	for _, m := range list {
-		if m.ID == "ibm-granite/granite-3.3-8b-instruct" {
-			assert.Equal(t, "granite-3.3-8b-instruct", m.Title, "component entry wins over connector entry")
+	t.Run("entry shape", func(t *testing.T) {
+		m := byID["ibm-granite/granite-3.3-8b-instruct"]
+		assert.Equal(t, "Granite 3.3 8B Instruct", m.Name)
+		assert.Equal(t, "IBM", m.CertifiedBy)
+		assert.NotEmpty(t, m.Description)
+		assert.Equal(t, "llm", m.ComponentType.ID)
+		assert.NotEmpty(t, m.ComponentType.Name)
+		assert.NotEmpty(t, m.ComponentType.ShortName)
+	})
+
+	t.Run("providers are local first, then remote", func(t *testing.T) {
+		m := byID["ibm-granite/granite-3.3-8b-instruct"]
+		require.NotEmpty(t, m.Providers)
+		seenRemote := false
+		for _, pr := range m.Providers {
+			assert.NotEmpty(t, pr.ID)
+			assert.NotEmpty(t, pr.Name)
+			if pr.DeploymentType == "remote" {
+				seenRemote = true
+			} else {
+				assert.False(t, seenRemote, "local provider after a remote one: %+v", m.Providers)
+			}
 		}
-	}
+	})
+
+	t.Run("model of a component and a connector is listed once", func(t *testing.T) {
+		count := 0
+		for _, m := range list {
+			if m.ID == "BAAI/bge-reranker-v2-m3" {
+				count++
+			}
+		}
+		assert.Equal(t, 1, count)
+		assert.Equal(t, "reranker", byID["BAAI/bge-reranker-v2-m3"].ComponentType.ID)
+	})
+
+	t.Run("component_type filter", func(t *testing.T) {
+		filtered := get("/api/v1/catalog/models?component_type=reranker")
+		require.NotEmpty(t, filtered)
+		for _, m := range filtered {
+			assert.Equal(t, "reranker", m.ComponentType.ID)
+		}
+
+		assert.Empty(t, get("/api/v1/catalog/models?component_type=nope"))
+	})
 }
 
 func TestGetCatalogModel(t *testing.T) {
@@ -548,21 +586,48 @@ func TestGetCatalogModel(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
 		assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", m.ID)
 		assert.Equal(t, "Granite 3.3 8B Instruct", m.Name)
-		assert.Equal(t, "Apache-2.0", m.License)
+		assert.Equal(t, "llm", m.ComponentType.ID)
+		assert.NotEmpty(t, m.ComponentType.Name)
+		assert.NotEmpty(t, m.ComponentType.ShortName)
 		assert.Equal(t, "IBM", m.CertifiedBy)
+		assert.Equal(t, "Apache-2.0", m.License)
+		assert.NotEmpty(t, m.Description)
 		assert.NotEmpty(t, m.About, "the get-by-id view includes about")
+		assert.NotEmpty(t, m.Providers, "the get-by-id view includes providers")
 	})
 
-	// The model is listed by components (which set a title) and by a connector (which doesn't).
-	// The component entry must win on every call, not whichever the map iteration reaches first.
-	t.Run("model served by several providers is stable", func(t *testing.T) {
+	// Same providers, in the same order, as the list entry: both come from one collector.
+	t.Run("providers match the list entry", func(t *testing.T) {
+		listRouter := setupTestRouter()
+		listRouter.GET("/api/v1/catalog/models", handler.ListModels)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/catalog/models", nil)
+		listRouter.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var list []types.ModelCatalogEntry
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+
+		for _, entry := range list {
+			w := get("/api/v1/catalog/models/" + url.PathEscape(entry.ID))
+			require.Equal(t, http.StatusOK, w.Code, entry.ID)
+
+			var m types.ModelDetail
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
+			assert.Equal(t, entry, m.ModelCatalogEntry, entry.ID)
+		}
+	})
+
+	t.Run("model listed by several providers is stable", func(t *testing.T) {
 		for range 20 {
-			w := get("/api/v1/catalog/models/ibm-granite%2Fgranite-3.3-8b-instruct")
+			w := get("/api/v1/catalog/models/BAAI%2Fbge-reranker-v2-m3")
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 			var m types.ModelDetail
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &m))
-			require.Equal(t, "granite-3.3-8b-instruct", m.Title)
+			require.Equal(t, "MIT", m.License)
+			require.Equal(t, "BAAI", m.CertifiedBy)
+			require.Len(t, m.Providers, 3)
 		}
 	})
 

@@ -172,22 +172,28 @@ type Model struct {
 	Profiles       []string   `yaml:"profiles" json:"-"`              // supported hardware profile IDs; local providers only
 }
 
-// ModelSummary is a model as the catalog list API returns it.
-type ModelSummary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Default     bool   `json:"default"`
+// ModelCatalogEntry is a model as GET /catalog/models returns it: the model with the providers that serve it.
+type ModelCatalogEntry struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	ComponentType ComponentType          `json:"component_type"`
+	CertifiedBy   string                 `json:"certified_by"`
+	Description   string                 `json:"description"`
+	Providers     []ModelCatalogProvider `json:"providers"`
 }
 
-// ModelDetail is a model as the catalog get-by-id API returns it: the summary
-// plus license, certification and the free-form about section.
+// ModelCatalogProvider is a provider listed on a ModelCatalogEntry.
+type ModelCatalogProvider struct {
+	ID             string                   `json:"id"`
+	Name           string                   `json:"name"`
+	DeploymentType constants.DeploymentType `json:"deployment_type"` // "local" or "remote"
+}
+
+// ModelDetail is a model as GET /catalog/models/:id returns it: the list entry plus license and about.
 type ModelDetail struct {
-	ModelSummary
-	License     string `json:"license,omitempty"`
-	CertifiedBy string `json:"certified_by,omitempty"`
-	About       any    `json:"about,omitempty"`
+	ModelCatalogEntry
+	License string `json:"license,omitempty"`
+	About   any    `json:"about,omitempty"`
 }
 
 // UnmarshalYAML keeps the free-form 'about' node, as Service and Architecture do.
@@ -197,24 +203,22 @@ func (m *Model) UnmarshalYAML(value *yaml.Node) error {
 	return decodeWithAbout(value, (*Alias)(m), &m.About)
 }
 
-// Summary returns the list view of the model.
-func (m Model) Summary() ModelSummary {
-	return ModelSummary{
+// Entry returns the model's own fields of its list entry; the caller fills in the component type and providers.
+func (m Model) Entry() ModelCatalogEntry {
+	return ModelCatalogEntry{
 		ID:          m.ID,
 		Name:        m.Name,
-		Title:       m.Title,
+		CertifiedBy: m.CertifiedBy,
 		Description: m.Description,
-		Default:     m.Default,
 	}
 }
 
-// Detail returns the get-by-id view of the model.
+// Detail returns the model's own fields of its get-by-id view; the caller fills in the component type and providers.
 func (m Model) Detail() ModelDetail {
 	return ModelDetail{
-		ModelSummary: m.Summary(),
-		License:      m.License,
-		CertifiedBy:  m.CertifiedBy,
-		About:        aboutValue(m.About),
+		ModelCatalogEntry: m.Entry(),
+		License:           m.License,
+		About:             aboutValue(m.About),
 	}
 }
 

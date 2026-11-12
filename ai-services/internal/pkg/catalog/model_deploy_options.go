@@ -54,7 +54,7 @@ func (p *CatalogProvider) GetModelDeployOptions(ctx context.Context, modelID, pr
 	if err != nil {
 		return nil, err
 	}
-	models.SetComponentTypeNames(result, components)
+	models.SetComponentTypeNames(&result.ComponentType, components)
 
 	result.Providers = models.FilterAndSortProviders(result.Providers, providerID)
 
