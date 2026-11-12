@@ -452,10 +452,13 @@ const WorkerResourcesTable = ({
                       />
                     </TableContainer>
 
-                    {!state.isLoading &&
-                      state.totalItems > state.pageSize &&
+                    {state.totalItems > state.pageSize &&
                       state.rowsData.length > 0 && (
                         <Pagination
+                          className={
+                            state.isLoading ? styles.loadingTable : undefined
+                          }
+                          disabled={state.isLoading}
                           page={state.page}
                           pageSize={state.pageSize}
                           pageSizes={[10, 20, 30, 50]}
