@@ -53,7 +53,7 @@ func TestModelCatalog_ProviderNames(t *testing.T) {
 		key      string
 		wantName string // "" means only that the entry exists, with a name other than its id
 	}{
-		{name: "remote provider carries its display name", key: "remote/watsonx", wantName: "Watsonx"},
+		{name: "remote provider carries its display name", key: "remote/watsonx", wantName: "IBM watsonx.ai on IBM Cloud"},
 		{name: "local provider is listed", key: "local/vllm-spyre"},
 		{name: "second local provider is listed", key: "local/vllm-cpu"},
 		{name: "second remote provider is listed", key: "remote/hosted_vllm"},
@@ -131,7 +131,7 @@ func TestModelDependencyType(t *testing.T) {
 func TestProviderInfo(t *testing.T) {
 	providers := map[string]string{
 		"local/vllm-spyre": "vLLM Spyre",
-		"remote/watsonx":   "Watsonx",
+		"remote/watsonx":   "IBM watsonx.ai on IBM Cloud",
 	}
 
 	tests := []struct {
@@ -150,7 +150,7 @@ func TestProviderInfo(t *testing.T) {
 			name:           "known remote provider",
 			deploymentType: catalogconstants.DeploymentTypeRemote,
 			provider:       "watsonx",
-			want:           types.ProviderInfo{ID: "watsonx", Name: "Watsonx"},
+			want:           types.ProviderInfo{ID: "watsonx", Name: "IBM watsonx.ai on IBM Cloud"},
 		},
 		{
 			name:           "provider removed from the catalog falls back to its id",
@@ -246,7 +246,7 @@ func TestToModelBase(t *testing.T) {
 	id := uuid.New()
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	updated := created.Add(time.Hour)
-	providers := map[string]string{"remote/watsonx": "Watsonx", "local/vllm-spyre": "vLLM Spyre"}
+	providers := map[string]string{"remote/watsonx": "IBM watsonx.ai on IBM Cloud", "local/vllm-spyre": "vLLM Spyre"}
 	componentTypes := map[string]types.ComponentType{
 		"llm": {ID: "llm", Name: "Large Language Model (LLM)", ShortName: "LLM"},
 	}
@@ -311,7 +311,7 @@ func TestToModelBase(t *testing.T) {
 			row:  remote,
 			check: func(t *testing.T, got apimodels.ModelBase) {
 				assert.Nil(t, got.Worker)
-				assert.Equal(t, types.ProviderInfo{ID: "watsonx", Name: "Watsonx"}, got.Provider)
+				assert.Equal(t, types.ProviderInfo{ID: "watsonx", Name: "IBM watsonx.ai on IBM Cloud"}, got.Provider)
 				assert.Zero(t, got.ConnectedServices)
 				assert.Nil(t, got.Params)
 			},
