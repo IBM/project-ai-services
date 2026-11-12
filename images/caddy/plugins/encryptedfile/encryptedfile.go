@@ -41,6 +41,13 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 )
 
+// Caddyfile subdirective names.
+const (
+	directiveCert       = "cert"
+	directiveKey        = "key"
+	directiveSecretFile = "secret_file"
+)
+
 func init() {
 	caddy.RegisterModule(&EncryptedFile{})
 }
@@ -241,11 +248,11 @@ func (e *EncryptedFile) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 		var target *string
 
 		switch d.Val() {
-		case "cert":
+		case directiveCert:
 			target = &e.CertFile
-		case "key":
+		case directiveKey:
 			target = &e.KeyFile
-		case "secret_file":
+		case directiveSecretFile:
 			target = &e.SecretFile
 		default:
 			return d.Errf("unknown subdirective %q", d.Val())
