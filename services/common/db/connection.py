@@ -53,7 +53,8 @@ def get_database_url() -> str:
     encoded_user = quote_plus(str(user))
     encoded_password = quote_plus(str(password))
 
-    return f"postgresql://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
+    # Explicit driver: SQLAlchemy 2.1+ defaults "postgresql://" to psycopg (v3)
+    return f"postgresql+psycopg2://{encoded_user}:{encoded_password}@{host}:{port}/{database}"
 
 
 def create_db_engine(

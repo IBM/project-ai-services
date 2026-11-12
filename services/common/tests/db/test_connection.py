@@ -36,7 +36,7 @@ class TestGetDatabaseUrl:
             'POSTGRES_PASSWORD': 'testpass'
         }):
             url = get_database_url()
-            assert url == 'postgresql://testuser:testpass@localhost:5432/testdb'
+            assert url == 'postgresql+psycopg2://testuser:testpass@localhost:5432/testdb'
     
     def test_get_database_url_with_special_characters(self):
         """Test URL encoding of special characters in credentials."""
