@@ -147,6 +147,10 @@ func logDigitizeBackupSummary(exportResponse *commonBackup.DigitizeExportRespons
 			exportResponse.Summary.Documents.Failed)
 	}
 
+	if exportResponse.Summary.DocumentChecksums.TotalExported > 0 {
+		logger.Infof("  Document checksums - exported: %d\n", exportResponse.Summary.DocumentChecksums.TotalExported)
+	}
+
 	logger.Infof("  Returned records: %d\n", exportResponse.Pagination.ReturnedRecords)
 }
 
