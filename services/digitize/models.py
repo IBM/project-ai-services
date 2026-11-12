@@ -308,9 +308,9 @@ class ImportRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_non_empty_payload(self):
-        if not self.data.jobs and not self.data.documents:
+        if not (self.data.jobs or self.data.documents or self.data.document_checksums):
             raise ValueError(
-                "At least one job or document record must be provided"
+                "At least one job, document or document checksum record must be provided"
             )
         return self
 
@@ -335,6 +335,7 @@ class ImportSummary(BaseModel):
     """Import summary grouped by entity type."""
     jobs: ImportEntitySummary
     documents: ImportEntitySummary
+    document_checksums: ImportEntitySummary = Field(default_factory=ImportEntitySummary)
 
 
 class ImportResponse(BaseModel):

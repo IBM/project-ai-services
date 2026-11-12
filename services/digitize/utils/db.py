@@ -722,11 +722,13 @@ def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
 def _build_import_summary(
     total_jobs: int,
     total_documents: int,
+    total_document_checksums: int = 0,
 ) -> ImportSummary:
     """Create an initialized import summary object."""
     return ImportSummary(
         jobs=ImportEntitySummary(total_received=total_jobs),
         documents=ImportEntitySummary(total_received=total_documents),
+        document_checksums=ImportEntitySummary(total_received=total_document_checksums),
     )
 
 
@@ -859,7 +861,12 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
 def import_metadata(payload: ImportRequest) -> ImportResponse:
     """
-    Import jobs and documents into PostgreSQL in skip-existing mode.
+    Import jobs, documents and document checksums into PostgreSQL in skip-existing mode.
+
+    Records are imported in dependency order, whatever order the payload lists them
+    in: jobs → documents → document_checksums. Each stage only references records
+    that already exist in the database or were imported by an earlier stage; records
+    whose parent is missing are reported as warnings and counted as failed.
 
     Args:
         payload: Import request payload.
@@ -874,6 +881,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     summary = _build_import_summary(
         len(payload.data.jobs),
         len(payload.data.documents),
+        len(payload.data.document_checksums),
     )
     warnings: list[ImportRecordIssue] = []
     errors: list[ImportRecordIssue] = []
@@ -882,6 +890,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     existing_document_ids = set(get_all_document_ids())
 
     importable_job_ids = set(existing_job_ids)
+    importable_document_ids = set(existing_document_ids)
 
     # ── Jobs ─────────────────────────────────────────────────────────────────
     for job_record in payload.data.jobs:
@@ -972,6 +981,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
 
         if payload.validate_only:
             summary.documents.imported += 1
+            importable_document_ids.add(document_record.id)
             continue
 
         doc_source = (
@@ -1006,6 +1016,52 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             continue
 
         summary.documents.imported += 1
+        importable_document_ids.add(document_record.id)
+
+    # ── Document checksums ────────────────────────────────────────────────────
+    for checksum_record in payload.data.document_checksums:
+        if checksum_record.doc_id not in importable_document_ids:
+            summary.document_checksums.failed += 1
+            warnings.append(
+                ImportRecordIssue(
+                    record_type="document_checksum",
+                    record_id=checksum_record.doc_id,
+                    type="orphaned_document_checksum",
+                    message=(
+                        f"Document checksum references non-existent doc_id: {checksum_record.doc_id}"
+                    ),
+                )
+            )
+            continue
+
+        if payload.validate_only:
+            summary.document_checksums.imported += 1
+            continue
+
+        try:
+            inserted = db_manager.insert_document_checksum(
+                checksum_record.checksum, checksum_record.type, checksum_record.doc_id
+            )
+        except Exception as exc:
+            logger.error(
+                f"Failed to import document checksum for doc_id={checksum_record.doc_id}: {exc}",
+                exc_info=True,
+            )
+            summary.document_checksums.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="document_checksum",
+                    record_id=checksum_record.doc_id,
+                    type="database_error",
+                    message="Failed to create document checksum record",
+                )
+            )
+            continue
+
+        if inserted:
+            summary.document_checksums.imported += 1
+        else:
+            summary.document_checksums.skipped += 1
 
     return ImportResponse(
         status="completed",

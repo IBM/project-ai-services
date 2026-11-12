@@ -780,6 +780,24 @@ class TestImportExportEndpoints:
 
         assert response.status_code == 413
 
+    def test_import_metadata_record_limit_counts_document_checksums(self, digitize_test_client, monkeypatch):
+        monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
+        monkeypatch.setattr(jobs_router_module, "MAX_IMPORT_RECORDS", 1)
+
+        response = digitize_test_client.post(
+            "/v1/import",
+            json={
+                "data": {
+                    "document_checksums": [
+                        {"checksum": "a", "type": "ingestion", "doc_id": "doc-1"},
+                        {"checksum": "b", "type": "ingestion", "doc_id": "doc-2"},
+                    ],
+                }
+            },
+        )
+
+        assert response.status_code == 413
+
     def test_export_metadata_default_limit(self, digitize_test_client, monkeypatch):
         export_metadata_mock = Mock(
             return_value={
