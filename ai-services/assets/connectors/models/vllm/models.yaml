@@ -2,7 +2,7 @@
   name: Granite 3.3 8B Instruct
   description: "An 8b-parameter instruction-tuned LLM for reasoning, summarization, and tool-use."
   license: Apache-2.0
-  certified_by: BAAI
+  certified_by: IBM
   component_type: llm
   about:
     - title: "Model strengths"
@@ -92,7 +92,7 @@
   name: BGE Reranker v2 M3
   description: "A multilingual, cross-encoder-based reranker model used to improve retrieval quality by scoring and ranking candidate documents."
   license: MIT
-  certified_by: IBM
+  certified_by: BAAI
   component_type: reranker
   about:
     - title: "Model strengths"
