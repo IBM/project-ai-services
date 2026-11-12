@@ -503,7 +503,7 @@ def test_triton_url_problem_does_not_echo_the_value():
 
 
 @pytest.mark.unit
-def test_startup_reports_a_bad_triton_url_as_a_configuration_error(caplog):
+def test_startup_fails_on_a_bad_triton_url_without_echoing_it(caplog):
     import forecast.app as forecast_app
     import forecast.triton_client.triton as triton
     from forecast.settings import settings
@@ -512,14 +512,13 @@ def test_startup_reports_a_bad_triton_url_as_a_configuration_error(caplog):
     with patch.object(forecast_app, "close_db_connections"), patch.object(
         forecast_app, "triton_url_check", triton.triton_url_check
     ), patch.object(settings.forecast, "triton_url", "triton:8000"), caplog.at_level("ERROR"):
-        with TestClient(forecast_app.app) as test_client:
-            response = test_client.get("/health")
+        with pytest.raises(Exception, match="must start with http"):
+            with TestClient(forecast_app.app):
+                pass
 
     errors = [r for r in caplog.records if r.levelname == "ERROR" and "TRITON_URL" in r.getMessage()]
     assert len(errors) == 1
     assert "triton:8000" not in errors[0].getMessage()
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
