@@ -30,18 +30,18 @@ func constructMetadataFromCache(backupDir string) (map[string]interface{}, error
 
 	logger.Infof("Constructing metadata from cache files at: %s\n", cacheDir)
 
-	jobs, err := readCacheFiles(filepath.Join(cacheDir, "jobs"), "_status.json", "job")
+	jobs, err := readDigitizeFiles(filepath.Join(cacheDir, "jobs"), "_status.json", "job")
 	if err != nil {
 		return nil, err
 	}
 
-	documents, err := readCacheFiles(filepath.Join(cacheDir, "docs"), "_metadata.json", "document")
+	documents, err := readDigitizeFiles(filepath.Join(cacheDir, "docs"), "_metadata.json", "document")
 	if err != nil {
 		return nil, err
 	}
 
 	// The checksums directory is absent in backups taken before checksums were exported.
-	documentChecksums, err := readCacheFiles(filepath.Join(cacheDir, "checksums"), "_checksum.json", "document checksum")
+	documentChecksums, err := readDigitizeFiles(filepath.Join(cacheDir, "checksums"), "_checksum.json", "document checksum")
 	if err != nil {
 		return nil, err
 	}
@@ -66,11 +66,11 @@ func constructMetadataFromCache(backupDir string) (map[string]interface{}, error
 	return payload, nil
 }
 
-// readCacheFiles reads every JSON file in dir whose name ends with suffix and returns the
+// readDigitizeFiles reads every JSON file in dir whose name ends with suffix and returns the
 // decoded objects. kind names the record type ("job", "document", ...) in logs and errors.
 // A missing directory is not an error: it yields an empty, non-nil slice so the import
 // payload carries [] instead of null. Unreadable or malformed files are skipped with a warning.
-func readCacheFiles(dir, suffix, kind string) ([]interface{}, error) {
+func readDigitizeFiles(dir, suffix, kind string) ([]interface{}, error) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		logger.Infof("No %s directory found, skipping %s import\n", filepath.Base(dir), kind)
 
