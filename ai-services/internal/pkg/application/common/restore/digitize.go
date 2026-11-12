@@ -30,121 +30,85 @@ func constructMetadataFromCache(backupDir string) (map[string]interface{}, error
 
 	logger.Infof("Constructing metadata from cache files at: %s\n", cacheDir)
 
-	// Read job files
-	jobs, err := readJobFiles(filepath.Join(cacheDir, "jobs"))
+	jobs, err := readCacheFiles(filepath.Join(cacheDir, "jobs"), "_status.json", "job")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read job files: %w", err)
+		return nil, err
 	}
 
-	// Read document files
-	documents, err := readDocumentFiles(filepath.Join(cacheDir, "docs"))
+	documents, err := readCacheFiles(filepath.Join(cacheDir, "docs"), "_metadata.json", "document")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read document files: %w", err)
+		return nil, err
 	}
 
-	if len(jobs) == 0 && len(documents) == 0 {
-		return nil, fmt.Errorf("no jobs or documents found in cache")
+	// The checksums directory is absent in backups taken before checksums were exported.
+	documentChecksums, err := readCacheFiles(filepath.Join(cacheDir, "checksums"), "_checksum.json", "document checksum")
+	if err != nil {
+		return nil, err
 	}
 
-	logger.Infof("Constructed metadata: %d job(s) and %d document(s)\n", len(jobs), len(documents))
+	if len(jobs) == 0 && len(documents) == 0 && len(documentChecksums) == 0 {
+		return nil, fmt.Errorf("no jobs, documents or document checksums found in cache")
+	}
 
-	// Construct the payload in Import API format
+	logger.Infof("Constructed metadata: %d job(s), %d document(s) and %d document checksum(s)\n",
+		len(jobs), len(documents), len(documentChecksums))
+
+	// Construct the payload in Import API format. The import API orders the records
+	// by dependency itself (jobs, documents, document_checksums).
 	payload := map[string]interface{}{
 		"data": map[string]interface{}{
-			"jobs":      jobs,
-			"documents": documents,
+			"jobs":               jobs,
+			"documents":          documents,
+			"document_checksums": documentChecksums,
 		},
 	}
 
 	return payload, nil
 }
 
-// readJobFiles reads all job status JSON files from the jobs directory.
-func readJobFiles(jobsDir string) ([]interface{}, error) {
-	// Check if jobs directory exists
-	if _, err := os.Stat(jobsDir); os.IsNotExist(err) {
-		logger.Infoln("No jobs directory found, skipping job import")
+// readCacheFiles reads every JSON file in dir whose name ends with suffix and returns the
+// decoded objects. kind names the record type ("job", "document", ...) in logs and errors.
+// A missing directory is not an error: it yields an empty, non-nil slice so the import
+// payload carries [] instead of null. Unreadable or malformed files are skipped with a warning.
+func readCacheFiles(dir, suffix, kind string) ([]interface{}, error) {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		logger.Infof("No %s directory found, skipping %s import\n", filepath.Base(dir), kind)
 
-		return nil, nil
+		return []interface{}{}, nil
 	}
 
-	entries, err := os.ReadDir(jobsDir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read jobs directory: %w", err)
+		return nil, fmt.Errorf("failed to read %s files: %w", kind, err)
 	}
 
-	jobs := make([]interface{}, 0, len(entries))
+	records := make([]interface{}, 0, len(entries))
 
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_status.json") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), suffix) {
 			continue
 		}
 
-		filePath := filepath.Join(jobsDir, entry.Name())
-		data, err := os.ReadFile(filePath)
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			logger.Warningf("Failed to read job file %s: %v\n", entry.Name(), err)
+			logger.Warningf("Failed to read %s file %s: %v\n", kind, entry.Name(), err)
 
 			continue
 		}
 
-		var job map[string]interface{}
-		if err := json.Unmarshal(data, &job); err != nil {
-			logger.Warningf("Failed to parse job file %s: %v\n", entry.Name(), err)
+		var record map[string]interface{}
+		if err := json.Unmarshal(data, &record); err != nil {
+			logger.Warningf("Failed to parse %s file %s: %v\n", kind, entry.Name(), err)
 
 			continue
 		}
 
-		jobs = append(jobs, job)
+		records = append(records, record)
 	}
 
-	logger.Infof("Read %d job(s) from cache", len(jobs))
+	logger.Infof("Read %d %s(s) from cache\n", len(records), kind)
 
-	return jobs, nil
-}
-
-// readDocumentFiles reads all document metadata JSON files from the docs directory.
-func readDocumentFiles(docsDir string) ([]interface{}, error) {
-	// Check if docs directory exists
-	if _, err := os.Stat(docsDir); os.IsNotExist(err) {
-		logger.Infoln("No docs directory found, skipping document import")
-
-		return nil, nil
-	}
-
-	entries, err := os.ReadDir(docsDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read docs directory: %w", err)
-	}
-
-	documents := make([]interface{}, 0, len(entries))
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_metadata.json") {
-			continue
-		}
-
-		filePath := filepath.Join(docsDir, entry.Name())
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			logger.Warningf("Failed to read document file %s: %v\n", entry.Name(), err)
-
-			continue
-		}
-
-		var doc map[string]interface{}
-		if err := json.Unmarshal(data, &doc); err != nil {
-			logger.Warningf("Failed to parse document file %s: %v\n", entry.Name(), err)
-
-			continue
-		}
-
-		documents = append(documents, doc)
-	}
-
-	logger.Infof("Read %d document(s) from cache", len(documents))
-
-	return documents, nil
+	return records, nil
 }
 
 // DigitizeRestoreClient wraps the HTTP client for digitize restore operations.
@@ -227,6 +191,11 @@ func logImportSummary(importResponse map[string]interface{}) {
 	if docs, ok := summary["documents"].(map[string]interface{}); ok {
 		logger.Infof("  Documents - imported: %d, skipped: %d, failed: %d\n",
 			utils.GetNumericValFromMap(docs, "imported"), utils.GetNumericValFromMap(docs, "skipped"), utils.GetNumericValFromMap(docs, "failed"))
+	}
+
+	if checksums, ok := summary["document_checksums"].(map[string]interface{}); ok {
+		logger.Infof("  Document checksums - imported: %d, skipped: %d, failed: %d\n",
+			utils.GetNumericValFromMap(checksums, "imported"), utils.GetNumericValFromMap(checksums, "skipped"), utils.GetNumericValFromMap(checksums, "failed"))
 	}
 }
 

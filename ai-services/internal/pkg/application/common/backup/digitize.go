@@ -38,16 +38,18 @@ type DigitizeExportResponse struct {
 	Pagination      DigitizeExportPagination `json:"pagination"`
 }
 
-// DigitizeImportExportData contains the jobs and documents data.
+// DigitizeImportExportData contains the jobs, documents and document checksums data.
 type DigitizeImportExportData struct {
-	Jobs      []map[string]interface{} `json:"jobs"`
-	Documents []map[string]interface{} `json:"documents"`
+	Jobs              []map[string]interface{} `json:"jobs"`
+	Documents         []map[string]interface{} `json:"documents"`
+	DocumentChecksums []map[string]interface{} `json:"document_checksums"`
 }
 
 // DigitizeExportSummary contains summary information for the export.
 type DigitizeExportSummary struct {
-	Jobs      DigitizeExportEntitySummary `json:"jobs"`
-	Documents DigitizeExportEntitySummary `json:"documents"`
+	Jobs              DigitizeExportEntitySummary `json:"jobs"`
+	Documents         DigitizeExportEntitySummary `json:"documents"`
+	DocumentChecksums DigitizeExportEntitySummary `json:"document_checksums"`
 }
 
 // DigitizeExportEntitySummary contains summary for a specific entity type.
@@ -142,8 +144,9 @@ func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExpo
 	cacheDir := filepath.Join(backupDir, "cache")
 	jobsDir := filepath.Join(cacheDir, "jobs")
 	docsDir := filepath.Join(cacheDir, "docs")
+	checksumsDir := filepath.Join(cacheDir, "checksums")
 
-	for _, dir := range []string{backupDir, cacheDir, jobsDir, docsDir} {
+	for _, dir := range []string{backupDir, cacheDir, jobsDir, docsDir, checksumsDir} {
 		if err := os.MkdirAll(dir, defaultDirPermission); err != nil {
 			return fmt.Errorf("failed to create backup directory %s: %w", dir, err)
 		}
@@ -154,6 +157,10 @@ func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExpo
 	}
 
 	if err := writeDigitizeDocumentFiles(docsDir, exportResponse.Data.Documents); err != nil {
+		return err
+	}
+
+	if err := writeDigitizeChecksumFiles(checksumsDir, exportResponse.Data.DocumentChecksums); err != nil {
 		return err
 	}
 
@@ -196,6 +203,24 @@ func writeDigitizeDocumentFiles(docsDir string, documents []map[string]interface
 		filePath := filepath.Join(docsDir, fmt.Sprintf("%s_metadata.json", docID))
 		if err := writeJSONFile(filePath, document); err != nil {
 			return fmt.Errorf("failed to write document file for %s: %w", docID, err)
+		}
+	}
+
+	return nil
+}
+
+// writeDigitizeChecksumFiles writes one file per document_checksum row. The file is
+// named after doc_id, which is unique in the registry.
+func writeDigitizeChecksumFiles(checksumsDir string, checksums []map[string]interface{}) error {
+	for _, checksum := range checksums {
+		docID, ok := checksum["doc_id"].(string)
+		if !ok || docID == "" {
+			return fmt.Errorf("export response contains document checksum without valid doc_id")
+		}
+
+		filePath := filepath.Join(checksumsDir, fmt.Sprintf("%s_checksum.json", docID))
+		if err := writeJSONFile(filePath, checksum); err != nil {
+			return fmt.Errorf("failed to write document checksum file for %s: %w", docID, err)
 		}
 	}
 
