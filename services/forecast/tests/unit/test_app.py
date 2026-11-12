@@ -445,6 +445,26 @@ def test_close_db_connections_is_a_no_op_without_a_connection_manager():
         connection.close_db_connections()
 
 
+
+@pytest.mark.unit
+def test_check_db_configured_raises_when_session_is_none():
+    import forecast.db.connection as connection
+
+    with patch.object(connection, "get_db_session", None):
+        with pytest.raises(RuntimeError, match="Database connection is not configured"):
+            connection.check_db_configured()
+
+
+@pytest.mark.unit
+def test_startup_fails_fast_when_database_not_configured():
+    import forecast.app as forecast_app
+    import forecast.db.connection as connection
+
+    with patch.object(forecast_app, "check_db_configured", side_effect=RuntimeError("db unconfigured")):
+        with pytest.raises(RuntimeError, match="db unconfigured"):
+            with TestClient(forecast_app.app):
+                pass
+
 @pytest.mark.unit
 def test_shutdown_logs_when_closing_the_database_fails(caplog):
     import forecast.app as forecast_app

@@ -20,6 +20,17 @@ from forecast.settings import settings
 ) = get_connection_manager("database", settings)
 
 
+def check_db_configured() -> None:
+    """Verify that the database session factory is configured.
+
+    Raises RuntimeError if database configuration is missing.
+    """
+    if get_db_session is None:
+        raise RuntimeError(
+            "Database connection is not configured. Ensure POSTGRES_* environment variables are set."
+        )
+
+
 def close_db_connections() -> None:
     """Close every pooled database connection."""
     if _close_db_connections:

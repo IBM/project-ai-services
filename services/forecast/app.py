@@ -6,8 +6,7 @@ This file is responsible only for:
   - Middleware (request-ID injection)
   - Exception handler registration
   - The health check
-
-The connector and forecast routers are added by later stories.
+  - Connector and forecasting API routes
 """
 
 import uuid
@@ -27,7 +26,8 @@ from forecast.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
-from forecast.db.connection import close_db_connections
+from forecast.api.v1 import connectors
+from forecast.db.connection import check_db_configured, close_db_connections
 from forecast.errors import register_exception_handlers
 from forecast.triton_client.triton import triton_url_check
 from forecast.utils.encryption import validate_cipher
@@ -51,6 +51,17 @@ async def lifespan(app: FastAPI):
     # Fail fast: without a valid key the service cannot store connector secrets, so
     # the error stops startup instead of surfacing on the first connector request.
     validate_cipher()
+    check_db_configured()
+
+    # Cap thread limiter to DB pool max capacity so pool exhaustion queues in AnyIO
+    try:
+        import anyio.to_thread
+
+        anyio.to_thread.current_default_thread_limiter().total_tokens = (
+            settings.database.pool_size + settings.database.max_overflow
+        )
+    except Exception as exc:
+        logger.warning(f"Could not set thread limiter tokens: {exc}")
 
     triton_url_check()
 
@@ -74,6 +85,10 @@ tags_metadata = [
         "name": "health",
         "description": "Health check and service status",
     },
+    {
+        "name": "connectors",
+        "description": "Source database connectors and training configuration",
+    },
 ]
 
 app = FastAPI(
@@ -88,6 +103,7 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
+app.include_router(connectors.router, prefix="/v1/connectors", tags=["connectors"])
 
 
 # ------------------------------------------------------------------ #

@@ -468,12 +468,11 @@ A connector stores the connection details of one source database, with its secre
 
 **`training` object:**
 
-| Field               | Type   | Required | Description                                                                                                                                                                   |
-|:--------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `table`             | string | Yes      | Table to train on.                                                                                                                                                            |
-| `target_column`     | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
+| Field             | Type   | Required | Description                                                                                                                                                                   |
+|:------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `table`           | string | Yes      | Table to train on.                                                                                                                                                            |
+| `target_column`   | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
 | `input_columns`   | array  | Yes      | The input columns. Each is an object with a `name` and, where AutoGluon needs it, a `type` (`string`, `integer` or `number`). The forecast endpoint checks rows against them. |
-| `validation_metric` | string | No       | The metric AutoGluon validates on. Omitted means AutoGluon's default for the target.                                                                                          |
 
 **Sample request:**
 
@@ -481,7 +480,7 @@ A connector stores the connection details of one source database, with its secre
 curl -X POST http://localhost:8500/v1/connectors \
   -H "Content-Type: application/json" \
   -d '{
-        "id": "c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
         "name": "prod-sales-db",
         "type": "db2_for_i",
         "schedule": "daily",
@@ -508,7 +507,7 @@ curl -X POST http://localhost:8500/v1/connectors \
 
 ```json
 {
-    "id": "c9e6679-7425-40de-944b-e07fc1f90ae7"
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
 }
 ```
 
@@ -1231,7 +1230,7 @@ These stories break the design above into units of work. Each one has a descript
 - A secret field is never returned, and a field that is not on the allowlist is encrypted.
 - `POST` returns `409` when the `id` or `name` already exists, and `409` when another connector already exists. In both cases nothing is stored: no job and no schedule.
 - `POST` returns `422` for an unknown type, an `id` that is not a UUID, or a missing or unknown field in `connection_details` or `training`.
-- The list and get responses return `status` and `message` from the `connectors` row and, on get, `last_trained_at` from the `jobs` table.
+- The list and get responses return `status`, `message`, and `last_trained_at` from the `connectors` row.
 - `PUT` rejects `type` and `training` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
 - Cleanup of the schedule and the forecasters of a deleted connector is not part of this story.
 
