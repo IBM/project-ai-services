@@ -1,6 +1,7 @@
 import { useReducer, useMemo, useEffect, useRef } from "react";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader } from "@carbon/ibm-products";
+import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import { ServiceCard, ServiceDetailPanel } from "@/components";
 import ServiceCardSkeleton from "@/components/ServiceCard/ServiceCardSkeleton";
 import type { ServiceDetailData } from "@/components";
@@ -152,8 +153,8 @@ const Services = () => {
   return (
     <div className={styles.servicesContainer}>
       <PageHeader
-        title="Services"
-        subtitle="Single-purpose AI capabilities designed to perform specific tasks independently or as part of larger solutions."
+        title={PAGE_TITLES.SERVICES}
+        subtitle={PAGE_SUBTITLES.SERVICES}
         className={styles.pageHeader}
       />
       <Tabs selectedIndex={state.selectedTabIndex} onChange={handleTabChange}>

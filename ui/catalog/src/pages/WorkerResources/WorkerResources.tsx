@@ -3,6 +3,7 @@ import { PageHeader } from "@carbon/ibm-products";
 import WorkerResourcesTable from "@/components/WorkerResourcesTable";
 import RegisterWorkerModal from "@/components/WorkerResourcesTable/RegisterWorkerModal";
 import { registerWorker } from "@/api/workerResources.api";
+import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import { workerResourcesReducer, initialState } from "./types";
 
 const WorkerResources = () => {
@@ -43,8 +44,8 @@ const WorkerResources = () => {
   return (
     <>
       <PageHeader
-        title="Worker resources"
-        subtitle="Deployment locations that provide the infrastructure and runtime targets where AI services are deployed, executed, and managed. They enable consistent deployment, scaling, monitoring, and governance across development, test, and production workloads."
+        title={PAGE_TITLES.DEPLOYMENT_LOCATIONS}
+        subtitle={PAGE_SUBTITLES.DEPLOYMENT_LOCATIONS}
       />
       <WorkerResourcesTable
         onRegister={() => dispatch({ type: "OPEN_MODAL" })}

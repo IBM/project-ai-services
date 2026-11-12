@@ -1,13 +1,14 @@
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader } from "@carbon/ibm-products";
+import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import styles from "./Models.module.scss";
 
 const Models = () => {
   return (
     <div className={styles.modelsContainer}>
       <PageHeader
-        title="Models"
-        subtitle="Manage foundation AI models and deployed inference instances across IBM Power worker nodes."
+        title={PAGE_TITLES.MODELS}
+        subtitle={PAGE_SUBTITLES.MODELS}
         className={styles.pageHeader}
       />
       <Tabs>

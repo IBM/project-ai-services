@@ -29,7 +29,7 @@ import {
 } from "@carbon/react";
 import { Deploy } from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
-import { DEPLOYMENT_STATUS } from "@/constants";
+import { DEPLOYMENT_STATUS, PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import type { DigitalAssistantRow } from "./types";
 import {
   ACTION_TYPES,
@@ -129,10 +129,10 @@ const DigitalAssistantsPage = () => {
   );
 
   // Use architecture data or fallback to defaults
-  const pageTitle = selectedArchitecture?.name || "Digital assistants";
+  const pageTitle =
+    selectedArchitecture?.name || PAGE_TITLES.DIGITAL_ASSISTANTS;
   const pageSubtitle =
-    selectedArchitecture?.description ||
-    "Production-ready tools that help users complete tasks and access information through conversation or commands. Assistants integrate multiple services for complex use cases and support retrieval-augmented generation (RAG).";
+    selectedArchitecture?.description || PAGE_SUBTITLES.DIGITAL_ASSISTANTS;
 
   // Refs mirror state.page/pageSize and are updated inline on every render
 

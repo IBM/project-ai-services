@@ -32,9 +32,9 @@ function App() {
                 element={<DigitalAssistantsPage />}
               />
               <Route path={ROUTES.SERVICES} element={<Services />} />
-              <Route path={ROUTES.CONNECTORS} element={<Connectors />} />
+              <Route path={ROUTES.DATA_CONNECTORS} element={<Connectors />} />
               <Route
-                path={ROUTES.WORKER_RESOURCES}
+                path={ROUTES.DEPLOYMENT_LOCATIONS}
                 element={<WorkerResources />}
               />
               <Route path={ROUTES.MODELS} element={<Models />} />

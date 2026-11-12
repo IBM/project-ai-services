@@ -359,7 +359,7 @@ const DataSourceConnectorsTable = ({
                   getTableProps,
                 }) => (
                   <>
-                    <TableContainer title="Data sources">
+                    <TableContainer>
                       <TableToolbarActions
                         search={state.search}
                         headers={HEADERS}

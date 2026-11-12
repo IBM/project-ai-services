@@ -82,9 +82,9 @@ const Navbar = (props: NavbarProps) => {
             {PAGE_TITLES.SERVICES}
           </SideNavMenuItem>
 
-          <SideNavMenuItem as={NavLink} to={ROUTES.CONNECTORS}>
+          <SideNavMenuItem as={NavLink} to={ROUTES.DATA_CONNECTORS}>
             <div className={styles.navItemContent}>
-              <span>{PAGE_TITLES.CONNECTORS}</span>
+              <span>{PAGE_TITLES.DATA_CONNECTORS}</span>
               {offlineCount !== null && offlineCount > 0 && (
                 <Tag type="red" size="sm" className={styles.badge}>
                   {offlineCount}
@@ -97,8 +97,8 @@ const Navbar = (props: NavbarProps) => {
             {PAGE_TITLES.MODELS}
           </SideNavMenuItem>
 
-          <SideNavMenuItem as={NavLink} to={ROUTES.WORKER_RESOURCES}>
-            {PAGE_TITLES.WORKER_RESOURCES}
+          <SideNavMenuItem as={NavLink} to={ROUTES.DEPLOYMENT_LOCATIONS}>
+            {PAGE_TITLES.DEPLOYMENT_LOCATIONS}
           </SideNavMenuItem>
 
           <SideNavDivider />
