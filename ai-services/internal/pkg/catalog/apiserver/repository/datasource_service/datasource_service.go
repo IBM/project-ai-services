@@ -557,23 +557,39 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, app *dbm
 	return eligible
 }
 
-// countDatasourcesForService returns the number of connector-type dependencies currently linked
-// to the given service. It is used to enforce datasource.max_connections at connect time.
+// countDatasourcesForService returns the number of datasource connectors currently linked to the
+// given service. Connector dependencies of other types (e.g. remote model connectors) are
+// excluded, matching the creation-time check. It is used to enforce datasource.max_connections
+// at connect time.
 func (s *DatasourceService) countDatasourcesForService(ctx context.Context, serviceID uuid.UUID) (int, error) {
 	deps, err := s.svcDepRepo.GetDependenciesByServiceID(ctx, serviceID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count datasources for service %s: %w", serviceID, err)
 	}
 
-	var count int
+	var connectorIDs []uuid.UUID
 
 	for _, dep := range deps {
 		if dep.DependencyType == dbmodels.DependencyTypeConnector {
-			count++
+			connectorIDs = append(connectorIDs, dep.DependencyID)
 		}
 	}
 
-	return count, nil
+	if len(connectorIDs) == 0 {
+		return 0, nil
+	}
+
+	connectors, err := s.connectorRepo.GetByIDs(ctx, connectorIDs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to load connectors for service %s: %w", serviceID, err)
+	}
+
+	connectorTypes := make([]string, 0, len(connectors))
+	for _, c := range connectors {
+		connectorTypes = append(connectorTypes, c.Type)
+	}
+
+	return validators.CountDatasourceConnectors(connectorTypes), nil
 }
 
 // validateServiceConstraints checks provider-compatibility and max-connections constraints for each

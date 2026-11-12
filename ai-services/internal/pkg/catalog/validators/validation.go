@@ -560,6 +560,22 @@ func validateConnectorInDB(
 	return ValidateProviderSupported(catalogService, connector.Provider, serviceCatalogID)
 }
 
+// CountDatasourceConnectors returns how many of the given connector type strings are datasource
+// connectors. It is the single source of truth for max_connections counting, shared by the
+// creation-time check and the post-creation connect check, so connectors of other types
+// (e.g. remote model connectors) never count against datasource.max_connections.
+func CountDatasourceConnectors(connectorTypes []string) int {
+	var count int
+
+	for _, t := range connectorTypes {
+		if t == catalogconstants.ConnectorTypeDatasource {
+			count++
+		}
+	}
+
+	return count
+}
+
 // validateMaxConnectionsAtCreation enforces datasource.max_connections at application-creation time.
 // It checks that the number of datasource connector refs supplied for the service does not exceed the limit.
 func validateMaxConnectionsAtCreation(service apimodels.Service, catalogService *types.Service) error {
@@ -568,13 +584,13 @@ func validateMaxConnectionsAtCreation(service apimodels.Service, catalogService 
 	}
 
 	max := *catalogService.Datasource.MaxConnections
-	var count int
 
+	refTypes := make([]string, 0, len(service.Connectors))
 	for _, ref := range service.Connectors {
-		if ref.Type == catalogconstants.ConnectorTypeDatasource {
-			count++
-		}
+		refTypes = append(refTypes, ref.Type)
 	}
+
+	count := CountDatasourceConnectors(refTypes)
 
 	if count > max {
 		return BadRequest(

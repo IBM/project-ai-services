@@ -7,8 +7,10 @@ import (
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -127,4 +129,70 @@ func TestBuildDatasourcePage_PreservesOrder(t *testing.T) {
 	for i, item := range items {
 		assert.Equal(t, order[i], item.ID)
 	}
+}
+
+// mockSvcDepRepoForCount embeds the interface so only GetDependenciesByServiceID needs to be implemented.
+type mockSvcDepRepoForCount struct {
+	dbrepo.ServiceDependencyRepository
+	deps []dbmodels.ServiceDependency
+}
+
+func (m *mockSvcDepRepoForCount) GetDependenciesByServiceID(_ context.Context, _ uuid.UUID) ([]dbmodels.ServiceDependency, error) {
+	return m.deps, nil
+}
+
+// mockConnectorRepoByIDs embeds the interface so only GetByIDs needs to be implemented.
+type mockConnectorRepoByIDs struct {
+	dbrepo.ConnectorRepository
+	connectors map[uuid.UUID]dbmodels.Connector
+}
+
+func (m *mockConnectorRepoByIDs) GetByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]dbmodels.Connector, error) {
+	return m.connectors, nil
+}
+
+func TestCountDatasourcesForService_MixedConnectorTypes(t *testing.T) {
+	dsID1, dsID2, modelID := uuid.New(), uuid.New(), uuid.New()
+
+	svc := &DatasourceService{
+		svcDepRepo: &mockSvcDepRepoForCount{deps: []dbmodels.ServiceDependency{
+			{DependencyID: dsID1, DependencyType: dbmodels.DependencyTypeConnector},
+			{DependencyID: dsID2, DependencyType: dbmodels.DependencyTypeConnector},
+			{DependencyID: modelID, DependencyType: dbmodels.DependencyTypeConnector},
+			{DependencyID: uuid.New(), DependencyType: dbmodels.DependencyTypeComponent},
+		}},
+		connectorRepo: &mockConnectorRepoByIDs{connectors: map[uuid.UUID]dbmodels.Connector{
+			dsID1:   {ID: dsID1, Type: catalogconstants.ConnectorTypeDatasource},
+			dsID2:   {ID: dsID2, Type: catalogconstants.ConnectorTypeDatasource},
+			modelID: {ID: modelID, Type: catalogconstants.ConnectorTypeModels},
+		}},
+	}
+
+	count, err := svc.countDatasourcesForService(context.Background(), uuid.New())
+	require.NoError(t, err)
+	assert.Equal(t, 2, count, "model connectors and non-connector dependencies must not count")
+}
+
+func TestCountDatasourcesForService_NoConnectors(t *testing.T) {
+	svc := &DatasourceService{
+		svcDepRepo: &mockSvcDepRepoForCount{deps: []dbmodels.ServiceDependency{
+			{DependencyID: uuid.New(), DependencyType: dbmodels.DependencyTypeComponent},
+		}},
+	}
+
+	count, err := svc.countDatasourcesForService(context.Background(), uuid.New())
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+func TestCountDatasourceConnectors_MixedTypes(t *testing.T) {
+	got := validators.CountDatasourceConnectors([]string{
+		catalogconstants.ConnectorTypeDatasource,
+		catalogconstants.ConnectorTypeModels,
+		catalogconstants.ConnectorTypeDatasource,
+		"other",
+	})
+
+	assert.Equal(t, 2, got)
+	assert.Equal(t, 0, validators.CountDatasourceConnectors(nil))
 }
