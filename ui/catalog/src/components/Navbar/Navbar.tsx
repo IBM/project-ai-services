@@ -97,12 +97,12 @@ const Navbar = (props: NavbarProps) => {
             </div>
           </SideNavMenuItem>
 
-          <SideNavMenuItem as={NavLink} to={ROUTES.WORKER_RESOURCES}>
-            {PAGE_TITLES.WORKER_RESOURCES}
+          <SideNavMenuItem as={NavLink} to={ROUTES.MODELS}>
+            {PAGE_TITLES.MODELS}
           </SideNavMenuItem>
 
-          <SideNavMenuItem as={NavLink} to={ROUTES.MODELS}>
-            Models
+          <SideNavMenuItem as={NavLink} to={ROUTES.WORKER_RESOURCES}>
+            {PAGE_TITLES.WORKER_RESOURCES}
           </SideNavMenuItem>
 
           <SideNavDivider />

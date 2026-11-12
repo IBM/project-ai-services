@@ -59,16 +59,6 @@ type ProviderInfo struct {
 	Name string `json:"name"`
 }
 
-// PaginationMetadata represents pagination information in the response.
-type PaginationMetadata struct {
-	Page       int  `json:"page"`
-	PageSize   int  `json:"page_size"`
-	TotalItems int  `json:"total_items"`
-	TotalPages int  `json:"total_pages"`
-	HasNext    bool `json:"has_next"`
-	HasPrev    bool `json:"has_prev"`
-}
-
 // ApplicationResourcesResponse represents the resource usage response for an application.
 type ApplicationResourcesResponse struct {
 	CPU          ApplicationCPUInfo  `json:"cpu"`

@@ -1,5 +1,5 @@
 ui:
-  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.62
+  image: icr.io/ai-services-cicd/chatbot-ui:v0.0.64
   resources:
     requests:
       memory: "512Mi"
@@ -9,7 +9,7 @@ ui:
       cpu: "50m"
 
 backend:
-  image: icr.io/ai-services-cicd/chatbot-service:v0.0.39
+  image: icr.io/ai-services-cicd/chatbot-service:v0.0.41
   log_level: "INFO"
   systemPrompt: "You are a helpful, conversational AI assistant. Engage naturally with users across multiple turns of conversation. Provide clear, accurate, and contextually relevant responses. Reference previous exchanges when appropriate to maintain conversation flow."
   resources:
@@ -25,19 +25,8 @@ chatbot:
   numChunksPostReranker: 3
   rerank: true
 
-embedding:
-  model:
-    name: ""
-
-reranker:
-  model:
-    name: ""
-
 opensearch:
   numShards: 1
-  auth:
-    username: "admin"
-    password: ""
 
 mcp:
   enabled: true
