@@ -144,13 +144,13 @@ func TestConstructMetadataFromCacheEmptyIsRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "no jobs, documents or document checksums")
 }
 
-func TestReadCacheFilesSkipsUnrelatedAndMalformedFiles(t *testing.T) {
+func TestReadDigitizeFilesSkipsUnrelatedAndMalformedFiles(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "doc-1_checksum.json"), []byte(`{"doc_id":"doc-1"}`), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "doc-2_checksum.json"), []byte(`not json`), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte(`{"doc_id":"x"}`), 0o644))
 
-	checksums, err := readCacheFiles(dir, "_checksum.json", "document checksum")
+	checksums, err := readDigitizeFiles(dir, "_checksum.json", "document checksum")
 
 	require.NoError(t, err)
 	require.Len(t, checksums, 1)

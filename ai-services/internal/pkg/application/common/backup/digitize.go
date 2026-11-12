@@ -142,26 +142,28 @@ func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExpo
 	// Create backup directory structure to match restore expectations
 	backupDir := filepath.Join(tempDir, "backup")
 	cacheDir := filepath.Join(backupDir, "cache")
-	jobsDir := filepath.Join(cacheDir, "jobs")
-	docsDir := filepath.Join(cacheDir, "docs")
-	checksumsDir := filepath.Join(cacheDir, "checksums")
 
-	for _, dir := range []string{backupDir, cacheDir, jobsDir, docsDir, checksumsDir} {
+	// One cache sub-directory per record type; the restore side reads the same layout.
+	digitizeFiles := []struct {
+		subDir, idKey, suffix, kind string
+		records                     []map[string]interface{}
+	}{
+		{"jobs", "job_id", "_status.json", "job", exportResponse.Data.Jobs},
+		{"docs", "id", "_metadata.json", "document", exportResponse.Data.Documents},
+		// Named after doc_id, which is unique in the document_checksum registry.
+		{"checksums", "doc_id", "_checksum.json", "document checksum", exportResponse.Data.DocumentChecksums},
+	}
+
+	for _, c := range digitizeFiles {
+		// MkdirAll also creates backup/ and backup/cache/, even when a record list is empty.
+		dir := filepath.Join(cacheDir, c.subDir)
 		if err := os.MkdirAll(dir, defaultDirPermission); err != nil {
 			return fmt.Errorf("failed to create backup directory %s: %w", dir, err)
 		}
-	}
 
-	if err := writeDigitizeJobFiles(jobsDir, exportResponse.Data.Jobs); err != nil {
-		return err
-	}
-
-	if err := writeDigitizeDocumentFiles(docsDir, exportResponse.Data.Documents); err != nil {
-		return err
-	}
-
-	if err := writeDigitizeChecksumFiles(checksumsDir, exportResponse.Data.DocumentChecksums); err != nil {
-		return err
+		if err := writeDigitizeFiles(dir, c.idKey, c.suffix, c.kind, c.records); err != nil {
+			return err
+		}
 	}
 
 	if err := writeDigitizeBackupInfo(backupDir); err != nil {
@@ -177,50 +179,18 @@ func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExpo
 	return nil
 }
 
-func writeDigitizeJobFiles(jobsDir string, jobs []map[string]interface{}) error {
-	for _, job := range jobs {
-		jobID, ok := job["job_id"].(string)
-		if !ok || jobID == "" {
-			return fmt.Errorf("export response contains job without valid job_id")
+// writeDigitizeFiles writes each record to dir as <record[idKey]><suffix>. kind names the
+// record type ("job", "document", ...) in errors. A record without a string idKey fails
+// the backup, because it could not be restored.
+func writeDigitizeFiles(dir, idKey, suffix, kind string, records []map[string]interface{}) error {
+	for _, record := range records {
+		id, ok := record[idKey].(string)
+		if !ok || id == "" {
+			return fmt.Errorf("export response contains %s without valid %s", kind, idKey)
 		}
 
-		filePath := filepath.Join(jobsDir, fmt.Sprintf("%s_status.json", jobID))
-		if err := writeJSONFile(filePath, job); err != nil {
-			return fmt.Errorf("failed to write job file for %s: %w", jobID, err)
-		}
-	}
-
-	return nil
-}
-
-func writeDigitizeDocumentFiles(docsDir string, documents []map[string]interface{}) error {
-	for _, document := range documents {
-		docID, ok := document["id"].(string)
-		if !ok || docID == "" {
-			return fmt.Errorf("export response contains document without valid id")
-		}
-
-		filePath := filepath.Join(docsDir, fmt.Sprintf("%s_metadata.json", docID))
-		if err := writeJSONFile(filePath, document); err != nil {
-			return fmt.Errorf("failed to write document file for %s: %w", docID, err)
-		}
-	}
-
-	return nil
-}
-
-// writeDigitizeChecksumFiles writes one file per document_checksum row. The file is
-// named after doc_id, which is unique in the registry.
-func writeDigitizeChecksumFiles(checksumsDir string, checksums []map[string]interface{}) error {
-	for _, checksum := range checksums {
-		docID, ok := checksum["doc_id"].(string)
-		if !ok || docID == "" {
-			return fmt.Errorf("export response contains document checksum without valid doc_id")
-		}
-
-		filePath := filepath.Join(checksumsDir, fmt.Sprintf("%s_checksum.json", docID))
-		if err := writeJSONFile(filePath, checksum); err != nil {
-			return fmt.Errorf("failed to write document checksum file for %s: %w", docID, err)
+		if err := writeJSONFile(filepath.Join(dir, id+suffix), record); err != nil {
+			return fmt.Errorf("failed to write %s file for %s: %w", kind, id, err)
 		}
 	}
 
