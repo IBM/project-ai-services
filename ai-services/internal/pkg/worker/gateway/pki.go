@@ -17,6 +17,7 @@ import (
 
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
@@ -208,9 +209,9 @@ func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]s
 
 		return []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}, nil
 	case types.RuntimeTypePodman:
-		domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
+		domainSuffix := utils.GetEnv(proxy.DomainSuffixEnvVar, "")
 		if domainSuffix == "" {
-			return nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set — cannot generate gateway server cert")
+			return nil, fmt.Errorf("%s environment variable not set — cannot generate gateway server cert", proxy.DomainSuffixEnvVar)
 		}
 
 		// domainSuffix itself is included because a worker's Caddy dials the

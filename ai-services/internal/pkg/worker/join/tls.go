@@ -106,8 +106,6 @@ func loadClientCert(tlsDir string) (tls.Certificate, error) {
 		return tls.Certificate{}, fmt.Errorf("load mTLS credentials: read %s: %w", tlsKeyFile, err)
 	}
 
-	ensureCaddyReadable(tlsDir)
-
 	keyPEMStr, err := catalogutils.Decrypt(string(keyEnc), secret)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("load mTLS credentials: decrypt %s: %w", tlsKeyFile, err)
