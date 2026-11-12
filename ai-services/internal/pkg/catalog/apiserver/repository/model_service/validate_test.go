@@ -9,7 +9,9 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,16 +32,66 @@ func TestValidateCreateRequest(t *testing.T) {
 		mutate  func(*apimodels.CreateModelRequest)
 		wantMsg string
 	}{
-		{"valid", func(*apimodels.CreateModelRequest) {}, ""},
+		{"valid local", func(*apimodels.CreateModelRequest) {}, ""},
+		{
+			"valid remote",
+			func(r *apimodels.CreateModelRequest) {
+				r.DeploymentType, r.ProviderID = constants.DeploymentTypeRemote, "hosted_vllm"
+			},
+			"",
+		},
+		{
+			"valid remote-only model",
+			func(r *apimodels.CreateModelRequest) {
+				r.DeploymentType, r.ProviderID, r.Model = constants.DeploymentTypeRemote, "watsonx", "ibm/granite-4-h-small"
+			},
+			"",
+		},
 		{"name bad chars", func(r *apimodels.CreateModelRequest) { r.Name = "a!b" }, "Model name may only contain"},
+		{"invalid component_type", func(r *apimodels.CreateModelRequest) { r.ComponentType = "database" }, "invalid component_type"},
+		{
+			"unknown provider",
+			func(r *apimodels.CreateModelRequest) { r.ProviderID = "nope" },
+			`is not available for local provider "nope"; it is offered by: vllm-spyre (local), vllm-cpu (local), hosted_vllm (remote)`,
+		},
+		{
+			"remote provider asked as local",
+			func(r *apimodels.CreateModelRequest) { r.ProviderID = "watsonx" },
+			`is not available for local provider "watsonx"`,
+		},
+		{"unknown model", func(r *apimodels.CreateModelRequest) { r.Model = "no/such-model" }, `invalid model "no/such-model"`},
+		{
+			"model of another component type",
+			func(r *apimodels.CreateModelRequest) { r.ComponentType = "embedding" },
+			`cannot be used as component_type "embedding"; it is a model of component_type: llm`,
+		},
+		{
+			"model the local provider does not offer",
+			func(r *apimodels.CreateModelRequest) {
+				r.ProviderID, r.Model = "vllm-spyre", "ibm-granite/granite-4.1-8b"
+			},
+			`is not available for local provider "vllm-spyre"`,
+		},
+		{
+			"local model asked as remote on a provider that does not list it",
+			func(r *apimodels.CreateModelRequest) {
+				r.DeploymentType, r.ProviderID = constants.DeploymentTypeRemote, "watsonx"
+			},
+			`is not available for remote provider "watsonx"`,
+		},
 	}
+
+	// The deploy options are read for the runtime of the control plane.
+	setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
+
+	svc := newListValidationService(t, &mockModelRepo{})
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := validRequest()
 			tt.mutate(&req)
 
-			err := validateCreateRequest(req)
+			err := svc.validateCreateRequest(context.Background(), req)
 			if tt.wantMsg == "" {
 				require.NoError(t, err)
 
@@ -205,6 +257,87 @@ func TestListModels_AcceptsKnownFilters(t *testing.T) {
 
 			_, err := svc.ListModels(context.Background(), req)
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestCheckDeployOptions(t *testing.T) {
+	options := func(componentType string, providers ...types.ModelDeployProvider) *types.ModelDeployOptions {
+		return &types.ModelDeployOptions{
+			ID:            "ibm-granite/granite-3.3-8b-instruct",
+			ComponentType: types.ComponentType{ID: componentType},
+			Providers:     providers,
+		}
+	}
+	local := func(id string) types.ModelDeployProvider {
+		return types.ModelDeployProvider{ID: id, DeploymentType: constants.DeploymentTypeLocal}
+	}
+	remote := func(id string) types.ModelDeployProvider {
+		return types.ModelDeployProvider{ID: id, DeploymentType: constants.DeploymentTypeRemote}
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*apimodels.CreateModelRequest)
+		options *types.ModelDeployOptions
+		wantMsg string
+	}{
+		{
+			name:    "local provider offers the model",
+			mutate:  func(*apimodels.CreateModelRequest) {},
+			options: options("llm", local("vllm-spyre"), local("vllm-cpu"), remote("hosted_vllm")),
+		},
+		{
+			name: "remote provider offers the model",
+			mutate: func(r *apimodels.CreateModelRequest) {
+				r.DeploymentType, r.ProviderID = constants.DeploymentTypeRemote, "hosted_vllm"
+			},
+			options: options("llm", local("vllm-cpu"), remote("hosted_vllm")),
+		},
+		{
+			name:    "model of another component type",
+			mutate:  func(r *apimodels.CreateModelRequest) { r.ComponentType = "embedding" },
+			options: options("llm", local("vllm-cpu")),
+			wantMsg: `cannot be used as component_type "embedding"; it is a model of component_type: llm`,
+		},
+		{
+			name: "provider id exists but for the other deployment type",
+			mutate: func(r *apimodels.CreateModelRequest) {
+				r.DeploymentType = constants.DeploymentTypeRemote
+			},
+			options: options("llm", local("vllm-cpu"), remote("hosted_vllm")),
+			wantMsg: `is not available for remote provider "vllm-cpu"; it is offered by: vllm-cpu (local), hosted_vllm (remote)`,
+		},
+		{
+			name:    "unknown provider",
+			mutate:  func(r *apimodels.CreateModelRequest) { r.ProviderID = "nope" },
+			options: options("llm", local("vllm-cpu")),
+			wantMsg: `is not available for local provider "nope"; it is offered by: vllm-cpu (local)`,
+		},
+		{
+			name:    "model with no provider",
+			mutate:  func(*apimodels.CreateModelRequest) {},
+			options: options("llm"),
+			wantMsg: `is not available for local provider "vllm-cpu"; it is offered by: `,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := validRequest()
+			tt.mutate(&req)
+
+			err := checkDeployOptions(req, tt.options)
+			if tt.wantMsg == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			var valErr *validators.ValidationError
+			require.ErrorAs(t, err, &valErr)
+			assert.Equal(t, http.StatusBadRequest, valErr.Code)
+			assert.Contains(t, valErr.Message, tt.wantMsg)
 		})
 	}
 }

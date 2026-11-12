@@ -17,6 +17,7 @@ func TestModelRequest(t *testing.T) {
 	assert.Equal(t, "m", req.ModelName)
 	assert.Equal(t, "p/m", req.LiteLLMParams["model"])
 	assert.Equal(t, []string{"id-1"}, req.LiteLLMParams["tags"])
+	assert.Equal(t, true, req.LiteLLMParams["use_in_pass_through"])
 	require.NotNil(t, req.ModelInfo)
 	assert.Equal(t, "rerank", req.ModelInfo.Mode)
 
@@ -34,6 +35,8 @@ func TestModelRequest_ForwardsParamsVerbatim(t *testing.T) {
 		"timeout":    30,
 		"model":      "attacker/override",
 		"tags":       []string{"attacker"},
+
+		"use_in_pass_through": false,
 	}
 	r := Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", Params: params}
 
@@ -45,6 +48,7 @@ func TestModelRequest_ForwardsParamsVerbatim(t *testing.T) {
 	assert.Equal(t, 30, got["timeout"])
 	assert.Equal(t, "p/m", got["model"], "a provider param must not override the platform-owned model")
 	assert.Equal(t, []string{"id-1"}, got["tags"], "a provider param must not override the platform-owned tags")
+	assert.Equal(t, true, got["use_in_pass_through"], "a provider param must not override use_in_pass_through")
 	assert.Equal(t, "attacker/override", params["model"], "the route params must not be mutated")
 }
 
@@ -68,7 +72,7 @@ func TestPassThroughRequest(t *testing.T) {
 	assert.Equal(t, "/tokenize/id-1", req.Path)
 	assert.Equal(t, "http://llm:8000/tokenize", req.Target)
 	assert.Equal(t, []string{"POST"}, req.Methods)
-	assert.True(t, req.Auth, "tokenize passthrough must require LiteLLM authentication")
+	assert.False(t, req.Auth, "tokenize passthrough must not require LiteLLM authentication")
 }
 
 type fakeLiteLLMClient struct {

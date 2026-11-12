@@ -3972,6 +3972,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelApplication"
                     }
                 },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
                 "connected_services": {
                     "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"
@@ -4040,6 +4043,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListItem": {
             "type": "object",
             "properties": {
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
                 "connected_services": {
                     "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"

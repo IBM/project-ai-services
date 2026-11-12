@@ -11,8 +11,9 @@ import (
 
 // Keys of litellm_params that the platform owns; a provider param can never override them.
 const (
-	litellmParamModel = "model"
-	litellmParamTags  = "tags"
+	litellmParamModel         = "model"
+	litellmParamTags          = "tags"
+	litellmParamUseInPassThru = "use_in_pass_through"
 )
 
 func modelRequest(r Route) catalogclient.LiteLLMModelNewRequest {
@@ -25,6 +26,7 @@ func modelRequest(r Route) catalogclient.LiteLLMModelNewRequest {
 
 	params[litellmParamModel] = r.UpstreamModel
 	params[litellmParamTags] = []string{r.Tag}
+	params[litellmParamUseInPassThru] = true
 
 	req := catalogclient.LiteLLMModelNewRequest{
 		ModelName:     r.Model,
@@ -48,7 +50,7 @@ func passThroughRequest(r Route) catalogclient.LiteLLMPassThroughRequest {
 		Path:    fmt.Sprintf("/tokenize/%s", r.Tag),
 		Target:  r.TokenizeURL,
 		Methods: []string{"POST"},
-		Auth:    true,
+		Auth:    false,
 	}
 }
 

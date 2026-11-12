@@ -1,7 +1,7 @@
 # Connector identification
 type: connector
 id: watsonx
-name: "Watsonx"
+name: "IBM watsonx.ai on IBM Cloud"
 description: "Connect to models hosted on IBM watsonx.ai"
 
 # Connector type this provider belongs to

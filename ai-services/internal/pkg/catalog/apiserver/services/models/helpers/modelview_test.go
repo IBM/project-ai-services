@@ -211,16 +211,51 @@ func TestWorkerInfo(t *testing.T) {
 	}
 }
 
+func TestModelCatalog_ComponentTypeInfos(t *testing.T) {
+	infos := newTestModelCatalog(t).ComponentTypeInfos()
+
+	for _, id := range []string{"llm", "embedding", "reranker"} {
+		got, ok := infos[id]
+
+		require.True(t, ok, "%q is missing from %v", id, infos)
+		assert.Equal(t, id, got.ID)
+		assert.NotEmpty(t, got.Name)
+		assert.NotEmpty(t, got.ShortName)
+	}
+
+	t.Run("empty catalog has no component types", func(t *testing.T) {
+		got := New(&catalog.CatalogProvider{}).ComponentTypeInfos()
+
+		require.NotNil(t, got)
+		assert.Empty(t, got)
+	})
+}
+
+func TestComponentTypeInfo(t *testing.T) {
+	infos := map[string]types.ComponentType{
+		"llm": {ID: "llm", Name: "Large Language Model (LLM)", ShortName: "LLM"},
+	}
+
+	assert.Equal(t, infos["llm"], componentTypeInfo(dbrepo.ModelRow{ComponentType: "llm"}, infos))
+	assert.Equal(t, types.ComponentType{ID: "retired"}, componentTypeInfo(dbrepo.ModelRow{ComponentType: "retired"}, infos),
+		"a type removed from the catalog falls back to its id")
+	assert.Equal(t, types.ComponentType{ID: "llm"}, componentTypeInfo(dbrepo.ModelRow{ComponentType: "llm"}, nil))
+}
+
 func TestToModelBase(t *testing.T) {
 	id := uuid.New()
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	updated := created.Add(time.Hour)
 	providers := map[string]string{"remote/watsonx": "Watsonx", "local/vllm-spyre": "vLLM Spyre"}
+	componentTypes := map[string]types.ComponentType{
+		"llm": {ID: "llm", Name: "Large Language Model (LLM)", ShortName: "LLM"},
+	}
 
 	local := dbrepo.ModelRow{
 		ID:                id,
 		DeploymentType:    catalogconstants.DeploymentTypeLocal,
 		Name:              "granite",
+		ComponentType:     "llm",
 		Provider:          "vllm-spyre",
 		Model:             "ibm-granite/granite-3.3-8b-instruct",
 		Params:            map[string]any{"max_tokens": 1024},
@@ -259,6 +294,7 @@ func TestToModelBase(t *testing.T) {
 				assert.Equal(t, id.String(), got.ID)
 				assert.Equal(t, catalogconstants.DeploymentTypeLocal, got.DeploymentType)
 				assert.Equal(t, "granite", got.Name)
+				assert.Equal(t, types.ComponentType{ID: "llm", Name: "Large Language Model (LLM)", ShortName: "LLM"}, got.ComponentType)
 				assert.Equal(t, types.ProviderInfo{ID: "vllm-spyre", Name: "vLLM Spyre"}, got.Provider)
 				assert.Equal(t, &types.ApplicationWorker{ID: "w-1", Name: "worker-1", RuntimeType: "podman"}, got.Worker)
 				assert.Equal(t, "ibm-granite/granite-3.3-8b-instruct", got.Model)
@@ -291,7 +327,7 @@ func TestToModelBase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.check(t, ToModelBase(tt.row, providers, tt.services))
+			tt.check(t, ToModelBase(tt.row, providers, componentTypes, tt.services))
 		})
 	}
 }
