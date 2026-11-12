@@ -31,7 +31,7 @@ func (p *CatalogProvider) GetModelDeployOptions(ctx context.Context, modelID, pr
 	// TODO: cache a model-id -> providers index instead of scanning every item's models.yaml per request.
 	// Warm latency is ~2ms currently.
 
-	for _, item := range p.allItems() {
+	for _, item := range p.sortedItems() {
 		model, err := findModel(item, modelID)
 		if err != nil {
 			return nil, err
@@ -54,7 +54,7 @@ func (p *CatalogProvider) GetModelDeployOptions(ctx context.Context, modelID, pr
 	if err != nil {
 		return nil, err
 	}
-	models.SetComponentTypeNames(result, components)
+	models.SetComponentTypeNames(&result.ComponentType, components)
 
 	result.Providers = models.FilterAndSortProviders(result.Providers, providerID)
 
@@ -102,10 +102,9 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 }
 
 // findModel returns modelID's entry from the item's models.yaml, or nil if the item doesn't list it.
-// Only components and model connectors have a models.yaml; other items return nil.
+// Only model components and model connectors have a models.yaml; other items return nil.
 func findModel(item *catalogItem, modelID string) (*types.Model, error) {
-	isModelConnector := item.Connector != nil && item.Connector.ConnectorType == constants.ConnectorTypeModels
-	if item.Component == nil && !isModelConnector {
+	if !models.IsModelProvider(item.Component, item.Connector) {
 		return nil, nil
 	}
 
