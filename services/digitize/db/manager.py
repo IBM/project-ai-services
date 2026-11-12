@@ -2727,6 +2727,29 @@ class DatabaseManager:
                 session.expunge(row)
             return rows
 
+    @staticmethod
+    def insert_document_checksum(checksum: str, doc_type: str, doc_id: str) -> bool:
+        """
+        Insert one document_checksum row, leaving any existing row untouched.
+
+        The document row must already exist (``doc_id`` is a foreign key). Raises on
+        database failure.
+
+        Returns:
+            True if a row was inserted, False if (checksum, type) or doc_id was already
+            registered.
+        """
+        with get_db_session() as session:
+            result = cast(
+                CursorResult,
+                session.execute(
+                    pg_insert(DocumentChecksum)
+                    .values(checksum=checksum, type=doc_type, doc_id=doc_id)
+                    .on_conflict_do_nothing()
+                ),
+            )
+            return result.rowcount == 1
+
 
 # Singleton instance for easy access
 db_manager = DatabaseManager()

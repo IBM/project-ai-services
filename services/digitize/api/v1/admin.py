@@ -39,11 +39,15 @@ MAX_IMPORT_RECORDS = -1  # -1 = no limit
         500: http_error_responses[500],
     },
     summary="Import metadata into PostgreSQL",
-    description="Import job and document metadata into PostgreSQL using the export-compatible JSON payload.",
+    description=(
+        "Import user jobs, user documents and document checksums into PostgreSQL using the "
+        "export-compatible JSON payload. Records are imported in dependency order (jobs, "
+        "documents, document_checksums) and existing records are skipped."
+    ),
     response_description="Import summary with imported, skipped, failed records and warnings",
 )
 async def import_metadata(payload: models.ImportRequest):
-    """Import job and document metadata into PostgreSQL."""
+    """Import job, document and document checksum metadata into PostgreSQL."""
     try:
         if not await db_ops.acquire_import_export_lock():
             APIError.raise_error(
@@ -53,7 +57,11 @@ async def import_metadata(payload: models.ImportRequest):
             )
 
         try:
-            total_records = len(payload.data.jobs) + len(payload.data.documents)
+            total_records = (
+                len(payload.data.jobs)
+                + len(payload.data.documents)
+                + len(payload.data.document_checksums)
+            )
             if MAX_IMPORT_RECORDS != -1 and total_records > MAX_IMPORT_RECORDS:
                 APIError.raise_error(
                     ErrorCode.CONTEXT_LIMIT_EXCEEDED,
