@@ -67,21 +67,20 @@ def _table_columns(table: str) -> set[str]:
 
 
 class TestSchemaFile:
-    # The columns of the Database Tables section of the proposal. The training
-    # configuration also keeps validation_metric, which the create request carries.
+    # The columns of the Database Tables section of the proposal.
     EXPECTED_COLUMNS = {
         "connectors": {
             "id", "name", "type", "config", "created_at", "updated_at", "status", "message",
         },
         "training_configs": {
             "connector_id", "source_table", "target_column", "input_columns",
-            "validation_metric", "schedule", "created_at",
+            "schedule", "created_at",
         },
         "jobs": {
             "id", "seq", "connector_id", "status", "message", "result",
             "created_at", "started_at", "finished_at",
         },
-        "forecasters": {"id", "job_id", "version", "name", "status", "metrics", "created_at"},
+        "forecasters": {"id", "connector_id", "job_id", "version", "status", "metrics", "created_at"},
     }
 
     @pytest.mark.parametrize("table", sorted(EXPECTED_COLUMNS))
@@ -90,8 +89,7 @@ class TestSchemaFile:
 
     def test_jobs_keeps_row_count_in_result_not_a_column(self):
         assert "total_rows" not in _table_columns("jobs")
-        for key in ("rows_read", "algorithm", "metric", "validation_score",
-                    "training_seconds", "attempts"):
+        for key in ("rows_read", "algorithm", "training_seconds", "attempts"):
             assert re.search(rf"^--\s+{key}\s", SCHEMA, re.M), key
 
     def test_expected_tables(self):
@@ -118,13 +116,25 @@ class TestSchemaFile:
     def test_single_running_job_index(self):
         assert re.search(
             r"CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_single_running\s+"
-            r"ON jobs \(status\) WHERE status = 'running';",
+            r"ON jobs \(status\) WHERE status = 'RUNNING';",
             SCHEMA,
         )
 
     def test_active_job_keeps_its_connector(self):
         assert re.search(
-            r"CHECK \(status NOT IN \('queued', 'running'\) OR connector_id IS NOT NULL\)",
+            r"CHECK \(status NOT IN \('QUEUED', 'RUNNING'\) OR connector_id IS NOT NULL\)",
+            SCHEMA,
+        )
+
+    def test_job_status_is_limited_to_the_uppercase_values(self):
+        assert re.search(
+            r"chk_jobs_status CHECK \(status IN \('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED'\)\)",
+            SCHEMA,
+        )
+
+    def test_forecaster_status_is_limited_to_the_uppercase_values(self):
+        assert re.search(
+            r"chk_forecasters_status CHECK \(status IN \('READY', 'RETIRING', 'DELETED'\)\)",
             SCHEMA,
         )
 
@@ -142,8 +152,8 @@ class TestSchemaFile:
             SCHEMA,
         )
 
-    def test_forecaster_name_is_unique(self):
-        assert re.search(r"name\s+TEXT\s+NOT NULL UNIQUE", SCHEMA)
+    def test_forecasters_are_unique_per_connector_and_version(self):
+        assert re.search(r"UNIQUE \(connector_id, version\)", SCHEMA)
 
     def test_foreign_key_delete_rules(self):
         assert re.search(

@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS training_configs (
     source_table      TEXT        NOT NULL,
     target_column     TEXT        NOT NULL,
     input_columns     JSONB       NOT NULL,  -- [{"name": ..., "type": ...}, ...]
-    validation_metric TEXT,                  -- NULL: AutoGluon's default for the target
     -- Training cadence as the API receives and returns it. The API turns it into the
     -- cron expression (UTC) when it registers the APScheduler job. NULL: only the
     -- first training runs. Compared in lower case, so the API owns the letter case.
@@ -41,14 +40,12 @@ CREATE TABLE IF NOT EXISTS training_configs (
 
 -- Training jobs, also the run history. seq is the forecaster version: the database
 -- assigns it (GENERATED ALWAYS), so neither the API nor the worker can pick one.
--- Deleting a connector sets connector_id to NULL on its jobs. For a queued or
--- running job that violates chk_jobs_active_has_connector, so the delete fails.
+-- Deleting a connector sets connector_id to NULL on its jobs. For a QUEUED or
+-- RUNNING job that violates chk_jobs_active_has_connector, so the delete fails.
 -- result is a JSON object. The worker cannot read it, so each worker write replaces
 -- the whole value:
 --   rows_read         worker, once when the data load finishes; repeated in the final write
 --   algorithm         worker, when training finishes
---   metric            worker, when training finishes
---   validation_score  worker, when training finishes
 --   training_seconds  worker, when training finishes
 --   attempts          API, after the worker exits (merge onto COALESCE(result, '{}'))
 -- Keys can be missing while a job runs or after it fails.
@@ -62,30 +59,30 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- When the job was queued (UTC)
     started_at    TIMESTAMPTZ,                                     -- When the job started running (UTC)
     finished_at   TIMESTAMPTZ,                                     -- When the job completed or failed (UTC)
-    CONSTRAINT chk_jobs_status CHECK (status IN ('queued', 'running', 'completed', 'failed')),
-    CONSTRAINT chk_jobs_active_has_connector CHECK (status NOT IN ('queued', 'running') OR connector_id IS NOT NULL)
+    CONSTRAINT chk_jobs_status CHECK (status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED')),
+    CONSTRAINT chk_jobs_active_has_connector CHECK (status NOT IN ('QUEUED', 'RUNNING') OR connector_id IS NOT NULL)
 );
 
--- At most one running job: a second row with status 'running' violates the unique index.
+-- At most one running job: a second row with status 'RUNNING' violates the unique index.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_single_running
-    ON jobs (status) WHERE status = 'running';
+    ON jobs (status) WHERE status = 'RUNNING';
 
 -- Supports the per-connector active-job check and run-history pruning.
 CREATE INDEX IF NOT EXISTS idx_jobs_connector_created
     ON jobs (connector_id, created_at DESC);
 
 -- Forecasters: one row per forecaster loaded into Triton.
--- name is fc_<connector_id>_<version>, the directory on the volume and the Triton model name.
 -- The row outlives its job: deleting an old job only clears job_id.
 CREATE TABLE IF NOT EXISTS forecasters (
-    id          UUID        PRIMARY KEY,
-    job_id      UUID        REFERENCES jobs(id) ON DELETE SET NULL,
-    version     BIGINT      NOT NULL,
-    name        TEXT        NOT NULL UNIQUE,
-    status      TEXT        NOT NULL,
-    metrics     JSONB,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_forecasters_status CHECK (status IN ('ready', 'retiring', 'deleted'))
+    id            UUID        PRIMARY KEY,
+    connector_id  UUID        NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+    job_id        UUID        REFERENCES jobs(id) ON DELETE SET NULL,
+    version       BIGINT      NOT NULL,
+    status        TEXT        NOT NULL,
+    metrics       JSONB,                                   -- algorithm and training_seconds, copied from the job's result
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_forecasters_status CHECK (status IN ('READY', 'RETIRING', 'DELETED')),
+    CONSTRAINT uq_forecasters_connector_version UNIQUE (connector_id, version)
 );
 
 -- Trigger function to keep connectors.updated_at current on every UPDATE
