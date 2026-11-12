@@ -4,7 +4,9 @@ ALTER TABLE components
     ADD COLUMN name VARCHAR(100),
     ADD COLUMN created_by VARCHAR(100) NOT NULL;
 
+ALTER TYPE component_status ADD VALUE IF NOT EXISTS 'Downloading';
 ALTER TYPE component_status ADD VALUE IF NOT EXISTS 'Deploying';
+ALTER TYPE component_status ADD VALUE IF NOT EXISTS 'Deleting';
 -- +goose StatementEnd
 
 -- +goose Down

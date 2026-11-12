@@ -3,7 +3,6 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -58,12 +57,7 @@ func NewApplicationHandler(appService repository.ApplicationServiceInterface) *A
 //	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/applications [get]
 func (h *ApplicationHandler) ListApplications(c *gin.Context) {
-	// Parse pagination parameters
-	page, _ := strconv.Atoi(c.Query("page"))
-	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-
-	// Validate and apply defaults
-	page, pageSize, err := repository.ValidatePaginationParams(page, pageSize)
+	page, pageSize, err := parsePagination(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 
