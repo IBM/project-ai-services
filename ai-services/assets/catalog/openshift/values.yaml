@@ -44,3 +44,35 @@ db:
     limits:
       memory: "1Gi"
       cpu: "500m"
+
+litellm:
+  image: "icr.io/ai-services-cicd/litellm:v1.106.4-1"
+  # port: port the LiteLLM proxy listens on. The catalog backend reaches it as
+  # http://litellm:<port> through the LITELLM_ENDPOINT env var.
+  port: "4000"
+  # @generate:password length=32, special=false
+  masterKey: ""
+  # @generate:password length=64, special=false
+  saltKey: ""
+  dbConnectionRetries: "20"
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "250m"
+    limits:
+      memory: "4Gi"
+      cpu: "1000m"
+  db:
+    image: icr.io/ai-services-cicd/postgres:18-6
+    database: "litellm"
+    user: "postgres"
+    # @generate:password length=32, special=false
+    password: ""
+    storage: 5Gi
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "250m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
