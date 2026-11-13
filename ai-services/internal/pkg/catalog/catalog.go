@@ -16,6 +16,8 @@ import (
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -24,6 +26,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"go.yaml.in/yaml/v3"
 )
+
+// ErrModelNotSupported means the requested model is not listed in the provider's models.yaml.
+var ErrModelNotSupported = errors.New("model is not supported by the provider")
 
 // bundleStorageRoot is the well-known mount path for the dedicated catalog-bundles
 // volume — identical on Podman and OpenShift. Must match archive.go's constant.
@@ -877,6 +882,42 @@ func (p *CatalogProvider) LoadComponentValues(componentType, providerID string, 
 	for key, val := range argParams {
 		utils.SetNestedValue(values, key, val)
 	}
+
+	return values, nil
+}
+
+// LoadComponentValuesForModel is LoadComponentValues plus the requested model and the values of its
+// hardware profile (see profiles.ValuesFor). Profile values are applied after argParams, so they
+// cannot be overridden by them. An empty model/profile selects the provider's default profile.
+// An unknown model or profile wraps ErrModelNotSupported / profiles.ErrNotSupported.
+func (p *CatalogProvider) LoadComponentValuesForModel(componentType, providerID, model, profile string, argParams map[string]string) (map[string]any, error) {
+	values, err := p.LoadComponentValues(componentType, providerID, argParams)
+	if err != nil {
+		return nil, err
+	}
+
+	key := fmt.Sprintf("%s/%s", componentType, providerID)
+	item, ok := p.getItem(key)
+	if !ok {
+		return nil, fmt.Errorf("component '%s' not found", key)
+	}
+
+	var m *types.Model
+	if model != "" {
+		if m, err = models.Find(item.itemFS, item.Path, model); err != nil {
+			return nil, err
+		}
+		if m == nil {
+			return nil, fmt.Errorf("%w: '%s' is not listed for '%s'", ErrModelNotSupported, model, key)
+		}
+		values["model"] = model
+	}
+
+	profileValues, err := profiles.ValuesFor(item.itemFS, item.Path, m, profile)
+	if err != nil {
+		return nil, err
+	}
+	maps.Copy(values, profileValues)
 
 	return values, nil
 }
