@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: "litellm"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    ai-services.io/component: litellm
+spec:
+  selector:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/component: litellm
+  ports:
+    - name: http
+      port: {{ .Values.litellm.port }}
+      targetPort: {{ .Values.litellm.port }}
+      protocol: TCP

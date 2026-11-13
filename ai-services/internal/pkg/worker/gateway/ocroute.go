@@ -12,6 +12,8 @@ import (
 const (
 	// gatewayRouteName is the OpenShift Route name for the worker-gateway passthrough route.
 	gatewayRouteName = "catalog-worker-gateway"
+	// modelGatewayRouteName is the OpenShift Route name for the LiteLLM model gateway.
+	modelGatewayRouteName = "model-gateway"
 )
 
 // GatewayRouteHost looks up the live OpenShift passthrough route for the worker
@@ -22,9 +24,22 @@ const (
 // If no route named "catalog-worker-gateway" is found, or the route has no host
 // assigned yet, an error is returned.
 func GatewayRouteHost(ctx context.Context) (string, error) {
+	return routeHost(ctx, gatewayRouteName)
+}
+
+// ModelGatewayRouteHost looks up the live OpenShift route for the LiteLLM model gateway
+// and returns its hostname (.spec.host).
+//
+// If no route named "model-gateway" is found, or the route has no host assigned yet,
+// an error is returned.
+func ModelGatewayRouteHost(ctx context.Context) (string, error) {
+	return routeHost(ctx, modelGatewayRouteName)
+}
+
+func routeHost(ctx context.Context, routeName string) (string, error) {
 	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogAppName)
 	if err != nil {
-		return "", fmt.Errorf("worker gateway: create OpenShift client to look up gateway route: %w", err)
+		return "", fmt.Errorf("worker gateway: create OpenShift client to look up route %q: %w", routeName, err)
 	}
 
 	labelSelector := fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalogconstants.CatalogAppName)
@@ -34,14 +49,14 @@ func GatewayRouteHost(ctx context.Context) (string, error) {
 	}
 
 	for _, r := range routes {
-		if r.Name == gatewayRouteName {
+		if r.Name == routeName {
 			if r.HostPort == "" {
-				return "", fmt.Errorf("worker gateway: route %q exists but has no host assigned yet", gatewayRouteName)
+				return "", fmt.Errorf("worker gateway: route %q exists but has no host assigned yet", routeName)
 			}
 
 			return r.HostPort, nil
 		}
 	}
 
-	return "", fmt.Errorf("worker gateway: route %q not found (selector=%s)", gatewayRouteName, labelSelector)
+	return "", fmt.Errorf("worker gateway: route %q not found (selector=%s)", routeName, labelSelector)
 }

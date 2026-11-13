@@ -10,7 +10,8 @@ metadata:
   name: ai-services-catalog-reader
 rules:
   # Required by GatewayRouteHost to look up the catalog-worker-gateway Route host
-  # in order to embed the correct DNS SAN in the server certificate and bootstrap token.
+  # in order to embed the correct DNS SAN in the server certificate and bootstrap token,
+  # and by ModelGatewayRouteHost to look up the model-gateway Route host for the model endpoint URL.
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
     verbs: ["get", "list"]
