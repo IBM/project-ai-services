@@ -31,23 +31,32 @@ export function transformWorkerToRow(
 export async function fetchWorkerResources(
   page = 1,
   pageSize = 20,
+  search?: string,
+  options?: { signal?: AbortSignal },
 ): Promise<WorkerListResponse> {
+  const params: Record<string, string | number> = {
+    page,
+    page_size: pageSize,
+  };
+  if (search) {
+    params.q = search;
+  }
   const res = await api.get<WorkerListResponse>(
     WORKERS_ENDPOINTS.LIST_WORKERS,
-    {
-      params: { page, page_size: pageSize },
-    },
+    { params, ...options },
   );
   return res.data;
 }
 
-export async function fetchAllWorkerResources(): Promise<WorkerApiResponse[]> {
+export async function fetchAllWorkerResources(
+  search?: string,
+): Promise<WorkerApiResponse[]> {
   let currentPage = 1;
   let hasNext = true;
   const allData: WorkerApiResponse[] = [];
 
   while (hasNext) {
-    const response = await fetchWorkerResources(currentPage, 100);
+    const response = await fetchWorkerResources(currentPage, 100, search);
     allData.push(...response.data);
     hasNext = response.pagination.has_next;
     currentPage++;
