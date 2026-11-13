@@ -166,7 +166,14 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "CSR is required")
 	}
 
-	tlsCertPEM, caCertPEM, notAfter, signErr := signWorkerCSR(csrPEM, workerName, g.caCert, g.caKey)
+	runtimeType := types.RuntimeType(req.GetRuntimeType())
+	dnsNames := workerCertDNSNames(workerName, runtimeType, req.GetMetadata())
+	if len(dnsNames) == 0 {
+		logger.WarningfCtx(ctx, "WorkerGateway: worker=%s (runtime=%s) produced no DNS SANs — private-ingress hostname verification against this worker will fail",
+			workerName, runtimeType)
+	}
+
+	tlsCertPEM, caCertPEM, notAfter, signErr := signWorkerCSR(csrPEM, workerName, dnsNames, g.caCert, g.caKey)
 	if signErr != nil {
 		logger.WarningfCtx(ctx, "WorkerGateway: CSR error for worker=%s: %v", workerName, signErr)
 

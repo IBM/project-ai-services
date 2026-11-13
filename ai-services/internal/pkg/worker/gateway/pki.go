@@ -17,6 +17,7 @@ import (
 
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
@@ -33,9 +34,16 @@ const (
 	workerCertTTL = 365 * 24 * time.Hour // 1 year
 
 	serialBitSize = 128
-	dirPerm       = 0o700
-	certPerm      = 0o644
-	keyPerm       = 0o600
+	// dirPerm lets the Caddy container user (a different uid from the catalog
+	// process) reach the files in the PKI directory.
+	dirPerm  = 0o755
+	certPerm = 0o644
+	// keyPerm is the mode of the AES-GCM encrypted server.key, which the Caddy
+	// container user must read so the encrypted_file Caddy module can decrypt it in
+	// memory. ca.key is never read by Caddy and keeps caKeyPerm.
+	keyPerm = 0o644
+	// caKeyPerm is the mode of the encrypted CA signing key. Only the catalog reads it.
+	caKeyPerm = 0o600
 )
 
 // pkiResult groups the four pieces of PKI material the gateway needs.
@@ -48,21 +56,32 @@ type pkiResult struct {
 
 // loadOrGeneratePKI loads the four PKI files from pkiDir when they all exist,
 // or generates a new ECDSA P-256 root CA and server certificate on first start.
+// Either way, the directory and server.key are then made readable for Caddy.
 func loadOrGeneratePKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	caKeyPath := filepath.Join(pkiDir, "ca.key")
 	caCrtPath := filepath.Join(pkiDir, "ca.crt")
 	srvKeyPath := filepath.Join(pkiDir, "server.key")
 	srvCrtPath := filepath.Join(pkiDir, "server.crt")
 
+	var (
+		res pkiResult
+		err error
+	)
+
 	if fileExists(caKeyPath) && fileExists(caCrtPath) && fileExists(srvKeyPath) && fileExists(srvCrtPath) {
 		logger.InfofCtx(ctx, "worker gateway: PKI files found in %s, loading existing material", pkiDir)
 
-		return loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath)
+		res, err = loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath)
+	} else {
+		logger.InfofCtx(ctx, "worker gateway: PKI directory empty or incomplete — generating new CA and server certificate in %s", pkiDir)
+
+		res, err = generateAndPersistPKI(ctx, pkiDir, runtimeType)
+	}
+	if err != nil {
+		return pkiResult{}, err
 	}
 
-	logger.InfofCtx(ctx, "worker gateway: PKI directory empty or incomplete — generating new CA and server certificate in %s", pkiDir)
-
-	return generateAndPersistPKI(ctx, pkiDir, runtimeType)
+	return res, nil
 }
 
 // generateCA creates a new ECDSA P-256 root CA key and certificate.
@@ -109,8 +128,12 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNa
 		DNSNames:     dnsNames,
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(serverCertTTL),
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		KeyUsage:     x509.KeyUsageDigitalSignature,
+		// ServerAuth: served by the gateway and by Caddy's private ingress (:9443).
+		// ClientAuth: the control-plane Caddy presents this same cert when it dials
+		//             a worker's private ingress; Go TLS rejects a client cert
+		//             that lacks ExtKeyUsageClientAuth.
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
 	}
 	srvCertDER, err := x509.CreateCertificate(rand.Reader, srvTemplate, caCert, &srvKey.PublicKey, caKey)
 	if err != nil {
@@ -137,7 +160,7 @@ func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []b
 		perm os.FileMode
 		data []byte
 	}{
-		{filepath.Join(pkiDir, "ca.key"), keyPerm, []byte(caKeyEnc)},
+		{filepath.Join(pkiDir, "ca.key"), caKeyPerm, []byte(caKeyEnc)},
 		{filepath.Join(pkiDir, "ca.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER})},
 		{filepath.Join(pkiDir, "server.key"), keyPerm, []byte(srvKeyEnc)},
 		{filepath.Join(pkiDir, "server.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvCertDER})},
@@ -167,14 +190,17 @@ func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]s
 
 		return []string{route, workerconstants.OpenShiftGatewayServiceEndpoint}, nil
 	case types.RuntimeTypePodman:
-		domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
+		domainSuffix := utils.GetEnv(proxy.DomainSuffixEnvVar, "")
 		if domainSuffix == "" {
-			return nil, fmt.Errorf("DOMAIN_SUFFIX environment variable not set — cannot generate gateway server cert")
+			return nil, fmt.Errorf("%s environment variable not set — cannot generate gateway server cert", proxy.DomainSuffixEnvVar)
 		}
 
+		// domainSuffix itself is included because a worker's Caddy dials the
+		// control-plane private ingress at the bare domain.
 		return []string{
 			workerconstants.WorkerGatewayName + "." + domainSuffix,
 			workerconstants.PodmanGatewayPodName,
+			domainSuffix,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime type %q for gateway PKI generation", runtimeType)

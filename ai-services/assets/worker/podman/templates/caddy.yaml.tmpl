@@ -35,6 +35,29 @@ spec:
       volumeMounts:
         - name: caddy-data
           mountPath: /data:z
+    # Caddy reads the trusted CA file (ca.crt) of the :9443 private ingress when it
+    # loads its config, so it cannot start before the worker has joined and written
+    # it. Wait up to 90 x 2s = 180s for it instead of crash-looping. tls.crt and the
+    # encrypted tls.key are read per handshake by the encrypted_file module.
+    - name: wait-for-worker-tls
+      image: "{{ .Values.caddy.image }}"
+      imagePullPolicy: IfNotPresent
+      command:
+        - "sh"
+        - "-c"
+        - |
+          for i in $(seq 1 90); do
+            if [ -s /data/worker-tls/ca.crt ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "timed out waiting for /data/worker-tls/ca.crt; the worker has not joined" >&2
+          exit 1
+      volumeMounts:
+        - name: worker-tls
+          mountPath: /data/worker-tls
+          readOnly: true
   containers:
     - name: caddy
       image: "{{ .Values.caddy.image }}"
@@ -50,6 +73,15 @@ spec:
           mountPath: /data:z
         - name: caddy-data
           mountPath: /config:z
+        # Worker cert, CA and the AES-GCM encrypted key (tls.key) used by the :9443
+        # private ingress. Written by the worker pod once it has registered.
+        - name: worker-tls
+          mountPath: /data/worker-tls
+          readOnly: true
+        # Secret the encrypted_file module uses to decrypt tls.key in memory.
+        - name: worker-mtls-encryption-secret
+          mountPath: /etc/secret/worker-mtls-encryption-secret
+          readOnly: true
         {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
         - name: caddy-certs
           mountPath: /etc/secret/ssl
@@ -73,6 +105,12 @@ spec:
     - name: caddy-data
       persistentVolumeClaim:
         claimName: "caddy-worker"
+    - name: worker-tls
+      persistentVolumeClaim:
+        claimName: "worker-tls"
+    - name: worker-mtls-encryption-secret
+      secret:
+        secretName: worker-mtls-encryption-secret
     {{- if and .Values.caddy.sslCertContent .Values.caddy.sslKeyContent }}
     - name: caddy-certs
       secret:
