@@ -69,10 +69,11 @@ func (l *Lister) List(ctx context.Context, req apimodels.ListModelsRequest) (*ap
 	}
 
 	providers := l.modelCatalog.ProviderNames()
+	typeInfos := l.modelCatalog.ComponentTypeInfos()
 	items := make([]apimodels.ModelListItem, 0, len(rows))
 
 	for _, row := range rows {
-		items = append(items, toListItem(row, providers, counts[row.ID]))
+		items = append(items, toListItem(row, providers, typeInfos, counts[row.ID]))
 	}
 
 	return &apimodels.ModelListResponse{
@@ -122,6 +123,6 @@ func (l *Lister) connectedServices(ctx context.Context, rows []dbrepo.ModelRow) 
 }
 
 // toListItem maps a database row to its API shape.
-func toListItem(row dbrepo.ModelRow, providers map[string]string, services int) apimodels.ModelListItem {
-	return apimodels.ModelListItem{ModelBase: helpers.ToModelBase(row, providers, services)}
+func toListItem(row dbrepo.ModelRow, providers map[string]string, componentTypes map[string]types.ComponentType, services int) apimodels.ModelListItem {
+	return apimodels.ModelListItem{ModelBase: helpers.ToModelBase(row, providers, componentTypes, services)}
 }

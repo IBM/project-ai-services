@@ -2,7 +2,6 @@ package deletion
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -44,7 +43,8 @@ func (p *Planner) PlanLocal(ctx context.Context, comp *dbmodels.Component, worke
 	}
 
 	// The provider names the tokenize passthrough. A provider the catalog no longer lists (e.g. a
-	// removed bundle) must not make the model undeletable, so the passthrough is skipped then.
+	// removed bundle) must not make the model undeletable: the passthrough then gets an ID that
+	// matches nothing, which LiteLLM reports as not found.
 	var provider string
 	if root, err := p.catalogProvider.LoadComponent(comp.Type, comp.Provider); err == nil && root.LiteLLM != nil {
 		provider = root.LiteLLM.Provider
@@ -75,15 +75,13 @@ func (p *Planner) PlanRemote(conn *dbmodels.Connector) *types.RemotePlan {
 	}
 }
 
-// keyAlias returns the alias of the model's public LiteLLM key, "<model>-<id>", the same alias the
-// key was generated with. It returns "" when the model name is not recorded in the metadata.
+// keyAlias returns the alias of the model's public LiteLLM key, the same one the key was generated
+// with. A model name missing from the metadata gives an alias that matches no key, which LiteLLM
+// reports as not found.
 func keyAlias(metadata map[string]any, id uuid.UUID) string {
 	model, _ := metadata[catalogconstants.MetadataKeyModel].(string)
-	if model == "" {
-		return ""
-	}
 
-	return fmt.Sprintf("%s-%s", model, id)
+	return litellm.PublicKeyAlias(model, id)
 }
 
 // liteLLMModelID reads the LiteLLM model ID stored by the deployment executor under

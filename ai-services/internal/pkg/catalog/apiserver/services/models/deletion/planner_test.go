@@ -106,9 +106,9 @@ func TestPlanRemote(t *testing.T) {
 			want: litellmRouteWant{modelID: "", keyAlias: "ibm/granite-" + id.String(), tag: id.String(), provider: "hosted_vllm"},
 		},
 		{
-			name: "no metadata: nothing to name in the gateway",
+			name: "no metadata: no model id, and an alias that matches no key",
 			conn: &dbmodels.Connector{ID: id, Provider: "hosted_vllm"},
-			want: litellmRouteWant{tag: id.String(), provider: "hosted_vllm"},
+			want: litellmRouteWant{keyAlias: "-" + id.String(), tag: id.String(), provider: "hosted_vllm"},
 		},
 	}
 

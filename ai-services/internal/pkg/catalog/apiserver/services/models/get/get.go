@@ -57,7 +57,7 @@ func (g *Getter) Detail(ctx context.Context, row *dbrepo.ModelRow) (*apimodels.M
 	}
 
 	detail := &apimodels.ModelDetail{
-		ModelBase:    helpers.ToModelBase(*row, g.modelCatalog.ProviderNames(), counts[row.ID]),
+		ModelBase:    helpers.ToModelBase(*row, g.modelCatalog.ProviderNames(), g.modelCatalog.ComponentTypeInfos(), counts[row.ID]),
 		Applications: applications,
 		Endpoints:    g.endpoints(),
 	}
