@@ -220,9 +220,15 @@ class JobState(BaseModel):
 
 
 class ImportExportData(BaseModel):
-    """Shared payload structure for import/export APIs."""
+    """Shared payload structure for import/export APIs.
+
+    Only user-ingested data is exchanged (connector data is out of scope).
+    Lists are in dependency order, which is also the import order:
+    jobs → documents → document_checksums.
+    """
     jobs: List["ExportJobRecord"] = Field(default_factory=list)
     documents: List["ExportDocumentRecord"] = Field(default_factory=list)
+    document_checksums: List["ExportDocumentChecksumRecord"] = Field(default_factory=list)
 
 
 class ExportJobRecord(BaseModel):
@@ -251,6 +257,13 @@ class ExportDocumentRecord(BaseModel):
     completed_at: Optional[str] = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExportDocumentChecksumRecord(BaseModel):
+    """Serializable document_checksum (user-ingestion dedup registry) row."""
+    checksum: str
+    type: str
+    doc_id: str
 
 
 class ExportConnectorRecord(BaseModel):
@@ -295,9 +308,9 @@ class ImportRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_non_empty_payload(self):
-        if not self.data.jobs and not self.data.documents:
+        if not (self.data.jobs or self.data.documents or self.data.document_checksums):
             raise ValueError(
-                "At least one job or document record must be provided"
+                "At least one job, document or document checksum record must be provided"
             )
         return self
 
@@ -322,6 +335,7 @@ class ImportSummary(BaseModel):
     """Import summary grouped by entity type."""
     jobs: ImportEntitySummary
     documents: ImportEntitySummary
+    document_checksums: ImportEntitySummary = Field(default_factory=ImportEntitySummary)
 
 
 class ImportResponse(BaseModel):
@@ -344,10 +358,15 @@ class ExportSummary(BaseModel):
     """Export summary grouped by entity type."""
     jobs: ExportEntitySummary
     documents: ExportEntitySummary
+    document_checksums: ExportEntitySummary = Field(default_factory=ExportEntitySummary)
 
 
 class ExportPagination(BaseModel):
-    """Pagination metadata for export API."""
+    """Pagination metadata for export API.
+
+    limit/offset/total_records/returned_records count records of all entity
+    types combined, taken in dependency order (jobs, documents, document_checksums).
+    """
     limit: int
     offset: int
     has_more: bool

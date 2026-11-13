@@ -20,6 +20,7 @@ from digitize.models import (
     JobStats,
     ExportJobRecord,
     ExportDocumentRecord,
+    ExportDocumentChecksumRecord,
     ImportRequest,
     ImportResponse,
     ImportSummary,
@@ -721,24 +722,35 @@ def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
 def _build_import_summary(
     total_jobs: int,
     total_documents: int,
+    total_document_checksums: int = 0,
 ) -> ImportSummary:
     """Create an initialized import summary object."""
     return ImportSummary(
         jobs=ImportEntitySummary(total_received=total_jobs),
         documents=ImportEntitySummary(total_received=total_documents),
+        document_checksums=ImportEntitySummary(total_received=total_document_checksums),
     )
+
+
+# Entities in the order they are exported (and must be imported): each entity
+# only references entities that come before it.
+EXPORT_ENTITY_ORDER = ("jobs", "documents", "document_checksums")
 
 
 def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -> ExportResponse:
     """
-    Export jobs and documents from PostgreSQL as JSON-serializable metadata.
+    Export user jobs, user documents and the document_checksum registry as
+    JSON-serializable metadata. Connector data is not exported.
 
     Args:
         limit: Maximum combined records to return. Use -1 to return all records.
         offset: Number of combined records to skip.
 
+    ``limit``/``offset`` apply to one sequence made of jobs, then documents, then
+    document_checksums, so consecutive pages neither overlap nor skip records.
+
     Returns:
-        ExportResponse with exported jobs/documents and pagination metadata.
+        ExportResponse with exported records and pagination metadata.
     """
     if engine is None:
         raise RuntimeError("Database not available. Cannot export metadata without database connection.")
@@ -751,54 +763,24 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
     started_at = perf_counter()
 
-    if limit == -1:
-        # Fetch all records in batches
-        jobs, total_jobs = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
-        documents, total_documents = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
+    counts = {entity: db_manager.count_user_export_rows(entity) for entity in EXPORT_ENTITY_ORDER}
+    total_records = sum(counts.values())
 
-        # Fetch remaining jobs
-        remaining_job_offset = len(jobs)
-        while remaining_job_offset < total_jobs:
-            batch, _ = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_job_offset)
-            if not batch:
-                break
-            jobs.extend(batch)
-            remaining_job_offset += len(batch)
-
-        # Fetch remaining documents
-        remaining_doc_offset = len(documents)
-        while remaining_doc_offset < total_documents:
-            batch, _ = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_doc_offset)
-            if not batch:
-                break
-            documents.extend(batch)
-            remaining_doc_offset += len(batch)
-    else:
-        # Fetch records respecting the combined limit across jobs and documents
-        # First, get total counts
-        _, total_jobs = db_manager.get_all_jobs(limit=1, offset=0)
-        _, total_documents = db_manager.get_all_documents(limit=1, offset=0)
-
-        # Calculate how many records to skip and fetch
-        total_records = total_jobs + total_documents
-
-        # Determine which records fall within the requested range
-        jobs = []
-        documents = []
-
-        if offset < total_jobs:
-            # We need some jobs
-            jobs_to_fetch = min(limit, total_jobs - offset)
-            jobs, _ = db_manager.get_all_jobs(limit=jobs_to_fetch, offset=offset)
-
-            # If we haven't reached the limit, fetch documents
-            remaining_limit = limit - len(jobs)
-            if remaining_limit > 0:
-                documents, _ = db_manager.get_all_documents(limit=remaining_limit, offset=0)
-        else:
-            # Skip all jobs, fetch only documents
-            doc_offset = offset - total_jobs
-            documents, _ = db_manager.get_all_documents(limit=limit, offset=doc_offset)
+    # Walk the entities in order, skipping `offset` records and then taking up to `limit`.
+    rows_by_entity = {entity: [] for entity in EXPORT_ENTITY_ORDER}
+    to_skip = offset
+    remaining = None if limit == -1 else limit
+    for entity in EXPORT_ENTITY_ORDER:
+        if remaining == 0:
+            break
+        if to_skip >= counts[entity]:
+            to_skip -= counts[entity]
+            continue
+        rows = db_manager.get_user_export_rows(entity, limit=remaining, offset=to_skip)
+        to_skip = 0
+        rows_by_entity[entity] = rows
+        if remaining is not None:
+            remaining -= len(rows)
 
     exported_jobs = [
         ExportJobRecord(
@@ -812,7 +794,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             stats=job.stats or {},
             error=job.error,
         )
-        for job in jobs
+        for job in rows_by_entity["jobs"]
     ]
 
     exported_documents = [
@@ -829,18 +811,22 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             error=doc.error,
             metadata=doc.doc_metadata or {},
         )
-        for doc in documents
+        for doc in rows_by_entity["documents"]
     ]
 
-    returned_records = len(exported_jobs) + len(exported_documents)
-    total_records = total_jobs + total_documents
-    effective_limit = returned_records if limit == -1 else limit
+    exported_checksums = [
+        ExportDocumentChecksumRecord(checksum=row.checksum, type=row.type, doc_id=row.doc_id)
+        for row in rows_by_entity["document_checksums"]
+    ]
+
+    returned_records = len(exported_jobs) + len(exported_documents) + len(exported_checksums)
 
     return ExportResponse(
         status="completed",
         data=ImportExportData(
             jobs=exported_jobs,
             documents=exported_documents,
+            document_checksums=exported_checksums,
         ),
         summary=ExportSummary(
             jobs=ExportEntitySummary(
@@ -859,12 +845,13 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
+            document_checksums=ExportEntitySummary(total_exported=len(exported_checksums)),
         ),
         export_timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         duration_seconds=round(perf_counter() - started_at, 4),
         pagination=ExportPagination(
-            limit=effective_limit,
-            offset=0 if limit == -1 else offset,
+            limit=returned_records if limit == -1 else limit,
+            offset=offset,
             has_more=False if limit == -1 else (offset + returned_records) < total_records,
             total_records=total_records,
             returned_records=returned_records,
@@ -874,7 +861,12 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
 def import_metadata(payload: ImportRequest) -> ImportResponse:
     """
-    Import jobs and documents into PostgreSQL in skip-existing mode.
+    Import jobs, documents and document checksums into PostgreSQL in skip-existing mode.
+
+    Records are imported in dependency order, whatever order the payload lists them
+    in: jobs → documents → document_checksums. Each stage only references records
+    that already exist in the database or were imported by an earlier stage; records
+    whose parent is missing are reported as warnings and counted as failed.
 
     Args:
         payload: Import request payload.
@@ -889,6 +881,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     summary = _build_import_summary(
         len(payload.data.jobs),
         len(payload.data.documents),
+        len(payload.data.document_checksums),
     )
     warnings: list[ImportRecordIssue] = []
     errors: list[ImportRecordIssue] = []
@@ -897,6 +890,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     existing_document_ids = set(get_all_document_ids())
 
     importable_job_ids = set(existing_job_ids)
+    importable_document_ids = set(existing_document_ids)
 
     # ── Jobs ─────────────────────────────────────────────────────────────────
     for job_record in payload.data.jobs:
@@ -987,6 +981,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
 
         if payload.validate_only:
             summary.documents.imported += 1
+            importable_document_ids.add(document_record.id)
             continue
 
         doc_source = (
@@ -1021,6 +1016,52 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             continue
 
         summary.documents.imported += 1
+        importable_document_ids.add(document_record.id)
+
+    # ── Document checksums ────────────────────────────────────────────────────
+    for checksum_record in payload.data.document_checksums:
+        if checksum_record.doc_id not in importable_document_ids:
+            summary.document_checksums.failed += 1
+            warnings.append(
+                ImportRecordIssue(
+                    record_type="document_checksum",
+                    record_id=checksum_record.doc_id,
+                    type="orphaned_document_checksum",
+                    message=(
+                        f"Document checksum references non-existent doc_id: {checksum_record.doc_id}"
+                    ),
+                )
+            )
+            continue
+
+        if payload.validate_only:
+            summary.document_checksums.imported += 1
+            continue
+
+        try:
+            inserted = db_manager.insert_document_checksum(
+                checksum_record.checksum, checksum_record.type, checksum_record.doc_id
+            )
+        except Exception as exc:
+            logger.error(
+                f"Failed to import document checksum for doc_id={checksum_record.doc_id}: {exc}",
+                exc_info=True,
+            )
+            summary.document_checksums.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="document_checksum",
+                    record_id=checksum_record.doc_id,
+                    type="database_error",
+                    message="Failed to create document checksum record",
+                )
+            )
+            continue
+
+        if inserted:
+            summary.document_checksums.imported += 1
+        else:
+            summary.document_checksums.skipped += 1
 
     return ImportResponse(
         status="completed",

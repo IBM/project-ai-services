@@ -156,10 +156,11 @@ type ExportEntitySummary struct {
 	Failed        int `json:"failed"`
 }
 
-// ExportSummary holds both jobs and documents export summaries.
+// ExportSummary holds the jobs, documents and document checksums export summaries.
 type ExportSummary struct {
-	Jobs      ExportEntitySummary `json:"jobs"`
-	Documents ExportEntitySummary `json:"documents"`
+	Jobs              ExportEntitySummary `json:"jobs"`
+	Documents         ExportEntitySummary `json:"documents"`
+	DocumentChecksums ExportEntitySummary `json:"document_checksums"`
 }
 
 // ExportPagination holds pagination metadata returned by /v1/export.
@@ -171,10 +172,11 @@ type ExportPagination struct {
 	ReturnedRecords int  `json:"returned_records"`
 }
 
-// ExportData holds the raw jobs and documents records returned by /v1/export.
+// ExportData holds the raw jobs, documents and document checksum records returned by /v1/export.
 type ExportData struct {
-	Jobs      []map[string]interface{} `json:"jobs"`
-	Documents []map[string]interface{} `json:"documents"`
+	Jobs              []map[string]interface{} `json:"jobs"`
+	Documents         []map[string]interface{} `json:"documents"`
+	DocumentChecksums []map[string]interface{} `json:"document_checksums"`
 }
 
 // ExportResponse is the top-level response from GET /v1/export.
@@ -196,8 +198,9 @@ type ImportSummaryEntity struct {
 
 // ImportSummary holds the combined import result summary.
 type ImportSummary struct {
-	Jobs      ImportSummaryEntity `json:"jobs"`
-	Documents ImportSummaryEntity `json:"documents"`
+	Jobs              ImportSummaryEntity `json:"jobs"`
+	Documents         ImportSummaryEntity `json:"documents"`
+	DocumentChecksums ImportSummaryEntity `json:"document_checksums"`
 }
 
 // ImportResponse is the top-level response from POST /v1/import.
