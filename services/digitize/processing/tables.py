@@ -8,13 +8,16 @@ Responsibilities:
 - is_table_continuation — fuzzy matching of headers across pages
 - merge_markdown_tables — combine tables by dropping duplicate setup rows
 - merge_consecutive_tables — merge tables spanning consecutive pages
+- split_markdown_table_into_row_chunks — split large tables into self-contained row-group chunks
 """
 
 import json
+import math
 import threading
 import time
 import re
 from pathlib import Path
+from typing import Callable
 from rapidfuzz import fuzz
 
 from common.lang_utils import LanguageCodes, get_prompt_for_language
@@ -25,10 +28,64 @@ from digitize.settings import settings
 
 logger = get_logger("processing.tables")
 
+def _parse_row_cells(line: str) -> list[str]:
+    """Parse cells from a markdown table row, preserving cell count."""
+    trimmed = line.strip()
+    if trimmed.startswith('|'):
+        trimmed = trimmed[1:]
+    if trimmed.endswith('|'):
+        trimmed = trimmed[:-1]
+    return [c.strip() for c in trimmed.split('|')]
+
+
+def _format_row_cells(cells: list[str]) -> str:
+    """Format cells back to a markdown table row."""
+    return "| " + " | ".join(cells) + " |"
+
+
+def _merge_header_cells(top_cells: list[str], sub_cells: list[str]) -> list[str]:
+    """Merge top-level group header cells with sub-header cells generically."""
+    max_len = max(len(top_cells), len(sub_cells))
+    merged = []
+    for i in range(max_len):
+        top = top_cells[i] if i < len(top_cells) else ""
+        sub = sub_cells[i] if i < len(sub_cells) else ""
+        if top and sub and top.lower() != sub.lower():
+            if sub.lower().startswith(top.lower()):
+                merged.append(sub)
+            elif top.lower().startswith(sub.lower()):
+                merged.append(top)
+            else:
+                merged.append(f"{top} - {sub}")
+        elif sub:
+            merged.append(sub)
+        elif top:
+            merged.append(top)
+        else:
+            merged.append("")
+    return merged
+
+
+_NUMERIC_VALUE_RE = re.compile(r'^\s*[\$€£¥]?\s*\(?-?\d+(?:,\d{3})*(?:\.\d+)?\)?%?\s*$')
+
+
+def _is_numeric_data_row(cells: list[str]) -> bool:
+    """True if most data columns contain numeric measurement values (e.g., a real data row)."""
+    if len(cells) <= 1:
+        return False
+    data_cells = [c.strip() for c in cells[1:] if c.strip()]
+    if not data_cells:
+        return False
+    numeric_count = sum(1 for c in data_cells if _NUMERIC_VALUE_RE.match(c))
+    return numeric_count > len(data_cells) // 2
+
+
 def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) -> tuple[str, str]:
     """
-    Cleans up markdown tables where the PDF parser accidentally put the caption
-    as the first header row, and the real headers as the first data row.
+    Cleans up markdown tables:
+    1. Detects when the PDF parser accidentally put the caption as the first header row,
+       and the real headers as the first data row.
+    2. Flattens multi-tier/hierarchical headers into single, descriptive column headers.
     """
     if not markdown_table:
         return markdown_table, current_caption
@@ -40,13 +97,14 @@ def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) 
             sep_idx = i
             break
 
+    new_caption = current_caption
+
+    # Step 1: Caption promotion if header row is a caption/repeated title
     if sep_idx > 0 and len(lines) > sep_idx + 1:
         header_line = lines[sep_idx - 1]
         headers = [h.strip() for h in header_line.strip('|').split('|') if h.strip()]
-
         first_data_line = lines[sep_idx + 1]
 
-        # Check if the header row is a repeated string or looks like a caption
         is_repeated_header = len(set(headers)) == 1 and len(headers) >= 1
         starts_with_caption = False
         if headers:
@@ -54,8 +112,6 @@ def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) 
 
         if is_repeated_header or starts_with_caption:
             potential_caption = headers[0] if headers else ""
-
-            # Reconstruct the markdown with the first data row promoted to the header
             new_lines = []
             if sep_idx - 1 > 0:
                 new_lines.extend(lines[:sep_idx - 1])
@@ -64,11 +120,29 @@ def clean_markdown_table_and_caption(markdown_table: str, current_caption: str) 
             new_lines.append(lines[sep_idx])      # Separator
             new_lines.extend(lines[sep_idx + 2:]) # Remaining data rows
 
-            new_markdown = '\n'.join(new_lines)
+            lines = new_lines
             new_caption = current_caption if current_caption else potential_caption
-            return new_markdown, new_caption
+            # Recompute sep_idx after promotion
+            sep_idx = next((i for i, line in enumerate(lines) if '|' in line and '-' in line and not any(c.isalnum() for c in line)), -1)
 
-    return markdown_table, current_caption
+    # Step 2: Multi-level header flattening
+    if sep_idx > 1:
+        # Multiple header rows before the separator
+        header_cells = _parse_row_cells(lines[0])
+        for h_line in lines[1:sep_idx]:
+            header_cells = _merge_header_cells(header_cells, _parse_row_cells(h_line))
+        merged_header = _format_row_cells(header_cells)
+        lines = [merged_header, lines[sep_idx]] + lines[sep_idx + 1:]
+    elif sep_idx == 1 and len(lines) > 2:
+        top_cells = _parse_row_cells(lines[0])
+        sub_cells = _parse_row_cells(lines[2])
+        # If top header has repeated spanning labels and the line below separator is a sub-header row
+        if len(top_cells) > len(set(top_cells)) and not _is_numeric_data_row(sub_cells):
+            merged_header = _format_row_cells(_merge_header_cells(top_cells, sub_cells))
+            lines = [merged_header, lines[1]] + lines[3:]
+
+    new_markdown = '\n'.join(lines)
+    return new_markdown, new_caption
 
 def extract_table_headers(markdown_table: str) -> list[str]:
     """Extract headers from a markdown table.
@@ -111,7 +185,7 @@ def extract_table_headers(markdown_table: str) -> list[str]:
         headers = [h.strip() for h in header_line.split('|') if h.strip()]
         return headers
     except Exception as e:
-        logger.debug(f"Failed to extract headers from markdown table: {e}")
+        logger.debug(f"Failed to extract headers from markdown table: {e}", exc_info=True)
         return []
 
 def is_table_continuation(headers1: list[str], headers2: list[str], fuzzy_threshold: float = 85.0) -> bool:
@@ -261,9 +335,124 @@ def merge_consecutive_tables(table_dict: dict) -> dict:
 
     return merged_dict
 
-def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None):
+_NO_SUMMARY = "No summary."  # fallback summary returned by summarize_and_classify_*
+
+def _is_separator_line(line: str) -> bool:
+    """True for a markdown table separator row such as ``|---|:---:|``."""
+    return '|' in line and '-' in line and not any(c.isalnum() for c in line)
+
+_WHITESPACE_RUN = re.compile(r'\s{2,}')
+_DASH_RUN = re.compile(r'-{3,}')
+
+def _normalize_table_line(line: str) -> str:
+    """Strip the column-alignment padding that markdown exporters (tabulate) add.
+
+    Collapses runs of whitespace and shortens separator dashes (``|-----|`` -> ``|---|``)
+    so token counts reflect the real content instead of padding, and the LLM prompt
+    is smaller. Cell values are not modified.
+    """
+    line = _WHITESPACE_RUN.sub(' ', line.strip())
+    if _is_separator_line(line):
+        line = _DASH_RUN.sub('---', line)
+    return line
+
+def _estimate_tokens(text: str) -> int:
+    """Cheap token estimate (~3 characters per token) that avoids a tokenizer call per table row."""
+    return math.ceil(len(text) / 3)
+
+def split_markdown_table_into_row_chunks(
+    markdown_table: str,
+    caption: str = "",
+    max_tokens: int = 200,
+    count_tokens_fn: Callable[[str], int] | None = None,
+) -> list[str]:
+    """Split a markdown table into row-group chunks that each fit in ``max_tokens``.
+
+    Every chunk is self-contained: the caption (when it is not already part of the
+    table text), the header row(s) and the separator row are repeated at the top of
+    each chunk, followed by a contiguous group of data rows. A table that already
+    fits in ``max_tokens`` is returned as a single chunk. Rows are never split; a
+    single row larger than the budget is emitted on its own chunk. Alignment padding
+    added by the markdown exporter is removed before counting tokens.
+
+    Args:
+        markdown_table: Markdown formatted table string.
+        caption: Table caption, repeated in every chunk when non-empty.
+        max_tokens: Maximum tokens per chunk (caption + header + rows).
+        count_tokens_fn: Callable returning the token count for a string.
+            Defaults to a character based estimate (~3 chars per token).
+
+    Returns:
+        List of markdown chunk strings (empty if the table is empty).
+    """
+    if not markdown_table or not markdown_table.strip():
+        logger.debug("Row chunking skipped: empty markdown table")
+        return []
+
+    if count_tokens_fn is None:
+        count_tokens_fn = _estimate_tokens
+
+    lines = [_normalize_table_line(line) for line in markdown_table.strip().split('\n') if line.strip()]
+    sep_idx = next((i for i, line in enumerate(lines) if _is_separator_line(line)), -1)
+
+    if sep_idx >= 0:
+        header_lines = lines[:sep_idx + 1]
+        row_lines = lines[sep_idx + 1:]
+    else:
+        logger.debug("Row chunking: no separator row found, treating every line as a data row without header")
+        header_lines = []
+        row_lines = lines
+
+    caption = (caption or "").strip()
+    preamble_lines = list(header_lines)
+    if caption and caption.lower() not in markdown_table.lower():
+        preamble_lines.insert(0, caption)
+    preamble = "\n".join(preamble_lines)
+    preamble_tokens = count_tokens_fn(preamble) if preamble else 0
+
+    def _assemble(rows: list[str]) -> str:
+        return "\n".join(([preamble] if preamble else []) + rows)
+
+    row_tokens = [count_tokens_fn(row) for row in row_lines]
+    total_tokens = preamble_tokens + sum(row_tokens)
+    logger.debug(
+        f"Row chunking: caption='{caption[:60]}', header_lines={len(header_lines)}, "
+        f"data_rows={len(row_lines)}, total_tokens={total_tokens}, max_tokens={max_tokens}"
+    )
+
+    if not row_lines or total_tokens <= max_tokens:
+        logger.debug("Row chunking: table fits in a single chunk, no split needed")
+        return [_assemble(row_lines)]
+
+    chunks: list[str] = []
+    current_rows: list[str] = []
+    current_tokens = preamble_tokens
+    for row, tokens in zip(row_lines, row_tokens):
+        if current_rows and current_tokens + tokens > max_tokens:
+            chunks.append(_assemble(current_rows))
+            logger.debug(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
+            current_rows = []
+            current_tokens = preamble_tokens
+        if not current_rows and preamble_tokens + tokens > max_tokens:
+            logger.warning(
+                f"Row chunking: a single row (~{preamble_tokens + tokens} tokens incl. header) "
+                f"exceeds max_tokens={max_tokens}; emitting it as its own chunk"
+            )
+        current_rows.append(row)
+        current_tokens += tokens
+
+    if current_rows:
+        chunks.append(_assemble(current_rows))
+        logger.debug(f"Row chunking: closed chunk {len(chunks)} with {len(current_rows)} rows (~{current_tokens} tokens)")
+
+    logger.debug(f"Row chunking: split {len(row_lines)} rows into {len(chunks)} chunks")
+    return chunks
+
+def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, document_language=LanguageCodes.ENGLISH, stop_event: threading.Event | None = None, table_chunk_max_tokens: int = 400):
     """Extract, process, and summarize tables found in a document.
 
+    Large tables are split into row-group chunks (header and caption repeated) so each
+    chunk is summarized separately and every row keeps its keywords in the index.
     Saves the extracted tables and their LLM-generated summaries to a JSON file.
     """
     table_count = 0
@@ -279,6 +468,8 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
+
+    logger.debug(f"Extracting {len(converted_doc.tables)} tables from '{doc_path}'")
 
     # Lazy import to avoid circular dependency
     from digitize.parsing.docx import recover_table_caption_from_body_context
@@ -322,14 +513,32 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
     logger.debug(f"Merging cross-page tables for '{doc_path}'")
     merged_table_dict = merge_consecutive_tables(table_dict)
-
-    table_markdowns = [merged_table_dict[key]["markdown"] for key in sorted(merged_table_dict)]
-    table_captions_list = [merged_table_dict[key]["caption"] for key in sorted(merged_table_dict)]
-    table_page_numbers = (
-        [merged_table_dict[key]["page_number"] for key in sorted(merged_table_dict)]
-        if not is_docx
-        else [None] * len(merged_table_dict)
+    logger.debug(
+        f"Table merge for '{doc_path}': {len(table_dict)} extracted -> {len(merged_table_dict)} after cross-page merge"
     )
+
+    # Split each (merged) table into row-group chunks; each chunk repeats the caption and
+    # header so it can be summarized on its own. Chunks inherit caption and page number.
+    table_markdowns = []
+    table_captions_list = []
+    table_page_numbers = []
+    table_group_ids = []  # source table key of each chunk
+    for key in sorted(merged_table_dict):
+        entry = merged_table_dict[key]
+        page_num = None if is_docx else entry["page_number"]
+        row_chunks = split_markdown_table_into_row_chunks(
+            entry["markdown"], entry["caption"], max_tokens=table_chunk_max_tokens,
+        )
+        logger.debug(
+            f"Table {key} (page {page_num}) of '{doc_path}' -> {len(row_chunks)} row chunk(s) "
+            f"(max ~{table_chunk_max_tokens} tokens each)"
+        )
+        for chunk_md in row_chunks:
+            table_markdowns.append(chunk_md)
+            table_captions_list.append(entry["caption"])
+            table_page_numbers.append(page_num)
+            table_group_ids.append(key)
+    logger.debug(f"Summarizing {len(table_markdowns)} table chunk(s) for '{doc_path}'")
 
     # Select appropriate prompt and max_tokens based on document language (lingua ISO format: 'EN', 'DE', etc.)
     prompt_templates = {
@@ -353,7 +562,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
 
     logger.debug(
         f"Using language prompt {document_language} and max_tokens ({selected_max_tokens}) "
-        f"for table summarization"
+        f"for table summarization of '{doc_path}'"
     )
 
     if stop_event and stop_event.is_set():
@@ -367,19 +576,66 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
         stop_event=stop_event,
     )
 
+    # Chunks whose LLM call failed (e.g. invalid/truncated JSON) have no summary. Rather than losing
+    # their rows, index the chunk's own markdown (it already repeats the caption and header row) in
+    # the summary field and keep the chunk. Name each one so the fallback can be traced.
+    table_summaries = list(table_summaries)
+    decisions = list(decisions)
+    for failed_idx, error_msg in sorted(failures.items()):
+        table_summaries[failed_idx] = table_markdowns[failed_idx]
+        decisions[failed_idx] = True
+        logger.debug(
+            f"Table chunk {failed_idx + 1}/{len(table_markdowns)} of table {table_group_ids[failed_idx]} "
+            f"(page {table_page_numbers[failed_idx]}) of '{doc_path}' failed ({error_msg}); "
+            f"using its raw markdown ({len(table_markdowns[failed_idx])} chars) as the summary"
+        )
+    if failures:
+        logger.debug(
+            f"Raw-markdown fallback applied to {len(failures)} table chunk(s) of '{doc_path}': "
+            f"chunk numbers {[i + 1 for i in sorted(failures)]}"
+        )
+
+    # The relevance decision is made per chunk, but a table is either relevant or not. If any
+    # chunk of a table was kept, keep its sibling chunks too (when they have a real summary),
+    # otherwise rows of a relevant table silently disappear from the index.
+    kept_groups = {gid for gid, keep in zip(table_group_ids, decisions) if keep}
+    final_keep = []
+    for chunk_idx, (gid, keep, summary) in enumerate(zip(table_group_ids, decisions, table_summaries)):
+        has_real_summary = bool(summary) and summary != _NO_SUMMARY
+        rescued = (not keep) and gid in kept_groups and has_real_summary
+        final_keep.append(keep or rescued)
+        if rescued:
+            logger.debug(f"Keeping chunk {chunk_idx + 1} of table {gid} of '{doc_path}': discarded by the LLM but a sibling chunk was kept")
+        elif not keep and gid in kept_groups:
+            logger.debug(
+                f"Dropping chunk {chunk_idx + 1} of table {gid} of '{doc_path}': discarded by the LLM "
+                f"and it has no usable summary, so it cannot be rescued; its rows will be missing from the index"
+            )
+    dropped = [i + 1 for i, keep in enumerate(final_keep) if not keep]
+    logger.debug(
+        f"Table chunk decisions for '{doc_path}': kept {sum(final_keep)}/{len(final_keep)} "
+        f"(LLM kept {sum(decisions)}); dropped chunk numbers: {dropped}"
+    )
+    if dropped:
+        logger.debug(f"{len(dropped)} table chunk(s) of '{doc_path}' were dropped (chunk numbers: {dropped})")
+
     filtered_table_dicts = {
         idx: {
             'summary': summary,
             'caption': caption,
             'page_number': page_num,
         }
-        for idx, (keep, markdown, summary, caption, page_num) in enumerate(
-            zip(decisions, table_markdowns, table_summaries, table_captions_list, table_page_numbers)
+        for idx, (keep, _markdown, summary, caption, page_num) in enumerate(
+            zip(final_keep, table_markdowns, table_summaries, table_captions_list, table_page_numbers)
         )
         if keep
     }
     table_count = len(filtered_table_dicts)
     out_path.write_text(json.dumps(filtered_table_dicts, indent=2), encoding="utf-8")
     process_time = time.time() - t0
+    logger.debug(
+        f"Processed tables for '{doc_path}': kept {table_count}/{len(table_markdowns)} chunks "
+        f"(failures={len(failures)}) in {process_time:.2f}s, saved to {out_path}"
+    )
 
     return table_count, process_time, failures
