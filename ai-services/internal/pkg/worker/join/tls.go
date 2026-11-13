@@ -70,23 +70,6 @@ func generateKeyAndCSR() (keyPEM, csrPEM []byte, err error) {
 	return keyPEM, csrPEM, nil
 }
 
-// ensureCaddyReadable makes the TLS directory and the encrypted tls.key readable by
-// the Caddy container user. os.WriteFile and os.MkdirAll only apply a mode when
-// they create something, so workers installed before this change still have a
-// 0700 directory and a 0600 key; this runs on every start to fix them.
-// It is best effort: a failure is logged but must not stop the worker from
-// connecting to the control plane (it only affects Caddy's private ingress).
-func ensureCaddyReadable(dir string) {
-	if err := os.Chmod(dir, dirPerm); err != nil { //nolint:gosec // Caddy runs as a different uid and must traverse the directory
-		logger.Warningf("worker join: cannot make %s readable for Caddy: %v", dir, err)
-	}
-
-	keyPath := filepath.Join(dir, tlsKeyFile)
-	if err := os.Chmod(keyPath, keyPerm); err != nil { //nolint:gosec // the file is AES-GCM encrypted; Caddy decrypts it in memory
-		logger.Warningf("worker join: cannot make %s readable for Caddy: %v", keyPath, err)
-	}
-}
-
 // loadClientCert loads the worker's mTLS key pair from tlsDir.
 // tls.key is stored encrypted; it is decrypted in memory before building the
 // tls.Certificate so the plaintext key is never written to disk unprotected.
