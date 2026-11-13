@@ -8,212 +8,161 @@ values.yaml files must also be updated to match.
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # Registry used in values.yaml files
 EXPECTED_REGISTRY = "icr.io/ai-services-cicd"
 
-# Map of: makefile_path -> list of (values_yaml_path, values_key)
-# values_key is the top-level key in values.yaml that contains the image reference
-COMPONENTS = {
-    "services/chatbot/Makefile": [
-        ("ai-services/assets/applications/rag/podman/values.yaml", "backend"),
-        ("ai-services/assets/applications/rag/openshift/values.yaml", "backend"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "backend"),
-        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "backend"),
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "backend"),
-        ("ai-services/assets/services/chat/podman/values.yaml", "backend"),
-        ("ai-services/assets/services/chat/openshift/values.yaml", "backend"),
-    ],
-    "services/digitize/Makefile": [
-        ("ai-services/assets/applications/rag/podman/values.yaml", "digitize"),
-        ("ai-services/assets/applications/rag/openshift/values.yaml", "digitize"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitize"),
-        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitize"),
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitize"),
-        ("ai-services/assets/services/digitize/podman/values.yaml", "digitize"),
-        ("ai-services/assets/services/digitize/openshift/values.yaml", "digitize"),
-    ],
-    "services/summarize/Makefile": [
-        ("ai-services/assets/applications/rag/podman/values.yaml", "summarize"),
-        ("ai-services/assets/applications/rag/openshift/values.yaml", "summarize"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "summarize"),
-        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "summarize"),
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "summarize"),
-        ("ai-services/assets/services/summarize/podman/values.yaml", "summarize"),
-        ("ai-services/assets/services/summarize/openshift/values.yaml", "summarize"),
-    ],
-    "services/similarity/Makefile": [
-        ("ai-services/assets/applications/rag/podman/values.yaml", "similarity"),
-        ("ai-services/assets/applications/rag/openshift/values.yaml", "similarity"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "similarity"),
-        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "similarity"),
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "similarity"),
-        ("ai-services/assets/services/similarity/podman/values.yaml", "similarity"),
-        ("ai-services/assets/services/similarity/openshift/values.yaml", "similarity")
-    ],
-    "services/extract/Makefile": [
-        ("ai-services/assets/services/extract/podman/values.yaml", "extract"),
-        ("ai-services/assets/services/extract/openshift/values.yaml", "extract"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "extract")
-    ],
-    "services/translate/Makefile": [
-        ("ai-services/assets/services/translate/podman/values.yaml", "translate"),
-        ("ai-services/assets/services/translate/openshift/values.yaml", "translate"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "translate")
-    ],
-    "ui/chatbot/Makefile": [
-        ("ai-services/assets/applications/rag/podman/values.yaml", "ui"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "ui"),
-        ("ai-services/assets/applications/rag/openshift/values.yaml", "ui"),
-        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "ui"),
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "ui"),
-        ("ai-services/assets/services/chat/podman/values.yaml", "ui"),
-        ("ai-services/assets/services/chat/openshift/values.yaml", "ui"),
-    ],
-    "ui/digitize/Makefile": [
-        ("ai-services/assets/applications/rag/openshift/values.yaml", "digitizeUi"),
-        ("ai-services/assets/applications/rag/podman/values.yaml", "digitizeUi"),
-        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "digitizeUi"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "digitizeUi"),
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "digitizeUi"),
-        ("ai-services/assets/services/digitize/podman/values.yaml", "digitizeUi"),
-        ("ai-services/assets/services/digitize/openshift/values.yaml", "digitizeUi"),
-    ],
-    "ui/catalog/Makefile": [
-        ("ai-services/assets/catalog/podman/values.yaml", "ui"),
-        ("ai-services/assets/catalog/openshift/values.yaml", "ui"),
-    ],
-    "ai-services/Makefile": [
-        ("ai-services/assets/catalog/podman/values.yaml", "backend"),
-        ("ai-services/assets/catalog/openshift/values.yaml", "backend"),
-        ("ai-services/assets/worker/podman/values.yaml", "worker"),
-        ("ai-services/assets/worker/openshift/values.yaml", "worker"),
-    ],
-    "images/postgres/Makefile": [
-        ("ai-services/assets/catalog/podman/values.yaml", "db"),
-        ("ai-services/assets/catalog/openshift/values.yaml", "db"),
-        ("ai-services/assets/applications/rag/podman/values.yaml", "postgres"),
-        ("ai-services/assets/applications/rag/openshift/values.yaml", "postgres"),
-        ("ai-services/assets/applications/rag-dev/podman/values.yaml", "postgres"),
-        ("ai-services/assets/applications/rag-dev/openshift/values.yaml", "postgres"),
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "postgres"),
-        ("ai-services/assets/services/summarize/podman/values.yaml", "postgres"),
-        ("ai-services/assets/services/summarize/openshift/values.yaml", "postgres"),
-        ("ai-services/assets/services/digitize/podman/values.yaml", "postgres"),
-        ("ai-services/assets/services/digitize/openshift/values.yaml", "postgres"),
-        ("ai-services/assets/services/extract/podman/values.yaml", "postgres"),
-        ("ai-services/assets/services/extract/openshift/values.yaml", "postgres"),
-        ("ai-services/assets/services/translate/podman/values.yaml", "postgres"),
-        ("ai-services/assets/services/translate/openshift/values.yaml", "postgres")
-    ],
-    "images/litellm/Makefile": [
-        ("ai-services/assets/applications/rag-cpu/podman/values.yaml", "litellm"),
-    ],
-    "images/caddy/Makefile": [
-        ("ai-services/assets/catalog/podman/values.yaml", "caddy"),
-        ("ai-services/assets/worker/podman/values.yaml", "caddy"),
-    ],
-    "mcp/Makefile": [
-        ("ai-services/assets/services/chat/podman/values.yaml", "mcp"),
-        ("ai-services/assets/services/chat/openshift/values.yaml", "mcp"),
-        ("ai-services/assets/services/digitize/podman/values.yaml", "mcp"),
-        ("ai-services/assets/services/digitize/openshift/values.yaml", "mcp"),
-        ("ai-services/assets/services/similarity/podman/values.yaml", "mcp"),
-        ("ai-services/assets/services/similarity/openshift/values.yaml", "mcp"),
-        ("ai-services/assets/services/summarize/podman/values.yaml", "mcp"),
-        ("ai-services/assets/services/summarize/openshift/values.yaml", "mcp"),
-        ("ai-services/assets/services/translate/podman/values.yaml", "mcp"),
-        ("ai-services/assets/services/translate/openshift/values.yaml", "mcp"),
-        ("ai-services/assets/services/extract/podman/values.yaml", "mcp"),
-        ("ai-services/assets/services/extract/openshift/values.yaml", "mcp"),
-    ],
+# Directories to ignore during Makefile discovery
+IGNORED_DIRS = {"vendor", "venv", ".venv", "node_modules", ".git"}
+
+# Makefiles to ignore (aggregators / dispatchers / tests without image definitions)
+IGNORED_MAKEFILES = {
+    Path("services/Makefile"),
+    Path("images/Makefile"),
+    Path("ai-services/tests/e2e/cli/Makefile"),
 }
 
 
-def get_makefile_info(makefile_path: Path) -> Tuple[str, str]:
-    """Extract IMAGE= and TAG= values from a Makefile, calculating TAG if it references other variables."""
+def find_makefiles(repo_root: Path) -> List[Path]:
+    """Find all relevant Makefiles across the repository."""
+    makefiles = []
+    for makefile_path in sorted(repo_root.rglob("Makefile")):
+        rel_path = makefile_path.relative_to(repo_root)
+        if any(part in IGNORED_DIRS for part in rel_path.parts):
+            continue
+        if rel_path in IGNORED_MAKEFILES:
+            continue
+        makefiles.append(rel_path)
+    return makefiles
+
+
+def extract_image_name(makefile_path: Path) -> Optional[str]:
+    """Extract IMAGE= variable from a Makefile."""
     content = makefile_path.read_text()
+    match = re.search(r"^\s*IMAGE\s*\??=\s*(\S+)", content, re.MULTILINE)
+    if match:
+        return match.group(1).strip()
+    return None
 
-    # Extract all variable definitions
+
+def resolve_tag_fallback(makefile_path: Path) -> Optional[str]:
+    """Parse TAG= and resolve variable references statically if make command fails."""
+    content = makefile_path.read_text()
     variables = {}
-    for line in content.split('\n'):
-        # Match variable assignments: VAR?=value or VAR=value
-        var_match = re.match(r'^(\w+)\s*\??\s*=\s*(.+?)(?:\s*#.*)?$', line.strip())
+    for line in content.splitlines():
+        var_match = re.match(r"^(\w+)\s*\??\s*=\s*(.+?)(?:\s*#.*)?$", line.strip())
         if var_match:
-            var_name = var_match.group(1)
-            var_value = var_match.group(2).strip()
-            variables[var_name] = var_value
+            variables[var_match.group(1)] = var_match.group(2).strip()
 
-    # Get IMAGE value
-    image = variables.get('IMAGE')
-    if not image:
-        raise ValueError(f"Could not find IMAGE= in {makefile_path}")
-
-    # Get TAG value
-    tag_value = variables.get('TAG')
+    tag_value = variables.get("TAG")
     if not tag_value:
-        raise ValueError(f"Could not find TAG= in {makefile_path}")
+        return None
 
-    # If TAG references other variables, resolve them
-    # Handle patterns like: $(VAR1)-$(VAR2) or v$(VAR1)-$(VAR2)
-    def resolve_variables(value: str) -> str:
-        # Replace $(VAR) with actual values
-        pattern = r'\$\((\w+)\)'
-        while re.search(pattern, value):
-            match = re.search(pattern, value)
-            if match:
-                var_name = match.group(1)
-                var_replacement = variables.get(var_name, match.group(0))
-                value = value.replace(match.group(0), var_replacement)
-        return value
-
-    resolved_tag = resolve_variables(tag_value)
-    return image, resolved_tag
+    pattern = r"\$\((\w+)\)"
+    while re.search(pattern, tag_value):
+        match = re.search(pattern, tag_value)
+        if match:
+            var_name = match.group(1)
+            replacement = variables.get(var_name, match.group(0))
+            tag_value = tag_value.replace(match.group(0), replacement)
+    return tag_value
 
 
-def get_image_from_values_yaml(values_path: Path, key: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Extract image name and tag from a values.yaml section.
+def get_makefile_tag(repo_root: Path, makefile_rel: Path) -> Optional[str]:
+    """Execute 'make image-tag' to retrieve the evaluated tag value."""
+    full_path = repo_root / makefile_rel
 
-    Example: key=backend, image line: icr.io/ai-services-cicd/rag:v0.0.32
-    Returns: ("rag", "v0.0.32")
-    """
-    content = values_path.read_text()
+    # Handle services/<service_name>/Makefile via parent services/Makefile
+    if makefile_rel.parts[0] == "services" and len(makefile_rel.parts) == 3:
+        service_name = makefile_rel.parts[1]
+        services_dir = repo_root / "services"
+        res = subprocess.run(
+            ["make", "-s", "-C", str(services_dir), "image-tag", f"SERVICE={service_name}"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
 
-    # Find the section for the key and extract the image line within it
-    pattern = re.compile(
-        rf"^{key}:\s*\n(.*?)(?=^\w|\Z)",
-        re.MULTILINE | re.DOTALL,
+    # Standalone Makefiles with image-tag target
+    res = subprocess.run(
+        ["make", "-s", "-C", str(full_path.parent), "image-tag"],
+        capture_output=True,
+        text=True,
     )
-    section_match = pattern.search(content)
-    if not section_match:
-        raise ValueError(f"Could not find '{key}:' section in {values_path}")
+    if res.returncode == 0 and res.stdout.strip():
+        return res.stdout.strip()
 
-    section = section_match.group(1)
-    image_match = re.search(r"image:\s*(\S+)", section)
-    if not image_match:
-        raise ValueError(f"Could not find 'image:' in '{key}' section of {values_path}")
+    # Fallback to static resolution
+    return resolve_tag_fallback(full_path)
 
-    full_image = image_match.group(1)
 
-    # Only validate images from our own registry
-    if not full_image.startswith(EXPECTED_REGISTRY + "/"):
-        return None, None  # Skip third-party images
+def discover_image_catalog(repo_root: Path) -> Dict[str, Tuple[str, str]]:
+    """
+    Discover all images and their tags from repository Makefiles.
 
-    # Parse: icr.io/ai-services-cicd/IMAGE:TAG
-    image_with_tag = full_image.split("/")[-1]
-    if ":" not in image_with_tag:
-        raise ValueError(f"Image missing tag in {values_path}: {full_image}")
+    Returns:
+        Dict mapping image_name -> (relative_makefile_path, resolved_tag)
+    """
+    catalog = {}
+    for makefile_rel in find_makefiles(repo_root):
+        full_path = repo_root / makefile_rel
+        image_name = extract_image_name(full_path)
+        if not image_name:
+            continue
 
-    image_name, tag = image_with_tag.split(":", 1)
-    return image_name, tag
+        tag = get_makefile_tag(repo_root, makefile_rel)
+        if not tag:
+            continue
+
+        catalog[image_name] = (str(makefile_rel), tag)
+    return catalog
+
+
+def scan_assets_for_images(
+    repo_root: Path,
+) -> List[Tuple[str, int, str, str, str]]:
+    """
+    Scan all YAML files under ai-services/assets for ICR image references.
+
+    Returns:
+        List of tuples: (relative_file_path, line_number, full_image_ref, image_name, tag)
+    """
+    assets_dir = repo_root / "ai-services" / "assets"
+    if not assets_dir.exists():
+        return []
+
+    # Match: icr.io/<registry_path>/<image_name>:<tag>
+    pattern = re.compile(r"(icr\.io/[^\s\"'\)]+/([^:\s\"'\)]+):([^\s\"'\)]+))")
+    found_images = []
+
+    yaml_files = sorted(
+        list(assets_dir.rglob("*.yaml")) + list(assets_dir.rglob("*.yml"))
+    )
+
+    for yaml_path in yaml_files:
+        rel_path = str(yaml_path.relative_to(repo_root))
+        try:
+            lines = yaml_path.read_text().splitlines()
+        except Exception:
+            continue
+
+        for line_no, line in enumerate(lines, 1):
+            for match in pattern.finditer(line):
+                full_ref = match.group(1)
+                image_name = match.group(2)
+                tag = match.group(3)
+                found_images.append((rel_path, line_no, full_ref, image_name, tag))
+
+    return found_images
 
 
 def main() -> int:
-    repo_root = Path(__file__).parent.parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     errors = []
 
     print("=" * 70)
@@ -221,66 +170,46 @@ def main() -> int:
     print("=" * 70)
     print()
 
-    for makefile_rel, values_entries in COMPONENTS.items():
-        makefile_path = repo_root / makefile_rel
+    # 1. Discover all Makefiles and build image catalog
+    image_catalog = discover_image_catalog(repo_root)
 
-        if not makefile_path.exists():
-            errors.append(f"❌ Makefile not found: {makefile_rel}")
-            continue
+    # 2. Scan assets directory for image references
+    asset_references = scan_assets_for_images(repo_root)
 
-        try:
-            makefile_image, makefile_tag = get_makefile_info(makefile_path)
-        except ValueError as e:
-            errors.append(f"❌ {e}")
-            continue
+    # Group references by image name
+    refs_by_image: Dict[str, List[Tuple[str, int, str, str]]] = {}
+    for rel_file, line_no, full_ref, img_name, tag in asset_references:
+        refs_by_image.setdefault(img_name, []).append((rel_file, line_no, full_ref, tag))
 
+    # 3. Validate each Makefile component against asset templates
+    for image_name, (makefile_rel, expected_tag) in sorted(image_catalog.items(), key=lambda x: x[1][0]):
         print(f"📦 {makefile_rel}")
-        print(f"   IMAGE={makefile_image}  TAG={makefile_tag}")
+        print(f"   IMAGE={image_name}  TAG={expected_tag}")
         print()
 
-        for values_rel, values_key in values_entries:
-            values_path = repo_root / values_rel
+        refs = refs_by_image.get(image_name, [])
+        if not refs:
+            print("   ⏭  No template references found in ai-services/assets/")
+            print()
+            continue
 
-            if not values_path.exists():
-                errors.append(f"   ❌ File not found: {values_rel}")
-                print(f"   ❌ {values_rel}: not found")
-                continue
-
-            try:
-                values_image, values_tag = get_image_from_values_yaml(values_path, values_key)
-            except ValueError as e:
-                errors.append(f"   ❌ {values_rel} [{values_key}]: {e}")
-                print(f"   ❌ {values_rel} [{values_key}]: parse error - {e}")
-                continue
-
-            if values_image is None:
-                # Third-party image, skip
-                print(f"   ⏭  {values_rel} [{values_key}]: skipped (third-party image)")
-                continue
-
-            if values_image != makefile_image:
+        for rel_file, line_no, full_ref, found_tag in refs:
+            if found_tag != expected_tag:
                 errors.append(
-                    f"   ❌ Image name mismatch in {values_rel} [{values_key}]:\n"
-                    f"      Makefile IMAGE : {makefile_image}\n"
-                    f"      values.yaml    : {values_image}"
-                )
-                print(f"   ❌ {values_rel} [{values_key}]: image '{values_image}' != '{makefile_image}'")
-            elif values_tag != makefile_tag:
-                errors.append(
-                    f"   ❌ Version mismatch in {values_rel} [{values_key}]:\n"
-                    f"      Makefile TAG   : {makefile_tag}\n"
-                    f"      values.yaml    : {values_tag}\n"
-                    f"      Fix: update '{values_key}.image' to "
-                    f"'{EXPECTED_REGISTRY}/{makefile_image}:{makefile_tag}'"
+                    f"   ❌ Version mismatch in {rel_file} [line {line_no}]:\n"
+                    f"      Makefile TAG   : {expected_tag}\n"
+                    f"      values.yaml    : {found_tag}\n"
+                    f"      Fix: update image reference to "
+                    f"'{EXPECTED_REGISTRY}/{image_name}:{expected_tag}'"
                 )
                 print(
-                    f"   ❌ {values_rel} [{values_key}]: "
-                    f"tag '{values_tag}' != '{makefile_tag}'"
+                    f"   ❌ {rel_file}:{line_no}: "
+                    f"tag '{found_tag}' != '{expected_tag}'"
                 )
             else:
                 print(
-                    f"   ✅ {values_rel} [{values_key}]: "
-                    f"{EXPECTED_REGISTRY}/{values_image}:{values_tag}"
+                    f"   ✅ {rel_file}:{line_no}: "
+                    f"{full_ref}"
                 )
 
         print()
