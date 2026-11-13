@@ -89,6 +89,7 @@ export const TextCell = ({ value }: CellRendererProps): React.ReactElement => (
 export const CELL_RENDERERS: Record<string, CellRendererComponent> = {
   name: NameCell,
   status: StatusCell,
+  createdAt: TextCell,
   model: TextCell,
   componentType: TypeCell,
   backend: TextCell,

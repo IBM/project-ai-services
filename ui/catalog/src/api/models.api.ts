@@ -3,6 +3,7 @@ import type {
   ModelDeploymentsListResponse,
 } from "@/types/api.types";
 import type { ModelDeploymentRow } from "@/components/ModelsTable/types";
+import { formatDateTime } from "@/utils/time";
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 // API integration will be done in a future PR once the backend is ready.
@@ -104,6 +105,7 @@ export function transformModelDeploymentToRow(
     id: model.id,
     name: model.name,
     status: model.status,
+    createdAt: formatDateTime(model.created_at),
     model: model.model,
     componentType: model.component_type.short_name,
     backend: model.provider.name,

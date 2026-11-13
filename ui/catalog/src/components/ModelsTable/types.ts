@@ -13,6 +13,7 @@ export interface ModelDeploymentRow {
   id: string;
   name: string;
   status: string;
+  createdAt: string;
   model: string;
   componentType: string;
   backend: string;
@@ -35,10 +36,11 @@ export type AppAction = {
   payload: { rows: ModelDeploymentRow[]; total: number };
 };
 
-// Table headers — 8 visible columns + actions overflow
+// Table headers — 9 visible columns + actions overflow
 export const HEADERS: DataTableHeader[] = [
   { header: "Instance name", key: "name" },
   { header: "Status", key: "status" },
+  { header: "Created", key: "createdAt" },
   { header: "Model", key: "model" },
   { header: "Type", key: "componentType" },
   { header: "Backend", key: "backend" },
@@ -51,6 +53,7 @@ export const HEADERS: DataTableHeader[] = [
 export const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   name: true,
   status: true,
+  createdAt: true,
   model: true,
   componentType: true,
   backend: true,
