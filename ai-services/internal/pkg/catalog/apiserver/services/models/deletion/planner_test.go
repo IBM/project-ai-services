@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
@@ -181,11 +182,11 @@ func TestPlanLocal(t *testing.T) {
 			wantCode:   http.StatusUnprocessableEntity,
 		},
 		{
-			name:       "models are unsupported on openshift",
-			comp:       comp("vllm-cpu"),
-			workers:    &fakeWorkers{rt: mock.New(runtimeTypes.RuntimeTypeOpenShift)},
-			wantWorker: workerconstants.LocalWorkerName,
-			wantCode:   http.StatusUnprocessableEntity,
+			name:         "an openshift runtime is planned like any other",
+			comp:         comp("vllm-cpu"),
+			workers:      &fakeWorkers{rt: mock.New(runtimeTypes.RuntimeTypeOpenShift)},
+			wantWorker:   workerconstants.LocalWorkerName,
+			wantProvider: "hosted_vllm",
 		},
 	}
 
@@ -207,6 +208,8 @@ func TestPlanLocal(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+			assert.Equal(t, []string{catalogutils.ModelNamespace(id)}, tt.workers.namespaces,
+				"the runtime is scoped to the namespace of the model")
 			assert.Equal(t, id, plan.ComponentID)
 			assert.Equal(t, tt.workers.rt, plan.Runtime)
 			assert.Equal(t, "litellm-1", plan.Route.LiteLLMModelID)

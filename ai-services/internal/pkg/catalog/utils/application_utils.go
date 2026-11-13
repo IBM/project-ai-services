@@ -36,6 +36,13 @@ func AppNamespace(appID uuid.UUID) string {
 	return "ai-services-" + appID.String()[:8]
 }
 
+// ModelNamespace derives the Kubernetes namespace of a local model from its component UUID.
+// Format: "ai-services-model-<first 8 chars of UUID>". Each model gets its own namespace so that
+// it can be removed together with everything it deployed, without touching an application.
+func ModelNamespace(componentID uuid.UUID) string {
+	return "ai-services-model-" + componentID.String()[:8]
+}
+
 // HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".
 // e.g. "llm-2b4410e6", "vector-store-2b4410e6", "chat-c08f9a8b".
 func HelmReleaseName(appID uuid.UUID, id string) string {

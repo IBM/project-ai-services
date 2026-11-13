@@ -116,11 +116,11 @@ func newTestExecutor(log *callLog, failOn string, compRepo *fakeComponentRepo, c
 	}
 }
 
-func TestNewExecutor_RegistersPodmanDeleter(t *testing.T) {
+func TestNewExecutor_RegistersDeleters(t *testing.T) {
 	e := NewExecutor(&fakeComponentRepo{}, &fakeConnectorRepo{}, &fakeLiteLLM{log: &callLog{}})
 
 	assert.Contains(t, e.deleters, runtimeTypes.RuntimeTypePodman)
-	assert.NotContains(t, e.deleters, runtimeTypes.RuntimeTypeOpenShift, "models are not supported on openshift")
+	assert.Contains(t, e.deleters, runtimeTypes.RuntimeTypeOpenShift)
 }
 
 func TestExecutor_ExecuteLocal(t *testing.T) {
