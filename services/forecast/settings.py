@@ -40,6 +40,17 @@ class ForecastConfig(BaseSettings):
         description="32-byte AES-256-GCM key for connector secrets",
     )
 
+    # Db2 Connection & TLS
+    db2_verify_tls: bool = Field(
+        default=True,
+        description="Whether to verify TLS certificates when connecting to Db2 for i",
+    )
+
+    db2_ca_cert_path: Optional[Path] = Field(
+        default=None,
+        description="Optional CA certificate path for Db2 TLS verification",
+    )
+
     # Triton
     triton_url: str = Field(
         default="",
