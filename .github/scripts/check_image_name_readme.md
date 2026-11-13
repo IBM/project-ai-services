@@ -1,8 +1,5 @@
 # Image Name and Version Consistency Checker Plan
 
-## Role
-Senior Python Developer / CI-CD Engineer
-
 ## Problem Statement
 We want to verify that container image tags referenced in `ai-services/assets/` application and service templates (`values.yaml`) match the current `TAG` defined in their respective `Makefile`s across the repository. If any mismatch is detected, the script should report actionable errors and exit with a non-zero status code.
 
