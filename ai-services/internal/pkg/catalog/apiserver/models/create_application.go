@@ -21,7 +21,7 @@ type Service struct {
 	Components []Component `json:"components" binding:"required,dive"`
 	// Connectors lists pre-registered connector records to attach to this service
 	// after the application reaches Running status. Each entry is validated against
-	// the service's catalog YAML (accepts_datasource) and the connectors table before
+	// the service's catalog YAML (datasource block) and the connectors table before
 	// deployment begins. Omitting this field (or passing an empty list) is valid.
 	Connectors []ConnectorRef `json:"connectors,omitempty"`
 	Params     map[string]any `json:"params"` // Service-level parameters
