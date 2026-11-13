@@ -3,6 +3,10 @@ package catalog
 import (
 	"testing"
 	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestListArchitectures(t *testing.T) {
@@ -216,6 +220,79 @@ func TestLoadComponent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadComponentValuesForModel(t *testing.T) {
+	const granite33 = "ibm-granite/granite-3.3-8b-instruct"
+
+	p := newPodmanProvider(t)
+
+	t.Run("default profile of the model is merged into the values", func(t *testing.T) {
+		v, err := p.LoadComponentValuesForModel("llm", "vllm-spyre", granite33, "", nil)
+		require.NoError(t, err)
+
+		assert.Equal(t, granite33, v["model"])
+		assert.Equal(t, "standard", v["profile"])
+		assert.Equal(t, 32768, v["maxModelLen"])
+		assert.Equal(t, "2Gi", v["shmSize"])
+		assert.Equal(t, map[string]int{"ibm.com/spyre_pf": 4}, v["resources"].(map[string]any)["accelerators"])
+	})
+
+	t.Run("requested profile overrides the default", func(t *testing.T) {
+		v, err := p.LoadComponentValuesForModel("llm", "vllm-spyre", granite33, "compact-4k", nil)
+		require.NoError(t, err)
+
+		assert.Equal(t, "compact-4k", v["profile"])
+		assert.Equal(t, 4096, v["maxModelLen"])
+		assert.Equal(t, map[string]int{"ibm.com/spyre_pf": 1}, v["resources"].(map[string]any)["accelerators"])
+	})
+
+	t.Run("cpu provider has no accelerators and carries maxNumBatchedTokens", func(t *testing.T) {
+		v, err := p.LoadComponentValuesForModel("llm", "vllm-cpu", granite33, "", nil)
+		require.NoError(t, err)
+
+		assert.Equal(t, 8096, v["maxNumBatchedTokens"])
+		assert.NotContains(t, v["resources"], "accelerators")
+	})
+
+	t.Run("no model falls back to the provider default profile", func(t *testing.T) {
+		v, err := p.LoadComponentValuesForModel("llm", "vllm-spyre", "", "", nil)
+		require.NoError(t, err)
+
+		assert.Equal(t, 32768, v["maxModelLen"])
+		assert.Empty(t, v["model"])
+	})
+
+	t.Run("profile values win over argParams, other argParams are kept", func(t *testing.T) {
+		v, err := p.LoadComponentValuesForModel("llm", "vllm-spyre", granite33, "", map[string]string{"maxModelLen": "1", "apiKey": "k"})
+		require.NoError(t, err)
+
+		assert.Equal(t, 32768, v["maxModelLen"])
+		assert.Equal(t, "k", v["apiKey"])
+	})
+
+	t.Run("provider without profiles loads plain values", func(t *testing.T) {
+		v, err := p.LoadComponentValuesForModel("vector_store", "opensearch", "", "", nil)
+		require.NoError(t, err)
+
+		assert.NotContains(t, v, "profile")
+		assert.NotContains(t, v, "maxModelLen")
+	})
+
+	t.Run("errors", func(t *testing.T) {
+		_, err := p.LoadComponentValuesForModel("llm", "vllm-spyre", "no/such-model", "", nil)
+		assert.ErrorIs(t, err, ErrModelNotSupported, "unknown model")
+
+		_, err = p.LoadComponentValuesForModel("vector_store", "opensearch", granite33, "", nil)
+		assert.ErrorIs(t, err, ErrModelNotSupported, "provider without models.yaml")
+
+		// vllm-cpu lists only "standard" for this model.
+		_, err = p.LoadComponentValuesForModel("llm", "vllm-cpu", granite33, "compact-4k", nil)
+		assert.ErrorIs(t, err, profiles.ErrNotSupported, "profile not listed for the model")
+
+		_, err = p.LoadComponentValuesForModel("llm", "no-such-provider", granite33, "", nil)
+		assert.Error(t, err, "unknown provider")
+	})
 }
 
 // Made with Bob
