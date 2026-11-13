@@ -451,9 +451,13 @@ def test_shutdown_logs_when_closing_the_database_fails(caplog):
 
     with patch.object(
         forecast_app, "close_db_connections", side_effect=RuntimeError("boom")
-    ), caplog.at_level("ERROR"):
-        with TestClient(forecast_app.app):
-            pass
+    ), caplog.at_level("ERROR", logger="forecast_server"):
+        logging.getLogger("forecast_server").propagate = True
+        try:
+            with TestClient(forecast_app.app):
+                pass
+        finally:
+            logging.getLogger("forecast_server").propagate = False
     assert any("Error closing database connections" in r.getMessage() for r in caplog.records)
 
 

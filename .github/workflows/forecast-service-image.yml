@@ -7,6 +7,13 @@ on:
     branches:
       - main
       - 'release-*'
+  pull_request:
+    paths:
+      - 'services/forecast/**'
+      - '.github/workflows/forecast-service-image.yml'
+    branches:
+      - main
+      - 'release-*'
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
