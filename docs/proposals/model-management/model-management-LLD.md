@@ -31,7 +31,7 @@
    - [5.7 Migration Plan](#57-migration-plan)
    - [5.8 Full Entity Relationship Diagram](#58-full-entity-relationship-diagram)
 6. [API Specification](#6-api-specification)
-   - [6.1 Catalog Model Endpoints](#61-catalog-model-endpoints-read-only-and-management)
+   - [6.1 Catalog Model Endpoints](#61-catalog-model-endpoints-read-only)
    - [6.2 Model Runtime Endpoints (polymorphic)](#62-model-runtime-endpoints-polymorphic--components--connectors-tables)
    - [6.3 Connector Provider-Discovery Endpoints](#63-connector-provider-discovery-endpoints-read-only)
    - [6.4 Extensions to Existing Endpoints](#64-extensions-to-existing-endpoints)
@@ -44,7 +44,7 @@
    - [7.2 Create a Model (polymorphic)](#72-create-a-model-polymorphic)
    - [7.3 List Models (polymorphic)](#73-list-models-polymorphic)
    - [7.4 Get Model Details](#74-get-model-details)
-   - [7.5 Update a Remote Model's Credentials](#75-update-a-remote-models-credentials)
+   - [7.5 Update a Remote Model's Credentials (Stretch)](#75-update-a-remote-models-credentials-stretch)
    - [7.6 Delete / Undeploy a Model](#76-delete--undeploy-a-model)
    - [7.7 Generate Public Key](#77-generate-public-key)
 8. [Deployment Flow](#8-deployment-flow)
@@ -56,10 +56,9 @@
 11. [Error Handling](#11-error-handling)
 12. [Future Considerations](#12-future-considerations)
 13. [CLI Commands](#13-cli-commands)
-    - [13.0 Catalog Configure](#130-catalog-configure)
     - [13.1 Model Commands](#131-model-commands)
-    - [13.2 Connector Commands](#132-connector-commands)
-    - [13.3 LiteLLM Gateway Commands](#133-litellm-gateway-commands)
+    - [13.2 Remote Model Commands](#132-remote-model-commands)
+    - [13.3 Model Key Commands](#133-model-key-commands)
     - [13.4 Command Summary](#134-command-summary)
 14. [Key Rotation](#14-key-rotation)
 
@@ -159,22 +158,6 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
 }
 ```
 
-Equivalent `curl`:
-
-```bash
-curl -k -X POST https://litellm-api.10.20.185.165.nip.io/model/new \
-  -H "Authorization: Bearer $LITELLM_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_name": "ibm-granite/granite-3.3-8b-instruct",
-    "litellm_params": {
-      "model": "hosted_vllm/ibm-granite/granite-3.3-8b-instruct",
-      "api_base": "http://llm-5b6297a4b5:8000/v1",
-      "tags": ["7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"]
-    }
-  }'
-```
-
 > **Notes:**
 > - `model_name` is the full model name as configured in `params.model` — no provider suffix. This is exactly what consumer services pass in the `model` field.
 > - `model` uses the `hosted_vllm/<model-name>` prefix — LiteLLM infers the provider from the prefix. No separate `custom_llm_provider` field and no `api_key` are needed for local vLLM endpoints.
@@ -248,7 +231,7 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
 
 **Public key (on demand, per model):**
 
-A user asks the Catalog API for a public key for one model and one or more of its **deployments** (`POST /api/v1/models/keys`, see §7.6). A deployment is a `components` row, which already fixes the provider, the worker (`worker_id`) and the profile (`metadata.profile`), so the user picks *where* and *at which profile* the key may reach by picking deployments. `modelmanager` validates the request, then performs two calls against LiteLLM:
+A user asks the Catalog API for a public key for one model and one or more of its **deployments** (`POST /api/v1/models/{id}/keys`, see §7.7). A deployment is a `components` row, which already fixes the provider, the worker (`worker_id`) and the profile (`metadata.profile`), so the user picks *where* and *at which profile* the key may reach by picking deployments. `modelmanager` validates the request, then performs two calls against LiteLLM:
 
 ```
 # 1. Revoke the existing public key for this model, if any (looked up by its alias)
@@ -273,22 +256,6 @@ Authorization: Bearer <LITELLM_MASTER_KEY>
 }
 ```
 
-Equivalent `curl` for step 2:
-
-```bash
-curl -k -X POST 'https://litellm-api.10.20.185.165.nip.io/key/generate' \
-  -H "Authorization: Bearer $LITELLM_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "key_alias": "public-ibm-granite/granite-3.3-8b-instruct",
-    "models": ["ibm-granite/granite-3.3-8b-instruct"],
-    "metadata": {
-      "type": "public",
-      "tags": ["7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"]
-    }
-  }'
-```
-
 - **Scoped to one model and the chosen deployments.** `"models"` limits the key to that `model_name`; `"metadata.tags"` lists the deployment ID(s) the key may reach, and each ID implies one worker and one profile. With tag filtering enabled, a request made with this key is only eligible for routes whose `litellm_params.tags` contain one of those IDs. A caller may narrow further with request `metadata.tags`, but cannot widen beyond the key's tags.
 - **At most one public key per model.** The alias is `public-<model_name>`, which LiteLLM enforces as unique, and `metadata.type: "public"` identifies the key. Generating a new key for a model always revokes that model's previous public key first, so the old key stops working immediately (in-flight requests receive `401`). A "key not found" response from step 1 is ignored — it just means no public key existed yet. Public keys for other models are untouched.
 - **Shown once.** The new `sk-...` value is returned in the response of step 2 and passed straight back to the caller. The Catalog API neither stores nor logs it, so it cannot be retrieved again. A user who loses it generates a new one for the same model, which invalidates the lost one.
@@ -301,7 +268,7 @@ curl -k -X POST 'https://litellm-api.10.20.185.165.nip.io/key/generate' \
 | Consumer | Key type | How it receives the key |
 |---|---|---|
 | **Internal consumer services** (chatbot, digitize, similarity, summarize) | `internal` | Rendered into a Podman Secret at application create and mounted into the pod at `/etc/secret/litellm-secret/LITELLM_VIRTUAL_KEY` (see §9.10). No call to the Catalog API is needed |
-| **External callers** (developers, CI pipelines) | `public` | The user generates it for a model and deployment(s) with `ai-services model litellm key generate` (see §13.3) or `POST /api/v1/models/keys`, and copies it from the one-time response |
+| **External callers** (developers, CI pipelines) | `public` | The user generates it for a model and deployment(s) with `ai-services model key generate` (see §13.3) or `POST /api/v1/models/{id}/keys`, and copies it from the one-time response |
 
 **Usage by callers:**
 
@@ -634,9 +601,8 @@ Defined in [`assets/connectors/models/hosted_vllm/schema.json`](../../../ai-serv
 | Key | Label | Required | Field type | Sensitive | Description / Section |
 |---|---|---|---|---|---|
 | `model_name` | Large language model (LLM) | Yes | `string` | No | Chat/Instruct model name |
-| `api_base` | API Base | No | `string` (`format: uri`) | No | Base URL of your vLLM instance (Connection) |
-| `project_id` | Project ID | No | `string` | No | Optional: Project ID (Connection) |
-| `api_key` | API Key | Yes | `string` (`format: password`) | Yes | API key / token (Authentication) |
+| `api_base` | API Base | Yes | `string` (`format: uri`) | No | Base URL of your vLLM instance (Connection) |
+| `api_key` | API Key | No | `string` (`format: password`) | Yes | API key / token (Authentication) |
 
 #### `watsonx` — Watsonx
 
@@ -644,7 +610,7 @@ Defined in [`assets/connectors/models/watsonx/schema.json`](../../../ai-services
 
 | Key | Label | Required | Field type | Sensitive | Description / Section |
 |---|---|---|---|---|---|
-| `model_name` | Large language model (LLM) | Yes | `enum` / `string` | No | `oneOf` list (default `ibm/granite-4-h-small`) |
+| `model_name` | Large language model (LLM) | Yes | `string` | No | Model name; supported models come from the provider's `models.yaml` (default `ibm/granite-4-h-small`) |
 | `api_base` | API Base | No | `string` (`format: uri`) | No | Base URL of your WatsonX instance (Connection) |
 | `project_id` | Project ID | No | `string` | No | Optional: Your Watsonx.ai Project ID (Connection) |
 | `api_key` | API Key | Yes | `string` (`format: password`) | Yes | IBM Cloud API key (Authentication) |
@@ -662,8 +628,8 @@ Defined in [`assets/connectors/models/watsonx/schema.json`](../../../ai-services
 | Provider | Storage table | `type` value | Pod? | Credentials location |
 |---|---|---|---|---|
 | vLLM (cpu / spyre) | `components` | — | ✅ | None (local endpoint needs no credential) |
-| WatsonX (`watsonx`) | `connectors` | `llm` / `embedding` | ❌ | LiteLLM Gateway |
-| Hosted vLLM (`hosted_vllm`) | `connectors` | `llm` / `embedding` / `reranker` | ❌ | LiteLLM Gateway |
+| WatsonX (`watsonx`) | `connectors` | `models` | ❌ | LiteLLM Gateway |
+| Hosted vLLM (`hosted_vllm`) | `connectors` | `models` | ❌ | LiteLLM Gateway |
 
 `service_dependencies.dependency_id` points at `components.id` for local models and at `connectors.id` for remote model connectors — both already use `dependency_type = 'connector'` from §4.2 of the datasource proposal, so no new enum value is needed.
 
@@ -811,7 +777,7 @@ FROM service_dependencies sd
 JOIN connectors c ON c.id = sd.dependency_id
 WHERE sd.service_id      = $1
   AND sd.dependency_type = 'connector'
-  AND c.type IN ('llm', 'embedding', 'reranker');
+  AND c.type = 'models';
 ```
 
 **Cascade behaviour** is already correct: `ON DELETE CASCADE` on `service_id` means deleting a service automatically removes its connector links.
@@ -877,7 +843,7 @@ Model management adds the following goose migration files:
 | `20260801000004_add_worker_fk_to_components.sql` | Adds `worker_id UUID` nullable FK column to `components` (ON DELETE SET NULL) |
 | `20260901000001_create_model_profiles_table.sql` | Creates `model_profiles` table (`provider_id`, `profile_id`, `title`, `description`, `is_default`, `params JSONB`, `created_by`) with unique index on `(provider_id, profile_id)`; seeds built-in profiles from `profiles.yaml` via `ON CONFLICT DO NOTHING` |
 
-> There is no migration for virtual keys: they are not stored in the Catalog DB. If an earlier draft migration `20260430094511_create_keys_table.sql` was already applied in a development environment, add a follow-up migration that runs `DROP TABLE keys`.
+> There is no migration for virtual keys: they are not stored in the Catalog DB.
 
 > `connectors`, `connector_status`, and `dependency_type = 'connector'` are already present from the datasource migration — no re-creation needed.
 
@@ -943,7 +909,7 @@ erDiagram
     connectors {
         UUID             id              PK
         VARCHAR_255      name               "UNIQUE"
-        VARCHAR_64       type               "llm | embedding | reranker | datasource"
+        VARCHAR_64       type               "models | datasource"
         VARCHAR_64       provider           "watsonx | hosted_vllm | object_storage | file_system"
         connector_status status             "connected | offline"
         TEXT             message
@@ -1024,6 +990,7 @@ All endpoints require `Authorization: Bearer <access_token>`. All routes are und
 | `GET` | `/api/v1/catalog/models` | List all catalog models, each with supported providers, `component_type`, and metadata. Filter with `?component_type=` | `200 OK` |
 | `GET` | `/api/v1/catalog/models/:id` | Get detailed model specs, architecture, about information, license, and supported providers for a specific model | `200 OK` |
 | `GET` | `/api/v1/catalog/models/:id/deploy-options` | Get deployment options for a catalog model (available providers, hardware profiles, resource estimations, schema URLs). Filter with `?provider_id=` and `?runtime=` | `200 OK` |
+| `GET` | `/api/v1/components/:component_type/providers/:provider_id/profiles` | Return all hardware profiles for the given local provider, optionally filtered to one model via `?model=<model_name>`. Each entry has `id`, `title`, `description`, `default` and `params`. Providers without a `profiles.yaml` return `[]`. See [`model-profiles.md §11.5`](model-profiles.md#115-new-api-endpoint--get-apiv1componentscomponent_typeproviderssprovider_idprofiles) | `200 OK` |
 
 ### 6.2 Model Runtime Endpoints (polymorphic — `components` + `connectors` tables)
 
@@ -1046,7 +1013,6 @@ These two endpoints are already implemented and shared with datasource connector
 | Method | Path | Description | Response |
 |---|---|---|---|
 | `GET` | `/api/v1/connectors?type=<type>` | List all registered provider definitions for a connector type (`models`, `datasource`). Omit `type` to list all. | `200 OK` |
-| `GET` | `/api/v1/components/:component_type/providers/:provider_id/profiles` | Return all hardware profiles for the given local provider, optionally filtered to one model via `?model=<model_name>`. Each entry has `id`, `title`, `description`, `default` and `params`. Providers without a `profiles.yaml` return `[]`. See [`model-profiles.md §11.5`](model-profiles.md#115-new-api-endpoint--get-apiv1componentscomponent_typeproviderssprovider_idprofiles) | `200 OK` |
 | `GET` | `/api/v1/connectors/:connector_type/providers/:provider_id/params` | Return the provider's `schema.json` (field definitions, required fields, sensitive-field markers). Examples: `/api/v1/connectors/models/providers/watsonx/params` | `200 OK` |
 
 #### Reuse check against the current implementation
@@ -1158,17 +1124,17 @@ connector_name: "Models"
 
 Error responses: `404 {"error": "connector type \"<type>\" not found"}` for an unknown type, and `404` for an unknown provider.
 
-### 6.3 Extensions to Existing Endpoints
+### 6.4 Extensions to Existing Endpoints
 
 | Existing Endpoint | Change |
 |---|---|
 | `POST /api/v1/applications` | `services[].connectors[]` accepts `{type, id}` entries with `type = "models"`, referencing remote model connectors in the `connectors` table (alongside `type = "datasource"`). The model role (`llm`, `embedding`, `reranker`) is resolved from `connectors.metadata.component_type`. A given model role can be set via `components` or `connectors`, not both. See [Flow: Application Create — Model Connector](#flow-application-create--model-connector-remote) |
 | `POST /api/v1/applications` | `services[].components[]` entries of type `llm` / `embedding` / `reranker` may carry an `instance_id` — the `components.id` of an existing `Running` instance. The entry is then just `{component_type, instance_id}`; `provider_id`, `version` and `params` are omitted because they are read from that row. Without `instance_id` the entry keeps its existing shape. See [Flow: Application Create — Model Already Deployed](#flow-application-create--model-already-deployed-pre-deployed-path) |
-| `POST /api/v1/applications` | `services[].components[]` entries of type `llm` / `embedding` / `reranker` must supply `model` and `profile` as **top-level fields** on the component entry — not inside `params`. `params` carries only provider-specific config (e.g. `apiKey`). Example: `{ "component_type": "llm", "provider_id": "vllm-spyre", "model": "ibm-granite/granite-3.3-8b-instruct", "profile": "compact-4k", "params": {} }` |
+| `POST /api/v1/applications` | `services[].components[]` entries of type `llm` / `embedding` / `reranker` must supply `model` as a **top-level field** on the component entry — not inside `params`. Application create does **not** accept a `profile` from the client: for a newly deployed model the backend resolves it from the service's `recommendations` (the entry matching the component type, provider and model — the same `profile` the application deploy-options response sends), falling back to the model's `default_profile` from `models.yaml` when there is no matching recommendation; an existing instance keeps the profile it was deployed with. To deploy a model at a specific profile, deploy it from the Models page (`POST /api/v1/models`) first and attach it with `instance_id`. `params` carries only provider-specific config (e.g. `apiKey`). Example: `{ "component_type": "llm", "provider_id": "vllm-spyre", "model": "ibm-granite/granite-3.3-8b-instruct", "params": {} }` |
 | `GET /api/v1/applications/:id` | Response includes model connectors from `connectors` table alongside `services` and local `components`. For `llm` / `embedding` / `reranker` components, `model` and `profile` are returned as **top-level fields** instead of inside `metadata`. Example component entry: `{ "id": "...", "type": "llm", "provider": { "id": "vllm-spyre", ... }, "status": "Running", "model": "ibm-granite/granite-3.3-8b-instruct", "profile": "compact-4k" }` |
 | `GET /api/v1/architectures/:id/deploy-options` | `providers` list under `llm`/`embedding`/`reranker` includes connector provider options (`watsonx`, `hosted_vllm`) alongside `vllm-cpu`, `vllm-spyre`; worker list included for target-worker selection |
 
-### 6.4 Public Key Endpoint
+### 6.5 Public Key Endpoint
 
 | Method | Path | Description | Response |
 |---|---|---|---|
@@ -1189,8 +1155,8 @@ There is no endpoint to read a key back. Internal consumer services do not call 
 **Description:** Returns all catalog model definitions, each with the list of providers that support it and high-level metadata. Sourced from in-memory catalog assets and registered catalog entries — no live pod queries. The UI uses this to render the **Model Catalog** gallery/table view.
 
 **Data sources:**
-- Local providers — `assets/components/<component_type>/<provider_id>/values.schema.json` (`model.oneOf[]`)
-- Remote providers — `assets/connectors/models/<provider_id>/schema.json` (`model_name.oneOf[]`)
+- Local providers — `assets/components/<component_type>/<provider_id>/models.yaml`
+- Remote providers — `assets/connectors/models/<provider_id>/models.yaml`
 - `hosted_vllm` has no fixed model list (`model_name` is a free-text field) — it appears as an `open: true` provider on every entry
 
 **Query Parameters:**
@@ -1436,7 +1402,7 @@ There is no endpoint to read a key back. Internal consumer services do not call 
 }
 ```
 
-> **Resource Requirements Note:** Each profile entry carries its own `resources` block (`memory` in bytes, `accelerators`) so the UI can display accurate resource requirements as soon as the user selects a profile. The top-level `resources` block on the provider reflects the footprint of the **default profile** and is used as the initial estimate before any profile is selected.
+> **Resource Requirements Note:** Each profile entry carries its own `resources` block (`memory` in bytes, `accelerators`) so the UI can display accurate resource requirements as soon as the user selects a profile. The profile flagged `"default": true` is pre-selected.
 
 **Error Responses:**
 - `400 Bad Request` — Invalid `runtime` value (must be `podman` or `openshift`)
@@ -1498,7 +1464,7 @@ Content-Type: application/json
 | `name` | string | Yes | Human-readable label (3–100 chars, slug-safe, unique case-insensitively) |
 | `provider_id` | string | Yes | Provider identifier — local: `vllm-cpu`, `vllm-spyre`; remote: `watsonx`, `hosted_vllm` |
 | `model` | string | Yes | Model identifier from catalog (e.g. `ibm-granite/granite-3.3-8b-instruct`). Top-level field — must not be placed inside `params` |
-| `profile` | string | No | Hardware profile ID (e.g. `compact-4k`, `standard`). Local models only; defaults to the model's `default_profile` from `models.yaml`. Top-level field — must not be placed inside `params` |
+| `profile` | string | Yes for `deployment_type=local`; not applicable to `remote` | Hardware profile ID (e.g. `compact-4k`, `standard`) — must be valid for the model per `profiles.yaml` (see `GET /api/v1/components/:component_type/providers/:provider_id/profiles?model=`). **Mandatory** for local models: there is no server-side default on this endpoint, and a missing or invalid `profile` returns `400`. Rejected for `remote`. Top-level field — must not be placed inside `params` |
 | `params` | object | No | Provider-specific configuration only (e.g. API keys, URLs, credentials). Must not contain `model` or `profile` — those are top-level fields. Validated against the provider's parameter schema (`values.schema.json`) |
 
 > **`connectors.type` is always `"models"` for remote models — it is set server-side and is not a request field.** The client does not send it. It is the fixed discriminator that separates model connectors from datasource connectors in the shared `connectors` table, and is the value `ConnectorRef.type` must match when an application references the connector (`{ "type": "models", "id": "<uuid>" }`).
@@ -1637,28 +1603,27 @@ The `modelmanager` package validates `params` against the provider's parameter s
 
 #### Populating the Instance dropdown
 
-The application deploy form needs the existing instances of one model at one profile. It does not need a dedicated endpoint: the UI calls this list endpoint with filters, and each returned item already carries everything a dropdown option needs.
+The application deploy form needs the existing instances of one model. It does not need a dedicated endpoint: the UI calls this list endpoint with filters, and each returned item already carries everything a dropdown option needs. Application create takes no `profile`, so the list is not filtered by profile.
 
 ```
 GET /api/v1/models?deployment_type=local&component_type=llm&provider_id=vllm-spyre
-                  &model=ibm-granite/granite-3.3-8b-instruct&profile=compact-4k&status=Running
+                  &model=ibm-granite/granite-3.3-8b-instruct&status=Running
 ```
 
 | Dropdown part | Source in each item |
 |---|---|
 | Option label | `name` (e.g. `granite-llm`) |
-| Option detail | `worker.name` (`Local` when `worker` is `null`) and `status` |
+| Option detail | `worker.name` (`Local` when `worker` is `null`), `profile.name` and `status` |
 | Value sent as `instance_id` | `id` (the `components.id`) |
 
-Each of the three form steps is backed by one call:
+Each of the two form steps is backed by one call:
 
 | Step | Call |
 |---|---|
-| 1. Model | The model list from the provider's params schema: `GET /api/v1/components/:component_type/providers/:provider_id/params` (the `model` `oneOf`) |
-| 2. Profile | `GET /api/v1/components/:component_type/providers/:provider_id/profiles?model=<selected_model>` — returns only the profiles valid for that model; the entry with `"default": true` is pre-selected (see `model-profiles.md §11.5`) |
-| 3. Instance | `GET /api/v1/models` with the filters above, using the selections from steps 1 and 2 |
+| 1. Model | The model list from the catalog: `GET /api/v1/catalog/models?component_type=<type>`, keeping the entries whose `providers` include the selected provider (sourced from the provider's `models.yaml`) |
+| 2. Instance | `GET /api/v1/models` with the filters above, using the selection from step 1 |
 
-The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `profile` and `status=Running`, because application create accepts only `Running` local instances. An empty result means no instance exists yet at that profile, and the form tells the user to deploy one from the Models page first. The list is paginated (`page_size` up to 100), which is ample for one model and profile.
+The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model` and `status=Running`, because application create accepts only `Running` local instances. The profile of each instance is shown in the option detail for information only; it is not a form input. An empty result means no instance exists yet, and the form either deploys a new instance (the backend picks the profile from the service's recommendations) or tells the user to deploy one from the Models page first. The list is paginated (`page_size` up to 100), which is ample for one model.
 
 ---
 
@@ -1790,7 +1755,7 @@ The UI sets `deployment_type=local`, `component_type`, `provider_id`, `model`, `
    Content-Type: application/json
 
    {
-     "model_name": "<model_name>--<provider>--<worker>",
+     "model_name": "<model_name>",
      "model_info": {
        "id": "<model_name>--<provider>"
      },
@@ -1991,7 +1956,7 @@ POST /api/v1/models
                             path: "/tokenize/" + <components.id>,
                             target: "http://<pod-name>:8000/tokenize",
                             methods: ["POST"], auth: false }
-  8. [async] Probe GET /health?model=ibm-granite/granite-3.3-8b-instruct → UPDATE components.status = 'Running' or 'Error'
+  7. [async] Probe GET /health?model=ibm-granite/granite-3.3-8b-instruct → UPDATE components.status = 'Running' or 'Error'
 ```
 
 ### Flow: Deploy vLLM (Podman + Spyre) — Remote Worker (`worker_name=lpar-1`)
@@ -2035,7 +2000,7 @@ POST /api/v1/models
                             path: "/tokenize/" + <components.id>,
                             target: "http://ai-services--caddy:8080/worker/lpar-1/models/<caddyRouteID>/tokenize",
                             methods: ["POST"], auth: false }
-  8. [async] Probe GET /health?model=ibm-granite/granite-3.3-8b-instruct → UPDATE components.status = 'Running' or 'Error'
+  7. [async] Probe GET /health?model=ibm-granite/granite-3.3-8b-instruct → UPDATE components.status = 'Running' or 'Error'
 ```
 
 ### Flow: Register WatsonX Connector — remote (no pod)
@@ -2110,7 +2075,7 @@ POST /api/v1/models          (deployment_type=remote)
 
 ### Flow: Application Create — Model Already Deployed (pre-deployed path)
 
-The user picks the **model**, then one of the **profiles** that model supports, then an existing **instance**. The UI sends that instance's `components.id` as `instance_id`. The component entry is the existing `components[]` shape reduced to the two fields that are still needed: `component_type` (always required, and what the duplicate-type and connector-conflict checks use) and `instance_id`. `provider_id`, `version` and `params` are not sent: provider, model, profile and worker are read from the referenced `components` row.
+The user picks the **model**, then an existing **instance** of it. No profile is chosen: the instance already runs at the profile it was deployed with. The UI sends that instance's `components.id` as `instance_id`. The component entry is the existing `components[]` shape reduced to the two fields that are still needed: `component_type` (always required, and what the duplicate-type and connector-conflict checks use) and `instance_id`. `provider_id`, `version` and `params` are not sent: provider, model, profile and worker are read from the referenced `components` row.
 
 **Example request body:**
 
@@ -2200,18 +2165,19 @@ Because the key is tagged with the component ID, the application reaches exactly
 
 ### Flow: Application Create — New Model Deploy
 
-The component entry has no `instance_id` and carries `provider_id`, `version`, `model`, `profile`, and `params`. `model` and `profile` are top-level fields on the component entry — not inside `params`. `params` only carries provider-specific config (e.g. `apiKey`).
+The component entry has no `instance_id` and carries `provider_id`, `version`, `model`, and `params`. `model` is a top-level field on the component entry — not inside `params`. There is **no `profile` field**: the backend picks the profile from the service's `recommendations` (`models[].providers[].recommendations` in `services/<id>/metadata.yaml`) for this component type, provider and `model`, and falls back to the model's `default_profile` from `models.yaml` when none matches. `params` only carries provider-specific config (e.g. `apiKey`).
 
 ```
 POST /api/v1/applications
 { services: [{catalog_id: "summarize", components: [{component_type: "llm", provider_id: "vllm-cpu", version: "1.0.0",
                                                      model: "ibm-granite/granite-3.3-8b-instruct",
-                                                     profile: "compact-4k",
                                                      params: {}}]}],
   worker_name: "lpar-1" }
 
   PlanDeployment → insertComponentRecords:
     GetRunningByTypeAndProvider → nil (no running component) → new components row inserted
+    profile = service recommendation for (component_type, provider_id, model) → e.g. "compact-4k"
+              (none matching → default_profile of the model from models.yaml)
     managed-model component gets: created_by=<user>, worker_id=<worker-uuid>, name=<model-field>,
                                   metadata={model: "ibm-granite/granite-3.3-8b-instruct", profile: "compact-4k"}
 
@@ -2221,7 +2187,7 @@ POST /api/v1/applications
 
   deployComponents:
     LoadComponentValues(): read values.yaml, merge params (provider config only),
-                           resolve profile "compact-4k" from profiles.yaml → merge resources/maxModelLen/etc.,
+                           resolve the backend-chosen profile "compact-4k" from profiles.yaml → merge resources/maxModelLen/etc.,
                            set values["model"] = comp.Model
     render vllm-server.yaml.tmpl with resolved values → podman kube play (pod starts on worker)
     deployer polls until pod healthy → mergeComponentEndpoints → comp.Endpoints["llm"]["host"] = podName
@@ -2278,7 +2244,6 @@ A service can use a pre-registered remote model connector (created via `POST /ap
           "provider_id": "vllm-cpu",
           "version": "1.0.0",
           "model": "ibm-granite/granite-embedding-278m-multilingual",
-          "profile": "standard",
           "params": {}
         }
       ],
@@ -2378,9 +2343,9 @@ DELETE /api/v1/models/:id          (resolves to connectors table — same handle
 
 ### Application Flow Changes
 
-#### POST /api/v1/applications — `model` and `profile` as top-level fields
+#### POST /api/v1/applications — `model` as a top-level field (no `profile`)
 
-For `llm`, `embedding`, and `reranker` component entries, `model` and `profile` move out of `params` and become top-level fields on the component entry. `params` carries only provider-specific config (e.g. `apiKey`).
+For `llm`, `embedding`, and `reranker` component entries, `model` moves out of `params` and becomes a top-level field on the component entry. `profile` is no longer accepted from the client: for a new deploy the backend resolves it from the service's `recommendations` (falling back to the model's `default_profile`), and an existing instance keeps the profile it was deployed with. The profile is still **sent to the UI** in the deploy-options `recommendations` so it can be displayed. `params` carries only provider-specific config (e.g. `apiKey`).
 
 **Before:**
 ```json
@@ -2400,7 +2365,6 @@ For `llm`, `embedding`, and `reranker` component entries, `model` and `profile` 
   "component_type": "llm",
   "provider_id": "vllm-spyre",
   "model": "ibm-granite/granite-3.3-8b-instruct",
-  "profile": "compact-4k",
   "params": {}
 }
 ```
@@ -2421,7 +2385,6 @@ The same applies to `embedding` and `reranker` entries:
   "component_type": "embedding",
   "provider_id": "vllm-cpu",
   "model": "ibm-granite/granite-embedding-278m-multilingual",
-  "profile": "standard",
   "params": {}
 }
 ```
@@ -2465,19 +2428,16 @@ For `llm`, `embedding`, and `reranker` components in the response, `model` and `
 }
 ```
 
-#### GET /api/v1/architectures/:id/deploy-options and GET /api/v1/services/:id/deploy-options — `catalog` object on model providers
-
-## Use v2alpha
+#### GET /api/v1/architectures/:id/deploy-options and GET /api/v1/services/:id/deploy-options — model providers
 
 For `llm`, `embedding`, and `reranker` component providers:
 
-- `category: "model"` is added so the UI knows to render a model + profile selector instead of a schema-driven params form
+- `category: "model"` is added so the UI knows to render a model + instance selector instead of a schema-driven params form
 - `models` — named URL reference; UI calls `models.url` to fetch and populate the model dropdown
-- `deploy_options` — named URL reference; UI substitutes `{model_id}` with the selected model ID and calls `deploy_options.url` to get providers and their profiles
 - `instances` — named URL reference; UI substitutes `{model_id}` with the selected model ID and calls `instances.url` (`GET /api/v1/models` filtered by `provider_id`, `model`, `deployment_type`, and `status`) to populate the **Instance** dropdown with existing instances of that model the user can attach to instead of deploying a new one
-- `recommendations` — ordered list of `{ model_id, profile }` entries declared by the service for this component and provider (sourced from `models[].providers[].recommendations` in `services/<id>/metadata.yaml`; `profile` omitted for remote providers). The **first entry** is the primary: the UI pre-selects its model and shows a **"★ Recommended"** badge on it. When the user picks any model listed here, the UI pre-selects that entry's `profile`. Omitted when the service declares none
+- `recommendations` — ordered list of `{ model_id, profile }` entries declared by the service for this component and provider (sourced from `models[].providers[].recommendations` in `services/<id>/metadata.yaml`; `profile` omitted for remote providers). The **first entry** is the primary: the UI pre-selects its model and shows a **"★ Recommended"** badge on it. The `profile` is sent for display only — the UI does **not** submit it back; on `POST /api/v1/applications` the backend applies the matching recommendation's `profile` itself. Omitted when the service declares none
 - `schema` still points to `values.schema.json` for any remaining provider-specific config (e.g. `apiKey`); it no longer contains `model` or `profile` properties, so it carries no recommendations
-- Non-model providers (`opensearch`, `milvus`) omit `category`, `models`, `deploy_options`, `instances`, and `recommendations`
+- Non-model providers (`opensearch`, `milvus`) omit `category`, `models`, `instances`, and `recommendations`
 
 **After — complete architecture deploy-options response:**
 
@@ -2520,7 +2480,6 @@ For `llm`, `embedding`, and `reranker` component providers:
               "category": "model",
               "schema": "/api/v1/components/llm/providers/vllm-spyre/params",
               "models":         { "name": "Large Language Models", "url": "/api/v1/catalog/models?component_type=llm" },
-              "deploy_options": { "name": "Resource Profiles",     "url": "/api/v1/catalog/models/{model_id}/deploy-options?provider_id=vllm-spyre" },
               "instances":      { "name": "Running Instances",     "url": "/api/v1/models?provider_id=vllm-spyre&model={model_id}&deployment_type=local&status=Running" },
               "recommendations": [
                 { "model_id": "ibm-granite/granite-4.1-8b-fp8",         "profile": "standard" },
@@ -2535,7 +2494,6 @@ For `llm`, `embedding`, and `reranker` component providers:
               "category": "model",
               "schema": "/api/v1/components/llm/providers/vllm-cpu/params",
               "models":         { "name": "Large Language Models", "url": "/api/v1/catalog/models?component_type=llm" },
-              "deploy_options": { "name": "Resource Profiles",     "url": "/api/v1/catalog/models/{model_id}/deploy-options?provider_id=vllm-cpu" },
               "instances":      { "name": "Running Instances",     "url": "/api/v1/models?provider_id=vllm-cpu&model={model_id}&deployment_type=local&status=Running" },
               "recommendations": [
                 { "model_id": "ibm-granite/granite-4.1-8b-fp8",         "profile": "standard" },
@@ -2550,7 +2508,6 @@ For `llm`, `embedding`, and `reranker` component providers:
               "category": "model",
               "schema": "/api/v1/connectors/models/providers/watsonx/params",
               "models":         { "name": "Large Language Models", "url": "/api/v1/catalog/models?component_type=llm" },
-              "deploy_options": { "name": "Resource Profiles",     "url": "/api/v1/catalog/models/{model_id}/deploy-options?provider_id=watsonx&runtime=podman" },
               "instances":      { "name": "Connected Instances",   "url": "/api/v1/models?provider_id=watsonx&model={model_id}&deployment_type=remote&status=connected" },
               "recommendations": [
                 { "model_id": "ibm/granite-3-8b-instruct" }
@@ -2570,7 +2527,6 @@ For `llm`, `embedding`, and `reranker` component providers:
               "category": "model",
               "schema": "/api/v1/components/embedding/providers/vllm-cpu/params",
               "models":         { "name": "Embedding Models",  "url": "/api/v1/catalog/models?component_type=embedding" },
-              "deploy_options": { "name": "Resource Profiles", "url": "/api/v1/catalog/models/{model_id}/deploy-options?provider_id=vllm-cpu" },
               "instances":      { "name": "Running Instances", "url": "/api/v1/models?provider_id=vllm-cpu&model={model_id}&deployment_type=local&status=Running" },
               "recommendations": [
                 { "model_id": "ibm-granite/granite-embedding-278m-multilingual", "profile": "standard" }
@@ -2584,7 +2540,7 @@ For `llm`, `embedding`, and `reranker` component providers:
 }
 ```
 
-> The UI uses `category: "model"` to switch from a schema-driven params form to a model + profile selector. It calls `models.url` to populate the model dropdown; the model and profile pre-selections come from the provider's `recommendations` list in this response (see `service-model-contracts.md`). `models.url` and `deploy_options.url` stay generic catalog endpoints with no service parameter. Once a model is chosen, the UI substitutes `{model_id}` into `instances.url` and calls `GET /api/v1/models` to populate the **Instance** dropdown with existing instances of that model. An empty result means no instance exists yet and the user must deploy one first. Once model, profile, and instance are chosen, they are submitted as top-level fields on the component entry — not inside `params`. `schema` is still called for any remaining provider-specific config (e.g. `apiKey`).
+> The UI uses `category: "model"` to switch from a schema-driven params form to a model + instance selector. It calls `models.url` to populate the model dropdown; the model pre-selection, and the profile shown for it, come from the provider's `recommendations` list in this response (see `service-model-contracts.md`). `models.url` stays a generic catalog endpoint with no service parameter. Once a model is chosen, the UI substitutes `{model_id}` into `instances.url` and calls `GET /api/v1/models` to populate the **Instance** dropdown with existing instances of that model. An empty result means no instance exists yet and the user must deploy one first. Once a model is chosen (new deploy) or an instance is chosen (existing), it is submitted as a top-level field on the component entry (`model` or `instance_id`) — not inside `params`. No profile is submitted: the backend applies the recommended `profile` for the chosen model when it deploys a new instance. `schema` is still called for any remaining provider-specific config (e.g. `apiKey`).
 
 ---
 
@@ -2628,16 +2584,6 @@ The `litellm:` block in each provider's `metadata.yaml` similarly externalises L
 
 Routes are registered with `litellm_params.tags: [<deployment-id>]` (e.g. `["7f3a1c2d-…"]`), and tag filtering is enabled gateway-wide (`router_settings.enable_tag_filtering: true`). `internal` virtual keys carry `metadata.tags` with the single deployment ID of the instance the user chose for the application, so a service always reaches exactly that instance. `public` keys carry the deployment ID(s) the user selected, which ties the key to specific workers and profiles; with several tags LiteLLM may route across those deployments. Consumer services call LiteLLM using the full model name as configured (e.g. `ibm-granite/granite-3.3-8b-instruct`); routing to a deployment is decided by the key tags (optionally narrowed by request `metadata.tags`) — the provider suffix is never encoded in the model name.
 
-| Property | Old | New |
-|---|---|---|
-| Consumer `model` field | `"ibm-granite/granite-3.3-8b-instruct--vllm-spyre"` | `"ibm-granite/granite-3.3-8b-instruct"` |
-| Deployment communicated via | Encoded in model name string | Virtual key `metadata.tags` (deployment ID), optionally request `metadata.tags` |
-| `tags` field on `/model/new` | Inside `litellm_params` (full model name) | Inside `litellm_params` (deployment ID only — `components.id` / `connectors.id`) |
-| Tag value | Full model name | Deployment ID (`components.id` / `connectors.id`) — provider, worker and profile are all recoverable from the row |
-| Stored in Catalog DB | `model_id` in `components.metadata` + derived string in the keys table | Nothing extra — routes are addressed by `model_name`; the deployment ID tag is the existing `components.id` / `connectors.id` |
-| Swap provider (e.g. cpu → spyre) | Consumer model name config must change | Key `metadata.tags` updated (or request `metadata.tags`) — `model` field unchanged |
-| Deregister call | `{ "id": "ibm-granite-granite-3.3-8b-instruct--vllm-spyre" }` | `{ "model_name": "ibm-granite/granite-3.3-8b-instruct" }` |
-
 Deregistration uses `model_name` (`DELETE /model/delete { "model_name": ... }`), so no LiteLLM-assigned model UUID has to be kept in the Catalog DB. The `model_name` in `POST /model/new` is the full model name from `params.model`; the deployment ID in `litellm_params.tags` is the only tag — `model_name` never changes when the provider changes.
 
 The `litellm_params.model` field uses the `hosted_vllm/<upstream-model-name>` prefix. LiteLLM infers the provider from this prefix — no separate `custom_llm_provider` field is required, and no `api_key` is needed for local vLLM endpoints.
@@ -2646,8 +2592,8 @@ The `litellm_params.model` field uses the `hosted_vllm/<upstream-model-name>` pr
 
 When `POST /api/v1/applications` references a managed-model component type (`llm`, `embedding`, `reranker`), the component entry decides what happens:
 
-- **`instance_id` present**: the user picked an existing instance (model → profile it supports → instance). The entry is `{component_type, instance_id}` only; `provider_id`, `version` and `params` are omitted and read from the `components` row. The row must be `Running` and its type must equal `component_type`, otherwise `400`. It is used as is (`PreDeployed = true`): no new pod is started and the existing component's endpoints are copied into the deployment plan. If the model has no LiteLLM route yet, the route is registered. A fresh `internal` per-application virtual key, tagged with that component ID, is always generated.
-- **`instance_id` absent**: the existing behaviour. The `components` table is checked for a running instance of that type and provider; if none exists, the component pod is deployed normally with the chosen `model` and `profile` top-level fields (not from `params`). After the pod is healthy, a `PostComponentHook` registers the LiteLLM route and generates an `internal` per-application virtual key.
+- **`instance_id` present**: the user picked an existing instance (model → instance). The entry is `{component_type, instance_id}` only; `provider_id`, `version` and `params` are omitted and read from the `components` row. The row must be `Running` and its type must equal `component_type`, otherwise `400`. It is used as is (`PreDeployed = true`): no new pod is started and the existing component's endpoints are copied into the deployment plan. If the model has no LiteLLM route yet, the route is registered. A fresh `internal` per-application virtual key, tagged with that component ID, is always generated.
+- **`instance_id` absent**: the existing behaviour. The `components` table is checked for a running instance of that type and provider; if none exists, the component pod is deployed normally with the chosen top-level `model` field (not from `params`) at the profile resolved by the backend from the service's `recommendations` (falling back to the model's `default_profile`). After the pod is healthy, a `PostComponentHook` registers the LiteLLM route and generates an `internal` per-application virtual key.
 
 In both cases the component row is written with `created_by`, `worker_id`, and `name` populated so it appears in `GET /api/v1/models`.
 
@@ -2666,7 +2612,7 @@ This mirrors the exact same logic used by `model_service.deployAsync`.
 
 ### 12. One Public Key per Model, Identified by Metadata, Enforced by Alias
 
-Callers outside the platform need a key, but the platform must not accumulate them. Instead of persisting keys in a table, the `public` key is distinguished in LiteLLM itself: `metadata.type = "public"` marks its purpose and the alias `public-<model_name>` lets LiteLLM enforce one key per model. The key is generated for a chosen model and deployment(s), so it is tied to specific workers and profiles and grants only what the user asked for. Using the deployment ID (`components.id` / `connectors.id`) as the tag means no worker or profile string has to be composed or parsed: the ID is already unique, and the row behind it holds the worker and profile. Generating a new one for the same model revokes the old one first, shows the new value once, and stores nothing. `internal` keys carry `metadata.type = "internal"` so the two kinds can always be told apart. This removes the `keys` table, `KeyRepository`, and the read-key API, and means a leaked public key is recovered with a single regenerate.
+Callers outside the platform need a key, but the platform must not accumulate them. Instead of persisting keys in a table, the `public` key is distinguished in LiteLLM itself: `metadata.type = "public"` marks its purpose and the alias `public-<model_name>` lets LiteLLM enforce one key per model. The key is generated for a chosen model and deployment(s), so it is tied to specific workers and profiles and grants only what the user asked for. Using the deployment ID (`components.id` / `connectors.id`) as the tag means no worker or profile string has to be composed or parsed: the ID is already unique, and the row behind it holds the worker and profile. Generating a new one for the same model revokes the old one first, shows the new value once, and stores nothing. `internal` keys carry `metadata.type = "internal"` so the two kinds can always be told apart. A leaked public key is recovered with a single regenerate.
 
 ---
 
@@ -2688,12 +2634,12 @@ ORDER BY type;
 ### All active remote model connectors:
 ```sql
 SELECT
-    id, name, type, provider, status,
+    id, name, metadata->>'component_type' AS component_type, provider, status,
     metadata->>'model_name' AS model_name
 FROM connectors
-WHERE type IN ('llm', 'embedding', 'reranker')
+WHERE type = 'models'
   AND status = 'connected'
-ORDER BY type;
+ORDER BY component_type;
 ```
 
 ### Full application view — services + local models + remote connectors:
@@ -2718,12 +2664,12 @@ SELECT
     a.id AS app_id, a.name AS app_name,
     s.id AS service_id, s.catalog_id AS service_type,
     cn.id AS model_id, 'remote' AS model_source,
-    cn.type AS model_role, cn.provider, cn.status::text AS model_status,
+    cn.metadata->>'component_type' AS model_role, cn.provider, cn.status::text AS model_status,
     cn.metadata->>'model_name' AS model_name
 FROM applications a
 LEFT JOIN services s ON s.app_id = a.id
 LEFT JOIN service_dependencies sd ON sd.service_id = s.id AND sd.dependency_type = 'connector'
-LEFT JOIN connectors cn ON cn.id = sd.dependency_id AND cn.type IN ('llm', 'embedding', 'reranker')
+LEFT JOIN connectors cn ON cn.id = sd.dependency_id AND cn.type = 'models'
 WHERE a.id = 'application-uuid-here'
 ORDER BY model_role, model_source;
 ```
@@ -2732,7 +2678,7 @@ ORDER BY model_role, model_source;
 ```sql
 SELECT id, name, provider, message, updated_at
 FROM connectors
-WHERE type IN ('llm', 'embedding', 'reranker')
+WHERE type = 'models'
   AND status = 'offline'
 ORDER BY updated_at DESC;
 ```
@@ -2769,11 +2715,10 @@ All error responses follow the existing catalog error format:
 
 1. **Component Swap API** — `PUT /api/v1/models/:id/swap` to atomically swap the active model under a given LiteLLM alias with zero consumer-service downtime (register new route before removing the old one).
 2. **Multiple Models Per Role (Fallback)** — LiteLLM supports listing multiple models under the same alias for automatic failover. Relax the one-active-model-per-role constraint to allow a primary + fallback pair per role.
-3. **Model Catalog Browse** — `GET /api/v1/model-catalog` to enumerate available providers, their resource requirements, and compatible model IDs from component `metadata.yaml` assets — analogous to the architecture/service catalog endpoints.
-4. **RBAC on Connectors** — Connectors currently belong to the creating user. Future: share connectors across a team, or mark them platform-wide, via a `visibility` field (`private` / `shared` / `global`).
-5. **Connector Key Rotation** — Scheduled validation jobs to proactively detect stale API keys before they impact deployed models.
-6. **Audit Logging** — Add `updated_by` to `connectors` and populate it on credential update or status change.
-7. **Deployment History** — Consider adding an audit/history table to record past component deployments if operators need a record after row deletion.
+3. **RBAC on Connectors** — Connectors currently belong to the creating user. Future: share connectors across a team, or mark them platform-wide, via a `visibility` field (`private` / `shared` / `global`).
+4. **Connector Key Rotation** — Scheduled validation jobs to proactively detect stale API keys before they impact deployed models.
+5. **Audit Logging** — Add `updated_by` to `connectors` and populate it on credential update or status change.
+6. **Deployment History** — Consider adding an audit/history table to record past component deployments if operators need a record after row deletion.
 
 ---
 
@@ -2783,51 +2728,12 @@ All model commands live under `ai-services model` and map to the `/api/v1/models
 
 ---
 
-### 13.0 Catalog Configure
-
-`catalog configure` is extended to deploy the LiteLLM Gateway as part of the one-time platform setup sequence. No new top-level command is added — the existing command picks up the new steps automatically.
-
-**What changes:**
-
-```
-ai-services catalog configure --runtime podman
-```
-
-The existing steps (secrets, postgres, caddy, catalog API) are unchanged. The following are appended to the sequence:
-
-| Step | Action |
-|---|---|
-| Generate master key | A UUID is generated and stored as Podman Secret `LITELLM_MASTER_KEY` |
-| Deploy LiteLLM pod | `litellm.yaml.tmpl` is rendered and `podman kube play` is called |
-| Wait for readiness | Liveness probe polled until healthy |
-| Register in DB | `components` row inserted (`provider='litellm'`, `status='Running'`) |
-| Enable tag filtering | `POST /config/update` sent to the gateway with `router_settings.enable_tag_filtering: true` |
-
-**Tag filtering config call (step 5):**
-
-```bash
-curl -k -X POST https://<litellm-host>/config/update \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-        "router_settings": {
-          "enable_tag_filtering": true
-        }
-      }'
-```
-
-This is a one-time call made by the platform immediately after the LiteLLM pod reaches healthy status. It enables gateway-wide tag filtering so that virtual key tags pin every inference request to the correct deployment. It does not need to be repeated on restart — the setting is persisted in the LiteLLM PostgreSQL instance.
-
-> **No new CLI flag is needed.** The configure command detects whether LiteLLM is already running (by checking the `components` row) and skips steps 4–8 if it is, making the command safely idempotent.
-
----
-
 ### 13.1 Model Commands
 
-#### Deploy a local model
+#### Register a local model
 
 ```
-ai-services model deploy [name] --type <type> --provider <provider> --runtime podman
+ai-services model register [name] --type <type> --provider <provider> --runtime podman
 ```
 
 | Flag | Short | Required | Description |
@@ -2835,23 +2741,24 @@ ai-services model deploy [name] --type <type> --provider <provider> --runtime po
 | `--type` | `-t` | Yes | Component type: `llm`, `embedding`, `reranker` |
 | `--provider` | `-p` | Yes | Backend provider: `vllm-cpu`, `vllm-spyre` |
 | `--model` | | Yes | Model identifier from catalog (e.g. `ibm-granite/granite-3.3-8b-instruct`) |
-| `--profile` | | No | Hardware profile ID (e.g. `compact-4k`). Defaults to the model's `default_profile` |
+| `--profile` | | Yes | Hardware profile ID (e.g. `compact-4k`) — must be valid for the model |
 | `--params` | | No | Inline key=value pairs for provider-specific config only (e.g. `apiKey=sk-xxx`) |
 
 ```bash
-# Deploy a vLLM-Spyre LLM model
-ai-services model deploy granite-llm \
+# Register a vLLM-Spyre LLM model
+ai-services model register granite-llm \
   --type llm \
   --provider vllm-spyre \
   --model ibm-granite/granite-3.3-8b-instruct \
   --profile compact-4k \
   --runtime podman
 
-# Deploy a vLLM-CPU embedding model
-ai-services model deploy granite-embed \
+# Register a vLLM-CPU embedding model
+ai-services model register granite-embed \
   --type embedding \
   --provider vllm-cpu \
   --model ibm-granite/granite-embedding-125m-english \
+  --profile standard \
   --runtime podman
 ```
 
@@ -2921,10 +2828,10 @@ ai-services model delete granite-llm -y --runtime podman
 
 Remote model operations use the same `ai-services model` command group. The `--deployment-type remote` flag (or provider inference) selects the remote path on `POST /api/v1/models`.
 
-#### Create a remote model
+#### Register a remote model
 
 ```
-ai-services model create [name] --type <type> --provider <provider> --deployment-type remote --runtime podman
+ai-services model register [name] --type <type> --provider <provider> --deployment-type remote --runtime podman
 ```
 
 | Flag | Short | Required | Description |
@@ -2937,7 +2844,7 @@ ai-services model create [name] --type <type> --provider <provider> --deployment
 
 ```bash
 # Register a WatsonX LLM connector
-ai-services model create prod-watsonx \
+ai-services model register prod-watsonx \
   --deployment-type remote \
   --type llm \
   --provider watsonx \
@@ -2946,7 +2853,7 @@ ai-services model create prod-watsonx \
   --runtime podman
 
 # Register a hosted vLLM connector
-ai-services model create ext-vllm \
+ai-services model register ext-vllm \
   --deployment-type remote \
   --type llm \
   --provider hosted_vllm \
@@ -2975,29 +2882,29 @@ ai-services model update prod-watsonx \
 
 ---
 
-### 13.3 LiteLLM Gateway Commands
+### 13.3 Model Key Commands
 
 #### Generate a public virtual key
 
-Generates a **public** LiteLLM key for a model (identified by its ID) covering all its active deployments via `POST /api/v1/models/{id}/keys`. Use it to authenticate calls to `POST /chat/completions`, `POST /embeddings`, and other inference endpoints from external clients or scripts.
+Generates a **public** LiteLLM key for a model (identified by its name) covering all its active deployments. The CLI resolves the model name to its ID and calls `POST /api/v1/models/{id}/keys`. Use it to authenticate calls to `POST /chat/completions`, `POST /embeddings`, and other inference endpoints from external clients or scripts.
 
 ```
-ai-services model litellm key generate --model <model-id> --runtime podman
+ai-services model key generate --model <model-name> --runtime podman
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--model` | Yes | Model ID (the `id` shown by `ai-services model list`) |
+| `--model` | Yes | Model name (e.g. `ibm-granite/granite-3.3-8b-instruct`, as shown by `ai-services model list`) |
 
 ```bash
 # Generate a key for granite-3.3-8b-instruct and print it once
-ai-services model litellm key generate \
-  --model 7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f \
+ai-services model key generate \
+  --model ibm-granite/granite-3.3-8b-instruct \
   --runtime podman
 
 # Example: capture it and use it in a curl call
-KEY=$(ai-services model litellm key generate \
-  --model 7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f --runtime podman)
+KEY=$(ai-services model key generate \
+  --model ibm-granite/granite-3.3-8b-instruct --runtime podman)
 curl -s http://litellm:4000/chat/completions \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
@@ -3012,14 +2919,13 @@ curl -s http://litellm:4000/chat/completions \
 
 | Command | Maps to | Description |
 |---|---|---|
-| `ai-services catalog configure` | internal sequence | Deploy LiteLLM Gateway, enable tag filtering via `POST /config/update` (one-time, idempotent) |
-| `ai-services model deploy [name]` | `POST /api/v1/models` (`deployment_type=local`) | Deploy a local model pod |
-| `ai-services model create [name] --deployment-type remote` | `POST /api/v1/models` (`deployment_type=remote`) | Register a remote model connector |
+| `ai-services model register [name]` | `POST /api/v1/models` (`deployment_type=local`) | Register a local model (deploys its pod) |
+| `ai-services model register [name] --deployment-type remote` | `POST /api/v1/models` (`deployment_type=remote`) | Register a remote model connector |
 | `ai-services model list` | `GET /api/v1/models` | List all models (local + remote) |
 | `ai-services model info [name]` | `GET /api/v1/models/:id` | Get full details of any model (local or remote) |
 | `ai-services model update [name]` | `PUT /api/v1/models/:id` | Update credentials of a remote model |
 | `ai-services model delete [name]` | `DELETE /api/v1/models/:id` | Undeploy/delete a model and delete its row |
-| `ai-services model litellm key generate --model` | `POST /api/v1/models/{id}/keys` | Generate a public LiteLLM key for a model covering all its active deployments (shown once); revokes any previous public key for that model |
+| `ai-services model key generate --model` | `POST /api/v1/models/{id}/keys` | Generate a public LiteLLM key for a model covering all its active deployments (shown once); revokes any previous public key for that model |
 
 ---
 
@@ -3029,7 +2935,7 @@ Virtual keys are generated with `"duration": null` and have no built-in expiry. 
 
 ### Public key
 
-Rotating a public key is the same operation as generating it: calling `POST /api/v1/models/{id}/keys` (or `ai-services model litellm key generate --model <id>`) revokes that model's current public key and returns a new one. There is no separate rotate step and no database row to update.
+Rotating a public key is the same operation as generating it: calling `POST /api/v1/models/{id}/keys` (or `ai-services model key generate --model <model-name>`) revokes that model's current public key and returns a new one. There is no separate rotate step and no database row to update.
 
 Rotate when:
 
