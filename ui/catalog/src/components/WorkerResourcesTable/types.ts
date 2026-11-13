@@ -1,5 +1,5 @@
 import type { DataTableHeader } from "@carbon/react";
-import type { WorkerRuntimeType, WorkerStatus } from "@/types/api.types";
+import type { WorkerRuntimeType, WorkerStatus } from "@/constants";
 import type {
   BaseTableState,
   SharedTableAction,

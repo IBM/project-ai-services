@@ -1,6 +1,7 @@
 import React from "react";
 import type { Dispatch } from "react";
 import { OverflowMenu, OverflowMenuItem } from "@carbon/react";
+import { DETAILS_PANEL_MODES } from "@/constants";
 import { Delete, Edit } from "@carbon/icons-react";
 import type { AppAction } from "./types";
 import { ACTION_TYPES } from "./types";
@@ -30,7 +31,7 @@ export const NameCell = ({ value, rowId, dispatch }: CellRendererProps) => (
     onNameClick={(id) =>
       dispatch({
         type: ACTION_TYPES.OPEN_DETAILS_PANEL,
-        payload: { id, mode: "view" },
+        payload: { id, mode: DETAILS_PANEL_MODES.VIEW },
       })
     }
   />
@@ -58,7 +59,7 @@ export const ActionCell = ({ rowId, rowData, dispatch }: CellRendererProps) => {
         onClick={() =>
           dispatch({
             type: ACTION_TYPES.OPEN_DETAILS_PANEL,
-            payload: { id: rowId, mode: "update-key" },
+            payload: { id: rowId, mode: DETAILS_PANEL_MODES.UPDATE_KEY },
           })
         }
       />

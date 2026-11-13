@@ -2,8 +2,6 @@ import type { DataSourceDetailResponse } from "@/types/api.types";
 import type { ConnectorField } from "@/components/AddDataSourceModal/schemaUtils";
 export type { ConnectorField };
 
-export type DetailsPanelMode = "view" | "update-key";
-
 /** How the authentication section is displayed. */
 export type AuthSectionState =
   | { kind: "button" } // read-only view — shows "Update key" button

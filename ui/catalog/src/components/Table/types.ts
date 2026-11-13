@@ -5,15 +5,6 @@ export interface BaseTableRow {
   status: string;
 }
 
-export type RowStatus =
-  | "Initializing"
-  | "Downloading"
-  | "Deploying"
-  | "Running"
-  | "Deleting"
-  | "Stopped"
-  | "Error";
-
 export type TableHeaders = DataTableHeader[];
 
 export interface BaseTableState<TRow extends BaseTableRow = BaseTableRow> {

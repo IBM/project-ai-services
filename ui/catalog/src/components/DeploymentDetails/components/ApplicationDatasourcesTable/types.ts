@@ -9,8 +9,6 @@ import {
   setLoading,
 } from "@/components/Table/utils/reducerUtils";
 
-export type { DatasourceSyncStatus as ApplicationDatasourceStatus } from "@/types/api.types";
-
 export interface ApplicationDatasourceRow {
   id: string;
   name: string;

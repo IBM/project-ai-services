@@ -29,7 +29,7 @@ import {
 } from "@carbon/react";
 import { Deploy } from "@carbon/icons-react";
 import styles from "./DigitalAssistants.module.scss";
-import { DEPLOYMENT_STATUS } from "@/constants";
+import { DEPLOYMENT_STATUS, DEPLOYMENT_DETAILS_SECTIONS } from "@/constants";
 import type { DigitalAssistantRow } from "./types";
 import {
   ACTION_TYPES,
@@ -323,7 +323,7 @@ const DigitalAssistantsPage = () => {
         status: row.status,
         type: row.type || "Digital assistant",
       },
-      defaultSection: "integration",
+      defaultSection: DEPLOYMENT_DETAILS_SECTIONS.INTEGRATION,
     } as AppAction);
   };
 

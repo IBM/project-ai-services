@@ -9,6 +9,7 @@ import {
 } from "@/components/Table/components/CellRenderers";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 import styles from "./WorkerResourcesTable.module.scss";
+import { WORKER_STATUS } from "@/constants";
 import { LOCAL_WORKER_NAME } from "@/constants/app.constants";
 export { StatusCell };
 
@@ -36,7 +37,7 @@ export const MessageCell = ({
   value,
   rowData,
 }: CellRendererProps): React.ReactElement => {
-  const isDisconnected = rowData?.status === "disconnected";
+  const isDisconnected = rowData?.status === WORKER_STATUS.DISCONNECTED;
   return (
     <span className={isDisconnected ? styles.messageCellError : undefined}>
       {isDisconnected && (

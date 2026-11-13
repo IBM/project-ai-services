@@ -1,4 +1,5 @@
 import type { DataTableHeader } from "@carbon/react";
+import type { DeploymentStatus } from "@/constants";
 import type {
   BaseTableState,
   SharedTableAction,
@@ -11,7 +12,7 @@ import {
 export interface DeployedServicesRow {
   id: string;
   name: string;
-  status: "Downloading" | "Deploying" | "Running" | "Deleting" | "Error";
+  status: DeploymentStatus;
   type?: string;
   uptime: string;
   workerResource: string;

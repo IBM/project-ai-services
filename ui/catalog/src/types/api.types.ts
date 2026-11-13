@@ -1,3 +1,10 @@
+import type {
+  ConnectorStatus,
+  WorkerStatus,
+  DatasourceSyncStatus,
+  WorkerRuntimeType,
+} from "@/constants";
+
 export interface ArchitectureSummary {
   id: string;
   name: string;
@@ -417,11 +424,6 @@ export interface ServiceDeploymentPayload {
 export type DeploymentPayload =
   ArchitectureDeploymentPayload | ServiceDeploymentPayload;
 
-export type ConnectorStatus = "connected" | "offline";
-
-export type WorkerStatus = "pending" | "ready" | "disconnected";
-export type WorkerRuntimeType = "unknown" | "podman" | "openshift";
-
 export interface WorkerApiResponse {
   id: string;
   name: string;
@@ -520,11 +522,6 @@ export interface CreateDatasourceRequest {
 export interface CreateDatasourceResponse {
   id: string;
 }
-
-// Sync-state status values produced by the Digitize service pod.
-// "unknown" is set by the Go catalog when the pod is unreachable.
-export type DatasourceSyncStatus =
-  "up to date" | "syncing" | "out of sync" | "delete pending" | "unknown";
 
 // Matches backend ApplicationDatasourceItem (GET /applications/:id/datasources).
 export interface ApplicationDatasourceApiItem {
