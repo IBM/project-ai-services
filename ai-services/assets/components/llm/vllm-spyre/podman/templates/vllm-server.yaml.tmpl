@@ -12,14 +12,14 @@ metadata:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     io.podman.annotations.userns: "keep-id"
     run.oci.keep_original_groups: "1"
-    ai-services.io/llm--spyre-cards: "4"
+    ai-services.io/llm--spyre-cards: "{{ index .Values.resources.accelerators "ibm.com/spyre_pf" }}"
 spec:
   restartPolicy: always
   volumes:
     - name: dshm
       emptyDir:
         medium: Memory
-        sizeLimit: 64Gi
+        sizeLimit: {{ .Values.shmSize }}
     - name: models
       hostPath:
         path: "{{ .BaseDir }}/models"
@@ -57,7 +57,7 @@ spec:
         - name: VLLM_MODEL_PATH
           value: "/models/{{ .Values.model }}"
         - name: AIU_WORLD_SIZE
-          value: "4"
+          value: "{{ index .Values.resources.accelerators "ibm.com/spyre_pf" }}"
         - name: VLLM_SPYRE_USE_CB
           value: "1"
         - name: MAX_MODEL_LEN
@@ -76,10 +76,10 @@ spec:
         {{- end }}
       resources:
         requests:
-          podman.io/device=/dev/vfio: 4
-          memory: "200Gi"
+          podman.io/device=/dev/vfio: {{ index .Values.resources.accelerators "ibm.com/spyre_pf" }}
+          memory: "{{ .Values.resources.memory }}"
         limits:
-          memory: "200Gi"
+          memory: "{{ .Values.resources.memory }}"
       ports:
         - containerPort: 8000
       volumeMounts:

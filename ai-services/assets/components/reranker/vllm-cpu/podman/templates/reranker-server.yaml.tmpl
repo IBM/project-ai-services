@@ -39,9 +39,9 @@ spec:
         failureThreshold: 12
       resources:
         requests:
-          memory: "5Gi"
+          memory: "{{ .Values.resources.memory }}"
         limits:
-          memory: "5Gi"
+          memory: "{{ .Values.resources.memory }}"
       ports:
         - containerPort: 8002
       volumeMounts:

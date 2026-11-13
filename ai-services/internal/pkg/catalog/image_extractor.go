@@ -205,7 +205,8 @@ func (p *CatalogProvider) collectComponentsByType(ctx context.Context, component
 
 // addComponentImages adds component images to the provided map.
 func (p *CatalogProvider) addComponentImages(ctx context.Context, componentType, componentID string, allImages map[string]bool) error {
-	values, err := p.LoadComponentValues(componentType, componentID, map[string]string{})
+	// Templates read the hardware values of a profile, so render with the provider's default one.
+	values, err := p.LoadComponentValuesForModel(componentType, componentID, "", "", map[string]string{})
 	if err != nil {
 		return fmt.Errorf("failed to load values for component %s/%s: %w", componentType, componentID, err)
 	}
