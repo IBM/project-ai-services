@@ -5,10 +5,16 @@ IMAGE=litellm
 # 2. Manually update patches/litellm/watsonx-passthrough.patch if the patched file changed upstream
 # 3. Run verify-patch to confirm all patches apply cleanly
 # 4. Run update-checksums to regenerate the checksums
-LITELLM_VERSION?=1.106.4
-LITELLM_SHA256?=dc58da933f25e8efec12348a4821b71e15e358d97093821576073fee37c49589
-IMAGE_REVISION?=1
-PYTHON_VERSION?=3.14
+LITELLM_VERSION?=1.108.6
+LITELLM_SHA256?=af6d1ef60181e508050a83e883949592c333240028ac003f94081cc516547b6c
+IMAGE_REVISION?=0
+# To build from a custom branch/tag/commit instead of the upstream release, set
+# LITELLM_REF (and optionally LITELLM_REPO), e.g.:
+#   make build LITELLM_REPO=myuser/litellm LITELLM_REF=my-branch LITELLM_VERSION=<version in that ref's pyproject.toml>
+# LITELLM_SHA256 is not verified for custom refs.
+LITELLM_REPO?=BerriAI/litellm
+LITELLM_REF?=
+PYTHON_VERSION?=3.12
 # Node.js version for baking Prisma CLI — Active LTS version
 NODE_VERSION?=24.21.0
 NODE_SHA256?=51c5d53066ee92920b61783b03b06ecb99f3661160f7b15ca77e8474115a67bc
@@ -62,6 +68,8 @@ build:
 		--jobs 2 \
 		--build-arg VERSION=$(LITELLM_VERSION) \
 		--build-arg LITELLM_SHA256=$(LITELLM_SHA256) \
+		--build-arg LITELLM_REPO=$(LITELLM_REPO) \
+		--build-arg LITELLM_REF=$(LITELLM_REF) \
 		--build-arg PYTHON_VERSION=$(PYTHON_VERSION) \
 		--build-arg NODE_VERSION=$(NODE_VERSION) \
 		--build-arg NODE_SHA256=$(NODE_SHA256) \

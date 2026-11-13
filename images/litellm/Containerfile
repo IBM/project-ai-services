@@ -47,6 +47,8 @@ FROM base as wheels
 
 ARG VERSION
 ARG LITELLM_SHA256
+ARG LITELLM_REPO
+ARG LITELLM_REF
 ARG PYTHON_VERSION
 ENV PYTHON_VERSION=${PYTHON_VERSION} \
     UV_PYTHON=${PYTHON_VERSION}
@@ -96,6 +98,7 @@ ARG PYTHON_VERSION
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
 ENV LITELLM_NON_ROOT=true \
+    STORE_MODEL_IN_DB=true \
     #pyroscope isn't supported on ppc64le
     LITELLM_ENABLE_PYROSCOPE=false \
     LITELLM_UI_PATH=/app/ui \
