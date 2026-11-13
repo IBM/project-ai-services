@@ -60,6 +60,10 @@ func registerModelRoutes(v1 *gin.RouterGroup, h *handlers.ModelHandler, authMw g
 	g.Use(authMw)
 	{
 		g.POST("", h.CreateModel)
+		g.GET("", h.ListModels)
+		g.GET("/:id", h.GetModelByID)
+		g.POST("/:id/keys", h.GenerateModelKey)
+		g.DELETE("/:id", h.DeleteModel)
 	}
 }
 
@@ -89,6 +93,8 @@ func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler
 		g.GET("/services/:id/images", catalog.GetServiceImages)
 		g.GET("/services/:id/models", catalog.GetServiceModels)
 		g.GET("/services/:id/steps", catalog.GetServiceSteps)
+		g.GET("/catalog/models", catalog.ListModels)
+		g.GET("/catalog/models/:id", catalog.GetCatalogModel)
 		g.GET("/catalog/models/:id/deploy-options", catalog.GetModelDeployOptions)
 		g.GET("/components/:component_type/providers/:provider_id/params", catalog.GetComponentProviderParams)
 		g.GET("/connectors", catalog.ListConnectorProviders)

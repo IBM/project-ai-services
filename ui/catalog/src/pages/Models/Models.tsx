@@ -3,6 +3,7 @@ import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import { ModelCard, ModelCardSkeleton } from "@/components/ModelCard";
 import { useModels } from "@/hooks/useModels";
+import { ModelsTable } from "@/components";
 import styles from "./Models.module.scss";
 
 const Models = () => {
@@ -66,6 +67,10 @@ const Models = () => {
               </div>
             )}
           </TabPanel>
+          <TabPanel>
+            <ModelsTable />
+          </TabPanel>
+          <TabPanel />
         </TabPanels>
       </Tabs>
     </div>

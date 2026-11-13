@@ -6,6 +6,7 @@ ALTER TABLE components
 
 ALTER TYPE component_status ADD VALUE IF NOT EXISTS 'Downloading';
 ALTER TYPE component_status ADD VALUE IF NOT EXISTS 'Deploying';
+ALTER TYPE component_status ADD VALUE IF NOT EXISTS 'Deleting';
 -- +goose StatementEnd
 
 -- +goose Down

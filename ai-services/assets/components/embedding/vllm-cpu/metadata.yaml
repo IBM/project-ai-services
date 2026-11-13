@@ -6,8 +6,10 @@ name: "AI Inference on CPU"
 description: "Deploy embedding models on vLLM inference engine (CPU-only)"
 
 # Component type this provider belongs to
-component_type: embedding
-component_name: "Embedding model"
+component_type:
+  id: embedding
+  name: "Embedding model"
+  short_name: "Embedding"
 category: models
 litellm:
   provider: hosted_vllm

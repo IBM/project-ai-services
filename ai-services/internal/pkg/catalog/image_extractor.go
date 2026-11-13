@@ -180,11 +180,11 @@ func (p *CatalogProvider) collectComponentsImages(ctx context.Context, dependenc
 // collectComponentsByType collects images for all components of a specific type.
 func (p *CatalogProvider) collectComponentsByType(ctx context.Context, componentType string, components []types.Component, allImages map[string]bool, displayedComponents map[string]bool) error {
 	for _, comp := range components {
-		if comp.ComponentType != componentType {
+		if comp.ComponentType.ID != componentType {
 			continue
 		}
 
-		componentKey := fmt.Sprintf("%s.%s", comp.ComponentType, comp.ID)
+		componentKey := fmt.Sprintf("%s.%s", comp.ComponentType.ID, comp.ID)
 
 		// Skip if already processed (only when tracking duplicates)
 		if displayedComponents != nil && displayedComponents[componentKey] {
@@ -195,8 +195,8 @@ func (p *CatalogProvider) collectComponentsByType(ctx context.Context, component
 			displayedComponents[componentKey] = true
 		}
 
-		if err := p.addComponentImages(ctx, comp.ComponentType, comp.ID, allImages); err != nil {
-			return fmt.Errorf("failed to collect images for component %s/%s: %w", comp.ComponentType, comp.ID, err)
+		if err := p.addComponentImages(ctx, comp.ComponentType.ID, comp.ID, allImages); err != nil {
+			return fmt.Errorf("failed to collect images for component %s/%s: %w", comp.ComponentType.ID, comp.ID, err)
 		}
 	}
 

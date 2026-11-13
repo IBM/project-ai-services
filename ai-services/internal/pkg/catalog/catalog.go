@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	texttemplate "text/template"
@@ -295,7 +297,7 @@ func parseComponent(ctx context.Context, path, appPath string, itemFS fs.FS, dat
 
 	// Use composite key for components: {component_type}/{id}
 	// This allows same ID across different component types
-	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType, comp.ID)
+	componentKey := fmt.Sprintf("%s/%s", comp.ComponentType.ID, comp.ID)
 	items[componentKey] = &catalogItem{
 		Path:      appPath,
 		Component: &comp,
@@ -345,6 +347,24 @@ func (p *CatalogProvider) allItems() map[string]*catalogItem {
 	}
 
 	return snapshot
+}
+
+// sortedItems returns the cached items with components before connectors, each ordered by key ("type/id").
+// Loops that keep the first match use it so they give the same answer on every call.
+func (p *CatalogProvider) sortedItems() []*catalogItem {
+	items := p.allItems()
+	keys := slices.Sorted(maps.Keys(items))
+	result := make([]*catalogItem, 0, len(items))
+
+	for _, wantConnector := range []bool{false, true} {
+		for _, k := range keys {
+			if (items[k].Connector != nil) == wantConnector {
+				result = append(result, items[k])
+			}
+		}
+	}
+
+	return result
 }
 
 // LoadArchitecture loads an architecture by ID from cache.
@@ -450,7 +470,7 @@ func ToComponentSummary(component *types.Component) types.ComponentSummary {
 		ID:            component.ID,
 		Name:          component.Name,
 		Description:   component.Description,
-		ComponentType: component.ComponentType,
+		ComponentType: component.ComponentType.ID,
 	}
 }
 

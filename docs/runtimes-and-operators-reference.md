@@ -14,9 +14,9 @@ This section serves as an executive quick-reference for the core components and 
 
 | Component / Operator | Supported Runtime(s) | Channel / Version | Image & Registry Path |
 | :--- | :--- | :--- | :--- |
-| **vLLM (IBM Spyre AIU)** | Podman & OpenShift | `v3.5.0` (Red Hat AI Inference) | `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0` |
-| **vLLM (CPU-Only)** | Podman | `v0.28.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` |
-| **vLLM (CPU-Only)** | OpenShift | `v0.28.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0` |
+| **vLLM (IBM Spyre AIU)** | Podman & OpenShift | `v3.5.3` (Red Hat AI Inference) | `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.3` |
+| **vLLM (CPU-Only)** | Podman | `v0.31.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.31.0` |
+| **vLLM (CPU-Only)** | OpenShift | `v0.31.0` | `icr.io/ppc64le-oss/vllm-ppc64le:0.31.0` |
 | **IBM Spyre Operator** | OpenShift | `stable-v1.4` (v1.4.0) | Managed via Subscription |
 | **Red Hat OpenShift AI (RHOAI)** | OpenShift | `stable-3.5` (v3.5.2) | Managed via Subscription |
 
@@ -49,8 +49,8 @@ Once the subscriptions are healthy, the following Red Hat OpenShift AI (RHOAI / 
 2. **`DataScienceCluster` (RHOAI stack):**
    - Configures `default-dsc` with the **KServe** component enabled (`managementState: Managed`) to manage ServingRuntimes.
 3. **`ServingRuntime` Custom Resources:**
-   - **`spyre-temp`**: ServingRuntime for vLLM on Spyre AIU cards using `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0`.
-   - **`cpu-temp`**: ServingRuntime for vLLM on CPU using `icr.io/ppc64le-oss/vllm-ppc64le:0.28.0`.
+   - **`spyre-temp`**: ServingRuntime for vLLM on Spyre AIU cards using `registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.3`.
+   - **`cpu-temp`**: ServingRuntime for vLLM on CPU using `icr.io/ppc64le-oss/vllm-ppc64le:0.31.0`.
 4. **`InferenceService` (KServe):**
    - Creates the model predictor pods, mapping them to the specific `ServingRuntime` and applying resources/limits requests (e.g. `ibm.com/spyre_pf` requests/limits).
 
