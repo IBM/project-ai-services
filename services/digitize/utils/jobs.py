@@ -112,6 +112,14 @@ def generate_uuid():
 _COMPLETED_OWNER_STATUSES = (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
 
 
+def dedup_key(operation: str, output_format) -> str:
+    """Registry key for document_checksum.type: digitization dedups per output format,
+    ingestion is format-agnostic."""
+    if operation == models.OperationType.DIGITIZATION.value:
+        return f"{operation}:{getattr(output_format, 'value', output_format)}"
+    return operation
+
+
 def build_duplicate_record(filename: str, file_hash: str, owner):
     """
     Describe a duplicate file given the Document that owns its content.
@@ -213,7 +221,7 @@ def initialize_job_state(
     # of concurrent submissions of the same content exactly one wins.
     lost_claims: dict = {}  # filename -> Document that owns the content
     if file_checksum_dict:
-        op_key = operation.value if hasattr(operation, "value") else operation
+        op_key = dedup_key(operation.value if hasattr(operation, "value") else operation, output_format)
         already_exists_files = already_exists_files if already_exists_files is not None else []
         skipped_files = skipped_files if skipped_files is not None else []
         for doc in documents_info:
