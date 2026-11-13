@@ -91,6 +91,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 //	@Param			provider_id		query		[]string	false	"Filter by provider (e.g. vllm-spyre, watsonx); repeat the parameter to match any of several"	collectionFormat(multi)
 //	@Param			model			query		[]string	false	"Filter by model identifier; repeat the parameter to match any of several"						collectionFormat(multi)
 //	@Param			status			query		string		false	"Filter by status: Downloading, Deploying, Running, Error (local) or connected, offline (remote)"
+//	@Param			q				query		string		false	"Case-insensitive substring search on model name"
 //	@Param			page			query		int			false	"Page number (1-indexed)"				default(1)
 //	@Param			page_size		query		int			false	"Number of items per page (max: 100)"	default(20)
 //	@Success		200				{object}	models.ModelListResponse
@@ -119,6 +120,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 		ProviderIDs:    queryValues(c, "provider_id"),
 		Models:         queryValues(c, "model"),
 		Status:         c.Query("status"),
+		Search:         c.Query("q"),
 		CreatedBy:      userID,
 	})
 	if err != nil {

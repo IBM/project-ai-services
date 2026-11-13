@@ -408,6 +408,15 @@ func TestListModels(t *testing.T) {
 			},
 		},
 		{
+			name:       "q is passed to the service as the search term",
+			query:      "?q=granite",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, "granite", req.Search)
+			},
+		},
+		{
 			name:       "repeated provider_id and model parameters are all passed",
 			query:      "?provider_id=vllm-spyre&provider_id=watsonx&model=ibm/granite-4-h-small&model=ibm-granite/granite-3.3-8b-instruct",
 			wantCode:   http.StatusOK,

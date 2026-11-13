@@ -46,6 +46,8 @@ type ListModelsRequest struct {
 	ProviderIDs []string
 	Models      []string
 	Status      string
+	// Search is a case-insensitive substring match on the model name.
+	Search string
 	// CreatedBy restricts the list to models created by this user. It is set from the token by
 	// the handler.
 	CreatedBy string

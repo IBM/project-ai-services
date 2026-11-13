@@ -14,6 +14,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 )
 
+// modelSearchColumns defines the columns searched when a ?q= term is provided.
+// Add column names here to extend search to additional fields in future.
+var modelSearchColumns = []string{"name"}
+
 // ModelFilters defines the optional filters and the pagination of the model list.
 // Every empty field is not added to the WHERE clause.
 // The values of one multi-value filter (Providers, Models) are OR'd; different filters are AND'd.
@@ -24,6 +28,7 @@ type ModelFilters struct {
 	Providers      []string                 // Optional: provider ids, e.g. "vllm-spyre"; a model matches any of them
 	Models         []string                 // Optional: model identifiers; a model matches any of them
 	Status         string                   // Optional: component or connector status
+	Search         string                   // Optional: case-insensitive substring search on the model name
 	Limit          int                      // Optional: maximum number of records to return
 	Offset         int                      // Optional: number of records to skip
 }
@@ -166,6 +171,10 @@ func buildModelWhere(f *ModelFilters, componentTypes []string) (string, []interf
 	addAny("provider", f.Providers)
 	addAny("model", f.Models)
 	add("status", f.Status)
+
+	if f.Search != "" {
+		clauses = append(clauses, buildSearchClause(modelSearchColumns, &args, f.Search))
+	}
 
 	if len(clauses) == 0 {
 		return "", nil
