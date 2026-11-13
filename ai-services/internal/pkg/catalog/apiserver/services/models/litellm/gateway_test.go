@@ -36,13 +36,12 @@ func TestModelRequest(t *testing.T) {
 // platform has never heard of; only model and tags are owned by the platform.
 func TestModelRequest_ForwardsParamsVerbatim(t *testing.T) {
 	params := map[string]any{
-		"api_base":   "https://host/v1",
-		"api_key":    "secret",
-		"project_id": "proj-1",
-		"timeout":    30,
-		"model":      "attacker/override",
-		"tags":       []string{"attacker"},
-
+		"api_base":            "https://host/v1",
+		"api_key":             "secret",
+		"project_id":          "proj-1",
+		"timeout":             30,
+		"model":               "attacker/override",
+		"tags":                []string{"attacker"},
 		"use_in_pass_through": false,
 	}
 	r := Route{Tag: "id-1", Model: "m", UpstreamModel: "p/m", Params: params}
