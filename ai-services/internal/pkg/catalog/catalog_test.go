@@ -15,7 +15,7 @@ func TestListArchitectures(t *testing.T) {
 	architectures, err := provider.ListArchitectures()
 	elapsed := time.Since(start)
 
-	if err != nil {
+	if err == nil {
 		t.Errorf("ListArchitectures() error = %v", err)
 
 		return
