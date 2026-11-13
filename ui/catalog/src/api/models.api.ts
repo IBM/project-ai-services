@@ -1,9 +1,19 @@
+import { api } from "@/api/axios";
+import { MODEL_MANAGEMENT_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
+  CatalogModel,
   ModelDeployment,
   ModelDeploymentsListResponse,
 } from "@/types/api.types";
 import type { ModelDeploymentRow } from "@/components/ModelsTable/types";
 import { formatDateTime } from "@/utils/time";
+
+export async function fetchCatalogModels(): Promise<CatalogModel[]> {
+  const response = await api.get<CatalogModel[]>(
+    MODEL_MANAGEMENT_ENDPOINTS.GET_CATALOG_MODELS,
+  );
+  return response.data;
+}
 
 // ─── Static data ──────────────────────────────────────────────────────────────
 // API integration will be done in a future PR once the backend is ready.

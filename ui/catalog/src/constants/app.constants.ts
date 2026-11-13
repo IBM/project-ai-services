@@ -49,3 +49,12 @@ export const WORKER_RUNTIME_LABELS: Record<
       "Deploys services as managed workloads on a Red Hat OpenShift cluster. Ideal for Kubernetes-orchestrated, large-scale deployments.",
   },
 } as const;
+
+// TODO: Make provider tag labels customizable and receive tag metadata from the backend API.
+export const PROVIDER_TAG_LABELS: Record<string, string> = {
+  "vllm-spyre": "IBM Spyre",
+  "vllm-cpu": "CPU",
+  watsonx: "Watsonx",
+  amd: "AMD GPU",
+  hosted_vllm: "Remote",
+};
