@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 import forecast.app as forecast_app
 import forecast.api.v1.connectors as connectors_api
 import forecast.db.connectors as connectors_db
-from forecast.scheduler import register_connector_job
+from forecast.training.scheduler import register_connector_job
 from forecast.settings import settings
 from forecast.utils.encryption import (
     decrypt_secrets,
@@ -41,11 +41,13 @@ CREATED = datetime(2026, 10, 26, 8, 55, tzinfo=timezone.utc)
 
 @pytest.fixture(autouse=True)
 def _startup_dependencies_stubbed():
-    """Valid key and stubbed TRITON_URL check, as in test_app.py."""
+    """Valid key, stubbed TRITON_URL check, and stubbed Db2 probe."""
     with patch.object(
         settings.forecast, "db_encryption_key", SecretStr(KEY)
-    ), patch("forecast.app.triton_url_check", return_value=None):
-        yield
+    ), patch("forecast.app.triton_url_check", return_value=None), patch(
+        "forecast.api.v1.connectors.probe_db2_connector"
+    ) as mock_probe:
+        yield mock_probe
 
 
 @pytest.fixture
@@ -85,6 +87,7 @@ def db():
 
 def _create_body(**overrides):
     body = {
+        "id": CONNECTOR_ID,
         "name": "prod-sales-db",
         "type": "db2_for_i",
         "schedule": "daily",
@@ -168,12 +171,13 @@ def test_create_stores_encrypted_connector_and_queues_training(client, db):
 
 
 @pytest.mark.unit
-def test_create_generates_an_id_when_omitted(client, db):
-    response = client.post("/v1/connectors", json=_create_body())
+def test_create_without_an_id_is_422(client, db):
+    body = _create_body()
+    del body["id"]
+    response = client.post("/v1/connectors", json=body)
 
-    assert response.status_code == 201
-    generated = response.json()["id"]
-    assert db.insert_connector.call_args.kwargs["connector_id"] == generated
+    assert response.status_code == 422
+    _assert_envelope(response.json(), "INVALID_REQUEST", 422)
 
 
 @pytest.mark.unit
@@ -663,7 +667,7 @@ def test_put_reads_the_connector_for_update(client, db):
 
     client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"name": "renamed"})
 
-    assert db.get_connector.call_args.kwargs == {"for_update": True}
+    assert db.get_connector.call_args_list[-1].kwargs == {"for_update": True}
 
 
 @pytest.mark.unit
@@ -962,3 +966,124 @@ def test_decrypt_value_failures_raise_decryption_error():
     valid_token = encrypt_secrets({"password": "secret"})["password"]
     with pytest.raises(DecryptionError):
         _decrypt_value(other_cipher, valid_token)
+
+
+@pytest.mark.unit
+def test_create_fails_and_does_not_insert_when_db2_probe_fails(client, db):
+    from fastapi import HTTPException
+
+    with patch(
+        "forecast.api.v1.connectors.probe_db2_connector",
+        side_effect=HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_REQUEST", "message": "Cannot connect to Db2", "status": 400}},
+        ),
+    ):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    db.insert_connector.assert_not_called()
+    db.register.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_fails_and_does_not_update_when_db2_probe_fails(client, db):
+    from fastapi import HTTPException
+
+    db.get_connector.return_value = _stored_row()
+    with patch(
+        "forecast.api.v1.connectors.probe_db2_connector",
+        side_effect=HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_REQUEST", "message": "Authentication failed", "status": 400}},
+        ),
+    ):
+        response = client.put(
+            f"/v1/connectors/{CONNECTOR_ID}",
+            json={"connection_details": {"password": "new-pass"}},
+        )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_changing_host_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row(host="old-host.example.com")
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"host": "new-host.example.com"}},
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "Password must be supplied when host or username changes" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_changing_host_with_password_succeeds(client, db):
+    db.get_connector.return_value = _stored_row(host="old-host.example.com")
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"host": "new-host.example.com", "password": "new-password"}},
+    )
+
+    assert response.status_code == 200
+    db.update_connector.assert_called_once()
+
+
+@pytest.mark.unit
+def test_create_calls_db2_probe_with_table_and_columns(client, db):
+    with patch("forecast.api.v1.connectors.probe_db2_connector") as mock_probe:
+        payload = _create_body()
+        response = client.post("/v1/connectors", json=payload)
+        assert response.status_code == 201
+
+        mock_probe.assert_called_once_with(
+            host=payload["connection_details"]["host"],
+            port=payload["connection_details"]["port"],
+            database=payload["connection_details"]["database"],
+            username=payload["connection_details"]["username"],
+            password=payload["connection_details"]["password"],
+            table=payload["training"]["table"],
+            columns=["REGION", "QUANTITY", "DELIVERY_LATE"],
+        )
+
+
+@pytest.mark.unit
+def test_put_calls_db2_probe_with_table_and_no_columns(client, db):
+    db.get_connector.return_value = _stored_row(source_table="MYLIB.SALES")
+    with patch("forecast.api.v1.connectors.probe_db2_connector") as mock_probe:
+        response = client.put(
+            f"/v1/connectors/{CONNECTOR_ID}",
+            json={"connection_details": {"password": "updated-password"}},
+        )
+        assert response.status_code == 200
+
+        mock_probe.assert_called_once_with(
+            host="ibmi.example.com",
+            port=8471,
+            database="PRODDB",
+            username="forecast_ro",
+            password="updated-password",
+            table="MYLIB.SALES",
+            columns=None,
+        )
+
+
+@pytest.mark.unit
+def test_put_unchanged_host_without_password_succeeds(client, db):
+    db.get_connector.return_value = _stored_row(host="ibmi.example.com")
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"host": "ibmi.example.com"}},
+    )
+
+    assert response.status_code == 200
+    db.update_connector.assert_called_once()

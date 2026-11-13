@@ -12,14 +12,13 @@ Endpoints:
   GET    /v1/connectors/{connector_id}/metrics   (developer use only)
 """
 
-import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import ValidationError
 from sqlalchemy.exc import (
     IntegrityError,
     SQLAlchemyError,
@@ -30,8 +29,10 @@ from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import get_logger, get_utc_timestamp
 from forecast.db import connectors as connectors_db
 from forecast.db.connection import get_db_session
-from forecast.scheduler import register_connector_job
+from forecast.models import ConnectorCreateRequest, ConnectorUpdateRequest, Db2ForIDetails
+from forecast.training.scheduler import register_connector_job
 from forecast.settings import settings
+from forecast.utils.db2_probe import probe_db2_connector
 from forecast.utils.encryption import (
     DecryptionError,
     decrypt_secrets,
@@ -41,98 +42,6 @@ from forecast.utils.encryption import (
 
 router = APIRouter()
 logger = get_logger("forecast_connectors")
-
-Schedule = Literal["hourly", "daily", "weekly", "monthly", "yearly"]
-ColumnType = Literal["string", "integer", "number"]
-
-# SQL identifier patterns: allows letters, numbers, underscores, and common SQL/Db2 special chars ($, #, @).
-# Table can optionally be schema-qualified (e.g. "SCHEMA.TABLE" or just "TABLE").
-_SQL_IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
-_SQL_TABLE_PATTERN = r"^(?:[A-Za-z_][A-Za-z0-9_$#@]{0,127}\.)?[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
-
-
-# ---------------------------------------------------------------------------
-# Request models
-# ---------------------------------------------------------------------------
-
-
-class Db2ForIDetails(BaseModel):
-    """connection_details of a db2_for_i connector. Unknown fields are rejected."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    host: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9._:\-]+$")
-    port: Optional[int] = Field(default=None, ge=1, le=65535)
-    database: str = Field(min_length=1, max_length=128)
-    username: str = Field(min_length=1, max_length=128)
-    password: str = Field(min_length=1, max_length=1024)
-
-
-class Db2ForIDetailsPatch(BaseModel):
-    """Partial connection_details for PUT. Only the supplied keys are changed.
-
-    Values are not typed here: the merged details are validated by Db2ForIDetails,
-    so every invalid value is answered with the same 400.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    host: Any = None
-    port: Any = None
-    database: Any = None
-    username: Any = None
-    password: Any = None
-
-
-class TrainingInputColumn(BaseModel):
-    """An input column used for model training."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
-    type: Optional[ColumnType] = None
-
-
-class TrainingRequest(BaseModel):
-    """Training configuration for a connector."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    table: str = Field(min_length=1, max_length=257, pattern=_SQL_TABLE_PATTERN)
-    target_column: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
-    input_columns: list[TrainingInputColumn] = Field(min_length=1, max_length=1000)
-
-    @model_validator(mode="after")
-    def _validate_columns(self):
-        names = [col.name.upper() for col in self.input_columns]
-        if len(set(names)) != len(names):
-            raise ValueError("input_columns must not contain duplicate column names")
-        if self.target_column.upper() in names:
-            raise ValueError("target_column must not be present in input_columns")
-        return self
-
-
-class ConnectorCreateRequest(BaseModel):
-    """Payload to create a new database connector."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: Optional[UUID] = None
-    name: str = Field(min_length=1, max_length=255)
-    type: Literal["db2_for_i"]
-    schedule: Optional[Schedule] = None
-    connection_details: Db2ForIDetails
-    training: TrainingRequest
-
-
-class ConnectorUpdateRequest(BaseModel):
-    """Payload to update an existing database connector."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    connection_details: Optional[Db2ForIDetailsPatch] = None
-
 
 # ---------------------------------------------------------------------------
 # Response helpers
@@ -251,7 +160,28 @@ def _database_errors(operation: str, connector_id: Optional[str] = None):
 )
 def create_connector(body: ConnectorCreateRequest):
     """Create the single connector and queue its first training job."""
-    connector_id = str(body.id or uuid.uuid4())
+    connector_id = str(body.id)
+
+    # Fast-check if a connector already exists before running the external probe
+    with _database_errors("checking existing connector", connector_id), get_db_session() as session:
+        if connectors_db.connector_exists(session):
+            logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "A connector already exists. Only one connector is supported.",
+            )
+
+    # Probe Db2 for i connectivity, credentials, and schema before acquiring locks/inserting
+    probe_db2_connector(
+        host=body.connection_details.host,
+        port=body.connection_details.port,
+        database=body.connection_details.database,
+        username=body.connection_details.username,
+        password=body.connection_details.password,
+        table=body.training.table,
+        columns=[col.name for col in body.training.input_columns] + [body.training.target_column],
+    )
+
     encrypted = encrypt_secrets(body.connection_details.model_dump(exclude_none=True))
 
     with _database_errors("creating", connector_id), get_db_session() as session:
@@ -391,56 +321,98 @@ def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] 
     cid = str(connector_id)
 
     with _database_errors("updating", cid), get_db_session() as session:
-        row = connectors_db.get_connector(session, cid, for_update=True)
-        if row is None:
-            logger.warning(f"Update: connector {cid} not found")
-            APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Connector {cid!r} not found")
+        row = connectors_db.get_connector(session, cid, for_update=False)
+    if row is None:
+        logger.warning(f"Update: connector {cid} not found")
+        APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Connector {cid!r} not found")
 
-        config = dict(row["config"])
-        supplied = (
-            body.connection_details.model_dump(exclude_unset=True)
-            if body.connection_details is not None
-            else {}
+    config = dict(row["config"])
+    supplied = (
+        body.connection_details.model_dump(exclude_unset=True)
+        if body.connection_details is not None
+        else {}
+    )
+    if supplied:
+        try:
+            # Only the fields that stay are decrypted, so an unreadable stored
+            # secret does not block a PUT that replaces it.
+            kept = decrypt_secrets(
+                {
+                    k: v
+                    for k, v in config.items()
+                    if k not in supplied and k in Db2ForIDetails.model_fields
+                }
+            )
+            merged = Db2ForIDetails.model_validate({**kept, **supplied})
+        except DecryptionError:
+            logger.warning(
+                f"Update of connector {cid} rejected: stored secret could not be decrypted"
+            )
+            APIError.raise_error(
+                ErrorCode.INVALID_REQUEST,
+                "Stored secret could not be decrypted. Please provide all required secrets in the request.",
+            )
+        except ValidationError as exc:
+            problems = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                for error in exc.errors(include_input=False)
+            )
+            logger.warning(
+                f"Update of connector {cid} rejected: merged connection_details are invalid: {problems}"
+            )
+            APIError.raise_error(
+                ErrorCode.INVALID_REQUEST,
+                f"Invalid connection_details: {problems}",
+            )
+
+        # Security check: never replay a stored password to a changed host or username
+        endpoint_changed = (
+            merged.host != config.get("host")
+            or merged.username != config.get("username")
         )
-        if supplied:
-            try:
-                # Only the fields that stay are decrypted, so an unreadable stored
-                # secret does not block a PUT that replaces it.
-                kept = decrypt_secrets(
-                    {
-                        k: v
-                        for k, v in config.items()
-                        if k not in supplied and k in Db2ForIDetails.model_fields
-                    }
-                )
-                merged = Db2ForIDetails.model_validate({**kept, **supplied})
-            except DecryptionError:
-                logger.warning(
-                    f"Update of connector {cid} rejected: stored secret could not be decrypted"
-                )
-                APIError.raise_error(
-                    ErrorCode.INVALID_REQUEST,
-                    "Stored secret could not be decrypted. Please provide all required secrets in the request.",
-                )
-            except ValidationError as exc:
-                problems = "; ".join(
-                    f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
-                    for error in exc.errors(include_input=False)
-                )
-                logger.warning(
-                    f"Update of connector {cid} rejected: merged connection_details are invalid: {problems}"
-                )
-                APIError.raise_error(
-                    ErrorCode.INVALID_REQUEST,
-                    f"Invalid connection_details: {problems}",
-                )
-            # Store the validated values, so "8471" is kept as the integer 8471.
-            config.update(encrypt_secrets(merged.model_dump(include=set(supplied))))
+        if endpoint_changed and "password" not in supplied:
+            logger.warning(
+                f"Update of connector {cid} rejected: password required when host or username changes"
+            )
+            APIError.raise_error(
+                ErrorCode.INVALID_REQUEST,
+                "Password must be supplied when host or username changes.",
+            )
 
-        if body.name is not None or body.connection_details is not None:
+        # Probe updated Db2 credentials outside the PostgreSQL transaction
+        probe_db2_connector(
+            host=merged.host,
+            port=merged.port,
+            database=merged.database,
+            username=merged.username,
+            password=merged.password,
+            table=row.get("source_table"),
+            columns=None,
+        )
+
+        # Store the validated values, so "8471" is kept as the integer 8471.
+        encrypted_supplied = encrypt_secrets(merged.model_dump(include=set(supplied)))
+    else:
+        encrypted_supplied = None
+
+    if body.name is not None or body.connection_details is not None:
+        with _database_errors("updating", cid), get_db_session() as session:
+            current = connectors_db.get_connector(session, cid, for_update=True)
+            if current is None:
+                logger.warning(f"Update: connector {cid} not found")
+                APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Connector {cid!r} not found")
+            
+            final_config = dict(current["config"])
+            if encrypted_supplied is not None:
+                final_config.update(encrypted_supplied)
+
             try:
-                connectors_db.update_connector(session, cid, name=body.name, config=config)
-            except IntegrityError:
+                connectors_db.update_connector(session, cid, name=body.name, config=final_config)
+            except IntegrityError as exc:
+                orig = getattr(exc, "orig", None)
+                sqlstate = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+                if sqlstate and sqlstate != "23505":
+                    raise
                 logger.warning(f"Update of connector {cid} rejected: the name {body.name!r} is taken")
                 APIError.raise_error(
                     ErrorCode.RESOURCE_CONFLICT,

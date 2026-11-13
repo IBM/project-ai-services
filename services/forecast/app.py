@@ -103,7 +103,7 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
-app.include_router(connectors.router, prefix="/v1/connectors", tags=["connectors"])
+app.include_router(connectors.router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False)
 
 
 # ------------------------------------------------------------------ #
@@ -113,7 +113,9 @@ app.include_router(connectors.router, prefix="/v1/connectors", tags=["connectors
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     """Extract or generate a request ID, and return it in the X-Request-ID header."""
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id or len(request_id) > 128:
+        request_id = str(uuid.uuid4())
     set_request_id(request_id)
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id

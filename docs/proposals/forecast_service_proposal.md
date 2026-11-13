@@ -68,10 +68,10 @@ It also introduces three things that no existing service has:
 **Decision: The API process and APScheduler tick talks to Triton, and only the APScheduler tick deletes forecaster files.**
 
 - Triton runs in **explicit model-control mode** (`--model-control-mode=explicit`). No model is loaded automatically; the API explicitly issues load requests after successful training and during startup reconciliation.
-- The **database state is authoritative**: Triton serves only forecasters with an active `ready` record in PostgreSQL. Unregistered directories are never loaded.
--- The worker only **creates** a forecaster's directory, by writing a temporary directory on the same volume and renaming it, so the directory appears whole or not at all. The APScheduler tick only **deletes** directories whose row is `retiring`, and the temporary directory of a job that failed.
--- The APScheduler writes the `forecasters` row only after Triton has loaded the forecaster. A row is therefore always `ready`, `retiring` or `deleted`, and the worker has no write grant on `forecasters`.
--- Retention is by count, per connector, and runs after each successful load. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired in this order: its row becomes `retiring`, it is unloaded from Triton, its directory is deleted, and its row becomes `deleted`. The row is kept. Forecasters of other connectors are not affected.
+- The **database state is authoritative**: Triton serves only forecasters with an active record in the PostgreSQL `forecasters` table. Unregistered directories are never loaded.
+- The worker only **creates** a forecaster's directory, by writing a temporary directory on the same volume and renaming it to `fc_<connector_id>_<version>`, so the directory appears whole or not at all.
+- The API writes the `forecasters` row only after Triton has successfully loaded the forecaster. A row's presence in `forecasters` means the model is loaded and ready.
+- Retention is by count, per connector, and runs after each successful load. When the forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest forecaster of that connector is unloaded from Triton, its directory is deleted from disk, and its row is deleted from `forecasters`.
 
 ### 2.3 Decision — Single worker, enforced twice
 
@@ -128,7 +128,7 @@ flowchart TD
     EXIT -- "other non-zero exit, killed or timed out" --> MORE{"attempts left?<br/>TRAINING_MAX_ATTEMPTS"}
     MORE -- yes --> WAIT["delete temp dir<br/>wait TRAINING_RETRY_DELAY_SECONDS<br/>attempt + 1"]
     WAIT --> SPAWN
-    MORE -- no --> FAIL["delete temp dir<br/>job status = failed, jobs.error set, attempts added to jobs.result"]
+    MORE -- no --> FAIL["delete temp dir<br/>job status = failed, jobs.message set, attempts added to jobs.result"]
     FAIL --> PRUNE["prune old finished jobs of the connector"]
 ```
 
@@ -459,7 +459,7 @@ A connector stores the connection details of one source database, with its secre
 
 | Field                | Type   | Required | Description                                                                            |
 |:---------------------|:-------|:---------|:---------------------------------------------------------------------------------------|
-| `id`                 | string | No       | A UUID chosen by the client (for example a catalog). Generated when omitted.           |
+| `id`                 | string | Yes      | Unique connector identifier (UUID).                                                    |
 | `name`               | string | Yes      | Unique, human-readable name, 1–255 characters.                                         |
 | `type`               | string | Yes      | A supported connector type (`db2_for_i`).                                              |
 | `connection_details` | object | Yes      | Fields for the type, as in the connector types table. Unknown fields are rejected.     |
@@ -691,11 +691,11 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 **Constraints.**
 
 - `idx_jobs_single_running`: a unique partial index that allows at most one `running` job.
-- `forecasters.name` is unique.
+- `forecasters` primary key `(connector_id, version)` guarantees uniqueness per connector.
 - A CHECK constraint on `jobs` requires a `queued` or `running` job to keep its `connector_id`.
 - `forecasters.job_id` is `ON DELETE SET NULL`, so deleting an old job does not delete its forecaster.
 
-**Run history.** The `jobs` table is also the run history. Each finished job keeps its `status`, `error`, timestamps (the time taken is `finished_at - started_at`) and `result` (algorithm, validation metric and score, training time, rows read, attempts). After each run finishes, the API keeps the newest `FORECASTER_RETENTION_COUNT` finished jobs (`completed` or `failed`) of that `connector_id` and deletes the older ones. `queued` and `running` jobs are never deleted. The details a forecaster needs to be served live in its own `metrics`, so they survive the deletion of its job.
+**Run history.** The `jobs` table is also the run history. Each finished job keeps its `status`, `message`, timestamps (the time taken is `finished_at - started_at`) and `result` (algorithm, validation metric and score, training time, rows read, attempts). After each run finishes, the API keeps the newest `FORECASTER_RETENTION_COUNT` finished jobs (`completed` or `failed`) of that `connector_id` and deletes the older ones. `queued` and `running` jobs are never deleted. The details a forecaster needs to be served live in its own `metrics`, so they survive the deletion of its job.
 
 ## 8. Data Loader
 
@@ -1016,7 +1016,7 @@ spec:
 └── fc_<connector_id>_<version+1>/ ...
 ```
 
-**One Triton model per forecaster version.** The Triton model name is `fc_<connector_id>_<version>` (`forecasters.name`, where `version` is `jobs.seq`), and its single Triton model version directory is always `1`. This follows from how Triton works and from Section 2.2:
+**One Triton model per forecaster version.** The Triton model name is `fc_<connector_id>_<version>` (where `version` is `jobs.seq`), and its single Triton model version directory is always `1`. This follows from how Triton works and from Section 2.2:
 
 - Triton's unload call acts on a **whole model with all its versions**. There is no call to unload one version of a model.
 - The service keeps several versions per connector and retires the oldest while the newest keeps serving.
@@ -1195,7 +1195,7 @@ These stories break the design above into units of work. Each one has a descript
 **Acceptance criteria.**
 
 - The init container creates `connectors`, `training_configs`, `jobs` and `forecasters` with the columns in the Database Tables section, and runs again without error.
-- The constraints exist: the unique partial index `idx_jobs_single_running`, the unique `forecasters.name`, the CHECK constraint that keeps `connector_id` on a `queued` or `running` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
+- The constraints exist: the unique partial index `idx_jobs_single_running`, the primary key `(connector_id, version)` on `forecasters`, the CHECK constraint that keeps `connector_id` on a `queued` or `running` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
 - `jobs.seq` is an identity column.
 - The `scheduler` schema exists for the APScheduler job store.
 - The restricted `forecast_worker` role has column-level grants: it can read the connector and its training configuration, and can write the job's `result` and `message`. It has no write grant on `forecasters`.

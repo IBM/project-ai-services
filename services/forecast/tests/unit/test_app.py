@@ -101,6 +101,14 @@ def test_empty_request_id_is_replaced(client):
     assert response.headers["X-Request-ID"]
 
 
+@pytest.mark.unit
+def test_overlong_request_id_is_replaced(client):
+    overlong_id = "a" * 150
+    response = client.get("/health", headers={"X-Request-ID": overlong_id})
+    assert response.headers["X-Request-ID"]
+    assert response.headers["X-Request-ID"] != overlong_id
+
+
 # ---------------------------------------------------------------------------
 # Error envelope
 # ---------------------------------------------------------------------------
