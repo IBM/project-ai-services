@@ -46,9 +46,9 @@ func (m ModelCatalog) ComponentTypeInfos() map[string]types.ComponentType {
 	infos := make(map[string]types.ComponentType)
 
 	for _, id := range m.ComponentTypes() {
-		opts := &types.ModelDeployOptions{ComponentType: types.ComponentType{ID: id}}
-		catalogmodels.SetComponentTypeNames(opts, comps)
-		infos[id] = opts.ComponentType
+		ct := types.ComponentType{ID: id}
+		catalogmodels.SetComponentTypeNames(&ct, comps)
+		infos[id] = ct
 	}
 
 	return infos

@@ -318,7 +318,7 @@ func TestCheckDeployOptions(t *testing.T) {
 			name:    "model with no provider",
 			mutate:  func(*apimodels.CreateModelRequest) {},
 			options: options("llm"),
-			wantMsg: `is not available for local provider "vllm-cpu"; it is offered by: `,
+			wantMsg: `is not available for any provider`,
 		},
 	}
 

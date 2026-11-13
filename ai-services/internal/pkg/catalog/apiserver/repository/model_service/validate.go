@@ -78,6 +78,10 @@ func checkDeployOptions(req apimodels.CreateModelRequest, options *types.ModelDe
 			req.Model, req.ComponentType, options.ComponentType.ID)
 	}
 
+	if len(options.Providers) == 0 {
+		return validators.BadRequest("model %q is not available for any provider", req.Model)
+	}
+
 	offered := make([]string, 0, len(options.Providers))
 
 	for _, p := range options.Providers {
