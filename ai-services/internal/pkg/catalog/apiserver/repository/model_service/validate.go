@@ -2,13 +2,17 @@ package modelservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
@@ -42,19 +46,54 @@ func statusesFor(deploymentType constants.DeploymentType) []string {
 	}
 }
 
-// validateCreateRequest performs the checks on a create request that are not expressed as
-// binding tags on apimodels.CreateModelRequest (required fields, name length and deployment_type
-// are enforced there). It is a pure function so it can be tested without any service dependencies.
-func validateCreateRequest(req apimodels.CreateModelRequest) error {
+// validateCreateRequest validates what the binding tags on apimodels.CreateModelRequest cannot:
+// the name, and the component type, model and provider against the catalog's deploy options.
+// Failures are 400s that say what is available.
+func (s *ModelService) validateCreateRequest(ctx context.Context, req apimodels.CreateModelRequest) error {
 	if err := validators.ValidateResourceName("Model name", req.Name); err != nil {
 		return err
 	}
 
-	// TODO(model-validation): validate req.Model against the catalog models (the upcoming
-	// GET /catalog/models listing, or the findModel helper) and reject unknown models with a 400.
-	// The model is no longer part of the provider params schema, so nothing validates it today.
+	if err := helpers.New(s.catalogProvider).ValidateType(req.ComponentType); err != nil {
+		return err
+	}
 
-	return nil
+	options, err := s.catalogProvider.GetModelDeployOptions(ctx, req.Model, "")
+	if errors.Is(err, catalog.ErrModelNotFound) {
+		return validators.BadRequest("invalid model %q; it is not in the catalog", req.Model)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to get deploy options of model %q: %w", req.Model, err)
+	}
+
+	return checkDeployOptions(req, options)
+}
+
+// checkDeployOptions checks that the model described by options can serve the component type of
+// the request and be deployed with its provider and deployment type.
+func checkDeployOptions(req apimodels.CreateModelRequest, options *types.ModelDeployOptions) error {
+	if options.ComponentType.ID != req.ComponentType {
+		return validators.BadRequest("model %q cannot be used as component_type %q; it is a model of component_type: %s",
+			req.Model, req.ComponentType, options.ComponentType.ID)
+	}
+
+	if len(options.Providers) == 0 {
+		return validators.BadRequest("model %q is not available for any provider", req.Model)
+	}
+
+	offered := make([]string, 0, len(options.Providers))
+
+	for _, p := range options.Providers {
+		if p.ID == req.ProviderID && p.DeploymentType == req.DeploymentType {
+			return nil
+		}
+
+		offered = append(offered, fmt.Sprintf("%s (%s)", p.ID, p.DeploymentType))
+	}
+
+	return validators.BadRequest("model %q is not available for %s provider %q; it is offered by: %s",
+		req.Model, req.DeploymentType, req.ProviderID, strings.Join(offered, ", "))
 }
 
 // ensureNameAvailable rejects a name already used by a local model (component) or a remote

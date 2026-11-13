@@ -56,6 +56,7 @@ type ModelBase struct {
 	ID             string                   `json:"id"`
 	DeploymentType constants.DeploymentType `json:"deployment_type"`
 	Name           string                   `json:"name"`
+	ComponentType  types.ComponentType      `json:"component_type"`
 	Provider       types.ProviderInfo       `json:"provider"`
 	// Worker is null for remote models and for local models on the control-plane Podman socket.
 	Worker *types.ApplicationWorker `json:"worker"`
