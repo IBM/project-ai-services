@@ -81,8 +81,6 @@ func loadOrGeneratePKI(ctx context.Context, pkiDir string, runtimeType types.Run
 		return pkiResult{}, err
 	}
 
-	ensureCaddyReadable(ctx, pkiDir)
-
 	return res, nil
 }
 
@@ -174,23 +172,6 @@ func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []b
 	}
 
 	return nil
-}
-
-// ensureCaddyReadable makes the PKI directory and the encrypted server.key readable
-// by the Caddy container user. os.WriteFile and os.MkdirAll only apply a mode when
-// they create something, so a catalog installed before this change still has a 0700
-// directory and a 0600 server.key; this runs on every start to fix them.
-// It is best effort: a failure is logged but must not stop the gateway from starting
-// (it only affects Caddy's private ingress). ca.key is deliberately left at 0600.
-func ensureCaddyReadable(ctx context.Context, pkiDir string) {
-	if err := os.Chmod(pkiDir, dirPerm); err != nil { //nolint:gosec // Caddy runs as a different uid and must traverse the directory
-		logger.WarningfCtx(ctx, "worker gateway: cannot make %s readable for Caddy: %v", pkiDir, err)
-	}
-
-	keyPath := filepath.Join(pkiDir, "server.key")
-	if err := os.Chmod(keyPath, keyPerm); err != nil { //nolint:gosec // the file is AES-GCM encrypted; Caddy decrypts it in memory
-		logger.WarningfCtx(ctx, "worker gateway: cannot make %s readable for Caddy: %v", keyPath, err)
-	}
 }
 
 // generateAndPersistPKI creates a new ECDSA P-256 root CA and signs a server
