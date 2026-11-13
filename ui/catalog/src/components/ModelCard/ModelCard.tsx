@@ -1,17 +1,20 @@
 import { Tag } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Badge, Deploy, ArrowRight } from "@carbon/icons-react";
-import type { ModelProvider, ComponentType } from "@/api/models.api";
+import type {
+  CatalogModelProvider,
+  ModelComponentType,
+} from "@/types/api.types";
 import { PROVIDER_TAG_LABELS } from "@/constants/app.constants";
 import styles from "./ModelCard.module.scss";
 
 export interface ModelCardProps {
   id: string;
   name: string;
-  componentType: ComponentType;
+  componentType: ModelComponentType;
   description: string;
   certifiedBy: string;
-  providers: ModelProvider[];
+  providers: CatalogModelProvider[];
   onDeploy?: (id: string) => void;
 }
 

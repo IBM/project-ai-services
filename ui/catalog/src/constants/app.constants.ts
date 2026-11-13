@@ -50,8 +50,11 @@ export const WORKER_RUNTIME_LABELS: Record<
   },
 } as const;
 
+// TODO: Make provider tag labels customizable and receive tag metadata from the backend API.
 export const PROVIDER_TAG_LABELS: Record<string, string> = {
-  "vllm-spyre": "Spyre",
+  "vllm-spyre": "IBM Spyre",
   "vllm-cpu": "CPU",
-  watsonx: "watsonx",
+  watsonx: "Watsonx",
+  amd: "AMD GPU",
+  hosted_vllm: "Remote",
 };

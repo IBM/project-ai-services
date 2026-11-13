@@ -31,11 +31,13 @@ const Models = () => {
           contained={false}
           className={styles.tabList}
         >
-          <Tab>Deployments</Tab>
+          <Tab>Model deployments</Tab>
           <Tab>Catalog</Tab>
         </TabList>
         <TabPanels>
-          <TabPanel />
+          <TabPanel>
+            <ModelsTable />
+          </TabPanel>
           <TabPanel>
             {isLoading ? (
               <div className={styles.catalogGrid}>
@@ -67,10 +69,6 @@ const Models = () => {
               </div>
             )}
           </TabPanel>
-          <TabPanel>
-            <ModelsTable />
-          </TabPanel>
-          <TabPanel />
         </TabPanels>
       </Tabs>
     </div>

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CatalogModel } from "@/api/models.api";
+import type { CatalogModel } from "@/types/api.types";
 
 interface ModelsState {
   models: CatalogModel[] | null;

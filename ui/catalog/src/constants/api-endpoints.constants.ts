@@ -62,8 +62,5 @@ export const WORKERS_ENDPOINTS = {
 
 export const MODEL_MANAGEMENT_ENDPOINTS = {
   GET_CATALOG_MODELS: "/catalog/models",
-};
-
-export const MODEL_ENDPOINTS = {
   LIST_MODELS: "/models",
 };
