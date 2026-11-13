@@ -261,6 +261,74 @@ CONFIDENCE: 0.5"""
         
         assert result.result == ValidationResult.VALIDATION_ERROR
 
+    def test_parse_response_with_markdown_bold(self):
+        """LLMs sometimes wrap keywords in markdown bold, e.g. **VERDICT:** SÛR."""
+        response_text = (
+            "**VERDICT:** SÛR  \n"
+            "**RAISON:** Aucun schéma d'injection détecté.  \n"
+            "**CONFIANCE:** 0.98  \n\n"
+            "Explication supplémentaire."
+        )
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="SÛR",
+            invalid_verdict="NON SÛR",
+            invalid_result_type=ValidationResult.UNSAFE_INJECTION,
+            validation_type="Injection Detection",
+            language="FR"
+        )
+
+        assert result.result == ValidationResult.VALID
+        assert result.reason == "Aucun schéma d'injection détecté."
+        assert result._confidence == 0.98
+
+    def test_parse_response_with_markdown_bold_around_colon_and_value(self):
+        """Bold may also wrap the keyword only, or the whole line."""
+        response_text = "**VERDICT**: INVALID\n**REASON: Contradictory instructions.**\n__CONFIDENCE:__ 0.8"
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="VALID",
+            invalid_verdict="INVALID",
+            invalid_result_type=ValidationResult.INVALID_SEMANTIC,
+            validation_type="Semantic"
+        )
+
+        assert result.result == ValidationResult.INVALID_SEMANTIC
+        assert result.reason == "Contradictory instructions."
+        assert result._confidence == 0.8
+
+    def test_parse_response_with_backticks(self):
+        """Inline code formatting around keywords is ignored."""
+        response_text = "`VERDICT:` VALID\n`REASON:` Fine.\n`CONFIDENCE:` 0.9"
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="VALID",
+            invalid_verdict="INVALID",
+            invalid_result_type=ValidationResult.INVALID_SEMANTIC,
+            validation_type="Semantic"
+        )
+
+        assert result.result == ValidationResult.VALID
+        assert result._confidence == 0.9
+
+    def test_parse_response_keeps_single_asterisk_in_reason(self):
+        """Single asterisks (e.g. IBM i pool names like *MACHINE) are not markdown and are preserved."""
+        response_text = "**VERDICT:** SAFE\n**REASON:** Mentions pool *MACHINE only.\n**CONFIDENCE:** 0.9"
+
+        result = _parse_validation_response(
+            response_text,
+            valid_verdict="SAFE",
+            invalid_verdict="UNSAFE",
+            invalid_result_type=ValidationResult.UNSAFE_INJECTION,
+            validation_type="Injection Detection"
+        )
+
+        assert result.result == ValidationResult.VALID
+        assert result.reason == "Mentions pool *MACHINE only."
+
 
 @pytest.mark.unit
 class TestCallLLMForValidation:
@@ -331,6 +399,22 @@ class TestCallLLMForValidation:
         
         result = _call_llm_for_validation("Test prompt", "Semantic")
         assert result == ""
+    
+    @patch('chatbot.prompt_validator.misc_utils.SESSION')
+    @patch('chatbot.prompt_validator.settings')
+    def test_call_llm_uses_30_second_timeout(self, mock_settings, mock_session):
+        """Test the LLM validation request uses a 30 second timeout."""
+        mock_settings.llm.endpoint = "http://localhost:8000"
+        mock_settings.llm.model = "test-model"
+        mock_settings.llm.api_key.get_secret_value.return_value = ""
+        
+        mock_response = Mock()
+        mock_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        mock_session.post.return_value = mock_response
+        
+        _call_llm_for_validation("Test prompt", "Semantic")
+        
+        assert mock_session.post.call_args.kwargs["timeout"] == 30.0
 
 
 @pytest.mark.unit
@@ -366,13 +450,13 @@ CONFIDENCE: 0.88"""
     
     @patch('chatbot.prompt_validator._call_llm_for_validation')
     def test_validate_semantic_quality_llm_unavailable(self, mock_call_llm):
-        """Test semantic validation when LLM is unavailable."""
+        """Test semantic validation fails when LLM is unavailable (timeout/error)."""
         mock_call_llm.return_value = ""
         
         result = validate_semantic_quality("Test prompt", "system")
         
-        assert result.is_valid()
-        assert result.result == ValidationResult.VALIDATION_DISABLED
+        assert not result.is_valid()
+        assert result.result == ValidationResult.VALIDATION_ERROR
         assert "LLM validation unavailable" in result.reason
 
 
@@ -408,13 +492,13 @@ CONFIDENCE: 0.95"""
     
     @patch('chatbot.prompt_validator._call_llm_for_validation')
     def test_detect_injection_llm_unavailable(self, mock_call_llm):
-        """Test injection detection when LLM is unavailable."""
+        """Test injection detection fails when LLM is unavailable (timeout/error)."""
         mock_call_llm.return_value = ""
         
         result = detect_prompt_injection("Test prompt")
         
-        assert result.is_valid()
-        assert result.result == ValidationResult.VALIDATION_DISABLED
+        assert not result.is_valid()
+        assert result.result == ValidationResult.VALIDATION_ERROR
         assert "LLM injection detection unavailable" in result.reason
 
 
@@ -505,6 +589,16 @@ class TestValidatePromptWithLLM:
         assert result.is_valid()
         mock_injection.assert_called_once()
         mock_semantic.assert_not_called()
+    
+    @patch('chatbot.prompt_validator._call_llm_for_validation')
+    def test_validate_llm_unavailable_fails(self, mock_call_llm):
+        """Test overall validation fails when the LLM does not respond."""
+        mock_call_llm.return_value = ""
+        
+        result = validate_prompt_with_llm("Test prompt", "system")
+        
+        assert not result.is_valid()
+        assert result.result == ValidationResult.VALIDATION_ERROR
     
     @patch('chatbot.prompt_validator.detect_prompt_injection')
     @patch('chatbot.prompt_validator.validate_semantic_quality')

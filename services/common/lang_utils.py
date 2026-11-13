@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from typing import Dict
 
@@ -14,6 +15,15 @@ from common.settings import settings
 logger = get_logger("LANG")
 
 _language_detector = None
+
+# Minimum length (characters) accepted for a custom system prompt
+MIN_SYSTEM_PROMPT_LENGTH = 10
+
+# Maximum length (characters) accepted for a custom system prompt
+MAX_SYSTEM_PROMPT_LENGTH = 5000
+
+# Regular expression pattern to strip markdown formatting (bold, code emphasis) from LLM responses
+MARKDOWN_EMPHASIS_RE = re.compile(r"\*\*|__|`")
 
 # ---------------------------------------------------------------------------
 # Language codes
@@ -141,7 +151,7 @@ def get_prompt_for_language(lang: str, prompts: dict[str, str]) -> str:
     Used for non-English languages only (English uses conversational mode).
 
     Args:
-        lang: Language code (DE, etc.)
+        lang: Language code (EN, DE, IT, FR or JA)
         prompts: Dictionary mapping language codes to prompt templates
 
     Returns:
@@ -183,7 +193,7 @@ def detect_language(text: str, min_confidence: float = settings.language.languag
     """
     Detect the language of a text string.
 
-    Returns a language code (EN, DE) if confidence >= min_confidence, else EN by default.
+    Returns a language code (EN, DE, IT, FR or JA) if confidence >= min_confidence, else EN by default.
     Thread-safe — can be called from any endpoint or background task.
     """
 

@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from common.misc_utils import get_logger, create_llm_session
 import common.misc_utils as misc_utils
 from common.settings import Settings as CommonSettings
+from common.lang_utils import MAX_SYSTEM_PROMPT_LENGTH, MIN_SYSTEM_PROMPT_LENGTH
 
 logger = get_logger("settings")
 
@@ -626,6 +627,21 @@ class RAGConfig(BaseSettings):
         """
         # Handle custom system_prompt
         if self.system_prompt:
+            v_stripped = self.system_prompt.strip()
+            if len(v_stripped) < MIN_SYSTEM_PROMPT_LENGTH:
+                logger.warning(
+                    f"Custom system_prompt too short ({len(v_stripped)} chars). "
+                    f"Falling back to default system prompt."
+                )
+                return
+            if len(v_stripped) > MAX_SYSTEM_PROMPT_LENGTH:
+                logger.warning(
+                    f"Custom system_prompt too long ({len(v_stripped)} chars, "
+                    f"max {MAX_SYSTEM_PROMPT_LENGTH}). Falling back to default system prompt."
+                )
+                return
+            
+            self.system_prompt = v_stripped
             try:
                 from common.lang_utils import detect_language, LanguageCodes
                 
@@ -670,7 +686,11 @@ class RAGConfig(BaseSettings):
                             f"All validation checks passed"
                         )
                     except Exception as e:
-                        logger.warning(f"Error during LLM validation: {e}. Proceeding with basic validation only.")
+                        logger.warning(
+                            f"Error during LLM validation: {e}. "
+                            f"Falling back to default system prompt."
+                        )
+                        return
                     finally:
                         if created_temp_session and misc_utils.SESSION is not None:
                             try:
@@ -729,73 +749,44 @@ class RAGConfig(BaseSettings):
             return 3
         return v
 
-    @field_validator('english', mode='after')
+    @field_validator('english', 'german', 'italian', 'french', 'japanese', mode='after')
     @classmethod
-    def validate_english_system_prompt(cls, v, info):
-        """Validate English system_prompt with language detection, warning fallback and LLM validation."""
-        default_prompt = cls.EnglishConfig.DEFAULT_SYSTEM_PROMPT
-        system_prompt = v.system_prompt
-        
-        if system_prompt == default_prompt:
-            return v
-        
-        # Basic validation: check if prompt is not empty and has reasonable length
-        v_stripped = system_prompt.strip()
-        if len(v_stripped) == 0:
-            v.system_prompt = default_prompt
-            return v
-        
-        if len(v_stripped) < 10:
-            logger.warning(
-                f"English system_prompt too short ({len(v_stripped)} chars). "
-                "Falling back to default system prompt."
-            )
-            v.system_prompt = default_prompt
-            return v
-        
-        if len(v_stripped) > 5000:
-            logger.warning(
-                f"English system_prompt too long ({len(v_stripped)} chars). "
-                "Truncating to 5000 characters."
-            )
-            v_stripped = v_stripped[:5000]
-        
-        logger.info("Using custom English system_prompt")
-        v.system_prompt = v_stripped
-        return v
+    def validate_language_system_prompt(cls, v, info):
+        """Validate a language config's system_prompt (same rules for every supported language).
 
-    @field_validator('german', mode='after')
-    @classmethod
-    def validate_german_system_prompt(cls, v, info):
-        """Validate German system_prompt with language detection, warning fallback and LLM validation."""
-        default_prompt = cls.GermanConfig.DEFAULT_SYSTEM_PROMPT
+        Falls back to the language's default prompt when the prompt is empty, shorter
+        than MIN_SYSTEM_PROMPT_LENGTH characters, or longer than MAX_SYSTEM_PROMPT_LENGTH. Otherwise the
+        stripped prompt is kept.
+        """
+        default_prompt = type(v).DEFAULT_SYSTEM_PROMPT
         system_prompt = v.system_prompt
         
         if system_prompt == default_prompt:
             return v
         
-        # Basic validation: check if prompt is not empty and has reasonable length
+        lang_name = info.field_name.capitalize()
         v_stripped = system_prompt.strip()
         if len(v_stripped) == 0:
             v.system_prompt = default_prompt
             return v
         
-        if len(v_stripped) < 10:
+        if len(v_stripped) < MIN_SYSTEM_PROMPT_LENGTH:
             logger.warning(
-                f"German system_prompt too short ({len(v_stripped)} chars). "
+                f"{lang_name} system_prompt too short ({len(v_stripped)} chars). "
                 "Falling back to default system prompt."
             )
             v.system_prompt = default_prompt
             return v
         
-        if len(v_stripped) > 5000:
+        if len(v_stripped) > MAX_SYSTEM_PROMPT_LENGTH:
             logger.warning(
-                f"German system_prompt too long ({len(v_stripped)} chars). "
-                "Truncating to 5000 characters."
+                f"{lang_name} system_prompt too long ({len(v_stripped)} chars, "
+                f"max {MAX_SYSTEM_PROMPT_LENGTH}). Falling back to default system prompt."
             )
-            v_stripped = v_stripped[:5000]
+            v.system_prompt = default_prompt
+            return v
         
-        logger.info("Using custom German system_prompt")
+        logger.info(f"Using custom {lang_name} system_prompt")
         v.system_prompt = v_stripped
         return v
 
