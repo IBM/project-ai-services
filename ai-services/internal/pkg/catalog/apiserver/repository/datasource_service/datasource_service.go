@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -584,12 +585,9 @@ func (s *DatasourceService) countDatasourcesForService(ctx context.Context, serv
 		return 0, fmt.Errorf("failed to load connectors for service %s: %w", serviceID, err)
 	}
 
-	connectorTypes := make([]string, 0, len(connectors))
-	for _, c := range connectors {
-		connectorTypes = append(connectorTypes, c.Type)
-	}
-
-	return validators.CountDatasourceConnectors(connectorTypes), nil
+	return validators.CountDatasourceConnectors(maps.Values(connectors), func(c dbmodels.Connector) string {
+		return c.Type
+	}), nil
 }
 
 // validateServiceConstraints checks provider-compatibility and max-connections constraints for each

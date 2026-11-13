@@ -3,6 +3,7 @@ package datasourceservice
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -186,13 +187,15 @@ func TestCountDatasourcesForService_NoConnectors(t *testing.T) {
 }
 
 func TestCountDatasourceConnectors_MixedTypes(t *testing.T) {
-	got := validators.CountDatasourceConnectors([]string{
+	identity := func(s string) string { return s }
+
+	got := validators.CountDatasourceConnectors(slices.Values([]string{
 		catalogconstants.ConnectorTypeDatasource,
 		catalogconstants.ConnectorTypeModels,
 		catalogconstants.ConnectorTypeDatasource,
 		"other",
-	})
+	}), identity)
 
 	assert.Equal(t, 2, got)
-	assert.Equal(t, 0, validators.CountDatasourceConnectors(nil))
+	assert.Equal(t, 0, validators.CountDatasourceConnectors(slices.Values([]string(nil)), identity))
 }

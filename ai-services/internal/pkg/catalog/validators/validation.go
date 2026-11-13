@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"regexp"
 	"slices"
@@ -560,15 +561,16 @@ func validateConnectorInDB(
 	return ValidateProviderSupported(catalogService, connector.Provider, serviceCatalogID)
 }
 
-// CountDatasourceConnectors returns how many of the given connector type strings are datasource
-// connectors. It is the single source of truth for max_connections counting, shared by the
-// creation-time check and the post-creation connect check, so connectors of other types
-// (e.g. remote model connectors) never count against datasource.max_connections.
-func CountDatasourceConnectors(connectorTypes []string) int {
+// CountDatasourceConnectors returns how many of the given items are datasource connectors,
+// using typeOf to extract each item's connector type. It is the single source of truth for
+// max_connections counting, shared by the creation-time check and the post-creation connect
+// check, so connectors of other types (e.g. remote model connectors) never count against
+// datasource.max_connections.
+func CountDatasourceConnectors[T any](items iter.Seq[T], typeOf func(T) string) int {
 	var count int
 
-	for _, t := range connectorTypes {
-		if t == catalogconstants.ConnectorTypeDatasource {
+	for item := range items {
+		if typeOf(item) == catalogconstants.ConnectorTypeDatasource {
 			count++
 		}
 	}
@@ -585,12 +587,9 @@ func validateMaxConnectionsAtCreation(service apimodels.Service, catalogService 
 
 	max := *catalogService.Datasource.MaxConnections
 
-	refTypes := make([]string, 0, len(service.Connectors))
-	for _, ref := range service.Connectors {
-		refTypes = append(refTypes, ref.Type)
-	}
-
-	count := CountDatasourceConnectors(refTypes)
+	count := CountDatasourceConnectors(slices.Values(service.Connectors), func(ref apimodels.ConnectorRef) string {
+		return ref.Type
+	})
 
 	if count > max {
 		return BadRequest(
