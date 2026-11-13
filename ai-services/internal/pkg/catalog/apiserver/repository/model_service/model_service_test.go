@@ -503,7 +503,7 @@ func TestCreateModel_Local_InitialRow(t *testing.T) {
 		wantProfile any
 	}{
 		{name: "minimal request", mutate: func(*apimodels.CreateModelRequest) {}},
-		{name: "request with a profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "small" }, wantProfile: "small"},
+		{name: "request with a profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "standard" }, wantProfile: "standard"},
 	}
 
 	for _, tt := range tests {
@@ -895,14 +895,24 @@ func TestPlanLocal(t *testing.T) {
 			// The component row keeps the non-sensitive params; credentials only reach the pod via the values.
 			name: "component metadata keeps the profile and strips sensitive params",
 			mutate: func(r *apimodels.CreateModelRequest) {
-				r.Profile = "small"
+				r.Profile = "standard"
 				r.Params = map[string]any{"apiKey": "k"}
 			},
 			check: func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan) {
 				assert.NotContains(t, plan.Metadata, "apiKey", "params are not stored flat")
 				assert.Empty(t, plan.Metadata["params"], "credentials must never be persisted")
 				assert.Equal(t, req.Model, plan.Metadata["model"])
-				assert.Equal(t, "small", plan.Metadata["profile"])
+				assert.Equal(t, "standard", plan.Metadata["profile"])
+			},
+		},
+		{
+			// The templates read hardware from the profile; without a requested profile the default applies.
+			name:   "profile values reach the template values",
+			mutate: func(*apimodels.CreateModelRequest) {},
+			check: func(t *testing.T, _ apimodels.CreateModelRequest, plan *types.LocalPlan) {
+				assert.Equal(t, "standard", plan.Values["profile"])
+				assert.Equal(t, 8096, plan.Values["maxModelLen"])
+				assert.Contains(t, plan.Values, "resources")
 			},
 		},
 	}
@@ -918,6 +928,32 @@ func TestPlanLocal(t *testing.T) {
 			require.NoError(t, err)
 
 			tt.check(t, req, plan)
+		})
+	}
+}
+
+// A model or profile the provider does not define is a client error, not a failed deployment.
+func TestPlanLocal_RejectsUnknownModelOrProfile(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*apimodels.CreateModelRequest)
+	}{
+		{name: "unknown profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "no-such-profile" }},
+		{name: "unknown model", mutate: func(r *apimodels.CreateModelRequest) { r.Model = "no/such-model" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
+
+			req := localRequest()
+			tt.mutate(&req)
+
+			_, err := svc.planner.PlanLocal(context.Background(), req)
+
+			var valErr *validators.ValidationError
+			require.ErrorAs(t, err, &valErr)
+			assert.Equal(t, http.StatusBadRequest, valErr.Code)
 		})
 	}
 }

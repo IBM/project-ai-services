@@ -3,12 +3,15 @@ package catalog
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	texttemplate "text/template"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	v1 "go.podman.io/podman/v6/pkg/k8s.io/api/core/v1"
 )
 
 // TestProcessTemplates_Success tests successful template processing.
@@ -779,6 +782,201 @@ func TestFetchSpyreCardsFromPodAnnotations(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedTotal, total)
 				assert.Equal(t, tt.expectedContainerMap, containerMap)
+			}
+		})
+	}
+}
+
+// renderPods renders the real podman templates of a component with the values resolved for model and
+// profile, and returns the Pod specs keyed by template name.
+func renderPods(t *testing.T, componentType, providerID, model, profile string) map[string]*models.PodSpec {
+	t.Helper()
+
+	return renderPodsWith(t, componentType, providerID, model, profile, nil)
+}
+
+// renderPodsWith is renderPods with a hook to change the resolved values before rendering.
+func renderPodsWith(t *testing.T, componentType, providerID, model, profile string, mutate func(map[string]any)) map[string]*models.PodSpec {
+	t.Helper()
+
+	p := newPodmanProvider(t)
+	values, err := p.LoadComponentValuesForModel(componentType, providerID, model, profile, nil)
+	require.NoError(t, err)
+	if mutate != nil {
+		mutate(values)
+	}
+
+	templates, err := p.LoadComponentTemplates(componentType, providerID)
+	require.NoError(t, err)
+
+	pods := map[string]*models.PodSpec{}
+	err = p.ProcessTemplates(context.Background(), templates, values, "test", func(name string, spec *models.PodSpec) error {
+		if spec.Kind == "Pod" {
+			pods[name] = spec
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
+	require.Len(t, pods, 1, "expected exactly one Pod template")
+
+	return pods
+}
+
+func onlyPod(pods map[string]*models.PodSpec) *models.PodSpec {
+	for _, pod := range pods {
+		return pod
+	}
+
+	return nil
+}
+
+func envOf(c v1.Container) map[string]string {
+	env := map[string]string{}
+	for _, e := range c.Env {
+		env[e.Name] = e.Value
+	}
+
+	return env
+}
+
+func shmSizeLimit(pod *models.PodSpec) string {
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == "dshm" && v.EmptyDir != nil && v.EmptyDir.SizeLimit != nil {
+			return v.EmptyDir.SizeLimit.String()
+		}
+	}
+
+	return ""
+}
+
+// The pod a profile produces must follow the profile: cards, memory, shm and context length.
+func TestComponentTemplates_FollowProfile(t *testing.T) {
+	const (
+		granite33 = "ibm-granite/granite-3.3-8b-instruct"
+		vfio      = v1.ResourceName("podman.io/device=/dev/vfio")
+	)
+
+	t.Run("vllm-spyre llm", func(t *testing.T) {
+		tests := []struct {
+			profile   string
+			cards     string
+			memory    int64
+			shm       string
+			modelLen  string
+			cardCount int
+		}{
+			{"standard", "4", 214748364800, "2Gi", "32768", 4},
+			{"balanced", "2", 161061273600, "2Gi", "8192", 2},
+			{"compact-4k", "1", 107374182400, "2Gi", "4096", 1},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.profile, func(t *testing.T) {
+				pods := renderPods(t, "llm", "vllm-spyre", granite33, tt.profile)
+				pod := onlyPod(pods)
+				c := pod.Spec.Containers[0]
+				env := envOf(c)
+
+				assert.Equal(t, tt.cards, pod.Annotations["ai-services.io/llm--spyre-cards"])
+				assert.Equal(t, tt.cards, env["AIU_WORLD_SIZE"])
+				assert.Equal(t, tt.modelLen, env["MAX_MODEL_LEN"])
+				req := c.Resources.Requests[vfio]
+				assert.Equal(t, tt.cards, req.String(), "device request")
+				assert.EqualValues(t, tt.memory, c.Resources.Requests.Memory().Value())
+				assert.EqualValues(t, tt.memory, c.Resources.Limits.Memory().Value())
+				assert.Equal(t, tt.shm, shmSizeLimit(pod))
+
+				// The planner sizes the Spyre card pool from the rendered annotation.
+				templates, err := newPodmanProvider(t).LoadComponentTemplates("llm", "vllm-spyre")
+				require.NoError(t, err)
+				values, err := newPodmanProvider(t).LoadComponentValuesForModel("llm", "vllm-spyre", granite33, tt.profile, nil)
+				require.NoError(t, err)
+				cards, err := newPodmanProvider(t).CollectSpyreCardsFromTemplates(context.Background(), templates, values)
+				require.NoError(t, err)
+				assert.Equal(t, tt.cardCount, cards)
+			})
+		}
+	})
+}
+
+// Callers that render a model component without a request (image pulls) must still get the
+// provider's default profile, or the profile-driven templates fail to render.
+func TestAddComponentImages_ProfileDrivenTemplates(t *testing.T) {
+	p := newPodmanProvider(t)
+
+	for _, provider := range []string{"vllm-spyre", "vllm-cpu"} {
+		t.Run(provider, func(t *testing.T) {
+			images := map[string]bool{}
+			require.NoError(t, p.addComponentImages(context.Background(), "llm", provider, images))
+			assert.Len(t, images, 1)
+		})
+	}
+}
+
+// Every Podman model template must take its hardware numbers from the values, not from constants.
+// The sentinels differ from every profile, so a hardcoded number cannot pass by coincidence.
+func TestComponentTemplates_ReadHardwareValues(t *testing.T) {
+	const (
+		sentinelMem = int64(12345678901)
+		sentinelLen = 1234
+		vfio        = v1.ResourceName("podman.io/device=/dev/vfio")
+	)
+
+	withSentinels := func(cards int) func(map[string]any) {
+		return func(v map[string]any) {
+			res := map[string]any{"memory": int(sentinelMem)}
+			if cards > 0 {
+				res["accelerators"] = map[string]int{"ibm.com/spyre_pf": cards}
+			}
+			v["resources"] = res
+			v["shmSize"] = "7Gi"
+			v["maxModelLen"] = sentinelLen
+			v["maxBatchSize"] = 77
+			v["maxNumBatchedTokens"] = 4321
+		}
+	}
+
+	tests := []struct {
+		componentType, provider, model string
+		cards                          int
+		check                          func(t *testing.T, pod *models.PodSpec)
+	}{
+		{"llm", "vllm-spyre", "ibm-granite/granite-3.3-8b-instruct", 3, func(t *testing.T, pod *models.PodSpec) {
+			env := envOf(pod.Spec.Containers[0])
+			assert.Equal(t, "3", pod.Annotations["ai-services.io/llm--spyre-cards"])
+			assert.Equal(t, "3", env["AIU_WORLD_SIZE"])
+			assert.Equal(t, "1234", env["MAX_MODEL_LEN"])
+			assert.Equal(t, "77", env["MAX_BATCH_SIZE"])
+			assert.Equal(t, "7Gi", shmSizeLimit(pod))
+		}},
+		{"llm", "vllm-cpu", "ibm-granite/granite-3.3-8b-instruct", 0, func(t *testing.T, pod *models.PodSpec) {
+			args := strings.Join(pod.Spec.Containers[0].Args, " ")
+			assert.Contains(t, args, "--max-model-len=1234")
+			assert.Contains(t, args, "--max-num-batched-tokens=4321")
+		}},
+		{"reranker", "vllm-spyre", "BAAI/bge-reranker-v2-m3", 3, func(t *testing.T, pod *models.PodSpec) {
+			assert.Equal(t, "3", pod.Annotations["ai-services.io/reranker--spyre-cards"])
+			assert.Equal(t, "3", envOf(pod.Spec.Containers[0])["AIU_WORLD_SIZE"])
+		}},
+		{"reranker", "vllm-cpu", "BAAI/bge-reranker-v2-m3", 0, nil},
+		{"embedding", "vllm-cpu", "ibm-granite/granite-embedding-278m-multilingual", 0, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.componentType+"/"+tt.provider, func(t *testing.T) {
+			pod := onlyPod(renderPodsWith(t, tt.componentType, tt.provider, tt.model, "", withSentinels(tt.cards)))
+			c := pod.Spec.Containers[0]
+
+			assert.Equal(t, sentinelMem, c.Resources.Requests.Memory().Value(), "memory request")
+			assert.Equal(t, sentinelMem, c.Resources.Limits.Memory().Value(), "memory limit")
+
+			if tt.cards > 0 {
+				req := c.Resources.Requests[vfio]
+				assert.Equal(t, strconv.Itoa(tt.cards), req.String(), "device request")
+			}
+			if tt.check != nil {
+				tt.check(t, pod)
 			}
 		})
 	}

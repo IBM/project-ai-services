@@ -16,6 +16,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -579,6 +580,15 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 		metadata, err := s.filterComponentMetadata(ctx, scopedProvider, comp.ComponentType, comp.ProviderID, comp.Params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to filter component metadata for %s: %w", hash, err)
+		}
+
+		// The profile is chosen by the backend, so it is not in params and
+		// is added here (after schema filtering, which would drop it) from the resolved values.
+		if profile, ok := comp.Values[profiles.ValuesKeyProfile].(string); ok && profile != "" {
+			if metadata == nil {
+				metadata = make(map[string]any)
+			}
+			metadata[constants.MetadataKeyProfile] = profile
 		}
 
 		component := &models.Component{
