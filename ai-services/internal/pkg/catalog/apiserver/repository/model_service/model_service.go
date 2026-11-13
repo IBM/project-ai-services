@@ -21,8 +21,6 @@ import (
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
 // ModelService implements the ModelServiceInterface for model management.
@@ -93,11 +91,6 @@ func NewModelService(
 // Errors of type *validators.ValidationError carry the HTTP status to return; any other error is
 // an internal failure.
 func (s *ModelService) CreateModel(ctx context.Context, req apimodels.CreateModelRequest) (*apimodels.CreateModelResponse, error) {
-	// Fail fast: models (local and remote) are not supported when the control plane runs on OpenShift.
-	if vars.RuntimeFactory != nil && vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
-		return nil, validators.BadRequest("models are unsupported on openshift runtime")
-	}
-
 	if err := validateCreateRequest(req); err != nil {
 		return nil, err
 	}
@@ -200,10 +193,6 @@ func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy
 // nothing is revoked or generated before the check passes. Errors of type *validators.ValidationError
 // carry the HTTP status to return; any other error is an internal failure.
 func (s *ModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.GenerateModelKeyResponse, error) {
-	if vars.RuntimeFactory != nil && vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
-		return nil, validators.BadRequest("models are unsupported on openshift runtime")
-	}
-
 	row, err := s.ownedModel(ctx, id, createdBy)
 	if err != nil {
 		return nil, err

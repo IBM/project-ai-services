@@ -11,8 +11,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 // Planner plans model deletions: it resolves where a model runs and which gateway route to remove.
@@ -34,13 +34,9 @@ func NewPlanner(provider *catalog.CatalogProvider, workers worker.Resolver) *Pla
 func (p *Planner) PlanLocal(ctx context.Context, comp *dbmodels.Component, workerName string) (*types.LocalPlan, error) {
 	workerName = worker.DefaultName(workerName)
 
-	rt, err := p.workers.NewRuntime(ctx, workerName, "")
+	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelNamespace(comp.ID))
 	if err != nil {
 		return nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
-	}
-
-	if rt.Type() != runtimeTypes.RuntimeTypePodman {
-		return nil, validators.Unprocessable("models are unsupported on %s runtime", rt.Type())
 	}
 
 	// The provider names the tokenize passthrough. A provider the catalog no longer lists (e.g. a

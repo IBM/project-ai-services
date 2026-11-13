@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deletion/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deletion/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deletion/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
@@ -45,7 +46,8 @@ func NewExecutor(
 		connectorRepo: connectorRepo,
 		gateway:       litellm.NewGateway(litellmClient),
 		deleters: map[runtimeTypes.RuntimeType]Deleter{
-			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeleter(componentRepo),
+			runtimeTypes.RuntimeTypePodman:    podman.NewPodmanDeleter(componentRepo),
+			runtimeTypes.RuntimeTypeOpenShift: openshift.NewOpenShiftDeleter(componentRepo),
 		},
 	}
 }
