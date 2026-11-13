@@ -38,6 +38,8 @@ from digitize.db.models import (
     DocumentSource,
     JobSource,
 )
+from digitize.connectors.models import LAST_SYNC_ERROR_PREFIX
+
 from digitize.db.manager import db_manager
 from digitize.db.connection import engine
 
@@ -220,6 +222,16 @@ def create_job(
         raise
 
 
+def _document_message(doc) -> Optional[str]:
+    """Build the human-readable message shown for shadow (already_exists / skipped) docs."""
+    metadata = doc.doc_metadata or {}
+    if doc.status == DocStatus.ALREADY_EXISTS.value:
+        return f"already exists: ingested as {metadata.get('existing_doc_name')}"
+    if doc.status == DocStatus.SKIPPED.value:
+        return f"skipped: duplicate of in progress {metadata.get('existing_doc_name')}"
+    return None
+
+
 def get_job(job_id: str) -> Optional[dict]:
     """
     Get job data from database.
@@ -244,8 +256,7 @@ def get_job(job_id: str) -> Optional[dict]:
                     id=doc.doc_id,
                     name=doc.name,
                     status=doc.status,
-                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
-                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
+                    message=_document_message(doc),
                 )
                 for doc in documents
             ]
@@ -314,8 +325,7 @@ def get_all_jobs(
                     id=doc.doc_id,
                     name=doc.name,
                     status=doc.status,
-                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
-                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
+                    message=_document_message(doc),
                 )
                 for doc in documents
             ]
@@ -478,11 +488,11 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
 
 def get_shadow_documents_for(doc_id: str) -> List[str]:
     """
-    Return the names of all 'already_exists' shadow document rows whose
+    Return the names of all 'already_exists'/'skipped' shadow document rows whose
     ``existing_doc_id`` metadata key references *doc_id*.
 
     These placeholder rows are created whenever a duplicate file is submitted
-    (the original was already ingested).  They will be automatically removed
+    (the original was already ingested or is in progress).  They will be automatically removed
     by :meth:`~digitize.db.manager.DatabaseManager.delete_document` when the
     original document is deleted, so callers should surface this list to the
     user before confirming deletion.
@@ -499,7 +509,9 @@ def get_shadow_documents_for(doc_id: str) -> List[str]:
             stmt = (
                 _select(Document.name)
                 .where(
-                    Document.status == DocStatus.ALREADY_EXISTS.value,
+                    Document.status.in_(
+                        [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                    ),
                     Document.doc_metadata["existing_doc_id"].as_string() == doc_id,
                 )
                 .order_by(Document.submitted_at)
@@ -1155,16 +1167,7 @@ class DatabaseStatusManager:
         # Perform database update
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
-            if success:
-                # Register the checksum when the document reaches any terminal success
-                # state (COMPLETED or COMPLETED_WITH_ERRORS) so future re-uploads of
-                # the same content are de-duplicated via document_checksum.
-                if (
-                    update_params.get("status") in [DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS]
-                    and "file_hash" in metadata_fields
-                ):
-                    db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)
-            else:
+            if not success:
                 logger.warning(f"Document {doc_id} not found in database for update")
 
     def _update_job(
@@ -1219,11 +1222,12 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics.
-        # ALREADY_EXISTS and COMPLETED_WITH_ERRORS are both terminal success states;
-        # count them with completed.
+        # ALREADY_EXISTS, SKIPPED and COMPLETED_WITH_ERRORS are all terminal success
+        # states; count them with completed.
         _terminal_ok = (
             DocStatus.COMPLETED.value,
             DocStatus.ALREADY_EXISTS.value,
+            DocStatus.SKIPPED.value,
             DocStatus.COMPLETED_WITH_ERRORS.value,
         )
         stats = {
@@ -1296,7 +1300,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name", "had_table_failures"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "existing_doc_id", "existing_doc_name", "had_table_failures"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
@@ -1520,7 +1524,8 @@ def init_sync_log_and_update_connector(
     Initialise a new sync run across two tables:
       - connector_sync_log: inserts a new row with status=STARTED and an
         auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
-      - connector: sets status=SYNCING on the matching row.
+      - connector: sets status=SYNCING on the matching row (message is kept so
+        a previous failure stays visible).
 
     Returns the generated seq value.
     """
@@ -1545,7 +1550,8 @@ def finalize_sync_log_and_update_connector(
         and optional file counts / error message.
       - connector: UPDATEs last_sync_at to now, status to the terminal
         state, and message — CANCELLED/FAILED both map to OUT_OF_SYNC so
-        the scheduler can retry; COMPLETED clears message to NULL.
+        the scheduler can retry; COMPLETED clears message to NULL, FAILED
+        sets it, CANCELLED leaves it unchanged.
 
     Returns True on success, False if the sync-log row was not found.
     """
@@ -1562,7 +1568,7 @@ def finalize_sync_log_and_update_connector(
     )
     if not found:
         return False
-    connector_message = f"Error from last sync: {error}" if error else None
+    connector_message = f"{LAST_SYNC_ERROR_PREFIX} {error}" if error else None
     db_manager.update_connector_after_sync(
         connector_id, status=status, last_sync_at=now, message=connector_message
     )
@@ -1572,8 +1578,12 @@ def finalize_sync_log_and_update_connector(
 def update_connector_total_files_and_message(
     connector_id: str, total_files: int, message: str
 ) -> None:
-    """Update total_files and message on the connector row in a single DB call."""
-    db_manager.update_connector(connector_id=connector_id, total_files=total_files, message=message)
+    """Update total_files and message on the connector row in a single DB call.
+
+    A failure message left by a previous sync is preserved (sticky until a
+    sync completes successfully); only total_files is updated in that case.
+    """
+    db_manager.update_connector_total_files_and_progress_message(connector_id, total_files, message)
 
 
 def set_connector_message(connector_id: str, error: Optional[str]) -> None:

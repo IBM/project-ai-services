@@ -281,6 +281,24 @@ definitions:
       updated_at:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeleteModelResponse:
+    properties:
+      id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GenerateModelKeyResponse:
+    properties:
+      key:
+        type: string
+      model:
+        type: string
+      type:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse:
     properties:
       id:
@@ -812,6 +830,15 @@ definitions:
       type:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      short_name:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider:
     properties:
       description:
@@ -911,10 +938,38 @@ definitions:
       version:
         type: string
     type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry:
+    properties:
+      certified_by:
+        type: string
+      component_type:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      providers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider'
+        type: array
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider:
+    properties:
+      deployment_type:
+        allOf:
+        - $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType'
+        description: '"local" or "remote"'
+      id:
+        type: string
+      name:
+        type: string
+    type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions:
     properties:
       component_type:
-        type: string
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
       id:
         type: string
       name:
@@ -955,6 +1010,26 @@ definitions:
         type: array
       schema:
         type: string
+    type: object
+  github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail:
+    properties:
+      about: {}
+      certified_by:
+        type: string
+      component_type:
+        $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType'
+      description:
+        type: string
+      id:
+        type: string
+      license:
+        type: string
+      name:
+        type: string
+      providers:
+        items:
+          $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider'
+        type: array
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata:
     properties:
@@ -2320,6 +2395,77 @@ paths:
       summary: Validate a bundle without storing it
       tags:
       - Bundles
+  /catalog/models:
+    get:
+      description: Lists every deployable model of the catalog, once per model id,
+        sorted by id, with the providers that serve it. Covers the models of local
+        model components and of remote model connectors.
+      parameters:
+      - description: 'Only models of this role: ''llm'', ''embedding'' or ''reranker''.
+          Omit for all.'
+        in: query
+        name: component_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry'
+            type: array
+        "400":
+          description: Invalid component_type
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List catalog models
+      tags:
+      - Catalog
+  /catalog/models/{id}:
+    get:
+      description: Returns one model of the catalog with the providers that serve
+        it, its license and its about details.
+      parameters:
+      - description: URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail'
+        "401":
+          description: Unauthorized - Invalid or missing access token
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Model not found in catalog
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get a catalog model
+      tags:
+      - Catalog
   /catalog/models/{id}/deploy-options:
     get:
       description: Lists the providers a catalog model can be deployed with. Local
@@ -2883,6 +3029,60 @@ paths:
       tags:
       - Models
   /models/{id}:
+    delete:
+      description: Deletes one of the authenticated user's models. The id is looked
+        up among local models first, then remote ones. A local model is undeployed
+        asynchronously (202 Accepted); a remote model is removed synchronously (204
+        No Content). A model used by an application, or a local model already being
+        deleted, returns 409 Conflict.
+      parameters:
+      - description: Model ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Local model undeploy initiated
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeleteModelResponse'
+        "204":
+          description: Remote model deleted
+        "400":
+          description: Invalid model ID format
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User does not own the model
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Model not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "409":
+          description: Model is in use, or is already being deleted
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "422":
+          description: Worker of the model cannot be reached
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete / undeploy a model (local or remote)
+      tags:
+      - Models
     get:
       description: Retrieves one of the authenticated user's models. The id is looked
         up among local models first, then remote ones. Local and remote models alike
@@ -2925,6 +3125,53 @@ paths:
       security:
       - BearerAuth: []
       summary: Get a model by ID (local or remote)
+      tags:
+      - Models
+  /models/{id}/keys:
+    post:
+      description: Generates a LiteLLM key for the model. Any existing key for it
+        is revoked, so only one key is valid at a time. The key is returned once and
+        cannot be retrieved again.
+      parameters:
+      - description: Model (component or connector) ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Public key generated
+          schema:
+            $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GenerateModelKeyResponse'
+        "400":
+          description: Invalid model ID, or openshift runtime
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "403":
+          description: User is not the model creator
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "404":
+          description: Model not found
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+        "502":
+          description: LiteLLM failed; the old key may already be revoked, so retry
+          schema:
+            $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Generate a public key for a model
       tags:
       - Models
   /resources:

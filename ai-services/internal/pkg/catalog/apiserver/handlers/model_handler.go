@@ -181,6 +181,107 @@ func (h *ModelHandler) GetModelByID(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GenerateModelKey godoc
+//
+//	@Summary		Generate a public key for a model
+//	@Description	Generates a LiteLLM key for the model. Any existing key for it is revoked, so only one key is valid at a time. The key is returned once and cannot be retrieved again.
+//	@Tags			Models
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string							true	"Model (component or connector) ID"
+//	@Success		201	{object}	models.GenerateModelKeyResponse	"Public key generated"
+//	@Failure		400	{object}	ErrorResponse					"Invalid model ID, or openshift runtime"
+//	@Failure		401	{object}	ErrorResponse					"Unauthorized"
+//	@Failure		403	{object}	ErrorResponse					"User is not the model creator"
+//	@Failure		404	{object}	ErrorResponse					"Model not found"
+//	@Failure		500	{object}	ErrorResponse					"Internal Server Error"
+//	@Failure		502	{object}	ErrorResponse					"LiteLLM failed; the old key may already be revoked, so retry"
+//	@Router			/models/{id}/keys [post]
+func (h *ModelHandler) GenerateModelKey(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid model ID format"})
+
+		return
+	}
+
+	resp, err := h.modelService.GenerateModelKey(ctx, id, c.GetString(middleware.CtxUserIDKey))
+	if err != nil {
+		var valErr *validators.ValidationError
+		if errors.As(err, &valErr) {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		// The error never carries the key, but internal details are still logged, not returned.
+		logger.ErrorfCtx(ctx, "failed to generate key for model %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to generate model key"})
+
+		return
+	}
+
+	// The key is shown once: forbid any cache from keeping it.
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, resp)
+}
+
+// DeleteModel godoc
+//
+//	@Summary		Delete / undeploy a model (local or remote)
+//	@Description	Deletes one of the authenticated user's models. The id is looked up among local models first, then remote ones. A local model is undeployed asynchronously (202 Accepted); a remote model is removed synchronously (204 No Content). A model used by an application, or a local model already being deleted, returns 409 Conflict.
+//	@Tags			Models
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string						true	"Model ID"
+//	@Success		202	{object}	models.DeleteModelResponse	"Local model undeploy initiated"
+//	@Success		204	"Remote model deleted"
+//	@Failure		400	{object}	ErrorResponse	"Invalid model ID format"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403	{object}	ErrorResponse	"User does not own the model"
+//	@Failure		404	{object}	ErrorResponse	"Model not found"
+//	@Failure		409	{object}	ErrorResponse	"Model is in use, or is already being deleted"
+//	@Failure		422	{object}	ErrorResponse	"Worker of the model cannot be reached"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/models/{id} [delete]
+func (h *ModelHandler) DeleteModel(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid model ID format"})
+
+		return
+	}
+
+	resp, err := h.modelService.DeleteModel(ctx, id, c.GetString(middleware.CtxUserIDKey))
+	if err != nil {
+		var valErr *validators.ValidationError
+		if errors.As(err, &valErr) {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		// Internal details are logged, not returned: they may include upstream response bodies.
+		logger.ErrorfCtx(ctx, "failed to delete model %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to delete model"})
+
+		return
+	}
+
+	// A remote model is already gone: no body.
+	if resp == nil {
+		c.Status(http.StatusNoContent)
+
+		return
+	}
+
+	c.JSON(http.StatusAccepted, resp)
+}
+
 // queryValues returns the values of a repeatable query parameter (?model=a&model=b), without the
 // empty ones, so that "?model=" is the same as not filtering.
 func queryValues(c *gin.Context, key string) []string {

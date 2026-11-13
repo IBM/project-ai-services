@@ -1630,6 +1630,112 @@ const docTemplate = `{
                 }
             }
         },
+        "/catalog/models": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists every deployable model of the catalog, once per model id, sorted by id, with the providers that serve it. Covers the models of local model components and of remote model connectors.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "List catalog models",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Only models of this role: 'llm', 'embedding' or 'reranker'. Omit for all.",
+                        "name": "component_type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid component_type",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/catalog/models/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one model of the catalog with the providers that serve it, its license and its about details.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get a catalog model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Model not found in catalog",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/catalog/models/{id}/deploy-options": {
             "get": {
                 "security": [
@@ -2506,6 +2612,153 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes one of the authenticated user's models. The id is looked up among local models first, then remote ones. A local model is undeployed asynchronously (202 Accepted); a remote model is removed synchronously (204 No Content). A model used by an application, or a local model already being deleted, returns 409 Conflict.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Models"
+                ],
+                "summary": "Delete / undeploy a model (local or remote)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Local model undeploy initiated",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeleteModelResponse"
+                        }
+                    },
+                    "204": {
+                        "description": "Remote model deleted"
+                    },
+                    "400": {
+                        "description": "Invalid model ID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "User does not own the model",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Model not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Model is in use, or is already being deleted",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Worker of the model cannot be reached",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/{id}/keys": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Generates a LiteLLM key for the model. Any existing key for it is revoked, so only one key is valid at a time. The key is returned once and cannot be retrieved again.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Models"
+                ],
+                "summary": "Generate a public key for a model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model (component or connector) ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Public key generated",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GenerateModelKeyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid model ID, or openshift runtime",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "User is not the model creator",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Model not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "LiteLLM failed; the old key may already be revoked, so retry",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -3580,6 +3833,34 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.DeleteModelResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GenerateModelKeyResponse": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.GetApplicationDatasourceResponse": {
             "type": "object",
             "properties": {
@@ -4323,6 +4604,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "short_name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ConnectorProvider": {
             "type": "object",
             "properties": {
@@ -4471,11 +4766,56 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry": {
+            "type": "object",
+            "properties": {
+                "certified_by": {
+                    "type": "string"
+                },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider"
+                    }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider": {
+            "type": "object",
+            "properties": {
+                "deployment_type": {
+                    "description": "\"local\" or \"remote\"",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType"
+                        }
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDeployOptions": {
             "type": "object",
             "properties": {
                 "component_type": {
-                    "type": "string"
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
                 },
                 "id": {
                     "type": "string"
@@ -4539,6 +4879,36 @@ const docTemplate = `{
                 },
                 "schema": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail": {
+            "type": "object",
+            "properties": {
+                "about": {},
+                "certified_by": {
+                    "type": "string"
+                },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider"
+                    }
                 }
             }
         },

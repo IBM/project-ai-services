@@ -162,7 +162,7 @@ const Services = () => {
           contained={false}
           className={styles.tabList}
         >
-          <Tab>Deployments</Tab>
+          <Tab>Service deployments</Tab>
           <Tab>Catalog</Tab>
         </TabList>
         <TabPanels>

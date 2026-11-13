@@ -28,6 +28,25 @@ type mockModelService struct {
 	createModelFunc func(ctx context.Context, req models.CreateModelRequest) (*models.CreateModelResponse, error)
 	listModelsFunc  func(ctx context.Context, req models.ListModelsRequest) (*models.ModelListResponse, error)
 	getModelFunc    func(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelDetail, error)
+	deleteModelFunc func(ctx context.Context, id uuid.UUID, createdBy string) (*models.DeleteModelResponse, error)
+
+	generateModelKeyFunc func(ctx context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error)
+}
+
+func (m *mockModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error) {
+	if m.generateModelKeyFunc != nil {
+		return m.generateModelKeyFunc(ctx, id, createdBy)
+	}
+
+	return &models.GenerateModelKeyResponse{Key: "sk-test", Type: "public", Model: "m"}, nil
+}
+
+func (m *mockModelService) DeleteModel(ctx context.Context, id uuid.UUID, createdBy string) (*models.DeleteModelResponse, error) {
+	if m.deleteModelFunc != nil {
+		return m.deleteModelFunc(ctx, id, createdBy)
+	}
+
+	return nil, nil
 }
 
 func (m *mockModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelDetail, error) {
@@ -62,6 +81,8 @@ func setupModelRouter(svc repository.ModelServiceInterface, tm *auth.TokenManage
 	router.POST("/api/v1/models", authMw, h.CreateModel)
 	router.GET("/api/v1/models", authMw, h.ListModels)
 	router.GET("/api/v1/models/:id", authMw, h.GetModelByID)
+	router.POST("/api/v1/models/:id/keys", authMw, h.GenerateModelKey)
+	router.DELETE("/api/v1/models/:id", authMw, h.DeleteModel)
 
 	return router
 }
@@ -708,4 +729,195 @@ func TestGetModelByID_ResponseShape(t *testing.T) {
 	assert.NotContains(t, raw, "profile")
 	assert.Len(t, raw["applications"], 1)
 	assert.Contains(t, raw, "connected_services")
+}
+
+func TestGenerateModelKey(t *testing.T) {
+	const modelID = "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"
+
+	tests := []struct {
+		name     string
+		path     string
+		noAuth   bool
+		svcErr   error
+		wantCode int
+		wantErr  string
+		wantCall bool
+	}{
+		{name: "key is generated", path: modelID, wantCode: http.StatusCreated, wantCall: true},
+		{name: "missing token is unauthorized", path: modelID, noAuth: true, wantCode: http.StatusUnauthorized},
+		{name: "malformed id is rejected", path: "not-a-uuid", wantCode: http.StatusBadRequest, wantErr: "Invalid model ID format"},
+		{
+			name:     "validation error keeps its status and message",
+			path:     modelID,
+			svcErr:   validators.NotFound("model not found"),
+			wantCode: http.StatusNotFound,
+			wantErr:  "model not found",
+			wantCall: true,
+		},
+		{
+			name:     "gateway failure is a 502",
+			path:     modelID,
+			svcErr:   validators.BadGateway("LiteLLM failed"),
+			wantCode: http.StatusBadGateway,
+			wantErr:  "LiteLLM failed",
+			wantCall: true,
+		},
+		{
+			name:     "internal error is hidden",
+			path:     modelID,
+			svcErr:   errors.New("db password leaked"),
+			wantCode: http.StatusInternalServerError,
+			wantErr:  "Failed to generate model key",
+			wantCall: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				called    bool
+				gotID     uuid.UUID
+				gotUserID string
+			)
+
+			svc := &mockModelService{
+				generateModelKeyFunc: func(_ context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error) {
+					called, gotID, gotUserID = true, id, createdBy
+					if tt.svcErr != nil {
+						return nil, tt.svcErr
+					}
+
+					return &models.GenerateModelKeyResponse{Key: "sk-abc", Type: "public", Model: "ibm-granite/granite-3.3-8b-instruct"}, nil
+				},
+			}
+
+			tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+			router := setupModelRouter(svc, tm)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/models/"+tt.path+"/keys", nil)
+			if !tt.noAuth {
+				token, _, err := tm.GenerateAccessToken("user-123")
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+			assert.Equal(t, tt.wantCall, called)
+
+			if tt.wantErr != "" {
+				var errResp ErrorResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Equal(t, tt.wantErr, errResp.Error)
+			}
+
+			if tt.wantCode == http.StatusCreated {
+				var resp models.GenerateModelKeyResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+				assert.Equal(t, "sk-abc", resp.Key)
+				assert.Equal(t, "public", resp.Type)
+				assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+				assert.Equal(t, modelID, gotID.String())
+				assert.Equal(t, "user-123", gotUserID, "the creator comes from the token")
+			}
+		})
+	}
+}
+
+func TestDeleteModel(t *testing.T) {
+	const modelID = "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"
+
+	accepted := &models.DeleteModelResponse{ID: modelID, Status: "Deleting", Message: "Undeploy initiated"}
+
+	tests := []struct {
+		name            string
+		path            string
+		noAuth          bool
+		svcResp         *models.DeleteModelResponse
+		svcErr          error
+		wantCode        int
+		wantCalled      bool
+		wantErrContains string
+		wantAbsent      string
+	}{
+		{name: "local accepted", path: modelID, svcResp: accepted, wantCode: http.StatusAccepted, wantCalled: true},
+		{name: "remote no content", path: modelID, wantCode: http.StatusNoContent, wantCalled: true},
+		{name: "malformed id", path: "not-a-uuid", wantCode: http.StatusBadRequest, wantErrContains: "Invalid model ID"},
+		{name: "no token", path: modelID, noAuth: true, wantCode: http.StatusUnauthorized},
+		{name: "not found", path: modelID, svcErr: validators.NotFound("model not found"), wantCode: http.StatusNotFound, wantCalled: true, wantErrContains: "model not found"},
+		{name: "not the owner", path: modelID, svcErr: validators.Forbidden("user does not own this model"), wantCode: http.StatusForbidden, wantCalled: true, wantErrContains: "does not own"},
+		{name: "in use", path: modelID, svcErr: validators.Conflict("model is in use by 1 service(s)"), wantCode: http.StatusConflict, wantCalled: true, wantErrContains: "in use"},
+		{
+			name:            "internal error is not leaked",
+			path:            modelID,
+			svcErr:          errors.New("litellm returned 500 at 10.0.0.5"),
+			wantCode:        http.StatusInternalServerError,
+			wantCalled:      true,
+			wantErrContains: "Failed to delete model",
+			wantAbsent:      "10.0.0.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				called   bool
+				gotID    uuid.UUID
+				gotOwner string
+			)
+
+			svc := &mockModelService{
+				deleteModelFunc: func(_ context.Context, id uuid.UUID, createdBy string) (*models.DeleteModelResponse, error) {
+					called = true
+					gotID = id
+					gotOwner = createdBy
+
+					return tt.svcResp, tt.svcErr
+				},
+			}
+
+			tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+			router := setupModelRouter(svc, tm)
+
+			req := httptest.NewRequest(http.MethodDelete, "/api/v1/models/"+tt.path, nil)
+
+			if !tt.noAuth {
+				token, _, err := tm.GenerateAccessToken("user-123")
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+			assert.Equal(t, tt.wantCalled, called, "whether the request reached the model service")
+
+			if tt.wantCalled {
+				assert.Equal(t, modelID, gotID.String())
+				assert.Equal(t, "user-123", gotOwner, "the owner comes from the token, not the request")
+			}
+
+			if tt.wantErrContains != "" {
+				var errResp ErrorResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Contains(t, errResp.Error, tt.wantErrContains)
+			}
+
+			if tt.wantAbsent != "" {
+				assert.NotContains(t, w.Body.String(), tt.wantAbsent)
+			}
+
+			switch tt.wantCode {
+			case http.StatusNoContent:
+				assert.Empty(t, w.Body.String())
+			case http.StatusAccepted:
+				var got models.DeleteModelResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+				assert.Equal(t, *accepted, got)
+			}
+		})
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -30,6 +31,10 @@ func BuildOrVerifyCLIBinary(ctx context.Context) (string, error) {
 	logger.Infof("[BOOTSTRAP] Starting BuildOrVerifyCLIBinary...")
 
 	if bin, ok, err := fromEnvBinary(); ok {
+		return bin, err
+	}
+
+	if bin, ok, err := fromPatchBranchBinary(ctx); ok {
 		return bin, err
 	}
 
@@ -60,6 +65,64 @@ func fromEnvBinary() (string, bool, error) {
 	logger.Infof("[BOOTSTRAP] Using AI_SERVICES_BIN: %s", bin)
 
 	return bin, true, nil
+}
+
+const defaultPatchRepoURL = "https://github.com/IBM/project-ai-services.git"
+
+// patchBranchPattern limits PATCH_BRANCH to characters valid in a git ref name
+// (and rejects a leading '-' so the value can never be parsed as a git option).
+var patchBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+
+// fromPatchBranchBinary builds the binary from the branch/tag named by PATCH_BRANCH.
+// The e2e test code stays on the current checkout; only the binary (and the templates
+// and images embedded in it) comes from the patch branch.
+// PATCH_REPO_URL optionally overrides the repository to clone from.
+func fromPatchBranchBinary(ctx context.Context) (string, bool, error) {
+	branch := strings.TrimSpace(os.Getenv("PATCH_BRANCH"))
+	if branch == "" {
+		return "", false, nil
+	}
+
+	if !patchBranchPattern.MatchString(branch) {
+		return "", true, fmt.Errorf("invalid PATCH_BRANCH %q", branch)
+	}
+
+	if testBinDir == "" {
+		return "", true, fmt.Errorf("testBinDir not set; call SetTestBinDir before BuildOrVerifyCLIBinary")
+	}
+
+	repoURL := strings.TrimSpace(os.Getenv("PATCH_REPO_URL"))
+	if repoURL == "" {
+		repoURL = defaultPatchRepoURL
+	}
+
+	srcDir := filepath.Join(filepath.Dir(testBinDir), "patch-src")
+	logger.Infof("[BOOTSTRAP] PATCH_BRANCH=%s: cloning %s into %s", branch, repoURL, srcDir)
+
+	_ = os.RemoveAll(srcDir)
+
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", branch, "--", repoURL, srcDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", true, fmt.Errorf("failed to clone branch %q from %s: %w", branch, repoURL, err)
+	}
+
+	moduleRoot := filepath.Join(srcDir, "ai-services")
+
+	binPath, err := buildUsingMake(ctx, moduleRoot, testBinDir)
+	if err != nil {
+		return "", true, fmt.Errorf("failed to build binary for PATCH_BRANCH %q: %w", branch, err)
+	}
+
+	if _, err := CheckBinaryVersion(binPath); err != nil {
+		return "", true, fmt.Errorf("binary built from PATCH_BRANCH %q failed verification: %w", branch, err)
+	}
+
+	logger.Infof("[BOOTSTRAP] Using binary built from patch branch %s: %s", branch, binPath)
+
+	return binPath, true, nil
 }
 
 // fromTempDirBinary checks existing binary in temp dir.

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -102,7 +103,7 @@ func (p *CatalogProvider) collectComponentsModels(ctx context.Context, dependenc
 // collectComponentsByTypeModels collects models for all components of a specific type.
 func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, componentType string, components []types.Component, allModels map[string]bool, excludeComponentProviders []string) error {
 	for _, comp := range components {
-		if comp.ComponentType != componentType {
+		if comp.ComponentType.ID != componentType {
 			continue
 		}
 
@@ -110,7 +111,7 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 		excluded := false
 		for _, excludedID := range excludeComponentProviders {
 			if strings.EqualFold(comp.ID, excludedID) {
-				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType, comp.ID)
+				logger.DebugfCtx(ctx, "Skipping model extraction for excluded component: %s/%s\n", comp.ComponentType.ID, comp.ID)
 				excluded = true
 
 				break
@@ -120,8 +121,8 @@ func (p *CatalogProvider) collectComponentsByTypeModels(ctx context.Context, com
 			continue
 		}
 
-		if err := p.addComponentModels(ctx, comp.ComponentType, comp.ID, allModels); err != nil {
-			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType, comp.ID, err)
+		if err := p.addComponentModels(ctx, comp.ComponentType.ID, comp.ID, allModels); err != nil {
+			return fmt.Errorf("failed to collect models for component %s/%s: %w", comp.ComponentType.ID, comp.ID, err)
 		}
 	}
 
@@ -150,48 +151,9 @@ func (p *CatalogProvider) addComponentModels(ctx context.Context, componentType,
 	}
 
 	// Extract models from schema
-	extractModelsFromSchema(schema, allModels)
+	models.ExtractFromSchema(schema, allModels)
 
 	return nil
-}
-
-// extractModelsFromSchema extracts model names from a JSON schema.
-// It looks for properties with "model" in the key and extracts values from oneOf/const fields.
-func extractModelsFromSchema(schema map[string]any, modelSet map[string]bool) {
-	// Get properties object
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return
-	}
-
-	// Look for model-related properties
-	for key, value := range properties {
-		if !strings.Contains(strings.ToLower(key), "model") {
-			continue
-		}
-
-		propMap, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Extract models from oneOf field
-		extractModelsFromProperty(propMap, modelSet)
-	}
-}
-
-// extractModelsFromProperty extracts model values from a property's oneOf array.
-func extractModelsFromProperty(propMap map[string]any, modelSet map[string]bool) {
-	// Check for oneOf array with const values
-	if oneOf, ok := propMap["oneOf"].([]any); ok {
-		for _, option := range oneOf {
-			if optMap, ok := option.(map[string]any); ok {
-				if constVal, ok := optMap["const"].(string); ok && constVal != "" {
-					modelSet[constVal] = true
-				}
-			}
-		}
-	}
 }
 
 // GetModelProviders lists the providers a model can be deployed with, as the provider id with its
@@ -234,14 +196,11 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 	result := make([]types.Model, 0)
 
 	for _, item := range p.allItems() {
-		isModelComponent := item.Component != nil && item.Component.Category == constants.ComponentCategoryModels
-		isModelConnector := item.Connector != nil && item.Connector.ConnectorType == constants.ConnectorTypeModels
-
-		if !isModelComponent && !isModelConnector {
+		if !models.IsModelProvider(item.Component, item.Connector) {
 			continue
 		}
 
-		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, modelsFileName)
+		models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, constants.ModelsFileName)
 		if err != nil {
 			return nil, err
 		}
@@ -256,4 +215,135 @@ func (p *CatalogProvider) GetModels() ([]types.Model, error) {
 	}
 
 	return result, nil
+}
+
+// catalogModel is a model with the providers that serve it, as collected from the catalog.
+type catalogModel struct {
+	model         types.Model // the first entry found, components before connectors
+	componentType string
+	providers     []types.ModelDeployProvider
+}
+
+// collectModels gathers the deployable models by id from every model component and "models" connector.
+// modelID, when set, collects only that model.
+func (p *CatalogProvider) collectModels(modelID string) (map[string]*catalogModel, error) {
+	result := map[string]*catalogModel{}
+
+	for _, item := range p.sortedItems() {
+		if !models.IsModelProvider(item.Component, item.Connector) {
+			continue
+		}
+
+		listed, err := models.List(item.itemFS, item.Path)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, m := range listed {
+			if modelID != "" && m.ID != modelID {
+				continue
+			}
+
+			provider, componentType, ok := modelProvider(item, m)
+			if !ok {
+				continue
+			}
+
+			cm, seen := result[m.ID]
+			if !seen {
+				cm = &catalogModel{model: m, componentType: componentType}
+				result[m.ID] = cm
+			}
+			cm.providers = append(cm.providers, provider)
+		}
+	}
+
+	return result, nil
+}
+
+// fillEntry sets the component type (with its display names) and the sorted providers of entry from cm.
+func fillEntry(entry *types.ModelCatalogEntry, cm *catalogModel, components []types.Component) {
+	entry.ComponentType = types.ComponentType{ID: cm.componentType}
+	models.SetComponentTypeNames(&entry.ComponentType, components)
+
+	sorted := models.FilterAndSortProviders(cm.providers, "")
+	entry.Providers = make([]types.ModelCatalogProvider, 0, len(sorted))
+	for _, pr := range sorted {
+		entry.Providers = append(entry.Providers, types.ModelCatalogProvider{ID: pr.ID, Name: pr.Name, DeploymentType: pr.DeploymentType})
+	}
+}
+
+// ListModelCatalog lists the deployable models with the providers that serve them, in no particular order.
+// componentType, when set, keeps only the models of that role (llm, embedding, reranker).
+func (p *CatalogProvider) ListModelCatalog(componentType string) ([]types.ModelCatalogEntry, error) {
+	components, err := p.ListComponents()
+	if err != nil {
+		return nil, err
+	}
+
+	collected, err := p.collectModels("")
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]types.ModelCatalogEntry, 0, len(collected))
+
+	for _, cm := range collected {
+		if componentType != "" && cm.componentType != componentType {
+			continue
+		}
+
+		entry := cm.model.Entry()
+		fillEntry(&entry, cm, components)
+		result = append(result, entry)
+	}
+
+	return result, nil
+}
+
+// modelProvider returns the provider behind item for model m and the model's component type id.
+// ok is false when the item cannot deploy the model on its own.
+func modelProvider(item *catalogItem, m types.Model) (provider types.ModelDeployProvider, componentType string, ok bool) {
+	if item.Connector != nil {
+		return types.ModelDeployProvider{
+			ID:             item.Connector.ID,
+			Name:           item.Connector.Name,
+			DeploymentType: constants.DeploymentTypeRemote,
+		}, m.ComponentType, true
+	}
+
+	if len(m.Profiles) == 0 {
+		return provider, "", false
+	}
+
+	return types.ModelDeployProvider{
+		ID:             item.Component.ID,
+		Name:           item.Component.Name,
+		DeploymentType: constants.DeploymentTypeLocal,
+		Default:        item.Component.Default,
+	}, item.Component.ComponentType.ID, true
+}
+
+// GetModel returns modelID as ListModelCatalog lists it, plus its license and about details,
+// or ErrModelNotFound if the catalog doesn't list it.
+func (p *CatalogProvider) GetModel(modelID string) (*types.ModelDetail, error) {
+	components, err := p.ListComponents()
+	if err != nil {
+		return nil, err
+	}
+
+	collected, err := p.collectModels(modelID)
+	if err != nil {
+		return nil, err
+	}
+
+	cm, ok := collected[modelID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrModelNotFound, modelID)
+	}
+
+	detail := cm.model.Detail()
+	fillEntry(&detail.ModelCatalogEntry, cm, components)
+
+	return &detail, nil
 }

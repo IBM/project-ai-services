@@ -6,6 +6,19 @@
   margin: 0;
 }
 
+.breadcrumbLabel {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+  cursor: pointer;
+}
+
+.resourceSkeletonBar {
+  width: 100%;
+  height: $spacing-03;
+  margin-top: $spacing-05;
+}
+
 .mainGrid {
   row-gap: 0;
   padding-left: 0 !important;
@@ -78,6 +91,7 @@
   gap: $spacing-03;
   align-items: center;
   flex-wrap: wrap;
+  padding: $spacing-03 0;
 }
 
 .headerCertifiedBadge {
@@ -146,17 +160,6 @@
 .allocatedValue {
   @include type-style("label-01");
   color: $text-secondary;
-}
-
-.actionsGrid {
-  margin-top: $spacing-09;
-  row-gap: 0;
-}
-
-.actionButtons {
-  display: flex;
-  gap: $spacing-03;
-  justify-content: flex-start;
 }
 
 .toastNotification {
@@ -273,19 +276,6 @@
     position: relative;
     max-width: 100%;
   }
-
-  .actionButtons {
-    flex-direction: column;
-
-    button {
-      width: 100%;
-    }
-  }
-}
-
-.labelColor :global(.cds--text-input),
-:global(.cds--list-box) {
-  background-color: var(--cds-layer-02);
 }
 
 .progressSuccess :global(.cds--progress-bar__bar) {

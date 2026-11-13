@@ -51,6 +51,9 @@ jobs:
          - path: services
            image: extract-service
            service: extract
+         - path: services
+           image: forecast-service
+           service: forecast
          - path: mcp
            image: ai-services-mcp
          - path: ai-services
