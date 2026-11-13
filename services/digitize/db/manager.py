@@ -4,10 +4,11 @@ Database repository layer for Job, Document, Connector, and ConversionTask opera
 Provides CRUD operations with proper error handling and transaction management.
 """
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, cast
-from sqlalchemy import select, update, delete, func, or_, and_, exists, case
+from sqlalchemy import select, update, delete, func, or_, and_, exists, case, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
@@ -24,6 +25,16 @@ from digitize.models import JobStatus, DocStatus
 from digitize.connectors.models import ConnectorStatus, SyncLogStatus, LAST_SYNC_ERROR_PREFIX
 
 logger = get_logger("db_repository")
+
+# Number of most-recent sync-log rows retained per connector; older rows are evicted.
+SYNC_LOG_RETENTION = 5
+
+_TERMINAL_JOB_STATUSES = (
+    JobStatus.COMPLETED.value,
+    JobStatus.COMPLETED_WITH_ERRORS.value,
+    JobStatus.FAILED.value,
+    JobStatus.CANCELLED.value,
+)
 
 # Sentinel used by update_connector to distinguish "not supplied" from explicit None.
 _UNSET: object = object()
@@ -1385,10 +1396,131 @@ class DatabaseManager:
                 )
                 seq: int = session.execute(stmt).scalar_one()
                 logger.debug(f"insert_sync_log: connector={connector_id!r} seq={seq}")
+                # Evict everything beyond the latest SYNC_LOG_RETENTION rows (incl. this one).
+                keep = (
+                    select(ConnectorSyncLog.seq)
+                    .where(ConnectorSyncLog.connector_id == connector_id)
+                    .order_by(ConnectorSyncLog.seq.desc())
+                    .limit(SYNC_LOG_RETENTION)
+                )
+                session.execute(
+                    delete(ConnectorSyncLog).where(
+                        ConnectorSyncLog.connector_id == connector_id,
+                        ConnectorSyncLog.seq.not_in(keep),
+                    )
+                )
                 return seq
         except SQLAlchemyError as e:
             logger.error(f"DB error in insert_sync_log({connector_id}): {e}", exc_info=True)
             raise
+
+    @staticmethod
+    def prune_all_sync_logs() -> int:
+        """
+        Delete, for every connector, all sync-log rows except the latest
+        SYNC_LOG_RETENTION (by seq). Returns the number of rows deleted.
+        """
+        try:
+            with get_db_session() as session:
+                ranked = (
+                    select(
+                        ConnectorSyncLog.connector_id.label("cid"),
+                        ConnectorSyncLog.seq.label("seq"),
+                        func.row_number()
+                        .over(
+                            partition_by=ConnectorSyncLog.connector_id,
+                            order_by=ConnectorSyncLog.seq.desc(),
+                        )
+                        .label("rn"),
+                    )
+                ).subquery()
+                stale = select(ranked.c.cid, ranked.c.seq).where(
+                    ranked.c.rn > SYNC_LOG_RETENTION
+                )
+                result = cast(
+                    CursorResult,
+                    session.execute(
+                        delete(ConnectorSyncLog).where(
+                            tuple_(ConnectorSyncLog.connector_id, ConnectorSyncLog.seq).in_(stale)
+                        )
+                    ),
+                )
+                if result.rowcount:
+                    logger.info(f"prune_all_sync_logs: evicted {result.rowcount} old sync log row(s)")
+                return result.rowcount
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in prune_all_sync_logs: {e}", exc_info=True)
+            return 0
+
+    @staticmethod
+    def _prune_jobs_in_session(session, connector_id: str, connector_name: str) -> int:
+        """
+        Delete terminal connector jobs of *connector_id* whose sync ``seq`` (parsed
+        from the ``Connector-<name>-<seq>-<batch>`` job name) no longer has a
+        sync-log row. Skipped when the connector has no sync logs at all.
+        """
+        retained = set(
+            session.scalars(
+                select(ConnectorSyncLog.seq).where(ConnectorSyncLog.connector_id == connector_id)
+            ).all()
+        )
+        if not retained:
+            return 0
+        prefix = f"Connector-{connector_name}-"
+        rows = session.execute(
+            select(Job.job_id, Job.job_name).where(
+                Job.source == JobSource.CONNECTOR.value,
+                Job.status.in_(_TERMINAL_JOB_STATUSES),
+                Job.job_name.startswith(prefix, autoescape=True),
+            )
+        ).all()
+        pattern = re.compile(rf"^{re.escape(prefix)}(\d+)-\d+$")
+        stale = [
+            job_id
+            for job_id, job_name in rows
+            if (m := pattern.match(job_name)) and int(m.group(1)) not in retained
+        ]
+        if not stale:
+            return 0
+        result = cast(
+            CursorResult,
+            session.execute(delete(Job).where(Job.job_id.in_(stale))),
+        )
+        return result.rowcount
+
+    @staticmethod
+    def prune_connector_jobs(connector_id: str) -> int:
+        """
+        Evict terminal connector jobs that belong to sync runs no longer present in
+        connector_sync_logs. Returns the number of jobs deleted (0 on error).
+        """
+        try:
+            with get_db_session() as session:
+                name = session.scalar(select(Connector.name).where(Connector.id == connector_id))
+                if name is None:
+                    return 0
+                deleted = DatabaseManager._prune_jobs_in_session(session, connector_id, name)
+                if deleted:
+                    logger.info(f"prune_connector_jobs: evicted {deleted} job(s) for connector {connector_id!r}")
+                return deleted
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in prune_connector_jobs({connector_id!r}): {e}", exc_info=True)
+            return 0
+
+    @staticmethod
+    def prune_all_connector_jobs() -> int:
+        """Run the connector-job eviction for every connector. Returns total deleted."""
+        try:
+            with get_db_session() as session:
+                total = 0
+                for connector_id, name in session.execute(select(Connector.id, Connector.name)).all():
+                    total += DatabaseManager._prune_jobs_in_session(session, connector_id, name)
+                if total:
+                    logger.info(f"prune_all_connector_jobs: evicted {total} job(s)")
+                return total
+        except SQLAlchemyError as e:
+            logger.error(f"DB error in prune_all_connector_jobs: {e}", exc_info=True)
+            return 0
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
