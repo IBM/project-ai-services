@@ -402,12 +402,12 @@ def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] 
                 logger.warning(f"Update: connector {cid} not found")
                 APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Connector {cid!r} not found")
             
-            final_config = dict(current["config"])
+            final_conn_details = dict(current["config"])
             if encrypted_supplied is not None:
-                final_config.update(encrypted_supplied)
+                final_conn_details.update(encrypted_supplied)
 
             try:
-                connectors_db.update_connector(session, cid, name=body.name, config=final_config)
+                connectors_db.update_connector(session, cid, name=body.name, config=final_conn_details)
             except IntegrityError as exc:
                 orig = getattr(exc, "orig", None)
                 sqlstate = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
