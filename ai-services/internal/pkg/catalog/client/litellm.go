@@ -169,7 +169,7 @@ func (c *litellmClient) RegisterModel(ctx context.Context, req LiteLLMModelNewRe
 
 func (c *litellmClient) DeregisterModel(ctx context.Context, modelID string) error {
 	body := map[string]string{"id": modelID}
-	respBytes, statusCode, err := c.doRequest(ctx, http.MethodDelete, "/model/delete", body)
+	respBytes, statusCode, err := c.doRequest(ctx, http.MethodPost, "/model/delete", body)
 	if err != nil {
 		return fmt.Errorf("failed to delete route from litellm: %w", err)
 	}

@@ -18,6 +18,8 @@ export { default as ConnectorDetailsPanel } from "./ConnectorDetailsPanel";
 export type { ConnectorDetailsPanelProps } from "./ConnectorDetailsPanel";
 export { default as WorkerResourcesTable } from "./WorkerResourcesTable";
 export type { WorkerResourcesTableProps } from "./WorkerResourcesTable";
+export { default as InlineEditableTitle } from "./InlineEditableTitle";
+export type { InlineEditableTitleProps } from "./InlineEditableTitle";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
   DeployFormData,

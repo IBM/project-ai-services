@@ -1,0 +1,29 @@
+@use "carbonTokens" as *;
+
+.titleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-03;
+}
+
+.inlineEditRow {
+  margin: 0;
+  padding: 0;
+}
+
+.inlineEditButton {
+  width: 100%;
+}
+
+.inlineEditButtonCol {
+  @include breakpoint-down(md) {
+    padding-top: $spacing-03;
+  }
+}
+
+.toastNotification {
+  position: fixed;
+  top: $spacing-10;
+  right: $spacing-05;
+  z-index: 9999;
+}
