@@ -1,5 +1,6 @@
 import numpy as np
 import hashlib
+import threading
 from tqdm import tqdm
 from opensearchpy import OpenSearch, helpers
 
@@ -28,6 +29,15 @@ class OpensearchNotReadyError(VectorStoreNotReadyError):
     pass
 
 class OpensearchVectorStore(VectorStore):
+    # Delay between a delete and the force merge. Lets a batch of deletes finish, and is past the ~30s
+    # retention-lease sync after which OpenSearch can actually drop soft-deleted docs (earlier is a no-op).
+    FORCE_MERGE_DELAY_SECS = 60
+
+    # Indices with a force merge queued or running. Class-level because get_vector_store() creates a
+    # new instance per call, so the gate must be shared across instances in the process.
+    _force_merge_pending = set()
+    _force_merge_lock = threading.Lock()
+
     def __init__(self):
 
         self.host = settings.vector_store.opensearch_host
@@ -103,7 +113,10 @@ class OpensearchVectorStore(VectorStore):
                     "knn": True,  # Enable k-NN search functionality
                     "knn.algo_param.ef_search": 100,  # Number of candidates to consider during search (higher = more accurate but slower)
                     "number_of_shards": self.num_shards,  # Number of primary shards for data distribution
-                    'auto_expand_replicas': '0-all' # dynamically set the replicas based on nodes
+                    'auto_expand_replicas': '0-all', # dynamically set the replicas based on nodes
+                    # Lucene's background merge keeps deleted docs below this % of the index (5.0 is the
+                    # OpenSearch minimum; default 20.0), so space from deleted chunks is reclaimed automatically
+                    "merge.policy.deletes_pct_allowed": 5.0
                 }
             },
             "mappings": {
@@ -449,6 +462,36 @@ class OpensearchVectorStore(VectorStore):
         return exists
 
 
+    def _schedule_force_merge(self):
+        """
+        Merge the index down to a single segment FORCE_MERGE_DELAY_SECS after a delete, so deleted docs are
+        dropped, disk space is freed and searches have fewer segments to visit. Runs on a background timer
+        so the delete call is not blocked. If a merge is already queued or running for this index, this
+        call does nothing. Failures are only logged since the delete itself already succeeded.
+        """
+        index_name = self.index_name
+        with OpensearchVectorStore._force_merge_lock:
+            if index_name in OpensearchVectorStore._force_merge_pending:
+                logger.debug(f"Force merge already queued or running for {index_name}, skipping")
+                return
+            OpensearchVectorStore._force_merge_pending.add(index_name)
+
+        def _force_merge():
+            try:
+                self.client.indices.forcemerge(index=index_name, params={"max_num_segments": 1})
+                # merged-away segment files are only deleted from disk once a new commit is made
+                self.client.indices.flush(index=index_name)
+                logger.info(f"Force merged index {index_name} after delete")
+            except Exception as e:
+                logger.warning(f"Force merge of index {index_name} failed: {e}")
+            finally:
+                with OpensearchVectorStore._force_merge_lock:
+                    OpensearchVectorStore._force_merge_pending.discard(index_name)
+
+        timer = threading.Timer(self.FORCE_MERGE_DELAY_SECS, _force_merge)
+        timer.daemon = True
+        timer.start()
+
     @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def remove_docs_from_index(self, doc_ids: list[str]):
         """
@@ -494,6 +537,9 @@ class OpensearchVectorStore(VectorStore):
 
         deleted_count = response.get("deleted", 0)
         logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
+
+        if deleted_count > 0:
+            self._schedule_force_merge()
 
         return deleted_count
 
@@ -551,6 +597,7 @@ class OpensearchVectorStore(VectorStore):
 
         if deleted_count > 0:
             logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
+            self._schedule_force_merge()
         else:
             if total_matched == 0:
                 logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
