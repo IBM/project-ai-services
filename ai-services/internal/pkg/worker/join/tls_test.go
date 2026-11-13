@@ -56,23 +56,6 @@ func TestWriteTLSMaterial_KeyStaysEncryptedAndCaddyReadable(t *testing.T) {
 	assertCaddyReadable(t, dir)
 }
 
-// TestEnsureCaddyReadable_FixesPermissionsOfExistingInstall covers workers installed
-// before the encrypted_file Caddy module: they have a 0700 directory and a 0600 key,
-// which the Caddy user cannot read.
-func TestEnsureCaddyReadable_FixesPermissionsOfExistingInstall(t *testing.T) {
-	dir := writeTestCredentials(t)
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(filepath.Join(dir, tlsKeyFile), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	ensureCaddyReadable(dir)
-
-	assertCaddyReadable(t, dir)
-}
-
 // TestLoadClientCert_DoesNotChangePermissions guards against loadClientCert (and so
 // hasValidTLSCredentials) modifying the filesystem.
 func TestLoadClientCert_DoesNotChangePermissions(t *testing.T) {

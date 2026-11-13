@@ -182,8 +182,6 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 // this worker; it is empty on reconnect (the gateway will read it from the message).
 func connectAndStream(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter, gatewayAddr, workerName string) error {
 	tlsDir := workerTLSDir()
-	// Covers both paths into here: existing credentials and freshly registered ones.
-	ensureCaddyReadable(tlsDir)
 	cert, err := loadClientCert(tlsDir)
 	if err != nil {
 		return fmt.Errorf("worker join: %w", err)

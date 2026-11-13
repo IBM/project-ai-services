@@ -558,30 +558,6 @@ func TestGenerateAndPersistPKI_NoPlaintextKeyOnDisk(t *testing.T) {
 	assertCaddyReadablePKI(t, dir)
 }
 
-// TestLoadOrGeneratePKI_FixesPermissionsOfExistingInstall covers a catalog installed
-// before the encrypted_file Caddy module: 0700 directory and 0600 server.key.
-func TestLoadOrGeneratePKI_FixesPermissionsOfExistingInstall(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("DOMAIN_SUFFIX", "example.com")
-	t.Setenv(workerconstants.MTLSEncryptionKeyEnv, "test-mtls-secret")
-
-	if _, err := generateAndPersistPKI(t.Context(), dir, "podman"); err != nil {
-		t.Fatalf("generateAndPersistPKI: %v", err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(filepath.Join(dir, "server.key"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := loadOrGeneratePKI(t.Context(), dir, "podman"); err != nil {
-		t.Fatalf("loadOrGeneratePKI: %v", err)
-	}
-
-	assertCaddyReadablePKI(t, dir)
-}
-
 func assertCaddyReadablePKI(t *testing.T, dir string) {
 	t.Helper()
 
