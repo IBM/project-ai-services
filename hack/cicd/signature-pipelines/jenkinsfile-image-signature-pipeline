@@ -27,6 +27,7 @@ pipeline {
   litellm
   postgres
   tools
+  vllm-rocm
   ai-services
   ai-services-mcp
   catalog-ui
@@ -92,6 +93,15 @@ pipeline {
                     steps {
                         script {
                             env.ICR_LITELLM_IMAGE = buildAndPublishImage('images/litellm/', 'litellm')
+                        }
+                    }
+                }
+
+                stage('Build vllm-rocm') {
+                    when { expression { !isImageSkipped('vllm-rocm') } }
+                    steps {
+                        script {
+                            env.ICR_VLLM_ROCM_IMAGE = buildAndPublishImage('images/vllm-rocm/', 'vllm-rocm')
                         }
                     }
                 }
@@ -548,6 +558,7 @@ def generateImageList() {
         env.ICR_LITELLM_IMAGE,
         env.ICR_POSTGRES_IMAGE,
         env.ICR_TOOL_IMAGE,
+        env.ICR_VLLM_ROCM_IMAGE,
         env.ICR_AI_SERVICES_IMAGE,
         env.ICR_AI_SERVICES_MCP_IMAGE
     ].findAll { it != null }
