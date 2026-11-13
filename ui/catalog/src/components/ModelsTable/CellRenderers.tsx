@@ -51,7 +51,7 @@ export const ActionCell = ({ rowId, rowData }: CellRendererProps) => (
     rowId={rowId}
     rowData={rowData}
     onDelete={() => {
-      /* delete not yet wired */
+      // TODO: Wire delete once the DELETE API is integrated.
     }}
     isDeleteEnabled={(status) =>
       status === DEPLOYMENT_STATUS.RUNNING || status === DEPLOYMENT_STATUS.ERROR

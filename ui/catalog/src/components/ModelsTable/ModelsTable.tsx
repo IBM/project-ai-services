@@ -204,6 +204,7 @@ const ModelsTable = ({
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
+  // TODO: Add filter options and wire filter functionality.
   const filterSlot = (
     <h6 className={sharedStyles.overflowMenuHeading}>Filter</h6>
   );
@@ -257,7 +258,7 @@ const ModelsTable = ({
                         headers={HEADERS}
                         visibleColumns={state.visibleColumns}
                         onSearchChange={() => {
-                          /* server-side search — not yet wired */
+                          // TODO: Wire server-side search
                         }}
                         onRefresh={() => fetchModels()}
                         onExport={() =>
