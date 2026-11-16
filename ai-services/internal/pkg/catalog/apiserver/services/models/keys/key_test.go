@@ -65,6 +65,10 @@ func (l *keyLiteLLM) GenerateKey(_ context.Context, req catalogclient.LiteLLMKey
 	return key, nil
 }
 
+func (l *keyLiteLLM) GetModelInfo(context.Context, string) (*catalogclient.LiteLLMModelInfoResponse, error) {
+	return &catalogclient.LiteLLMModelInfoResponse{}, nil
+}
+
 func newKeyManager(lite *keyLiteLLM) *Manager {
 	if lite.keys == nil {
 		lite.keys = map[string]string{}

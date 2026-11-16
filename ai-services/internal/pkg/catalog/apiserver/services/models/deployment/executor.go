@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/vllm"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
@@ -156,6 +157,12 @@ func updateLocalRoute(plan *types.LocalPlan, egress string) {
 // ExecuteRemote runs a remote plan synchronously: add the LiteLLM route, verify connectivity and
 // persist a connector. Any failure rolls the route back. A connectivity failure is reported as 422.
 func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePlan) error {
+	if plan.Req.ProviderID == catalogconstants.ConnectorProviderHostedVLLM {
+		if err := e.fetchAndSetVllmParams(ctx, plan); err != nil {
+			return err
+		}
+	}
+
 	if err := e.gateway.Register(ctx, &plan.Route); err != nil {
 		var probeErr *litellm.ProbeError
 		if errors.As(err, &probeErr) {
@@ -164,6 +171,16 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 
 		return err
 	}
+
+	if plan.Req.ProviderID != catalogconstants.ConnectorProviderHostedVLLM {
+		if err := e.fetchAndSetLiteLLMParams(ctx, plan); err != nil {
+			e.gateway.Deregister(ctx, plan.Route)
+
+			return err
+		}
+	}
+
+	e.setBatchSizeParam(plan)
 
 	// The route is registered before the connector row is written, so the LiteLLM model ID is
 	// already known here and is stored together with the rest of the metadata.
@@ -183,4 +200,92 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 	}
 
 	return nil
+}
+
+// fetchAndSetVllmParams queries the remote vLLM models endpoint and populates the model_params metadata.
+func (e *ModelExecutor) fetchAndSetVllmParams(ctx context.Context, plan *types.RemotePlan) error {
+	apiBase, _ := plan.Req.Params[catalogconstants.ParamAPIBase].(string)
+	apiKey, _ := plan.Req.Params[catalogconstants.ParamAPIKey].(string)
+
+	if apiBase == "" {
+		return nil
+	}
+
+	vllmClient := vllm.NewClient(apiBase, apiKey)
+	modelsResp, err := vllmClient.GetModels(ctx)
+	if err != nil {
+		return validators.Unprocessable("failed to fetch models from vllm: %v", err)
+	}
+
+	maxModelLen := -1
+	for _, m := range modelsResp.Data {
+		if m.ID == plan.Req.Model {
+			maxModelLen = m.MaxModelLen
+
+			break
+		}
+	}
+
+	if maxModelLen == -1 {
+		return validators.Unprocessable("could not resolve maximum model length for model %q", plan.Req.Model)
+	}
+
+	e.getOrCreateModelParams(plan)[catalogconstants.ParamMaxModelLen] = maxModelLen
+
+	return nil
+}
+
+// fetchAndSetLiteLLMParams queries the LiteLLM model/info endpoint and populates the model_params metadata.
+func (e *ModelExecutor) fetchAndSetLiteLLMParams(ctx context.Context, plan *types.RemotePlan) error {
+	litellmModelID := plan.Route.LiteLLMModelID
+	if litellmModelID == "" {
+		return fmt.Errorf("litellm model ID is empty")
+	}
+
+	infoResp, err := e.gateway.GetModelInfo(ctx, litellmModelID)
+	if err != nil {
+		return fmt.Errorf("failed to get model info from litellm: %w", err)
+	}
+
+	maxInputTokens := -1
+	for _, d := range infoResp.Data {
+		if d.ModelInfo.ID == litellmModelID {
+			maxInputTokens = d.ModelInfo.MaxInputTokens
+
+			break
+		}
+	}
+
+	if maxInputTokens == -1 {
+		return fmt.Errorf("could not resolve maximum input tokens from litellm model info")
+	}
+
+	e.getOrCreateModelParams(plan)[catalogconstants.ParamMaxModelLen] = maxInputTokens
+
+	return nil
+}
+
+// setBatchSizeParam parses maxBatchSize from the parameter map (defaulting to 32) and populates DB model_params metadata.
+func (e *ModelExecutor) setBatchSizeParam(plan *types.RemotePlan) {
+	maxBatchSize := 32
+	if val, ok := plan.Req.Params[catalogconstants.ParamMaxBatchSize].(int); ok {
+		maxBatchSize = val
+	}
+
+	e.getOrCreateModelParams(plan)[catalogconstants.ParamMaxBatchSize] = maxBatchSize
+}
+
+// getOrCreateModelParams returns the model_params map nested inside the plan's metadata, initializing as necessary.
+func (e *ModelExecutor) getOrCreateModelParams(plan *types.RemotePlan) map[string]any {
+	if plan.Metadata == nil {
+		plan.Metadata = make(map[string]any)
+	}
+
+	modelParams, ok := plan.Metadata[catalogconstants.MetadataKeyModelParams].(map[string]any)
+	if !ok {
+		modelParams = make(map[string]any)
+		plan.Metadata[catalogconstants.MetadataKeyModelParams] = modelParams
+	}
+
+	return modelParams
 }
