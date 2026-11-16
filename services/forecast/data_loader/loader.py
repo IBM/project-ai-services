@@ -1,7 +1,7 @@
 """
 Orchestrates extracting streaming batches from Db2 and persisting to compressed Parquet.
 
-Enforces column validation, streaming batching, hard row limits, and atomic file storage.
+Enforces column validation, streaming batching, and atomic file storage.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from typing import Any, Dict, List, Optional, Sequence
 from forecast.data_loader.config import (
     DEFAULT_LOADER_CHUNK_ROWS,
     DEFAULT_MAPEPIRE_PORT,
-    DEFAULT_MAX_TRAINING_ROWS,
     DEFAULT_PARQUET_COMPRESSION,
     DataLoaderConfig,
 )
@@ -22,7 +21,6 @@ from forecast.data_loader.db2_client import Db2Client
 from forecast.data_loader.exceptions import (
     ConnectorDecryptionError,
     DBColumnNotFoundError,
-    RowLimitExceededError,
 )
 from forecast.data_loader.parquet_store import (
     ParquetBatchWriter,
@@ -73,7 +71,6 @@ class Db2DataLoader:
         output_path: str | Path,
         where_clause: Optional[str] = None,
         batch_size: int = DEFAULT_LOADER_CHUNK_ROWS,
-        max_training_rows: int = DEFAULT_MAX_TRAINING_ROWS,
         compression: str = DEFAULT_PARQUET_COMPRESSION,
         connector_id: Optional[str] = None,
         connector_type: Optional[str] = None,
@@ -92,7 +89,6 @@ class Db2DataLoader:
             output_path: Destination path for the .parquet file.
             where_clause: Optional SQL filter condition (e.g., "STATUS = 'ACTIVE'").
             batch_size: Number of rows to fetch per chunk from Db2.
-            max_training_rows: Maximum allowed row limit. Extraction aborts if exceeded.
             compression: Parquet compression codec (default 'snappy').
             connector_id: Connector identifier, used in decryption errors.
             connector_type: Connector type used to select the secret fields to decrypt.
@@ -109,7 +105,6 @@ class Db2DataLoader:
             InvalidTableReferenceError: If table is not in 'SCHEMA.TABLE' form.
             DBTableNotFoundError: If table does not exist or user lacks access.
             DBColumnNotFoundError: If any requested column is missing.
-            RowLimitExceededError: If extracted rows exceed max_training_rows.
             DBConnectionError: If connection is dropped during extraction.
             ParquetWriteError: If Parquet writing fails.
         """
@@ -131,7 +126,6 @@ class Db2DataLoader:
                     output_path=output_path,
                     where_clause=where_clause,
                     batch_size=batch_size,
-                    max_training_rows=max_training_rows,
                     compression=compression,
                 )
 
@@ -146,11 +140,10 @@ class Db2DataLoader:
         cols_requested = list(columns)
 
         logger.info(
-            "Starting Db2 data extraction: table=%s columns=%s batch_size=%d max_training_rows=%d output=%s",
+            "Starting Db2 data extraction: table=%s columns=%s batch_size=%d output=%s",
             table,
             cols_requested,
             batch_size,
-            max_training_rows,
             target_path,
         )
 
@@ -185,17 +178,6 @@ class Db2DataLoader:
         with ParquetBatchWriter(output_path=target_path, schema=arrow_schema, compression=compression) as writer:
             for batch in self.db2_client.stream_query_batches(query, batch_size=batch_size):
                 batch_len = len(batch)
-                if total_rows + batch_len > max_training_rows:
-                    writer.abort()
-                    raise RowLimitExceededError(
-                        row_count=total_rows + batch_len,
-                        max_training_rows=max_training_rows,
-                        message=(
-                            f"Extraction exceeded max_training_rows limit of {max_training_rows} rows "
-                            f"(attempted to read {total_rows + batch_len} rows from {table})"
-                        ),
-                    )
-
                 writer.write_batch(batch)
                 total_rows += batch_len
                 batches_count += 1

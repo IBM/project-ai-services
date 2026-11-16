@@ -65,21 +65,6 @@ class DBColumnNotFoundError(DataLoaderError):
     is_permanent_failure: bool = True
 
 
-class RowLimitExceededError(DataLoaderError):
-    """Raised when data extraction exceeds the configured maximum row limit.
-
-    This is a permanent failure (will not succeed on retry without config changes).
-    """
-
-    is_permanent_failure: bool = True
-
-    def __init__(self, row_count: int, max_training_rows: int, message: Optional[str] = None):
-        self.row_count = row_count
-        self.max_training_rows = max_training_rows
-        msg = message or f"Extracted row count ({row_count}) exceeded maximum limit of {max_training_rows} rows"
-        super().__init__(msg)
-
-
 class ParquetWriteError(DataLoaderError):
     """Raised when an error occurs while writing data to a Parquet file."""
 

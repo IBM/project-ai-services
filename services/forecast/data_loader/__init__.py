@@ -9,7 +9,6 @@ from forecast.data_loader.config import (
     DEFAULT_CONNECT_TIMEOUT_S,
     DEFAULT_LOADER_CHUNK_ROWS,
     DEFAULT_MAPEPIRE_PORT,
-    DEFAULT_MAX_TRAINING_ROWS,
     DEFAULT_PARQUET_COMPRESSION,
     DEFAULT_QUERY_TIMEOUT_S,
     DataLoaderConfig,
@@ -25,7 +24,6 @@ from forecast.data_loader.exceptions import (
     DBTableNotFoundError,
     InvalidTableReferenceError,
     ParquetWriteError,
-    RowLimitExceededError,
 )
 from forecast.data_loader.loader import (
     Db2DataLoader,
@@ -44,7 +42,6 @@ __all__ = [
     "ConnectorDecryptionError",
     "ConnectorNotFoundError",
     "DEFAULT_MAPEPIRE_PORT",
-    "DEFAULT_MAX_TRAINING_ROWS",
     "DEFAULT_PARQUET_COMPRESSION",
     "DEFAULT_QUERY_TIMEOUT_S",
     "DataLoaderConfig",
@@ -59,7 +56,6 @@ __all__ = [
     "InvalidTableReferenceError",
     "ParquetBatchWriter",
     "ParquetWriteError",
-    "RowLimitExceededError",
     "build_arrow_schema",
     "map_db_type_to_arrow",
 ]
