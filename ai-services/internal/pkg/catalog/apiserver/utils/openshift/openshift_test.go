@@ -16,7 +16,7 @@ import (
 )
 
 func TestPredictorAddress(t *testing.T) {
-	assert.Equal(t, "llm-predictor.ai-services-model-1234abcd.svc.cluster.local:8080",
+	assert.Equal(t, "llm-predictor.ai-services-model-1234abcd.svc.cluster.local:8000",
 		PredictorAddress("llm", "ai-services-model-1234abcd"))
 }
 

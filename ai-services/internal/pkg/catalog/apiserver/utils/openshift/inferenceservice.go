@@ -11,8 +11,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
-// PredictorPort is the port of the Service KServe creates in RawDeployment mode.
-const PredictorPort = "8080"
+// PredictorPort is the port the model server listens on. It is the containerPort of the
+const PredictorPort = "8000"
 
 // PredictorAddress returns the "host:port" of the predictor Service of the InferenceService
 // isvcName in namespace. KServe (RawDeployment) creates a Service named "<isvcName>-predictor", so
