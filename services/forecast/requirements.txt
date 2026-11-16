@@ -23,3 +23,8 @@ autogluon.tabular>=1.1.0
 # Triton Serving & Model Config (Protobuf Text Format / Triton Client)
 protobuf>=4.25.0
 tritonclient[http]>=2.40.0
+onnx
+onnxmltools
+onnxruntime
+pandas
+pyarrow
