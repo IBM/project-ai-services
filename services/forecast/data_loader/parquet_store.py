@@ -79,15 +79,17 @@ def build_arrow_schema(
 
     Args:
         columns: Ordered list of column names.
-        column_types: Optional mapping of column name (case-insensitive) to SQL type string.
+        column_types: Optional mapping of column name to SQL type string. An exact name
+            match wins; otherwise the match is case-insensitive.
 
     Returns:
         pyarrow.Schema with properly mapped types.
     """
-    type_lookup = {k.upper(): v for k, v in (column_types or {}).items()}
+    column_types = column_types or {}
+    type_lookup = {k.upper(): v for k, v in column_types.items()}
     fields = []
     for col in columns:
-        db_type = type_lookup.get(col.upper(), "VARCHAR")
+        db_type = column_types[col] if col in column_types else type_lookup.get(col.upper(), "VARCHAR")
         arrow_type = map_db_type_to_arrow(db_type)
         fields.append(pa.field(col, arrow_type, nullable=True))
     return pa.schema(fields)

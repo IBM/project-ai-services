@@ -7,15 +7,9 @@ and server-side streaming cursor execution.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
 
-from forecast.data_loader.config import (
-    DEFAULT_CONNECT_TIMEOUT_S,
-    DEFAULT_LOADER_CHUNK_ROWS,
-    DEFAULT_MAPEPIRE_PORT,
-    DEFAULT_QUERY_TIMEOUT_S,
-)
 from forecast.data_loader.exceptions import (
     DBAuthError,
     DBColumnNotFoundError,
@@ -23,17 +17,34 @@ from forecast.data_loader.exceptions import (
     DBTableNotFoundError,
     InvalidTableReferenceError,
 )
+from forecast.settings import settings
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ColumnInfo:
-    """Metadata for a single database column."""
+    """Metadata for a single database column.
+
+    ``name`` is the catalogue spelling. ``table_schema`` / ``table_name`` are the catalogue
+    spelling of the owning table (``table_schema`` is None when the table was requested
+    without a schema); they are not part of equality.
+    """
 
     name: str
     type: str
     nullable: bool = True
+    table_schema: Optional[str] = field(default=None, compare=False)
+    table_name: Optional[str] = field(default=None, compare=False)
+
+    @property
+    def table_ref(self) -> Optional[str]:
+        """Catalogue-spelled 'SCHEMA.TABLE' or 'TABLE' reference, or None if unknown."""
+        if self.table_name is None:
+            return None
+        if self.table_schema is None:
+            return self.table_name
+        return f"{self.table_schema}.{self.table_name}"
 
 
 class Db2Client:
@@ -48,9 +59,9 @@ class Db2Client:
         database: str,
         username: str,
         password: str,
-        port: int = DEFAULT_MAPEPIRE_PORT,
-        connect_timeout: int = DEFAULT_CONNECT_TIMEOUT_S,
-        query_timeout: int = DEFAULT_QUERY_TIMEOUT_S,
+        port: int = settings.forecast.mapepire_port,
+        connect_timeout: int = settings.forecast.connector_connect_timeout_s,
+        query_timeout: int = settings.forecast.connector_query_timeout_s,
         ignore_unauthorized: bool = False,
         ca_cert: Optional[str | bytes] = None,
         custom_connection: Optional[Any] = None,
@@ -144,32 +155,56 @@ class Db2Client:
             cursor.close()
 
     @staticmethod
-    def split_table_ref(table: str) -> Tuple[str, str]:
-        """Split a 'SCHEMA.TABLE' reference into its (schema, table) parts."""
-        schema, sep, name = (table or "").strip().partition(".")
-        schema, name = schema.strip(), name.strip()
-        if not sep or not schema or not name or "." in name:
+    def split_table_ref(table: str) -> Tuple[Optional[str], str]:
+        """Split a 'SCHEMA.TABLE' or 'TABLE' reference into (schema, table).
+
+        ``schema`` is None when the reference has no schema part; Db2 then resolves the
+        table against the session's current schema.
+        """
+        parts = [part.strip() for part in (table or "").strip().split(".")]
+        if len(parts) > 2 or not all(parts):
             raise InvalidTableReferenceError(
-                f"Table reference '{table}' must be in the form 'SCHEMA.TABLE'"
+                f"Table reference '{table}' must be 'TABLE' or 'SCHEMA.TABLE'"
             )
-        return schema, name
+        if len(parts) == 1:
+            return None, parts[0]
+        return parts[0], parts[1]
 
     def list_columns(self, table: str) -> List[ColumnInfo]:
-        """Retrieve column names, data types, and nullability for a 'SCHEMA.TABLE'."""
+        """Retrieve column names, data types, and nullability for a 'SCHEMA.TABLE' or 'TABLE'.
+
+        The table is matched case-insensitively and the columns carry the catalogue
+        spelling of the table and column names, which is what must be quoted in queries
+        (quoted identifiers are case-sensitive in Db2). If several tables differ only by
+        case, the one spelled exactly as requested is used; otherwise the reference is
+        ambiguous and rejected. An unqualified table is looked up in the session's
+        current schema.
+        """
         schema, name = self.split_table_ref(table)
         conn = self._get_connection()
         cursor = conn.cursor()
 
         try:
-            cursor.execute(
-                """
-                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-                FROM QSYS2.SYSCOLUMNS
-                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-                ORDER BY ORDINAL_POSITION
-                """,
-                [schema.upper(), name.upper()],
-            )
+            if schema is None:
+                cursor.execute(
+                    """
+                    SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM QSYS2.SYSCOLUMNS
+                    WHERE TABLE_SCHEMA = CURRENT SCHEMA AND UPPER(TABLE_NAME) = ?
+                    ORDER BY TABLE_NAME, ORDINAL_POSITION
+                    """,
+                    [name.upper()],
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                    FROM QSYS2.SYSCOLUMNS
+                    WHERE UPPER(TABLE_SCHEMA) = ? AND UPPER(TABLE_NAME) = ?
+                    ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+                    """,
+                    [schema.upper(), name.upper()],
+                )
             rows = cursor.fetchall()
         except Exception as exc:
             raise DBConnectionError(f"Failed to query columns for table '{table}': {exc}") from exc
@@ -181,13 +216,29 @@ class Db2Client:
                 f"Table '{table}' not found or not accessible for user '{self.username}'"
             )
 
+        # Group by catalogue (schema, table); more than one group means names differing by case.
+        tables: dict[Tuple[str, str], list] = {}
+        for row in rows:
+            tables.setdefault((row[0].strip(), row[1].strip()), []).append(row)
+        if len(tables) > 1:
+            exact = [key for key in tables if key[1] == name and (schema is None or key[0] == schema)]
+            if len(exact) != 1:
+                raise InvalidTableReferenceError(
+                    f"Table reference '{table}' matches several tables that differ only by case: "
+                    f"{sorted('.'.join(key) for key in tables)}. Use the exact spelling."
+                )
+            tables = {exact[0]: tables[exact[0]]}
+        (table_schema, table_name), table_rows = next(iter(tables.items()))
+
         return [
             ColumnInfo(
-                name=row[0].strip(),
-                type=row[1].strip() if row[1] else "VARCHAR",
-                nullable=str(row[2]).strip().upper() in ("Y", "YES", "TRUE", "1"),
+                name=row[2].strip(),
+                type=row[3].strip() if row[3] else "VARCHAR",
+                nullable=str(row[4]).strip().upper() in ("Y", "YES", "TRUE", "1"),
+                table_schema=None if schema is None else table_schema,
+                table_name=table_name,
             )
-            for row in rows
+            for row in table_rows
         ]
 
     @staticmethod
@@ -201,15 +252,18 @@ class Db2Client:
         table: str,
         columns: Sequence[str],
         where_clause: Optional[str] = None,
-        batch_size: int = DEFAULT_LOADER_CHUNK_ROWS,
+        batch_size: int = settings.forecast.loader_chunk_rows,
     ) -> str:
         """Build an optimized, safe SELECT SQL statement for streaming reads.
 
-        ``table`` must be a 'SCHEMA.TABLE' reference.
+        ``table`` is 'SCHEMA.TABLE' or 'TABLE'; an unqualified table is resolved by Db2
+        against the session's current schema.
         """
         schema, name = self.split_table_ref(table)
         quoted_cols = ", ".join(self.quote_identifier(c) for c in columns)
-        table_ref = f"{self.quote_identifier(schema)}.{self.quote_identifier(name)}"
+        table_ref = self.quote_identifier(name)
+        if schema is not None:
+            table_ref = f"{self.quote_identifier(schema)}.{table_ref}"
 
         sql = f"SELECT {quoted_cols} FROM {table_ref}"
 
@@ -226,7 +280,7 @@ class Db2Client:
     def stream_query_batches(
         self,
         query: str,
-        batch_size: int = DEFAULT_LOADER_CHUNK_ROWS,
+        batch_size: int = settings.forecast.loader_chunk_rows,
         fetch_size: int = 2500,
     ) -> Iterator[List[Sequence[Any]]]:
         """Execute a query and yield result rows in batches using fetchmany.

@@ -113,6 +113,31 @@ class ForecastConfig(BaseSettings):
         description="Rows per chunk when streaming the source to scratch",
     )
 
+    parquet_compression: str = Field(
+        default="snappy",
+        description="Parquet compression codec for data extracted to scratch",
+    )
+
+    # Db2 for i connectors (Mapepire)
+    mapepire_port: int = Field(
+        default=8076,
+        ge=1,
+        le=65535,
+        description="Mapepire daemon port used when the connector does not specify one",
+    )
+
+    connector_connect_timeout_s: int = Field(
+        default=30,
+        ge=1,
+        description="Timeout for opening a connection to the source database",
+    )
+
+    connector_query_timeout_s: int = Field(
+        default=3600,
+        ge=1,
+        description="Timeout for a streaming extraction query on the source database",
+    )
+
     worker_memory_limit_mb: Optional[int] = Field(
         default=None,
         ge=1,

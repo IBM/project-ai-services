@@ -54,7 +54,7 @@ class DBTableNotFoundError(DataLoaderError):
 
 
 class InvalidTableReferenceError(DataLoaderError):
-    """Raised when a table reference is not in the required 'SCHEMA.TABLE' form."""
+    """Raised when a table reference is not in the form 'TABLE' or 'SCHEMA.TABLE'."""
 
     is_permanent_failure: bool = True
 

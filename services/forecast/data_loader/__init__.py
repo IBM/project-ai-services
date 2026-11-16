@@ -5,14 +5,6 @@ Handles database extraction (Db2 for i / Db2 LUW) in streaming chunks,
 type conversion, and disk persistence to compressed Parquet files.
 """
 
-from forecast.data_loader.config import (
-    DEFAULT_CONNECT_TIMEOUT_S,
-    DEFAULT_LOADER_CHUNK_ROWS,
-    DEFAULT_MAPEPIRE_PORT,
-    DEFAULT_PARQUET_COMPRESSION,
-    DEFAULT_QUERY_TIMEOUT_S,
-    DataLoaderConfig,
-)
 from forecast.data_loader.db2_client import ColumnInfo, Db2Client
 from forecast.data_loader.exceptions import (
     ConnectorDecryptionError,
@@ -37,14 +29,8 @@ from forecast.data_loader.parquet_store import (
 
 __all__ = [
     "ColumnInfo",
-    "DEFAULT_CONNECT_TIMEOUT_S",
-    "DEFAULT_LOADER_CHUNK_ROWS",
     "ConnectorDecryptionError",
     "ConnectorNotFoundError",
-    "DEFAULT_MAPEPIRE_PORT",
-    "DEFAULT_PARQUET_COMPRESSION",
-    "DEFAULT_QUERY_TIMEOUT_S",
-    "DataLoaderConfig",
     "DataLoaderError",
     "DBAuthError",
     "DBColumnNotFoundError",

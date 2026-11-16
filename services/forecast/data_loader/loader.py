@@ -11,13 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from forecast.data_loader.config import (
-    DEFAULT_LOADER_CHUNK_ROWS,
-    DEFAULT_MAPEPIRE_PORT,
-    DEFAULT_PARQUET_COMPRESSION,
-    DataLoaderConfig,
-)
-from forecast.data_loader.db2_client import Db2Client
+from forecast.data_loader.db2_client import ColumnInfo, Db2Client
 from forecast.data_loader.exceptions import (
     ConnectorDecryptionError,
     DBColumnNotFoundError,
@@ -26,6 +20,7 @@ from forecast.data_loader.parquet_store import (
     ParquetBatchWriter,
     build_arrow_schema,
 )
+from forecast.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +38,68 @@ class ExtractResult:
     batches_count: int = 0
 
 
+def _resolve_columns(
+    requested: Sequence[str], available: Sequence[ColumnInfo], table: str
+) -> List[ColumnInfo]:
+    """Map requested column names to catalogue columns.
+
+    An exact match wins; otherwise the match is case-insensitive and must be unique.
+    Db2 quoted identifiers are case-sensitive, so queries must use the catalogue spelling.
+    """
+    by_exact = {col.name: col for col in available}
+    by_upper: Dict[str, List[ColumnInfo]] = {}
+    for col in available:
+        by_upper.setdefault(col.name.upper(), []).append(col)
+
+    resolved: List[ColumnInfo] = []
+    missing: List[str] = []
+    for name in requested:
+        if name in by_exact:
+            resolved.append(by_exact[name])
+            continue
+        candidates = by_upper.get(name.upper(), [])
+        if len(candidates) > 1:
+            raise DBColumnNotFoundError(
+                f"Column '{name}' is ambiguous in table '{table}': matches "
+                f"{[c.name for c in candidates]}. Use the exact spelling."
+            )
+        if candidates:
+            resolved.append(candidates[0])
+        else:
+            missing.append(name)
+
+    if missing:
+        raise DBColumnNotFoundError(
+            f"Column(s) {missing} not found in table '{table}'. Available columns: {[c.name for c in available]}"
+        )
+    return resolved
+
+
+def _as_bool(value: Any) -> bool:
+    """Parse a bool that may have been stored as a string (decrypted fields are strings)."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
 def _client_from_config(connection_config: Dict[str, Any]) -> Db2Client:
-    """Build a Db2Client from a connection config dictionary."""
+    """Build a Db2Client from a connection config dictionary.
+
+    Decrypted connector fields are strings, so numeric and boolean options are converted here.
+    """
     return Db2Client(
         host=connection_config["host"],
         database=connection_config["database"],
         username=connection_config["username"],
         password=connection_config["password"],
-        port=connection_config.get("port", DEFAULT_MAPEPIRE_PORT),
-        connect_timeout=connection_config.get("connect_timeout", 30),
-        query_timeout=connection_config.get("query_timeout", 3600),
-        ignore_unauthorized=connection_config.get("ignore_unauthorized", False),
+        port=int(connection_config.get("port", settings.forecast.mapepire_port)),
+        connect_timeout=int(
+            connection_config.get("connect_timeout", settings.forecast.connector_connect_timeout_s)
+        ),
+        query_timeout=int(
+            connection_config.get("query_timeout", settings.forecast.connector_query_timeout_s)
+        ),
+        ignore_unauthorized=_as_bool(connection_config.get("ignore_unauthorized", False)),
         ca_cert=connection_config.get("ca_cert"),
     )
 
@@ -70,8 +116,8 @@ class Db2DataLoader:
         columns: Sequence[str],
         output_path: str | Path,
         where_clause: Optional[str] = None,
-        batch_size: int = DEFAULT_LOADER_CHUNK_ROWS,
-        compression: str = DEFAULT_PARQUET_COMPRESSION,
+        batch_size: int = settings.forecast.loader_chunk_rows,
+        compression: str = settings.forecast.parquet_compression,
         connector_id: Optional[str] = None,
         connector_type: Optional[str] = None,
         encrypted_connection_details: Optional[Dict[str, Any]] = None,
@@ -84,12 +130,12 @@ class Db2DataLoader:
         for this extraction, ignoring ``db2_client``.
 
         Args:
-            table: Source table in 'SCHEMA.TABLE' form.
+            table: Source table as 'SCHEMA.TABLE' or 'TABLE' (resolved in the current schema).
             columns: List of columns to extract.
             output_path: Destination path for the .parquet file.
             where_clause: Optional SQL filter condition (e.g., "STATUS = 'ACTIVE'").
             batch_size: Number of rows to fetch per chunk from Db2.
-            compression: Parquet compression codec (default 'snappy').
+            compression: Parquet compression codec (default from PARQUET_COMPRESSION).
             connector_id: Connector identifier, used in decryption errors.
             connector_type: Connector type used to select the secret fields to decrypt.
             encrypted_connection_details: Encrypted connector configuration.
@@ -102,7 +148,7 @@ class Db2DataLoader:
                 (names the connector without leaking credentials).
             ValueError: If neither a client nor connector details are available, or
                 connector details are given without connector_id and connector_type.
-            InvalidTableReferenceError: If table is not in 'SCHEMA.TABLE' form.
+            InvalidTableReferenceError: If table is not 'TABLE' or 'SCHEMA.TABLE'.
             DBTableNotFoundError: If table does not exist or user lacks access.
             DBColumnNotFoundError: If any requested column is missing.
             DBConnectionError: If connection is dropped during extraction.
@@ -112,7 +158,7 @@ class Db2DataLoader:
             if not connector_id or not connector_type:
                 raise ValueError("connector_id and connector_type are required with encrypted_connection_details")
 
-            from forecast.encryption import decrypt_secrets
+            from forecast.utils.encryption import decrypt_secrets
 
             try:
                 decrypted_config = decrypt_secrets(connector_type, encrypted_connection_details)
@@ -147,26 +193,20 @@ class Db2DataLoader:
             target_path,
         )
 
-        # 1. Fetch available column metadata and validate requested columns exist
+        # 1. Fetch catalogue metadata and resolve the table and requested columns to the
+        #    catalogue spelling (matching is case-insensitive, quoted queries are not)
         available_cols = self.db2_client.list_columns(table)
-        available_col_map = {col.name.upper(): col for col in available_cols}
-
-        missing_cols = [c for c in cols_requested if c.upper() not in available_col_map]
-        if missing_cols:
-            raise DBColumnNotFoundError(
-                f"Column(s) {missing_cols} not found in table '{table}'. Available columns: {list(available_col_map.keys())}"
-            )
+        resolved_cols = _resolve_columns(cols_requested, available_cols, table)
+        resolved_names = [col.name for col in resolved_cols]
+        resolved_table = available_cols[0].table_ref or table
 
         # 2. Build Arrow schema with mapped data types
-        col_type_map = {
-            col.name.upper(): col.type for col in available_cols
-        }
-        arrow_schema = build_arrow_schema(cols_requested, col_type_map)
+        arrow_schema = build_arrow_schema(resolved_names, {col.name: col.type for col in resolved_cols})
 
         # 3. Build optimized SELECT SQL statement
         query = self.db2_client.build_select_query(
-            table=table,
-            columns=cols_requested,
+            table=resolved_table,
+            columns=resolved_names,
             where_clause=where_clause,
             batch_size=batch_size,
         )
@@ -203,9 +243,9 @@ class Db2DataLoader:
         return ExtractResult(
             output_path=str(target_path),
             rows_written=total_rows,
-            columns=cols_requested,
+            columns=resolved_names,
             bytes_written=file_size,
             duration_seconds=duration,
-            table=table,
+            table=resolved_table,
             batches_count=batches_count,
         )
