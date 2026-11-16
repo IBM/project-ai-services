@@ -25,33 +25,31 @@ func TestList(t *testing.T) {
 		"llm/bad/profiles.yaml": &fstest.MapFile{Data: []byte("not: [a list")},
 	}
 
-	t.Run("parses entries", func(t *testing.T) {
+	t.Run("parses entries into unstructured params map", func(t *testing.T) {
 		got, err := List(fsys, "llm/p")
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		assert.Equal(t, "standard", got[0].ID)
 		assert.True(t, got[0].Default)
-		assert.Equal(t, 214748364800, got[0].Params.Resources.Memory)
-		assert.Equal(t, 4, got[0].Params.Resources.Accelerators["ibm.com/spyre_pf"])
+		res, ok := got[0].Params["resources"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, 214748364800, res["memory"])
+		acc, ok := res["accelerators"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, 4, acc["ibm.com/spyre_pf"])
 	})
 
-	t.Run("parses hardware params", func(t *testing.T) {
-		withParams := fstest.MapFS{"llm/p/profiles.yaml": &fstest.MapFile{Data: []byte(`
-- id: standard
-  params:
-    maxModelLen: 32768
-    maxBatchSize: 32
-    maxNumBatchedTokens: 8096
-    shmSize: "2Gi"
-`)}}
+	t.Run("parses arbitrary hardware params without structured schema", func(t *testing.T) {
+		withParams := fstest.MapFS{"llm/p/profiles.yaml": &fstest.MapFile{Data: []byte("- id: standard\n  params:\n    maxModelLen: 32768\n    maxBatchSize: 32\n    maxNumBatchedTokens: 8096\n    shmSize: \"2Gi\"\n    customFlag: \"enabled\"\n")}}
 
 		got, err := List(withParams, "llm/p")
 		require.NoError(t, err)
 		require.Len(t, got, 1)
-		assert.Equal(t, 32768, got[0].Params.MaxModelLen)
-		assert.Equal(t, 32, got[0].Params.MaxBatchSize)
-		assert.Equal(t, 8096, got[0].Params.MaxNumBatchedTokens)
-		assert.Equal(t, "2Gi", got[0].Params.ShmSize)
+		assert.Equal(t, 32768, got[0].Params["maxModelLen"])
+		assert.Equal(t, 32, got[0].Params["maxBatchSize"])
+		assert.Equal(t, 8096, got[0].Params["maxNumBatchedTokens"])
+		assert.Equal(t, "2Gi", got[0].Params["shmSize"])
+		assert.Equal(t, "enabled", got[0].Params["customFlag"])
 	})
 
 	t.Run("missing file means no profiles", func(t *testing.T) {
@@ -92,40 +90,6 @@ func TestIsDefault(t *testing.T) {
 			assert.Equal(t, tt.want, IsDefault(tt.defaultID, tt.profile))
 		})
 	}
-}
-
-func TestParamValues(t *testing.T) {
-	t.Run("spyre profile sets every key", func(t *testing.T) {
-		p := Param{
-			Resources:    Resources{Memory: 214748364800, Accelerators: map[string]int{"ibm.com/spyre_pf": 4}},
-			MaxModelLen:  32768,
-			MaxBatchSize: 32,
-			ShmSize:      "2Gi",
-		}
-
-		assert.Equal(t, map[string]any{
-			"resources": map[string]any{
-				"memory":       214748364800,
-				"accelerators": map[string]int{"ibm.com/spyre_pf": 4},
-			},
-			"maxModelLen":  32768,
-			"maxBatchSize": 32,
-			"shmSize":      "2Gi",
-		}, p.Values())
-	})
-
-	t.Run("cpu profile omits unset keys", func(t *testing.T) {
-		p := Param{Resources: Resources{Memory: 161061273600}, MaxModelLen: 8096, MaxBatchSize: 32, MaxNumBatchedTokens: 8096}
-
-		got := p.Values()
-		assert.Equal(t, map[string]any{"memory": 161061273600}, got["resources"])
-		assert.Equal(t, 8096, got["maxNumBatchedTokens"])
-		assert.NotContains(t, got, "shmSize")
-	})
-
-	t.Run("empty param yields no keys", func(t *testing.T) {
-		assert.Empty(t, Param{}.Values())
-	})
 }
 
 func TestResolve(t *testing.T) {
@@ -208,7 +172,7 @@ func TestValuesFor(t *testing.T) {
 		assert.Equal(t, 32768, got["maxModelLen"])
 		assert.Equal(t, map[string]any{
 			"memory":       214748364800,
-			"accelerators": map[string]int{"ibm.com/spyre_pf": 4},
+			"accelerators": map[string]any{"ibm.com/spyre_pf": 4},
 		}, got["resources"])
 
 		got, err = ValuesFor(fsys, "llm/spyre", model, "compact-4k")

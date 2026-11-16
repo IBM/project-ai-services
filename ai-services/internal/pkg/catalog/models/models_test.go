@@ -259,10 +259,10 @@ func TestSetComponentTypeNames(t *testing.T) {
 
 func TestBuildDeployProfiles(t *testing.T) {
 	byID := map[string]profiles.Profile{
-		"p1": {ID: "p1", Name: "P1", Description: "d1", Default: true, Params: profiles.Param{
-			Resources: profiles.Resources{Memory: 100, Accelerators: map[string]int{"ibm.com/spyre_pf": 4}},
+		"p1": {ID: "p1", Name: "P1", Description: "d1", Default: true, Params: map[string]any{
+			"resources": map[string]any{"memory": 100, "accelerators": map[string]any{"ibm.com/spyre_pf": 4}},
 		}},
-		"p2": {ID: "p2", Name: "P2", Params: profiles.Param{Resources: profiles.Resources{Memory: 200}}},
+		"p2": {ID: "p2", Name: "P2", Params: map[string]any{"resources": map[string]any{"memory": 200}}},
 	}
 
 	t.Run("maps profiles in model order with cpu and storage", func(t *testing.T) {

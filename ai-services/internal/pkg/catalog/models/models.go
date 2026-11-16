@@ -153,20 +153,43 @@ func BuildDeployProfiles(model *types.Model, profilesByID map[string]profiles.Pr
 		if !ok {
 			return nil, fmt.Errorf("model '%s' lists profile '%s' which is not defined in %s for provider '%s'", model.ID, id, profiles.FileName, providerID)
 		}
-		res := base // copy, so each profile gets its own resources
-		res.Memory = pr.Params.Resources.Memory
-		res.Accelerators = pr.Params.Resources.Accelerators
 
 		deployProfiles = append(deployProfiles, types.ModelDeployProfile{
 			ID:          pr.ID,
 			Name:        pr.Name,
 			Description: pr.Description,
 			Default:     profiles.IsDefault(model.DefaultProfile, pr),
-			Resources:   res,
+			Resources:   extractProfileResources(pr.Params, base),
 		})
 	}
 
 	return deployProfiles, nil
+}
+
+func extractProfileResources(params map[string]any, base types.Resources) types.Resources {
+	res := base
+	resources, ok := params["resources"].(map[string]any)
+	if !ok {
+		return res
+	}
+
+	if mem, ok := resources["memory"].(int); ok {
+		res.Memory = mem
+	}
+
+	switch acc := resources["accelerators"].(type) {
+	case map[string]int:
+		res.Accelerators = acc
+	case map[string]any:
+		res.Accelerators = make(map[string]int, len(acc))
+		for k, v := range acc {
+			if count, ok := v.(int); ok {
+				res.Accelerators[k] = count
+			}
+		}
+	}
+
+	return res
 }
 
 // FilterAndSortProviders applies the provider filter, then sorts:

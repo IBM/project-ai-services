@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"slices"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
@@ -22,60 +23,13 @@ const (
 	FileName = "profiles.yaml"
 )
 
-// Resources is the resource footprint declared inside a profile's params.
-type Resources struct {
-	Memory       int            `yaml:"memory"`       // bytes
-	Accelerators map[string]int `yaml:"accelerators"` // e.g. {"ibm.com/spyre_pf": 4}
-}
-
-// Param holds the hardware parameters of one profile.
-type Param struct {
-	Resources           Resources `yaml:"resources"`
-	MaxModelLen         int       `yaml:"maxModelLen"`         // vLLM --max-model-len
-	MaxBatchSize        int       `yaml:"maxBatchSize"`        // vLLM --max-num-seqs
-	MaxNumBatchedTokens int       `yaml:"maxNumBatchedTokens"` // vLLM --max-num-batched-tokens (CPU only)
-	ShmSize             string    `yaml:"shmSize"`             // /dev/shm sizeLimit
-}
-
-// Values returns the params as template values: flat keys (.Values.maxModelLen, ...) plus a nested
-// "resources" map (.Values.resources.memory, .Values.resources.accelerators). Unset params are omitted.
-func (p Param) Values() map[string]any {
-	values := map[string]any{}
-
-	res := map[string]any{}
-	if p.Resources.Memory > 0 {
-		res["memory"] = p.Resources.Memory
-	}
-	if len(p.Resources.Accelerators) > 0 {
-		res["accelerators"] = p.Resources.Accelerators
-	}
-	if len(res) > 0 {
-		values["resources"] = res
-	}
-
-	if p.MaxModelLen > 0 {
-		values["maxModelLen"] = p.MaxModelLen
-	}
-	if p.MaxBatchSize > 0 {
-		values["maxBatchSize"] = p.MaxBatchSize
-	}
-	if p.MaxNumBatchedTokens > 0 {
-		values["maxNumBatchedTokens"] = p.MaxNumBatchedTokens
-	}
-	if p.ShmSize != "" {
-		values["shmSize"] = p.ShmSize
-	}
-
-	return values
-}
-
 // Profile is one entry in a provider's profiles.yaml.
 type Profile struct {
-	ID          string `yaml:"id"`
-	Default     bool   `yaml:"default"`
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Params      Param  `yaml:"params"`
+	ID          string         `yaml:"id"`
+	Default     bool           `yaml:"default"`
+	Name        string         `yaml:"name"`
+	Description string         `yaml:"description"`
+	Params      map[string]any `yaml:"params"`
 }
 
 // List returns the profiles in dir/profiles.yaml. A missing file means no profiles (nil, nil).
@@ -152,7 +106,8 @@ func ValuesFor(fsys fs.FS, dir string, model *types.Model, requested string) (ma
 		return nil, err
 	}
 
-	values := selected.Params.Values()
+	values := make(map[string]any, len(selected.Params)+1)
+	maps.Copy(values, selected.Params)
 	values[ValuesKeyProfile] = selected.ID
 
 	return values, nil

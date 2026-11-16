@@ -235,7 +235,7 @@ func TestLoadComponentValuesForModel(t *testing.T) {
 		assert.Equal(t, "standard", v["profile"])
 		assert.Equal(t, 32768, v["maxModelLen"])
 		assert.Equal(t, "2Gi", v["shmSize"])
-		assert.Equal(t, map[string]int{"ibm.com/spyre_pf": 4}, v["resources"].(map[string]any)["accelerators"])
+		assert.Equal(t, map[string]any{"ibm.com/spyre_pf": 4}, v["resources"].(map[string]any)["accelerators"])
 	})
 
 	t.Run("requested profile overrides the default", func(t *testing.T) {
@@ -244,7 +244,7 @@ func TestLoadComponentValuesForModel(t *testing.T) {
 
 		assert.Equal(t, "compact-4k", v["profile"])
 		assert.Equal(t, 4096, v["maxModelLen"])
-		assert.Equal(t, map[string]int{"ibm.com/spyre_pf": 1}, v["resources"].(map[string]any)["accelerators"])
+		assert.Equal(t, map[string]any{"ibm.com/spyre_pf": 1}, v["resources"].(map[string]any)["accelerators"])
 	})
 
 	t.Run("cpu provider has no accelerators and carries maxNumBatchedTokens", func(t *testing.T) {
