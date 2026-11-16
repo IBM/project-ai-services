@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Iterator, List, Optional, Sequence
+from typing import Any, Iterator, List, Optional, Sequence, Tuple
 
 from forecast.data_loader.config import (
     DEFAULT_CONNECT_TIMEOUT_S,
@@ -21,6 +21,7 @@ from forecast.data_loader.exceptions import (
     DBColumnNotFoundError,
     DBConnectionError,
     DBTableNotFoundError,
+    InvalidTableReferenceError,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,56 +143,33 @@ class Db2Client:
         finally:
             cursor.close()
 
-    def list_tables(self, schema: str) -> List[str]:
-        """Fetch all table names in the given schema."""
+    @staticmethod
+    def split_table_ref(table: str) -> Tuple[str, str]:
+        """Split a 'SCHEMA.TABLE' reference into its (schema, table) parts."""
+        schema, sep, name = (table or "").strip().partition(".")
+        schema, name = schema.strip(), name.strip()
+        if not sep or not schema or not name or "." in name:
+            raise InvalidTableReferenceError(
+                f"Table reference '{table}' must be in the form 'SCHEMA.TABLE'"
+            )
+        return schema, name
+
+    def list_columns(self, table: str) -> List[ColumnInfo]:
+        """Retrieve column names, data types, and nullability for a 'SCHEMA.TABLE'."""
+        schema, name = self.split_table_ref(table)
         conn = self._get_connection()
         cursor = conn.cursor()
+
         try:
-            # Query IBM i QSYS2.SYSTABLES or standard DB2 catalog
             cursor.execute(
                 """
-                SELECT TABLE_NAME
-                FROM QSYS2.SYSTABLES
-                WHERE TABLE_SCHEMA = ? AND TABLE_TYPE IN ('T', 'P', 'V')
-                ORDER BY TABLE_NAME
+                SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+                FROM QSYS2.SYSCOLUMNS
+                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+                ORDER BY ORDINAL_POSITION
                 """,
-                [schema.upper()],
+                [schema.upper(), name.upper()],
             )
-            rows = cursor.fetchall()
-            return [row[0].strip() for row in rows]
-        except Exception as exc:
-            raise DBConnectionError(f"Failed to list tables in schema '{schema}': {exc}") from exc
-        finally:
-            cursor.close()
-
-    def list_columns(self, schema: Optional[str], table: str) -> List[ColumnInfo]:
-        """Retrieve column names, data types, and nullability for a table."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        schema_param = schema.upper() if schema else None
-        table_param = table.upper()
-
-        try:
-            if schema_param:
-                cursor.execute(
-                    """
-                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-                    FROM QSYS2.SYSCOLUMNS
-                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-                    ORDER BY ORDINAL_POSITION
-                    """,
-                    [schema_param, table_param],
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
-                    FROM QSYS2.SYSCOLUMNS
-                    WHERE TABLE_NAME = ?
-                    ORDER BY ORDINAL_POSITION
-                    """,
-                    [table_param],
-                )
             rows = cursor.fetchall()
         except Exception as exc:
             raise DBConnectionError(f"Failed to query columns for table '{table}': {exc}") from exc
@@ -199,9 +177,8 @@ class Db2Client:
             cursor.close()
 
         if not rows:
-            qual = f"{schema}.{table}" if schema else table
             raise DBTableNotFoundError(
-                f"Table '{qual}' not found or not accessible for user '{self.username}'"
+                f"Table '{table}' not found or not accessible for user '{self.username}'"
             )
 
         return [
@@ -221,18 +198,18 @@ class Db2Client:
 
     def build_select_query(
         self,
-        schema: Optional[str],
         table: str,
         columns: Sequence[str],
         where_clause: Optional[str] = None,
         batch_size: int = DEFAULT_LOADER_CHUNK_ROWS,
     ) -> str:
-        """Build an optimized, safe SELECT SQL statement for streaming reads."""
+        """Build an optimized, safe SELECT SQL statement for streaming reads.
+
+        ``table`` must be a 'SCHEMA.TABLE' reference.
+        """
+        schema, name = self.split_table_ref(table)
         quoted_cols = ", ".join(self.quote_identifier(c) for c in columns)
-        if schema:
-            table_ref = f"{self.quote_identifier(schema)}.{self.quote_identifier(table)}"
-        else:
-            table_ref = self.quote_identifier(table)
+        table_ref = f"{self.quote_identifier(schema)}.{self.quote_identifier(name)}"
 
         sql = f"SELECT {quoted_cols} FROM {table_ref}"
 

@@ -53,6 +53,12 @@ class DBTableNotFoundError(DataLoaderError):
     is_permanent_failure: bool = True
 
 
+class InvalidTableReferenceError(DataLoaderError):
+    """Raised when a table reference is not in the required 'SCHEMA.TABLE' form."""
+
+    is_permanent_failure: bool = True
+
+
 class DBColumnNotFoundError(DataLoaderError):
     """Raised when one or more required columns are missing in the Db2 table."""
 

@@ -7,8 +7,7 @@ Usage:
         --port 8076 \\
         --user MYUSER \\
         --password MYPASS \\
-        --schema CC_DEMO \\
-        --table CREDIT_DATA \\
+        --table CC_DEMO.CREDIT_DATA \\
         --output /tmp/extracted.parquet \\
         --insecure
 """
@@ -29,6 +28,7 @@ from forecast.data_loader.config import (
     DEFAULT_MAX_TRAINING_ROWS,
 )
 from forecast.data_loader.db2_client import Db2Client
+from forecast.data_loader.exceptions import InvalidTableReferenceError
 from forecast.data_loader.loader import Db2DataLoader
 
 
@@ -66,16 +66,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Database password",
     )
     parser.add_argument(
-        "-s",
-        "--schema",
-        default=os.getenv("DB2I_SCHEMA", None),
-        help="Schema / library name (e.g., CC_DEMO)",
-    )
-    parser.add_argument(
         "-t",
         "--table",
         default=os.getenv("DB2I_TABLE", ""),
-        help="Table name to extract from (e.g., CREDIT_DATA)",
+        help="Table to extract from, as SCHEMA.TABLE (e.g., CC_DEMO.CREDIT_DATA)",
     )
     parser.add_argument(
         "-c",
@@ -134,6 +128,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parser.error("--password is required (or set DB2I_PASSWORD / MAPEPIRE_PASSWORD)")
     if not args.table:
         parser.error("--table is required (or set DB2I_TABLE)")
+    try:
+        Db2Client.split_table_ref(args.table)
+    except InvalidTableReferenceError as exc:
+        parser.error(str(exc))
 
     return args
 
@@ -146,7 +144,6 @@ def run(args: argparse.Namespace) -> int:
     print(f"Host              : {args.host}:{args.port}")
     print(f"Database          : {args.database}")
     print(f"User              : {args.user}")
-    print(f"Schema            : {args.schema or '(default)'}")
     print(f"Table             : {args.table}")
     print(f"Batch Size        : {args.batch_size:,} rows")
     print(f"Max Training Rows : {args.max_rows:,} rows")
@@ -173,7 +170,7 @@ def run(args: argparse.Namespace) -> int:
 
         # Step 2: Metadata discovery & column resolution
         print(f"\n[2/4] Inspecting table metadata for '{args.table}'...")
-        columns_info = client.list_columns(schema=args.schema, table=args.table)
+        columns_info = client.list_columns(table=args.table)
         print(f"      Found {len(columns_info)} total columns in database:")
         for col in columns_info:
             print(f"        - {col.name:<25} ({col.type:<15}, nullable={col.nullable})")
@@ -189,7 +186,6 @@ def run(args: argparse.Namespace) -> int:
         print(f"\n[3/4] Streaming data rows and writing directly to Parquet...")
         loader = Db2DataLoader(client)
         result = loader.extract_to_parquet(
-            schema=args.schema,
             table=args.table,
             columns=target_columns,
             output_path=output_path,

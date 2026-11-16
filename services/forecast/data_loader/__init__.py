@@ -23,14 +23,13 @@ from forecast.data_loader.exceptions import (
     DBColumnNotFoundError,
     DBConnectionError,
     DBTableNotFoundError,
+    InvalidTableReferenceError,
     ParquetWriteError,
     RowLimitExceededError,
 )
 from forecast.data_loader.loader import (
     Db2DataLoader,
     ExtractResult,
-    load_connector_to_parquet,
-    load_db2_to_parquet,
 )
 from forecast.data_loader.parquet_store import (
     ParquetBatchWriter,
@@ -57,11 +56,10 @@ __all__ = [
     "Db2Client",
     "Db2DataLoader",
     "ExtractResult",
+    "InvalidTableReferenceError",
     "ParquetBatchWriter",
     "ParquetWriteError",
     "RowLimitExceededError",
     "build_arrow_schema",
-    "load_connector_to_parquet",
-    "load_db2_to_parquet",
     "map_db_type_to_arrow",
 ]
