@@ -1,4 +1,4 @@
-image: icr.io/ppc64le-oss/vllm-ppc64le:0.28.0
+image: icr.io/ppc64le-oss/vllm-ppc64le:0.31.0
 model: ""
 apiKey: ""
 maxNumBatchedTokens: 8096

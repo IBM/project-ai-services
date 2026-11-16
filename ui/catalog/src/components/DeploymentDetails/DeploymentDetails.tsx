@@ -8,14 +8,12 @@ import {
   SideNavLink,
   Tag,
   ProgressBar,
-  Button,
-  TextInput,
-  TextInputSkeleton,
   SkeletonText,
   SkeletonPlaceholder,
   ToastNotification,
 } from "@carbon/react";
 import ApplicationDatasourcesTable from "./components/ApplicationDatasourcesTable";
+import { InlineEditableTitle } from "@/components";
 import { PageHeader, ProductiveCard } from "@carbon/ibm-products";
 import {
   ArrowLeft,
@@ -84,17 +82,8 @@ const DeploymentDetails = ({
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
-  const [editedName, setEditedName] = useState(deployment.name);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
   const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
-
-  useEffect(() => {
-    setEditedName(deployment.name);
-    setSaveError("");
-  }, [deployment.name]);
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -402,52 +391,16 @@ const DeploymentDetails = ({
     return Math.round((used / allocated) * 100);
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    setSaveError("");
-
-    try {
-      await api.put(APPLICATION_ENDPOINTS.UPDATE_APPLICATION(deployment.id), {
-        name: editedName,
-      });
-      onNameUpdate?.(editedName);
-      setSaveSuccess(true);
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Failed to update deployment name";
-      setSaveError(errorMessage);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleCancel = () => {
-    setEditedName(deployment.name);
-    setSaveError("");
+  // Persists the edited deployment name and notifies the parent
+  const handleNameSave = async (newName: string) => {
+    await api.put(APPLICATION_ENDPOINTS.UPDATE_APPLICATION(deployment.id), {
+      name: newName,
+    });
+    onNameUpdate?.(newName);
   };
 
   return (
     <>
-      {saveSuccess && (
-        <ToastNotification
-          kind="success"
-          title="Name updated successfully"
-          timeout={5000}
-          onClose={() => setSaveSuccess(false)}
-          className={styles.toastNotification}
-        />
-      )}
-      {saveError && (
-        <ToastNotification
-          kind="error"
-          title="Failed to update name"
-          subtitle={saveError}
-          onClose={() => setSaveError("")}
-          className={styles.toastNotification}
-        />
-      )}
       {datasourceSupportError && (
         <ToastNotification
           kind="error"
@@ -467,12 +420,7 @@ const DeploymentDetails = ({
               title: deploymentSource,
               label: (
                 <span
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    cursor: "pointer",
-                  }}
+                  className={styles.breadcrumbLabel}
                   onClick={(e) => {
                     e.preventDefault();
                     onBack();
@@ -485,7 +433,18 @@ const DeploymentDetails = ({
             },
           ]}
           breadcrumbOverflowAriaLabel="Show more breadcrumbs"
-          title={deployment.name}
+          title={{
+            content: (
+              <InlineEditableTitle
+                id="deployment-name-inline"
+                label="Deployment name"
+                value={deployment.name}
+                onSave={handleNameSave}
+              />
+            ),
+            asText: deployment.name,
+            breadcrumbContent: deployment.name,
+          }}
           subtitle={
             <div className={styles.headerSubtitle}>
               {activeSection === "datasources" && datasourceCount === 0 ? (
@@ -558,26 +517,6 @@ const DeploymentDetails = ({
                     title="Details"
                     className={styles.detailsCard}
                   >
-                    <Grid className={styles.resourcesGrid}>
-                      <Column lg={8} md={4} sm={2}>
-                        {isLoadingResources ? (
-                          <TextInputSkeleton />
-                        ) : (
-                          <TextInput
-                            className={styles.labelColor}
-                            id="deployment-name"
-                            labelText="AI deployment name"
-                            value={editedName}
-                            onChange={(e) => {
-                              setEditedName(e.target.value);
-                              setSaveError("");
-                            }}
-                            disabled={isSaving}
-                          />
-                        )}
-                      </Column>
-                    </Grid>
-
                     {(workerInfo?.name || workerInfo?.runtime_type) && (
                       <div className={styles.workerInfoRow}>
                         {workerInfo.name && (
@@ -621,11 +560,7 @@ const DeploymentDetails = ({
                             <div key={index} className={styles.resourceItem}>
                               <SkeletonText lineCount={1} width="30%" />
                               <SkeletonPlaceholder
-                                style={{
-                                  width: "100%",
-                                  height: "0.5rem",
-                                  marginTop: "1rem",
-                                }}
+                                className={styles.resourceSkeletonBar}
                               />
                               <div className={styles.resourceStats}>
                                 <SkeletonText lineCount={1} width="35%" />
@@ -729,27 +664,6 @@ const DeploymentDetails = ({
                       </Column>
                     )}
                   </ProductiveCard>
-                </Column>
-              </Grid>
-
-              <Grid className={styles.actionsGrid}>
-                <Column sm={4} md={8} lg={16}>
-                  <div className={styles.actionButtons}>
-                    <Button
-                      kind="secondary"
-                      onClick={handleCancel}
-                      disabled={isSaving}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      kind="primary"
-                      onClick={handleSave}
-                      disabled={isSaving}
-                    >
-                      {isSaving ? "Saving..." : "Save"}
-                    </Button>
-                  </div>
                 </Column>
               </Grid>
             </>

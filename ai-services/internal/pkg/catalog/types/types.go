@@ -35,9 +35,7 @@ func (a Architecture) MarshalJSON() ([]byte, error) {
 		*Alias
 	}{
 		Alias: (*Alias)(&a),
-	}
-	if a.About != nil && a.About.Kind != 0 {
-		aux.About = yamlNodeToInterface(a.About) // Uses your helper below
+		About: aboutValue(a.About),
 	}
 
 	return json.Marshal(aux)
@@ -46,20 +44,8 @@ func (a Architecture) MarshalJSON() ([]byte, error) {
 // UnmarshalYAML handles raw document maps to safely capture nested array/map structure nodes.
 func (a *Architecture) UnmarshalYAML(value *yaml.Node) error {
 	type Alias Architecture
-	aux := (*Alias)(a)
 
-	// Temporarily nil out About to prevent unmarshal errors
-	aux.About = nil
-
-	// Decode all fields except About
-	if err := value.Decode(aux); err != nil {
-		return err
-	}
-
-	// Extract About node manually
-	a.About = extractAboutNode(value)
-
-	return nil
+	return decodeWithAbout(value, (*Alias)(a), &a.About)
 }
 
 // ArchitectureSummary represents an architecture for list API responses.
@@ -120,20 +106,8 @@ type Service struct {
 // UnmarshalYAML extracts the 'about' node manually, insulating it from reflection errors.
 func (s *Service) UnmarshalYAML(value *yaml.Node) error {
 	type Alias Service
-	aux := (*Alias)(s)
 
-	// Temporarily nil out About to prevent unmarshal errors
-	aux.About = nil
-
-	// Decode all fields except About
-	if err := value.Decode(aux); err != nil {
-		return err
-	}
-
-	// Extract About node manually
-	s.About = extractAboutNode(value)
-
-	return nil
+	return decodeWithAbout(value, (*Alias)(s), &s.About)
 }
 
 // MarshalJSON implements custom JSON marshaling for Service to properly handle yaml.Node.
@@ -144,9 +118,7 @@ func (s Service) MarshalJSON() ([]byte, error) {
 		*Alias
 	}{
 		Alias: (*Alias)(&s),
-	}
-	if s.About != nil && s.About.Kind != 0 {
-		aux.About = yamlNodeToInterface(s.About)
+		About: aboutValue(s.About),
 	}
 
 	return json.Marshal(aux)
@@ -187,14 +159,67 @@ type LiteLLMConfig struct {
 
 // Model is one entry in a provider's models.yaml.
 type Model struct {
-	ID             string   `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
-	Default        bool     `yaml:"default" json:"default"`         // whether this is the default model for the provider
-	Title          string   `yaml:"title" json:"title"`             // short display name
-	Name           string   `yaml:"name" json:"name"`               // human-readable name
-	ComponentType  string   `yaml:"component_type" json:"-"`        // model role; set in connector models.yaml only
-	Description    string   `yaml:"description" json:"description"` // markdown description
-	DefaultProfile string   `yaml:"default_profile" json:"-"`       // default hardware profile ID; local providers only
-	Profiles       []string `yaml:"profiles" json:"-"`              // supported hardware profile IDs; local providers only
+	ID             string     `yaml:"id" json:"id"`                   // full model name, e.g. "ibm-granite/granite-4.1-8b-fp8"
+	Default        bool       `yaml:"default" json:"default"`         // whether this is the default model for the provider
+	Title          string     `yaml:"title" json:"title"`             // short display name
+	Name           string     `yaml:"name" json:"name"`               // human-readable name
+	Description    string     `yaml:"description" json:"description"` // markdown description
+	License        string     `yaml:"license" json:"-"`               // e.g. "Apache-2.0"
+	CertifiedBy    string     `yaml:"certified_by" json:"-"`          // e.g. "IBM"
+	About          *yaml.Node `yaml:"-" json:"-"`                     // free-form details, kept as YAML
+	ComponentType  string     `yaml:"component_type" json:"-"`        // model role; set in connector models.yaml only
+	DefaultProfile string     `yaml:"default_profile" json:"-"`       // default hardware profile ID; local providers only
+	Profiles       []string   `yaml:"profiles" json:"-"`              // supported hardware profile IDs; local providers only
+}
+
+// ModelCatalogEntry is a model as GET /catalog/models returns it: the model with the providers that serve it.
+type ModelCatalogEntry struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	ComponentType ComponentType          `json:"component_type"`
+	CertifiedBy   string                 `json:"certified_by"`
+	Description   string                 `json:"description"`
+	Providers     []ModelCatalogProvider `json:"providers"`
+}
+
+// ModelCatalogProvider is a provider listed on a ModelCatalogEntry.
+type ModelCatalogProvider struct {
+	ID             string                   `json:"id"`
+	Name           string                   `json:"name"`
+	DeploymentType constants.DeploymentType `json:"deployment_type"` // "local" or "remote"
+}
+
+// ModelDetail is a model as GET /catalog/models/:id returns it: the list entry plus license and about.
+type ModelDetail struct {
+	ModelCatalogEntry
+	License string `json:"license,omitempty"`
+	About   any    `json:"about,omitempty"`
+}
+
+// UnmarshalYAML keeps the free-form 'about' node, as Service and Architecture do.
+func (m *Model) UnmarshalYAML(value *yaml.Node) error {
+	type Alias Model
+
+	return decodeWithAbout(value, (*Alias)(m), &m.About)
+}
+
+// Entry returns the model's own fields of its list entry; the caller fills in the component type and providers.
+func (m Model) Entry() ModelCatalogEntry {
+	return ModelCatalogEntry{
+		ID:          m.ID,
+		Name:        m.Name,
+		CertifiedBy: m.CertifiedBy,
+		Description: m.Description,
+	}
+}
+
+// Detail returns the model's own fields of its get-by-id view; the caller fills in the component type and providers.
+func (m Model) Detail() ModelDetail {
+	return ModelDetail{
+		ModelCatalogEntry: m.Entry(),
+		License:           m.License,
+		About:             aboutValue(m.About),
+	}
 }
 
 // ComponentSummary represents a component for list API responses.
@@ -342,6 +367,27 @@ type DeployOptionsArchitecture struct {
 	Version          string                   `json:"version,omitempty"`
 	GlobalComponents []DeployOptionsComponent `json:"global_components"`
 	Services         []DeployOptionsService   `json:"services"`
+}
+
+// decodeWithAbout decodes value into dst, then stores the free-form 'about' node in about.
+// dst must be an alias of the caller's type, so decoding does not call the caller's UnmarshalYAML again.
+func decodeWithAbout(value *yaml.Node, dst any, about **yaml.Node) error {
+	if err := value.Decode(dst); err != nil {
+		return err
+	}
+
+	*about = extractAboutNode(value)
+
+	return nil
+}
+
+// aboutValue converts an 'about' node to a JSON-friendly value, or nil if there is none.
+func aboutValue(node *yaml.Node) any {
+	if node == nil || node.Kind == 0 {
+		return nil
+	}
+
+	return yamlNodeToInterface(node)
 }
 
 // extractAboutNode finds and returns the 'about' field from a YAML node.

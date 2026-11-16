@@ -13,6 +13,14 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
+// IsModelProvider reports whether a catalog item serves models: a model component or a "models" connector.
+func IsModelProvider(comp *types.Component, conn *types.Connector) bool {
+	isModelComponent := comp != nil && comp.Category == constants.ComponentCategoryModels
+	isModelConnector := conn != nil && conn.ConnectorType == constants.ConnectorTypeModels
+
+	return isModelComponent || isModelConnector
+}
+
 // List returns the models in dir/models.yaml. A missing file means no models (nil, nil).
 func List(fsys fs.FS, dir string) ([]types.Model, error) {
 	return utils.LoadYAMLList[types.Model](fsys, dir, constants.ModelsFileName)
@@ -118,8 +126,7 @@ func SetInfo(result *types.ModelDeployOptions, name, componentType string) {
 }
 
 // SetComponentTypeNames fills the component type's display names from the components of that type.
-func SetComponentTypeNames(result *types.ModelDeployOptions, components []types.Component) {
-	ct := &result.ComponentType
+func SetComponentTypeNames(ct *types.ComponentType, components []types.Component) {
 	for _, c := range components {
 		if c.ComponentType.ID != ct.ID {
 			continue
