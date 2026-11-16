@@ -16,6 +16,6 @@ class PermanentFailure(Exception):
     """A failure that a retry cannot fix.
 
     The connector is missing or cannot be decrypted, the table or a column does not
-    exist, the table has no rows or too many, or the data cannot be trained on.
+    exist, the table has no rows, or the data cannot be trained on.
     The message is stored in jobs.message, so it must never hold a secret.
     """
