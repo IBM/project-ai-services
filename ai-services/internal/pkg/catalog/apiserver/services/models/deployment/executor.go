@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/vllm"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
@@ -211,7 +210,7 @@ func (e *ModelExecutor) fetchAndSetVllmParams(ctx context.Context, plan *types.R
 		return nil
 	}
 
-	vllmClient := vllm.NewClient(apiBase, apiKey)
+	vllmClient := catalogclient.NewVLLMClient(apiBase, apiKey)
 	modelsResp, err := vllmClient.GetModels(ctx)
 	if err != nil {
 		return validators.Unprocessable("failed to fetch models from vllm: %v", err)

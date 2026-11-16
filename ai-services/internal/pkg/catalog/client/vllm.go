@@ -1,4 +1,4 @@
-package vllm
+package client
 
 import (
 	"context"
@@ -11,42 +11,42 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
-const defaultTimeout = 15 * time.Second
+const defaultVLLMTimeout = 15 * time.Second
 
-// ModelInfo represents a model returned by vLLM.
-type ModelInfo struct {
+// VLLMModelInfo represents a model returned by vLLM.
+type VLLMModelInfo struct {
 	ID          string `json:"id"`
 	MaxModelLen int    `json:"max_model_len"`
 }
 
-// ModelsResponse is the response format for vLLM /v1/models.
-type ModelsResponse struct {
-	Data []ModelInfo `json:"data"`
+// VLLMModelsResponse is the response format for vLLM /v1/models.
+type VLLMModelsResponse struct {
+	Data []VLLMModelInfo `json:"data"`
 }
 
-// Client is a client for the vLLM API.
-type Client struct {
+// VLLMClient is a client for the vLLM API.
+type VLLMClient struct {
 	client *resty.Client
 }
 
-// NewClient creates a new vLLM client.
-func NewClient(apiBase, apiKey string) *Client {
+// NewVLLMClient creates a new vLLM client.
+func NewVLLMClient(apiBase, apiKey string) *VLLMClient {
 	baseURL := strings.TrimRight(apiBase, "/")
 
 	rClient := resty.New().
 		SetBaseURL(baseURL).
-		SetTimeout(defaultTimeout).
+		SetTimeout(defaultVLLMTimeout).
 		SetHeader("Content-Type", "application/json")
 
 	if apiKey != "" {
 		rClient.SetAuthToken(apiKey)
 	}
 
-	return &Client{client: rClient}
+	return &VLLMClient{client: rClient}
 }
 
 // GetModels retrieves the list of models from vLLM.
-func (c *Client) GetModels(ctx context.Context) (*ModelsResponse, error) {
+func (c *VLLMClient) GetModels(ctx context.Context) (*VLLMModelsResponse, error) {
 	resp, err := c.client.R().
 		SetContext(ctx).
 		Get("/v1/models")
@@ -58,7 +58,7 @@ func (c *Client) GetModels(ctx context.Context) (*ModelsResponse, error) {
 		return nil, fmt.Errorf("vllm returned status code %d: %s", resp.StatusCode(), resp.String())
 	}
 
-	var modelsResponse ModelsResponse
+	var modelsResponse VLLMModelsResponse
 	if err := json.Unmarshal(resp.Body(), &modelsResponse); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal vllm response: %w", err)
 	}
