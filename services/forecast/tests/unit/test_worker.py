@@ -322,8 +322,7 @@ def test_main_stores_a_bounded_message(monkeypatch):
 def _fake_loader_module(**errors):
     names = [
         "ConnectorNotFoundError", "ConnectorDecryptionError", "DBTableNotFoundError",
-        "DBColumnNotFoundError", "InvalidTableReferenceError", "RowLimitExceededError",
-        "DBConnectionError", "DBAuthError",
+        "DBColumnNotFoundError", "InvalidTableReferenceError", "DBConnectionError", "DBAuthError",
     ]
     module = SimpleNamespace(**{name: type(name, (Exception,), {}) for name in names})
 
@@ -347,7 +346,7 @@ def _use_loader(monkeypatch, module):
     monkeypatch.setitem(__import__("sys").modules, "forecast.data_loader", module)
 
 
-def test_loader_is_given_the_columns_the_limits_and_the_encrypted_connector(monkeypatch, tmp_path):
+def test_loader_reads_every_row_in_batches_with_the_encrypted_connector(monkeypatch, tmp_path):
     from forecast.worker.source import load_training_data
 
     module = _fake_loader_module()
@@ -359,7 +358,7 @@ def test_loader_is_given_the_columns_the_limits_and_the_encrypted_connector(monk
     assert call["table"] == "SALES.ORDERS"
     assert call["columns"] == ["REGION", "QUANTITY", "PRICE", "LATE"]
     assert call["batch_size"] == settings.forecast.loader_chunk_rows
-    assert call["max_training_rows"] == settings.forecast.max_training_rows
+    assert "max_training_rows" not in call  # No ceiling: every row is read.
     assert call["connector_id"] == str(CONNECTOR_ID)
     assert call["encrypted_connection_details"] == JOB.connection_details
 
@@ -368,7 +367,7 @@ def test_loader_is_given_the_columns_the_limits_and_the_encrypted_connector(monk
     "raised",
     [
         "ConnectorNotFoundError", "ConnectorDecryptionError", "DBTableNotFoundError",
-        "DBColumnNotFoundError", "InvalidTableReferenceError", "RowLimitExceededError",
+        "DBColumnNotFoundError", "InvalidTableReferenceError",
     ],
 )
 def test_loader_errors_that_would_only_repeat_are_permanent(monkeypatch, tmp_path, raised):

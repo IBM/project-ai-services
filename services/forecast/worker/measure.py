@@ -9,7 +9,8 @@ Each size runs ``forecast.worker.main.run`` in its own process on a synthetic ta
 numeric and half text columns, a binary target), with the loader and the database replaced
 by in-process fakes. Peak resident memory is the kernel's high-water mark for the process
 and its children, so it includes AutoGluon's worker processes. Set WORKER_MEMORY_LIMIT_MB
-above the largest peak at MAX_TRAINING_ROWS, with margin, and below the container limit.
+above the largest peak at the largest table the service must train on, with margin, and
+below the container limit.
 """
 import argparse
 import json
