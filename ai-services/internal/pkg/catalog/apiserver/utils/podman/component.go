@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -239,4 +241,65 @@ func NewSpyreCardPool(ctx context.Context, rt runtime.Runtime, required int) (*d
 	}
 
 	return &deploymenttypes.SpyreCardPool{Addresses: pciAddresses}, nil
+}
+
+// DeleteComponents deletes the given components (pods, secrets, volumes and DB records) and returns
+// any error messages. Shared by the application deletion and the model deletion flows.
+//
+//nolint:cyclop // Function complexity is acceptable for deletion orchestration
+func DeleteComponents(ctx context.Context, rt runtime.Runtime, componentRepo dbrepo.ComponentRepository, componentIDs []uuid.UUID, keepData bool) []string {
+	var errorMessages []string
+	forceDelete := true
+
+	for _, componentID := range componentIDs {
+		// List component pods
+		pods, err := rt.ListPods(ctx, map[string][]string{
+			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
+		})
+		if err != nil {
+			errMsg := fmt.Sprintf("component %s: failed to list pods: %s", componentID, err)
+			errorMessages = append(errorMessages, errMsg)
+			_ = catalogutils.UpdateComponentStatus(ctx, componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to list pods: %s", err))
+
+			continue
+		}
+
+		// Delete component secrets
+		secretErrors := DeleteSecretsFromPods(ctx, rt, pods, keepData, "component", componentID)
+		if len(secretErrors) > 0 {
+			errorMessages = append(errorMessages, secretErrors...)
+		}
+
+		// Delete component pods first so runtime releases attached volumes.
+		podErrors := DeletePods(ctx, rt, pods, forceDelete)
+		hasDeletionErrors := false
+		if len(podErrors) > 0 {
+			hasDeletionErrors = true
+			errMsg := fmt.Sprintf("component %s: failed to delete %d pod(s)", componentID, len(podErrors))
+			errorMessages = append(errorMessages, errMsg)
+			_ = catalogutils.UpdateComponentStatus(ctx, componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
+		}
+
+		// Delete component volumes only after pods are deleted and only when keepData is false.
+		if !keepData {
+			volumeErrors := DeleteVolumesFromPods(ctx, rt, pods, "component", componentID)
+			if len(volumeErrors) > 0 {
+				hasDeletionErrors = true
+				errorMessages = append(errorMessages, volumeErrors...)
+			}
+		}
+
+		if hasDeletionErrors {
+			continue
+		}
+
+		// Delete component from DB
+		if err := componentRepo.Delete(ctx, componentID); err != nil {
+			errMsg := fmt.Sprintf("component %s: failed to delete from DB: %s", componentID, err)
+			errorMessages = append(errorMessages, errMsg)
+			_ = catalogutils.UpdateComponentStatus(ctx, componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
+		}
+	}
+
+	return errorMessages
 }

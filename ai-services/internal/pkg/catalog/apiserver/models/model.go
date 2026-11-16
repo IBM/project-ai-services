@@ -28,6 +28,14 @@ type CreateModelResponse struct {
 	ID string `json:"id"`
 }
 
+// DeleteModelResponse represents the body returned for an accepted DELETE /api/v1/models/:id,
+// that is, for a local model whose undeploy continues in the background.
+type DeleteModelResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
 // ListModelsRequest carries the parameters for GET /api/v1/models. Empty filters are not applied.
 type ListModelsRequest struct {
 	Page           int
@@ -48,6 +56,7 @@ type ModelBase struct {
 	ID             string                   `json:"id"`
 	DeploymentType constants.DeploymentType `json:"deployment_type"`
 	Name           string                   `json:"name"`
+	ComponentType  types.ComponentType      `json:"component_type"`
 	Provider       types.ProviderInfo       `json:"provider"`
 	// Worker is null for remote models and for local models on the control-plane Podman socket.
 	Worker *types.ApplicationWorker `json:"worker"`

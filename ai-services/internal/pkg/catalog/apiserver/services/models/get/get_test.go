@@ -155,7 +155,7 @@ func TestGet_Remote(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, constants.DeploymentTypeRemote, got.DeploymentType)
-	assert.Equal(t, "Watsonx", got.Provider.Name)
+	assert.Equal(t, "IBM watsonx.ai on IBM Cloud", got.Provider.Name)
 	assert.Nil(t, got.Worker)
 	assert.Equal(t, []apimodels.ModelEndpoint{{Type: "external", URL: testGatewayEndpoint}}, got.Endpoints,
 		"a remote model is called through the same LiteLLM endpoint")

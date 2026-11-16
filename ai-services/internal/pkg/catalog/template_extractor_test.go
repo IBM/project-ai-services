@@ -479,7 +479,7 @@ spec:
 	}
 
 	values := map[string]any{
-		"image": "registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.0",
+		"image": "registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.3",
 	}
 
 	totalCards, err := provider.CollectSpyreCardsFromTemplates(context.Background(), templates, values)
