@@ -1,0 +1,27 @@
+# -*- mode: Python -*-
+
+# =============================================================================
+# Tiltfile.summarize - the Summarize service on its own (macOS / local development)
+# =============================================================================
+#
+# Runs ONLY what the summarize service depends on: PostgreSQL, a local LLM-only model server and the
+# service itself. No OpenSearch, embeddings, reranker or UI.
+#
+# Usage (LLM provider = ollama, the default; Ollama must be running on the host):
+#   ollama pull granite4.1:8b
+#   tilt up -f hack/tilt/services/Tiltfile.summarize
+#
+# Usage (LLM provider = watsonx):
+#   export WATSONX_APIKEY=...  WATSONX_URL=https://<region>.ml.cloud.ibm.com  WATSONX_PROJECT_ID=...
+#   tilt up -f hack/tilt/services/Tiltfile.summarize -- --llm_provider=watsonx
+#
+# Other:
+#   tilt up -f hack/tilt/services/Tiltfile.summarize -- --summarize_port=9999   # custom parameters
+#   tilt down -f hack/tilt/services/Tiltfile.summarize
+#
+# See docs/dev-guides/tilt-services-local-development.md
+# =============================================================================
+
+load("./lib.star", "run")
+
+run("summarize")
