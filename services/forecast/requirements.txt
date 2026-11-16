@@ -23,3 +23,8 @@ httpx>=0.24.0
 
 # Triton Model Config (Protobuf Text Format)
 protobuf>=4.25.0
+onnx
+onnxmltools
+onnxruntime
+pandas
+pyarrow
