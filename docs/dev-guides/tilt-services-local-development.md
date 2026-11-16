@@ -4,13 +4,17 @@ The Tiltfiles in [`hack/tilt/services`](../../hack/tilt/services) run the **extr
 
 > **Local development only.** The PostgreSQL password is a publicly documented default. Never use this setup on a shared environment.
 
-## Which Tiltfile to use
+## Usage
 
-| Run | Command | Starts |
-|-----|---------|--------|
-| Extract only | `tilt up -f hack/tilt/services/Tiltfile.extract` | PostgreSQL, model server, `extract-api` |
-| Translate only | `tilt up -f hack/tilt/services/Tiltfile.translate` | PostgreSQL, model server, `translate-api` |
-| Summarize only | `tilt up -f hack/tilt/services/Tiltfile.summarize` | PostgreSQL, model server, `summarize-api` |
+One Tiltfile, [`hack/tilt/services/Tiltfile`](../../hack/tilt/services/Tiltfile). Pick the service with the `--service` option (`extract`, `translate` or `summarize`):
+
+```bash
+tilt up -f hack/tilt/services/Tiltfile -- --service=extract
+tilt up -f hack/tilt/services/Tiltfile -- --service=translate
+tilt up -f hack/tilt/services/Tiltfile -- --service=summarize
+```
+
+Each starts PostgreSQL, the model server and `<service>-api` only. A missing or unknown service fails with a message listing the valid names.
 
 For the other stacks see [Catalog](tilt-local-development.md) (`Tiltfile`) and [RAG](tilt-rag-local-development.md) (`Tiltfile.rag`: chatbot, similarity, digitize).
 
@@ -29,20 +33,15 @@ The three services only call an LLM (chat completions plus `/tokenize`) and stor
 
 Environment variables passed to the services match the `rag-dev` pod templates (`LLM_ENDPOINT`, `LLM_MODEL`, `LLM_MAX_MODEL_LEN`, `POSTGRES_*`, `DB_POOL_SIZE`, `PORT`).
 
-### How the Tiltfiles are organised
+### Layout
 
 ```
 hack/tilt/
 ├── model_server.py          # shared with Tiltfile.rag (LLM-only mode added)
 └── services/
-    ├── lib.star             # all resource definitions, shared by the three Tiltfiles
-    ├── requirements.txt     # lean venv (no torch / docling / OpenSearch client)
-    ├── Tiltfile.extract     # load("./lib.star", "run"); run("extract")
-    ├── Tiltfile.translate
-    └── Tiltfile.summarize
+    ├── Tiltfile             # --service=extract|translate|summarize
+    └── requirements.txt     # lean venv (no torch / docling / OpenSearch client)
 ```
-
-Each Tiltfile is two lines, so a fix or new option in `lib.star` applies to all of them.
 
 ## Prerequisites
 
@@ -59,7 +58,7 @@ No Node.js is needed.
 With Ollama (default):
 
 ```bash
-tilt up -f hack/tilt/services/Tiltfile.extract
+tilt up -f hack/tilt/services/Tiltfile -- --service=extract
 ```
 
 With watsonx.ai:
@@ -69,7 +68,7 @@ export WATSONX_APIKEY=<your key>          # read from the environment only, neve
 export WATSONX_URL=https://us-south.ml.cloud.ibm.com
 export WATSONX_PROJECT_ID=<your project id>
 
-tilt up -f hack/tilt/services/Tiltfile.translate -- --llm_provider=watsonx
+tilt up -f hack/tilt/services/Tiltfile -- --service=translate --llm_provider=watsonx
 ```
 
 In the Tilt UI (http://localhost:10350) wait for the resources to turn green, then open the Swagger UI of the service (served at `/`):
@@ -80,25 +79,26 @@ In the Tilt UI (http://localhost:10350) wait for the resources to turn green, th
 | Translate | http://localhost:9000 |
 | Summarize | http://localhost:6100 |
 
-Stop and clean up with `tilt down -f hack/tilt/services/Tiltfile.<name>`. This removes the PostgreSQL container, its data volume and the service caches (`.tilt/services/<name>`), but keeps `hack/tilt/services/.venv`.
+Stop and clean up with `tilt down -f hack/tilt/services/Tiltfile -- --service=<name>`. This removes the PostgreSQL container, its data volume and the service caches (`.tilt/services/<name>`), but keeps `hack/tilt/services/.venv`.
 
 ### Running several at once
 
-Every Tiltfile has its own default ports, PostgreSQL container/volume and cache directory, so they can run side by side. Give each `tilt up` its own Tilt UI port:
+Every service has its own default ports, PostgreSQL container/volume and cache directory, so they can run side by side. Give each `tilt up` its own Tilt UI port:
 
 ```bash
-tilt up -f hack/tilt/services/Tiltfile.extract   --port 10351
-tilt up -f hack/tilt/services/Tiltfile.translate --port 10352
+tilt up -f hack/tilt/services/Tiltfile --port 10351 -- --service=extract
+tilt up -f hack/tilt/services/Tiltfile --port 10352 -- --service=translate
 ```
 
 Each of these starts its own PostgreSQL and model server; the model server loads only a tokenizer, so this is cheap.
 
 ## Options
 
-Pass any option after `--`, for example `tilt up -f hack/tilt/services/Tiltfile.extract -- --extract_port=9501`.
+Pass any option after `--`, for example `tilt up -f hack/tilt/services/Tiltfile -- --service=extract --extract_port=9501`.
 
 | Option | Default |
 |--------|---------|
+| `service` | required (`extract`, `translate` or `summarize`) |
 | `llm_provider` | `$LLM_PROVIDER`, else `ollama` (`ollama` or `watsonx`) |
 | `ollama_url` | `$OLLAMA_URL`, else `http://127.0.0.1:11434/v1` |
 | `ollama_model` | `$OLLAMA_MODEL`, else `granite4.1:8b` |
@@ -106,7 +106,7 @@ Pass any option after `--`, for example `tilt up -f hack/tilt/services/Tiltfile.
 | `watsonx_model` | `$WATSONX_MODEL`, else `ibm/granite-4-h-small` |
 | `llm_max_model_len` | `26208` |
 | `model_server_port` | `8200` (extract), `8201` (translate), `8202` (summarize) |
-| `extract_port` / `translate_port` / `summarize_port` | `9500` / `9000` / `6100` (only the options of the services in that Tiltfile exist) |
+| `extract_port` / `translate_port` / `summarize_port` | `9500` / `9000` / `6100` (only the option of the selected service exists) |
 | `postgres_image` | `docker.io/library/postgres:16-alpine` |
 | `postgres_port` | `5434` (extract), `5435` (translate), `5436` (summarize) |
 | `postgres_password` | `Aiservicesdb@1234` |

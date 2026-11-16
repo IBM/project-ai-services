@@ -1,20 +1,20 @@
 # -*- mode: Python -*-
 
 # =============================================================================
-# Shared Tilt library for the extract / translate / summarize services
+# Tiltfile for the extract / translate / summarize services (macOS / local development)
 # =============================================================================
 #
-# Loaded by Tiltfile.extract, Tiltfile.translate and Tiltfile.summarize (same folder).
-# Each of them calls run("<service>"), which defines ONLY what that service needs:
-#
-#   python-env     : lean venv (hack/tilt/services/.venv), no torch / docling / OpenSearch client
-#   postgres       : PostgreSQL in Podman, one database per service (<svc>_metadata)
-#   model-server   : hack/tilt/model_server.py in LLM-only mode (/llm: Ollama or watsonx.ai + /tokenize)
+# Runs ONE service with only its dependencies, chosen with the --service Tilt flag:
+#   python-env     : lean venv (hack/tilt/services/.venv)
+#   postgres       : PostgreSQL in Podman (<svc>_metadata database)
+#   model-server   : hack/tilt/model_server.py in LLM-only mode (Ollama or watsonx.ai + /tokenize)
 #   <svc>-db-init  : creates the service database and schema (idempotent)
 #   <svc>-api      : the service's FastAPI app, run from source with uvicorn --reload
 #
-# These three services need nothing else: no OpenSearch, no embedding model, no reranker, no UI.
-# That is why they are much lighter than the RAG stack (Tiltfile.rag).
+# Usage:
+#   tilt up -f hack/tilt/services/Tiltfile -- --service=extract
+#   tilt up -f hack/tilt/services/Tiltfile -- --service=translate --llm_provider=watsonx
+#   tilt down -f hack/tilt/services/Tiltfile -- --service=summarize
 #
 # Local development only - every credential below is a publicly documented default.
 # See docs/dev-guides/tilt-services-local-development.md
@@ -31,22 +31,14 @@ SERVICES = {
     "summarize": {"title": "Summarize", "port": 6100, "database": "summarize_metadata"},
 }
 
-# Every service gets its own default Postgres / model-server port, container and volume names, so
-# several services can run side by side (give each `tilt up` its own --port for the Tilt UI).
-PROFILES = ["extract", "translate", "summarize"]
-
 
 def _flag(cfg, name, default):
     return str(cfg.get(name, default))
 
 
-def setup(profile):
+def setup():
     """Defines the config flags, parses them and returns the settings dict used by the helpers below."""
-    if profile not in PROFILES:
-        fail("unknown profile '{}'".format(profile))
-    index = PROFILES.index(profile)
-    services = [profile]
-
+    config.define_string("service", args=False)
     config.define_string("python_bin", args=False)
     config.define_string("llm_provider", args=False)
     config.define_string("ollama_url", args=False)
@@ -60,9 +52,16 @@ def setup(profile):
     config.define_string("postgres_image", args=False)
     config.define_string("postgres_port", args=False)
     config.define_string("postgres_password", args=False)
-    for name in services:
+    for name in SERVICES:
         config.define_string(name + "_port", args=False)
     cfg = config.parse()
+
+    profile = _flag(cfg, "service", "").strip().lower()
+    if profile not in SERVICES:
+        fail("pass --service=<name> (tilt up -f <Tiltfile> -- --service=extract); one of: {} (got '{}')".format(
+            ", ".join(SERVICES.keys()), profile))
+    index = list(SERVICES.keys()).index(profile)
+    services = [profile]
 
     llm_provider = _flag(cfg, "llm_provider", os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
     if llm_provider not in ["ollama", "watsonx"]:
@@ -313,12 +312,14 @@ def add_quick_links(ctx):
     )
 
 
-def run(profile):
-    """Defines every resource of one service: 'extract', 'translate' or 'summarize'."""
-    ctx = setup(profile)
+def run():
+    ctx = setup()
     add_quick_links(ctx)
     add_python_env(ctx)
     add_postgres(ctx)
     add_model_server(ctx)
     for name in ctx["services"]:
         add_service(ctx, name)
+
+
+run()
