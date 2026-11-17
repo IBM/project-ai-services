@@ -88,18 +88,8 @@ def create_indexing_handler(
 
             # Update status to COMPLETED with indexing timing
             if status_mgr and doc_id_dict:
-                from digitize.utils.db import get_document
-                try:
-                    current_doc = get_document(doc_id)
-                    had_partial = bool(
-                        (current_doc.metadata or {}).get("had_table_failures", False)
-                    )
-                except Exception:
-                    had_partial = False
-
-                final_doc_status = DocStatus.COMPLETED_WITH_ERRORS if had_partial else DocStatus.COMPLETED
                 logger.debug(
-                    f"Indexing Done: updating doc metadata to {final_doc_status.value} "
+                    f"Indexing Done: updating doc metadata to {DocStatus.COMPLETED.value} "
                     f"for document: {doc_id}"
                 )
                 metadata_update = {
@@ -108,7 +98,7 @@ def create_indexing_handler(
                     "timing_in_secs": {"indexing": round(indexing_time, 2)},
                 }
                 status_mgr.update_doc_metadata(doc_id, metadata_update)
-                status_mgr.update_job_progress(doc_id, final_doc_status, JobStatus.IN_PROGRESS)
+                status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
 
             logger.info(f"✅ Successfully indexed document {doc_id}")
             return True

@@ -1342,7 +1342,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "existing_doc_id", "existing_doc_name", "had_table_failures"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "existing_doc_id", "existing_doc_name"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
