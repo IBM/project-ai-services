@@ -154,42 +154,72 @@ func BuildDeployProfiles(model *types.Model, profilesByID map[string]profiles.Pr
 			return nil, fmt.Errorf("model '%s' lists profile '%s' which is not defined in %s for provider '%s'", model.ID, id, profiles.FileName, providerID)
 		}
 
+		res, err := extractProfileResources(pr.ID, pr.Params, base)
+		if err != nil {
+			return nil, err
+		}
+
 		deployProfiles = append(deployProfiles, types.ModelDeployProfile{
 			ID:          pr.ID,
 			Name:        pr.Name,
 			Description: pr.Description,
 			Default:     profiles.IsDefault(model.DefaultProfile, pr),
-			Resources:   extractProfileResources(pr.Params, base),
+			Resources:   res,
 		})
 	}
 
 	return deployProfiles, nil
 }
 
-func extractProfileResources(params map[string]any, base types.Resources) types.Resources {
+func extractProfileResources(profileID string, params map[string]any, base types.Resources) (types.Resources, error) {
 	res := base
-	resources, ok := params["resources"].(map[string]any)
-	if !ok {
-		return res
+	rawRes, ok := params["resources"]
+	if !ok || rawRes == nil {
+		return res, nil
 	}
 
-	if mem, ok := resources["memory"].(int); ok {
+	resources, ok := rawRes.(map[string]any)
+	if !ok {
+		return res, fmt.Errorf("profile '%s' resources must be a map, got %T", profileID, rawRes)
+	}
+
+	if rawMem, exists := resources["memory"]; exists {
+		mem, ok := rawMem.(int)
+		if !ok {
+			return res, fmt.Errorf("profile '%s' invalid memory: expected int bytes, got %T (%v)", profileID, rawMem, rawMem)
+		}
 		res.Memory = mem
 	}
 
-	switch acc := resources["accelerators"].(type) {
-	case map[string]int:
-		res.Accelerators = acc
-	case map[string]any:
-		res.Accelerators = make(map[string]int, len(acc))
-		for k, v := range acc {
-			if count, ok := v.(int); ok {
-				res.Accelerators[k] = count
-			}
+	if rawAcc, exists := resources["accelerators"]; exists {
+		acc, err := extractAccelerators(profileID, rawAcc)
+		if err != nil {
+			return res, err
 		}
+		res.Accelerators = acc
 	}
 
-	return res
+	return res, nil
+}
+
+func extractAccelerators(profileID string, rawAcc any) (map[string]int, error) {
+	switch acc := rawAcc.(type) {
+	case map[string]int:
+		return acc, nil
+	case map[string]any:
+		result := make(map[string]int, len(acc))
+		for k, v := range acc {
+			count, ok := v.(int)
+			if !ok {
+				return nil, fmt.Errorf("profile '%s' accelerator '%s' count must be int, got %T (%v)", profileID, k, v, v)
+			}
+			result[k] = count
+		}
+
+		return result, nil
+	default:
+		return nil, fmt.Errorf("profile '%s' accelerators must be a map, got %T", profileID, rawAcc)
+	}
 }
 
 // FilterAndSortProviders applies the provider filter, then sorts:

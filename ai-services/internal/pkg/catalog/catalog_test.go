@@ -264,11 +264,13 @@ func TestLoadComponentValuesForModel(t *testing.T) {
 	})
 
 	t.Run("profile values win over argParams, other argParams are kept", func(t *testing.T) {
-		v, err := p.LoadComponentValuesForModel("llm", "vllm-spyre", granite33, "", map[string]string{"maxModelLen": "1", "apiKey": "k"})
+		v, err := p.LoadComponentValuesForModel("llm", "vllm-spyre", granite33, "", map[string]string{"maxModelLen": "1", "apiKey": "k", "resources.cpu": "8"})
 		require.NoError(t, err)
 
 		assert.Equal(t, 32768, v["maxModelLen"])
 		assert.Equal(t, "k", v["apiKey"])
+		assert.Equal(t, "8", v["resources"].(map[string]any)["cpu"], "non-profile resource keys like cpu are preserved")
+		assert.Equal(t, map[string]any{"ibm.com/spyre_pf": 4}, v["resources"].(map[string]any)["accelerators"])
 	})
 
 	t.Run("provider without profiles loads plain values", func(t *testing.T) {

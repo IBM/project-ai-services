@@ -308,6 +308,58 @@ func TestBuildDeployProfiles(t *testing.T) {
 			t.Errorf("got %v, %v", got, err)
 		}
 	})
+
+	t.Run("invalid memory type returns error", func(t *testing.T) {
+		invalidMemByID := map[string]profiles.Profile{
+			"bad-mem": {ID: "bad-mem", Params: map[string]any{
+				"resources": map[string]any{"memory": "200Gi"},
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-mem"}}, invalidMemByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-int memory")
+		}
+	})
+
+	t.Run("invalid resources type returns error", func(t *testing.T) {
+		invalidResByID := map[string]profiles.Profile{
+			"bad-res": {ID: "bad-res", Params: map[string]any{
+				"resources": "not-a-map",
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-res"}}, invalidResByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-map resources")
+		}
+	})
+
+	t.Run("invalid accelerator count type returns error", func(t *testing.T) {
+		invalidAccByID := map[string]profiles.Profile{
+			"bad-acc": {ID: "bad-acc", Params: map[string]any{
+				"resources": map[string]any{
+					"accelerators": map[string]any{"ibm.com/spyre_pf": "four"},
+				},
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-acc"}}, invalidAccByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-int accelerator count")
+		}
+	})
+
+	t.Run("invalid accelerator map type returns error", func(t *testing.T) {
+		invalidAccByID := map[string]profiles.Profile{
+			"bad-acc": {ID: "bad-acc", Params: map[string]any{
+				"resources": map[string]any{
+					"accelerators": "not-a-map",
+				},
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-acc"}}, invalidAccByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-map accelerators")
+		}
+	})
 }
 
 func TestFilterAndSortProviders(t *testing.T) {

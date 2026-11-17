@@ -917,9 +917,33 @@ func (p *CatalogProvider) LoadComponentValuesForModel(componentType, providerID,
 	if err != nil {
 		return nil, err
 	}
-	maps.Copy(values, profileValues)
+
+	mergeProfileValues(values, profileValues)
 
 	return values, nil
+}
+
+func mergeProfileValues(values, profileValues map[string]any) {
+	for k, v := range profileValues {
+		if k == "model" {
+			continue
+		}
+
+		if k == "resources" {
+			if profileRes, ok := v.(map[string]any); ok {
+				existingRes, _ := values["resources"].(map[string]any)
+				if existingRes == nil {
+					existingRes = make(map[string]any, len(profileRes))
+				}
+				maps.Copy(existingRes, profileRes)
+				values["resources"] = existingRes
+
+				continue
+			}
+		}
+
+		values[k] = v
+	}
 }
 
 // LoadComponentRuntimeMetadata loads runtime-specific metadata for a component.
