@@ -189,7 +189,7 @@ class TestProcessTableRowChunking:
         converted_doc.tables = [_mock_table(_make_table(30), "Table 1: Ridership", 3)]
 
         with patch.object(Path, "write_text") as mock_write:
-            table_count, _, failures = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+            table_count, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
 
         markdowns = mock_summarize.call_args[0][0]
         assert len(markdowns) > 1
@@ -197,7 +197,6 @@ class TestProcessTableRowChunking:
             assert md.split("\n")[0] == "Table 1: Ridership"
             assert HEADER in md
         assert table_count == len(markdowns)
-        assert failures == {}
 
         saved = mock_write.call_args[0][0]
         assert '"caption": "Table 1: Ridership"' in saved
@@ -232,7 +231,7 @@ class TestProcessTableRowChunking:
         converted_doc.tables = [_mock_table(_make_table(30), "Table 1", 3)]
 
         with patch.object(Path, "write_text") as mock_write:
-            table_count, _, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+            table_count, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
 
         n_chunks = len(mock_summarize.call_args[0][0])
         assert table_count == n_chunks - 1  # only the "No summary." chunk is dropped
@@ -259,7 +258,7 @@ class TestProcessTableRowChunking:
         converted_doc.tables = [_mock_table(_make_table(30), "Table 1", 3)]
 
         with patch.object(Path, "write_text"):
-            table_count, _, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+            table_count, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
 
         assert table_count == 0
 
@@ -291,12 +290,11 @@ class TestProcessTableRowChunking:
 
         with patch.object(Path, "write_text") as mock_write, \
                 patch("digitize.processing.tables.logger") as mock_logger:
-            table_count, _, failures = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
+            table_count, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 60)
 
         markdowns = mock_summarize.call_args[0][0]
-        # no chunk is lost, and the failure is still reported to the caller
+        # no chunk is lost, raw markdown is used as fallback summary
         assert table_count == len(markdowns)
-        assert list(failures) == [1]
 
         saved = json.loads(mock_write.call_args[0][0])
         assert saved["1"]["summary"] == markdowns[1]       # raw markdown stored in the summary column
@@ -326,7 +324,7 @@ class TestProcessTableRowChunking:
         converted_doc.tables = [_mock_table(_make_table(2), "Table 1", 1)]
 
         with patch.object(Path, "write_text"):
-            table_count, _, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 1000)
+            table_count, _ = _run_process_table(converted_doc, LanguageCodes.ENGLISH, 1000)
 
         assert len(mock_summarize.call_args[0][0]) == 1
         assert table_count == 1

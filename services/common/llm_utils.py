@@ -101,14 +101,13 @@ def summarize_and_classify_single_table(prompt, gen_model, llm_endpoint, max_tok
         except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
             logger.error(
                 f"Table LLM response is not the expected JSON (finish_reason={finish_reason}, "
-                f"response_chars={len(text)}): {e}; last 200 chars: {text[-200:]!r}"
+                f"response_chars={len(text)}): {e}"
             )
             raise ValueError(f"Invalid table summary response (finish_reason={finish_reason}): {e}") from e
 
         logger.debug(
             f"Parsed table LLM response: response_chars={len(text)}, finish_reason={finish_reason}, "
-            f"decision={parsed['decision']!r} -> keep={decision}, summary_chars={len(summary)}, "
-            f"summary_preview={summary[:120]!r}"
+            f"decision={parsed['decision']!r} -> keep={decision}, summary_chars={len(summary)}"
         )
 
         return summary or "No summary.", decision

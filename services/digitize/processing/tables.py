@@ -464,7 +464,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     if not converted_doc.tables:
         logger.debug(f"No tables found in '{doc_path}'")
         out_path.write_text(json.dumps({}, indent=2), encoding="utf-8")
-        return table_count, process_time, {}
+        return table_count, process_time
 
     file_ext = Path(doc_path).suffix.lower()
     is_docx = file_ext == '.docx'
@@ -625,8 +625,8 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
             'caption': caption,
             'page_number': page_num,
         }
-        for idx, (keep, _markdown, summary, caption, page_num) in enumerate(
-            zip(final_keep, table_markdowns, table_summaries, table_captions_list, table_page_numbers)
+        for idx, (keep, summary, caption, page_num) in enumerate(
+            zip(final_keep, table_summaries, table_captions_list, table_page_numbers)
         )
         if keep
     }
@@ -635,7 +635,7 @@ def process_table(converted_doc, doc_path, out_path, gen_model, gen_endpoint, do
     process_time = time.time() - t0
     logger.debug(
         f"Processed tables for '{doc_path}': kept {table_count}/{len(table_markdowns)} chunks "
-        f"(failures={len(failures)}) in {process_time:.2f}s, saved to {out_path}"
+        f"in {process_time:.2f}s, saved to {out_path}"
     )
 
-    return table_count, process_time, failures
+    return table_count, process_time
