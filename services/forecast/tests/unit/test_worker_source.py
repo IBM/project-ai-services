@@ -22,7 +22,7 @@ from forecast.data_loader import (  # noqa: E402
     InvalidTableReferenceError,
     ParquetWriteError,
 )
-from forecast.worker.errors import PermanentFailure  # noqa: E402
+from common.forecast_errors import PermanentFailure  # noqa: E402
 from forecast.tests.unit.test_worker import CONNECTOR_ID, JOB, make_table  # noqa: E402
 
 pytestmark = pytest.mark.unit
@@ -55,7 +55,7 @@ def loader(monkeypatch):
 
 
 def test_loader_reads_every_row_with_the_encrypted_connector(loader, tmp_path):
-    from forecast.worker.source import load_training_data
+    from forecast.training.source import load_training_data
 
     data = load_training_data(JOB, tmp_path / "data.parquet")
 
@@ -72,7 +72,7 @@ def test_loader_reads_every_row_with_the_encrypted_connector(loader, tmp_path):
 
 
 def test_columns_come_back_as_named_in_the_training_configuration(loader, tmp_path):
-    from forecast.worker.source import load_training_data
+    from forecast.training.source import load_training_data
 
     # The loader matches columns case-insensitively and writes the catalogue's spelling.
     loader.table = make_table(20).rename(columns=str.lower)
@@ -96,7 +96,7 @@ def test_columns_come_back_as_named_in_the_training_configuration(loader, tmp_pa
     ids=lambda error: type(error).__name__,
 )
 def test_loader_errors_that_would_only_repeat_are_permanent(loader, tmp_path, error):
-    from forecast.worker.source import load_training_data
+    from forecast.training.source import load_training_data
 
     loader.error = error
 
@@ -105,7 +105,7 @@ def test_loader_errors_that_would_only_repeat_are_permanent(loader, tmp_path, er
 
 
 def test_a_dropped_connection_is_retried(loader, tmp_path):
-    from forecast.worker.source import load_training_data
+    from forecast.training.source import load_training_data
 
     loader.error = DBConnectionError("connection lost")
 

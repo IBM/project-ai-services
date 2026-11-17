@@ -6,10 +6,10 @@ from pathlib import Path
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from forecast.worker.errors import PermanentFailure
-from forecast.worker.features import Encoding, encode
-from forecast.worker.jobs import TrainingJob
-from forecast.worker.onnx_export import EXPORTABLE_HYPERPARAMETERS
+from common.forecast_errors import PermanentFailure
+from forecast.db.jobs import TrainingJob
+from forecast.training.features import Encoding, encode
+from forecast.training.onnx_export import EXPORTABLE_HYPERPARAMETERS
 
 # AutoGluon gets part of the job's time limit. Loading the data and exporting the model
 # take the rest, and the API kills the worker at the limit.

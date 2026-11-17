@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from forecast.worker.errors import PermanentFailure
-from forecast.worker.jobs import TrainingJob
+from common.forecast_errors import PermanentFailure
+from forecast.db.jobs import TrainingJob
 
 
 def load_training_data(job: TrainingJob, output_path: Path) -> pd.DataFrame:
