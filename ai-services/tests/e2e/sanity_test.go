@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +13,9 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/digitization"
 	"github.com/project-ai-services/ai-services/tests/e2e/extraction"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
+	"github.com/project-ai-services/ai-services/tests/e2e/similarity"
 	"github.com/project-ai-services/ai-services/tests/e2e/summarization"
+	"github.com/project-ai-services/ai-services/tests/e2e/translation"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
@@ -32,9 +35,13 @@ import (
 //
 //	4 Spyre cards: CREATE_PARAMS="reranker.vllm-cpu=true"      5 cards: unset (template default)
 //
-// Flow: bootstrap + catalog -> RAG app -> ps/info/pods -> ingest document + Q&A -> delete RAG app
-// -> extract service -> digitize service -> summarize service -> catalog logout/uninstall.
+// Flow: bootstrap + catalog -> RAG app -> ps/info/pods -> ingest document + Q&A -> RAG MCP sidecars
+// (chat + similarity + digitize) -> delete RAG app -> extract service (+ MCP sidecar) -> digitize
+// service -> summarize service -> translate service (MCP sidecar) -> catalog logout/uninstall.
 // The lifecycle steps are the existing specs in e2e_suite_test.go that carry the same label.
+//
+// The MCP specs reuse the same helpers and spec bodies as the regular "mcp-tests" run
+// (mcp_translate_extract_test.go); only the app they resolve the sidecar URLs from differs.
 const (
 	sanityLabel = "sanity-0.4"
 
@@ -75,6 +82,7 @@ func defineSanityContexts() {
 	defineSanityExtract()
 	defineSanityDigitize()
 	defineSanitySummarize()
+	defineSanityTranslate()
 }
 
 // sanityService describes how to locate and health-check a standalone service app.
@@ -235,6 +243,89 @@ func defineSanityRAGQnA() {
 				logger.Infof("[SANITY-RAG] Q: %s\n[SANITY-RAG] A: %s", prompt.question, response)
 			}
 		})
+
+		defineSanityRAGMCP()
+	})
+}
+
+// defineSanityRAGMCP checks the chat, similarity and digitize MCP sidecars of the RAG app and
+// drives chat_completion and similarity_search through them. It is nested in the RAG context, so
+// it runs after the ingestion spec (the document is already indexed) and before the RAG app is
+// deleted. Ingestion itself is not repeated through MCP: the digitize service answers 409 for a
+// file that was already ingested, and the regular "mcp-flow" run covers create_digitize_job.
+func defineSanityRAGMCP() {
+	const (
+		label    = "SANITY-RAG-MCP"
+		question = "What is PowerVC?"
+		keyword  = "powervc"
+	)
+
+	ginkgo.Context("Sanity RAG MCP sidecars", ginkgo.Ordered, func() {
+		var chatURL, simURL, digitizeURL string
+
+		ginkgo.BeforeAll(func() {
+			loginCtx, loginCancel := withTimeout(10 * time.Minute)
+			defer loginCancel()
+
+			// The ingestion spec can run for a long time; refresh the token the sidecars forward.
+			catalogLoginWithDiscovery(loginCtx, true)
+			mcpRequireToken(label)
+
+			infoOutput := mcpApplicationInfo(label)
+			chatURL = cli.ExtractChatMCPURL(infoOutput)
+			simURL = cli.ExtractSimilarityMCPURL(infoOutput)
+			digitizeURL = cli.ExtractDigitizeMCPURL(infoOutput)
+		})
+
+		ginkgo.It("exposes healthy chat, similarity and digitize MCP sidecars with their tools", func() {
+			mcpExpectHealthy(chatURL, "chat")
+			mcpExpectHealthy(simURL, "similarity")
+			mcpExpectHealthy(digitizeURL, "digitize")
+
+			mcpRequireTools(chatURL, "chat", []string{"chat_completion"})
+			mcpRequireTools(simURL, "similarity", []string{"similarity_search"})
+			mcpRequireTools(digitizeURL, "digitize", []string{"create_digitize_job", "get_digitize_job"})
+		})
+
+		ginkgo.It("answers a question about the ingested document via the chat MCP sidecar", func() {
+			callCtx, cancel := context.WithTimeout(ctx, mcpSyncTimeout)
+			defer cancel()
+
+			text, err := mcpCallText(callCtx, mcpEnsureEndpoint(chatURL), "chat_completion", map[string]any{
+				"data": map[string]any{
+					"messages": []map[string]string{{"role": "user", "content": question}},
+					"stream":   false,
+				},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[%s] chat_completion failed", label)
+
+			var resp rag.ChatCompletionResponse
+			gomega.Expect(json.Unmarshal([]byte(text), &resp)).To(gomega.Succeed(),
+				"[%s] could not unmarshal chat completion from: %.300s", label, text)
+			gomega.Expect(resp.Choices).NotTo(gomega.BeEmpty(), "[%s] chat completion returned no choices", label)
+
+			answer := resp.Choices[0].Message.Content
+			gomega.Expect(strings.ToLower(answer)).To(gomega.ContainSubstring(keyword),
+				"[%s] answer to %q does not mention %q: %.300s", label, question, keyword, answer)
+			logger.Infof("[%s] chat answer: %.200s", label, answer)
+		})
+
+		ginkgo.It("returns similar chunks for the question via the similarity MCP sidecar", func() {
+			callCtx, cancel := context.WithTimeout(ctx, mcpSyncTimeout)
+			defer cancel()
+
+			text, err := mcpCallText(callCtx, mcpEnsureEndpoint(simURL), "similarity_search", map[string]any{
+				"data": map[string]any{"query": question},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[%s] similarity_search failed", label)
+
+			var resp similarity.SimilaritySearchResponse
+			gomega.Expect(json.Unmarshal([]byte(text), &resp)).To(gomega.Succeed(),
+				"[%s] could not unmarshal similarity search from: %.300s", label, text)
+			gomega.Expect(resp.Results).NotTo(gomega.BeEmpty(),
+				"[%s] similarity search returned 0 results after ingestion", label)
+			logger.Infof("[%s] similarity returned %d result(s), top score=%.4f", label, len(resp.Results), resp.Results[0].Score)
+		})
 	})
 }
 
@@ -308,6 +399,11 @@ func defineSanityExtract() {
 
 			missing, ok := common.AllFieldsPresent(result.GetData(), requiredFields)
 			gomega.Expect(ok).To(gomega.BeTrue(), "expected field %q in async extraction result", missing)
+		})
+
+		// Same specs as the regular MCP run, pointed at the app deployed above (svcApp is read lazily).
+		ginkgo.Context("Sanity Extract MCP sidecar", func() {
+			mcpExtractSpecsFor(func(label string) string { return mcpApplicationInfoFor(svcApp, label) })
 		})
 	})
 }
@@ -448,6 +544,36 @@ func defineSanitySummarize() {
 			}
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(strings.TrimSpace(res.Summary)).NotTo(gomega.BeEmpty())
+		})
+	})
+}
+
+// defineSanityTranslate deploys the translate service and runs its MCP sidecar specs: /health,
+// tools/list and the sync translation -> async file job -> result flow, all through the sidecar.
+func defineSanityTranslate() {
+	ginkgo.Context("Sanity Translate service", ginkgo.Ordered, ginkgo.Label("spyre-dependent", sanityLabel), func() {
+		var svcApp string
+
+		ginkgo.BeforeAll(func() {
+			skipUnlessSanityRun()
+			svcApp = sanityAppName("translate")
+			svcApp, _ = deploySanityService(sanityService{
+				template:  "translate",
+				logPrefix: "SANITY-TRANSLATE",
+				urlFrom:   cli.ExtractCatalogTranslateURL,
+				health:    translation.HealthCheck,
+			})
+		})
+
+		ginkgo.AfterAll(func() {
+			if sanityActive() {
+				deleteSanityApp("SANITY-TRANSLATE", svcApp)
+			}
+		})
+
+		// Same specs as the regular MCP run, pointed at the app deployed above (svcApp is read lazily).
+		ginkgo.Context("Sanity Translate MCP sidecar", func() {
+			mcpTranslateSpecsFor(func(label string) string { return mcpApplicationInfoFor(svcApp, label) })
 		})
 	})
 }

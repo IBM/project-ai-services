@@ -469,16 +469,20 @@ validate a patch of a release branch. The test code always comes from the curren
 only the `ai-services` binary - and therefore the templates and images embedded in it - comes from
 the patch branch.
 
-What runs, in order (19 specs, all in `e2e_suite_test.go` / `sanity_test.go`):
+What runs, in order (39 specs, in `e2e_suite_test.go` / `sanity_test.go` / `mcp_translate_extract_test.go`):
 
 1. Existing lifecycle specs carrying the label: help, bootstrap configure/validate, catalog configure/info/login, RAG app create, `application ps` / `info` / pod health.
-2. **RAG**: ingest `test_doc.pdf`, then ask fixed questions (same prompts as backup/restore) and assert each answer is non-empty and grounded in the document. The RAG app is then deleted to free its Spyre cards.
-3. **Extract**: deploy the extract service, run one sync and one async extraction.
+2. **RAG**: ingest `test_doc.pdf`, then ask fixed questions (same prompts as backup/restore) and assert each answer is non-empty and grounded in the document.
+   **RAG MCP**: on the same app, check the chat, similarity and digitize MCP sidecars (`/health`, `tools/list`), then call `chat_completion` and `similarity_search` through them. The RAG app is then deleted to free its Spyre cards.
+3. **Extract**: deploy the extract service, run one sync and one async extraction, then the extract MCP sidecar specs (`/health`, `tools/list`, sync → async job → per-document result, error paths).
 4. **Digitize**: deploy the digitize service, digitize a PDF and run an ingestion job.
 5. **Summarize**: deploy the summarize service, run one sync and one PDF (async) summarization.
-6. Catalog logout and uninstall.
+6. **Translate**: deploy the translate service and run the translate MCP sidecar specs (`/health`, `tools/list`, sync translation → async file job → result, error paths).
+7. Catalog logout and uninstall.
 
 Each service stage deploys and deletes its own app, so the same Spyre cards are reused.
+
+The sanity MCP specs are the same spec bodies as the regular `mcp-tests` run (`mcpExtractSpecsFor` / `mcpTranslateSpecsFor`); only the app they read the sidecar URLs from differs, so the normal `mcp-tests` run is unchanged.
 
 ### Patch branch
 
