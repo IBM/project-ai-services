@@ -90,9 +90,6 @@ const (
 
 // Catalog name constants.
 const (
-	// DefaultCatalogNamespace is the default OpenShift namespace for the catalog and worker.
-	DefaultCatalogNamespace = "ai-services"
-
 	// CatalogAppName represents the catalog Helm release name and resource label value.
 	CatalogAppName = "ai-services"
 	// CatalogAppTemplate represents the catalog template name used for loading catalog infrastructure templates.
@@ -111,6 +108,8 @@ const (
 	CatalogConnectorSecretName = "catalog-db-encryption-secret"
 	// CatalogMTLSSecretName represents the catalog mTLS encryption key secret name.
 	CatalogMTLSSecretName = "catalog-mtls-encryption-secret"
+	// CatalogAPIServiceName represents the catalog API Kubernetes service name.
+	CatalogAPIServiceName = "catalog-api"
 	// CatalogDeploymentName represent the catalog deployment name.
 	CatalogDeploymentName = "catalog-backend"
 	// CatalogAdminUser is the default admin username created during catalog configure.
@@ -123,10 +122,6 @@ const (
 	// stamped on the catalog pod.
 	CatalogComponentValue = "catalog"
 )
-
-// CatalogNamespace is the single source of truth for the OpenShift namespace
-// where the catalog (backend, DB, UI) and worker are deployed.
-var CatalogNamespace = DefaultCatalogNamespace
 
 // Pagination constants.
 const (

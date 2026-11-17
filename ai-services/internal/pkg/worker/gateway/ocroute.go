@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	runtimeopenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
@@ -22,7 +23,7 @@ const (
 // If no route named "catalog-worker-gateway" is found, or the route has no host
 // assigned yet, an error is returned.
 func GatewayRouteHost(ctx context.Context) (string, error) {
-	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogNamespace)
+	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogns.Get())
 	if err != nil {
 		return "", fmt.Errorf("worker gateway: create OpenShift client to look up gateway route: %w", err)
 	}

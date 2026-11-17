@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
@@ -24,7 +25,7 @@ import (
 // UninstallCatalog removes the catalog helm release and optionally cleans up PVCs and catalog namespace.
 func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	catalog := catalogConstants.CatalogAppName
-	namespace := catalogConstants.CatalogNamespace
+	namespace := catalogns.Get()
 
 	rt, err := openshiftruntime.NewOpenshiftClientWithNamespace(namespace)
 	if err != nil {
