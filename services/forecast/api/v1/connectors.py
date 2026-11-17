@@ -36,7 +36,7 @@ from forecast.settings import settings
 from forecast.training.scheduler import register_connector_job
 from forecast.utils.api_utils import (
     UNIQUE_VIOLATION,
-    database_errors,
+    handle_database_errors,
     format_timestamp,
     job_item,
     list_item,
@@ -76,7 +76,7 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     connector_id = str(body.id)
 
     # Cheap pre-check, so a request that will be rejected never takes the table lock below.
-    with database_errors("checking existing connector", connector_id), get_db_session() as session:
+    with handle_database_errors("checking existing connector", connector_id), get_db_session() as session:
         if connectors_db.connector_exists(session):
             logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
             APIError.raise_error(
@@ -86,7 +86,7 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
 
     encrypted = encrypt_secrets(body.connection_details.model_dump(exclude_none=True))
 
-    with database_errors("creating", connector_id), get_db_session() as session:
+    with handle_database_errors("creating", connector_id), get_db_session() as session:
         connectors_db.lock_connectors(session)
         if connectors_db.connector_exists(session):
             logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
@@ -162,7 +162,7 @@ def list_connectors(
     ),
 ) -> ConnectorListResponse:
     """Return one page of connectors, optionally filtered by name."""
-    with database_errors("listing connectors"), get_db_session() as session:
+    with handle_database_errors("listing connectors"), get_db_session() as session:
         rows, total = connectors_db.list_connectors(
             session, limit=limit, offset=offset, name=name
         )
@@ -188,7 +188,7 @@ def list_connectors(
 def get_connector(connector_id: UUID) -> ConnectorResponse:
     """Return one connector with its safe connection details."""
     cid = str(connector_id)
-    with database_errors("getting", cid), get_db_session() as session:
+    with handle_database_errors("getting", cid), get_db_session() as session:
         row = connectors_db.get_connector(session, cid)
     if row is None:
         logger.warning(f"Get: connector {cid} not found")
@@ -246,7 +246,7 @@ def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] 
     # One transaction: the row is locked on the first read, so the merge, the
     # validation and the host/username check run against the config that is
     # written. A concurrent PUT cannot change it in between.
-    with database_errors("updating", cid), get_db_session() as session:
+    with handle_database_errors("updating", cid), get_db_session() as session:
         row = connectors_db.get_connector(session, cid, for_update=writes)
         if row is None:
             logger.warning(f"Update: connector {cid} not found")
@@ -291,7 +291,7 @@ def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] 
 def get_connector_metrics(connector_id: UUID) -> ConnectorMetricsResponse:
     """Return the ready versions, training summary and job history of a connector."""
     cid = str(connector_id)
-    with database_errors("getting metrics for", cid), get_db_session() as session:
+    with handle_database_errors("getting metrics for", cid), get_db_session() as session:
         if connectors_db.get_connector(session, cid) is None:
             logger.warning(f"Metrics: connector {cid} not found")
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Connector {cid!r} not found")

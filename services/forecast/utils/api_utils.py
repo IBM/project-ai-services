@@ -106,7 +106,7 @@ def sqlstate(exc: Exception) -> Optional[str]:
 
 
 @contextmanager
-def database_errors(operation: str, connector_id: Optional[str] = None):
+def handle_database_errors(operation: str, connector_id: Optional[str] = None):
     """Turn a database error into DATABASE_ERROR without its message.
 
     The message of a SQLAlchemy error includes the bound parameters, which for a
