@@ -9,10 +9,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	k8sutils "github.com/project-ai-services/ai-services/internal/pkg/utils/k8s"
 )
 
 // HandleDeploymentStepError updates the application status to Error and logs the failure.
@@ -32,16 +34,16 @@ func HandleDeploymentStepError(ctx context.Context, appRepo dbrepo.ApplicationRe
 }
 
 // AppNamespace derives the Kubernetes namespace from an application UUID.
-// Format: "<CatalogNamespace>-<first 8 chars of UUID>".
+// Format: "<catalog namespace>-<first 8 chars of UUID>".
 func AppNamespace(appID uuid.UUID) string {
-	return catalogconstants.CatalogNamespace + "-" + appID.String()[:8]
+	return catalogns.Get() + "-" + appID.String()[:8]
 }
 
 // OpenShiftCatalogServiceEndpoint returns the catalog-api service DNS name for
 // internal cluster communication. It is a function so it reflects the
 // --namespace flag parsed at runtime.
 func OpenShiftCatalogServiceEndpoint() string {
-	return "catalog-api." + catalogconstants.CatalogNamespace + ".svc.cluster.local"
+	return k8sutils.ServiceDNS(catalogconstants.CatalogAPIServiceName, catalogns.Get())
 }
 
 // HelmReleaseName builds a Helm release name: "<id>-<first 8 chars of appID>".

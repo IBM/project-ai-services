@@ -3,9 +3,6 @@
 package constants
 
 const (
-	// WorkerAppName is the app name used for Podman worker pods/templates.
-	WorkerAppName = "ai-services"
-
 	// LocalWorkerName is the sentinel value used when no remote worker is specified.
 	// It means "deploy on this machine using the local runtime".
 	LocalWorkerName = "Local"
@@ -24,6 +21,7 @@ const (
 	// WorkerDataSubDir is the on-disk subtree written by deploy.Setup; removed by uninstall.
 	WorkerDataSubDir = "worker"
 
+	WorkerAppName = "ai-services"
 	// WorkerAppTemplate is the app name passed to the template provider.
 	// Resolves to assets/worker/<runtime>/templates/.
 	WorkerAppTemplate     = "worker"

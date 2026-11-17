@@ -18,6 +18,7 @@ import (
 	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	k8sutils "github.com/project-ai-services/ai-services/internal/pkg/utils/k8s"
 )
 
 // Type aliases for deployment plan types.
@@ -240,7 +241,7 @@ func (d *OpenShiftDeployer) registerServiceEndpoints(ctx context.Context, plan *
 		// Use route.ServiceName (the K8s Service the route points to) as the hostname —
 		// not releaseName, which is the Helm release name and has no corresponding Service.
 		if route.Labels[constants.EndpointTypeLabelKey] == "api" && route.TargetPort != "" && route.ServiceName != "" {
-			internalURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%s", route.ServiceName, ns, route.TargetPort)
+			internalURL := fmt.Sprintf("http://%s:%s", k8sutils.ServiceDNS(route.ServiceName, ns), route.TargetPort)
 			endpoints = append(endpoints, map[string]any{
 				"type": "internal",
 				"url":  internalURL,
