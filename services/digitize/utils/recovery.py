@@ -294,3 +294,62 @@ def recover_conversion_tasks() -> int:
         logger.debug("✅ No stale conversion tasks found on startup")
 
     return recovered
+
+
+def reconcile_opensearch_orphans(dry_run: bool = False, batch_size: int = 500) -> dict:
+    """
+    Scan OpenSearch for document IDs that do not exist in the PostgreSQL documents table
+    and remove their orphaned vector chunks.
+
+    Args:
+        dry_run: If True, only identify and report orphans without deleting them.
+        batch_size: Page size for OpenSearch composite aggregation and DB queries.
+
+    Returns:
+        dict summarizing scanned document count, detected orphan doc_ids, and deleted chunks.
+    """
+    import common.db_utils as db
+    from digitize.db.manager import db_manager
+
+    vector_store = db.get_vector_store()
+    total_scanned = 0
+    total_orphans: list[str] = []
+    total_deleted_chunks = 0
+    after_key = None
+
+    try:
+        while True:
+            os_doc_ids, after_key = vector_store.get_all_indexed_doc_ids(
+                page_size=batch_size, after_key=after_key
+            )
+            if not os_doc_ids:
+                break
+
+            total_scanned += len(os_doc_ids)
+            existing_ids = db_manager.get_existing_doc_ids(os_doc_ids)
+            orphans = [doc_id for doc_id in os_doc_ids if doc_id not in existing_ids]
+
+            if orphans:
+                total_orphans.extend(orphans)
+                if not dry_run:
+                    deleted = vector_store.remove_docs_from_index(orphans)
+                    total_deleted_chunks += deleted
+
+            if not after_key:
+                break
+    except Exception as exc:
+        logger.error(f"Error during OpenSearch orphan reconciliation: {exc}", exc_info=True)
+        raise
+
+    logger.info(
+        f"OpenSearch orphan reconciliation: scanned={total_scanned}, orphans={len(total_orphans)}, "
+        f"deleted_chunks={total_deleted_chunks}, dry_run={dry_run}"
+    )
+
+    return {
+        "dry_run": dry_run,
+        "scanned_docs": total_scanned,
+        "orphan_doc_ids": total_orphans,
+        "orphan_count": len(total_orphans),
+        "deleted_chunks": total_deleted_chunks,
+    }
