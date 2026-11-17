@@ -181,6 +181,42 @@ class TestRemoveConnectorJob:
             sched_mod._scheduler = original
 
 
+# ---------------------------------------------------------------------------
+# scheduler.register_opensearch_reconcile_job
+# ---------------------------------------------------------------------------
+
+class TestRegisterOpensearchReconcileJob:
+    @pytest.mark.asyncio
+    async def test_raises_when_scheduler_none(self):
+        import digitize.connectors.scheduler as sched_mod
+        original = sched_mod._scheduler
+        sched_mod._scheduler = None
+        try:
+            with pytest.raises(RuntimeError, match="ConnectorScheduler not initialised"):
+                from digitize.connectors.scheduler import register_opensearch_reconcile_job
+                await register_opensearch_reconcile_job()
+        finally:
+            sched_mod._scheduler = original
+
+    @pytest.mark.asyncio
+    async def test_adds_reconcile_job_to_scheduler(self):
+        mock_sched = MagicMock()
+        import digitize.connectors.scheduler as sched_mod
+        original = sched_mod._scheduler
+        sched_mod._scheduler = mock_sched
+        try:
+            from digitize.connectors.scheduler import register_opensearch_reconcile_job, RECONCILE_JOB_ID
+            await register_opensearch_reconcile_job(interval_seconds=1200)
+
+            mock_sched.add_job.assert_called_once()
+            call_kwargs = mock_sched.add_job.call_args[1]
+            assert call_kwargs["id"] == RECONCILE_JOB_ID
+            assert call_kwargs["replace_existing"] is True
+            assert call_kwargs["kwargs"] == {"dry_run": False}
+        finally:
+            sched_mod._scheduler = original
+
+
 # ===========================================================================
 # recover_connector_sync_state
 # ===========================================================================

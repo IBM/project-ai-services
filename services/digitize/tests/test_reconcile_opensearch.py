@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from common.opensearch import OpensearchVectorStore
 from digitize.app import app
 from digitize.db.manager import DatabaseManager
-from digitize.utils.recovery import reconcile_opensearch_orphans
+from digitize.utils.recovery import reconcile_opensearch_orphans, _reconcile_lock
 
 
 class TestOpensearchGetAllIndexedDocIds:
@@ -57,16 +57,16 @@ class TestDatabaseManagerGetExistingDocIds:
 
     def test_returns_matching_doc_ids(self):
         mock_session = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = ["doc-exists-1"]
-        mock_session.scalars.return_value = mock_scalars
+        doc_scalars = MagicMock()
+        doc_scalars.all.return_value = ["doc-exists-1"]
+        mock_session.scalars.return_value = doc_scalars
 
         @contextmanager
         def _fake_session():
             yield mock_session
 
         with patch("digitize.db.manager.get_db_session", side_effect=lambda: _fake_session()):
-            res = DatabaseManager.get_existing_doc_ids(["doc-exists-1", "doc-missing-2"])
+            res = DatabaseManager.get_existing_doc_ids(["doc-exists-1", "doc-orphan-2"])
             assert res == {"doc-exists-1"}
 
 
@@ -80,6 +80,7 @@ class TestReconcileOpensearchOrphans:
         monkeypatch.setattr("digitize.db.manager.db_manager.get_existing_doc_ids", lambda ids: {"doc-1"})
 
         result = reconcile_opensearch_orphans(dry_run=True)
+        assert result["status"] == "completed"
         assert result["dry_run"] is True
         assert result["scanned_docs"] == 3
         assert set(result["orphan_doc_ids"]) == {"doc-2", "doc-3"}
@@ -97,6 +98,7 @@ class TestReconcileOpensearchOrphans:
         monkeypatch.setattr("digitize.db.manager.db_manager.get_existing_doc_ids", lambda ids: {"doc-1"})
 
         result = reconcile_opensearch_orphans(dry_run=False)
+        assert result["status"] == "completed"
         assert result["dry_run"] is False
         assert result["scanned_docs"] == 2
         assert result["orphan_doc_ids"] == ["doc-orphan"]
@@ -104,15 +106,28 @@ class TestReconcileOpensearchOrphans:
         assert result["deleted_chunks"] == 12
         mock_vector_store.remove_docs_from_index.assert_called_once_with(["doc-orphan"])
 
+    def test_concurrency_lock_prevents_simultaneous_runs(self, monkeypatch):
+        # Lock is held
+        _reconcile_lock.acquire(blocking=False)
+        try:
+            result = reconcile_opensearch_orphans(dry_run=False)
+            assert result["status"] == "already_in_progress"
+            assert result["message"] == "Reconciliation is already running"
+            assert result["orphan_count"] == 0
+        finally:
+            _reconcile_lock.release()
+
 
 class TestReconcileEndpoint:
     def test_endpoint_invokes_reconciliation(self, monkeypatch):
         fake_result = {
+            "status": "completed",
             "dry_run": False,
             "scanned_docs": 10,
             "orphan_doc_ids": ["doc-orphan-1"],
             "orphan_count": 1,
             "deleted_chunks": 5,
+            "message": None,
         }
         monkeypatch.setattr(
             "digitize.utils.recovery.reconcile_opensearch_orphans",
@@ -123,6 +138,7 @@ class TestReconcileEndpoint:
         resp = client.post("/v1/reconcile-opensearch")
         assert resp.status_code == 200
         data = resp.json()
+        assert data["status"] == "completed"
         assert data["dry_run"] is False
         assert data["scanned_docs"] == 10
         assert data["orphan_doc_ids"] == ["doc-orphan-1"]
