@@ -1,5 +1,6 @@
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader } from "@carbon/ibm-products";
+import { ModelsTable } from "@/components";
 import styles from "./Models.module.scss";
 
 const Models = () => {
@@ -20,7 +21,9 @@ const Models = () => {
           <Tab>Catalog</Tab>
         </TabList>
         <TabPanels>
-          <TabPanel />
+          <TabPanel>
+            <ModelsTable />
+          </TabPanel>
           <TabPanel />
         </TabPanels>
       </Tabs>

@@ -18,6 +18,7 @@
 #   tilt down                            # Stop and remove local state (.tilt/, catalog-db)
 #
 # See docs/dev-guides/tilt-local-development.md
+# Other standalone stacks: Tiltfile.rag (RAG) and hack/tilt/services (extract / translate / summarize).
 # =============================================================================
 
 # -----------------------------------------------------------------------------

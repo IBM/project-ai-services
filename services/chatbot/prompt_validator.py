@@ -11,7 +11,7 @@ from enum import Enum
 from common.misc_utils import get_logger
 from common.settings import settings
 from common.llm_utils import get_vllm_headers
-from common.lang_utils import LanguageCodes
+from common.lang_utils import LanguageCodes, MARKDOWN_EMPHASIS_RE
 import common.misc_utils as misc_utils
 
 logger = get_logger("prompt_validator")
@@ -441,7 +441,7 @@ def _call_llm_for_validation(prompt: str, validation_type: str) -> str:
             f"{llm_endpoint}/v1/chat/completions",
             json=payload,
             headers=get_vllm_headers(api_key),
-            timeout=20.0  # 20 second timeout for validation
+            timeout=30.0  # 30 second timeout for validation
         )
         response.raise_for_status()
         data = response.json() or {}
@@ -473,11 +473,11 @@ def _parse_validation_response(
     
     Args:
         response_text: Raw response text from LLM
-        valid_verdict: Expected verdict string for valid result (e.g., "VALID", "SAFE", "GÜLTIG", "SICHER")
-        invalid_verdict: Expected verdict string for invalid result (e.g., "INVALID", "UNSAFE", "UNGÜLTIG", "UNSICHER")
+        valid_verdict: Expected verdict string for valid result, from the language's VERDICT_VALUES (e.g., "VALID", "SAFE", "GÜLTIG", "VALIDE", "有効")
+        invalid_verdict: Expected verdict string for invalid result, from the language's VERDICT_VALUES (e.g., "INVALID", "UNSAFE", "UNGÜLTIG", "NON VALIDE", "無効")
         invalid_result_type: ValidationResult enum to return for invalid verdict
         validation_type: Type of validation for logging (e.g., "Semantic", "Injection Detection")
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with parsed result
@@ -492,7 +492,8 @@ def _parse_validation_response(
         keywords = _get_language_constants(language).RESPONSE_KEYWORDS
         
         for line in lines:
-            line = line.strip()
+            # Drop markdown emphasis (bold/code) some models wrap around keywords, e.g. **VERDICT:** SAFE
+            line = MARKDOWN_EMPHASIS_RE.sub("", line).strip()
             # Check for verdict keyword
             if line.startswith(f"{keywords['VERDICT']}:"):
                 verdict = line.split(":", 1)[1].strip().upper()
@@ -538,7 +539,7 @@ def validate_semantic_quality(
     Args:
         prompt: The custom prompt to validate
         prompt_type: Type of prompt (e.g., "system", "initial", "query")
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with validation result
@@ -555,10 +556,10 @@ def validate_semantic_quality(
     response_text = _call_llm_for_validation(validation_prompt, "Semantic")
     
     if not response_text:
-        # If LLM validation fails, return disabled status (allows fallback to basic validation)
+        # LLM did not respond (timeout/error): validation failed, caller falls back to the default prompt
         return PromptValidationResponse(
-            ValidationResult.VALIDATION_DISABLED,
-            "LLM validation unavailable, using basic validation only"
+            ValidationResult.VALIDATION_ERROR,
+            "LLM validation unavailable (timeout or error)"
         )
     
     # Parse response using shared method
@@ -581,7 +582,7 @@ def detect_prompt_injection(
     
     Args:
         prompt: The custom prompt to check for injection attempts
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with detection result
@@ -595,10 +596,10 @@ def detect_prompt_injection(
     response_text = _call_llm_for_validation(validation_prompt, "Injection Detection")
     
     if not response_text:
-        # If LLM validation fails, return disabled status (allows fallback to basic validation)
+        # LLM did not respond (timeout/error): validation failed, caller falls back to the default prompt
         return PromptValidationResponse(
-            ValidationResult.VALIDATION_DISABLED,
-            "LLM injection detection unavailable, using basic validation only"
+            ValidationResult.VALIDATION_ERROR,
+            "LLM injection detection unavailable (timeout or error)"
         )
     
     # Parse response using shared method
@@ -627,7 +628,7 @@ def validate_prompt_with_llm(
         prompt_type: Type of prompt (e.g., "system", "initial", "query")
         enable_semantic_check: Whether to perform semantic validation
         enable_injection_check: Whether to perform injection detection
-        language: Language code (EN for English, DE for German)
+        language: Language code (EN, DE, IT, FR or JA); unsupported codes fall back to English
     
     Returns:
         PromptValidationResponse with overall validation result
