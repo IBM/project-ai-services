@@ -21,6 +21,7 @@ from forecast.worker.features import encode
 from forecast.worker.jobs import JobStore, TrainingJob
 from forecast.worker.onnx_export import triton_config
 from forecast.worker.publish import forecaster_name, publish
+from forecast.worker.training import _split
 
 pytestmark = pytest.mark.unit
 
@@ -182,12 +183,33 @@ def test_run_records_rows_read_then_the_full_result(volumes):
     assert store.results[0] == {"rows_read": 300}
     final = store.results[-1]
     assert set(final) == {
-        "rows_read", "algorithm", "validation_metric", "validation_score", "training_seconds"
+        "rows_read", "algorithm", "validation_metric", "validation_score", "test_score", "training_seconds"
     }
     assert final["rows_read"] == 300
     assert final["algorithm"] in {"LightGBM", "CatBoost"}
     assert final["validation_metric"] == "accuracy"
     assert 0 <= final["validation_score"] <= 1
+    assert 0 <= final["test_score"] <= 1
+
+
+def test_the_test_split_is_held_out_and_keeps_the_class_ratio():
+    df = make_table(500)
+
+    train_rows, test_rows = _split(df, "LATE")
+
+    assert len(test_rows) == 100 and len(train_rows) == 400
+    assert set(train_rows.index).isdisjoint(test_rows.index)
+    assert test_rows.LATE.eq("Y").mean() == pytest.approx(df.LATE.eq("Y").mean(), abs=0.01)
+
+
+def test_the_test_split_of_a_regression_target_or_a_single_row_class_is_random():
+    regression = make_table(100, target="regression")
+    rare_class = make_table(100)
+    rare_class.loc[0, "LATE"] = "RARE"
+
+    for df in (regression, rare_class):
+        train_rows, test_rows = _split(df, "LATE")
+        assert len(test_rows) == 20 and len(train_rows) == 80
 
 
 def test_run_removes_its_scratch_directory_only(volumes):

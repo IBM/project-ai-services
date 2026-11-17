@@ -39,6 +39,7 @@ def main(argv: list[str]) -> int:
         1, uuid4(), "db2_for_i", {}, "SCHEMA.TABLE", args.target, [{"name": c} for c in inputs]
     )
     store = MemoryStore(job)
+    settings.forecast.model_repo_path.mkdir(parents=True, exist_ok=True)  # A mounted volume in production.
 
     def load(_job, _output_path):
         return pd.read_parquet(args.parquet)
