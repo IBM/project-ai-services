@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 import forecast.app as forecast_app
 import forecast.api.v1.connectors as connectors_api
 import forecast.db.connectors as connectors_db
+from forecast.utils.api_utils import format_timestamp
 from forecast.db.connectors import ConnectorListRow, ConnectorRow, JobRow
 from forecast.training.scheduler import register_connector_job
 from forecast.settings import settings
@@ -991,8 +992,8 @@ def test_create_returns_409_when_the_table_lock_times_out(db):
 
 @pytest.mark.unit
 def test_timestamp_treats_a_naive_value_as_utc():
-    assert connectors_api._timestamp(datetime(2026, 10, 26, 8, 55)) == "2026-10-26T08:55:00Z"
-    assert connectors_api._timestamp(None) is None
+    assert format_timestamp(datetime(2026, 10, 26, 8, 55)) == "2026-10-26T08:55:00Z"
+    assert format_timestamp(None) is None
 
 
 @pytest.mark.unit

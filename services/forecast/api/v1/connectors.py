@@ -12,155 +12,47 @@ Endpoints:
   GET    /v1/connectors/{connector_id}/metrics   (developer use only)
 """
 
-from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
-from pydantic import ValidationError
-from sqlalchemy.exc import (
-    IntegrityError,
-    SQLAlchemyError,
-    TimeoutError as PoolTimeoutError,
-)
+from sqlalchemy.exc import IntegrityError
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
-from common.misc_utils import get_logger, get_utc_timestamp
+from common.misc_utils import get_logger
 from forecast.db import connectors as connectors_db
-from forecast.db.connectors import ConnectorListRow, JobRow
 from forecast.db.connection import get_db_session
 from forecast.models import (
     ConnectorCreateRequest,
     ConnectorCreateResponse,
-    ConnectorListItem,
     ConnectorListResponse,
     ConnectorMetricsResponse,
     ConnectorResponse,
     ConnectorUpdateRequest,
     ConnectorVersions,
-    Db2ForIDetails,
-    JobItem,
-    JobResult,
     Pagination,
-    TrainingSummary,
 )
 from forecast.settings import settings
 from forecast.training.scheduler import register_connector_job
-from forecast.utils.encryption import (
-    DecryptionError,
-    decrypt_secrets,
-    encrypt_secrets,
-    safe_connection_details,
+from forecast.utils.api_utils import (
+    UNIQUE_VIOLATION,
+    database_errors,
+    format_timestamp,
+    job_item,
+    list_item,
+    merge_connection_details,
+    sqlstate,
+    training_summary,
 )
+from forecast.utils.encryption import encrypt_secrets, safe_connection_details
 
 router = APIRouter()
 logger = get_logger("forecast_connectors")
-
-# ---------------------------------------------------------------------------
-# Response helpers
-# ---------------------------------------------------------------------------
-
-
-def _timestamp(value: Optional[datetime]) -> Optional[str]:
-    """Format a timestamp as UTC ISO 8601, whatever timezone the database session uses."""
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return get_utc_timestamp(value.astimezone(timezone.utc))
-
-
-def _list_item(row: ConnectorListRow) -> ConnectorListItem:
-    """Format a connector database row into the list response item."""
-    return ConnectorListItem(
-        id=str(row.id),
-        name=row.name,
-        type=row.type,
-        created_at=_timestamp(row.created_at),
-        last_trained_at=_timestamp(row.last_trained_at),
-        status=row.status,
-        table=row.source_table,
-        target_column=row.target_column,
-        message=row.message or "",
-    )
-
-
-def _job_item(row: JobRow) -> JobItem:
-    """Format a job database row into the metrics job history item."""
-    return JobItem(
-        seq=row.seq,
-        status=row.status,
-        created_at=_timestamp(row.created_at),
-        started_at=_timestamp(row.started_at),
-        finished_at=_timestamp(row.finished_at),
-        message=row.message or "",
-        result=JobResult.model_validate(row.result) if row.result is not None else None,
-    )
-
-
-def _training_summary(jobs: list[JobRow]) -> TrainingSummary:
-    """Summarize jobs ordered newest first."""
-    completed = [job for job in jobs if job.status == "COMPLETED"]
-    finished = [job for job in jobs if job.status in ("COMPLETED", "FAILED")]
-    last_finished = finished[0] if finished else None
-    last_completed = completed[0] if completed else None
-    return TrainingSummary(
-        jobs_completed=len(completed),
-        jobs_failed=sum(job.status == "FAILED" for job in jobs),
-        last_job_status=jobs[0].status if jobs else None,
-        last_duration_seconds=(
-            (last_finished.result or {}).get("training_seconds") if last_finished else None
-        ),
-        last_completed_at=(
-            _timestamp(last_completed.finished_at) if last_completed else None
-        ),
-    )
 
 
 # ---------------------------------------------------------------------------
 # POST /v1/connectors
 # ---------------------------------------------------------------------------
-
-
-_LOCK_NOT_AVAILABLE = "55P03"
-_UNIQUE_VIOLATION = "23505"
-
-
-def _sqlstate(exc: Exception) -> Optional[str]:
-    """Return the SQLSTATE of a database error (psycopg2 pgcode or psycopg3 sqlstate)."""
-    orig = getattr(exc, "orig", None)
-    return getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
-
-
-@contextmanager
-def _database_errors(operation: str, connector_id: Optional[str] = None):
-    """Turn a database error into DATABASE_ERROR without its message.
-
-    The message of a SQLAlchemy error includes the bound parameters, which for a
-    connector write are the encrypted config. Only the exception type and safe
-    SQLSTATE code are logged.
-    """
-    try:
-        yield
-    except PoolTimeoutError:
-        target = f" connector {connector_id}" if connector_id else ""
-        logger.warning(f"Database connection pool exhausted while {operation}{target}")
-        APIError.raise_error(
-            ErrorCode.SERVER_BUSY,
-            "Database connection pool is temporarily busy. Please retry shortly.",
-        )
-    except SQLAlchemyError as exc:
-        target = f" connector {connector_id}" if connector_id else ""
-        sqlstate = _sqlstate(exc)
-        state_str = f" (SQLSTATE {sqlstate})" if sqlstate else ""
-        logger.error(f"Database error while {operation}{target}: {type(exc).__name__}{state_str}")
-        if sqlstate == _LOCK_NOT_AVAILABLE:
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                "The connector is currently locked by a concurrent operation. Please retry shortly.",
-            )
-        APIError.raise_error(ErrorCode.DATABASE_ERROR)
 
 
 @router.post(
@@ -184,7 +76,7 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     connector_id = str(body.id)
 
     # Cheap pre-check, so a request that will be rejected never takes the table lock below.
-    with _database_errors("checking existing connector", connector_id), get_db_session() as session:
+    with database_errors("checking existing connector", connector_id), get_db_session() as session:
         if connectors_db.connector_exists(session):
             logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
             APIError.raise_error(
@@ -194,7 +86,7 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
 
     encrypted = encrypt_secrets(body.connection_details.model_dump(exclude_none=True))
 
-    with _database_errors("creating", connector_id), get_db_session() as session:
+    with database_errors("creating", connector_id), get_db_session() as session:
         connectors_db.lock_connectors(session)
         if connectors_db.connector_exists(session):
             logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
@@ -222,8 +114,8 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
             )
         except IntegrityError as exc:
             # Only a duplicate id or name is a conflict. Any other integrity error
-            # is a server fault and goes to _database_errors.
-            if _sqlstate(exc) not in (None, _UNIQUE_VIOLATION):
+            # is a server fault and goes to database_errors.
+            if sqlstate(exc) not in (None, UNIQUE_VIOLATION):
                 raise
             logger.warning(
                 f"Create rejected for connector {connector_id}: duplicate connector name or ID"
@@ -270,13 +162,13 @@ def list_connectors(
     ),
 ) -> ConnectorListResponse:
     """Return one page of connectors, optionally filtered by name."""
-    with _database_errors("listing connectors"), get_db_session() as session:
+    with database_errors("listing connectors"), get_db_session() as session:
         rows, total = connectors_db.list_connectors(
             session, limit=limit, offset=offset, name=name
         )
     return ConnectorListResponse(
         pagination=Pagination(total=total, limit=limit, offset=offset),
-        data=[_list_item(row) for row in rows],
+        data=[list_item(row) for row in rows],
     )
 
 
@@ -296,7 +188,7 @@ def list_connectors(
 def get_connector(connector_id: UUID) -> ConnectorResponse:
     """Return one connector with its safe connection details."""
     cid = str(connector_id)
-    with _database_errors("getting", cid), get_db_session() as session:
+    with database_errors("getting", cid), get_db_session() as session:
         row = connectors_db.get_connector(session, cid)
     if row is None:
         logger.warning(f"Get: connector {cid} not found")
@@ -311,72 +203,16 @@ def get_connector(connector_id: UUID) -> ConnectorResponse:
         schedule=row.schedule,
         connection_details=safe_connection_details(row.config),
         status=row.status,
-        last_trained_at=_timestamp(row.last_trained_at),
+        last_trained_at=format_timestamp(row.last_trained_at),
         message=row.message or "",
-        created_at=_timestamp(row.created_at),
-        updated_at=_timestamp(row.updated_at),
+        created_at=format_timestamp(row.created_at),
+        updated_at=format_timestamp(row.updated_at),
     )
 
 
 # ---------------------------------------------------------------------------
 # PUT /v1/connectors/{connector_id}
 # ---------------------------------------------------------------------------
-
-
-# The stored password is only ever used with these values; changing one needs a new password.
-_PASSWORD_BOUND_FIELDS = ("host", "port", "database", "username")
-
-
-def _merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
-    """Validate the stored details merged with the supplied ones; return the supplied fields encrypted.
-
-    Raises INVALID_REQUEST when a kept secret cannot be decrypted, the merged details
-    are invalid, or the host, port, database or username changes without a new password.
-    """
-    try:
-        # Only the fields that stay are decrypted, so an unreadable stored
-        # secret does not block a PUT that replaces it.
-        kept = decrypt_secrets(
-            {
-                k: v
-                for k, v in config.items()
-                if k not in supplied and k in Db2ForIDetails.model_fields
-            }
-        )
-        merged = Db2ForIDetails.model_validate({**kept, **supplied})
-    except DecryptionError:
-        logger.warning(f"Update of connector {cid} rejected: stored secret could not be decrypted")
-        APIError.raise_error(
-            ErrorCode.INVALID_REQUEST,
-            "Stored secret could not be decrypted. Please provide all required secrets in the request.",
-        )
-    except ValidationError as exc:
-        problems = "; ".join(
-            f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
-            for error in exc.errors(include_input=False)
-        )
-        logger.warning(
-            f"Update of connector {cid} rejected: merged connection_details are invalid: {problems}"
-        )
-        APIError.raise_error(
-            ErrorCode.INVALID_REQUEST,
-            f"Invalid connection_details: {problems}",
-        )
-
-    # Security check: never replay a stored password to a changed target or identity
-    changed = [f for f in _PASSWORD_BOUND_FIELDS if getattr(merged, f) != config.get(f)]
-    if changed and "password" not in supplied:
-        logger.warning(
-            f"Update of connector {cid} rejected: password required when "
-            f"{', '.join(changed)} changes"
-        )
-        APIError.raise_error(
-            ErrorCode.INVALID_REQUEST,
-            "Password must be supplied when host, port, database or username changes.",
-        )
-
-    # Store the validated values, so "8471" is kept as the integer 8471.
-    return encrypt_secrets(merged.model_dump(include=set(supplied)))
 
 
 @router.put(
@@ -410,7 +246,7 @@ def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] 
     # One transaction: the row is locked on the first read, so the merge, the
     # validation and the host/username check run against the config that is
     # written. A concurrent PUT cannot change it in between.
-    with _database_errors("updating", cid), get_db_session() as session:
+    with database_errors("updating", cid), get_db_session() as session:
         row = connectors_db.get_connector(session, cid, for_update=writes)
         if row is None:
             logger.warning(f"Update: connector {cid} not found")
@@ -419,12 +255,12 @@ def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] 
         if writes:
             config = dict(row.config)
             if supplied:
-                config.update(_merge_connection_details(cid, config, supplied))
+                config.update(merge_connection_details(cid, config, supplied))
 
             try:
                 connectors_db.update_connector(session, cid, name=body.name, config=config)
             except IntegrityError as exc:
-                if _sqlstate(exc) not in (None, _UNIQUE_VIOLATION):
+                if sqlstate(exc) not in (None, UNIQUE_VIOLATION):
                     raise
                 logger.warning(f"Update of connector {cid} rejected: the name {body.name!r} is taken")
                 APIError.raise_error(
@@ -455,7 +291,7 @@ def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] 
 def get_connector_metrics(connector_id: UUID) -> ConnectorMetricsResponse:
     """Return the ready versions, training summary and job history of a connector."""
     cid = str(connector_id)
-    with _database_errors("getting metrics for", cid), get_db_session() as session:
+    with database_errors("getting metrics for", cid), get_db_session() as session:
         if connectors_db.get_connector(session, cid) is None:
             logger.warning(f"Metrics: connector {cid} not found")
             APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, f"Connector {cid!r} not found")
@@ -465,6 +301,6 @@ def get_connector_metrics(connector_id: UUID) -> ConnectorMetricsResponse:
     return ConnectorMetricsResponse(
         connector_id=cid,
         versions=ConnectorVersions(ready=versions),
-        training=_training_summary(jobs),
-        jobs=[_job_item(job) for job in jobs],
+        training=training_summary(jobs),
+        jobs=[job_item(job) for job in jobs],
     )
