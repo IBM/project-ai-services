@@ -59,9 +59,8 @@ def measure_one(rows: int, columns: int) -> dict:
     job = TrainingJob(1, uuid4(), "db2_for_i", {}, "S.T", "TARGET", input_columns)
     store = MemoryStore(job)
 
-    def load(_job, path):
-        df.to_parquet(path)
-        return len(df)
+    def load(_job, _path):
+        return df
 
     with tempfile.TemporaryDirectory() as volume:
         settings.forecast.model_repo_path = Path(volume)

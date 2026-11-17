@@ -43,7 +43,7 @@ def train(data: pd.DataFrame, job: TrainingJob, workdir: Path, time_limit_second
             f"Target column {job.target_column} needs at least two different values to train on"
         )
 
-    features, encoding = encode(data[labelled], [column["name"] for column in job.input_columns])
+    features, encoding = encode(data[labelled], job.input_names)
     features[job.target_column] = target[labelled]
 
     started = time.monotonic()

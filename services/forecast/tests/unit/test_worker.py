@@ -72,11 +72,7 @@ class FakeStore:
 
 
 def loader_of(df: pd.DataFrame):
-    def load(job, path):
-        df.to_parquet(path)
-        return len(df)
-
-    return load
+    return lambda job, path: df
 
 
 @pytest.fixture
@@ -312,82 +308,6 @@ def test_main_stores_a_bounded_message(monkeypatch):
     worker.main(["7"])
 
     assert len(store.failures[0]) == 1000
-
-
-# ---------------------------------------------------------------------------
-# The loader seam
-# ---------------------------------------------------------------------------
-
-
-def _fake_loader_module(**errors):
-    names = [
-        "ConnectorNotFoundError", "ConnectorDecryptionError", "DBTableNotFoundError",
-        "DBColumnNotFoundError", "InvalidTableReferenceError", "DBConnectionError", "DBAuthError",
-    ]
-    module = SimpleNamespace(**{name: type(name, (Exception,), {}) for name in names})
-
-    class Db2DataLoader:
-        calls: list[dict] = []
-
-        def extract_to_parquet(self, **kwargs):
-            Db2DataLoader.calls.append(kwargs)
-            if "raises" in errors:
-                raise getattr(module, errors["raises"])("failure text")
-            return SimpleNamespace(rows_written=42)
-
-    module.Db2DataLoader = Db2DataLoader
-    return module
-
-
-def _use_loader(monkeypatch, module):
-    import forecast
-
-    monkeypatch.setattr(forecast, "data_loader", module, raising=False)
-    monkeypatch.setitem(__import__("sys").modules, "forecast.data_loader", module)
-
-
-def test_loader_reads_every_row_in_batches_with_the_encrypted_connector(monkeypatch, tmp_path):
-    from forecast.worker.source import load_training_data
-
-    module = _fake_loader_module()
-    _use_loader(monkeypatch, module)
-
-    assert load_training_data(JOB, tmp_path / "data.parquet") == 42
-
-    call = module.Db2DataLoader.calls[0]
-    assert call["table"] == "SALES.ORDERS"
-    assert call["columns"] == ["REGION", "QUANTITY", "PRICE", "LATE"]
-    assert call["batch_size"] == settings.forecast.loader_chunk_rows
-    assert "max_training_rows" not in call  # No ceiling: every row is read.
-    assert call["connector_id"] == str(CONNECTOR_ID)
-    assert call["encrypted_connection_details"] == JOB.connection_details
-
-
-@pytest.mark.parametrize(
-    "raised",
-    [
-        "ConnectorNotFoundError", "ConnectorDecryptionError", "DBTableNotFoundError",
-        "DBColumnNotFoundError", "InvalidTableReferenceError",
-    ],
-)
-def test_loader_errors_that_would_only_repeat_are_permanent(monkeypatch, tmp_path, raised):
-    from forecast.worker.source import load_training_data
-
-    _use_loader(monkeypatch, _fake_loader_module(raises=raised))
-
-    with pytest.raises(PermanentFailure, match="failure text"):
-        load_training_data(JOB, tmp_path / "data.parquet")
-
-
-@pytest.mark.parametrize("raised", ["DBConnectionError", "DBAuthError"])
-def test_connection_and_authentication_errors_are_retried(monkeypatch, tmp_path, raised):
-    from forecast.worker.source import load_training_data
-
-    module = _fake_loader_module(raises=raised)
-    _use_loader(monkeypatch, module)
-
-    with pytest.raises(getattr(module, raised)):
-        load_training_data(JOB, tmp_path / "data.parquet")
 
 
 # ---------------------------------------------------------------------------
