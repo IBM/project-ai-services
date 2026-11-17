@@ -49,12 +49,14 @@ def validate_cipher() -> AESGCM:
 
 
 def _encrypt_value(cipher: AESGCM, plaintext: str) -> str:
+    """Encrypt one secret with a random nonce; return base64 of nonce + ciphertext + tag."""
     nonce = os.urandom(_NONCE_SIZE)
     # AESGCM.encrypt returns ciphertext + tag (tag appended)
     return base64.b64encode(nonce + cipher.encrypt(nonce, plaintext.encode(), None)).decode()
 
 
 def _decrypt_value(cipher: AESGCM, token: str) -> str:
+    """Decrypt a token made by _encrypt_value; raise DecryptionError when it is invalid."""
     try:
         raw = base64.b64decode(token.encode())
         return cipher.decrypt(raw[:_NONCE_SIZE], raw[_NONCE_SIZE:], None).decode()
