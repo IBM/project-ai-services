@@ -2,21 +2,29 @@ package openshift
 
 import "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 
-// skipUpgrade controls whether existing operator subscriptions are silently
-// skipped instead of being offered an upgrade prompt.
-var skipUpgrade bool
+// Option configures an OpenshiftBootstrap instance.
+type Option func(*OpenshiftBootstrap)
 
-// SetSkipUpgrade enables or disables skipping the operator upgrade prompt flow.
-func SetSkipUpgrade(skip bool) {
-	skipUpgrade = skip
+// WithSkipUpgrade configures whether to skip the operator upgrade prompt flow.
+func WithSkipUpgrade(skip bool) Option {
+	return func(o *OpenshiftBootstrap) {
+		o.skipUpgrade = skip
+	}
 }
 
 // OpenshiftBootstrap implements Bootstrap interface for Openshift runtime.
-type OpenshiftBootstrap struct{}
+type OpenshiftBootstrap struct {
+	skipUpgrade bool
+}
 
-// NewOpenshiftBootstrap creates a new Podman Openshift instance.
-func NewOpenshiftBootstrap() *OpenshiftBootstrap {
-	return &OpenshiftBootstrap{}
+// NewOpenshiftBootstrap creates a new OpenshiftBootstrap instance with the provided options.
+func NewOpenshiftBootstrap(opts ...Option) *OpenshiftBootstrap {
+	b := &OpenshiftBootstrap{}
+	for _, opt := range opts {
+		opt(b)
+	}
+
+	return b
 }
 
 // Type returns the runtime type.

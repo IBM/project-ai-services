@@ -201,6 +201,15 @@ func ConfigurePodmanResetFlags(cmd *cobra.Command, resetPodmanAuth, resetCertifi
 	)
 }
 
+// ConfigureSkipUpgradeFlag registers the --skip-upgrade flag on cmd.
+// Used by commands that apply OpenShift operator configurations (bootstrap, bootstrap configure).
+func ConfigureSkipUpgradeFlag(cmd *cobra.Command, skipUpgrade *bool) {
+	cmd.Flags().BoolVar(skipUpgrade, constants.SkipUpgradeFlag, false,
+		"Skip the upgrade prompt for already-installed OCP operators.\n"+
+			"By default, the user is prompted to upgrade them to the versions defined in AI Services.\n"+
+			"Note: Supported for openshift runtime only.")
+}
+
 func ValidateResetCertificateFlags(cmd *cobra.Command, flagName, sslCertPath, sslKeyPath, domainName string, skipFlags ...string) error {
 	// Require SSL certificate flags with reset-certificate
 	if sslCertPath == "" || sslKeyPath == "" {
