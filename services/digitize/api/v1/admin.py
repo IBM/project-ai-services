@@ -69,7 +69,14 @@ async def import_metadata(payload: models.ImportRequest):
                     f"Active jobs: {', '.join(active_job_ids)}",
                 )
 
-            return db_ops.import_metadata(payload)
+            import_result = db_ops.import_metadata(payload)
+            if not payload.validate_only:
+                try:
+                    from digitize.utils.recovery import reconcile_opensearch_orphans
+                    reconcile_opensearch_orphans(dry_run=False)
+                except Exception as rec_err:
+                    logger.warning(f"Post-import OpenSearch orphan reconciliation failed: {rec_err}")
+            return import_result
         finally:
             await db_ops.release_import_export_lock()
 

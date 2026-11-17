@@ -414,10 +414,10 @@ class DatabaseManager:
                 return set(result)
         except SQLAlchemyError as e:
             logger.error(f"Database error querying existing document IDs: {e}", exc_info=True)
-            return set()
+            return set(doc_ids)  # Fail-safe: treat all as existing to prevent accidental deletion
         except Exception as e:
             logger.error(f"Unexpected error querying existing document IDs: {e}", exc_info=True)
-            return set()
+            return set(doc_ids)  # Fail-safe
 
 
     # A document in one of these states no longer owns its content: the next submission

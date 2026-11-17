@@ -229,6 +229,15 @@ async def _connector_scheduler_lifespan():
                 f"Error recovering/re-registering connector jobs: {exc}", exc_info=True
             )
 
+        # Re-register periodic OpenSearch orphan reconciliation job with scheduler on startup/recovery
+        try:
+            await scheduler_module.register_opensearch_reconcile_job()
+            logger.info("✅ Registered periodic OpenSearch orphan reconciliation job with scheduler")
+        except Exception as exc:
+            logger.error(
+                f"Error registering periodic OpenSearch orphan reconciliation: {exc}", exc_info=True
+            )
+
         sched.start()
         logger.info("✅ Connector scheduler started")
 
