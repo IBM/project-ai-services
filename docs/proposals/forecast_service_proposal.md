@@ -55,7 +55,7 @@ It also introduces three things that no existing service has:
 
 **Decision: training runs in a subprocess that the API spawns inside its own pod, one at a time.** It is not a separate pod, a Kubernetes Job or a thread.
 
-- **Same image and code.** `python -m forecast.worker <job_id>` shares the DB models and loader code with the API. No container-runtime access, ServiceAccount or Podman socket is needed, which keeps the Podman and OpenShift deployments identical.
+- **Same image and code.** `python -m forecast.training <job_id>` shares the DB models and loader code with the API. No container-runtime access, ServiceAccount or Podman socket is needed, which keeps the Podman and OpenShift deployments identical.
 - **Killable.** AutoGluon trains with child processes and large memory use. The API starts the worker in its **own process group** and kills the whole group on timeout, so nothing keeps running.
 - **Crash isolation from the event loop.** A worker that crashes or is killed by the kernel does not take the API's event loop with it, and the API can read the exit status.
 - **Why not threads or a process pool.** AutoGluon and ONNX export are CPU- and memory-heavy, and AutoGluon forks. A subprocess per job gives a clean memory release at exit and a unit that can be killed.
@@ -116,7 +116,7 @@ flowchart TD
 
     ONE --> RUN
     INS --> RUN["job status = running, attempt = 1"]
-    RUN --> SPAWN["spawn worker: python -m forecast.worker job_id<br/>own process group, time and memory limits"]
+    RUN --> SPAWN["spawn worker: python -m forecast.training job_id<br/>own process group, time and memory limits"]
     SPAWN --> EXIT{"worker result"}
 
     EXIT -- "exit 0" --> LOAD["API: load_model fc_connector_version into Triton"]
@@ -674,7 +674,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `connector_id` | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.                                                                                                                                                   |
 | `status`       | `QUEUED`, `RUNNING`, `COMPLETED` or `FAILED`.                                                                                                                                                                                                          |
 | `message`      | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
-| `result`       | JSON object. The worker writes `rows_read` (the number of rows available for training) once, when the data load finishes. When training finishes it overwrites the object with `rows_read` repeated plus `algorithm` (the algorithm AutoGluon chose) and `training_seconds`. The API adds `attempts` after the worker exits. A failed job keeps `rows_read` if the failure came after the load, and always has `attempts`. Readers must tolerate missing keys. |
+| `result`       | JSON object. The worker writes `rows_read` (the number of rows available for training) once, when the data load finishes. When training finishes it overwrites the object with `rows_read` repeated plus `algorithm` (the algorithm AutoGluon chose), `validation_metric`, `validation_score` (AutoGluon's score on its own validation rows), `test_score` (the same metric on a held-out 20% of the rows the model never saw) and `training_seconds`. The API adds `attempts` after the worker exits. A failed job keeps `rows_read` if the failure came after the load, and always has `attempts`. Readers must tolerate missing keys. |
 | `created_at`   | UTC time at which the job was queued.                                                                                                                                                                                                                  |
 | `started_at`   | UTC time at which the job started running.                                                                                                                                                                                                             |
 | `finished_at`  | UTC time at which the job completed or failed.                                                                                                                                                                                                         |
@@ -1187,7 +1187,7 @@ These stories break the design above into units of work. Each one has a descript
 - The service starts on port 8500 and reads its configuration from the environment.
 - Every error response uses the shared envelope, and a `422` uses it too.
 - `GET /health` returns `200` with `checks.postgres` and `checks.triton` when PostgreSQL is reachable, and `503` when it is not. An unreachable Triton does not make the response `503`.
-- The image builds for ppc64le and runs the API and `python -m forecast.worker` from the same code.
+- The image builds for ppc64le and runs the API and `python -m forecast.training` from the same code.
 
 ### 14.2 Story 2 — Database and init container
 
@@ -1251,7 +1251,7 @@ These stories break the design above into units of work. Each one has a descript
 
 ### 14.6 Story 6 — Training worker
 
-**Description.** Implement `python -m forecast.worker <job_id>`: read the data, train with AutoGluon, export to ONNX and publish the forecaster's directory.
+**Description.** Implement `python -m forecast.training <job_id>`: read the data, train with AutoGluon, export to ONNX and publish the forecaster's directory.
 
 **Subtasks.**
 
