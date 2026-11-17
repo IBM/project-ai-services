@@ -69,6 +69,7 @@ def run(job_id: int, store: JobStore, loader: Loader = load_training_data) -> Pa
             "algorithm": trained.algorithm,
             "validation_metric": trained.validation_metric,
             "validation_score": trained.validation_score,
+            "test_score": trained.test_score,
             "training_seconds": trained.training_seconds,
         },
     )
