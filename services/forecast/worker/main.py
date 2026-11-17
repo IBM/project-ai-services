@@ -33,7 +33,7 @@ logger = get_logger("forecast_worker")
 
 _MAX_MESSAGE_CHARS = 1000
 
-Loader = Callable[[TrainingJob, Path], int]
+Loader = Callable[[TrainingJob, Path], pd.DataFrame]
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -50,15 +50,13 @@ def run(job_id: int, store: JobStore, loader: Loader = load_training_data) -> Pa
     config.scratch_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(dir=config.scratch_dir, prefix=f"job-{job_id}-") as scratch:
-        data_path = Path(scratch) / "data.parquet"
-        rows_read = loader(job, data_path)
+        data = loader(job, Path(scratch) / "data.parquet")
+        rows_read = len(data)
         store.write_result(job_id, {"rows_read": rows_read})
         if rows_read == 0:
             raise PermanentFailure(f"Table {job.source_table} has no rows")
 
-        trained = train(
-            pd.read_parquet(data_path), job, Path(scratch), config.default_time_limit_seconds
-        )
+        trained = train(data, job, Path(scratch), config.default_time_limit_seconds)
         model = export(trained.predictor, trained.encoding)
 
     published = publish(

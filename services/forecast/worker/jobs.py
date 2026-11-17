@@ -31,6 +31,15 @@ class TrainingJob:
     target_column: str
     input_columns: list  # [{"name": ..., "type": ...}, ...]
 
+    @property
+    def input_names(self) -> list[str]:
+        return [column["name"] for column in self.input_columns]
+
+    @property
+    def columns(self) -> list[str]:
+        """The input columns, then the target."""
+        return [*self.input_names, self.target_column]
+
 
 def worker_engine() -> Engine:
     """Engine for the forecast_worker role. The worker is short-lived, so no pool."""
