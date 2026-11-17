@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"fmt"
 
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -24,15 +25,11 @@ func configureCmd() *cobra.Command {
 
 			rt := vars.RuntimeFactory.GetRuntimeType()
 			// Create bootstrap instance based on runtime
-			factory := bootstrap.NewBootstrapFactory(rt)
+			factory := bootstrap.NewBootstrapFactory(rt, bootstrap.WithSkipUpgrade(skipOperatorUpgrade))
 			bootstrapInstance, err := factory.Create()
 			if err != nil {
 				return fmt.Errorf("failed to create bootstrap instance: %w", err)
 			}
-
-			// --skip-upgrade is declared as a persistent flag on the parent bootstrap
-			// command, so it is inherited here and accessible via skipOperatorUpgrade.
-			bootstrap.SetSkipUpgrade(rt, skipOperatorUpgrade)
 
 			if err := bootstrapInstance.Configure(cmd.Context()); err != nil {
 				return fmt.Errorf("bootstrap configuration failed: %w", err)
@@ -43,6 +40,8 @@ func configureCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmdcommon.ConfigureSkipUpgradeFlag(cmd, &skipOperatorUpgrade)
 
 	return cmd
 }

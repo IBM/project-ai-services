@@ -10,13 +10,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
 )
-
-const bootstrapSkipUpgradeFlag = "skip-upgrade"
 
 var (
 	// Runtime type flag for bootstrap command.
@@ -42,10 +41,7 @@ func BootstrapCmd() *cobra.Command {
 	// Add runtime flag as required
 	cmdcommon.ConfigurePersistentRuntimeFlag(bootstrapCmd, &runtimeType)
 	bootstrapCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
-	bootstrapCmd.PersistentFlags().BoolVar(&skipOperatorUpgrade, bootstrapSkipUpgradeFlag, false,
-		"Skip the upgrade prompt for already-installed OCP operators.\n"+
-			"By default, the user is prompted to upgrade them to the versions defined in the ai-services.\n"+
-			"Note: Supported for openshift runtime only.\n")
+	cmdcommon.ConfigureSkipUpgradeFlag(bootstrapCmd, &skipOperatorUpgrade)
 
 	// subcommands
 	bootstrapCmd.AddCommand(validateCmd())
@@ -63,7 +59,7 @@ func bootstrapPersistentPreRunE(cmd *cobra.Command, args []string) error {
 
 	// Validate that --skip-upgrade is only used with the openshift runtime.
 	validator := flagvalidator.NewFlagValidatorBuilder(vars.RuntimeFactory.GetRuntimeType()).
-		AddOpenShiftFlag(bootstrapSkipUpgradeFlag, nil).
+		AddOpenShiftFlag(constants.SkipUpgradeFlag, nil).
 		Build()
 
 	return validator.Validate(cmd)
@@ -80,13 +76,11 @@ func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		// Create bootstrap instance based on runtime
-		factory := bootstrap.NewBootstrapFactory(rt)
+		factory := bootstrap.NewBootstrapFactory(rt, bootstrap.WithSkipUpgrade(skipOperatorUpgrade))
 		bootstrapInstance, err := factory.Create()
 		if err != nil {
 			return fmt.Errorf("failed to create bootstrap instance: %w", err)
 		}
-
-		bootstrap.SetSkipUpgrade(rt, skipOperatorUpgrade)
 
 		if configureErr := bootstrapInstance.Configure(cmd.Context()); configureErr != nil {
 			return fmt.Errorf("failed to run bootstrap configure: %w", configureErr)
