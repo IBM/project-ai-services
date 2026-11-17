@@ -365,4 +365,15 @@ class ExportResponse(BaseModel):
     pagination: ExportPagination
 
 
+class ReconcileOrphansResponse(BaseModel):
+    """Response model for OpenSearch orphan reconciliation."""
+    model_config = ConfigDict(use_enum_values=True)
+
+    dry_run: bool = Field(description="Whether the reconciliation ran in dry_run mode without deleting")
+    scanned_docs: int = Field(default=0, description="Total unique doc_ids scanned in OpenSearch")
+    orphan_doc_ids: List[str] = Field(default_factory=list, description="List of orphaned doc_ids found")
+    orphan_count: int = Field(default=0, description="Total count of orphaned doc_ids")
+    deleted_chunks: int = Field(default=0, description="Number of vector chunks removed from OpenSearch")
+
+
 # Made with Bob
