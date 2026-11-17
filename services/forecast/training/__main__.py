@@ -1,5 +1,5 @@
 import sys
 
-from forecast.worker.main import main
+from forecast.training.main import main
 
 sys.exit(main(sys.argv[1:]))

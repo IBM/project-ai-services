@@ -1,5 +1,5 @@
 """
-The worker's access to PostgreSQL, through the restricted forecast_worker role.
+The training worker's access to PostgreSQL, through the restricted forecast_worker role.
 
 The role can read the job's identity, the connector and the training configuration,
 and update only jobs.result and jobs.message (see db/scripts/init_db.py). It cannot
@@ -12,28 +12,51 @@ from uuid import UUID
 
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.engine import URL, Engine
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy.pool import NullPool
 
+from common.forecast_errors import PermanentFailure
 from forecast.db.models import Connector, Job, TrainingConfig
 from forecast.settings import settings
-from forecast.worker.errors import PermanentFailure
 
 
 @dataclass(frozen=True)
 class TrainingJob:
-    """Everything the worker reads from the database for one job."""
+    """The rows the worker reads for one job, with the fields it uses."""
 
-    job_id: int  # jobs.seq, also the forecaster version
-    connector_id: UUID
-    connector_type: str
-    connection_details: dict  # Secret fields are still encrypted.
-    source_table: str
-    target_column: str
-    input_columns: list  # [{"name": ..., "type": ...}, ...]
+    job: Job
+    connector: Connector
+    config: TrainingConfig
+
+    @property
+    def job_id(self) -> int:
+        """jobs.seq, also the forecaster version."""
+        return self.job.seq
+
+    @property
+    def connector_id(self) -> UUID:
+        return self.connector.id
+
+    @property
+    def connector_type(self) -> str:
+        return self.connector.type
+
+    @property
+    def connection_details(self) -> dict:
+        """Secret fields are still encrypted."""
+        return self.connector.connection_details
+
+    @property
+    def source_table(self) -> str:
+        return self.config.source_table
+
+    @property
+    def target_column(self) -> str:
+        return self.config.target_column
 
     @property
     def input_names(self) -> list[str]:
-        return [column["name"] for column in self.input_columns]
+        return [column["name"] for column in self.config.input_columns]
 
     @property
     def columns(self) -> list[str]:
@@ -68,29 +91,24 @@ class JobStore:
                 does not exist. Names no secret.
         """
         query = (
-            select(
-                Job.seq,
-                Job.connector_id,
-                Connector.type,
-                Connector.connection_details,
-                TrainingConfig.source_table,
-                TrainingConfig.target_column,
-                TrainingConfig.input_columns,
-            )
+            select(Job, Connector, TrainingConfig)
+            # The role may read only these columns of jobs.
+            .options(load_only(Job.seq, Job.connector_id))
             .select_from(Job)
             .outerjoin(Connector, Connector.id == Job.connector_id)
             .outerjoin(TrainingConfig, TrainingConfig.connector_id == Job.connector_id)
             .where(Job.seq == job_id)
         )
-        with self._engine.connect() as conn:
-            row = conn.execute(query).first()
+        with Session(self._engine) as session:
+            row = session.execute(query).first()
         if row is None:
             raise PermanentFailure(f"Job {job_id} does not exist")
-        if row.connector_id is None or row.type is None:
+        job, connector, config = row
+        if connector is None:
             raise PermanentFailure(f"The connector of job {job_id} does not exist")
-        if row.source_table is None:
-            raise PermanentFailure(f"Connector {row.connector_id} has no training configuration")
-        return TrainingJob(*row)
+        if config is None:
+            raise PermanentFailure(f"Connector {connector.id} has no training configuration")
+        return TrainingJob(job, connector, config)
 
     def write_result(self, job_id: int, result: dict) -> None:
         """Replace jobs.result."""
@@ -101,5 +119,8 @@ class JobStore:
         self._update(job_id, message=message)
 
     def _update(self, job_id: int, **values) -> None:
-        with self._engine.begin() as conn:
-            conn.execute(update(Job).where(Job.seq == job_id).values(**values))
+        with Session(self._engine) as session, session.begin():
+            session.execute(
+                update(Job).where(Job.seq == job_id).values(**values),
+                execution_options={"synchronize_session": False},
+            )

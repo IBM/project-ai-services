@@ -630,7 +630,7 @@ def test_startup_fails_on_a_bad_triton_url_without_echoing_it():
 
 @pytest.mark.unit
 def test_worker_requires_a_job_id():
-    from forecast.worker.main import parse_args
+    from forecast.training.main import parse_args
 
     with pytest.raises(SystemExit):
         parse_args([])
@@ -638,6 +638,6 @@ def test_worker_requires_a_job_id():
 
 @pytest.mark.unit
 def test_worker_parses_the_job_id():
-    from forecast.worker.main import parse_args
+    from forecast.training.main import parse_args
 
     assert parse_args(["42"]).job_id == 42

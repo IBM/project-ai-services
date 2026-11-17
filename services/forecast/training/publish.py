@@ -17,7 +17,7 @@ from uuid import UUID
 
 import onnx
 
-from forecast.worker.onnx_export import triton_config
+from forecast.training.onnx_export import triton_config
 
 STAGING = ".staging"
 TRITON_MODEL_VERSION = "1"  # Every forecaster version is its own Triton model.

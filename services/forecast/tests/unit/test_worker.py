@@ -14,26 +14,29 @@ import onnxruntime as ort
 import pandas as pd
 import pytest
 
+from common.forecast_errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure
+from forecast.db import jobs
+from forecast.db.jobs import JobStore, TrainingJob
+from forecast.db.models import Connector, Job, TrainingConfig
 from forecast.settings import settings
-from forecast.worker import main as worker
-from forecast.worker.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure
-from forecast.worker.features import encode
-from forecast.worker.jobs import JobStore, TrainingJob
-from forecast.worker.onnx_export import triton_config
-from forecast.worker.publish import forecaster_name, publish
-from forecast.worker.training import _split
+from forecast.training import main as worker
+from forecast.training.features import encode
+from forecast.training.onnx_export import triton_config
+from forecast.training.publish import forecaster_name, publish
+from forecast.training.training import _split
 
 pytestmark = pytest.mark.unit
 
 CONNECTOR_ID = UUID("c9e66790-7425-40de-944b-e07fc1f90ae7")
 JOB = TrainingJob(
-    job_id=7,
-    connector_id=CONNECTOR_ID,
-    connector_type="db2_for_i",
-    connection_details={"host": "h", "password": "encrypted"},
-    source_table="SALES.ORDERS",
-    target_column="LATE",
-    input_columns=[{"name": "REGION"}, {"name": "QUANTITY"}, {"name": "PRICE"}],
+    Job(seq=7, connector_id=CONNECTOR_ID),
+    Connector(id=CONNECTOR_ID, type="db2_for_i", connection_details={"host": "h", "password": "encrypted"}),
+    TrainingConfig(
+        connector_id=CONNECTOR_ID,
+        source_table="SALES.ORDERS",
+        target_column="LATE",
+        input_columns=[{"name": "REGION"}, {"name": "QUANTITY"}, {"name": "PRICE"}],
+    ),
 )
 
 
@@ -136,7 +139,7 @@ def test_exported_graph_matches_autogluon_and_maps_unseen_categories_to_missing(
     from autogluon.features.generators import IdentityFeatureGenerator
     from autogluon.tabular import TabularPredictor
 
-    from forecast.worker.onnx_export import EXPORTABLE_HYPERPARAMETERS, export
+    from forecast.training.onnx_export import EXPORTABLE_HYPERPARAMETERS, export
 
     df = make_table()
     features, encoding = encode(df, ["REGION", "QUANTITY", "PRICE"])
@@ -337,17 +340,15 @@ def test_main_stores_a_bounded_message(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-class FakeEngine:
-    """Stands in for a SQLAlchemy engine: returns one row and records the statements."""
+class FakeSession:
+    """Stands in for a SQLAlchemy Session: returns one row and records the statements."""
 
     def __init__(self, row=None):
         self.row = row
         self.statements = []
 
-    def connect(self):
+    def __call__(self, engine):
         return self
-
-    begin = connect
 
     def __enter__(self):
         return self
@@ -355,60 +356,80 @@ class FakeEngine:
     def __exit__(self, *exc):
         return False
 
-    def execute(self, statement):
+    def begin(self):
+        return self
+
+    def execute(self, statement, **kwargs):
         self.statements.append(statement)
         return SimpleNamespace(first=lambda: self.row)
 
 
-def job_row(**changes):
-    values = dict(
-        seq=7,
-        connector_id=CONNECTOR_ID,
-        type="db2_for_i",
-        connection_details={"host": "h"},
-        source_table="SALES.ORDERS",
-        target_column="LATE",
-        input_columns=[{"name": "REGION"}],
+@pytest.fixture
+def session(monkeypatch):
+    fake = FakeSession()
+    monkeypatch.setattr(jobs, "Session", fake)
+    return fake
+
+
+def job_row(connector=True, config=True):
+    return (
+        Job(seq=7, connector_id=CONNECTOR_ID),
+        Connector(id=CONNECTOR_ID, type="db2_for_i", connection_details={"host": "h"}) if connector else None,
+        TrainingConfig(
+            connector_id=CONNECTOR_ID,
+            source_table="SALES.ORDERS",
+            target_column="LATE",
+            input_columns=[{"name": "REGION"}],
+        )
+        if config
+        else None,
     )
-    values.update(changes)
-    return Row(values)
 
 
-class Row(tuple):
-    """A result row: a tuple in column order whose columns are also attributes."""
+def test_job_store_reads_the_job_connector_and_training_configuration(session):
+    session.row = job_row()
 
-    def __new__(cls, values):
-        row = super().__new__(cls, values.values())
-        row.__dict__.update(values)
-        return row
+    job = JobStore(None).read(7)
 
-
-def test_job_store_reads_the_job_connector_and_training_configuration():
-    job = JobStore(FakeEngine(job_row())).read(7)
-
-    assert job == TrainingJob(
-        7, CONNECTOR_ID, "db2_for_i", {"host": "h"}, "SALES.ORDERS", "LATE", [{"name": "REGION"}]
+    assert job.job_id == 7
+    assert (job.connector_id, job.connector_type, job.connection_details) == (
+        CONNECTOR_ID, "db2_for_i", {"host": "h"}
     )
+    assert (job.source_table, job.target_column) == ("SALES.ORDERS", "LATE")
+    assert job.input_names == ["REGION"] and job.columns == ["REGION", "LATE"]
+
+
+def test_job_store_reads_only_the_columns_of_jobs_that_the_worker_role_may_read(session):
+    from sqlalchemy.dialects import postgresql
+
+    session.row = job_row()
+    JobStore(None).read(7)
+
+    sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
+    selected = sql.split("FROM")[0]
+    assert "jobs.seq" in selected and "jobs.connector_id" in selected
+    assert not {"jobs.result", "jobs.message", "jobs.status", "jobs.created_at"} & set(selected.split())
 
 
 @pytest.mark.parametrize(
     "row, message",
     [
         (None, "Job 7 does not exist"),
-        (job_row(connector_id=None, type=None), "connector of job 7 does not exist"),
-        (job_row(source_table=None), "has no training configuration"),
+        (job_row(connector=False, config=False), "connector of job 7 does not exist"),
+        (job_row(config=False), "has no training configuration"),
     ],
 )
-def test_job_store_reports_a_missing_job_connector_or_configuration_as_permanent(row, message):
+def test_job_store_reports_a_missing_job_connector_or_configuration_as_permanent(session, row, message):
+    session.row = row
+
     with pytest.raises(PermanentFailure, match=message):
-        JobStore(FakeEngine(row)).read(7)
+        JobStore(None).read(7)
 
 
-def test_job_store_writes_only_jobs_result_and_jobs_message():
+def test_job_store_writes_only_jobs_result_and_jobs_message(session):
     from sqlalchemy.dialects import postgresql
 
-    engine = FakeEngine()
-    store = JobStore(engine)
+    store = JobStore(None)
 
     store.write_result(7, {"rows_read": 1})
     store.write_failure(7, "boom")
@@ -416,10 +437,10 @@ def test_job_store_writes_only_jobs_result_and_jobs_message():
     written = [
         {key.rsplit("_", 1)[0] for key in statement.compile(dialect=postgresql.dialect()).params}
         - {"seq"}
-        for statement in engine.statements
+        for statement in session.statements
     ]
     assert written == [{"result"}, {"message"}]
-    assert all(statement.table.name == "jobs" for statement in engine.statements)
+    assert all(statement.table.name == "jobs" for statement in session.statements)
 
 
 def test_triton_config_lists_every_tensor_of_the_graph():

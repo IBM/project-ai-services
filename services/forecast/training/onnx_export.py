@@ -17,7 +17,7 @@ import json
 import onnx
 from onnx import TensorProto, helper
 
-from forecast.worker.features import Encoding
+from forecast.training.features import Encoding
 
 LABEL = "label"
 PROBABILITIES = "probabilities"

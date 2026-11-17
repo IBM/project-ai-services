@@ -1,5 +1,5 @@
 """
-Entry point of the training worker: ``python -m forecast.worker <job_id>``.
+Entry point of the training worker: ``python -m forecast.training <job_id>``.
 
 Reads the job, loads the data, trains with AutoGluon, exports the model to ONNX and
 publishes the forecaster's directory. The worker never deletes from the repository
@@ -7,7 +7,7 @@ volume and never writes to ``forecasters``: the API loads the forecaster into Tr
 records it and owns every status change. Its only database writes are jobs.result and
 jobs.message. It removes only its own local scratch directory.
 
-Exit codes (``forecast.worker.errors``): 0 success, 1 failure that a retry may fix,
+Exit codes (``common.forecast_errors``): 0 success, 1 failure that a retry may fix,
 3 failure that would only repeat.
 """
 import argparse
@@ -20,14 +20,14 @@ from typing import Callable
 
 import pandas as pd
 
+from common.forecast_errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure
 from common.misc_utils import get_logger
+from forecast.db.jobs import JobStore, TrainingJob, worker_engine
 from forecast.settings import settings
-from forecast.worker.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure
-from forecast.worker.jobs import JobStore, TrainingJob, worker_engine
-from forecast.worker.onnx_export import export
-from forecast.worker.publish import forecaster_name, publish
-from forecast.worker.source import load_training_data
-from forecast.worker.training import train
+from forecast.training.onnx_export import export
+from forecast.training.publish import forecaster_name, publish
+from forecast.training.source import load_training_data
+from forecast.training.training import train
 
 logger = get_logger("forecast_worker")
 
@@ -38,7 +38,7 @@ Loader = Callable[[TrainingJob, Path], pd.DataFrame]
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse the command line of the worker."""
-    parser = argparse.ArgumentParser(prog="forecast.worker", description="Run one training job.")
+    parser = argparse.ArgumentParser(prog="forecast.training", description="Run one training job.")
     parser.add_argument("job_id", type=int, help="The jobs.seq of the training job to run")
     return parser.parse_args(argv)
 
