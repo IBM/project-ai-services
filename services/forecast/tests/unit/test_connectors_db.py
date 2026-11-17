@@ -12,12 +12,15 @@ Tests cover:
  - list_ready_versions & list_jobs: ORM queries and sorting
 """
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
 from forecast.db import connectors as connectors_db
 from forecast.db.models import Connector, Job, TrainingConfig
+
+NOW = datetime(2026, 10, 26, 8, 55, tzinfo=timezone.utc)
 
 
 @pytest.mark.unit
@@ -111,12 +114,18 @@ def test_list_connectors_executes_query_and_returns_data_and_count():
     session = MagicMock(name="session")
     session.scalar.return_value = 1
     session.execute.return_value.mappings.return_value.all.return_value = [
-        {"id": uuid.uuid4(), "name": "prod", "created_at": None, "last_trained_at": None}
+        {
+            "id": uuid.uuid4(), "name": "prod", "type": "db2_for_i", "status": "ACCEPTED",
+            "message": None, "created_at": NOW, "last_trained_at": None,
+            "source_table": "ORDERS", "target_column": "LATE",
+        }
     ]
 
     rows, total = connectors_db.list_connectors(session, limit=10, offset=0, name="prod")
 
     assert len(rows) == 1
+    assert isinstance(rows[0], connectors_db.ConnectorListRow)
+    assert rows[0].source_table == "ORDERS"
     assert total == 1
     assert session.scalar.call_count == 1
     assert session.execute.call_count == 1
@@ -127,13 +136,18 @@ def test_get_connector_without_for_update():
     session = MagicMock(name="session")
     conn_id = "11111111-1111-1111-1111-111111111111"
     session.execute.return_value.mappings.return_value.first.return_value = {
-        "id": uuid.UUID(conn_id),
-        "name": "prod",
+        "id": uuid.UUID(conn_id), "name": "prod", "type": "db2_for_i",
+        "config": {"host": "h"}, "status": "ACCEPTED", "message": None,
+        "created_at": NOW, "updated_at": NOW, "last_trained_at": None,
+        "source_table": "ORDERS", "target_column": "LATE", "schedule": "daily",
     }
 
     result = connectors_db.get_connector(session, conn_id, for_update=False)
 
-    assert result == {"id": uuid.UUID(conn_id), "name": "prod"}
+    assert isinstance(result, connectors_db.ConnectorRow)
+    assert result.id == uuid.UUID(conn_id)
+    assert result.config == {"host": "h"}
+    assert result.schedule == "daily"
     assert session.execute.call_count == 1
     query_str = str(session.execute.call_args[0][0])
     assert "FOR UPDATE" not in query_str
@@ -152,6 +166,33 @@ def test_get_connector_with_for_update_locks_row():
     executed_statements = [str(call.args[0]) for call in session.execute.call_args_list]
     assert connectors_db.LOCK_TIMEOUT_SQL in executed_statements[0]
     assert "FOR UPDATE" in executed_statements[1]
+
+
+@pytest.mark.unit
+def test_list_connectors_without_a_name_filter_has_no_where_clause():
+    session = MagicMock(name="session")
+    session.scalar.return_value = 0
+    session.execute.return_value.mappings.return_value.all.return_value = []
+
+    rows, total = connectors_db.list_connectors(session, limit=10, offset=0, name=None)
+
+    assert (rows, total) == ([], 0)
+    assert "WHERE" not in str(session.scalar.call_args[0][0])
+    assert "WHERE" not in str(session.execute.call_args[0][0])
+
+
+@pytest.mark.unit
+def test_update_connector_without_a_name_leaves_the_name_alone():
+    session = MagicMock(name="session")
+
+    connectors_db.update_connector(
+        session, "11111111-1111-1111-1111-111111111111", name=None, config={"host": "h"}
+    )
+
+    stmt_str = str(session.execute.call_args[0][0])
+    assert "connection_details" in stmt_str
+    assert "name=" not in stmt_str.replace(" ", "").lower()
+    assert "SET name" not in stmt_str
 
 
 @pytest.mark.unit
@@ -191,13 +232,17 @@ def test_list_jobs_queries_jobs():
     session = MagicMock(name="session")
     conn_id = "11111111-1111-1111-1111-111111111111"
     session.execute.return_value.mappings.return_value.all.return_value = [
-        {"seq": 1, "status": "QUEUED"}
+        {
+            "seq": 1, "status": "QUEUED", "message": None, "result": None,
+            "created_at": NOW, "started_at": None, "finished_at": None,
+        }
     ]
 
     jobs = connectors_db.list_jobs(session, conn_id)
 
     assert len(jobs) == 1
-    assert jobs[0]["seq"] == 1
+    assert isinstance(jobs[0], connectors_db.JobRow)
+    assert jobs[0].seq == 1
     session.execute.assert_called_once()
     stmt_str = str(session.execute.call_args[0][0])
     assert "jobs" in stmt_str

@@ -5,12 +5,54 @@ Uses SQLAlchemy ORM models from ``forecast.db.models``. Every function takes
 the session of the caller, which commits or rolls back.
 """
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import exists, func, select, text, update
 from sqlalchemy.orm import Session
 
 from forecast.db.models import Connector, Forecaster, Job, TrainingConfig
+
+
+@dataclass(frozen=True)
+class ConnectorListRow:
+    """A connector as listed: its identity, status and the training table."""
+
+    id: uuid.UUID
+    name: str
+    type: str
+    status: str
+    message: Optional[str]
+    created_at: datetime
+    last_trained_at: Optional[datetime]
+    # None when the connector has no training_configs row.
+    source_table: Optional[str]
+    target_column: Optional[str]
+
+
+@dataclass(frozen=True)
+class ConnectorRow(ConnectorListRow):
+    """A connector with its stored config and schedule."""
+
+    # connection_details: safe fields in plaintext, secret fields encrypted.
+    config: dict[str, Any]
+    updated_at: datetime
+    schedule: Optional[str]
+
+
+@dataclass(frozen=True)
+class JobRow:
+    """A training job as stored."""
+
+    seq: int
+    status: str
+    message: Optional[str]
+    result: Optional[dict[str, Any]]
+    created_at: datetime
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+
 
 # A lock that a stuck transaction holds fails after this time instead of blocking forever.
 LOCK_TIMEOUT_SQL = "SET LOCAL lock_timeout = '5s'"
@@ -24,7 +66,7 @@ def lock_connectors(session: Session) -> None:
 
 def connector_exists(session: Session) -> bool:
     """Return True when a connector row exists."""
-    return bool(session.scalar(select(func.count(Connector.id))) > 0)
+    return bool(session.scalar(select(exists().select_from(Connector))))
 
 
 def count_queued_jobs(session: Session) -> int:
@@ -78,7 +120,7 @@ def _name_filter(name: Optional[str]):
 
 def list_connectors(
     session: Session, *, limit: int, offset: int, name: Optional[str]
-) -> tuple[list[dict], int]:
+) -> tuple[list[ConnectorListRow], int]:
     """Return one page of connectors and the total count that matches the filter."""
     stmt = (
         select(
@@ -104,12 +146,12 @@ def list_connectors(
     total = session.scalar(count_stmt) or 0
     stmt = stmt.order_by(Connector.attached_at.desc(), Connector.id).limit(limit).offset(offset)
     rows = session.execute(stmt).mappings().all()
-    return [dict(row) for row in rows], total
+    return [ConnectorListRow(**row) for row in rows], total
 
 
 def get_connector(
     session: Session, connector_id: str, *, for_update: bool = False
-) -> Optional[dict]:
+) -> Optional[ConnectorRow]:
     """Return one connector with its training details, or None when it does not exist.
 
     With ``for_update``, the connector row is locked until the transaction ends, so a
@@ -141,7 +183,7 @@ def get_connector(
         stmt = stmt.with_for_update(of=Connector)
 
     row = session.execute(stmt).mappings().first()
-    return dict(row) if row is not None else None
+    return ConnectorRow(**row) if row is not None else None
 
 
 def update_connector(
@@ -167,7 +209,7 @@ def list_ready_versions(session: Session, connector_id: str) -> list[int]:
     return list(session.scalars(stmt).all())
 
 
-def list_jobs(session: Session, connector_id: str) -> list[dict]:
+def list_jobs(session: Session, connector_id: str) -> list[JobRow]:
     """Every job of the connector, newest first."""
     cid_uuid = uuid.UUID(connector_id) if isinstance(connector_id, str) else connector_id
     stmt = (
@@ -184,4 +226,4 @@ def list_jobs(session: Session, connector_id: str) -> list[dict]:
         .order_by(Job.seq.desc())
     )
     rows = session.execute(stmt).mappings().all()
-    return [dict(row) for row in rows]
+    return [JobRow(**row) for row in rows]

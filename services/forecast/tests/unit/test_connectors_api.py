@@ -11,6 +11,7 @@ PostgreSQL. Tests cover:
  - Encryption helpers: round trip, allowlist, nonce
 """
 
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -19,13 +20,14 @@ from unittest.mock import DEFAULT, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 # Imported at collection time so the "forecast_server" logger exists before pytest
 # attaches its capture handlers (see test_app.py).
 import forecast.app as forecast_app
 import forecast.api.v1.connectors as connectors_api
 import forecast.db.connectors as connectors_db
+from forecast.db.connectors import ConnectorListRow, ConnectorRow, JobRow
 from forecast.training.scheduler import register_connector_job
 from forecast.settings import settings
 from forecast.utils.encryption import (
@@ -41,13 +43,11 @@ CREATED = datetime(2026, 10, 26, 8, 55, tzinfo=timezone.utc)
 
 @pytest.fixture(autouse=True)
 def _startup_dependencies_stubbed():
-    """Valid key, stubbed TRITON_URL check, and stubbed Db2 probe."""
+    """Valid key and stubbed TRITON_URL check."""
     with patch.object(
         settings.forecast, "db_encryption_key", SecretStr(KEY)
-    ), patch("forecast.app.triton_url_check", return_value=None), patch(
-        "forecast.api.v1.connectors.probe_db2_connector"
-    ) as mock_probe:
-        yield mock_probe
+    ), patch("forecast.app.triton_url_check", return_value=None):
+        yield
 
 
 @pytest.fixture
@@ -108,19 +108,19 @@ def _create_body(**overrides):
     return body
 
 
-def _stored_row(password="s3cret", **overrides):
+def _stored_row(password="s3cret", host="ibmi.example.com", **overrides):
     """A connector as the database returns it, with the password encrypted."""
     config = encrypt_secrets(
         {
-            "host": "ibmi.example.com",
+            "host": host,
             "port": 8471,
             "database": "PRODDB",
             "username": "forecast_ro",
             "password": password,
         }
     )
-    row = {
-        "id": CONNECTOR_ID,
+    fields = {
+        "id": uuid.UUID(CONNECTOR_ID),
         "name": "prod-sales-db",
         "type": "db2_for_i",
         "config": config,
@@ -133,8 +133,23 @@ def _stored_row(password="s3cret", **overrides):
         "schedule": "daily",
         "last_trained_at": None,
     }
-    row.update(overrides)
-    return row
+    fields.update(overrides)
+    return ConnectorRow(**fields)
+
+
+def _job(seq, status, **overrides):
+    """A training job as the database returns it."""
+    fields = {
+        "seq": seq,
+        "status": status,
+        "message": None,
+        "result": None,
+        "created_at": CREATED,
+        "started_at": CREATED,
+        "finished_at": CREATED,
+    }
+    fields.update(overrides)
+    return JobRow(**fields)
 
 
 def _assert_envelope(body: dict, code: str, status: int):
@@ -256,17 +271,17 @@ def test_create_without_a_key_is_500_and_does_not_leak_the_password(db):
 def test_list_returns_the_pagination_envelope(client, db):
     db.list_connectors.return_value = (
         [
-            {
-                "id": CONNECTOR_ID,
-                "name": "prod-sales-db",
-                "type": "db2_for_i",
-                "status": "ACCEPTED",
-                "message": None,
-                "created_at": CREATED,
-                "source_table": "ORDERS",
-                "target_column": "DELIVERY_LATE",
-                "last_trained_at": None,
-            }
+            ConnectorListRow(
+                id=uuid.UUID(CONNECTOR_ID),
+                name="prod-sales-db",
+                type="db2_for_i",
+                status="ACCEPTED",
+                message=None,
+                created_at=CREATED,
+                last_trained_at=None,
+                source_table="ORDERS",
+                target_column="DELIVERY_LATE",
+            )
         ],
         1,
     )
@@ -374,11 +389,12 @@ def test_put_without_a_body_is_a_no_op(client, db):
 
 
 @pytest.mark.unit
-def test_put_null_port_clears_the_port_and_keeps_the_password(client, db):
+def test_put_null_port_clears_the_port(client, db):
     db.get_connector.return_value = _stored_row()
 
     response = client.put(
-        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"port": None}}
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"port": None, "password": "s3cret"}},
     )
 
     assert response.status_code == 200
@@ -407,7 +423,7 @@ def test_put_renames_without_touching_the_secrets(client, db):
     assert response.status_code == 200
     kwargs = db.update_connector.call_args.kwargs
     assert kwargs["name"] == "renamed"
-    assert kwargs["config"] == row["config"]
+    assert kwargs["config"] == row.config
 
 
 @pytest.mark.unit
@@ -418,7 +434,7 @@ def test_put_with_a_name_that_is_taken_is_409(client, db):
     response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"name": "taken"})
 
     assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_CONFLICT", 409)
+    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
     assert "taken" in response.json()["error"]["message"]
 
 
@@ -489,21 +505,21 @@ def test_metrics_summarizes_the_retained_jobs(client, db):
     db.get_connector.return_value = _stored_row()
     db.list_ready_versions.return_value = [3, 2]
     db.list_jobs.return_value = [
-        {
-            "seq": 3, "status": "FAILED", "message": "timeout", "created_at": CREATED,
-            "started_at": CREATED, "finished_at": datetime(2026, 10, 28, tzinfo=timezone.utc),
-            "result": {"rows_read": 10, "attempts": 2, "training_seconds": 99},
-        },
-        {
-            "seq": 2, "status": "COMPLETED", "message": None, "created_at": CREATED,
-            "started_at": CREATED, "finished_at": datetime(2026, 10, 27, tzinfo=timezone.utc),
-            "result": {"rows_read": 120000, "algorithm": "GBM", "training_seconds": 412, "attempts": 1},
-        },
-        {
-            "seq": 1, "status": "COMPLETED", "message": None, "created_at": CREATED,
-            "started_at": CREATED, "finished_at": datetime(2026, 10, 26, 9, tzinfo=timezone.utc),
-            "result": {"rows_read": 100000, "algorithm": "GBM", "training_seconds": 400, "attempts": 1},
-        },
+        _job(
+            3, "FAILED", message="timeout",
+            finished_at=datetime(2026, 10, 28, tzinfo=timezone.utc),
+            result={"rows_read": 10, "attempts": 2, "training_seconds": 99},
+        ),
+        _job(
+            2, "COMPLETED",
+            finished_at=datetime(2026, 10, 27, tzinfo=timezone.utc),
+            result={"rows_read": 120000, "algorithm": "GBM", "training_seconds": 412, "attempts": 1},
+        ),
+        _job(
+            1, "COMPLETED",
+            finished_at=datetime(2026, 10, 26, 9, tzinfo=timezone.utc),
+            result={"rows_read": 100000, "algorithm": "GBM", "training_seconds": 400, "attempts": 1},
+        ),
     ]
 
     response = client.get(f"/v1/connectors/{CONNECTOR_ID}/metrics")
@@ -543,12 +559,7 @@ def test_metrics_without_jobs_has_empty_training_summary(client, db):
 @pytest.mark.unit
 def test_metrics_with_a_finished_job_without_a_result_has_no_duration(client, db):
     db.get_connector.return_value = _stored_row()
-    db.list_jobs.return_value = [
-        {
-            "seq": 1, "status": "COMPLETED", "message": None, "created_at": CREATED,
-            "started_at": CREATED, "finished_at": CREATED, "result": None,
-        },
-    ]
+    db.list_jobs.return_value = [_job(1, "COMPLETED")]
 
     response = client.get(f"/v1/connectors/{CONNECTOR_ID}/metrics")
 
@@ -562,15 +573,12 @@ def test_metrics_with_a_finished_job_without_a_result_has_no_duration(client, db
 def test_metrics_failed_newest_job_without_training_seconds_has_no_duration(client, db):
     db.get_connector.return_value = _stored_row()
     db.list_jobs.return_value = [
-        {
-            "seq": 2, "status": "FAILED", "message": "timeout", "created_at": CREATED,
-            "started_at": CREATED, "finished_at": CREATED, "result": {"attempts": 3},
-        },
-        {
-            "seq": 1, "status": "COMPLETED", "message": None, "created_at": CREATED,
-            "started_at": CREATED, "finished_at": datetime(2026, 10, 27, tzinfo=timezone.utc),
-            "result": {"training_seconds": 400},
-        },
+        _job(2, "FAILED", message="timeout", result={"attempts": 3}),
+        _job(
+            1, "COMPLETED",
+            finished_at=datetime(2026, 10, 27, tzinfo=timezone.utc),
+            result={"training_seconds": 400},
+        ),
     ]
 
     response = client.get(f"/v1/connectors/{CONNECTOR_ID}/metrics")
@@ -632,9 +640,78 @@ def test_create_does_not_schedule_when_the_insert_fails(client, db):
 
 
 @pytest.mark.unit
+def test_create_still_succeeds_when_scheduling_fails(client, db, caplog):
+    """The connector is stored, so the call must not fail; a retry would get a 409."""
+    db.register.side_effect = RuntimeError("scheduler down")
+
+    with caplog.at_level("ERROR"):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
+    assert "could not be scheduled" in caplog.text
+    assert "s3cret" not in caplog.text
+
+
+@pytest.mark.unit
+def test_create_with_a_duplicate_id_or_name_is_409(client, db):
+    db.insert_connector.side_effect = IntegrityError(
+        "INSERT", {}, MagicMock(pgcode="23505")
+    )
+
+    response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 409
+    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
+    assert "prod-sales-db" in response.json()["error"]["message"]
+    db.register.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_with_another_integrity_error_is_a_database_error(client, db):
+    """A CHECK or NOT NULL violation is not a name conflict."""
+    db.insert_connector.side_effect = IntegrityError(
+        "INSERT", {}, MagicMock(pgcode="23514")
+    )
+
+    response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "DATABASE_ERROR", 500)
+    db.register.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_loses_the_race_for_the_single_connector(client, db):
+    """No connector at the pre-check, one by the time the table lock is held."""
+    db.connector_exists.side_effect = [False, True]
+
+    response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 409
+    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
+    db.lock_connectors.assert_called_once()
+    db.insert_connector.assert_not_called()
+    db.register.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_with_another_integrity_error_is_a_database_error(client, db):
+    db.get_connector.return_value = _stored_row()
+    db.update_connector.side_effect = IntegrityError(
+        "UPDATE", {}, MagicMock(pgcode="23502")
+    )
+
+    response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"name": "renamed"})
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "DATABASE_ERROR", 500)
+
+
+@pytest.mark.unit
 def test_put_replacing_an_unreadable_password_succeeds(client, db):
     db.get_connector.return_value = _stored_row(password="placeholder")
-    db.get_connector.return_value["config"]["password"] = "not-valid-ciphertext!"
+    db.get_connector.return_value.config["password"] = "not-valid-ciphertext!"
 
     response = client.put(
         f"/v1/connectors/{CONNECTOR_ID}",
@@ -649,7 +726,7 @@ def test_put_replacing_an_unreadable_password_succeeds(client, db):
 @pytest.mark.unit
 def test_put_keeping_unreadable_password_returns_400(client, db):
     db.get_connector.return_value = _stored_row(password="placeholder")
-    db.get_connector.return_value["config"]["password"] = "not-valid-ciphertext!"
+    db.get_connector.return_value.config["password"] = "not-valid-ciphertext!"
 
     response = client.put(
         f"/v1/connectors/{CONNECTOR_ID}",
@@ -671,9 +748,43 @@ def test_put_reads_the_connector_for_update(client, db):
 
 
 @pytest.mark.unit
-def test_database_error_on_create_does_not_expose_the_parameters(db, caplog):
-    from sqlalchemy.exc import OperationalError
+def test_put_merges_and_writes_in_one_locked_transaction(client, db):
+    """The config that is validated is the one that is read under the row lock.
 
+    A second, unlocked read would let a concurrent PUT change the host between the
+    host/username check and the write, and replay its password to the wrong host.
+    """
+    db.get_connector.return_value = _stored_row(host="old-host.example.com")
+    sessions = []
+
+    def record(session, *args, **kwargs):
+        sessions.append(session)
+        return db.get_connector.return_value
+
+    db.get_connector.side_effect = record
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"host": "new-host.example.com", "password": "new-pass"}},
+    )
+
+    assert response.status_code == 200
+    db.get_connector.assert_called_once()
+    assert db.get_connector.call_args.kwargs == {"for_update": True}
+    assert db.update_connector.call_args.args[0] is sessions[0]
+
+
+@pytest.mark.unit
+def test_put_without_changes_reads_without_the_row_lock(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    client.put(f"/v1/connectors/{CONNECTOR_ID}", json={})
+
+    db.get_connector.assert_called_once()
+    assert db.get_connector.call_args.kwargs == {"for_update": False}
+
+
+@pytest.mark.unit
+def test_database_error_on_create_does_not_expose_the_parameters(db, caplog):
     db.insert_connector.side_effect = OperationalError(
         "INSERT INTO connectors", {"config": "SECRETCIPHER"}, Exception("connection lost")
     )
@@ -691,8 +802,6 @@ def test_database_error_on_create_does_not_expose_the_parameters(db, caplog):
 
 @pytest.mark.unit
 def test_database_error_on_put_does_not_expose_the_parameters(client, db, caplog):
-    from sqlalchemy.exc import OperationalError
-
     db.get_connector.return_value = _stored_row()
     db.update_connector.side_effect = OperationalError(
         "UPDATE connectors", {"config": "SECRETCIPHER"}, Exception("connection lost")
@@ -707,12 +816,8 @@ def test_database_error_on_put_does_not_expose_the_parameters(client, db, caplog
     assert "SECRETCIPHER" not in caplog.text
 
 
-
 @pytest.mark.unit
 def test_database_lock_timeout_returns_409(client, db):
-    from unittest.mock import MagicMock
-    from sqlalchemy.exc import OperationalError
-
     orig_exc = MagicMock()
     orig_exc.pgcode = "55P03"
     db.get_connector.return_value = _stored_row()
@@ -729,8 +834,6 @@ def test_database_lock_timeout_returns_409(client, db):
 
 @pytest.mark.unit
 def test_database_error_on_list_returns_database_error(client, db):
-    from sqlalchemy.exc import OperationalError
-
     db.list_connectors.side_effect = OperationalError(
         "SELECT connectors", {}, Exception("connection lost")
     )
@@ -743,8 +846,6 @@ def test_database_error_on_list_returns_database_error(client, db):
 
 @pytest.mark.unit
 def test_database_error_on_get_returns_database_error(client, db):
-    from sqlalchemy.exc import OperationalError
-
     db.get_connector.side_effect = OperationalError(
         "SELECT connector", {}, Exception("connection lost")
     )
@@ -757,8 +858,6 @@ def test_database_error_on_get_returns_database_error(client, db):
 
 @pytest.mark.unit
 def test_database_error_on_metrics_returns_database_error(client, db):
-    from sqlalchemy.exc import OperationalError
-
     db.get_connector.side_effect = OperationalError(
         "SELECT connector", {}, Exception("connection lost")
     )
@@ -776,7 +875,7 @@ def test_put_empty_connection_details_does_not_touch_the_secrets(client, db):
     response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {}})
 
     assert response.status_code == 200
-    assert db.update_connector.call_args.kwargs["config"] == row["config"]
+    assert db.update_connector.call_args.kwargs["config"] == row.config
 
 
 @pytest.mark.unit
@@ -836,7 +935,8 @@ def test_put_stores_the_validated_port(client, db):
     db.get_connector.return_value = _stored_row()
 
     response = client.put(
-        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"port": "9000"}}
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"port": "9000", "password": "s3cret"}},
     )
 
     assert response.status_code == 200
@@ -859,9 +959,7 @@ def test_timestamps_are_returned_in_utc(client, db):
 
 
 @pytest.mark.unit
-def test_create_returns_409_on_database_lock_timeout(db):
-    from sqlalchemy.exc import OperationalError
-
+def test_create_returns_409_when_the_insert_hits_a_lock_timeout(db):
     orig_exc = MagicMock()
     orig_exc.pgcode = "55P03"
     db.insert_connector.side_effect = OperationalError(
@@ -876,9 +974,29 @@ def test_create_returns_409_on_database_lock_timeout(db):
 
 
 @pytest.mark.unit
-def test_lock_timeout_with_psycopg3_sqlstate_returns_409(client, db):
-    from sqlalchemy.exc import OperationalError
+def test_create_returns_409_when_the_table_lock_times_out(db):
+    """The lock timeout fires at LOCK TABLE, before anything is inserted."""
+    orig_exc = MagicMock()
+    orig_exc.pgcode = "55P03"
+    db.lock_connectors.side_effect = OperationalError("LOCK TABLE connectors", {}, orig_exc)
+    client = TestClient(forecast_app.app, raise_server_exceptions=False)
 
+    response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 409
+    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
+    db.insert_connector.assert_not_called()
+    db.register.assert_not_called()
+
+
+@pytest.mark.unit
+def test_timestamp_treats_a_naive_value_as_utc():
+    assert connectors_api._timestamp(datetime(2026, 10, 26, 8, 55)) == "2026-10-26T08:55:00Z"
+    assert connectors_api._timestamp(None) is None
+
+
+@pytest.mark.unit
+def test_lock_timeout_with_psycopg3_sqlstate_returns_409(client, db):
     orig_exc = MagicMock()
     orig_exc.pgcode = None
     orig_exc.sqlstate = "55P03"
@@ -969,58 +1087,28 @@ def test_decrypt_value_failures_raise_decryption_error():
 
 
 @pytest.mark.unit
-def test_create_fails_and_does_not_insert_when_db2_probe_fails(client, db):
-    from fastapi import HTTPException
-
-    with patch(
-        "forecast.api.v1.connectors.probe_db2_connector",
-        side_effect=HTTPException(
-            status_code=400,
-            detail={"error": {"code": "INVALID_REQUEST", "message": "Cannot connect to Db2", "status": 400}},
-        ),
-    ):
-        response = client.post("/v1/connectors", json=_create_body())
-
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    db.insert_connector.assert_not_called()
-    db.register.assert_not_called()
-
-
-@pytest.mark.unit
-def test_put_fails_and_does_not_update_when_db2_probe_fails(client, db):
-    from fastapi import HTTPException
-
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"host": "new-host.example.com"},
+        {"port": 9000},
+        {"database": "OTHERDB"},
+        {"username": "other_user"},
+    ],
+)
+def test_put_changing_the_target_without_password_fails_400(client, db, change):
     db.get_connector.return_value = _stored_row()
-    with patch(
-        "forecast.api.v1.connectors.probe_db2_connector",
-        side_effect=HTTPException(
-            status_code=400,
-            detail={"error": {"code": "INVALID_REQUEST", "message": "Authentication failed", "status": 400}},
-        ),
-    ):
-        response = client.put(
-            f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connection_details": {"password": "new-pass"}},
-        )
-
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    db.update_connector.assert_not_called()
-
-
-@pytest.mark.unit
-def test_put_changing_host_without_password_fails_400(client, db):
-    db.get_connector.return_value = _stored_row(host="old-host.example.com")
 
     response = client.put(
-        f"/v1/connectors/{CONNECTOR_ID}",
-        json={"connection_details": {"host": "new-host.example.com"}},
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": change}
     )
 
     assert response.status_code == 400
     _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    assert "Password must be supplied when host or username changes" in response.json()["error"]["message"]
+    assert (
+        "Password must be supplied when host, port, database or username changes"
+        in response.json()["error"]["message"]
+    )
     db.update_connector.assert_not_called()
 
 
@@ -1035,45 +1123,6 @@ def test_put_changing_host_with_password_succeeds(client, db):
 
     assert response.status_code == 200
     db.update_connector.assert_called_once()
-
-
-@pytest.mark.unit
-def test_create_calls_db2_probe_with_table_and_columns(client, db):
-    with patch("forecast.api.v1.connectors.probe_db2_connector") as mock_probe:
-        payload = _create_body()
-        response = client.post("/v1/connectors", json=payload)
-        assert response.status_code == 201
-
-        mock_probe.assert_called_once_with(
-            host=payload["connection_details"]["host"],
-            port=payload["connection_details"]["port"],
-            database=payload["connection_details"]["database"],
-            username=payload["connection_details"]["username"],
-            password=payload["connection_details"]["password"],
-            table=payload["training"]["table"],
-            columns=["REGION", "QUANTITY", "DELIVERY_LATE"],
-        )
-
-
-@pytest.mark.unit
-def test_put_calls_db2_probe_with_table_and_no_columns(client, db):
-    db.get_connector.return_value = _stored_row(source_table="MYLIB.SALES")
-    with patch("forecast.api.v1.connectors.probe_db2_connector") as mock_probe:
-        response = client.put(
-            f"/v1/connectors/{CONNECTOR_ID}",
-            json={"connection_details": {"password": "updated-password"}},
-        )
-        assert response.status_code == 200
-
-        mock_probe.assert_called_once_with(
-            host="ibmi.example.com",
-            port=8471,
-            database="PRODDB",
-            username="forecast_ro",
-            password="updated-password",
-            table="MYLIB.SALES",
-            columns=None,
-        )
 
 
 @pytest.mark.unit

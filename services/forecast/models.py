@@ -1,9 +1,10 @@
 
+"""Request and response models of the Forecast service API."""
+
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import ConfigDict, Field, model_validator
-from pydantic.main import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # SQL identifier patterns: allows letters, numbers, underscores, and common SQL/Db2 special chars ($, #, @).
 # Table can optionally be schema-qualified (e.g. "SCHEMA.TABLE" or just "TABLE").
@@ -95,3 +96,110 @@ class ConnectorUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     connection_details: Optional[Db2ForIDetailsPatch] = None
 
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
+
+
+class ConnectorCreateResponse(BaseModel):
+    """Response of POST /v1/connectors."""
+
+    id: str
+
+
+class Pagination(BaseModel):
+    """Paging details of a list response."""
+
+    total: int
+    limit: int
+    offset: int
+
+
+class ConnectorListItem(BaseModel):
+    """One connector in the list response. Timestamps are UTC ISO 8601 strings."""
+
+    id: str
+    name: str
+    type: str
+    created_at: Optional[str] = None
+    last_trained_at: Optional[str] = None
+    status: str
+    table: Optional[str] = None
+    target_column: Optional[str] = None
+    message: str = ""
+
+
+class ConnectorListResponse(BaseModel):
+    """Response of GET /v1/connectors."""
+
+    pagination: Pagination
+    data: list[ConnectorListItem]
+
+
+class ConnectorResponse(BaseModel):
+    """Response of GET /v1/connectors/{connector_id}."""
+
+    id: str
+    name: str
+    type: str
+    table: Optional[str] = None
+    target_column: Optional[str] = None
+    # Not typed as Schedule: the database compares the value in lower case, so a
+    # stored "Daily" must still be returned and not turn into a 500.
+    schedule: Optional[str] = None
+    # Only the safe fields of the connector type. The fields depend on the type,
+    # so they are not modelled here, and secrets are never part of it.
+    connection_details: dict[str, Any]
+    status: str
+    last_trained_at: Optional[str] = None
+    message: str = ""
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ConnectorVersions(BaseModel):
+    """Forecaster versions of a connector."""
+
+    ready: list[int]
+
+
+class TrainingSummary(BaseModel):
+    """Summary of the retained training jobs of a connector."""
+
+    jobs_completed: int
+    jobs_failed: int
+    last_job_status: Optional[str] = None
+    last_duration_seconds: Optional[int | float] = None
+    last_completed_at: Optional[str] = None
+
+
+class JobResult(BaseModel):
+    """Known keys of jobs.result. Any other key is left out of responses."""
+
+    rows_read: Optional[int] = None
+    algorithm: Optional[str] = None
+    training_seconds: Optional[int | float] = None
+    attempts: Optional[int] = None
+
+
+class JobItem(BaseModel):
+    """One training job in the metrics response."""
+
+    seq: int
+    status: str
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    message: str = ""
+    # Keys can be missing while a job runs or after it fails.
+    result: Optional[JobResult] = None
+
+
+class ConnectorMetricsResponse(BaseModel):
+    """Response of GET /v1/connectors/{connector_id}/metrics (developer use only)."""
+
+    connector_id: str
+    versions: ConnectorVersions
+    training: TrainingSummary
+    jobs: list[JobItem]
