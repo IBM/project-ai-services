@@ -35,6 +35,7 @@
 # (e.g. `tilt up -f Tiltfile.rag --port 10351`).
 #
 # See docs/dev-guides/tilt-rag-local-development.md
+# For extract / translate / summarize on their own see hack/tilt/services (docs/dev-guides/tilt-services-local-development.md).
 # =============================================================================
 
 # -----------------------------------------------------------------------------

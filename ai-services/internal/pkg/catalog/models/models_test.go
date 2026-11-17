@@ -233,26 +233,26 @@ func TestSetComponentTypeNames(t *testing.T) {
 	}
 
 	t.Run("fills names from first component of matching type", func(t *testing.T) {
-		r := &types.ModelDeployOptions{ComponentType: types.ComponentType{ID: "llm"}}
-		SetComponentTypeNames(r, components)
-		if r.ComponentType.Name != "Large language model" || r.ComponentType.ShortName != "LLM" {
-			t.Errorf("got %+v", r.ComponentType)
+		ct := &types.ComponentType{ID: "llm"}
+		SetComponentTypeNames(ct, components)
+		if ct.Name != "Large language model" || ct.ShortName != "LLM" {
+			t.Errorf("got %+v", ct)
 		}
 	})
 
 	t.Run("keeps existing names", func(t *testing.T) {
-		r := &types.ModelDeployOptions{ComponentType: types.ComponentType{ID: "llm", Name: "Keep", ShortName: "K"}}
-		SetComponentTypeNames(r, components)
-		if r.ComponentType.Name != "Keep" || r.ComponentType.ShortName != "K" {
-			t.Errorf("got %+v", r.ComponentType)
+		ct := &types.ComponentType{ID: "llm", Name: "Keep", ShortName: "K"}
+		SetComponentTypeNames(ct, components)
+		if ct.Name != "Keep" || ct.ShortName != "K" {
+			t.Errorf("got %+v", ct)
 		}
 	})
 
 	t.Run("no matching component leaves names empty", func(t *testing.T) {
-		r := &types.ModelDeployOptions{ComponentType: types.ComponentType{ID: "reranker"}}
-		SetComponentTypeNames(r, components)
-		if r.ComponentType.Name != "" || r.ComponentType.ShortName != "" {
-			t.Errorf("got %+v", r.ComponentType)
+		ct := &types.ComponentType{ID: "reranker"}
+		SetComponentTypeNames(ct, components)
+		if ct.Name != "" || ct.ShortName != "" {
+			t.Errorf("got %+v", ct)
 		}
 	})
 }

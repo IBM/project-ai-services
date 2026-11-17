@@ -1,0 +1,48 @@
+@use "carbonTokens" as *;
+
+.tableContent {
+  padding: $spacing-07;
+
+  :global(.cds--data-table) {
+    width: 100%;
+
+    // Compact auto-sizing for name, status, model, type, backend, worker resource, services
+    :global(th:nth-child(1)),
+    :global(td:nth-child(1)),
+    :global(th:nth-child(2)),
+    :global(td:nth-child(2)),
+    :global(th:nth-child(3)),
+    :global(td:nth-child(3)),
+    :global(th:nth-child(4)),
+    :global(td:nth-child(4)),
+    :global(th:nth-child(5)),
+    :global(td:nth-child(5)),
+    :global(th:nth-child(6)),
+    :global(td:nth-child(6)),
+    :global(th:nth-child(7)),
+    :global(td:nth-child(7)) {
+      width: 1%;
+      white-space: nowrap;
+    }
+
+    // Actions column — expands to fill remaining space and right-aligns
+    :global(th:last-child),
+    :global(td:last-child) {
+      width: auto;
+      white-space: nowrap;
+      text-align: right;
+    }
+  }
+}
+
+.squareTag {
+  border-radius: 4px;
+}
+
+.noDataContent {
+  padding: $spacing-07;
+}
+
+.tableColumn {
+  margin: 0;
+}

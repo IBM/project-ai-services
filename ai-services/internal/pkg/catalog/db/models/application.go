@@ -42,6 +42,7 @@ const (
 	ComponentStatusDownloading  ComponentStatus = "Downloading"
 	ComponentStatusDeploying    ComponentStatus = "Deploying"
 	ComponentStatusRunning      ComponentStatus = "Running"
+	ComponentStatusDeleting     ComponentStatus = "Deleting"
 	ComponentStatusError        ComponentStatus = "Error"
 )
 

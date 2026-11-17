@@ -11,8 +11,9 @@ import (
 
 // Keys of litellm_params that the platform owns; a provider param can never override them.
 const (
-	litellmParamModel = "model"
-	litellmParamTags  = "tags"
+	litellmParamModel         = "model"
+	litellmParamTags          = "tags"
+	litellmParamUseInPassThru = "use_in_pass_through"
 )
 
 func modelRequest(r Route) catalogclient.LiteLLMModelNewRequest {
@@ -25,6 +26,7 @@ func modelRequest(r Route) catalogclient.LiteLLMModelNewRequest {
 
 	params[litellmParamModel] = r.UpstreamModel
 	params[litellmParamTags] = []string{r.Tag}
+	params[litellmParamUseInPassThru] = true
 
 	req := catalogclient.LiteLLMModelNewRequest{
 		ModelName:     r.Model,
@@ -48,7 +50,7 @@ func passThroughRequest(r Route) catalogclient.LiteLLMPassThroughRequest {
 		Path:    fmt.Sprintf("/tokenize/%s", r.Tag),
 		Target:  r.TokenizeURL,
 		Methods: []string{"POST"},
-		Auth:    true,
+		Auth:    false,
 	}
 }
 
@@ -114,6 +116,33 @@ func (g Gateway) Deregister(ctx context.Context, r Route) {
 			logger.WarningfCtx(ctx, "failed to deregister tokenize passthrough %q: %v", passThroughID(r), err)
 		}
 	}
+}
+
+// Remove deletes everything the gateway holds for a model that is being deleted, in this order:
+// its public key, its tokenize passthrough, then the LiteLLM model, so nothing can reach the model
+// through a leftover key or passthrough once the model is gone. Unlike Deregister, a failure is
+// returned so that the model is not forgotten while part of it remains, and a retry starts over.
+// Removing something that is already gone is not an error.
+//
+// The key and the passthrough are always removed: whether they were created is not recorded, and
+// a missing one is not an error. The model is skipped when the route has no LiteLLMModelID, which
+// is the case for a model whose registration never completed.
+func (g Gateway) Remove(ctx context.Context, r Route) error {
+	if err := g.client.DeleteKeysByAlias(ctx, []string{r.KeyAlias}); err != nil {
+		return fmt.Errorf("failed to revoke litellm key %q: %w", r.KeyAlias, err)
+	}
+
+	if err := g.client.DeregisterPassThrough(ctx, passThroughID(r)); err != nil {
+		return fmt.Errorf("failed to deregister tokenize passthrough %q: %w", passThroughID(r), err)
+	}
+
+	if r.LiteLLMModelID != "" {
+		if err := g.client.DeregisterModel(ctx, r.LiteLLMModelID); err != nil {
+			return fmt.Errorf("failed to deregister litellm model %q: %w", r.LiteLLMModelID, err)
+		}
+	}
+
+	return nil
 }
 
 func (g Gateway) probe(ctx context.Context, litellmModelID string) error {

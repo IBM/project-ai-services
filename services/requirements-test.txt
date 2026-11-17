@@ -43,6 +43,9 @@ s3transfer==0.12.0
 # SFTP scanner dependencies (required by digitize connector tests)
 paramiko==5.0.0
 
+# Connector secret encryption (required by forecast)
+cryptography>=42.0.0
+
 # Document processing (required by digitize)
 pypdfium2==5.9.0
 pdfplumber==0.11.9

@@ -23,6 +23,11 @@ type ModelServiceInterface interface {
 	// and never stored. Returns a *validators.ValidationError: 403 when createdBy is not the model's creator, 404 when id is
 	// unknown, 502 when LiteLLM fails.
 	GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.GenerateModelKeyResponse, error)
+	// DeleteModel deletes a model, local or remote, owned by createdBy. A local model is undeployed
+	// in the background and a non-nil response is returned; a remote model is removed before
+	// returning and the response is nil. A missing model is a *validators.ValidationError with 404,
+	// another user's model one with 403, and a model in use (or already being deleted) one with 409.
+	DeleteModel(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.DeleteModelResponse, error)
 }
 
 // DatasourceServiceInterface defines the contract for datasource connector business logic.
