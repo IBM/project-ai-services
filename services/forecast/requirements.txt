@@ -16,15 +16,18 @@ scipy>=1.11.0
 scikit-learn>=1.3.0
 lightgbm>=4.0.0
 xgboost>=2.0.0
-autogluon.tabular>=1.1.0
+catboost>=1.2.0
+autogluon.tabular[lightgbm,catboost]>=1.1.0
+
+# ONNX export of the trained model (worker/onnx_export.py) and its check in tests
+onnx>=1.16.0
+onnxmltools>=1.12.0
+onnxruntime>=1.18.0
 
 # Triton inference client (async HTTP)
 httpx>=0.24.0
 
 # Triton Model Config (Protobuf Text Format)
 protobuf>=4.25.0
-onnx
-onnxmltools
-onnxruntime
 pandas
 pyarrow
