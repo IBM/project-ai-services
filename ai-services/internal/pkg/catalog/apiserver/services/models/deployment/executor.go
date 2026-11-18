@@ -201,7 +201,7 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 	return nil
 }
 
-// fetchAndSetVllmParams queries the remote vLLM models endpoint and populates the model_params metadata.
+// fetchAndSetVllmParams queries the remote vLLM models endpoint and populates the params metadata.
 func (e *ModelExecutor) fetchAndSetVllmParams(ctx context.Context, plan *types.RemotePlan) error {
 	apiBase, _ := plan.Req.Params[catalogconstants.ParamAPIBase].(string)
 	apiKey, _ := plan.Req.Params[catalogconstants.ParamAPIKey].(string)
@@ -229,12 +229,12 @@ func (e *ModelExecutor) fetchAndSetVllmParams(ctx context.Context, plan *types.R
 		return validators.Unprocessable("could not resolve maximum model length for model %q", plan.Req.Model)
 	}
 
-	e.getOrCreateModelParams(plan)[catalogconstants.ParamMaxModelLen] = maxModelLen
+	e.getOrCreateParams(plan)[catalogconstants.ParamMaxModelLen] = maxModelLen
 
 	return nil
 }
 
-// fetchAndSetLiteLLMParams queries the LiteLLM model/info endpoint and populates the model_params metadata.
+// fetchAndSetLiteLLMParams queries the LiteLLM model/info endpoint and populates the params metadata.
 func (e *ModelExecutor) fetchAndSetLiteLLMParams(ctx context.Context, plan *types.RemotePlan) error {
 	litellmModelID := plan.Route.LiteLLMModelID
 	if litellmModelID == "" {
@@ -259,32 +259,35 @@ func (e *ModelExecutor) fetchAndSetLiteLLMParams(ctx context.Context, plan *type
 		return fmt.Errorf("could not resolve maximum input tokens from litellm model info")
 	}
 
-	e.getOrCreateModelParams(plan)[catalogconstants.ParamMaxModelLen] = maxInputTokens
+	e.getOrCreateParams(plan)[catalogconstants.ParamMaxModelLen] = maxInputTokens
 
 	return nil
 }
 
-// setBatchSizeParam parses maxBatchSize from the parameter map (defaulting to 32) and populates DB model_params metadata.
+// setBatchSizeParam parses maxBatchSize from the parameter map (defaulting to 32) and populates DB params metadata.
 func (e *ModelExecutor) setBatchSizeParam(plan *types.RemotePlan) {
 	maxBatchSize := 32
-	if val, ok := plan.Req.Params[catalogconstants.ParamMaxBatchSize].(int); ok {
-		maxBatchSize = val
+	switch v := plan.Req.Params[catalogconstants.ParamMaxBatchSize].(type) {
+	case int:
+		maxBatchSize = v
+	case float64:
+		maxBatchSize = int(v)
 	}
 
-	e.getOrCreateModelParams(plan)[catalogconstants.ParamMaxBatchSize] = maxBatchSize
+	e.getOrCreateParams(plan)[catalogconstants.ParamMaxBatchSize] = maxBatchSize
 }
 
-// getOrCreateModelParams returns the model_params map nested inside the plan's metadata, initializing as necessary.
-func (e *ModelExecutor) getOrCreateModelParams(plan *types.RemotePlan) map[string]any {
+// getOrCreateParams returns the params map nested inside the plan's metadata, initializing as necessary.
+func (e *ModelExecutor) getOrCreateParams(plan *types.RemotePlan) map[string]any {
 	if plan.Metadata == nil {
 		plan.Metadata = make(map[string]any)
 	}
 
-	modelParams, ok := plan.Metadata[catalogconstants.MetadataKeyModelParams].(map[string]any)
+	params, ok := plan.Metadata[catalogconstants.MetadataKeyParams].(map[string]any)
 	if !ok {
-		modelParams = make(map[string]any)
-		plan.Metadata[catalogconstants.MetadataKeyModelParams] = modelParams
+		params = make(map[string]any)
+		plan.Metadata[catalogconstants.MetadataKeyParams] = params
 	}
 
-	return modelParams
+	return params
 }
