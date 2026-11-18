@@ -842,7 +842,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 total_exported=len(exported_documents),
                 completed=sum(
                     1 for doc in exported_documents
-                    if doc.status in (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+                    if doc.status == DocStatus.COMPLETED.value
                 ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
@@ -1264,13 +1264,11 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics.
-        # ALREADY_EXISTS, SKIPPED and COMPLETED_WITH_ERRORS are all terminal success
-        # states; count them with completed.
+        # ALREADY_EXISTS and SKIPPED are terminal success states; count them with completed.
         _terminal_ok = (
             DocStatus.COMPLETED.value,
             DocStatus.ALREADY_EXISTS.value,
             DocStatus.SKIPPED.value,
-            DocStatus.COMPLETED_WITH_ERRORS.value,
         )
         stats = {
             "total_documents": len(documents),

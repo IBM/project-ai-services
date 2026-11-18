@@ -166,7 +166,7 @@ class Document(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('accepted', 'in_progress', 'digitized', 'processed',"
-            " 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists', 'skipped',"
+            " 'chunked', 'completed', 'failed', 'already_exists', 'skipped',"
             " 'cancelled')",
             name="chk_doc_status"
         ),

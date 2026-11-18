@@ -917,12 +917,12 @@ class TestUpdateJobStatsAlreadyExists:
         mock_db_manager.get_job_by_id.return_value = Mock(
             job_id="job-1", status="in_progress", stats={}
         )
-        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed_with_errors"])
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed"])
         mock_db_manager.update_job.return_value = True
 
         from digitize.utils.db import DatabaseStatusManager
         mgr = DatabaseStatusManager("job-1")
-        mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS,
+        mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS,
                                  error="1 table failed to summarize")
 
         call_kwargs = mock_db_manager.update_job.call_args[1]
@@ -933,12 +933,12 @@ class TestUpdateJobStatsAlreadyExists:
         mock_db_manager.get_job_by_id.return_value = Mock(
             job_id="job-1", status="in_progress", stats={}
         )
-        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed_with_errors"])
+        mock_db_manager.get_documents_by_job_id.return_value = self._make_docs(["completed"])
         mock_db_manager.update_job.return_value = True
 
         from digitize.utils.db import DatabaseStatusManager
         mgr = DatabaseStatusManager("job-1")
-        mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS)
+        mgr.update_job_progress("", DocStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS)
 
         call_kwargs = mock_db_manager.update_job.call_args[1]
         assert "error" not in call_kwargs

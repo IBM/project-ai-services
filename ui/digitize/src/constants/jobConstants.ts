@@ -27,7 +27,6 @@ export const DOC_STATUS = {
   PROCESSED: "processed",
   CHUNKED: "chunked",
   COMPLETED: "completed",
-  COMPLETED_WITH_ERRORS: "completed_with_errors",
   FAILED: "failed",
   ALREADY_EXISTS: "already_exists",
   SKIPPED: "skipped",

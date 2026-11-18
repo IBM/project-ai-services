@@ -47,12 +47,10 @@ def get_job_document_stats(job_id: str) -> dict:
     Returns:
         Dictionary containing:
         - failed_docs: List of failed document objects with id, name, status
-        - completed_docs: List of completed document objects with id, name, status (includes already_exists and skipped, excludes completed_with_errors)
-        - completed_with_errors_docs: List of docs with status completed_with_errors
+        - completed_docs: List of completed document objects with id, name, status (includes already_exists and skipped)
         - total_docs: Total number of documents
         - failed_count: Number of failed documents
-        - completed_count: Number of completed documents (includes already_exists and skipped, excludes completed_with_errors)
-        - completed_with_errors_count: Number of completed_with_errors documents
+        - completed_count: Number of completed documents (includes already_exists and skipped)
     """
     from digitize.models import DocStatus
 
@@ -72,19 +70,13 @@ def get_job_document_stats(job_id: str) -> dict:
             DocStatus.SKIPPED.value,
         )
         completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]
-        completed_with_errors_docs = [
-            doc for doc in documents
-            if doc.get("status") == DocStatus.COMPLETED_WITH_ERRORS.value
-        ]
 
         return {
             "failed_docs": failed_docs,
             "completed_docs": completed_docs,
-            "completed_with_errors_docs": completed_with_errors_docs,
             "total_docs": len(documents),
             "failed_count": len(failed_docs),
             "completed_count": len(completed_docs),
-            "completed_with_errors_count": len(completed_with_errors_docs),
         }
     except Exception as e:
         logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)
@@ -109,7 +101,7 @@ def generate_uuid():
 
 # Owner statuses that mean "this content was already processed"; any other owner
 # status means it is still being processed.
-_COMPLETED_OWNER_STATUSES = (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+_COMPLETED_OWNER_STATUSES = (DocStatus.COMPLETED.value,)
 
 
 def dedup_key(operation: str, output_format) -> str:
@@ -400,7 +392,6 @@ TEARDOWN_JOB_POLL_INTERVAL_S = 2
 
 _TERMINAL_DOC_STATUSES = (
     models.DocStatus.COMPLETED.value,
-    models.DocStatus.COMPLETED_WITH_ERRORS.value,
     models.DocStatus.FAILED.value,
     models.DocStatus.CANCELLED.value,
     models.DocStatus.ALREADY_EXISTS.value,

@@ -49,7 +49,6 @@ class TestEnums:
             "processed",
             "chunked",
             "completed",
-            "completed_with_errors",
             "failed",
             "already_exists",
             "skipped",
@@ -61,7 +60,6 @@ class TestEnums:
         assert JobStatus("completed") == JobStatus.COMPLETED
         assert JobStatus("completed_with_errors") == JobStatus.COMPLETED_WITH_ERRORS
         assert DocStatus("failed") == DocStatus.FAILED
-        assert DocStatus("completed_with_errors") == DocStatus.COMPLETED_WITH_ERRORS
 
     def test_invalid_enum_values_raise(self):
         with pytest.raises(ValueError):
