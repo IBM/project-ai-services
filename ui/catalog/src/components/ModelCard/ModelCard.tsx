@@ -27,7 +27,6 @@ const ModelCard = ({
   providers,
   onDeploy,
 }: ModelCardProps) => {
-  const providerNames = [...new Set(providers.map((p) => p.name))].join(", ");
   const providerTags = [
     ...new Set(providers.map((p) => PROVIDER_TAG_LABELS[p.id] ?? p.id)),
   ];
@@ -35,27 +34,32 @@ const ModelCard = ({
   return (
     <div className={styles.cardWrapper}>
       <ProductiveCard
-        primaryButtonIcon={ArrowRight}
-        primaryButtonText={" "}
+        actionIcons={[
+          {
+            id: "view-details",
+            icon: () => <ArrowRight size={16} />,
+            iconDescription: "View details",
+            // TODO: Wire up onClick once the model details view/panel is implemented
+            onClick: () => {},
+          },
+        ]}
+        actionsPlacement="bottom"
         secondaryButtonIcon={Deploy}
         secondaryButtonText="Deploy"
         onSecondaryButtonClick={() => onDeploy?.(id)}
         className={styles.productiveCard}
       >
         <div className={styles.cardHeader}>
-          <span className={styles.componentTypeBadge}>
-            <Badge size={16} className={styles.badgeIcon} />
-            <span className={styles.componentTypeLabel}>
-              {componentType.short_name}
-            </span>
+          <span className={styles.componentTypeLabel}>
+            {componentType.short_name}
           </span>
-          <h1 className={styles.cardTitle}>{name}</h1>
-          <span className={styles.certifiedBy}>By {certifiedBy}</span>
+          <h3 className={styles.cardTitle}>{name}</h3>
+          <span className={styles.certifiedBadge}>
+            <Badge size={16} className={styles.badgeIcon} />
+            <span className={styles.certifiedBy}>{certifiedBy}</span>
+          </span>
         </div>
         <p className={styles.description}>{description}</p>
-        {providerNames && (
-          <p className={styles.providerNames}>{providerNames}</p>
-        )}
       </ProductiveCard>
       {providerTags.length > 0 && (
         <div className={styles.providerTags}>

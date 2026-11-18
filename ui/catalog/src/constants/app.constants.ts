@@ -54,7 +54,7 @@ export const WORKER_RUNTIME_LABELS: Record<
 export const PROVIDER_TAG_LABELS: Record<string, string> = {
   "vllm-spyre": "IBM Spyre",
   "vllm-cpu": "CPU",
-  watsonx: "Watsonx",
+  watsonx: "Remote",
   amd: "AMD GPU",
   hosted_vllm: "Remote",
 };

@@ -13,9 +13,6 @@ const ModelCardSkeleton = () => {
         <div className={styles.description}>
           <SkeletonText paragraph lineCount={3} width="100%" />
         </div>
-        <div className={styles.providerNames}>
-          <SkeletonText width="60%" />
-        </div>
         <SkeletonPlaceholder className={styles.skeletonFooter} />
       </Tile>
     </div>

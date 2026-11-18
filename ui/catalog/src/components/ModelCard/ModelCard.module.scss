@@ -60,7 +60,6 @@
     }
   }
 
-  // Arrow button (primary slot — renders last in DOM)
   :global(.c4p--card__footer button:last-child) {
     background-color: transparent;
     color: var(--cds-text-primary);
@@ -85,7 +84,7 @@
   gap: $spacing-02;
 }
 
-.componentTypeBadge {
+.certifiedBadge {
   @include type-style("label-01");
   display: inline-flex;
   align-items: center;
@@ -120,12 +119,6 @@
   line-clamp: 6;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.providerNames {
-  @include type-style("label-01");
-  color: var(--cds-text-secondary);
-  margin-bottom: $spacing-05;
 }
 
 .providerTags {
