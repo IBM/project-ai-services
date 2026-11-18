@@ -463,7 +463,6 @@ class TestInsertSyncLog:
         session = MagicMock()
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 3
-        session.scalar.return_value = "my-conn"
         update_result = MagicMock()
         session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), update_result]
 
@@ -477,7 +476,6 @@ class TestInsertSyncLog:
         session = MagicMock()
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 1
-        session.scalar.return_value = "my-conn"
         session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), MagicMock()]
 
         from digitize.utils.db import init_sync_log_and_update_connector
@@ -490,7 +488,6 @@ class TestInsertSyncLog:
         session = MagicMock()
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 9
-        session.scalar.return_value = "my-conn"
         session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), MagicMock()]
 
         from digitize.utils.db import init_sync_log_and_update_connector
@@ -514,7 +511,6 @@ class TestInsertSyncLog:
         session = MagicMock()
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 1
-        session.scalar.return_value = "my-conn"
         update_result = MagicMock()
         session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), update_result]
 

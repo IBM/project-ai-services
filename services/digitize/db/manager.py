@@ -1398,16 +1398,13 @@ class DatabaseManager:
 
                 # Evict sync logs & terminal connector jobs older than retention window together
                 cutoff = (started_at or datetime.now(timezone.utc)) - SYNC_HISTORY_RETENTION
-                conn_name = session.scalar(select(Connector.name).where(Connector.id == connector_id))
-                if conn_name:
-                    session.execute(
-                        delete(Job).where(
-                            Job.source == JobSource.CONNECTOR.value,
-                            Job.status.in_(_TERMINAL_JOB_STATUSES),
-                            Job.job_name.startswith(f"Connector-{conn_name}-", autoescape=True),
-                            Job.submitted_at < cutoff,
-                        )
+                session.execute(
+                    delete(Job).where(
+                        Job.source == JobSource.CONNECTOR.value,
+                        Job.status.in_(_TERMINAL_JOB_STATUSES),
+                        Job.submitted_at < cutoff,
                     )
+                )
                 session.execute(
                     delete(ConnectorSyncLog).where(
                         ConnectorSyncLog.connector_id == connector_id,
