@@ -23,6 +23,7 @@ from digitize.utils.db import (
     close_open_sync_log,
     get_all_jobs,
     get_status_manager,
+    prune_all_sync_history,
     reset_syncing_connectors,
 )
 
@@ -190,6 +191,7 @@ def recover_connector_sync_state() -> int:
     2. For each affected connector, closes the still-open ``connector_sync_logs``
        row (status = 'started' or 'cancel pending') by setting it to
        ``'failed'`` with an explanatory error message.
+    3. Evicts sync logs and terminal connector jobs older than 1 day.
 
     Returns:
         Number of connectors that were recovered.
@@ -214,6 +216,11 @@ def recover_connector_sync_state() -> int:
                 f"Error closing sync log for connector {connector_id!r}: {exc}",
                 exc_info=True,
             )
+
+    try:
+        prune_all_sync_history()
+    except Exception as exc:
+        logger.error(f"Error pruning old sync history: {exc}", exc_info=True)
 
     if affected_ids:
         logger.info(
