@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -485,6 +486,11 @@ func (s *DatasourceService) connectOneDatasource(ctx context.Context, datasource
 		return uuid.Nil, err
 	}
 
+	// Verify catalog-level constraints for every target service.
+	if err := s.validateServiceConstraints(ctx, linkedServices, connector.Provider); err != nil {
+		return uuid.Nil, err
+	}
+
 	connectionDetails, err := s.decryptedConnectionDetails(ctx, connector)
 	if err != nil {
 		return uuid.Nil, err
@@ -550,6 +556,64 @@ func (s *DatasourceService) eligibleServicesForApp(ctx context.Context, app *dbm
 	}
 
 	return eligible
+}
+
+// countDatasourcesForService returns the number of datasource connectors currently linked to the
+// given service. Connector dependencies of other types (e.g. remote model connectors) are
+// excluded, matching the creation-time check. It is used to enforce datasource.max_connections
+// at connect time.
+func (s *DatasourceService) countDatasourcesForService(ctx context.Context, serviceID uuid.UUID) (int, error) {
+	deps, err := s.svcDepRepo.GetDependenciesByServiceID(ctx, serviceID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count datasources for service %s: %w", serviceID, err)
+	}
+
+	var connectorIDs []uuid.UUID
+
+	for _, dep := range deps {
+		if dep.DependencyType == dbmodels.DependencyTypeConnector {
+			connectorIDs = append(connectorIDs, dep.DependencyID)
+		}
+	}
+
+	if len(connectorIDs) == 0 {
+		return 0, nil
+	}
+
+	connectors, err := s.connectorRepo.GetByIDs(ctx, connectorIDs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to load connectors for service %s: %w", serviceID, err)
+	}
+
+	return validators.CountDatasourceConnectors(maps.Values(connectors), func(c dbmodels.Connector) string {
+		return c.Type
+	}), nil
+}
+
+// validateServiceConstraints checks provider-compatibility and max-connections constraints for each
+// linked service before a datasource is connected. It is extracted to keep connectOneDatasource flat.
+func (s *DatasourceService) validateServiceConstraints(ctx context.Context, linkedServices []dbrepo.LinkedServiceRow, provider string) error {
+	for _, svc := range linkedServices {
+		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
+		if loadErr != nil {
+			return fmt.Errorf("failed to load catalog service %q: %w", svc.ServiceCatalogID, loadErr)
+		}
+
+		if err := validators.ValidateProviderSupported(catalogSvc, provider, svc.ServiceCatalogID); err != nil {
+			return err
+		}
+
+		existingCount, countErr := s.countDatasourcesForService(ctx, svc.ServiceID)
+		if countErr != nil {
+			return countErr
+		}
+
+		if err := validators.ValidateMaxConnectionsOnConnect(catalogSvc, svc.ServiceCatalogID, existingCount); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // loadConnector fetches the connector by ID (with credentials). Returns a typed ValidationError on 404.
