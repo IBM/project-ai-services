@@ -173,11 +173,15 @@ func (c *litellmClient) DeregisterModel(ctx context.Context, modelID string) err
 	if err != nil {
 		return fmt.Errorf("failed to delete route from litellm: %w", err)
 	}
-	if statusCode < 200 || statusCode >= 300 && statusCode != http.StatusNotFound {
-		return fmt.Errorf("litellm /model/delete returned status %d: %s", statusCode, string(respBytes))
+	if statusCode >= 200 && statusCode < 300 {
+		return nil
+	}
+	// LiteLLM reports a missing model as 404, or as a 400 with "not found" in the error message.
+	if statusCode == http.StatusNotFound || (statusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(string(respBytes)), "not found")) {
+		return nil
 	}
 
-	return nil
+	return fmt.Errorf("litellm /model/delete returned status %d: %s", statusCode, string(respBytes))
 }
 
 func (c *litellmClient) RegisterPassThrough(ctx context.Context, req LiteLLMPassThroughRequest) error {
@@ -198,11 +202,15 @@ func (c *litellmClient) DeregisterPassThrough(ctx context.Context, endpointID st
 	if err != nil {
 		return fmt.Errorf("failed to delete passthrough endpoint from litellm: %w", err)
 	}
-	if statusCode < 200 || (statusCode >= 300 && statusCode != http.StatusNotFound) {
-		return fmt.Errorf("litellm DELETE /config/pass_through_endpoint returned status %d: %s", statusCode, string(respBytes))
+	if statusCode >= 200 && statusCode < 300 {
+		return nil
+	}
+	respStr := strings.ToLower(string(respBytes))
+	if statusCode == http.StatusNotFound || (statusCode == http.StatusBadRequest && (strings.Contains(respStr, "not found") || strings.Contains(respStr, "no pass-through endpoints"))) {
+		return nil
 	}
 
-	return nil
+	return fmt.Errorf("litellm DELETE /config/pass_through_endpoint returned status %d: %s", statusCode, string(respBytes))
 }
 
 func (c *litellmClient) DeleteKeysByAlias(ctx context.Context, aliases []string) error {
@@ -214,8 +222,8 @@ func (c *litellmClient) DeleteKeysByAlias(ctx context.Context, aliases []string)
 	if statusCode >= 200 && statusCode < 300 {
 		return nil
 	}
-	// LiteLLM reports an alias without a key as 404, or as a 4xx/5xx whose message says not found.
-	if statusCode == http.StatusNotFound || strings.Contains(strings.ToLower(string(respBytes)), "not found") {
+	// LiteLLM reports an alias without a key as 404, or as a 400 with "not found" in the error message.
+	if statusCode == http.StatusNotFound || (statusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(string(respBytes)), "not found")) {
 		return nil
 	}
 
