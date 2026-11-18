@@ -135,10 +135,11 @@ def setup():
             # AES-256-GCM key: must be exactly 32 bytes, used as-is (not base64). Override with the
             # DB_ENCRYPTION_KEY environment variable; changing it makes stored connector secrets unreadable.
             "db_encryption_key": os.getenv("DB_ENCRYPTION_KEY", "forecast-local-dev-key-012345678"),
-            # The proposal's image (quay.io/powercloud/tritonserver) is ppc64le only. NVIDIA's image is
-            # multi-arch (amd64 + arm64), so by default podman pulls the native build (Apple Silicon: arm64).
+            # The proposal's image (quay.io/powercloud/tritonserver:latest, Triton 2.70.0 = NGC release 26.06)
+            # is ppc64le only. NVIDIA's 26.06-py3 is the same release and is multi-arch (amd64 + arm64), so
+            # by default podman pulls the native build (Apple Silicon: arm64).
             # Set --triton_platform=linux/amd64 only to force emulation.
-            "triton_image": _flag(cfg, "triton_image", "nvcr.io/nvidia/tritonserver:24.08-py3"),
+            "triton_image": _flag(cfg, "triton_image", "nvcr.io/nvidia/tritonserver:26.06-py3"),
             "triton_platform": _flag(cfg, "triton_platform", ""),
             "triton_port": triton_port,
             "triton_url": "http://localhost:{}".format(triton_port),

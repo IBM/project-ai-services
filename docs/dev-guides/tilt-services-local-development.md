@@ -128,7 +128,7 @@ Default ports avoid 5432 (catalog Tiltfile), 5433/8100/9200/3000/4000/4001/5050/
 
 Swagger UI is at http://localhost:8500/docs (the connector routes are hidden from the schema in the current code, but are served under `/v1/connectors`).
 
-- **Triton image.** The proposal's `quay.io/powercloud/tritonserver` is ppc64le only. Locally the default is `nvcr.io/nvidia/tritonserver:24.08-py3`, which is multi-arch, so Apple Silicon pulls the native arm64 build (about 13 GB on first `tilt up`).
+- **Triton image.** The proposal's `quay.io/powercloud/tritonserver` is ppc64le only. Locally the default is `nvcr.io/nvidia/tritonserver:26.06-py3`, which is multi-arch, so Apple Silicon pulls the native arm64 build (about 13 GB on first `tilt up`).
 - **Covered.** API, connectors, database/init, encryption and the `TRITON_URL` check. The API does not call Triton yet; the training worker, scheduler, data loader, Triton load/unload and the forecast endpoints are WIP.
 - **Venv.** The shared `requirements.txt` has only forecast's `cryptography` so far, no AutoGluon, pandas, tritonclient or APScheduler yet. Add them from `services/forecast/requirements.txt` when the worker lands.
 - **Encryption key.** `DB_ENCRYPTION_KEY` is read from the environment (exactly 32 bytes, used as is); default `forecast-local-dev-key-012345678`. Changing it makes stored connector secrets unreadable.
@@ -139,7 +139,7 @@ Forecast-only options:
 | Option | Default |
 |--------|---------|
 | `worker_postgres_user` / `worker_postgres_password` | `forecast_worker` / `ForecastWorker@1234` |
-| `triton_image` / `triton_platform` / `triton_port` | `nvcr.io/nvidia/tritonserver:24.08-py3` / unset (native) / `8000` |
+| `triton_image` / `triton_platform` / `triton_port` | `nvcr.io/nvidia/tritonserver:26.06-py3` / unset (native) / `8000` |
 
 ## Limitations
 
@@ -159,5 +159,5 @@ Forecast-only options:
 | `postgres` not ready | Check that the Podman machine is running (`podman machine list`). |
 | `tilt down` fails with `Refusing to run 'local' because ... might be a production kube context` | Tilt's safety guard looks at your current kube context even though these Tiltfiles use no Kubernetes. Switch to a local context (`kubectl config use-context <local>`), or remove the leftovers by hand: `podman rm -f ai-svc-<name>-postgres (forecast also ai-svc-forecast-triton); podman volume rm ai-svc-<name>-postgres-data; rm -rf .tilt/services/<name>`. The root `Tiltfile` and `Tiltfile.rag` behave the same way. |
 | `forecast-api` fails with `DB_ENCRYPTION_KEY must be exactly 32 bytes` | The `DB_ENCRYPTION_KEY` environment variable is not 32 bytes. |
-| `triton` not ready | First start pulls a multi-GB image (`podman pull nvcr.io/nvidia/tritonserver:24.08-py3`); check its log. |
+| `triton` not ready | First start pulls a multi-GB image (`podman pull nvcr.io/nvidia/tritonserver:26.06-py3`); check its log. |
 | A service crashed on a missing module | Add it to `hack/tilt/services/requirements.txt`; `python-env` reinstalls on change, then trigger the crashed resource. |
