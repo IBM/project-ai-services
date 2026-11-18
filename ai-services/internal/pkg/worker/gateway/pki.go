@@ -56,32 +56,21 @@ type pkiResult struct {
 
 // loadOrGeneratePKI loads the four PKI files from pkiDir when they all exist,
 // or generates a new ECDSA P-256 root CA and server certificate on first start.
-// Either way, the directory and server.key are then made readable for Caddy.
 func loadOrGeneratePKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	caKeyPath := filepath.Join(pkiDir, "ca.key")
 	caCrtPath := filepath.Join(pkiDir, "ca.crt")
 	srvKeyPath := filepath.Join(pkiDir, "server.key")
 	srvCrtPath := filepath.Join(pkiDir, "server.crt")
 
-	var (
-		res pkiResult
-		err error
-	)
-
 	if fileExists(caKeyPath) && fileExists(caCrtPath) && fileExists(srvKeyPath) && fileExists(srvCrtPath) {
 		logger.InfofCtx(ctx, "worker gateway: PKI files found in %s, loading existing material", pkiDir)
 
-		res, err = loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath)
-	} else {
-		logger.InfofCtx(ctx, "worker gateway: PKI directory empty or incomplete — generating new CA and server certificate in %s", pkiDir)
-
-		res, err = generateAndPersistPKI(ctx, pkiDir, runtimeType)
-	}
-	if err != nil {
-		return pkiResult{}, err
+		return loadPKI(caCrtPath, caKeyPath, srvCrtPath, srvKeyPath)
 	}
 
-	return res, nil
+	logger.InfofCtx(ctx, "worker gateway: PKI directory empty or incomplete — generating new CA and server certificate in %s", pkiDir)
+
+	return generateAndPersistPKI(ctx, pkiDir, runtimeType)
 }
 
 // generateCA creates a new ECDSA P-256 root CA key and certificate.
