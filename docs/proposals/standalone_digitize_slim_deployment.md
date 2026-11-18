@@ -116,9 +116,10 @@ Standalone deploy request
 |-------|--------|------|
 | **Catalog metadata** | Remove `vector_store`, `embedding`, `llm` from Digitize's `dependencies` | Low — only affects standalone path |
 | **RAG architecture metadata** | No change — `chat` already declares `llm` dependency | None |
-| **Podman template** | Conditionally render embedding/LLM/OpenSearch env vars and volumes | Medium — template logic |
-| **OpenShift template** | Same conditional rendering | Medium |
-| **Digitize Python service** | Make OpenSearch/LLM/embedding env vars optional; hide ingestion endpoints when backends are absent | Medium — service logic |
+| **Podman template** | Conditionally render container args (secret exports), embedding/LLM/OpenSearch env vars, volume mounts, and secret volumes | Medium — template logic |
+| **OpenShift template** | Same conditional rendering for env vars and secrets | Medium |
+| **Digitize Python service** | Make OpenSearch/LLM/embedding env vars optional; conditionally skip connector DB tables and scheduler; hide ingestion endpoints; expose `GET /v1/config` | Medium — service logic |
+| **Digitize UI** | Query `GET /v1/config` on startup; conditionally hide ingestion options in IngestSidePanel, enforce digitization-only flow, and adapt UI labels/empty states | Low — UI logic |
 | **Metadata `about` section** | Remove LLM/embedding/OpenSearch from standalone resource estimates | Low — documentation |
 | **Values files** | Remove `embedding`/`llm`/`vector_store` default values from digitize-specific values.yaml | Low |
 
@@ -159,10 +160,29 @@ Update the `about` section to reflect standalone-only details:
 
 **File: `ai-services/assets/services/digitize/podman/templates/digitize.yaml.tmpl`**
 
-Wrap embedding, LLM, and OpenSearch references in Go template conditionals. The values will only be present when the service is deployed as part of an architecture that provides these components.
+Wrap embedding, LLM, and OpenSearch references in Go template conditionals. Crucially, this must include container `args` (exporting secrets before app startup), environment variables, volume mounts, and secret volumes. The values will only be present when the service is deployed as part of an architecture that provides these components.
 
 ```yaml
-# Conditionally include embedding env vars
+# 1. Conditionally export secrets in backend-server container args
+args:
+  - |
+    export POSTGRES_USER=$(cat /etc/secret/digitize-db-secret/username)
+    export POSTGRES_PASSWORD=$(cat /etc/secret/digitize-db-secret/password)
+    {{- if .Values.vector_store }}
+    export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
+    export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+    {{- end }}
+    export DB_ENCRYPTION_KEY=$(cat /etc/secret/digitize-db-encryption-secret/db-encryption-key)
+    {{- if and .Values.llm .Values.llm.apiKey }}
+    export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
+    {{- end }}
+    exec /var/venv/bin/python -m uvicorn app:app \
+      --host 0.0.0.0 \
+      --port 4000 \
+      --loop uvloop \
+      --http httptools
+
+# 2. Conditionally include environment variables
 {{- if .Values.embedding }}
 - name: EMB_ENDPOINT
   value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
@@ -172,30 +192,60 @@ Wrap embedding, LLM, and OpenSearch references in Go template conditionals. The 
   value: "{{ .Values.embedding.maxModelLen }}"
 {{- end }}
 
-# Conditionally include LLM env vars
 {{- if .Values.llm }}
 - name: LLM_ENDPOINT
   value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
 - name: LLM_MODEL
   value: "{{ .Values.llm.model }}"
-...
+- name: LLM_MAX_MODEL_LEN
+  value: "{{ .Values.llm.maxModelLen }}"
+- name: LLM_MAX_BATCH_SIZE
+  value: "{{ .Values.llm.maxBatchSize }}"
 {{- end }}
 
-# Conditionally include OpenSearch env vars
 {{- if .Values.vector_store }}
 - name: OPENSEARCH_HOST
   value: "{{ .Values.vector_store.host }}"
-...
+- name: OPENSEARCH_PORT
+  value: "{{ .Values.vector_store.port }}"
+- name: OPENSEARCH_DB_PREFIX
+  value: "RAG_DB"
+- name: OPENSEARCH_INDEX_NAME
+  value: "RAG_INDEX"
+- name: OPENSEARCH_NUM_SHARDS
+  value: "1"
+{{- end }}
+
+# 3. Conditionally include secret volume mounts
+{{- if .Values.vector_store }}
+- mountPath: /etc/secret/opensearch-secret
+  name: opensearch-secret
+  readOnly: true
+{{- end }}
+{{- if and .Values.llm .Values.llm.apiKey }}
+- mountPath: /etc/secret/vllm-secret
+  name: vllm-secret
+  readOnly: true
+{{- end }}
+
+# 4. Conditionally include secret volumes
+{{- if .Values.vector_store }}
+- name: opensearch-secret
+  secret:
+    secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+{{- end }}
+{{- if and .Values.llm .Values.llm.apiKey }}
+- name: vllm-secret
+  secret:
+    secretName: "vllm-secret-{{ .Values.llm.instanceSlug }}"
 {{- end }}
 ```
-
-Similarly, conditionally include the secret volume mounts for `opensearch-secret` and `vllm-secret`.
 
 ### 6.3 Deployment Template Changes (OpenShift)
 
 **File: `ai-services/assets/services/digitize/openshift/templates/digitize-api-deployment.yaml`**
 
-Apply the same conditional rendering pattern as the podman template. The OpenShift template currently hardcodes `embedding-predictor` and `llm-predictor` hostnames — these must be wrapped in conditionals.
+Apply the same conditional rendering pattern as the podman template. The OpenShift template currently hardcodes `embedding-predictor` and `llm-predictor` hostnames and credentials — these must be wrapped in `{{- if .Values.embedding }}`, `{{- if .Values.llm }}`, and `{{- if .Values.vector_store }}` conditionals.
 
 ### 6.4 Values File Changes
 
@@ -209,16 +259,16 @@ No embedding/llm/vector_store values are defined here (they come from component 
 
 ### 6.5 Digitize Python Service Changes
 
-The Digitize service needs to detect whether ingestion backends are available and conditionally expose endpoints.
+The Digitize service detects whether ingestion backends are available and conditionally adjusts DB schema initialization, background schedulers, endpoints, and pipeline execution.
 
-**File: `services/digitize/app.py`**
+**File: `services/digitize/settings.py`**
 
-Conditionally include the ingestion-related parts of the jobs router. The `operation` parameter on the jobs endpoint accepts `ingestion` or `digitization` — in standalone mode, only `digitization` should be available.
+Define the computed feature flag at startup:
 
 ```python
 # Detect standalone mode by checking for backend availability.
-# All three are required for ingestion: embedding (vectorization), OpenSearch (indexing),
-# and LLM (table summarization during the ingest pipeline).
+# All three backends are required for ingestion: embedding (vectorization),
+# OpenSearch (indexing), and LLM (table summarization during the ingest pipeline).
 INGESTION_ENABLED = (
     bool(os.environ.get("EMB_ENDPOINT"))
     and bool(os.environ.get("OPENSEARCH_HOST"))
@@ -226,10 +276,32 @@ INGESTION_ENABLED = (
 )
 ```
 
+**File: `services/digitize/db/scripts/init_db.py` & `services/digitize/app.py` (Database Initialization)**
+
+Conditionally skip database initialization for all connector-related tables when `INGESTION_ENABLED` is `False`:
+
+- **Core tables (always created)**: `jobs`, `documents`, `document_checksum`, `conversion_tasks`.
+- **Connector tables (skipped in standalone mode)**: `connectors`, `connector_document_checksum`, `connector_sync_logs`, and the `scheduler` schema.
+- In `app.py` `_init_database()`: When `INGESTION_ENABLED` is `False`, invoke `Base.metadata.create_all(bind=engine, tables=[...])` targeting only the core tables (`Job`, `Document`, `DocumentChecksum`, `ConversionTask`).
+- In `init_db.py`: Execute only core schema SQL and verify core expected tables when `INGESTION_ENABLED` is `False`.
+- In `app.py` lifespan: Skip starting `_connector_scheduler_lifespan()` and `recover_connector_sync_state()` when `INGESTION_ENABLED` is `False`, ensuring APScheduler does not attempt to access connector tables or the `scheduler` schema.
+
+**File: `services/digitize/api/v1/config.py` (Runtime Config Endpoint)**
+
+Expose the computed feature flag via a new config endpoint:
+
+```python
+@router.get("/config", response_model=ConfigResponse, tags=["config"])
+async def get_config() -> ConfigResponse:
+    return ConfigResponse(ingestion_enabled=INGESTION_ENABLED)
+```
+
+**File: `services/digitize/app.py` (Router Registration & Job Validation)**
+
 When `INGESTION_ENABLED` is `False`:
-- The `/v1/jobs` endpoint should only accept `operation=digitization` (reject `ingestion` requests).
-- The connectors router should not be mounted (connectors exist to feed the ingestion pipeline).
-- The OpenAPI description should omit ingestion references.
+- Mount the new `/v1/config` router.
+- Do **not** mount the `/v1/connectors` router (connectors exist only to feed the ingestion pipeline).
+- The `/v1/jobs` endpoint validates `operation` and rejects `operation=ingestion` requests with a `400 Bad Request` (`INVALID_REQUEST` error code: "Ingestion operation is not supported in standalone mode. Only 'digitization' is enabled.").
 
 **File: `services/common/settings.py`**
 
@@ -237,9 +309,31 @@ The OpenSearch, embedding, and LLM settings already default to empty strings (`d
 
 **File: `services/digitize/pipeline/ingest.py`**
 
-Add a guard at the top of the ingestion pipeline entry points that raises a clear error if backends are not configured. This is a defense-in-depth measure — the API layer should prevent ingestion requests from reaching here in standalone mode.
+Add a guard at the top of the ingestion pipeline entry points (`ingest()` and `create_indexing_handler()`) raising a clear runtime error if backends are not configured. This is a defense-in-depth measure — the API layer and UI prevent ingestion requests from reaching here in standalone mode.
 
-### 6.6 Resource Estimate Updates
+### 6.6 Digitize UI Changes
+
+The Digitize frontend UI detects standalone mode and blocks ingestion features accordingly.
+
+**File: `ui/digitize/src/services/api.ts` & `ui/digitize/src/contexts/`**
+
+1. **Config API & Provider**:
+   - Add `getConfig()` in `api.ts` calling `GET /v1/config`.
+   - Implement `ConfigContext` and `ConfigProvider` (with `useConfig` hook) that fetches service configuration on application startup and provides `ingestionEnabled: boolean` to all UI components.
+
+2. **Job Creation Panel (`IngestSidePanel`)**:
+   - When `ingestionEnabled` is `False`:
+     - Default the operation state to `"digitization"`.
+     - Hide the "Ingestion" option from the operation selector (or hide the operation selector entirely, locking it to digitization).
+     - Always display the Output Format selector (`json`, `md`, `txt`) which is required for digitization.
+     - Enforce the single-file upload constraint in the UI with instant feedback if more than one file is selected.
+
+3. **Job Monitor & Document List Pages**:
+   - Dynamically adjust empty states, help text, and subtitles:
+     - Change "Start by ingesting a document" / "To ingest a document, click Create" to "Start by digitizing a document" / "To digitize a document, click Create".
+     - Adjust document empty state guidance to reflect digitization rather than ingestion.
+
+### 6.7 Resource Estimate Updates
 
 **File: `ai-services/assets/services/digitize/metadata.yaml` — `about` section**
 
@@ -294,9 +388,14 @@ Standalone Digitize will no longer expose ingestion endpoints. Clients that call
 ## 9. Acceptance Criteria
 
 - [ ] Deploying standalone Digitize does not install OpenSearch, LLM, or embedding components.
-- [ ] Deploying the Digital Assistant architecture installs OpenSearch, LLM, and embedding components, and ingestion works end-to-end.
+- [ ] Podman and OpenShift templates conditionally include container args (secrets export), environment variables, volume mounts, and secret volumes.
 - [ ] Standalone Digitize starts successfully without OpenSearch/LLM/embedding env vars.
-- [ ] Ingestion API endpoints are not visible in standalone Digitize's OpenAPI spec.
+- [ ] Database initialization conditionally skips all connector-related tables (`connectors`, `connector_document_checksum`, `connector_sync_logs`, `scheduler` schema) in standalone mode.
+- [ ] Connector scheduler and sync recovery are skipped on startup when ingestion is disabled.
+- [ ] `GET /v1/config` endpoint returns `{"ingestion_enabled": false}` in standalone mode and `{"ingestion_enabled": true}` in RAG architecture.
+- [ ] Ingestion API endpoints return `400 Bad Request` or are not mounted in standalone Digitize.
+- [ ] Digitize UI detects `ingestion_enabled: false` via `/v1/config` and hides ingestion options in `IngestSidePanel`, enforces 1-file limit for digitization, and updates empty state descriptions.
+- [ ] Deploying the Digital Assistant architecture installs OpenSearch, LLM, and embedding components, and ingestion works end-to-end.
 - [ ] Digitization jobs work correctly in standalone mode.
 - [ ] No regression in existing Digital Assistant deployments.
 - [ ] Resource estimates in metadata reflect standalone-only resources.
