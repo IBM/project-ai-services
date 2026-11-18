@@ -67,12 +67,22 @@ var mcpExtractTools = []string{
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// mcpApplicationInfo returns the current 'application info' output, failing the spec on error.
+// mcpInfoFunc returns the 'application info' output of the app hosting the service under test.
+// The suite app is used in normal runs (mcpApplicationInfo); the sanity suite passes the info of
+// the per-service app it deployed (mcpApplicationInfoFor).
+type mcpInfoFunc func(label string) string
+
+// mcpApplicationInfo returns the current 'application info' output of the suite app, failing the spec on error.
 func mcpApplicationInfo(label string) string {
+	return mcpApplicationInfoFor(appName, label)
+}
+
+// mcpApplicationInfoFor returns the current 'application info' output of app, failing the spec on error.
+func mcpApplicationInfoFor(app, label string) string {
 	infoCtx, infoCancel := context.WithTimeout(context.Background(), mcpInfoTimeout)
 	defer infoCancel()
 
-	out, err := cli.ApplicationInfo(infoCtx, cfg, appName, appRuntime)
+	out, err := cli.ApplicationInfo(infoCtx, cfg, app, appRuntime)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[%s] application info failed", label)
 
 	return out
@@ -220,6 +230,11 @@ func mcpExpectHealthy(mcpURL, label string) {
 // translationSpecs, so it only runs for the translate template, after the app is created,
 // the catalog session is refreshed and the translate API is healthy.
 func mcpTranslateSpecs() {
+	mcpTranslateSpecsFor(mcpApplicationInfo)
+}
+
+// mcpTranslateSpecsFor registers the translate MCP sidecar specs against the app described by infoFn.
+func mcpTranslateSpecsFor(infoFn mcpInfoFunc) {
 	ginkgo.BeforeEach(func() {
 		if appRuntime != "podman" {
 			ginkgo.Skip("[MCP] MCP sidecar tests are podman-only — skipping for runtime: " + appRuntime)
@@ -228,23 +243,23 @@ func mcpTranslateSpecs() {
 
 	ginkgo.It("translate MCP sidecar /health returns ok",
 		ginkgo.Label("spyre-dependent", "mcp-health"), func() {
-			mcpExpectHealthy(cli.ExtractTranslateMCPURL(mcpApplicationInfo("MCP")), "translate")
+			mcpExpectHealthy(cli.ExtractTranslateMCPURL(infoFn("MCP")), "translate")
 		})
 
 	ginkgo.It("translate MCP sidecar tools/list returns the translate tools",
 		ginkgo.Label("spyre-dependent", "mcp-tools"), func() {
-			mcpRequireTools(cli.ExtractTranslateMCPURL(mcpApplicationInfo("MCP")), "translate", mcpTranslateTools)
+			mcpRequireTools(cli.ExtractTranslateMCPURL(infoFn("MCP")), "translate", mcpTranslateTools)
 		})
 
 	ginkgo.Context("MCP translate flow: sync translation → async job → result",
-		ginkgo.Label("spyre-dependent", "mcp-flow"), ginkgo.Ordered, mcpTranslateFlowSpecs)
+		ginkgo.Label("spyre-dependent", "mcp-flow"), ginkgo.Ordered, func() { mcpTranslateFlowSpecs(infoFn) })
 }
 
 // ── translate flow ────────────────────────────────────────────────────────────
 
 // mcpTranslateFlowSpecs drives the translate service through its MCP sidecar only:
 // synchronous translation, an asynchronous file job, and the error paths of both.
-func mcpTranslateFlowSpecs() {
+func mcpTranslateFlowSpecs(infoFn mcpInfoFunc) {
 	const (
 		label      = "MCP-TRANSLATE"
 		germanText = "Der Vertrag tritt am 1. Januar 2025 in Kraft."
@@ -258,7 +273,7 @@ func mcpTranslateFlowSpecs() {
 
 	ginkgo.BeforeAll(func() {
 		mcpRequireToken(label)
-		endpoint = mcpRequireEndpoint(cli.ExtractTranslateMCPURL(mcpApplicationInfo(label)), label)
+		endpoint = mcpRequireEndpoint(cli.ExtractTranslateMCPURL(infoFn(label)), label)
 		logger.Infof("[%s] endpoint resolved — %s", label, endpoint)
 	})
 
@@ -392,6 +407,11 @@ func mcpTranslateFlowSpecs() {
 // "Entity Extraction Tests" context, so it only runs for the extract template, after the
 // app is created, the catalog session is refreshed and the extract API is healthy.
 func mcpExtractSpecs() {
+	mcpExtractSpecsFor(mcpApplicationInfo)
+}
+
+// mcpExtractSpecsFor registers the extract MCP sidecar specs against the app described by infoFn.
+func mcpExtractSpecsFor(infoFn mcpInfoFunc) {
 	ginkgo.BeforeEach(func() {
 		if appRuntime != "podman" {
 			ginkgo.Skip("[MCP] MCP sidecar tests are podman-only — skipping for runtime: " + appRuntime)
@@ -400,23 +420,23 @@ func mcpExtractSpecs() {
 
 	ginkgo.It("extract MCP sidecar /health returns ok",
 		ginkgo.Label("spyre-dependent", "mcp-health"), func() {
-			mcpExpectHealthy(cli.ExtractExtractMCPURL(mcpApplicationInfo("MCP")), "extract")
+			mcpExpectHealthy(cli.ExtractExtractMCPURL(infoFn("MCP")), "extract")
 		})
 
 	ginkgo.It("extract MCP sidecar tools/list returns the extract tools",
 		ginkgo.Label("spyre-dependent", "mcp-tools"), func() {
-			mcpRequireTools(cli.ExtractExtractMCPURL(mcpApplicationInfo("MCP")), "extract", mcpExtractTools)
+			mcpRequireTools(cli.ExtractExtractMCPURL(infoFn("MCP")), "extract", mcpExtractTools)
 		})
 
 	ginkgo.Context("MCP extract flow: sync extraction → async job → per-document result",
-		ginkgo.Label("spyre-dependent", "mcp-flow"), ginkgo.Ordered, mcpExtractFlowSpecs)
+		ginkgo.Label("spyre-dependent", "mcp-flow"), ginkgo.Ordered, func() { mcpExtractFlowSpecs(infoFn) })
 }
 
 // ── extract flow ──────────────────────────────────────────────────────────────
 
 // mcpExtractFlowSpecs drives the extract service through its MCP sidecar only:
 // synchronous extraction, an asynchronous file job, per-document results and the error paths.
-func mcpExtractFlowSpecs() {
+func mcpExtractFlowSpecs(infoFn mcpInfoFunc) {
 	const label = "MCP-EXTRACT"
 
 	var (
@@ -442,7 +462,7 @@ func mcpExtractFlowSpecs() {
 	ginkgo.BeforeAll(func() {
 		mcpRequireToken(label)
 
-		infoOutput := mcpApplicationInfo(label)
+		infoOutput := infoFn(label)
 		endpoint = mcpRequireEndpoint(cli.ExtractExtractMCPURL(infoOutput), label)
 		extractRESTURL = cli.ExtractExtractURL(infoOutput)
 
