@@ -361,8 +361,6 @@ const getStatusIcon = (status: string) => {
     case JOB_STATUS.INGESTED:
     case JOB_STATUS.DIGITIZED:
       return <CheckmarkFilled size={16} className={styles.statusIconSuccess} />;
-    case JOB_STATUS.COMPLETED_WITH_ERRORS:
-      return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case JOB_STATUS.FAILED:
     case JOB_STATUS.INGESTION_ERROR:
     case JOB_STATUS.DIGITIZATION_ERROR:
@@ -396,7 +394,6 @@ const getDocStatusIcon = (status: string) => {
       return <InProgress size={16} className={styles.statusIconProgress} />;
     case DOC_STATUS.ALREADY_EXISTS:
     case DOC_STATUS.SKIPPED:
-    case DOC_STATUS.COMPLETED_WITH_ERRORS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case DOC_STATUS.CANCELLED:
       return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
@@ -712,7 +709,6 @@ const JobMonitorPage = () => {
           : JOB_STATUS.DIGITIZATION_ERROR;
       case JOB_STATUS.IN_PROGRESS:
         return isIngestion ? JOB_STATUS.INGESTING : JOB_STATUS.DIGITIZING;
-      case JOB_STATUS.COMPLETED_WITH_ERRORS:
       case JOB_STATUS.ACCEPTED:
       case JOB_STATUS.CANCEL_PENDING:
       case JOB_STATUS.CANCELLED:

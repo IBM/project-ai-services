@@ -1331,7 +1331,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 							return status.Status
 						}, mcpFlowIngestTimeout, mcpFlowPollInterval).Should(
-							gomega.BeElementOf("completed", "completed_with_errors", "failed", "cancelled"),
+							gomega.BeElementOf("completed", "failed", "cancelled"),
 							"[MCP-FLOW] ingestion job %s did not reach a terminal state in time", mcpJobID)
 
 						gomega.Expect(last.Status).To(gomega.Equal("completed"),
