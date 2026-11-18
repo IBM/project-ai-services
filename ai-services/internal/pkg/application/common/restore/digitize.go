@@ -19,6 +19,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+const (
+	contentDir = "digitized"
+)
+
 // ConstructMetadataFromCache reads cache files and constructs the Import API payload.
 func constructMetadataFromCache(backupDir string) (map[string]interface{}, error) {
 	cacheDir := filepath.Join(backupDir, "cache")
@@ -64,6 +68,46 @@ func constructMetadataFromCache(backupDir string) (map[string]interface{}, error
 	}
 
 	return payload, nil
+}
+
+// digitizedContentFile is a digitized output file found in a backup.
+type digitizedContentFile struct {
+	docID  string
+	format string
+	path   string
+}
+
+// listDigitizedContentFiles returns the digitized output files (json/md/txt) in the backup, if any.
+func listDigitizedContentFiles(backupDir string) ([]digitizedContentFile, error) {
+	dir := filepath.Join(backupDir, "cache", contentDir)
+
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to read digitized content directory: %w", err)
+	}
+
+	files := make([]digitizedContentFile, 0, len(entries))
+
+	for _, entry := range entries {
+		ext := filepath.Ext(entry.Name())
+		format := strings.TrimPrefix(ext, ".")
+
+		if entry.IsDir() || (format != "json" && format != "md" && format != "txt") {
+			continue
+		}
+
+		files = append(files, digitizedContentFile{
+			docID:  strings.TrimSuffix(entry.Name(), ext),
+			format: format,
+			path:   filepath.Join(dir, entry.Name()),
+		})
+	}
+
+	return files, nil
 }
 
 // readDigitizeFiles reads every JSON file in dir whose name ends with suffix and returns the
@@ -175,6 +219,42 @@ func (c *DigitizeRestoreClient) CallImportAPI(ctx context.Context, payload map[s
 	return nil
 }
 
+// CallImportContentAPI uploads one digitized output file to the digitize service.
+// It returns true when the file was written and false when it already existed.
+func (c *DigitizeRestoreClient) CallImportContentAPI(ctx context.Context, file digitizedContentFile) (bool, error) {
+	raw, err := os.ReadFile(file.path)
+	if err != nil {
+		return false, fmt.Errorf("failed to read content file %s: %w", file.path, err)
+	}
+
+	result := json.RawMessage(raw)
+
+	if file.format != "json" {
+		// md/txt content is sent as a JSON string.
+		if result, err = json.Marshal(string(raw)); err != nil {
+			return false, fmt.Errorf("failed to encode content of %s: %w", file.docID, err)
+		}
+	}
+
+	var response map[string]interface{}
+
+	resp, err := c.client.R().
+		SetContext(ctx).
+		SetPathParam("doc_id", file.docID).
+		SetBody(map[string]interface{}{"result": result, "output_format": file.format}).
+		SetResult(&response).
+		Post("/v1/import/content/{doc_id}")
+	if err != nil {
+		return false, fmt.Errorf("failed to call import content API for %s: %w", file.docID, err)
+	}
+
+	if resp.IsError() {
+		return false, fmt.Errorf("import content API for %s returned HTTP %d: %s", file.docID, resp.StatusCode(), resp.String())
+	}
+
+	return response["status"] == "imported", nil
+}
+
 func logImportSummary(importResponse map[string]interface{}) {
 	summary, ok := importResponse["summary"].(map[string]interface{})
 	if !ok {
@@ -193,7 +273,7 @@ func logImportSummary(importResponse map[string]interface{}) {
 			utils.GetNumericValFromMap(docs, "imported"), utils.GetNumericValFromMap(docs, "skipped"), utils.GetNumericValFromMap(docs, "failed"))
 	}
 
-	if checksums, ok := summary["document_checksums"].(map[string]interface{}); ok {
+	if checksums, ok := summary["document_checksums"].(map[string]interface{}); ok && utils.GetNumericValFromMap(checksums, "total_received") > 0 {
 		logger.Infof("  Document checksums - imported: %d, skipped: %d, failed: %d\n",
 			utils.GetNumericValFromMap(checksums, "imported"), utils.GetNumericValFromMap(checksums, "skipped"), utils.GetNumericValFromMap(checksums, "failed"))
 	}
@@ -223,20 +303,60 @@ func logImportWarnings(importResponse map[string]interface{}) {
 	logger.Infof("Import completed with %d warning(s)\n", len(warnings))
 }
 
-func GetDigitizeData(backupFile string) (map[string]interface{}, error) {
+// RestoreDigitize restores digitize metadata (jobs, documents, checksums) from backupFile
+// through the Import API and, when the backup contains digitized output files, uploads
+// them to the digitize service as well.
+func RestoreDigitize(ctx context.Context, digitizeURL, backupFile string) error {
 	backupDir, cleanup, err := podmanrestore.ExtractAndLocateBackup(backupFile)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer cleanup()
 
-	// Construct metadata from cache files
 	importPayload, err := constructMetadataFromCache(backupDir)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return importPayload, nil
+	contentFiles, err := listDigitizedContentFiles(backupDir)
+	if err != nil {
+		return err
+	}
+
+	client := NewDigitizeRestoreClient(digitizeURL)
+	if err := client.CallImportAPI(ctx, importPayload); err != nil {
+		return err
+	}
+
+	return restoreDigitizedContent(ctx, client, contentFiles)
+}
+
+// restoreDigitizedContent uploads digitized output files; documents must already be imported.
+func restoreDigitizedContent(ctx context.Context, client *DigitizeRestoreClient, files []digitizedContentFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+
+	logger.Infof("Restoring %d digitized content file(s)\n", len(files))
+
+	var imported, skipped int
+
+	for _, file := range files {
+		written, err := client.CallImportContentAPI(ctx, file)
+		if err != nil {
+			return err
+		}
+
+		if written {
+			imported++
+		} else {
+			skipped++
+		}
+	}
+
+	logger.Infof("Digitized content - imported: %d, skipped: %d\n", imported, skipped)
+
+	return nil
 }
 
 // GetDigitizeAPIURL extracts the digitize API URL from application details.
@@ -259,5 +379,3 @@ func GetDigitizeAPIURL(appDetails *catalogTypes.Application) (string, error) {
 
 	return "", fmt.Errorf("digitize service not found in application")
 }
-
-// Made with Bob

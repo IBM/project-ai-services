@@ -3587,6 +3587,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			digitizeDocName = doc.Name
 			digitizeDocStatus = doc.Status
 
+			preBackupContent, err := digitization.GetDocumentContent(ctx, digitizeBaseURL, digitizeDocID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(preBackupContent.Result).NotTo(gomega.BeNil())
+
 			// Ingest test_doc.pdf AFTER digitization so OpenSearch is populated for
 			// the RAG queries below. Digitization has already recorded the file, so
 			// ingestion re-processes it without conflict (different operation type).
@@ -3679,6 +3683,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			gomega.Expect(restoredDocs.Data).NotTo(gomega.BeEmpty())
 			gomega.Expect(restoredDocs.Data[0].Name).To(gomega.Equal(digitizeDocName))
 			gomega.Expect(restoredDocs.Data[0].Status).To(gomega.Equal(digitizeDocStatus))
+
+			ginkgo.By("verifying digitized content was restored")
+			restoredContent, err := digitization.GetDocumentContent(ctx, restoredDigitizeBaseURL, digitizeDocID)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(restoredContent.OutputFormat).To(gomega.Equal(preBackupContent.OutputFormat))
+			gomega.Expect(restoredContent.Result).To(gomega.Equal(preBackupContent.Result))
 
 			restoredRAGBaseURL, err := cli.GetBaseURL(restoredInfoOutput, backendPort)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3809,6 +3819,10 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					gomega.Expect(docErr).NotTo(gomega.HaveOccurred())
 					osDigitizeDocName = osDoc.Name
 					osDigitizeDocStatus = osDoc.Status
+
+					osPreBackupContent, contentErr := digitization.GetDocumentContent(specCtx, osDigitizeURL, osDigitizeDocID)
+					gomega.Expect(contentErr).NotTo(gomega.HaveOccurred())
+					gomega.Expect(osPreBackupContent.Result).NotTo(gomega.BeNil())
 					logger.Infof("[OPENSHIFT-BR] Seeded digitize job=%s doc=%s", osDigitizeJobID, osDigitizeDocName)
 
 					// Runs after digitization so test_doc.pdf is already in the digitize
@@ -3931,6 +3945,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					gomega.Expect(restoredDocs.Data[0].Name).To(gomega.Equal(osDigitizeDocName))
 					gomega.Expect(restoredDocs.Data[0].Status).To(gomega.Equal(osDigitizeDocStatus))
 					logger.Infof("[OPENSHIFT-BR] Digitize document %s restored successfully", osDigitizeDocName)
+
+					ginkgo.By("verifying digitized content was restored")
+					osRestoredContent, contentErr := digitization.GetDocumentContent(specCtx, restoredDigitizeURL, osDigitizeDocID)
+					gomega.Expect(contentErr).NotTo(gomega.HaveOccurred())
+					gomega.Expect(osRestoredContent.OutputFormat).To(gomega.Equal(osPreBackupContent.OutputFormat))
+					gomega.Expect(osRestoredContent.Result).To(gomega.Equal(osPreBackupContent.Result))
 
 					ginkgo.By("verifying RAG responses match pre-backup responses")
 					for _, p := range osRAGPrompts {
