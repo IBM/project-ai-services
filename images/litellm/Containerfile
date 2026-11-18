@@ -1,5 +1,5 @@
 #### Base stage: shared build dependencies for the parallel stages below
-FROM registry.access.redhat.com/ubi9/ubi:9.8 as base
+FROM registry.access.redhat.com/ubi9/ubi:9.9 as base
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 ARG TARGETARCH
@@ -89,7 +89,7 @@ RUN NODE_VERSION=${NODE_VERSION} NODE_SHA256=${NODE_SHA256} \
     bash install-prisma-cli.sh
 
 #### Runtime Stage
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9
 
 ARG VERSION=${VERSION}
 ARG PYTHON_VERSION

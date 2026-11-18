@@ -1,7 +1,7 @@
 # ============================================================================
 # Build Stage
 # ============================================================================
-FROM registry.access.redhat.com/ubi9/ubi:9.8 AS builder
+FROM registry.access.redhat.com/ubi9/ubi:9.9 AS builder
 
 ARG GO_VERSION=1.26.10
 
@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" \
 # ============================================================================
 # Runtime Stage
 # ============================================================================
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9
 
 COPY --from=builder /go/src/github.com/project-ai-services/mcp/bin/ai-services-mcp /usr/bin/ai-services-mcp
 
