@@ -233,8 +233,8 @@ def _service_env(ctx, name):
 
 
 def add_python_env(ctx):
-    # Created once. Picks the first Python >= 3.10 found unless --python_bin is given
-    # (the services use `X | None` annotations, so the macOS system python3 3.9 is too old).
+    # Created once. Picks the first Python >= 3.12 found unless --python_bin is given
+    # (the macOS system python3 3.9 is too old).
     local_resource(
         name="python-env",
         dir=REPO_ROOT,
@@ -243,12 +243,12 @@ def add_python_env(ctx):
             if [ ! -x {venv}/bin/python ]; then
                 PY="{py}"
                 if [ -z "$PY" ]; then
-                    for c in python3.12 python3.13 python3.11 python3.10 python3; do
-                        if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+                    for c in python3.12 python3.13 python3.14 python3; do
+                        if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1; then PY="$c"; break; fi
                     done
                 fi
-                if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
-                    echo "ERROR: Python >= 3.10 is required; pass --python_bin=python3.12"
+                if [ -z "$PY" ] || ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
+                    echo "ERROR: Python >= 3.12 is required; pass --python_bin=python3.12"
                     exit 1
                 fi
                 "$PY" -m venv {venv}
