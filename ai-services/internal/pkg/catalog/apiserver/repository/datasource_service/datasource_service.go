@@ -975,10 +975,7 @@ func (s *DatasourceService) checkAllowConnect(services []dbrepo.LinkedServiceRow
 	for _, svc := range services {
 		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
 		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanConnectDatasource(catalogSvc.Datasource) {
-			return &ValidationError{
-				Code:    http.StatusUnprocessableEntity,
-				Message: fmt.Sprintf("service %q does not allow post-creation datasource connect", svc.ServiceCatalogID),
-			}
+			return validators.Unprocessable("service %q does not allow post-creation datasource connect", svc.ServiceCatalogID)
 		}
 	}
 
@@ -991,10 +988,7 @@ func (s *DatasourceService) checkAllowDisconnect(services []dbrepo.LinkedService
 	for _, svc := range services {
 		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
 		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanDisconnectDatasource(catalogSvc.Datasource) {
-			return &ValidationError{
-				Code:    http.StatusUnprocessableEntity,
-				Message: fmt.Sprintf("service %q does not allow datasource disconnect", svc.ServiceCatalogID),
-			}
+			return validators.Unprocessable("service %q does not allow datasource disconnect", svc.ServiceCatalogID)
 		}
 	}
 
