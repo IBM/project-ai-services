@@ -430,13 +430,10 @@ func TestCreateModel_Remote(t *testing.T) {
 				assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
 				assert.Equal(t, map[string]any{"model_id": "litellm-id-ibm/granite-4-h-small"}, conn.Metadata["litellm"])
 
-				modelParams, ok := conn.Metadata[constants.MetadataKeyModelParams].(map[string]any)
-				require.True(t, ok)
-				assert.Equal(t, 131072, modelParams[constants.ParamMaxModelLen])
-				assert.Equal(t, 32, modelParams[constants.ParamMaxBatchSize])
-
-				params, ok := conn.Metadata["params"].(map[string]any)
+				params, ok := conn.Metadata[constants.MetadataKeyParams].(map[string]any)
 				require.True(t, ok, "provider params are nested under \"params\"")
+				assert.Equal(t, 131072, params[constants.ParamMaxModelLen])
+				assert.Equal(t, 32, params[constants.ParamMaxBatchSize])
 				assert.NotContains(t, params, "api_key", "credentials must never be persisted")
 				assert.NotContains(t, conn.Metadata, "api_key")
 				assert.NotContains(t, conn.Metadata, "api_base", "params are not stored flat")
@@ -1286,8 +1283,8 @@ func TestCreateRemoteModel_HostedVllm(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, dbmodels.ConnectorStatusConnected, conn.Status)
 
-	modelParams, ok := conn.Metadata[constants.MetadataKeyModelParams].(map[string]any)
+	params, ok := conn.Metadata[constants.MetadataKeyParams].(map[string]any)
 	require.True(t, ok)
-	assert.Equal(t, 4096, modelParams[constants.ParamMaxModelLen])
-	assert.Equal(t, 64, modelParams[constants.ParamMaxBatchSize])
+	assert.Equal(t, 4096, params[constants.ParamMaxModelLen])
+	assert.Equal(t, 64, params[constants.ParamMaxBatchSize])
 }

@@ -41,11 +41,9 @@ const (
 	// MetadataKeyLiteLLMModelID is the key, nested under MetadataKeyLiteLLM, that stores the model ID
 	// LiteLLM assigned on registration.
 	MetadataKeyLiteLLMModelID = "model_id"
-	// MetadataKeyModelParams is the metadata key that holds parameters specific to the model, such as token limits.
-	MetadataKeyModelParams = "model_params"
-	// ParamMaxModelLen is the parameter key inside MetadataKeyModelParams storing maximum model length.
+	// ParamMaxModelLen is the parameter key inside MetadataKeyParams storing maximum model length.
 	ParamMaxModelLen = "maxModelLen"
-	// ParamMaxBatchSize is the parameter key inside MetadataKeyModelParams storing maximum batch size.
+	// ParamMaxBatchSize is the parameter key inside MetadataKeyParams storing maximum batch size.
 	ParamMaxBatchSize = "maxBatchSize"
 )
 
