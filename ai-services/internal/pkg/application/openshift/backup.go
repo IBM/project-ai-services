@@ -105,16 +105,8 @@ func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appDetails *c
 
 	logger.Infof("Digitize API URL: %s\n", digitizeURL)
 
-	// Create digitize backup client and call Export API
-	client := commonBackup.NewDigitizeBackupClient(digitizeURL)
-
-	exportResponse, err := client.CallExportAPI(ctx)
+	exportResponse, err := commonBackup.BackupDigitize(ctx, digitizeURL, absBackupFile)
 	if err != nil {
-		return err
-	}
-
-	// Create backup archive using shared function
-	if err := commonBackup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
 		return err
 	}
 
