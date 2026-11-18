@@ -77,7 +77,14 @@ async def import_metadata(payload: models.ImportRequest):
                     f"Active jobs: {', '.join(active_job_ids)}",
                 )
 
-            return db_ops.import_metadata(payload)
+            import_result = db_ops.import_metadata(payload)
+            if not payload.validate_only:
+                try:
+                    from digitize.utils.recovery import reconcile_opensearch_orphans
+                    reconcile_opensearch_orphans(dry_run=False)
+                except Exception as rec_err:
+                    logger.warning(f"Post-import OpenSearch orphan reconciliation failed: {rec_err}")
+            return import_result
         finally:
             await db_ops.release_import_export_lock()
 
@@ -273,3 +280,43 @@ async def get_conversion_tasks(
         )
         for t in tasks
     ]
+
+
+# ------------------------------------------------------------------ #
+# OpenSearch reconciliation endpoint                                 #
+# ------------------------------------------------------------------ #
+
+@router.post(
+    "/reconcile-opensearch",
+    response_model=models.ReconcileOrphansResponse,
+    responses={
+        500: http_error_responses[500],
+    },
+    summary="Reconcile and cleanup orphan chunks in OpenSearch",
+    description=(
+        "Scans OpenSearch for document IDs that do not exist in the PostgreSQL documents table "
+        "and removes orphaned vector chunks to ensure data consistency."
+    ),
+    response_description="Summary of scanned docs, identified orphans, and deleted chunks",
+)
+async def reconcile_opensearch(
+    dry_run: bool = Query(
+        False,
+        description="If True, only scans and reports orphan document IDs without deleting chunks",
+    ),
+):
+    """Reconcile OpenSearch vector database with PostgreSQL documents table."""
+    try:
+        from digitize.utils.recovery import reconcile_opensearch_orphans
+        result = reconcile_opensearch_orphans(dry_run=dry_run)
+        return models.ReconcileOrphansResponse(**result)
+    except HTTPException as exc:
+        message = f"Failed to reconcile OpenSearch orphans: {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
+    except Exception as exc:
+        logger.error(f"Failed to reconcile OpenSearch orphans: {exc}", exc_info=True)
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"OpenSearch reconciliation failed: {exc}",
+        )

@@ -394,6 +394,31 @@ class DatabaseManager:
             logger.error(f"Unexpected error retrieving document {doc_id}: {e}", exc_info=True)
             return None
 
+    @staticmethod
+    def get_existing_doc_ids(doc_ids: list[str]) -> set[str]:
+        """
+        Return the set of doc_ids that exist in the PostgreSQL documents table.
+
+        Args:
+            doc_ids: List of document IDs to check
+
+        Returns:
+            Set of existing document IDs
+        """
+        if not doc_ids:
+            return set()
+        try:
+            with get_db_session() as session:
+                stmt = select(Document.doc_id).where(Document.doc_id.in_(doc_ids))
+                result = session.scalars(stmt).all()
+                return set(result)
+        except SQLAlchemyError as e:
+            logger.error(f"Database error querying existing document IDs: {e}", exc_info=True)
+            return set(doc_ids)  # Fail-safe: treat all as existing to prevent accidental deletion
+        except Exception as e:
+            logger.error(f"Unexpected error querying existing document IDs: {e}", exc_info=True)
+            return set(doc_ids)  # Fail-safe
+
 
     # A document in one of these states no longer owns its content: the next submission
     # of the same content is treated as novel and re-points the document_checksum row.
