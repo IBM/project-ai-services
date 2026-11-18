@@ -9,6 +9,9 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp/reverseproxy"
 )
 
+// encryptedMTLSTransportID is the Caddy module ID of the encrypted_mtls transport.
+const encryptedMTLSTransportID = "http.reverse_proxy.transport.encrypted_mtls"
+
 func init() {
 	caddy.RegisterModule(&EncryptedMTLSTransport{})
 }
@@ -51,7 +54,7 @@ type EncryptedMTLSTransport struct {
 // CaddyModule returns the Caddy module information.
 func (*EncryptedMTLSTransport) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
-		ID:  "http.reverse_proxy.transport.encrypted_mtls",
+		ID:  encryptedMTLSTransportID,
 		New: func() caddy.Module { return new(EncryptedMTLSTransport) },
 	}
 }
