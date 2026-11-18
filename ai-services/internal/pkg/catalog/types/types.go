@@ -97,6 +97,10 @@ type DatasourceSettings struct {
 	AllowConnect       *bool    `yaml:"allow_connect,omitempty" json:"allow_connect,omitempty"`
 	AllowDisconnect    *bool    `yaml:"allow_disconnect,omitempty" json:"allow_disconnect,omitempty"`
 	SupportedProviders []string `yaml:"supported_providers,omitempty" json:"supported_providers,omitempty"`
+	// MaxConnections is the maximum number of datasources that may be attached to the service at any
+	// one time (creation-time and post-creation connections combined). nil means unlimited.
+	// Must be >= 1 when set.
+	MaxConnections *int `yaml:"max_connections,omitempty" json:"max_connections,omitempty"`
 }
 
 // Service represents a deployable AI service.
