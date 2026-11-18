@@ -179,7 +179,10 @@ class TestWorkerRole:
     def test_updates_password_when_role_exists(self):
         statements = _run_setup(role_exists=True)
         assert any(
-            s.startswith('ALTER ROLE "forecast_worker" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD')
+            s.startswith(
+                'ALTER ROLE "forecast_worker" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE '
+                "NOREPLICATION NOBYPASSRLS PASSWORD"
+            )
             for s in statements
         )
         assert not any(s.startswith("CREATE ROLE") for s in statements)
@@ -214,6 +217,20 @@ class TestWorkerRole:
         with patch.object(init_db, "get_connection", side_effect=RuntimeError("boom")):
             init_db.setup_worker_role("h", "5432", "d", "u", "p", "forecast_worker", "wpw")
         assert "wpw" not in capsys.readouterr().out
+
+    def test_failure_does_not_print_the_statement_that_holds_the_password(self, capsys):
+        """A database error can quote the failed statement, password included."""
+        cursor, _, connection = _setup_cursor(None)
+        error = RuntimeError("syntax error at: CREATE ROLE forecast_worker LOGIN PASSWORD 'wpw'")
+        error.pgcode = "42601"
+        cursor.execute.side_effect = [None, error]
+        with patch.object(init_db, "get_connection", return_value=connection):
+            assert not init_db.setup_worker_role(
+                "h", "5432", "d", "u", "p", "forecast_worker", "wpw"
+            )
+        out = capsys.readouterr().out
+        assert "wpw" not in out
+        assert "RuntimeError" in out and "42601" in out
 
 
 class TestMain:

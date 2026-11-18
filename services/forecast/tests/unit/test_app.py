@@ -101,6 +101,14 @@ def test_empty_request_id_is_replaced(client):
     assert response.headers["X-Request-ID"]
 
 
+@pytest.mark.unit
+def test_overlong_request_id_is_replaced(client):
+    overlong_id = "a" * 150
+    response = client.get("/health", headers={"X-Request-ID": overlong_id})
+    assert response.headers["X-Request-ID"]
+    assert response.headers["X-Request-ID"] != overlong_id
+
+
 # ---------------------------------------------------------------------------
 # Error envelope
 # ---------------------------------------------------------------------------
@@ -443,6 +451,70 @@ def test_close_db_connections_is_a_no_op_without_a_connection_manager():
 
     with patch.object(connection, "_close_db_connections", None):
         connection.close_db_connections()
+
+
+@pytest.mark.unit
+def test_close_db_connections_closes_the_pool():
+    import forecast.db.connection as connection
+
+    with patch.object(connection, "_close_db_connections") as close:
+        connection.close_db_connections()
+
+    close.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_check_db_configured_accepts_a_configured_session_factory():
+    import forecast.db.connection as connection
+
+    with patch.object(connection, "get_db_session", object()):
+        assert connection.check_db_configured() is None
+
+
+@pytest.mark.unit
+def test_check_db_configured_raises_when_session_is_none():
+    import forecast.db.connection as connection
+
+    with patch.object(connection, "get_db_session", None):
+        with pytest.raises(RuntimeError, match="Database connection is not configured"):
+            connection.check_db_configured()
+
+
+@pytest.mark.unit
+def test_startup_fails_fast_when_database_not_configured():
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "check_db_configured", side_effect=RuntimeError("db unconfigured")):
+        with pytest.raises(RuntimeError, match="db unconfigured"):
+            with TestClient(forecast_app.app):
+                pass
+
+
+@pytest.mark.unit
+def test_startup_continues_when_the_thread_limiter_cannot_be_set(caplog):
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections"), patch(
+        "anyio.to_thread.current_default_thread_limiter", side_effect=RuntimeError("no limiter")
+    ), caplog.at_level("WARNING"):
+        with TestClient(forecast_app.app) as client:
+            assert client.get("/health").status_code == 200
+    assert any("Could not set thread limiter tokens" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.unit
+def test_startup_caps_the_thread_limiter_to_the_database_pool():
+    import forecast.app as forecast_app
+    from forecast.settings import settings
+
+    with patch.object(forecast_app, "close_db_connections"), patch(
+        "anyio.to_thread.current_default_thread_limiter"
+    ) as current:
+        with TestClient(forecast_app.app):
+            pass
+    assert current.return_value.total_tokens == (
+        settings.database.pool_size + settings.database.max_overflow
+    )
 
 
 @pytest.mark.unit
