@@ -25,7 +25,7 @@ The three services only call an LLM (chat completions plus `/tokenize`) and stor
 
 | Resource | What it does |
 |----------|--------------|
-| `python-env` | Creates a venv from a requirements file. Extract, translate and summarize share `hack/tilt/services/.venv` ([`requirements.txt`](../../hack/tilt/services/requirements.txt)); forecast has its own `hack/tilt/services/forecast/.venv` ([`forecast/requirements.txt`](../../hack/tilt/services/forecast/requirements.txt)). Needs Python 3.10 or newer; created once. |
+| `python-env` | Creates `hack/tilt/services/.venv` from [`requirements.txt`](../../hack/tilt/services/requirements.txt), shared by every service. Needs Python 3.10 or newer; created once. |
 | `postgres` | PostgreSQL in Podman, one database per service (`extract_metadata`, `translate_metadata`, `summarize_metadata`, `forecast_metadata`). |
 | `model-server` | Extract / translate / summarize only. [`hack/tilt/model_server.py`](../../hack/tilt/model_server.py) with `MODEL_SERVER_MODELS=llm`: serves `/llm` only (chat completions through Ollama or watsonx.ai, plus a local `/tokenize`). |
 | `<service>-db-init` | Creates the service database and schema (idempotent). For forecast it also creates the restricted `forecast_worker` role. |
@@ -42,9 +42,7 @@ hack/tilt/
 ├── model_server.py          # shared with Tiltfile.rag (LLM-only mode added)
 └── services/
     ├── Tiltfile             # --service=extract|translate|summarize|forecast
-    ├── requirements.txt     # lean venv shared by extract / translate / summarize
-    └── forecast/
-        └── requirements.txt # forecast's own venv (kept apart so its training stack stays out of the shared one)
+    └── requirements.txt     # one lean venv for all services (no torch / docling / OpenSearch client)
 ```
 
 ## Prerequisites
@@ -132,7 +130,7 @@ Swagger UI is at http://localhost:8500/docs (the connector routes are hidden fro
 
 - **Triton image.** The proposal's `quay.io/powercloud/tritonserver` is ppc64le only. Locally the default is `nvcr.io/nvidia/tritonserver:24.08-py3`, which is multi-arch, so Apple Silicon pulls the native arm64 build (about 13 GB on first `tilt up`).
 - **Covered.** API, connectors, database/init, encryption and the `TRITON_URL` check. The API does not call Triton yet; the training worker, scheduler, data loader, Triton load/unload and the forecast endpoints are WIP.
-- **Venv.** `forecast/requirements.txt` has no AutoGluon, pandas, tritonclient or APScheduler yet. Add them there (not to the shared file) when the worker lands.
+- **Venv.** The shared `requirements.txt` has only forecast's `cryptography` so far, no AutoGluon, pandas, tritonclient or APScheduler yet. Add them from `services/forecast/requirements.txt` when the worker lands.
 - **Encryption key.** `DB_ENCRYPTION_KEY` is read from the environment (exactly 32 bytes, used as is); default `forecast-local-dev-key-012345678`. Changing it makes stored connector secrets unreadable.
 - **Data.** Model repository, scratch and CSV data dir live under `.tilt/services/forecast`; `tilt down` removes them and both containers, and keeps the venv.
 
@@ -162,4 +160,4 @@ Forecast-only options:
 | `tilt down` fails with `Refusing to run 'local' because ... might be a production kube context` | Tilt's safety guard looks at your current kube context even though these Tiltfiles use no Kubernetes. Switch to a local context (`kubectl config use-context <local>`), or remove the leftovers by hand: `podman rm -f ai-svc-<name>-postgres (forecast also ai-svc-forecast-triton); podman volume rm ai-svc-<name>-postgres-data; rm -rf .tilt/services/<name>`. The root `Tiltfile` and `Tiltfile.rag` behave the same way. |
 | `forecast-api` fails with `DB_ENCRYPTION_KEY must be exactly 32 bytes` | The `DB_ENCRYPTION_KEY` environment variable is not 32 bytes. |
 | `triton` not ready | First start pulls a multi-GB image (`podman pull nvcr.io/nvidia/tritonserver:24.08-py3`); check its log. |
-| A service crashed on a missing module | Add it to `hack/tilt/services/requirements.txt` (forecast: `hack/tilt/services/forecast/requirements.txt`); `python-env` reinstalls on change, then trigger the crashed resource. |
+| A service crashed on a missing module | Add it to `hack/tilt/services/requirements.txt`; `python-env` reinstalls on change, then trigger the crashed resource. |

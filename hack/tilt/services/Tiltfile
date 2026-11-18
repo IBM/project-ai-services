@@ -5,8 +5,7 @@
 # =============================================================================
 #
 # Runs ONE service with only its dependencies, chosen with the --service Tilt flag:
-#   python-env     : lean venv (extract/translate/summarize share hack/tilt/services/.venv;
-#                    forecast has its own hack/tilt/services/forecast/.venv, so it installs only what it needs)
+#   python-env     : lean venv (hack/tilt/services/.venv) shared by all services
 #   postgres       : PostgreSQL in Podman (<svc>_metadata database)
 #   <svc>-db-init  : creates the service database and schema (idempotent)
 #   <svc>-api      : the service's FastAPI app, run from source with uvicorn --reload
@@ -34,8 +33,6 @@ REQUIREMENTS = "hack/tilt/services/requirements.txt"
 
 # Default ports avoid browser-blocked (6000) and macOS AirPlay (5000, 7000) ports.
 #   llm        : needs the LLM model server (LLM_* env, CACHE_DIR)
-#   venv/requirements : override the shared venv and requirements (forecast needs no LLM stack, but
-#                       will need the heavy training stack, which must not leak into the shared venv)
 #   docs_path  : where the Swagger UI is served (the LLM services serve it at "/")
 SERVICES = {
     "extract": {"title": "Extract", "port": 9500, "database": "extract_metadata", "llm": True},
@@ -43,8 +40,6 @@ SERVICES = {
     "summarize": {"title": "Summarize", "port": 6100, "database": "summarize_metadata", "llm": True},
     "forecast": {
         "title": "Forecast", "port": 8500, "database": "forecast_metadata", "llm": False,
-        "venv": "hack/tilt/services/forecast/.venv",
-        "requirements": "hack/tilt/services/forecast/requirements.txt",
         "docs_path": "/docs",
     },
 }
@@ -108,8 +103,8 @@ def setup():
         "profile": profile,
         "services": services,
         "llm": service["llm"],
-        "venv": service.get("venv", VENV),
-        "requirements": service.get("requirements", REQUIREMENTS),
+        "venv": VENV,
+        "requirements": REQUIREMENTS,
         "python_bin": _flag(cfg, "python_bin", ""),
         "llm_provider": llm_provider,
         "ollama_url": _flag(cfg, "ollama_url", os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1")),
