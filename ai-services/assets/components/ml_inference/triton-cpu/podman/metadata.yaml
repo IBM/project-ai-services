@@ -1,0 +1,12 @@
+name: triton
+version: "1.0.0"
+
+podTemplateExecutions:
+  - [triton-server.yaml.tmpl]
+
+# Resource requirements
+# TBD (DEV): the values below are provided by DEV. The Catalog uses them for its capacity check.
+resources:
+  cpu: 0        # TBD (DEV)
+  memory: 0     # TBD (DEV), bytes
+  storage: 0    # TBD (DEV), bytes: size of the repository volume

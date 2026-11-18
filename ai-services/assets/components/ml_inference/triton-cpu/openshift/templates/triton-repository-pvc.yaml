@@ -1,0 +1,21 @@
+{{- if not (lookup "v1" "PersistentVolumeClaim" .Release.Namespace "triton-repository") -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "triton-repository"
+  labels:
+    ai-services.io/component: {{ .Release.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - ReadWriteMany
+  {{- if .Values.storageClassName }}
+  storageClassName: {{ .Values.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.storage | quote }}
+{{- end -}}

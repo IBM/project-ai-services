@@ -1,0 +1,17 @@
+image: quay.io/powercloud/tritonserver:latest
+
+# TBD (DEV): size of the repository volume. "1Gi" is a placeholder so that the claim can be
+# created; replace it with the value provided by DEV.
+storage: 1Gi
+# TBD (DEV): storage class of the repository volume. It must offer ReadWriteMany. Empty uses
+# the cluster default.
+storageClassName: ""
+
+# TBD (DEV): CPU and memory of the Triton container. Leave empty to set no request or limit.
+resources:
+  requests:
+    cpu: ""
+    memory: ""
+  limits:
+    cpu: ""
+    memory: ""

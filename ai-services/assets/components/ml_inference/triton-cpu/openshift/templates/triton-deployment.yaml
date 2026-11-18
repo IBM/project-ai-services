@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "triton"
+  labels:
+    ai-services.io/component: {{ .Release.Name }}
+    ai-services.io/template: {{ .Values.templateID }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      ai-services.io/component: {{ .Release.Name }}
+      ai-services.io/name: triton
+  template:
+    metadata:
+      labels:
+        ai-services.io/component: {{ .Release.Name }}
+        ai-services.io/template: {{ .Values.templateID }}
+        ai-services.io/name: triton
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: triton
+          image: "{{ .Values.image }}"
+          args:
+            - tritonserver
+            - --model-repository=/models
+            - --model-control-mode=explicit
+            - --strict-readiness=false
+            - --exit-on-error=false
+            - --http-port=8000
+            - --grpc-port=8001
+            - --metrics-port=8002
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: grpc
+              containerPort: 8001
+              protocol: TCP
+            - name: metrics
+              containerPort: 8002
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{- with .Values.resources }}
+          {{- $requests := dict }}
+          {{- $limits := dict }}
+          {{- range $k, $v := .requests }}{{ if $v }}{{ $_ := set $requests $k $v }}{{ end }}{{ end }}
+          {{- range $k, $v := .limits }}{{ if $v }}{{ $_ := set $limits $k $v }}{{ end }}{{ end }}
+          {{- if or $requests $limits }}
+          resources:
+            {{- if $requests }}
+            requests:
+              {{- toYaml $requests | nindent 14 }}
+            {{- end }}
+            {{- if $limits }}
+            limits:
+              {{- toYaml $limits | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: repository
+              mountPath: /models
+              readOnly: true
+      volumes:
+        - name: repository
+          persistentVolumeClaim:
+            claimName: "triton-repository"

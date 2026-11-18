@@ -1,0 +1,6 @@
+image: quay.io/powercloud/tritonserver:latest
+# TBD (DEV): memory request and limit of the Triton container, e.g. "8Gi". Unset means no limit.
+memoryLimit: ""
+# uid:gid that owns the repository volume root. The Forecast pod must run as this user and group
+# (securityContext runAsUser/fsGroup) so that it can create, rename and delete under /models.
+repositoryOwner: "1001:0"

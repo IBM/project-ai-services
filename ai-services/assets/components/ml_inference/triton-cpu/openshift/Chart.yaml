@@ -1,0 +1,7 @@
+apiVersion: v2
+name: ml-inference-triton-cpu
+description: A Helm chart for deploying Triton Inference Server (CPU) on OpenShift
+type: application
+
+version: "1.0.0"
+appVersion: "1.0.0"
