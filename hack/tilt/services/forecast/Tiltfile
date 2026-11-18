@@ -1,0 +1,301 @@
+# -*- mode: Python -*-
+
+# =============================================================================
+# Tiltfile for the forecast service (macOS / local development)
+# =============================================================================
+#
+# Sits next to hack/tilt/services/Tiltfile (extract / translate / summarize). Forecast has a
+# different shape - no LLM, a restricted worker DB role, a Triton model repository - so it has
+# its own Tiltfile and venv.
+#
+#   python-env        : lean venv (hack/tilt/services/forecast/.venv)
+#   postgres          : PostgreSQL in Podman (forecast_metadata database)
+#   forecast-db-init  : creates the database, schema and the restricted forecast_worker role (idempotent)
+#   forecast-api      : the FastAPI app, run from source with uvicorn --reload
+#   triton            : Triton Inference Server in Podman, explicit model control, reading the
+#                       model repository the API writes to
+#
+# Usage:
+#   tilt up -f hack/tilt/services/forecast/Tiltfile
+#   tilt down -f hack/tilt/services/forecast/Tiltfile
+#
+# Local development only - every credential below is a publicly documented default.
+# See docs/dev-guides/tilt-forecast-local-development.md
+# =============================================================================
+
+REPO_ROOT = os.path.abspath(os.path.join(config.main_dir, "..", "..", "..", ".."))
+VENV = "hack/tilt/services/forecast/.venv"
+REQUIREMENTS = "hack/tilt/services/forecast/requirements.txt"
+
+# 8500 is the service's own default (services/forecast/app.py). Postgres 5434-5436 belong to
+# hack/tilt/services/Tiltfile, so forecast takes 5437.
+DATABASE = "forecast_metadata"
+
+
+def _flag(cfg, name, default):
+    return str(cfg.get(name, default))
+
+
+def setup():
+    """Defines the config flags, parses them and returns the settings dict used by the helpers below."""
+    config.define_string("python_bin", args=False)
+    config.define_string("forecast_port", args=False)
+    config.define_string("postgres_image", args=False)
+    config.define_string("postgres_port", args=False)
+    config.define_string("postgres_password", args=False)
+    config.define_string("worker_postgres_user", args=False)
+    config.define_string("worker_postgres_password", args=False)
+    config.define_string("triton_image", args=False)
+    config.define_string("triton_platform", args=False)
+    config.define_string("triton_port", args=False)
+    cfg = config.parse()
+
+    triton_port = int(_flag(cfg, "triton_port", 8000))
+    data_dir = os.path.join(REPO_ROOT, ".tilt/services/forecast")
+
+    ctx = {
+        "python_bin": _flag(cfg, "python_bin", ""),
+        "forecast_port": int(_flag(cfg, "forecast_port", 8500)),
+        "postgres_image": _flag(cfg, "postgres_image", "docker.io/library/postgres:16-alpine"),
+        "postgres_port": int(_flag(cfg, "postgres_port", 5437)),
+        # Local development defaults only.
+        "postgres_password": _flag(cfg, "postgres_password", "Aiservicesdb@1234"),
+        "worker_postgres_user": _flag(cfg, "worker_postgres_user", "forecast_worker"),
+        "worker_postgres_password": _flag(cfg, "worker_postgres_password", "ForecastWorker@1234"),
+        # AES-256-GCM key: must be exactly 32 bytes, used as-is (not base64). Override with the
+        # DB_ENCRYPTION_KEY environment variable; changing it makes stored connector secrets unreadable.
+        "db_encryption_key": os.getenv("DB_ENCRYPTION_KEY", "forecast-local-dev-key-012345678"),
+        # The proposal's image (quay.io/powercloud/tritonserver) is ppc64le only. NVIDIA's image is
+        # multi-arch (amd64 + arm64), so by default podman pulls the native build (Apple Silicon: arm64).
+        # Set --triton_platform=linux/amd64 only to force emulation.
+        "triton_image": _flag(cfg, "triton_image", "nvcr.io/nvidia/tritonserver:24.08-py3"),
+        "triton_platform": _flag(cfg, "triton_platform", ""),
+        "triton_port": triton_port,
+        "triton_url": "http://localhost:{}".format(triton_port),
+        "pg_container": "ai-svc-forecast-postgres",
+        "pg_volume": "ai-svc-forecast-postgres-data",
+        "triton_container": "ai-svc-forecast-triton",
+        "data_dir": data_dir,
+        "model_repo": os.path.join(data_dir, "models"),
+    }
+
+    # len() of a Starlark string is its size in bytes.
+    if len(ctx["db_encryption_key"]) != 32:
+        fail("DB_ENCRYPTION_KEY must be exactly 32 bytes (AES-256), got {}".format(len(ctx["db_encryption_key"])))
+
+    # `tilt down` only deletes Kubernetes objects, so remove the containers, the volume and the
+    # service data here. The Python venv is kept on purpose: it is slow to recreate.
+    if config.tilt_subcommand == "down":
+        local(
+            ("podman rm -f {c} {t} >/dev/null 2>&1 || true; " +
+             "podman volume rm -f {v} >/dev/null 2>&1 || true; " +
+             "rm -rf '{d}'").format(c=ctx["pg_container"], t=ctx["triton_container"],
+                                    v=ctx["pg_volume"], d=ctx["data_dir"]),
+            quiet=True,
+        )
+
+    return ctx
+
+
+def _env(ctx):
+    """Environment of the API and of the init script (same variables as the proposal's Configuration table)."""
+    return """
+    export PYTHONPATH="{root}/services"
+    export LOG_LEVEL="INFO"
+    export DISABLE_CRASH_HANDLER="1"
+    export POSTGRES_HOST="localhost"
+    export POSTGRES_PORT="{pg_port}"
+    export POSTGRES_DB="{db}"
+    export POSTGRES_USER="postgres"
+    export POSTGRES_PASSWORD='{pg_pass}'
+    export WORKER_POSTGRES_USER="{wuser}"
+    export WORKER_POSTGRES_PASSWORD='{wpass}'
+    export DB_POOL_SIZE="5"
+    export DB_MAX_OVERFLOW="5"
+    export DB_ENCRYPTION_KEY='{key}'
+    export TRITON_URL="{triton_url}"
+    export MODEL_REPO_PATH="{models}"
+    export SCRATCH_DIR="{scratch}"
+    export DATA_DIR="{data}"
+    mkdir -p "$MODEL_REPO_PATH" "$SCRATCH_DIR" "$DATA_DIR"
+""".format(
+        root=REPO_ROOT,
+        pg_port=ctx["postgres_port"],
+        db=DATABASE,
+        pg_pass=ctx["postgres_password"],
+        wuser=ctx["worker_postgres_user"],
+        wpass=ctx["worker_postgres_password"],
+        key=ctx["db_encryption_key"],
+        triton_url=ctx["triton_url"],
+        models=ctx["model_repo"],
+        scratch=os.path.join(ctx["data_dir"], "scratch"),
+        data=os.path.join(ctx["data_dir"], "data"),
+    )
+
+
+def add_python_env(ctx):
+    # Created once. Picks the first Python >= 3.10 found unless --python_bin is given
+    # (the services use `X | None` annotations, so the macOS system python3 3.9 is too old).
+    local_resource(
+        name="python-env",
+        dir=REPO_ROOT,
+        cmd="""
+            set -e
+            if [ ! -x {venv}/bin/python ]; then
+                PY="{py}"
+                if [ -z "$PY" ]; then
+                    for c in python3.12 python3.13 python3.11 python3.10 python3; do
+                        if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+                    done
+                fi
+                if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+                    echo "ERROR: Python >= 3.10 is required; pass --python_bin=python3.12"
+                    exit 1
+                fi
+                "$PY" -m venv {venv}
+            fi
+            {venv}/bin/pip install -q -r {req}
+        """.format(venv=VENV, py=ctx["python_bin"], req=REQUIREMENTS),
+        deps=[os.path.join(REPO_ROOT, REQUIREMENTS)],
+        labels=["setup"],
+    )
+
+
+def add_postgres(ctx):
+    local_resource(
+        name="postgres",
+        serve_dir=REPO_ROOT,
+        serve_cmd="""
+            podman rm -f {container} 2>/dev/null || true
+            podman run --rm --name {container} \
+                -p {port}:5432 \
+                -e POSTGRES_USER=postgres \
+                -e POSTGRES_PASSWORD='{password}' \
+                -e POSTGRES_DB=postgres \
+                -v {volume}:/var/lib/postgresql/data \
+                {image}
+        """.format(
+            container=ctx["pg_container"],
+            port=ctx["postgres_port"],
+            password=ctx["postgres_password"],
+            volume=ctx["pg_volume"],
+            image=ctx["postgres_image"],
+        ),
+        labels=["database"],
+        readiness_probe=probe(
+            initial_delay_secs=5,
+            period_secs=3,
+            exec=exec_action(["podman", "exec", ctx["pg_container"], "pg_isready", "-U", "postgres"]),
+        ),
+    )
+
+
+def add_triton(ctx):
+    # Same flags as the proposal's Podman template (section 10.2): explicit model control, so nothing
+    # is loaded until the API asks; strict readiness off and exit-on-error off, so one bad model
+    # does not take the server down. The repository is mounted read-only, as in the proposal:
+    # the forecast API (running on the host) is the only writer.
+    local_resource(
+        name="triton",
+        serve_dir=REPO_ROOT,
+        serve_cmd="""
+            mkdir -p '{models}'
+            podman rm -f {container} 2>/dev/null || true
+            exec podman run --rm --name {container} \
+                {platform} \
+                -p {port}:8000 \
+                -v '{models}':/models:ro \
+                {image} \
+                tritonserver \
+                --model-repository=/models \
+                --model-control-mode=explicit \
+                --strict-readiness=false \
+                --exit-on-error=false \
+                --http-port=8000 --grpc-port=8001 --metrics-port=8002
+        """.format(
+            container=ctx["triton_container"],
+            platform=("--platform " + ctx["triton_platform"]) if ctx["triton_platform"] else "",
+            port=ctx["triton_port"],
+            models=ctx["model_repo"],
+            image=ctx["triton_image"],
+        ),
+        labels=["inference"],
+        readiness_probe=probe(
+            initial_delay_secs=15,
+            period_secs=5,
+            timeout_secs=5,
+            http_get=http_get_action(port=ctx["triton_port"], path="/v2/health/ready"),
+        ),
+    )
+
+
+def add_forecast(ctx):
+    env = _env(ctx)
+    port = ctx["forecast_port"]
+
+    # Creates forecast_metadata, applies init_schema.sql and creates the restricted worker role (idempotent).
+    local_resource(
+        name="forecast-db-init",
+        dir=REPO_ROOT,
+        cmd="""
+            set -e
+            {env}
+            cd services
+            ../{venv}/bin/python forecast/db/scripts/init_db.py
+        """.format(env=env, venv=VENV),
+        deps=[
+            os.path.join(REPO_ROOT, "services/forecast/db/scripts"),
+            os.path.join(REPO_ROOT, "services/common/db/scripts"),
+        ],
+        resource_deps=["postgres", "python-env"],
+        labels=["forecast", "setup"],
+    )
+
+    local_resource(
+        name="forecast-api",
+        serve_dir=REPO_ROOT,
+        serve_cmd="""
+            set -e
+            {env}
+            cd services
+            exec ../{venv}/bin/python -m uvicorn forecast.app:app \
+                --host 0.0.0.0 --port {port} --reload \
+                --reload-dir forecast --reload-dir common
+        """.format(env=env, venv=VENV, port=port),
+        resource_deps=["forecast-db-init", "triton"],
+        labels=["forecast", "backend"],
+        links=[link("http://localhost:{}/docs".format(port), "Forecast API (Swagger)")],
+        readiness_probe=probe(
+            initial_delay_secs=5,
+            period_secs=5,
+            timeout_secs=5,
+            http_get=http_get_action(port=port, path="/health"),
+        ),
+    )
+
+
+def add_quick_links(ctx):
+    lines = [
+        'echo "Forecast API : http://localhost:{}/docs"'.format(ctx["forecast_port"]),
+        'echo "PostgreSQL   : localhost:{} (db {})"'.format(ctx["postgres_port"], DATABASE),
+        'echo "Triton       : {}"'.format(ctx["triton_url"]),
+        'echo "Model repo   : {}"'.format(ctx["model_repo"]),
+    ]
+    local_resource(
+        name="quick-links",
+        cmd="\n".join(lines),
+        labels=["quick-links"],
+        links=[link("http://localhost:{}/docs".format(ctx["forecast_port"]), "Forecast API (Swagger)")],
+    )
+
+
+def run():
+    ctx = setup()
+    add_quick_links(ctx)
+    add_python_env(ctx)
+    add_postgres(ctx)
+    add_triton(ctx)
+    add_forecast(ctx)
+
+
+run()

@@ -1,0 +1,31 @@
+# Python dependencies for the forecast Tiltfile (hack/tilt/services/forecast).
+# Installed into hack/tilt/services/forecast/.venv by the Tiltfile. Local development only.
+#
+# Deliberately lean: only what the merged part of the service imports (API, connectors,
+# database, encryption, Triton URL check). No LLM stack, no model server.
+#
+# The training worker is not implemented yet. When it is, add the training stack from
+# services/forecast/requirements.txt (autogluon.tabular, lightgbm, xgboost, pandas, pyarrow,
+# tritonclient[http], ...) and apscheduler (Story 7) here.
+
+# --- web framework ---
+fastapi
+uvicorn
+python-multipart
+
+# --- services/common + shared service plumbing ---
+pydantic
+pydantic-settings
+requests
+httpx
+psutil
+# Imported by common/retry_utils.py, so every service needs them (client libraries only).
+paramiko
+opensearch-py
+
+# --- database ---
+SQLAlchemy==2.0.49
+psycopg2-binary
+
+# --- forecast: connector secret encryption (AES-256-GCM) ---
+cryptography>=42.0.0
