@@ -19,3 +19,426 @@ index be669502..e63c75d0 100644
          ## LOG SUCCESS
          # Upstream errors are already logged via _log_passthrough_upstream_failure
          # above; the success handler has no status-code awareness of its own; so
+diff --git a/litellm/proxy/_types.py b/litellm/proxy/_types.py
+index 5e812eec477..67d08fc1e9c 100644
+--- a/litellm/proxy/_types.py
++++ b/litellm/proxy/_types.py
+@@ -2230,6 +2230,10 @@ class PassThroughGenericEndpoint(LiteLLMPydanticObjectBase):
+         default={},
+         description="Key-value pairs of headers to be forwarded with the request. You can set any key value pair here and it will be forwarded to your target endpoint",
+     )
++    forward_headers: bool | None = Field(
++        default=None,
++        description="If True, the headers of the incoming request (including Authorization) are forwarded to the target. Headers set in `headers` take precedence over forwarded ones.",
++    )
+     default_query_params: dict = Field(
+         default={},
+         description="Key-value pairs of default query parameters to be sent with every request to this endpoint. These can be overridden by client-provided query parameters. For example: {'key': 'default_value', 'api_version': '2023-01'}",
+diff --git a/litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py b/litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py
+index 978882ef3f1..bbd59704122 100644
+--- a/litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py
++++ b/litellm/proxy/pass_through_endpoints/llm_passthrough_endpoints.py
+@@ -4259,16 +4259,47 @@ async def watsonx_proxy_route(
+     if provider_config is None:
+         raise HTTPException(status_code=404, detail="Watsonx passthrough config not found")
+ 
+-    watsonx_credentials: Final = passthrough_endpoint_router.get_proxy_wide_deployment_credentials(
+-        custom_llm_provider="watsonx"
++    from litellm.proxy.pass_through_endpoints.llm_provider_handlers.watsonx_passthrough_handler import (
++        WatsonxPassthroughHandler,
+     )
+-    api_key: Final = watsonx_credentials.api_key if watsonx_credentials is not None else None
+-    api_base: Final = watsonx_credentials.api_base if watsonx_credentials is not None else None
++
++    request_body: Final = await WatsonxPassthroughHandler.request_body(request)
++    is_streaming_request: Final = bool(request_body.get("stream"))
++
++    requested_model: Final = WatsonxPassthroughHandler.extract_param(
++        request_body=request_body,
++        query_params=request.query_params,
++        name="model_id",
++        alias="model",
++    )
++    requested_project_id: Final = WatsonxPassthroughHandler.extract_param(
++        request_body=request_body,
++        query_params=request.query_params,
++        name="project_id",
++    )
++    requested_space_id: Final = WatsonxPassthroughHandler.extract_param(
++        request_body=request_body,
++        query_params=request.query_params,
++        name="space_id",
++    )
++
++    allowed_deployments: Final = await WatsonxPassthroughHandler.allowed_deployments(
++        user_api_key_dict=user_api_key_dict, requested_model=requested_model
++    )
++    watsonx_router_creds: Final = WatsonxPassthroughHandler.resolve_credentials_from_router_deployments(
++        model_id=requested_model,
++        project_id=requested_project_id,
++        space_id=requested_space_id,
++        deployments=allowed_deployments,
++    )
++    creds: Final = watsonx_router_creds or {}
++    _resolved_api_key: Final = creds.get("api_key")
++    _resolved_api_base: Final = creds.get("api_base")
+ 
+     # Get complete URL with version parameter
+     complete_url, _ = provider_config.get_complete_url(
+-        api_base=api_base,
+-        api_key=api_key,
++        api_base=_resolved_api_base,
++        api_key=_resolved_api_key,
+         model="",
+         endpoint=endpoint,
+         request_query_params=None,
+@@ -4282,21 +4313,10 @@ async def watsonx_proxy_route(
+         messages=[],
+         optional_params={},
+         litellm_params={},
+-        api_key=api_key,
+-        api_base=api_base,
++        api_key=_resolved_api_key,
++        api_base=_resolved_api_base,
+     )
+ 
+-    # Check for streaming
+-    is_streaming_request = False
+-    if request.method == "POST":
+-        if "multipart/form-data" not in request.headers.get("content-type", ""):
+-            _request_body = await _json_request_body(request)
+-        else:
+-            _request_body = await get_form_data(request)
+-
+-        if _request_body.get("stream"):
+-            is_streaming_request = True
+-
+     request_query_params: Final = dict(request.query_params)
+     if request_query_params.get("version") is None:
+         request_query_params["version"] = litellm.WATSONX_DEFAULT_API_VERSION
+diff --git a/litellm/proxy/pass_through_endpoints/llm_provider_handlers/watsonx_passthrough_handler.py b/litellm/proxy/pass_through_endpoints/llm_provider_handlers/watsonx_passthrough_handler.py
+new file mode 100644
+index 00000000000..b24f1b0d1f8
+--- /dev/null
++++ b/litellm/proxy/pass_through_endpoints/llm_provider_handlers/watsonx_passthrough_handler.py
+@@ -0,0 +1,280 @@
++from collections.abc import Callable, Mapping, Sequence
++from typing import TYPE_CHECKING, Final, cast  # noqa: TID251  # proxy globals untyped
++
++from fastapi import Request
++from typing_extensions import NotRequired, ReadOnly, TypedDict
++
++from litellm._logging import verbose_router_logger
++from litellm.exceptions import BadRequestError
++from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
++from litellm.litellm_core_utils.get_llm_provider_logic import get_llm_provider
++from litellm.proxy.common_utils.http_parsing_utils import get_form_data
++
++if TYPE_CHECKING:
++    from litellm.proxy._types import UserAPIKeyAuth
++    from litellm.types.router import DeploymentTypedDict, LiteLLMParamsTypedDict
++
++
++class WatsonxPassThroughCredentials(TypedDict):
++    api_key: ReadOnly[NotRequired[str | None]]
++    api_base: ReadOnly[NotRequired[str | None]]
++    project_id: ReadOnly[NotRequired[str | None]]
++    space_id: ReadOnly[NotRequired[str | None]]
++    model: ReadOnly[NotRequired[str | None]]
++
++
++_SPECIAL_MODEL_NAMES: Final[frozenset[str]] = frozenset(
++    {
++        "all-team-models",
++        "all-proxy-models",
++        "no-default-models",
++    }
++)
++
++
++def _str_or_none(value: object) -> str | None:
++    return value if isinstance(value, str) else None
++
++
++def _is_usable_by_team(deployment: "DeploymentTypedDict", key_team_id: str | None) -> bool:
++    model_info: Final = deployment.get("model_info")
++    deployment_team_id: Final = model_info.get("team_id") if isinstance(model_info, Mapping) else None
++    return not deployment_team_id or deployment_team_id == key_team_id
++
++
++def _has_wildcard_or_special_token(models: Sequence[str]) -> bool:
++    return any("*" in m or m in _SPECIAL_MODEL_NAMES for m in models)
++
++
++def _needs_dynamic_model_resolution(
++    user_api_key_dict: "UserAPIKeyAuth",
++    model_access_groups: Mapping[str, Sequence[str]],
++) -> bool:
++    if bool(user_api_key_dict.access_group_ids) or bool(getattr(user_api_key_dict, "config", None)):
++        return True
++    models: Final[Sequence[str]] = cast(Sequence[str], user_api_key_dict.models) or ()  # cast-ok: key models
++    team_models: Final[Sequence[str]] = cast(Sequence[str], user_api_key_dict.team_models) or ()  # cast-ok: team models
++    if _has_wildcard_or_special_token(models) or _has_wildcard_or_special_token(team_models):
++        return True
++    return bool(model_access_groups and any(m in model_access_groups for m in (*models, *team_models)))
++
++
++class WatsonxPassthroughHandler:
++    @staticmethod
++    async def request_body(request: Request) -> Mapping[str, object]:
++        if request.method != "POST":
++            return {}
++        if "multipart/form-data" in request.headers.get("content-type", ""):
++            return await get_form_data(request)
++        return cast(Mapping[str, object], await request.json())  # cast-ok: json payload
++
++    @staticmethod
++    def extract_param(
++        request_body: Mapping[str, object],
++        query_params: Mapping[str, str],
++        name: str,
++        alias: str | None = None,
++    ) -> str | None:
++        return (
++            _str_or_none(request_body.get(name))
++            or _str_or_none(query_params.get(name))
++            or (_str_or_none(request_body.get(alias)) or _str_or_none(query_params.get(alias)) if alias else None)
++        )
++
++    @classmethod
++    async def allowed_deployments(
++        cls,
++        user_api_key_dict: "UserAPIKeyAuth",
++        requested_model: str | None,
++    ) -> Sequence["DeploymentTypedDict"]:
++        from fastapi import status
++
++        from litellm.proxy._types import ModelAccessDeniedProxyException, ProxyErrorTypes
++        from litellm.proxy.auth.auth_checks import model_access_denied_client_message
++        from litellm.proxy.proxy_server import (
++            general_settings,  # pyright: ignore[reportUnknownVariableType]  # untyped proxy global
++            llm_router,
++            prisma_client,
++            proxy_logging_obj,
++            user_api_key_cache,
++            user_model,  # pyright: ignore[reportUnknownVariableType]  # untyped proxy global
++        )
++        from litellm.proxy.utils import (
++            get_available_models_for_user,  # pyright: ignore[reportUnknownVariableType]  # untyped settings parameter
++        )
++
++        if llm_router is None:
++            return ()
++        key_team_id: Final = _str_or_none(user_api_key_dict.team_id)
++        all_deployments: Final = tuple(
++            d
++            for d in (llm_router.get_model_list() or ())
++            if d["litellm_params"].get("use_in_pass_through") is True and _is_usable_by_team(d, key_team_id)
++        )
++        if not all_deployments:
++            return ()
++
++        models: Final[Sequence[str]] = cast(Sequence[str], user_api_key_dict.models) or ()  # cast-ok: key models
++        team_models: Final[Sequence[str]] = (
++            cast(Sequence[str], user_api_key_dict.team_models) or ()  # cast-ok: team models
++        )
++        has_model_restrictions: Final = bool(models) or bool(team_models) or bool(user_api_key_dict.access_group_ids)
++        if not has_model_restrictions:
++            return all_deployments
++
++        model_access_groups: Final = llm_router.get_model_access_groups() if llm_router else {}
++        available_models: Final = (
++            frozenset(
++                await get_available_models_for_user(
++                    user_api_key_dict=user_api_key_dict,
++                    llm_router=llm_router,
++                    general_settings=cast(dict[str, object], general_settings),  # cast-ok: proxy server settings
++                    user_model=cast(str | None, user_model),  # cast-ok: proxy server untyped global
++                    prisma_client=prisma_client,
++                    proxy_logging_obj=proxy_logging_obj,
++                    user_api_key_cache=user_api_key_cache,
++                )
++            )
++            if _needs_dynamic_model_resolution(user_api_key_dict, model_access_groups)
++            else frozenset(models or team_models)
++        )
++        model_allowed_deployments: Final = tuple(
++            d
++            for d in all_deployments
++            if d["model_name"] in available_models
++            or (isinstance(m := d["litellm_params"].get("model"), str) and m in available_models)
++        )
++        _key_router_settings: Final = user_api_key_dict.router_settings
++        _key_tag_filtering: Final = (
++            _key_router_settings.get("enable_tag_filtering")
++            if isinstance(_key_router_settings, dict)
++            else None
++        )
++        tag_filtering_enabled: Final = bool(
++            _key_tag_filtering if _key_tag_filtering is not None else (llm_router.enable_tag_filtering if llm_router else False)
++        )
++        _raw_key_tags: Final = user_api_key_dict.metadata.get("tags") or () if tag_filtering_enabled else ()
++        key_tags: Final = frozenset(
++            t for t in cast(Sequence[str], _raw_key_tags)  # cast-ok: key metadata tags are always str
++        )
++        allowed_deployments: Final = (
++            tuple(
++                d
++                for d in model_allowed_deployments
++                if not (d["litellm_params"].get("tags") or ())
++                or key_tags.intersection(d["litellm_params"].get("tags") or ())
++            )
++            if key_tags
++            else model_allowed_deployments
++        )
++        if requested_model is None:
++            return allowed_deployments
++        model_is_accessible: Final = (
++            requested_model in available_models
++            or f"watsonx/{requested_model}" in available_models
++            or any(
++                cls.deployment_model_matches(creds, requested_model)
++                for d in allowed_deployments
++                if (creds := cls.resolve_credentials_from_deployment(d["litellm_params"])) is not None
++            )
++        )
++        if not model_is_accessible:
++            raise ModelAccessDeniedProxyException(
++                message=model_access_denied_client_message(model=requested_model),
++                internal_message=f"Key not allowed to access model {requested_model}",
++                type=ProxyErrorTypes.key_model_access_denied,
++                param="model",
++                code=status.HTTP_403_FORBIDDEN,
++            )
++        return allowed_deployments
++
++    @classmethod
++    def resolve_credentials_from_router_deployments(
++        cls,
++        model_id: str | None = None,
++        project_id: str | None = None,
++        space_id: str | None = None,
++        deployments: "Sequence[DeploymentTypedDict] | None" = None,
++    ) -> "WatsonxPassThroughCredentials | None":
++        candidates: Final = tuple(
++            creds
++            for deployment in (deployments or ())
++            if (creds := cls.resolve_credentials_from_deployment(deployment["litellm_params"])) is not None
++        )
++        if not candidates:
++            return None
++
++        first_candidate: Final = candidates[0]
++
++        def model_ok(creds: WatsonxPassThroughCredentials) -> bool:
++            return bool(model_id and cls.deployment_model_matches(creds, model_id))
++
++        def project_ok(creds: WatsonxPassThroughCredentials) -> bool:
++            return bool(project_id) and creds.get("project_id") == project_id
++
++        def space_ok(creds: WatsonxPassThroughCredentials) -> bool:
++            return bool(space_id) and creds.get("space_id") == space_id
++
++        selection_rules: Final[tuple[Callable[[WatsonxPassThroughCredentials], bool], ...]] = (
++            lambda creds: model_ok(creds) and project_ok(creds),
++            lambda creds: model_ok(creds) and space_ok(creds),
++            model_ok,
++            project_ok,
++            space_ok,
++        )
++
++        for rule in selection_rules:
++            if (matched := next(filter(rule, candidates), None)) is not None:
++                return matched
++
++        if len(candidates) > 1:
++            verbose_router_logger.warning(
++                "Multiple watsonx use_in_pass_through deployments found but no "
++                "model_id/project_id/space_id supplied to disambiguate — using the first. "
++                "Set project_id or space_id on each deployment's litellm_params and pass "
++                "project_id or space_id in the request body to route to the correct credentials."
++            )
++        return first_candidate
++
++    @staticmethod
++    def deployment_model_matches(creds: "WatsonxPassThroughCredentials", model_id: str) -> bool:
++        stored: Final = creds.get("model")
++        if stored is None:
++            return False
++        return stored == model_id or str(stored).endswith(f"/{model_id}")
++
++    @classmethod
++    def resolve_credentials_from_deployment(
++        cls, litellm_params: "LiteLLMParamsTypedDict"
++    ) -> "WatsonxPassThroughCredentials | None":
++        model: Final = litellm_params.get("model")
++        if model is None:
++            return None
++        try:
++            _, provider, _, _ = get_llm_provider(
++                model=model,
++                custom_llm_provider=litellm_params.get("custom_llm_provider"),
++            )
++        except BadRequestError:
++            return None
++        if provider != "watsonx":
++            return None
++        credential_name: Final = litellm_params.get("litellm_credential_name")
++        credential_values: Final[Mapping[str, object]] = (
++            CredentialAccessor.get_credential_values(credential_name) if credential_name is not None else {}
++        )
++        credential_api_key: Final = credential_values.get("api_key")
++        credential_api_base: Final = credential_values.get("api_base")
++        api_key: Final = (credential_api_key if isinstance(credential_api_key, str) else None) or litellm_params.get(
++            "api_key"
++        )
++        api_base: Final = (credential_api_base if isinstance(credential_api_base, str) else None) or litellm_params.get(
++            "api_base"
++        )
++        return WatsonxPassThroughCredentials(
++            api_key=api_key,
++            api_base=api_base,
++            project_id=litellm_params.get("project_id"),
++            space_id=litellm_params.get("space_id"),
++            model=model,
++        )
+diff --git a/litellm/proxy/pass_through_endpoints/pass_through_endpoints.py b/litellm/proxy/pass_through_endpoints/pass_through_endpoints.py
+index 5a41e2ea068..97d4870f56d 100644
+--- a/litellm/proxy/pass_through_endpoints/pass_through_endpoints.py
++++ b/litellm/proxy/pass_through_endpoints/pass_through_endpoints.py
+@@ -3910,7 +3910,7 @@ async def update_pass_through_endpoints(
+             path=updated_endpoint.path,
+             target=updated_endpoint.target,
+             custom_headers=_custom_headers,
+-            forward_headers=None,  # Defaults not available in model? assuming None logic handles it
++            forward_headers=updated_endpoint.forward_headers,
+             merge_query_params=None,
+             dependencies=None,
+             cost_per_request=updated_endpoint.cost_per_request,
+@@ -3927,7 +3927,7 @@ async def update_pass_through_endpoints(
+             path=updated_endpoint.path,
+             target=updated_endpoint.target,
+             custom_headers=_custom_headers,
+-            forward_headers=None,
++            forward_headers=updated_endpoint.forward_headers,
+             merge_query_params=None,
+             dependencies=None,
+             cost_per_request=updated_endpoint.cost_per_request,
+@@ -4002,7 +4002,7 @@ async def create_pass_through_endpoints(
+             path=created_endpoint.path,
+             target=created_endpoint.target,
+             custom_headers=_custom_headers,
+-            forward_headers=None,
++            forward_headers=created_endpoint.forward_headers,
+             merge_query_params=None,
+             dependencies=None,
+             cost_per_request=created_endpoint.cost_per_request,
+@@ -4019,7 +4019,7 @@ async def create_pass_through_endpoints(
+             path=created_endpoint.path,
+             target=created_endpoint.target,
+             custom_headers=_custom_headers,
+-            forward_headers=None,
++            forward_headers=created_endpoint.forward_headers,
+             merge_query_params=None,
+             dependencies=None,
+             cost_per_request=created_endpoint.cost_per_request,
