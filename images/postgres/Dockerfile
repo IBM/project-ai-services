@@ -4,7 +4,7 @@
 # This Dockerfile creates a PostgreSQL 18 image based on Red Hat Universal Base Image 9 Minimal
 #
 
-FROM registry.access.redhat.com/ubi9/ubi:9.8 AS gosu-builder
+FROM registry.access.redhat.com/ubi9/ubi:9.9 AS gosu-builder
 
 ARG GO_VERSION=1.26.9
 
@@ -26,7 +26,7 @@ RUN dnf install -y git ca-certificates && \
     go build -trimpath -ldflags='-s -w -buildid=' -o /out/gosu ./ && \
     /out/gosu --version
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9
 
 ARG DNF_FLAGS="--disablerepo=* --enablerepo=ubi-9-baseos-rpms --enablerepo=ubi-9-appstream-rpms"
 
