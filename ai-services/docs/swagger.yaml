@@ -2944,6 +2944,10 @@ paths:
         in: query
         name: status
         type: string
+      - description: Case-insensitive substring search on model name
+        in: query
+        name: q
+        type: string
       - default: 1
         description: Page number (1-indexed)
         in: query
