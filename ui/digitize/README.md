@@ -4,7 +4,7 @@ A modern React application built with IBM Carbon Design System to provide a user
 
 ## Features
 
-- **Document Upload**: Upload PDF documents for ingestion or digitization
+- **Document Upload**: Upload PDF, DOCX, HTML, Markdown, or text documents for ingestion or digitization
 - **Job Monitoring**: Track the status of document processing jobs
 - **Document Management**: View, search, and manage processed documents
 - **IBM Carbon Design**: Professional UI with IBM's design system
@@ -105,7 +105,7 @@ npm run preview
    - **Ingestion**: Process and store documents in vector database
    - **Digitization**: Convert documents to text/markdown/JSON format
 3. For digitization, select output format (JSON, Markdown, or Text)
-4. Select PDF file(s) to upload
+4. Select PDF, DOCX, HTML, MD, or TXT file(s) to upload
 5. Click "Upload" to start processing
 
 ### Monitor Jobs
@@ -208,5 +208,11 @@ This project is part of the IBM Project AI Services.
 `@carbon/ibm-products` depends internally on `react-table@7.8.0`, which is the last release of the v7 line and does not declare React 19 peer support. The `overrides` block forces React 19 for `react-table` to silence the `ERESOLVE` warning during `npm install`.
 
 `react-table` v7 is unmaintained — in v8 it was moved to `@tanstack/react-table`, which Carbon has not yet adopted. **Remove this override once `@carbon/ibm-products` migrates to `@tanstack/react-table`.**
+
+### `minimatch` override in `package.json`
+
+`eslint` and `typescript-eslint` (via `@typescript-eslint/typescript-estree`) depend on `minimatch@10`, which is affected by a denial-of-service advisory ([GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249)) fixed in `11.0.1`. The `overrides` block forces `minimatch@^11.0.4` so `npm audit` stays clean. `minimatch@11` requires Node `20 || >=22`.
+
+ESLint 10 does not fix this on its own, because it still depends on `minimatch@10`, and `eslint-plugin-react` does not yet support ESLint 10. **Remove this override once `eslint` and `typescript-eslint` depend on `minimatch@>=11.0.1`.**
 
 ---

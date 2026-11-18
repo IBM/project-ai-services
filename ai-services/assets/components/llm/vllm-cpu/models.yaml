@@ -1,4 +1,5 @@
 - id: ibm-granite/granite-3.3-8b-instruct
+  name: Granite 3.3 8B Instruct
   default: false
   title: granite-3.3-8b-instruct
   description: |-
@@ -7,8 +8,37 @@
     **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
 
     **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+  default_profile: standard
+  profiles:
+    - standard
 
 - id: ibm-granite/granite-4.1-8b
+  name: Granite 4.1 8B
   default: true
   title: granite-4.1-8b
   description: |-
@@ -17,3 +47,31 @@
     **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
 
     **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+  default_profile: standard
+  profiles:
+    - standard

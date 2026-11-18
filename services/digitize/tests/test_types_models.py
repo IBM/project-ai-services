@@ -52,6 +52,7 @@ class TestEnums:
             "completed_with_errors",
             "failed",
             "already_exists",
+            "skipped",
             "cancelled"
         }
 
@@ -149,6 +150,7 @@ class TestResponseModels:
             name="sample.pdf",
             type="ingestion",
             status="accepted",
+            output_format="json",
             submitted_at="2024-01-01T00:00:00Z",
         )
 
@@ -157,6 +159,7 @@ class TestResponseModels:
             "name": "sample.pdf",
             "type": "ingestion",
             "status": "accepted",
+            "output_format": "json",
             "submitted_at": "2024-01-01T00:00:00Z",
         }
 

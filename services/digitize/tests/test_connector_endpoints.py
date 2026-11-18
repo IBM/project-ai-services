@@ -155,13 +155,18 @@ def connector_test_client(monkeypatch, tmp_path, mock_db_operations):
     # db_manager mock for jobs.py (queue gate + dedup).
     mock_db_manager = Mock()
     mock_db_manager.get_queued_counts = Mock(return_value={"ingestion": 0, "digitization": 0})
-    mock_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    mock_db_manager.get_file_owner = Mock(return_value=None)
     monkeypatch.setattr(jobs_router_module, "db_manager", mock_db_manager)
 
     # Stub dg_util helpers that touch disk / DB.
     monkeypatch.setattr(digitize_app.dg_util, "enqueue_conversion_tasks", AsyncMock())
     monkeypatch.setattr(digitize_app.dg_util, "get_document_page_count", Mock(return_value=0))
-    monkeypatch.setattr(jobs_router_module, "generate_file_checksum", Mock(return_value="sha256:abc123"))
+    import hashlib
+    monkeypatch.setattr(
+        jobs_router_module,
+        "generate_file_checksum",
+        Mock(side_effect=lambda content: hashlib.md5(content if isinstance(content, bytes) else str(content).encode()).hexdigest())
+    )
     monkeypatch.setattr(digitize_app.dg_util, "initialize_and_launch", AsyncMock(return_value={"sample.pdf": "doc-1"}))
 
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())

@@ -35,6 +35,8 @@ export async function fetchDataSourceConnectors(
   page = 1,
   pageSize = 20,
   status?: string,
+  search?: string,
+  options?: { signal?: AbortSignal },
 ): Promise<DataSourceConnectorsListResponse> {
   const params: Record<string, string | number> = {
     page,
@@ -43,22 +45,30 @@ export async function fetchDataSourceConnectors(
   if (status) {
     params.status = status;
   }
+  if (search) {
+    params.q = search;
+  }
   const res = await api.get<DataSourceConnectorsListResponse>(
     CONNECTORS_ENDPOINTS.LIST_CONNECTORS,
-    { params },
+    { params, ...options },
   );
   return res.data;
 }
 
-export async function fetchAllDataSourceConnectors(): Promise<
-  DataSourceConnectorApiResponse[]
-> {
+export async function fetchAllDataSourceConnectors(
+  search?: string,
+): Promise<DataSourceConnectorApiResponse[]> {
   let currentPage = 1;
   let hasNext = true;
   const allData: DataSourceConnectorApiResponse[] = [];
 
   while (hasNext) {
-    const response = await fetchDataSourceConnectors(currentPage, 100);
+    const response = await fetchDataSourceConnectors(
+      currentPage,
+      100,
+      undefined,
+      search,
+    );
     allData.push(...response.data);
     hasNext = response.pagination?.has_next ?? false;
     currentPage++;

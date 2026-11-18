@@ -1,0 +1,37 @@
+Erstellen eines Netzinstallationspfads für Transformer-Modellierer
+
+Ihr Unternehmen verfügt möglicherweise über spezialisierte oder erfahrene Benutzer, die PowerCubes
+erstellen möchten, die anhand einer Kombination aus Unternehmens- und persönlichen Datenquellen
+modelliert werden. Diese Benutzer möchten möglicherweise eigene Analysen der Daten für Ihre Ge-
+schäftssparte oder eine kleine Benutzergruppe durchführen. Der Systemverantwortliche oder Administra-
+tor kann eine ausführbare Datei an eine Web- oder LAN-Position herunterladen, an der Modellierer die
+Datei ausführen können, um den IBM Cognos Transformer-Installationsassistenten auszuführen.
+Die Anweisungen in diesem Thema sind für den Installierer oder Administrator bestimmt. Wenn Sie
+Transformer-Modellierer oder Fachspezialist sind und Transformer herunterladen und verwenden möch-
+ten, finden Sie weitere Informationen unter „Bereitstellen von IBM Cognos Transformer für Modellierer”
+auf Seite 180.
+
+
+Vorbereitende Schritte
+
+Bevor Sie Transformer-Modellierern die Installationsdatei zugänglich machen, müssen noch Quellen und
+Berechtigungen eingerichtet werden:
+• Die Datenbank-Client-Software ist auf den Transformer-Computern installiert oder steht Modellierern
+zur Installation zur Verfügung. Diese Computer werden für den Zugriff auf IBM Cognos Analytics -Daten-
+quellen verwendet.
+• Modellierer müssen Berechtigungen zum Erstellen von Datenquellen in IBM Cognos Administration
+besitzen.
+Die Modellierer müssen nicht direkt auf IBM Cognos Administration zugreifen können. Sie können
+Datenquellen mit Transformer oder Befehlszeilen-Tools erstellen und aktualisieren. Sie können für
+Modellierer einen gesicherten Ordner in dem Portal zur Verfügung stellen, in dem PowerCube-Packages
+publiziert werden.
+• Die Modellierer müssen auf eine Position zugreifen können, an der der PowerCube nach der Erstellung
+gespeichert werden kann.
+Der IBM Cognos-Service muss auf diese Position zugreifen können; hierbei kann es sich durchaus auch
+um ein gesichertes gemeinsam genutztes Verzeichnis in einem LAN handeln.
+• Um PowerCubes auf einem spezifischen Transformer-Server zu erstellen, muss der Modellierer über
+FTP-Berechtigungen für die Übertragung von Modellen und Ausführungsberechtigungen für die Erstel-
+lung von Cubes auf dem Server verfügen.
+Der Modellierer kann Modelle übertragen und die Cube-Erstellung mithilfe von Scripts ausführen. Der
+Modellierer kann auch automatische Methoden verwenden, um PowerCubes zu erstellen. Weitere Infor-
+mationen finden Sie im Handbuch Verwaltung und Sicherheit.

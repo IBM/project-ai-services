@@ -24,6 +24,7 @@ permissions:
 
 jobs:
   build-publish-image:
+    name: "Build & Push"
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout code

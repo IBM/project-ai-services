@@ -38,10 +38,11 @@
     "prettier": "3.9.10",
     "sass": "^1.106.1",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.71.2",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.5"
   },
   "overrides": {
+    "minimatch": "^11.0.4",
     "react-table": {
       "react": "^19.3.0"
     }

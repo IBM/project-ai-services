@@ -12,7 +12,7 @@ interface FilterState {
   selectedProviders: string[];
   selectedDomains: string[];
   selectedAssets: string[];
-  selectedArchitectures: string[];
+  selectedServices: string[];
   isPanelOpen: boolean;
   selectedSolutionId: string | null;
 }
@@ -24,7 +24,7 @@ type FilterAction =
   | { type: "TOGGLE_DOMAIN"; payload: { checked: boolean; value: string } }
   | { type: "TOGGLE_ASSET"; payload: { checked: boolean; value: string } }
   | {
-      type: "TOGGLE_ARCHITECTURE";
+      type: "TOGGLE_SERVICE";
       payload: { checked: boolean; value: string };
     }
   | { type: "CLEAR_FILTERS" }
@@ -37,7 +37,7 @@ const initialState: FilterState = {
   selectedProviders: [],
   selectedDomains: [],
   selectedAssets: [],
-  selectedArchitectures: [],
+  selectedServices: [],
   isPanelOpen: false,
   selectedSolutionId: null,
 };
@@ -75,14 +75,12 @@ const filterReducer = (
           : state.selectedAssets.filter((a) => a !== action.payload.value),
       };
 
-    case "TOGGLE_ARCHITECTURE":
+    case "TOGGLE_SERVICE":
       return {
         ...state,
-        selectedArchitectures: action.payload.checked
-          ? [...state.selectedArchitectures, action.payload.value]
-          : state.selectedArchitectures.filter(
-              (a) => a !== action.payload.value,
-            ),
+        selectedServices: action.payload.checked
+          ? [...state.selectedServices, action.payload.value]
+          : state.selectedServices.filter((a) => a !== action.payload.value),
       };
 
     case "CLEAR_FILTERS":
@@ -92,7 +90,7 @@ const filterReducer = (
         selectedProviders: [],
         selectedDomains: [],
         selectedAssets: [],
-        selectedArchitectures: [],
+        selectedServices: [],
       };
 
     case "OPEN_PANEL":
@@ -123,7 +121,7 @@ const UseCaseReferences = () => {
     selectedProviders,
     selectedDomains,
     selectedAssets,
-    selectedArchitectures,
+    selectedServices,
     isPanelOpen,
     selectedSolutionId,
   } = state;
@@ -137,7 +135,7 @@ const UseCaseReferences = () => {
         checkProvider?: boolean;
         checkDomain?: boolean;
         checkAsset?: boolean;
-        checkArchitecture?: boolean;
+        checkService?: boolean;
         checkSearch?: boolean;
       } = {},
     ) => {
@@ -145,7 +143,7 @@ const UseCaseReferences = () => {
         checkProvider = true,
         checkDomain = true,
         checkAsset = true,
-        checkArchitecture = true,
+        checkService = true,
         checkSearch = true,
       } = options;
 
@@ -168,11 +166,11 @@ const UseCaseReferences = () => {
           selectedAssets.includes(normalizeString(asset)),
         );
 
-      const matchesArchitecture =
-        !checkArchitecture ||
-        selectedArchitectures.length === 0 ||
-        sol.architectures.some((arch) =>
-          selectedArchitectures.includes(normalizeString(arch)),
+      const matchesService =
+        !checkService ||
+        selectedServices.length === 0 ||
+        sol.services.some((svc) =>
+          selectedServices.includes(normalizeString(svc)),
         );
 
       const matchesSearch =
@@ -184,15 +182,15 @@ const UseCaseReferences = () => {
         sol.assets.some((asset) =>
           asset.toLowerCase().includes(searchValue.toLowerCase()),
         ) ||
-        sol.architectures.some((arch) =>
-          arch.toLowerCase().includes(searchValue.toLowerCase()),
+        sol.services.some((svc) =>
+          svc.toLowerCase().includes(searchValue.toLowerCase()),
         );
 
       return (
         matchesProvider &&
         matchesDomain &&
         matchesAsset &&
-        matchesArchitecture &&
+        matchesService &&
         matchesSearch
       );
     },
@@ -200,7 +198,7 @@ const UseCaseReferences = () => {
       selectedProviders,
       selectedDomains,
       selectedAssets,
-      selectedArchitectures,
+      selectedServices,
       searchValue,
     ],
   );
@@ -217,8 +215,8 @@ const UseCaseReferences = () => {
     dispatch({ type: "TOGGLE_ASSET", payload: { checked, value } });
   };
 
-  const handleArchitectureChange = (checked: boolean, value: string) => {
-    dispatch({ type: "TOGGLE_ARCHITECTURE", payload: { checked, value } });
+  const handleServiceChange = (checked: boolean, value: string) => {
+    dispatch({ type: "TOGGLE_SERVICE", payload: { checked, value } });
   };
 
   const handleClearFilters = () => {
@@ -229,7 +227,7 @@ const UseCaseReferences = () => {
     selectedProviders.length +
     selectedDomains.length +
     selectedAssets.length +
-    selectedArchitectures.length;
+    selectedServices.length;
 
   // Calculate dynamic counts based on current filters and search
   // For each filter category, count how many results would match if that option was selected
@@ -282,19 +280,19 @@ const UseCaseReferences = () => {
     return counts;
   }, [solutions, matchesFilters, selectedAssets]);
 
-  const architectureCounts = useMemo(() => {
+  const serviceCounts = useMemo(() => {
     const counts: Record<string, number> = {};
 
     solutions.forEach((sol) => {
-      if (matchesFilters(sol, { checkArchitecture: false })) {
-        sol.architectures.forEach((arch) => {
-          const key = normalizeString(arch);
-          // Count if no selection, already selected, or has all selected architectures
+      if (matchesFilters(sol, { checkService: false })) {
+        sol.services.forEach((svc) => {
+          const key = normalizeString(svc);
+          // Count if no selection, already selected, or has all selected services
           if (
-            selectedArchitectures.length === 0 ||
-            selectedArchitectures.includes(key) ||
-            selectedArchitectures.every((selected) =>
-              sol.architectures.some((a) => normalizeString(a) === selected),
+            selectedServices.length === 0 ||
+            selectedServices.includes(key) ||
+            selectedServices.every((selected) =>
+              sol.services.some((s) => normalizeString(s) === selected),
             )
           ) {
             counts[key] = (counts[key] || 0) + 1;
@@ -304,9 +302,9 @@ const UseCaseReferences = () => {
     });
 
     return counts;
-  }, [solutions, matchesFilters, selectedArchitectures]);
+  }, [solutions, matchesFilters, selectedServices]);
 
-  // Get unique assets and architectures dynamically
+  // Get unique assets and services dynamically
   const uniqueAssets = useMemo(() => {
     const assets = new Set<string>();
     solutions.forEach((sol) => {
@@ -315,12 +313,12 @@ const UseCaseReferences = () => {
     return Array.from(assets).sort();
   }, [solutions]);
 
-  const uniqueArchitectures = useMemo(() => {
-    const architectures = new Set<string>();
+  const uniqueServices = useMemo(() => {
+    const services = new Set<string>();
     solutions.forEach((sol) => {
-      sol.architectures.forEach((arch) => architectures.add(arch));
+      sol.services.forEach((svc) => services.add(svc));
     });
-    return Array.from(architectures).sort();
+    return Array.from(services).sort();
   }, [solutions]);
 
   // Filter solutions based on selected filters and search
@@ -362,16 +360,16 @@ const UseCaseReferences = () => {
     });
   }, [uniqueAssets, assetCounts]);
 
-  const architectureOptions = useMemo(() => {
-    return uniqueArchitectures.map((arch) => {
-      const key = normalizeString(arch);
+  const serviceOptions = useMemo(() => {
+    return uniqueServices.map((svc) => {
+      const key = normalizeString(svc);
       return {
-        label: arch,
+        label: svc,
         value: key,
-        count: architectureCounts[key] || 0,
+        count: serviceCounts[key] || 0,
       };
     });
-  }, [uniqueArchitectures, architectureCounts]);
+  }, [uniqueServices, serviceCounts]);
 
   const filterAccordions = (
     <>
@@ -423,16 +421,16 @@ const UseCaseReferences = () => {
         </AccordionItem>
       )}
 
-      {architectureOptions.length > 0 && (
-        <AccordionItem title="Architectures" open>
-          {architectureOptions.map((option) => (
+      {serviceOptions.length > 0 && (
+        <AccordionItem title="Services" open>
+          {serviceOptions.map((option) => (
             <Checkbox
               key={option.value}
               labelText={`${option.label} (${option.count})`}
-              id={`architecture-${option.value}`}
-              checked={selectedArchitectures.includes(option.value)}
+              id={`service-${option.value}`}
+              checked={selectedServices.includes(option.value)}
               onChange={(_, { checked }) =>
-                handleArchitectureChange(checked, option.value)
+                handleServiceChange(checked, option.value)
               }
             />
           ))}

@@ -1,0 +1,11 @@
+- id: standard
+  default: true
+  name: "Standard"
+  description: "1 card, 50 GiB RAM, 8k context"
+  params:
+    resources:
+      memory: 53687091200 # 50Gi in bytes
+      accelerators:
+        ibm.com/spyre_pf: 1
+    maxModelLen: 8192
+    maxBatchSize: 4

@@ -4,18 +4,6 @@ on:
   schedule:
     - cron: '0 0 */2 * *'
   workflow_dispatch:
-    inputs:
-      skip-cves-scan:
-        description: Skips cves scan job when variable is set to true.
-        required: false
-        type: boolean
-        default: false
-      skip-license-scan:
-        description: Skips license scan job when variable is set to true.
-        required: false
-        type: boolean
-        default: false
-
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -63,6 +51,9 @@ jobs:
          - path: services
            image: extract-service
            service: extract
+         - path: services
+           image: forecast-service
+           service: forecast
          - path: mcp
            image: ai-services-mcp
          - path: ai-services
@@ -74,8 +65,4 @@ jobs:
       service: ${{ matrix.service }}
       skip-image-build: true
       ignore-unfixed: false
-      skip-cves-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-cves-scan }}
-      skip-license-scan: ${{ github.event_name == 'workflow_dispatch' && inputs.skip-license-scan }}
-    secrets:
-      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
-      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+    secrets: inherit

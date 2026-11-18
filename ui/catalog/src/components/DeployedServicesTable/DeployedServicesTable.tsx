@@ -26,6 +26,7 @@ import {
 } from "@carbon/react";
 import { Deploy } from "@carbon/icons-react";
 import styles from "./DeployedServices.module.scss";
+import { DEPLOYMENT_STATUS } from "@/constants";
 import type { DeployedServicesRow } from "./types";
 import {
   ACTION_TYPES,
@@ -39,7 +40,7 @@ import { CELL_RENDERERS } from "./CellRenderers";
 import type { Dispatch } from "react";
 import type { AppAction } from "./types";
 import TableToolbarActions from "@/components/Table/components/TableToolbarActions";
-import DeleteModal from "@/components/Table/components/DeleteModal";
+import DeleteConfirmNameModal from "@/components/DeleteConfirmNameModal/DeleteConfirmNameModal";
 import ExportModal from "@/components/Table/components/ExportModal";
 import TableToasts from "@/components/Table/components/TableToasts";
 import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
@@ -146,14 +147,28 @@ const DeployedServicesTable = ({
       }));
   }, [services]);
 
-  // Fetch deployed services data
+  // hasTransitionalRow activates the additional 5-second poll whenever any
+  // row is in a transitional state (Deploying or Deleting).
+  const hasTransitionalRow = state.rowsData.some(
+    (row) =>
+      row.status === DEPLOYMENT_STATUS.DEPLOYING ||
+      row.status === DEPLOYMENT_STATUS.DELETING ||
+      row.status === DEPLOYMENT_STATUS.DOWNLOADING,
+  );
+  const hasTransitionalRowRef = useRef(hasTransitionalRow);
+  hasTransitionalRowRef.current = hasTransitionalRow;
+
+  // Fetch deployed services data.
   const fetchDeployedServices = useCallback(
     async (
       page = pageRef.current,
       pageSize = pageSizeRef.current,
       selectedServices = selectedServicesRef.current,
     ) => {
-      dispatch({ type: "SHARED_SET_LOADING", payload: true });
+      // Skip the skeleton while rows are transitional so polling updates statuses in place
+      if (!hasTransitionalRowRef.current) {
+        dispatch({ type: "SHARED_SET_LOADING", payload: true });
+      }
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
@@ -198,15 +213,6 @@ const DeployedServicesTable = ({
   );
 
   // Mount fetch + 2-minute auto-refresh interval (shared hook).
-  // hasTransitionalRow activates the additional 5-second poll whenever any
-  // row is in a transitional state (Deploying or Deleting).
-  const hasTransitionalRow = state.rowsData.some(
-    (row) =>
-      row.status === "Deploying" ||
-      row.status === "Deleting" ||
-      row.status === "Downloading",
-  );
-
   useAutoRefresh({
     fetchFn: fetchDeployedServices,
     hasData: state.rowsData.length > 0,
@@ -301,6 +307,9 @@ const DeployedServicesTable = ({
 
   // Visible headers for the DataTable (shared utility)
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
+
+  const selectedItemName =
+    state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
 
   // Service filter slot — injected into the shared toolbar's filterSlot prop
   const serviceFilterSlot = (
@@ -532,25 +541,20 @@ const DeployedServicesTable = ({
               </DataTable>
             )}
 
-            <DeleteModal
+            <DeleteConfirmNameModal
               isOpen={state.isDeleteDialogOpen}
               isDeleting={state.isDeleting}
-              isConfirmed={state.isConfirmed}
-              itemName={
-                state.rowsData.find((r) => r.id === state.selectedRowId)
-                  ?.name ?? ""
+              itemName={selectedItemName}
+              confirmValue={state.confirmValue}
+              modalLabel={`Delete ${selectedItemName}`}
+              primaryButtonLabel="Delete"
+              primaryButtonLoadingLabel="Deleting..."
+              warningText="Deleting a service deployment permanently removes all associated components, including connected services, runtime metadata, and configurations, and cannot be undone."
+              onConfirmValueChange={(value) =>
+                dispatch({ type: "SHARED_SET_CONFIRM_VALUE", payload: value })
               }
-              modalLabel="Delete service deployment"
-              confirmLegend="Confirm service deployment to be deleted"
-              warningText="Deleting a service deployment permanently deletes all associated components, including connected services, runtime metadata, and configurations. This action cannot be undone."
-              onConfirm={() => handleDelete()}
+              onConfirm={handleDelete}
               onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
-              onCheckboxChange={(checked) =>
-                dispatch({
-                  type: "SHARED_SET_CONFIRMED",
-                  payload: checked,
-                })
-              }
             />
 
             <ExportModal

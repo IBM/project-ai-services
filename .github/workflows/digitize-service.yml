@@ -30,8 +30,6 @@ jobs:
       path: 'services'
       service: 'digitize'
       image: 'digitize-service'
-    secrets:
-      ICR_USERNAME: ${{ secrets.ICR_USERNAME }}
-      ICR_APIKEY: ${{ secrets.ICR_APIKEY }}
+    secrets: inherit
 
 # Made with Bob

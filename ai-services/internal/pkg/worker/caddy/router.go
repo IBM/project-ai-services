@@ -58,6 +58,9 @@ func (pr *ProxyRouter) ManageProxyRoute(ctx context.Context, op payload.ProxyRou
 			ExternalURL: externalURL,
 		}, nil
 
+	case payload.ProxyRouteOpRegisterIngress, payload.ProxyRouteOpRegisterEgress:
+		return nil, pr.managePrivateRoute(ctx, op, route)
+
 	case payload.ProxyRouteOpUnregister:
 		return nil, pr.pm.UnregisterRoute(ctx, route.ID)
 
@@ -81,4 +84,26 @@ func (pr *ProxyRouter) ManageProxyRoute(ctx context.Context, op payload.ProxyRou
 	default:
 		return nil, fmt.Errorf("caddy router: unsupported op %q", op)
 	}
+}
+
+// managePrivateRoute registers a route on the private mTLS ingress or egress server.
+func (pr *ProxyRouter) managePrivateRoute(ctx context.Context, op payload.ProxyRouteOp, route payload.Route) error {
+	if op == payload.ProxyRouteOpRegisterIngress {
+		return pr.pm.RegisterIngressRoute(ctx, proxy.IngressRoute{
+			ID:         route.ID,
+			PathPrefix: route.PathPrefix,
+			Upstream:   route.Upstream,
+			Terminal:   route.Terminal,
+		})
+	}
+
+	return pr.pm.RegisterEgressRoute(ctx, proxy.EgressRoute{
+		ID:                route.ID,
+		PathPrefix:        route.PathPrefix,
+		DialUpstream:      route.Upstream,
+		ClientCertPath:    route.ClientCertPath,
+		ClientKeyPath:     route.ClientKeyPath,
+		TrustedCACertPath: route.TrustedCACertPath,
+		ServerName:        route.ServerName,
+	})
 }

@@ -30,6 +30,7 @@ export const DOC_STATUS = {
   COMPLETED_WITH_ERRORS: "completed_with_errors",
   FAILED: "failed",
   ALREADY_EXISTS: "already_exists",
+  SKIPPED: "skipped",
   CANCELLED: "cancelled",
 } as const;
 

@@ -40,9 +40,10 @@ func ResetPodmanAuth(ctx context.Context, deleteSecret bool) error {
 
 	// 3. Re-deploy the worker pod with the extracted configuration.
 	opts.Setup = workertypes.Options{
-		BaseDir:    podmanOpts.BaseDir,
-		DomainName: podmanOpts.DomainName,
-		HTTPSPort:  podmanOpts.HTTPSPort,
+		BaseDir:            podmanOpts.BaseDir,
+		DomainName:         podmanOpts.DomainName,
+		HTTPSPort:          podmanOpts.HTTPSPort,
+		PrivateIngressPort: podmanOpts.PrivateIngressPort,
 	}
 	opts.GatewayAddr = podmanOpts.GatewayAddr
 

@@ -28,9 +28,11 @@ type serviceConnectorListResponse struct {
 }
 
 // ServiceConnectorPage is the parsed result of a ListConnectors call: the page items keyed by
-// connector ID for O(1) lookup, plus the Total count reported by the service for pagination.
+// connector ID for O(1) lookup, the connector IDs in the order returned by the service (which
+// sorts by status), plus the Total count reported by the service for pagination.
 type ServiceConnectorPage struct {
 	ByID  map[string]apimodels.ConnectorItem
+	Order []string
 	Total int
 }
 
@@ -165,11 +167,14 @@ func (c *ServiceClient) ListConnectors(ctx context.Context, limit, offset int, s
 	}
 
 	byID := make(map[string]apimodels.ConnectorItem, len(result.Items))
+	order := make([]string, 0, len(result.Items))
+
 	for _, item := range result.Items {
 		byID[item.ID] = item
+		order = append(order, item.ID)
 	}
 
-	return &ServiceConnectorPage{ByID: byID, Total: result.Total}, nil
+	return &ServiceConnectorPage{ByID: byID, Order: order, Total: result.Total}, nil
 }
 
 // Connect calls POST /v1/connectors on the service pod.

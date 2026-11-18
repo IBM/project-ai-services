@@ -6,11 +6,11 @@ import (
 	"text/template"
 	"time"
 
-	v1 "go.podman.io/podman/v6/pkg/k8s.io/api/core/v1"
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	v1 "go.podman.io/podman/v6/pkg/k8s.io/api/core/v1"
 	k8syaml "sigs.k8s.io/yaml"
 )
 
@@ -32,7 +32,7 @@ func loadLLMPodSpec(t *testing.T, templatePath string) *models.PodSpec {
 		"TemplateID":   "00000000-0000-0000-0000-000000000000",
 		"BaseDir":      "/var/lib/ai-services",
 		"Values": map[string]any{
-			"image":               "icr.io/ppc64le-oss/vllm-ppc64le:0.28.0",
+			"image":               "icr.io/ppc64le-oss/vllm-ppc64le:0.31.0",
 			"model":               "ibm-granite/granite-3.3-8b-instruct",
 			"apiKey":              "",
 			"maxNumBatchedTokens": "8096",

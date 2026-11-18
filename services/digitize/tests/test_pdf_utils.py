@@ -1,8 +1,8 @@
 """
 Unit tests for digitize.pdf_utils module.
 
-Tests cover PDF and DOCX document processing utilities including:
-- Page count retrieval for both PDF and DOCX files
+Tests cover PDF, DOCX, HTML, Markdown, and text document processing utilities including:
+- Page count retrieval for PDF, DOCX, HTML, Markdown, and text files
 - TOC extraction
 - Document type detection
 """
@@ -80,9 +80,22 @@ class TestGetDocumentPageCount:
         
         assert result == 20
 
+    def test_get_page_count_for_html(self):
+        """Test page count for HTML files returns 1."""
+        assert get_document_page_count("document.html") == 1
+
+    def test_get_page_count_for_html_uppercase(self):
+        """Test page count for HTML files with uppercase extension returns 1."""
+        assert get_document_page_count("document.HTML") == 1
+
+    def test_get_page_count_for_md_and_txt(self):
+        """Test page count for Markdown and text files returns 1."""
+        assert get_document_page_count("notes.md") == 1
+        assert get_document_page_count("notes.TXT") == 1
+
     def test_get_page_count_for_unknown_extension(self):
         """Test page count for unknown file extension returns 0."""
-        result = get_document_page_count("document.txt")
+        result = get_document_page_count("document.csv")
         
         assert result == 0
 
@@ -282,6 +295,12 @@ class TestLoadPdfPages:
         
         # Should return empty list for DOCX files
         assert result == [] or result is None
+
+    @pytest.mark.parametrize("non_pdf", ["document.html", "notes.md", "readme.txt", "DOC.HTML", "NOTES.MD", "README.TXT"])
+    def test_load_pdf_pages_skips_non_pdf_formats(self, non_pdf):
+        """Test that HTML, Markdown, and text files are skipped."""
+        result = load_pdf_pages(non_pdf)
+        assert result == []
 
     @patch('digitize.parsing.pdf.pdfplumber.open')
     def test_load_pdf_pages_handles_exception(self, mock_pdfplumber_open):

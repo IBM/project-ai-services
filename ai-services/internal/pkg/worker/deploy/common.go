@@ -39,11 +39,12 @@ func DeployWorker(ctx context.Context, opts workertypes.DeployOpts) error {
 				CommonWorkerOptions: workertypes.CommonWorkerOptions{
 					HostAliases: opts.HostAliases,
 				},
-				BaseDir:     aiServicesDir,
-				HTTPSPort:   opts.HTTPSPort,
-				DomainName:  opts.DomainName,
-				SSLCertPath: opts.SSLCertPath,
-				SSLKeyPath:  opts.SSLKeyPath,
+				BaseDir:            aiServicesDir,
+				HTTPSPort:          opts.HTTPSPort,
+				PrivateIngressPort: opts.PrivateIngressPort,
+				DomainName:         opts.DomainName,
+				SSLCertPath:        opts.SSLCertPath,
+				SSLKeyPath:         opts.SSLKeyPath,
 			},
 		}
 

@@ -43,6 +43,9 @@ s3transfer==0.12.0
 # SFTP scanner dependencies (required by digitize connector tests)
 paramiko==5.0.0
 
+# Connector secret encryption (required by forecast)
+cryptography>=42.0.0
+
 # Document processing (required by digitize)
 pypdfium2==5.9.0
 pdfplumber==0.11.9
@@ -52,7 +55,7 @@ sentence-splitter==1.4
 spacy==3.8.7
 # Japanese model only — requires sudachipy + sudachidict-core for the SudachiPy tokeniser
 https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl
-sudachipy==0.6.11
-sudachidict-core==20260723
+sudachipy==0.7.0
+sudachidict-core==20261015
 
 apscheduler[sqlalchemy]==3.11.3

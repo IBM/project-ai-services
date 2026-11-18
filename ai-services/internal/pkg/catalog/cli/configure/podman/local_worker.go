@@ -50,11 +50,12 @@ func JoinAsLocalWorker(ctx context.Context, rt *podmanruntime.PodmanClient, opts
 			Token:       token,
 		},
 		Setup: workertypes.Options{
-			BaseDir:     opts.BaseDir,
-			HTTPSPort:   opts.HttpsPort,
-			DomainName:  opts.DomainName,
-			SSLCertPath: opts.SSLCertPath,
-			SSLKeyPath:  opts.SSLKeyPath,
+			BaseDir:            opts.BaseDir,
+			HTTPSPort:          opts.HttpsPort,
+			PrivateIngressPort: opts.PrivateIngressPort,
+			DomainName:         opts.DomainName,
+			SSLCertPath:        opts.SSLCertPath,
+			SSLKeyPath:         opts.SSLKeyPath,
 		},
 	}
 

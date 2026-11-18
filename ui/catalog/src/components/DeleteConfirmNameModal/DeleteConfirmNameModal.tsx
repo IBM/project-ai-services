@@ -11,21 +11,29 @@ export interface DeleteConfirmNameModalProps {
   itemName: string;
   /** Current value of the confirmation text input, controlled by parent. */
   confirmValue: string;
-  /** Modal heading. @default "Remove data source" */
-  heading?: string;
-  /** Warning paragraph shown below the inline notification. */
+  /** Small label rendered above the heading (e.g. "Delete my-assistant"). */
+  modalLabel?: string;
+  /** Modal heading. @default "Confirm delete" */
+  modalHeading?: string;
+  /** Label for the primary action button (e.g. "Delete" or "Remove"). */
+  primaryButtonLabel: string;
+  /** Label for the primary action button when in-flight (e.g. "Deleting..." or "Removing..."). */
+  primaryButtonLoadingLabel: string;
+  /** Warning paragraph shown in the modal body. */
   warningText: string;
+  /** When true an info InlineNotification is shown. @default false */
+  showInfoNotification?: boolean;
   /** Title of the info inline notification. @default "This may take a while." */
   infoNotificationTitle?: string;
   /** Subtitle of the info inline notification. */
   infoNotificationSubtitle?: string;
   /** Error message from a failed delete attempt — shown as an error banner inside the modal. */
   errorMessage?: string;
-  /** Title of the error inline notification. @default "Removal failed:" */
+  /** Title of the error inline notification. @default "Deletion failed:" */
   errorNotificationTitle?: string;
   /** Called on every keystroke in the confirmation input. */
   onConfirmValueChange: (value: string) => void;
-  /** Called when the primary (Remove) button is clicked. */
+  /** Called when the primary button is clicked. */
   onConfirm: () => void;
   /** Called when the modal is dismissed (X, Escape, or Cancel). */
   onClose: () => void;
@@ -36,12 +44,16 @@ const DeleteConfirmNameModal = ({
   isDeleting,
   itemName,
   confirmValue,
-  heading = "Remove data source",
+  modalLabel,
+  modalHeading = "Confirm delete",
+  primaryButtonLabel,
+  primaryButtonLoadingLabel,
   warningText,
+  showInfoNotification = false,
   infoNotificationTitle = "This may take a while.",
   infoNotificationSubtitle = "Data will be removed from each connected vector store. You can continue working while this process completes.",
   errorMessage,
-  errorNotificationTitle = "Removal failed:",
+  errorNotificationTitle = "Deletion failed:",
   onConfirmValueChange,
   onConfirm,
   onClose,
@@ -53,10 +65,13 @@ const DeleteConfirmNameModal = ({
     <Modal
       open={isOpen}
       size="sm"
-      modalHeading={heading}
-      primaryButtonText={isDeleting ? "Removing..." : "Remove"}
+      modalLabel={modalLabel}
+      modalHeading={modalHeading}
+      primaryButtonText={
+        isDeleting ? primaryButtonLoadingLabel : primaryButtonLabel
+      }
       secondaryButtonText="Cancel"
-      danger={nameMatches}
+      danger
       primaryButtonDisabled={!nameMatches || isDeleting}
       onRequestClose={() => {
         if (!isDeleting) {
@@ -82,14 +97,16 @@ const DeleteConfirmNameModal = ({
           />
         )}
 
-        <InlineNotification
-          kind="info"
-          title={infoNotificationTitle}
-          subtitle={infoNotificationSubtitle}
-          lowContrast
-          hideCloseButton
-          className={styles.inlineNotification}
-        />
+        {showInfoNotification && (
+          <InlineNotification
+            kind="info"
+            title={infoNotificationTitle}
+            subtitle={infoNotificationSubtitle}
+            lowContrast
+            hideCloseButton
+            className={styles.inlineNotification}
+          />
+        )}
 
         <p className={styles.warningText}>{warningText}</p>
 

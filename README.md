@@ -64,6 +64,7 @@ project-ai-services/
 │   ├── chatbot/       # RAG chatbot service
 │   ├── digitize/      # Document ingestion
 │   ├── extract/       # Document extraction service
+│   ├── forecast/      # Forecasting service
 │   ├── summarize/     # Summarization service
 │   ├── similarity/    # Similarity search
 │   └── translate/     # Translation service
@@ -94,6 +95,7 @@ The repository follows a microservices architecture with:
 - `chatbot-service` - RAG chatbot backend
 - `digitize-service` - Document ingestion and processing
 - `extract-service` - Document extraction
+- `forecast-service` - Tabular forecasting
 - `summarize-service` - Text summarization
 - `similarity-service` - Semantic similarity search
 - `translate-service` - Text translation

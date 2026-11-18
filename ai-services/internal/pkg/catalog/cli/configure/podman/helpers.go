@@ -40,6 +40,9 @@ func validateRequiredFields(opts *catalogUtils.PodmanConfigureOptions) error {
 	if opts.HttpsPort == 0 {
 		return fmt.Errorf("CADDY_HTTPS_PORT environment variable not found in catalog pod")
 	}
+	if opts.PrivateIngressPort == 0 {
+		return fmt.Errorf("CADDY_PRIVATE_INGRESS_PORT environment variable not found in catalog pod")
+	}
 	if opts.BaseDir == "" {
 		return fmt.Errorf("AI_SERVICES_BASE_DIR environment variable not found in catalog pod")
 	}
@@ -79,7 +82,7 @@ func validateReconfigureParameters(ctx context.Context, rt runtime.Runtime, newO
 	return validateCertificateChanges(ctx, newOpts, caddyCtx)
 }
 
-// validateConfigParameters validates domain, HTTPS port, and base directory haven't changed.
+// validateConfigParameters validates domain, HTTPS port, private ingress port, and base directory haven't changed.
 func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions, newOpts *catalogUtils.PodmanConfigureOptions, domainSuffix string) error {
 	if existingOpts.DomainName != domainSuffix {
 		return fmt.Errorf("domain change not allowed during reconfigure: existing=%s, new=%s. Please uninstall the catalog deployment and re-run configure to change domain", existingOpts.DomainName, domainSuffix)
@@ -87,6 +90,10 @@ func validateConfigParameters(existingOpts *catalogUtils.PodmanConfigureOptions,
 
 	if existingOpts.HttpsPort != newOpts.HttpsPort {
 		return fmt.Errorf("HTTPS port change not allowed during reconfigure: existing=%d, new=%d. Please uninstall the catalog deployment and re-run configure to change https port", existingOpts.HttpsPort, newOpts.HttpsPort)
+	}
+
+	if existingOpts.PrivateIngressPort != newOpts.PrivateIngressPort {
+		return fmt.Errorf("private ingress port change not allowed during reconfigure: existing=%d, new=%d. Please uninstall the catalog deployment and re-run configure to change private ingress port", existingOpts.PrivateIngressPort, newOpts.PrivateIngressPort)
 	}
 
 	if existingOpts.BaseDir != newOpts.BaseDir {

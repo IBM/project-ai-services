@@ -1,4 +1,5 @@
 - id: BAAI/bge-reranker-v2-m3
+  name: BGE Reranker v2 M3
   default: true
   title: bge-reranker-v2-m3
   description: |-
@@ -7,3 +8,31 @@
     **Model strengths**: Reliable instruction-following, contextual reasoning, and accurate response generation across a wide range of natural language tasks from summarization and question answering to prompt-driven workflows.
 
     **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 90+ more.
+  license: MIT
+  certified_by: BAAI
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Contextual reasoning
+            - Accurate response generation across a wide range of natural language tasks from summarization and question answering to prompt-driven workflows
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+            - And 90+ more
+  default_profile: standard
+  profiles:
+    - standard

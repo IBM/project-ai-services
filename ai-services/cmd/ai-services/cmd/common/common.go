@@ -20,6 +20,20 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
+const (
+	minPort = 1
+	maxPort = 65535
+)
+
+// ValidatePort validates that a port number is within the valid TCP/UDP range (1-65535).
+func ValidatePort(port int, name string) error {
+	if port < minPort || port > maxPort {
+		return fmt.Errorf("invalid %s %d: must be between %d and %d", name, port, minPort, maxPort)
+	}
+
+	return nil
+}
+
 // InitAndValidateRuntimeFlag validates the runtime flag value, initialises
 // vars.RuntimeFactory, and checks platform support. It must be called in
 // PreRunE before any code that reads vars.RuntimeFactory.
@@ -117,11 +131,12 @@ func ValidateResetFlag(cmd *cobra.Command, flagName string, skipFlags ...string)
 	return nil
 }
 
-// ConfigurePodmanDeployFlags registers the --basedir, --https-port, --ssl-cert,
+// ConfigurePodmanDeployFlags registers the --basedir, --https-port, --private-ingress-port, --ssl-cert,
 // --ssl-key, and --domain-name flags on cmd. It is shared by commands that deploy
 // a podman-backed service (e.g. "worker join" and "catalog configure").
 // defaultHTTPSPort is used as the default value for --https-port.
-func ConfigurePodmanDeployFlags(cmd *cobra.Command, baseDir *string, httpsPort *int, defaultHTTPSPort int, sslCertPath, sslKeyPath, domainName *string) {
+// defaultPrivateIngressPort is used as the default value for --private-ingress-port.
+func ConfigurePodmanDeployFlags(cmd *cobra.Command, baseDir *string, httpsPort *int, defaultHTTPSPort int, privateIngressPort *int, defaultPrivateIngressPort int, sslCertPath, sslKeyPath, domainName *string) {
 	cmd.Flags().StringVar(baseDir, constants.BaseDirFlag, "",
 		"Base directory for AI services data (models, caddy, etc.) on this worker.\n"+
 			"Defaults to "+constants.DefaultBaseDir+" when not specified.\n"+
@@ -132,6 +147,11 @@ func ConfigurePodmanDeployFlags(cmd *cobra.Command, baseDir *string, httpsPort *
 		"Custom HTTPS port to expose the service endpoints externally.\n"+
 			"Note: Supported for podman runtime only.\n"+
 			"Example: --https-port 8443\n")
+
+	cmd.Flags().IntVar(privateIngressPort, constants.PrivateIngressPortFlag, defaultPrivateIngressPort,
+		"Custom private ingress port for service-to-service communication.\n"+
+			"Note: Supported for podman runtime only.\n"+
+			"Example: --private-ingress-port 9443\n")
 
 	cmd.Flags().StringVar(domainName, constants.DomainNameFlag, "",
 		"Custom domain name for self-signed certificates.\n"+

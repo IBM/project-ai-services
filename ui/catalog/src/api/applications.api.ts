@@ -299,17 +299,43 @@ export async function fetchComponentModelsWithSchemas(
 // Fetches a list of deployed applications with optional filtering parameters
 export async function fetchApplications(
   params: FetchApplicationsParams = {},
+  search?: string,
+  options?: { signal?: AbortSignal },
 ): Promise<ApplicationListResponse> {
+  const queryParams: Record<string, string | number> = {
+    deployment_type: "architectures",
+    ...params,
+  };
+  if (search) {
+    queryParams.q = search;
+  }
   const response = await api.get<ApplicationListResponse>(
     APPLICATION_ENDPOINTS.GET_APPLICATIONS,
-    {
-      params: {
-        deployment_type: "architectures",
-        ...params,
-      },
-    },
+    { params: queryParams, ...options },
   );
   return response.data;
+}
+
+// Fetches all applications across all pages — used for CSV export
+export async function fetchAllApplications(
+  catalogId?: string,
+  search?: string,
+): Promise<Application[]> {
+  let currentPage = 1;
+  let hasNext = true;
+  const allData: Application[] = [];
+
+  while (hasNext) {
+    const response = await fetchApplications(
+      { page: currentPage, page_size: 100, catalog_id: catalogId },
+      search,
+    );
+    allData.push(...response.data);
+    hasNext = response.pagination?.has_next ?? false;
+    currentPage++;
+  }
+
+  return allData;
 }
 
 // Fetches detailed information for a specific application by ID
@@ -492,13 +518,19 @@ export async function fetchApplicationDatasources(
   applicationId: string,
   page: number,
   pageSize: number,
+  search?: string,
+  options?: { signal?: AbortSignal },
 ): Promise<{
   rows: ApplicationDatasourceRow[];
   pagination: PaginationMetadata;
 }> {
+  const params: Record<string, string | number> = { page, page_size: pageSize };
+  if (search) {
+    params.q = search;
+  }
   const response = await api.get<ApplicationDatasourcesListResponse>(
     APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
-    { params: { page, page_size: pageSize } },
+    { params, ...options },
   );
   return {
     rows: response.data.data.map(transformDatasourceToRow),
@@ -509,15 +541,23 @@ export async function fetchApplicationDatasources(
 // Fetches all datasources for a given application — used for CSV export
 export async function fetchAllApplicationDatasources(
   applicationId: string,
+  search?: string,
 ): Promise<ApplicationDatasourceRow[]> {
   let currentPage = 1;
   let hasNext = true;
   const allData: ApplicationDatasourceApiItem[] = [];
 
   while (hasNext) {
+    const params: Record<string, string | number> = {
+      page: currentPage,
+      page_size: 100,
+    };
+    if (search) {
+      params.q = search;
+    }
     const response = await api.get<ApplicationDatasourcesListResponse>(
       APPLICATION_ENDPOINTS.APPLICATION_DATASOURCES(applicationId),
-      { params: { page: currentPage, page_size: 100 } },
+      { params },
     );
     allData.push(...response.data.data);
     hasNext = response.data.pagination?.has_next ?? false;

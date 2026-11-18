@@ -122,7 +122,6 @@ func TestValidatePodmanMetadata_ResourcesBlockAbsent(t *testing.T) {
 	assertValidationError(t, err, http.StatusUnprocessableEntity, "'resources.cpu' must be greater than 0")
 }
 
-
 // -----------------------------------------------------------------------
 // resources key restriction — unknown keys must be rejected
 // -----------------------------------------------------------------------

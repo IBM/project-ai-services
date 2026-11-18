@@ -59,6 +59,9 @@ type Options struct {
 	// HTTPSPort is the host port Caddy binds for HTTPS traffic, e.g. "443".
 	// Set once at first join; ignored on subsequent runs if already deployed.
 	HTTPSPort int
+	// PrivateIngressPort is the host port Caddy binds for private ingress traffic, e.g. "9443".
+	// Set once at first join; ignored on subsequent runs if already deployed.
+	PrivateIngressPort int
 
 	// DomainName is an optional custom domain suffix for self-signed certificates.
 	// If empty, Caddy uses wildcard DNS format: <service>.<ip>.nip.io.

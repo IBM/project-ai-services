@@ -30,7 +30,8 @@ export interface BaseTableState<TRow extends BaseTableRow = BaseTableRow> {
 
   // Delete dialog
   isDeleteDialogOpen: boolean;
-  isConfirmed: boolean;
+  /** The value the user has typed in the name-match confirmation input. */
+  confirmValue: string;
   selectedRowId: string | null;
 
   // Delete error toast
@@ -66,7 +67,7 @@ export type SharedTableAction =
   | { type: "SHARED_SET_PAGE_SIZE"; payload: number }
   | { type: "SHARED_OPEN_DELETE_DIALOG"; payload: string }
   | { type: "SHARED_CLOSE_DELETE_DIALOG" }
-  | { type: "SHARED_SET_CONFIRMED"; payload: boolean }
+  | { type: "SHARED_SET_CONFIRM_VALUE"; payload: string }
   | { type: "SHARED_SET_SELECTED_ROW_ID"; payload: string | null }
   | { type: "SHARED_SET_LOADING"; payload: boolean }
   | {

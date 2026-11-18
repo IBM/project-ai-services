@@ -119,7 +119,7 @@ func executeCatalogDeployment(ctx context.Context, deployCtx *deploy.DeployConte
 		slices.Contains(existingResources, catalogconstants.CatalogCertSecretName)
 
 	if !isDeployed {
-		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, useExistingCert, opts.HttpsPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
+		if err = loadCatalogParamValues(deployCtx, passwordHash, opts.SSLCertPath, opts.SSLKeyPath, useExistingCert, opts.HttpsPort, opts.PrivateIngressPort, opts.WorkerGatewayPort, opts.SkipLocalWorker); err != nil {
 			s.Fail("failed to load param values")
 
 			return nil, false, err
@@ -228,11 +228,11 @@ func recoverDomainFromCaddy(ctx context.Context, caddyCtx *caddy.Context) error 
 }
 
 // loadCatalogParamValues prepares all necessary data for deployment.
-func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, workerGatewayPort int, skipLocalWorker bool) error {
+func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, privateIngressPort, workerGatewayPort int, skipLocalWorker bool) error {
 	logger.Debugln("loading catalog service param values...")
 
 	// Generate argument parameters
-	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, useExistingCert, httpsPort, workerGatewayPort, skipLocalWorker)
+	argParams, err := generateArgParams(passwordHash, sslCertPath, sslKeyPath, useExistingCert, httpsPort, privateIngressPort, workerGatewayPort, skipLocalWorker)
 	if err != nil {
 		return fmt.Errorf("failed to generate arg params: %w", err)
 	}
@@ -246,7 +246,7 @@ func loadCatalogParamValues(deployCtx *deploy.DeployContext, passwordHash, sslCe
 }
 
 // generateArgParams generates the argument parameters for template rendering.
-func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
+func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, useExistingCert bool, httpsPort, privateIngressPort, workerGatewayPort int, skipLocalWorker bool) (map[string]string, error) {
 	dbPassword, err := utils.GenerateRandomPassword()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate database password: %w", err)
@@ -282,6 +282,7 @@ func generateArgParams(passwordHash, sslCertPath, sslKeyPath string, useExisting
 	argParams[configure.ArgParamPodmanURI] = strings.TrimPrefix(podmanURI, "unix://")
 	argParams[configure.ArgParamDBPassword] = dbPassword
 	argParams[constants.ArgParamCaddyHTTPSPort] = fmt.Sprintf("%d", httpsPort)
+	argParams[constants.ArgParamCaddyPrivateIngressPort] = fmt.Sprintf("%d", privateIngressPort)
 	argParams[configure.ArgParamWorkerGatewayPort] = fmt.Sprintf("%d", workerGatewayPort)
 	argParams[configure.ArgParamLocalWorker] = strconv.FormatBool(!skipLocalWorker)
 	argParams[constants.ArgParamCaddyFileContent] = utils.IndentString(caddyFileContent, utils.CaddyFileIndent)

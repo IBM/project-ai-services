@@ -1,0 +1,9 @@
+- id: standard
+  default: true
+  name: "Standard"
+  description: "50 GiB RAM, 512 context"
+  params:
+    resources:
+      memory: 53687091200 # 50Gi in bytes
+    maxModelLen: 512
+    maxBatchSize: 256

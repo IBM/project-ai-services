@@ -27,13 +27,14 @@ var (
 
 // PodmanConfigureOptions contains the configuration for configuring the catalog service on Podman runtime.
 type PodmanConfigureOptions struct {
-	BaseDir           string
-	DomainName        string // Custom domain name for self-signed certificates
-	SSLCertPath       string // Path to user-provided SSL certificate
-	SSLKeyPath        string // Path to user-provided SSL private key
-	HttpsPort         int
-	WorkerGatewayPort int  // gRPC worker gateway port; always active, default 9191
-	SkipLocalWorker   bool // When true, skip joining this machine as the Local worker
+	BaseDir            string
+	DomainName         string // Custom domain name for self-signed certificates
+	SSLCertPath        string // Path to user-provided SSL certificate
+	SSLKeyPath         string // Path to user-provided SSL private key
+	HttpsPort          int
+	PrivateIngressPort int
+	WorkerGatewayPort  int  // gRPC worker gateway port; always active, default 9191
+	SkipLocalWorker    bool // When true, skip joining this machine as the Local worker
 }
 
 // OpenShiftConfigureOptions contains the configuration for configuring the catalog service on OpenShift runtime.
@@ -44,7 +45,7 @@ type OpenShiftConfigureOptions struct {
 }
 
 // GetCatalogPodConfig retrieves catalog pod configuration by inspecting the running pod and its containers.
-// It extracts environment variables like AI_SERVICES_BASE_DIR, DOMAIN_SUFFIX, and CADDY_HTTPS_PORT.
+// It extracts environment variables like AI_SERVICES_BASE_DIR, DOMAIN_SUFFIX, CADDY_HTTPS_PORT, and CADDY_PRIVATE_INGRESS_PORT.
 func GetCatalogPodConfig(ctx context.Context, rt runtime.Runtime, podLabel string) (*PodmanConfigureOptions, string, error) {
 	podmanOpts, podID, err := cliutils.GetPodConfig(ctx, rt, podLabel)
 	if err != nil {
@@ -52,10 +53,11 @@ func GetCatalogPodConfig(ctx context.Context, rt runtime.Runtime, podLabel strin
 	}
 
 	return &PodmanConfigureOptions{
-		BaseDir:           podmanOpts.BaseDir,
-		DomainName:        podmanOpts.DomainName,
-		HttpsPort:         podmanOpts.HTTPSPort,
-		WorkerGatewayPort: podmanOpts.WorkerGatewayPort,
+		BaseDir:            podmanOpts.BaseDir,
+		DomainName:         podmanOpts.DomainName,
+		HttpsPort:          podmanOpts.HTTPSPort,
+		PrivateIngressPort: podmanOpts.PrivateIngressPort,
+		WorkerGatewayPort:  podmanOpts.WorkerGatewayPort,
 	}, podID, nil
 }
 

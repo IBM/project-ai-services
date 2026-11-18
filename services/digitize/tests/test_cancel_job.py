@@ -130,7 +130,7 @@ def test_client(monkeypatch, tmp_path, mock_db_operations):
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
 
     mock_hash_db_manager = Mock()
-    mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    mock_hash_db_manager.get_file_owner = Mock(return_value=None)
     monkeypatch.setattr(jobs_module, "db_manager", mock_hash_db_manager)
 
     return TestClient(digitize_app.app)
@@ -455,7 +455,7 @@ class TestRunDigitize:
 # 3. _run_ingest background task
 # ===========================================================================
 #
-# Signature (after refactor): _run_ingest(job_id, doc_id_dict, file_checksum_dict=None)
+# Signature: _run_ingest(job_id, doc_id_dict)
 # - No file_list positional arg
 # - No concurrency_manager — staging cleanup is the only finally action
 

@@ -6,7 +6,9 @@ name: "IBM watsonx.ai on IBM Cloud"
 description: "Deploy llm models using watsonx"
 
 # Component type this provider belongs to
-component_type: llm
-component_name: "Large language model (LLM)"
+component_type:
+  id: llm
+  name: "Large language model (LLM)"
+  short_name: "LLM"
 
 # Made with Bob

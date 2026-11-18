@@ -487,8 +487,9 @@ class TestInsertSyncLog:
         # Two DB calls: INSERT log row + UPDATE connector status
         assert session.execute.call_count == 2
 
-    def test_clears_message_on_open_sync(self):
-        """Opening a sync log must clear the message field on the connector row."""
+    def test_preserves_message_on_open_sync(self):
+        """Opening a sync log must NOT touch the message on the connector row,
+        so a failure from the previous sync stays visible while syncing."""
         session = MagicMock()
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 1
@@ -496,8 +497,6 @@ class TestInsertSyncLog:
         session.execute.side_effect = [insert_result, update_result]
 
         from digitize.utils.db import init_sync_log_and_update_connector
-        from digitize.db.models import Connector
-        from sqlalchemy import update as sa_update
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             init_sync_log_and_update_connector(CONNECTOR_ID)
@@ -505,8 +504,8 @@ class TestInsertSyncLog:
         # Inspect the UPDATE statement sent to the connector row (second execute call)
         update_call_args = session.execute.call_args_list[1]
         stmt = update_call_args[0][0]  # first positional arg
-        compiled = stmt.compile(compile_kwargs={"literal_binds": True})
-        assert "message" in str(compiled).lower()
+        assert "message" not in stmt.compile().params
+        assert "message" not in str(stmt.compile()).lower().split(" where ")[0]
 
     def test_does_not_accept_seq_parameter(self):
         """seq must not be an accepted parameter — it is auto-generated."""
@@ -577,6 +576,63 @@ class TestUpdateSyncLog:
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=1, status=SyncLogStatus.COMPLETED)
         assert session.execute.called
+
+
+# ===========================================================================
+# Sticky connector message (kept until a sync completes successfully)
+# ===========================================================================
+
+class TestStickyConnectorMessage:
+    @staticmethod
+    def _finalize(status, error=None):
+        """Run finalize_sync_log_and_update_connector and return the connector UPDATE stmt."""
+        session = MagicMock()
+        session.execute.side_effect = [_execute_result(rowcount=1), _execute_result(rowcount=1)]
+        from digitize.utils.db import finalize_sync_log_and_update_connector
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            finalize_sync_log_and_update_connector(CONNECTOR_ID, seq=1, status=status, error=error)
+        return session.execute.call_args_list[1][0][0]
+
+    def test_failed_sync_sets_error_message(self):
+        params = self._finalize(SyncLogStatus.FAILED, error="disk full").compile().params
+        assert params["message"] == "Error from last sync: disk full"
+        assert params["status"] == ConnectorStatus.OUT_OF_SYNC
+
+    def test_completed_sync_clears_message(self):
+        params = self._finalize(SyncLogStatus.COMPLETED).compile().params
+        assert "message" in params
+        assert params["message"] is None
+        assert params["status"] == ConnectorStatus.UP_TO_DATE
+
+    def test_cancelled_sync_keeps_previous_message(self):
+        """A cancel carries no error; it must not wipe a previous failure message."""
+        params = self._finalize(SyncLogStatus.CANCELLED).compile().params
+        assert "message" not in params
+        assert params["status"] == ConnectorStatus.OUT_OF_SYNC
+
+    def test_progress_update_preserves_error_message(self):
+        """The 'N new files found' progress text must not overwrite a stored error."""
+        session = MagicMock()
+        session.execute.return_value = _execute_result(rowcount=1)
+        from digitize.utils.db import update_connector_total_files_and_message
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            update_connector_total_files_and_message(CONNECTOR_ID, 5, "2 new files found")
+
+        stmt = session.execute.call_args[0][0]
+        sql = str(stmt.compile()).upper()
+        # message is only replaced when it is NULL or not a previous-sync error
+        assert "CASE WHEN" in sql
+        assert "ELSE CONNECTORS.MESSAGE" in sql.replace("\n", " ")
+        assert "2 new files found" in stmt.compile().params.values()
+
+    def test_progress_update_raises_when_connector_missing(self):
+        session = MagicMock()
+        session.execute.return_value = _execute_result(rowcount=0)
+        from digitize.utils.db import update_connector_total_files_and_message
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            with pytest.raises(FileNotFoundError):
+                update_connector_total_files_and_message(CONNECTOR_ID, 5, "msg")
+
 
 
 # ===========================================================================
