@@ -6,7 +6,6 @@ export const JOB_STATUS = {
   ACCEPTED: "accepted",
   IN_PROGRESS: "in_progress",
   COMPLETED: "completed",
-  COMPLETED_WITH_ERRORS: "completed_with_errors",
   FAILED: "failed",
   CANCEL_PENDING: "cancel_pending",
   CANCELLED: "cancelled",

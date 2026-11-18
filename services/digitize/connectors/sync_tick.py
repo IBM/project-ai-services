@@ -286,7 +286,6 @@ async def _wait_for_job(
     """
     _TERMINAL = {
         JobStatus.COMPLETED.value,
-        JobStatus.COMPLETED_WITH_ERRORS.value,
         JobStatus.FAILED.value,
         JobStatus.CANCELLED.value,
     }

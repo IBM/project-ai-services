@@ -834,7 +834,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 total_exported=len(exported_jobs),
                 completed=sum(
                     1 for job in exported_jobs
-                    if job.status in (JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value)
+                    if job.status == JobStatus.COMPLETED.value
                 ),
                 failed=sum(1 for job in exported_jobs if job.status == JobStatus.FAILED.value),
             ),
@@ -1249,7 +1249,6 @@ class DatabaseStatusManager:
             JobStatus.FAILED,
             JobStatus.CANCELLED,
             JobStatus.CANCEL_PENDING,
-            JobStatus.COMPLETED_WITH_ERRORS,
         }
         current_db_status = JobStatus(job.status) if job.status in JobStatus._value2member_map_ else None
         if current_db_status in protected_statuses and job_status not in protected_statuses:
@@ -1298,11 +1297,11 @@ class DatabaseStatusManager:
         }
 
         # Set completed_at if job is finished
-        if job_status in [JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED, JobStatus.CANCELLED]:
+        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
             update_params["completed_at"] = datetime.now(timezone.utc)
 
-        # Set error for hard failures and completed_with_errors (when an error message is provided)
-        if error and job_status in (JobStatus.FAILED, JobStatus.COMPLETED_WITH_ERRORS):
+        # Set error for hard failures (when an error message is provided)
+        if error and job_status == JobStatus.FAILED:
             update_params["error"] = error
 
         # Perform database update

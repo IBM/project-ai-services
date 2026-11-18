@@ -97,7 +97,7 @@ class Job(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint(
-            "status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed', 'cancel_pending', 'cancelled')",
+            "status IN ('accepted', 'in_progress', 'completed', 'failed', 'cancel_pending', 'cancelled')",
             name="chk_job_status"
         ),
         CheckConstraint(
