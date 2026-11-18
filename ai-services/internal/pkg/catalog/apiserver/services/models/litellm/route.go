@@ -1,5 +1,17 @@
 package litellm
 
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+)
+
+// PublicKeyAlias returns the alias of the public LiteLLM key of a model, "<model>-<id>", where id is the
+// component or connector ID. Generating and revoking the key must use this one alias.
+func PublicKeyAlias(model string, id uuid.UUID) string {
+	return fmt.Sprintf("%s-%s", model, id)
+}
+
 // ParamAPIBase is the litellm_params key of the model endpoint. It is the only provider param
 // the platform interprets itself (to derive the /tokenize target); every other param is
 // forwarded to LiteLLM untouched.
@@ -16,7 +28,7 @@ type Route struct {
 	// passthrough ID so a route can be told apart by provider.
 	Provider string
 	// KeyAlias is the alias of the model's public LiteLLM key, "<model>-<id>". It is only set when a
-	// route is removed, by the deletion planner, and is empty when the key cannot be named.
+	// route is removed, by the deletion planner.
 	KeyAlias string
 	// Mode is the LiteLLM model mode ("chat", "embedding", "rerank", ...), from component metadata.
 	Mode string

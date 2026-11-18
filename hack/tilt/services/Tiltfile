@@ -1,0 +1,325 @@
+# -*- mode: Python -*-
+
+# =============================================================================
+# Tiltfile for the extract / translate / summarize services (macOS / local development)
+# =============================================================================
+#
+# Runs ONE service with only its dependencies, chosen with the --service Tilt flag:
+#   python-env     : lean venv (hack/tilt/services/.venv)
+#   postgres       : PostgreSQL in Podman (<svc>_metadata database)
+#   model-server   : hack/tilt/model_server.py in LLM-only mode (Ollama or watsonx.ai + /tokenize)
+#   <svc>-db-init  : creates the service database and schema (idempotent)
+#   <svc>-api      : the service's FastAPI app, run from source with uvicorn --reload
+#
+# Usage:
+#   tilt up -f hack/tilt/services/Tiltfile -- --service=extract
+#   tilt up -f hack/tilt/services/Tiltfile -- --service=translate --llm_provider=watsonx
+#   tilt down -f hack/tilt/services/Tiltfile -- --service=summarize
+#
+# Local development only - every credential below is a publicly documented default.
+# See docs/dev-guides/tilt-services-local-development.md
+# =============================================================================
+
+REPO_ROOT = os.path.abspath(os.path.join(config.main_dir, "..", "..", ".."))
+VENV = "hack/tilt/services/.venv"
+REQUIREMENTS = "hack/tilt/services/requirements.txt"
+
+# Default ports avoid browser-blocked (6000) and macOS AirPlay (5000, 7000) ports.
+SERVICES = {
+    "extract": {"title": "Extract", "port": 9500, "database": "extract_metadata"},
+    "translate": {"title": "Translate", "port": 9000, "database": "translate_metadata"},
+    "summarize": {"title": "Summarize", "port": 6100, "database": "summarize_metadata"},
+}
+
+
+def _flag(cfg, name, default):
+    return str(cfg.get(name, default))
+
+
+def setup():
+    """Defines the config flags, parses them and returns the settings dict used by the helpers below."""
+    config.define_string("service", args=False)
+    config.define_string("python_bin", args=False)
+    config.define_string("llm_provider", args=False)
+    config.define_string("ollama_url", args=False)
+    config.define_string("ollama_model", args=False)
+    config.define_string("watsonx_url", args=False)
+    config.define_string("watsonx_project_id", args=False)
+    config.define_string("watsonx_model", args=False)
+    # NOTE: the watsonx API key is read from the WATSONX_APIKEY environment variable, never from a flag.
+    config.define_string("llm_max_model_len", args=False)
+    config.define_string("model_server_port", args=False)
+    config.define_string("postgres_image", args=False)
+    config.define_string("postgres_port", args=False)
+    config.define_string("postgres_password", args=False)
+    for name in SERVICES:
+        config.define_string(name + "_port", args=False)
+    cfg = config.parse()
+
+    profile = _flag(cfg, "service", "").strip().lower()
+    if profile not in SERVICES:
+        fail("pass --service=<name> (tilt up -f <Tiltfile> -- --service=extract); one of: {} (got '{}')".format(
+            ", ".join(SERVICES.keys()), profile))
+    index = list(SERVICES.keys()).index(profile)
+    services = [profile]
+
+    llm_provider = _flag(cfg, "llm_provider", os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
+    if llm_provider not in ["ollama", "watsonx"]:
+        fail("llm_provider must be 'ollama' or 'watsonx', got '{}'".format(llm_provider))
+    ollama_model = _flag(cfg, "ollama_model", os.getenv("OLLAMA_MODEL", "granite4.1:8b"))
+    watsonx_model = _flag(cfg, "watsonx_model", os.getenv("WATSONX_MODEL", "ibm/granite-4-h-small"))
+    watsonx_url = _flag(cfg, "watsonx_url", os.getenv("WATSONX_URL", ""))
+    watsonx_project_id = _flag(cfg, "watsonx_project_id", os.getenv("WATSONX_PROJECT_ID", ""))
+
+    if llm_provider == "watsonx" and not (watsonx_url and watsonx_project_id and os.getenv("WATSONX_APIKEY", "")):
+        warn("llm_provider=watsonx: set WATSONX_URL, WATSONX_PROJECT_ID (or --watsonx_url/--watsonx_project_id) " +
+             "and the WATSONX_APIKEY environment variable; LLM calls fail until they are set.")
+
+    ctx = {
+        "profile": profile,
+        "services": services,
+        "python_bin": _flag(cfg, "python_bin", ""),
+        "llm_provider": llm_provider,
+        "ollama_url": _flag(cfg, "ollama_url", os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1")),
+        "ollama_model": ollama_model,
+        "watsonx_url": watsonx_url,
+        "watsonx_project_id": watsonx_project_id,
+        "watsonx_model": watsonx_model,
+        # Model name the services ask for (LLM_MODEL) and that the selected provider serves.
+        "llm_model": watsonx_model if llm_provider == "watsonx" else ollama_model,
+        "llm_max_model_len": int(_flag(cfg, "llm_max_model_len", 26208)),
+        "model_server_port": int(_flag(cfg, "model_server_port", 8200 + index)),
+        "postgres_image": _flag(cfg, "postgres_image", "docker.io/library/postgres:16-alpine"),
+        # 5432 is the catalog Tiltfile, 5433 is Tiltfile.rag.
+        "postgres_port": int(_flag(cfg, "postgres_port", 5434 + index)),
+        # Local development default only (same as Tiltfile.rag / rag-cpu values.yaml).
+        "postgres_password": _flag(cfg, "postgres_password", "Aiservicesdb@1234"),
+        "ports": {name: int(_flag(cfg, name + "_port", SERVICES[name]["port"])) for name in services},
+        "pg_container": "ai-svc-{}-postgres".format(profile),
+        "pg_volume": "ai-svc-{}-postgres-data".format(profile),
+        "data_dir": os.path.join(REPO_ROOT, ".tilt/services", profile),
+    }
+
+    # `tilt down` only deletes Kubernetes objects, so remove the container, its volume and the
+    # service caches here. The Python venv is kept on purpose: it is slow to recreate.
+    if config.tilt_subcommand == "down":
+        local(
+            ("podman rm -f {c} >/dev/null 2>&1 || true; " +
+             "podman volume rm -f {v} >/dev/null 2>&1 || true; " +
+             "rm -rf '{d}'").format(c=ctx["pg_container"], v=ctx["pg_volume"], d=ctx["data_dir"]),
+            quiet=True,
+        )
+
+    ctx["model_server_url"] = "http://localhost:{}".format(ctx["model_server_port"])
+    return ctx
+
+
+def _common_env(ctx):
+    """Environment shared by every service (same variables as the rag-dev podman pod templates)."""
+    return """
+    export PYTHONPATH="{root}/services"
+    export LLM_ENDPOINT="{ms}/llm"
+    export LLM_MODEL="{llm_model}"
+    export LLM_MAX_MODEL_LEN="{max_len}"
+    export LLM_MAX_BATCH_SIZE="32"
+    export LOG_LEVEL="INFO"
+    export POSTGRES_HOST="localhost"
+    export POSTGRES_PORT="{pg_port}"
+    export POSTGRES_USER="postgres"
+    export POSTGRES_PASSWORD='{pg_pass}'
+    export DB_POOL_SIZE="5"
+    export DB_MAX_OVERFLOW="5"
+    export DISABLE_CRASH_HANDLER="1"
+""".format(
+        root=REPO_ROOT,
+        ms=ctx["model_server_url"],
+        llm_model=ctx["llm_model"],
+        max_len=ctx["llm_max_model_len"],
+        pg_port=ctx["postgres_port"],
+        pg_pass=ctx["postgres_password"],
+    )
+
+
+def _service_env(ctx, name):
+    cache = os.path.join(ctx["data_dir"], name, "cache")
+    return _common_env(ctx) + """
+    export POSTGRES_DB="{db}"
+    export PORT="{port}"
+    export CACHE_DIR="{cache}"
+    mkdir -p "$CACHE_DIR"
+""".format(db=SERVICES[name]["database"], port=ctx["ports"][name], cache=cache)
+
+
+def add_python_env(ctx):
+    # Created once. Picks the first Python >= 3.10 found unless --python_bin is given
+    # (the services use `X | None` annotations, so the macOS system python3 3.9 is too old).
+    local_resource(
+        name="python-env",
+        dir=REPO_ROOT,
+        cmd="""
+            set -e
+            if [ ! -x {venv}/bin/python ]; then
+                PY="{py}"
+                if [ -z "$PY" ]; then
+                    for c in python3.12 python3.13 python3.11 python3.10 python3; do
+                        if command -v "$c" >/dev/null 2>&1; then PY="$c"; break; fi
+                    done
+                fi
+                if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+                    echo "ERROR: Python >= 3.10 is required; pass --python_bin=python3.12"
+                    exit 1
+                fi
+                "$PY" -m venv {venv}
+            fi
+            {venv}/bin/pip install -q -r {req}
+        """.format(venv=VENV, py=ctx["python_bin"], req=REQUIREMENTS),
+        deps=[os.path.join(REPO_ROOT, REQUIREMENTS)],
+        labels=["setup"],
+    )
+
+
+def add_postgres(ctx):
+    local_resource(
+        name="postgres",
+        serve_dir=REPO_ROOT,
+        serve_cmd="""
+            podman rm -f {container} 2>/dev/null || true
+            podman run --rm --name {container} \
+                -p {port}:5432 \
+                -e POSTGRES_USER=postgres \
+                -e POSTGRES_PASSWORD='{password}' \
+                -e POSTGRES_DB=postgres \
+                -v {volume}:/var/lib/postgresql/data \
+                {image}
+        """.format(
+            container=ctx["pg_container"],
+            port=ctx["postgres_port"],
+            password=ctx["postgres_password"],
+            volume=ctx["pg_volume"],
+            image=ctx["postgres_image"],
+        ),
+        labels=["database"],
+        readiness_probe=probe(
+            initial_delay_secs=5,
+            period_secs=3,
+            exec=exec_action(["podman", "exec", ctx["pg_container"], "pg_isready", "-U", "postgres"]),
+        ),
+    )
+
+
+def add_model_server(ctx):
+    # LLM-only mode: serves /llm (Ollama or watsonx.ai through LiteLLM) and the local /llm/tokenize
+    # the services use for token counting. No torch, embedding model or reranker is loaded.
+    local_resource(
+        name="model-server",
+        serve_dir=REPO_ROOT,
+        serve_cmd="""
+            set -e
+            export MODEL_SERVER_MODELS="llm"
+            export MODEL_SERVER_PORT="{port}"
+            export LLM_MAX_LEN="{max_len}"
+            export LLM_PROVIDER="{provider}"
+            export OLLAMA_URL="{ollama_url}"
+            export OLLAMA_MODEL="{ollama_model}"
+            export WATSONX_URL="{wx_url}"
+            export WATSONX_PROJECT_ID="{wx_project}"
+            export WATSONX_MODEL="{wx_model}"
+            # WATSONX_APIKEY is inherited from the environment that started Tilt.
+            exec {venv}/bin/python hack/tilt/model_server.py
+        """.format(
+            port=ctx["model_server_port"],
+            max_len=ctx["llm_max_model_len"],
+            provider=ctx["llm_provider"],
+            ollama_url=ctx["ollama_url"],
+            ollama_model=ctx["ollama_model"],
+            wx_url=ctx["watsonx_url"],
+            wx_project=ctx["watsonx_project_id"],
+            wx_model=ctx["watsonx_model"],
+            venv=VENV,
+        ),
+        deps=[os.path.join(REPO_ROOT, "hack/tilt/model_server.py")],
+        resource_deps=["python-env"],
+        labels=["models"],
+        readiness_probe=probe(
+            initial_delay_secs=5,
+            period_secs=5,
+            http_get=http_get_action(port=ctx["model_server_port"], path="/health"),
+        ),
+    )
+
+
+def add_service(ctx, name):
+    port = ctx["ports"][name]
+    title = SERVICES[name]["title"]
+    env = _service_env(ctx, name)
+
+    # Creates the <svc>_metadata database and its schema (idempotent).
+    local_resource(
+        name=name + "-db-init",
+        dir=REPO_ROOT,
+        cmd="""
+            set -e
+            {env}
+            cd services
+            ../{venv}/bin/python {name}/db/scripts/init_db.py
+        """.format(env=env, venv=VENV, name=name),
+        deps=[
+            os.path.join(REPO_ROOT, "services", name, "db/scripts"),
+            os.path.join(REPO_ROOT, "services/common/db/scripts"),
+        ],
+        resource_deps=["postgres", "python-env"],
+        labels=[name, "setup"],
+    )
+
+    # The apps tokenize with the LLM (/llm/tokenize) at startup or first request, so wait for the model server.
+    local_resource(
+        name=name + "-api",
+        serve_dir=REPO_ROOT,
+        serve_cmd="""
+            set -e
+            {env}
+            cd services
+            exec ../{venv}/bin/python -m uvicorn {name}.app:app \
+                --host 0.0.0.0 --port {port} --reload \
+                --reload-dir {name} --reload-dir common
+        """.format(env=env, venv=VENV, name=name, port=port),
+        resource_deps=[name + "-db-init", "model-server"],
+        labels=[name, "backend"],
+        links=[link("http://localhost:{}".format(port), "{} API (Swagger)".format(title))],
+        readiness_probe=probe(
+            initial_delay_secs=5,
+            period_secs=5,
+            timeout_secs=5,
+            http_get=http_get_action(port=port, path="/health"),
+        ),
+    )
+
+
+def add_quick_links(ctx):
+    lines = "\n".join([
+        'echo "{} API: http://localhost:{}"'.format(SERVICES[n]["title"], ctx["ports"][n])
+        for n in ctx["services"]
+    ])
+    local_resource(
+        name="quick-links",
+        cmd=lines + '\necho "Model server    : {} (LLM provider: {}, model: {})"'.format(
+            ctx["model_server_url"], ctx["llm_provider"], ctx["llm_model"]),
+        labels=["quick-links"],
+        links=[
+            link("http://localhost:{}".format(ctx["ports"][n]), "{} API (Swagger)".format(SERVICES[n]["title"]))
+            for n in ctx["services"]
+        ],
+    )
+
+
+def run():
+    ctx = setup()
+    add_quick_links(ctx)
+    add_python_env(ctx)
+    add_postgres(ctx)
+    add_model_server(ctx)
+    for name in ctx["services"]:
+        add_service(ctx, name)
+
+
+run()

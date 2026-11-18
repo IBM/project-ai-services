@@ -2659,6 +2659,98 @@ class DatabaseManager:
             return False
 
 
+    # ------------------------------------------------------------------ #
+    # Import / export queries                                             #
+    # ------------------------------------------------------------------ #
+    # Unlike the getters above, these deliberately do NOT swallow database
+    # errors: a failure must surface as an error, never as an empty backup.
+
+    @staticmethod
+    def _user_export_stmt(entity: str):
+        """
+        Build the unpaginated SELECT for one user-data export entity.
+
+        entity is one of 'jobs', 'documents', 'document_checksums'. Connector data
+        is never exported. 'already_exists' / 'skipped' documents are job-scoped
+        audit records and are left out, as in the global document listing. Every
+        ORDER BY ends in a unique key so offset pagination is stable.
+        """
+        if entity == "jobs":
+            return (
+                select(Job)
+                .where(Job.source == JobSource.USER.value)
+                .order_by(Job.submitted_at.desc(), Job.job_id)
+            )
+        if entity == "documents":
+            return (
+                select(Document)
+                .where(
+                    Document.source == DocumentSource.USER.value,
+                    Document.status.notin_(
+                        [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                    ),
+                )
+                .order_by(Document.submitted_at.desc(), Document.doc_id)
+            )
+        if entity == "document_checksums":
+            return select(DocumentChecksum).order_by(
+                DocumentChecksum.checksum, DocumentChecksum.type
+            )
+        raise ValueError(f"Unknown export entity: {entity!r}")
+
+    @staticmethod
+    def count_user_export_rows(entity: str) -> int:
+        """Return how many rows of *entity* the user-data export includes."""
+        stmt = DatabaseManager._user_export_stmt(entity)
+        with get_db_session() as session:
+            return session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+    @staticmethod
+    def get_user_export_rows(entity: str, limit: Optional[int] = None, offset: int = 0) -> list:
+        """
+        Return rows of *entity* in export order, detached from the session.
+
+        Args:
+            entity: see ``_user_export_stmt``.
+            limit: maximum rows to return; None returns every row from *offset* on.
+            offset: rows to skip.
+        """
+        stmt = DatabaseManager._user_export_stmt(entity)
+        if offset:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        with get_db_session() as session:
+            rows = list(session.scalars(stmt).all())
+            for row in rows:
+                session.expunge(row)
+            return rows
+
+    @staticmethod
+    def insert_document_checksum(checksum: str, doc_type: str, doc_id: str) -> bool:
+        """
+        Insert one document_checksum row, leaving any existing row untouched.
+
+        The document row must already exist (``doc_id`` is a foreign key). Raises on
+        database failure.
+
+        Returns:
+            True if a row was inserted, False if (checksum, type) or doc_id was already
+            registered.
+        """
+        with get_db_session() as session:
+            result = cast(
+                CursorResult,
+                session.execute(
+                    pg_insert(DocumentChecksum)
+                    .values(checksum=checksum, type=doc_type, doc_id=doc_id)
+                    .on_conflict_do_nothing()
+                ),
+            )
+            return result.rowcount == 1
+
+
 # Singleton instance for easy access
 db_manager = DatabaseManager()
 

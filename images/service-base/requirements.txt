@@ -24,8 +24,8 @@ sentence-splitter==1.4
 spacy==3.8.7
 # Japanese model only — requires sudachipy (built in prebuilder) + sudachidict-core
 https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl
-SudachiDict-core==20260723
-SudachiPy==0.6.11
+SudachiDict-core==20261015
+SudachiPy==0.7.0
 
 ## Documents
 pypdfium2==5.14.0

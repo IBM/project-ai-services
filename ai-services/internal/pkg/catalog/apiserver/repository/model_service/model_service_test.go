@@ -364,34 +364,23 @@ func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
 	}
 }
 
+// Request validation itself is covered by TestValidateCreateRequest; this checks that CreateModel
+// applies it before anything is written.
 func TestCreateModel_Validation_InvalidFields(t *testing.T) {
-	tests := []struct {
-		name    string
-		mutate  func(*apimodels.CreateModelRequest)
-		wantMsg string
-	}{
-		{"invalid component_type", func(r *apimodels.CreateModelRequest) { r.ComponentType = "database" }, "invalid component_type"},
-		{"invalid name", func(r *apimodels.CreateModelRequest) { r.Name = "a!" }, "Model name may only contain"},
-	}
+	setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
+	compRepo := newMockComponentRepo()
+	connRepo := newMockConnectorRepo()
+	svc := newTestModelService(t, compRepo, connRepo, worker.NewResolver(nil), &mockLiteLLMClient{})
 
-			svc := newTestModelService(t, newMockComponentRepo(), newMockConnectorRepo(), worker.NewResolver(nil), &mockLiteLLMClient{})
+	req := validRequest()
+	req.ComponentType = "database"
 
-			req := validRequest()
-			tt.mutate(&req)
-
-			resp, err := svc.CreateModel(context.Background(), req)
-			assert.Nil(t, resp)
-
-			var valErr *validators.ValidationError
-			require.ErrorAs(t, err, &valErr)
-			assert.Equal(t, http.StatusBadRequest, valErr.Code)
-			assert.Contains(t, valErr.Message, tt.wantMsg)
-		})
-	}
+	resp, err := svc.CreateModel(context.Background(), req)
+	assert.Nil(t, resp)
+	requireStatus(t, err, http.StatusBadRequest, "invalid component_type")
+	assert.Empty(t, compRepo.components, "no component row must be written")
+	assert.Empty(t, connRepo.connectors, "no connector must be written")
 }
 
 func TestCreateModel_Conflict_Name(t *testing.T) {
@@ -422,6 +411,8 @@ func TestCreateModel_Conflict_Name(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
+
 			compRepo := newMockComponentRepo()
 			connRepo := newMockConnectorRepo()
 			tt.seed(compRepo, connRepo)
@@ -701,7 +692,8 @@ func TestCreateModel_Local_Rejected(t *testing.T) {
 		{
 			name:     "unknown provider",
 			mutate:   func(r *apimodels.CreateModelRequest) { r.ProviderID = "nope" },
-			wantCode: http.StatusNotFound,
+			wantCode: http.StatusBadRequest,
+			wantMsg:  `is not available for local provider "nope"`,
 		},
 		{
 			name:     "params not matching schema",

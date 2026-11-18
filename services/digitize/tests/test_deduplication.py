@@ -435,7 +435,7 @@ class TestInitializeJobStateAlreadyExists:
         return SimpleNamespace(doc_id=doc_id, name=name, status=status, job_id=job_id)
 
     def _run_with_claims(self, claim_results, documents_info, file_checksum_dict,
-                         operation=OperationType.INGESTION, **kwargs):
+                         operation=OperationType.INGESTION, output_format=OutputFormat.JSON, **kwargs):
         mock_create_doc = Mock()
         mock_dbm = Mock()
         mock_dbm.claim_file_checksum = Mock(side_effect=claim_results)
@@ -446,7 +446,7 @@ class TestInitializeJobStateAlreadyExists:
             result = initialize_job_state(
                 job_id="job-1",
                 operation=operation,
-                output_format=OutputFormat.JSON,
+                output_format=output_format,
                 documents_info=documents_info,
                 file_checksum_dict=file_checksum_dict,
                 **kwargs,
@@ -460,8 +460,17 @@ class TestInitializeJobStateAlreadyExists:
             [None], ["a.pdf"], {"a.pdf": "ha"}, operation=OperationType.DIGITIZATION
         )
         assert [c.args for c in mock_dbm.claim_file_checksum.call_args_list] == [
-            ("ha", "digitization", result["a.pdf"])
+            ("ha", "digitization:json", result["a.pdf"])
         ]
+
+    def test_digitization_claim_key_follows_output_format(self):
+        """The claim key carries the output format, so md and json digitizations of the
+        same content claim different registry rows."""
+        _, _, mock_dbm = self._run_with_claims(
+            [None], ["a.pdf"], {"a.pdf": "ha"},
+            operation=OperationType.DIGITIZATION, output_format=OutputFormat.MD,
+        )
+        assert mock_dbm.claim_file_checksum.call_args.args[1] == "digitization:md"
 
     def test_digitization_lost_claim_to_completed_digitization_becomes_already_exists(self):
         already_exists = []
@@ -1518,7 +1527,7 @@ class TestDuplicateDetectionEndpoint:
         )
 
         assert response.status_code == 202
-        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == ["digitization"]
+        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == ["digitization:json"]
 
     def test_ingestion_ignores_digitization_owner(self, jobs_test_client, monkeypatch):
         """A digitization of the same content must not block ingestion: ingestion only
@@ -1529,7 +1538,7 @@ class TestDuplicateDetectionEndpoint:
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         # Simulate the real table: only the 'digitization' key is taken.
         mock_hash_db.get_file_owner = Mock(
-            side_effect=lambda h, op: _owner("dig-doc", "r.pdf", "in_progress") if op == "digitization" else None
+            side_effect=lambda h, op: _owner("dig-doc", "r.pdf", "in_progress") if op == "digitization:json" else None
         )
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -1565,7 +1574,7 @@ class TestDuplicateDetectionEndpoint:
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         mock_hash_db.get_file_owner = Mock(
-            side_effect=lambda h, op: dig_doc if op == "digitization" else None
+            side_effect=lambda h, op: dig_doc if op == "digitization:json" else None
         )
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -1575,6 +1584,63 @@ class TestDuplicateDetectionEndpoint:
 
         assert response.status_code == 409
         assert "dig-doc" in response.text
+
+    def test_digitization_allowed_for_different_output_format(self, jobs_test_client, monkeypatch):
+        """Digitized as json earlier -> an md (or txt) digitization of the same content proceeds."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        json_doc = _owner("json-doc", "r.pdf")
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: json_doc if op == "digitization:json" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        for fmt in ("md", "txt"):
+            response = jobs_test_client.post(
+                f"/v1/jobs?operation=digitization&output_format={fmt}", files=[self._pdf("r.pdf")]
+            )
+            assert response.status_code == 202, fmt
+
+        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == [
+            "digitization:md", "digitization:txt"
+        ]
+
+    def test_digitization_blocked_by_same_output_format(self, jobs_test_client, monkeypatch):
+        """Digitized as md earlier -> another md digitization of the same content is a duplicate."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        md_doc = _owner("md-doc", "r.pdf")
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(
+            side_effect=lambda h, op: md_doc if op == "digitization:md" else None
+        )
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=digitization&output_format=md", files=[self._pdf("r.pdf")]
+        )
+
+        assert response.status_code == 409
+        assert "md-doc" in response.text
+
+    def test_ingestion_key_ignores_output_format(self, jobs_test_client, monkeypatch):
+        """Ingestion dedup stays format-agnostic: the key is plain 'ingestion'."""
+        import digitize.api.v1.jobs as jobs_router_module
+
+        mock_hash_db = Mock()
+        mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
+        mock_hash_db.get_file_owner = Mock(return_value=None)
+        monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
+
+        response = jobs_test_client.post(
+            "/v1/jobs?operation=ingestion&output_format=md", files=[self._pdf("r.pdf")]
+        )
+
+        assert response.status_code == 202
+        assert [c.args[1] for c in mock_hash_db.get_file_owner.call_args_list] == ["ingestion"]
 
     def test_ingestion_blocked_by_existing_ingestion(self, jobs_test_client, monkeypatch):
         """Ingestion still dedups against its own (hash, 'ingestion') row."""
@@ -1603,7 +1669,7 @@ class TestDuplicateDetectionEndpoint:
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         mock_hash_db.get_file_owner = Mock(
-            side_effect=lambda h, op: dig_doc if op == "digitization" else None
+            side_effect=lambda h, op: dig_doc if op == "digitization:json" else None
         )
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -1623,7 +1689,7 @@ class TestDuplicateDetectionEndpoint:
             mock_hash_db = Mock()
             mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
             mock_hash_db.get_file_owner = Mock(
-                side_effect=lambda h, op, d=dig_doc: d if op == "digitization" else None
+                side_effect=lambda h, op, d=dig_doc: d if op == "digitization:json" else None
             )
             monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
@@ -1643,7 +1709,7 @@ class TestDuplicateDetectionEndpoint:
         mock_hash_db = Mock()
         mock_hash_db.check_quota_atomic = Mock(return_value=(True, 0))
         mock_hash_db.get_file_owner = Mock(
-            side_effect=lambda h, op: dig_doc if op == "digitization" else None
+            side_effect=lambda h, op: dig_doc if op == "digitization:json" else None
         )
         monkeypatch.setattr(jobs_router_module, "db_manager", mock_hash_db)
 
