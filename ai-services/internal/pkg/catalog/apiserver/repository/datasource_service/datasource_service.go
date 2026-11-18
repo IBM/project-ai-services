@@ -305,10 +305,7 @@ func (s *DatasourceService) resolveServiceProviders(serviceType, provider string
 
 	svc, err := s.catalogProvider.LoadService(serviceType)
 	if err != nil {
-		return nil, false, &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("service %q not found", serviceType),
-		}
+		return nil, false, validators.NotFound("service %q not found", serviceType)
 	}
 
 	if svc.Datasource == nil {
