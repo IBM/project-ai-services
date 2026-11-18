@@ -472,10 +472,7 @@ func validateRequiredDatasource(service apimodels.Service, catalogService *types
 		}
 	}
 
-	return &ValidationError{
-		Code:    http.StatusBadRequest,
-		Message: fmt.Sprintf("service %q requires a datasource connector; include at least one connector ref of type 'datasource'", service.CatalogID),
-	}
+	return BadRequest("service %q requires a datasource connector; include at least one connector ref of type 'datasource'", service.CatalogID)
 }
 
 // validateOneConnectorRef validates a single ConnectorRef entry: deduplication, catalog-level
@@ -489,28 +486,19 @@ func (v *ApplicationValidator) validateOneConnectorRef(
 	connectorRepo dbrepo.ConnectorRepository,
 ) error {
 	if seenIDs[ref.ID] {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("duplicate connector ID %q in service %q connectors list", ref.ID, serviceCatalogID),
-		}
+		return BadRequest("duplicate connector ID %q in service %q connectors list", ref.ID, serviceCatalogID)
 	}
 	seenIDs[ref.ID] = true
 
 	// Catalog-level guard: the service must declare datasource settings.
 	acceptsDatasource := catalogService != nil && catalogService.Datasource != nil
 	if ref.Type == catalogconstants.ConnectorTypeDatasource && !acceptsDatasource {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("service %q does not accept datasource connectors", serviceCatalogID),
-		}
+		return BadRequest("service %q does not accept datasource connectors", serviceCatalogID)
 	}
 
 	connectorID, err := uuid.Parse(ref.ID)
 	if err != nil {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("connector ref ID %q is not a valid UUID: %v", ref.ID, err),
-		}
+		return BadRequest("connector ref ID %q is not a valid UUID: %v", ref.ID, err)
 	}
 
 	return validateConnectorInDB(ctx, connectorID, ref, serviceCatalogID, catalogService, connectorRepo)
@@ -529,33 +517,24 @@ func validateConnectorInDB(
 	connector, err := connectorRepo.GetByID(ctx, connectorID, false)
 	if err != nil {
 		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
-			return &ValidationError{
-				Code:    http.StatusBadRequest,
-				Message: fmt.Sprintf("connector %q referenced in service %q not found", ref.ID, serviceCatalogID),
-			}
+			return BadRequest("connector %q referenced in service %q not found", ref.ID, serviceCatalogID)
 		}
 
 		return fmt.Errorf("failed to look up connector %q: %w", ref.ID, err)
 	}
 
 	if connector.Type != ref.Type {
-		return &ValidationError{
-			Code: http.StatusBadRequest,
-			Message: fmt.Sprintf(
-				"connector %q has type %q but was referenced as type %q in service %q",
-				ref.ID, connector.Type, ref.Type, serviceCatalogID,
-			),
-		}
+		return BadRequest(
+			"connector %q has type %q but was referenced as type %q in service %q",
+			ref.ID, connector.Type, ref.Type, serviceCatalogID,
+		)
 	}
 
 	if connector.Status != dbmodels.ConnectorStatusConnected {
-		return &ValidationError{
-			Code: http.StatusBadRequest,
-			Message: fmt.Sprintf(
-				"connector %q (type %q) is not connected (status: %q); only connected datasources may be attached",
-				ref.ID, ref.Type, connector.Status,
-			),
-		}
+		return BadRequest(
+			"connector %q (type %q) is not connected (status: %q); only connected datasources may be attached",
+			ref.ID, ref.Type, connector.Status,
+		)
 	}
 
 	return ValidateProviderSupported(catalogService, connector.Provider, serviceCatalogID)
@@ -629,13 +608,10 @@ func ValidateProviderSupported(catalogService *types.Service, provider, serviceC
 
 	ds := catalogService.Datasource
 	if len(ds.SupportedProviders) > 0 && !slices.Contains(ds.SupportedProviders, provider) {
-		return &ValidationError{
-			Code: http.StatusBadRequest,
-			Message: fmt.Sprintf(
-				"provider %s is not supported by service %s; supported providers: %v",
-				provider, serviceCatalogID, ds.SupportedProviders,
-			),
-		}
+		return BadRequest(
+			"provider %s is not supported by service %s; supported providers: %v",
+			provider, serviceCatalogID, ds.SupportedProviders,
+		)
 	}
 
 	return nil
