@@ -565,6 +565,7 @@ func validateMaxConnectionsAtCreation(service apimodels.Service, catalogService 
 	}
 
 	max := *catalogService.Datasource.MaxConnections
+
 	count := CountDatasourceConnectors(slices.Values(service.Connectors), func(ref apimodels.ConnectorRef) string {
 		return ref.Type
 	})

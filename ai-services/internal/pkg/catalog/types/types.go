@@ -127,10 +127,6 @@ func (s *Service) UnmarshalYAML(value *yaml.Node) error {
 		s.AcceptsDatasource = true
 	}
 
-	if s.Datasource != nil {
-		s.AcceptsDatasource = true
-	}
-
 	return nil
 }
 
