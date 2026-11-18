@@ -1,5 +1,7 @@
-# Python dependencies for the forecast Tiltfile (hack/tilt/services/forecast).
-# Installed into hack/tilt/services/forecast/.venv by the Tiltfile. Local development only.
+# Python dependencies for `--service=forecast` of hack/tilt/services/Tiltfile.
+# Installed into hack/tilt/services/forecast/.venv by that Tiltfile. Local development only.
+# Kept apart from hack/tilt/services/requirements.txt so the forecast training stack never lands in
+# the venv shared by extract / translate / summarize, and those services never get forecast's deps.
 #
 # Deliberately lean: only what the merged part of the service imports (API, connectors,
 # database, encryption, Triton URL check). No LLM stack, no model server.

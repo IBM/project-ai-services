@@ -1,19 +1,27 @@
 # -*- mode: Python -*-
 
 # =============================================================================
-# Tiltfile for the extract / translate / summarize services (macOS / local development)
+# Tiltfile for the extract / translate / summarize / forecast services (macOS / local development)
 # =============================================================================
 #
 # Runs ONE service with only its dependencies, chosen with the --service Tilt flag:
-#   python-env     : lean venv (hack/tilt/services/.venv)
+#   python-env     : lean venv (extract/translate/summarize share hack/tilt/services/.venv;
+#                    forecast has its own hack/tilt/services/forecast/.venv, so it installs only what it needs)
 #   postgres       : PostgreSQL in Podman (<svc>_metadata database)
-#   model-server   : hack/tilt/model_server.py in LLM-only mode (Ollama or watsonx.ai + /tokenize)
 #   <svc>-db-init  : creates the service database and schema (idempotent)
 #   <svc>-api      : the service's FastAPI app, run from source with uvicorn --reload
+#
+# extract / translate / summarize only:
+#   model-server   : hack/tilt/model_server.py in LLM-only mode (Ollama or watsonx.ai + /tokenize)
+#
+# forecast only (no LLM, so no model-server):
+#   forecast-db-init also creates the restricted forecast_worker role
+#   triton         : Triton Inference Server in Podman (explicit model control) on the model repository
 #
 # Usage:
 #   tilt up -f hack/tilt/services/Tiltfile -- --service=extract
 #   tilt up -f hack/tilt/services/Tiltfile -- --service=translate --llm_provider=watsonx
+#   tilt up -f hack/tilt/services/Tiltfile -- --service=forecast
 #   tilt down -f hack/tilt/services/Tiltfile -- --service=summarize
 #
 # Local development only - every credential below is a publicly documented default.
@@ -25,10 +33,20 @@ VENV = "hack/tilt/services/.venv"
 REQUIREMENTS = "hack/tilt/services/requirements.txt"
 
 # Default ports avoid browser-blocked (6000) and macOS AirPlay (5000, 7000) ports.
+#   llm        : needs the LLM model server (LLM_* env, CACHE_DIR)
+#   venv/requirements : override the shared venv and requirements (forecast needs no LLM stack, but
+#                       will need the heavy training stack, which must not leak into the shared venv)
+#   docs_path  : where the Swagger UI is served (the LLM services serve it at "/")
 SERVICES = {
-    "extract": {"title": "Extract", "port": 9500, "database": "extract_metadata"},
-    "translate": {"title": "Translate", "port": 9000, "database": "translate_metadata"},
-    "summarize": {"title": "Summarize", "port": 6100, "database": "summarize_metadata"},
+    "extract": {"title": "Extract", "port": 9500, "database": "extract_metadata", "llm": True},
+    "translate": {"title": "Translate", "port": 9000, "database": "translate_metadata", "llm": True},
+    "summarize": {"title": "Summarize", "port": 6100, "database": "summarize_metadata", "llm": True},
+    "forecast": {
+        "title": "Forecast", "port": 8500, "database": "forecast_metadata", "llm": False,
+        "venv": "hack/tilt/services/forecast/.venv",
+        "requirements": "hack/tilt/services/forecast/requirements.txt",
+        "docs_path": "/docs",
+    },
 }
 
 
@@ -52,6 +70,12 @@ def setup():
     config.define_string("postgres_image", args=False)
     config.define_string("postgres_port", args=False)
     config.define_string("postgres_password", args=False)
+    # forecast only
+    config.define_string("worker_postgres_user", args=False)
+    config.define_string("worker_postgres_password", args=False)
+    config.define_string("triton_image", args=False)
+    config.define_string("triton_platform", args=False)
+    config.define_string("triton_port", args=False)
     for name in SERVICES:
         config.define_string(name + "_port", args=False)
     cfg = config.parse()
@@ -62,6 +86,7 @@ def setup():
             ", ".join(SERVICES.keys()), profile))
     index = list(SERVICES.keys()).index(profile)
     services = [profile]
+    service = SERVICES[profile]
 
     llm_provider = _flag(cfg, "llm_provider", os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
     if llm_provider not in ["ollama", "watsonx"]:
@@ -71,13 +96,20 @@ def setup():
     watsonx_url = _flag(cfg, "watsonx_url", os.getenv("WATSONX_URL", ""))
     watsonx_project_id = _flag(cfg, "watsonx_project_id", os.getenv("WATSONX_PROJECT_ID", ""))
 
-    if llm_provider == "watsonx" and not (watsonx_url and watsonx_project_id and os.getenv("WATSONX_APIKEY", "")):
+    if service["llm"] and llm_provider == "watsonx" and not (
+            watsonx_url and watsonx_project_id and os.getenv("WATSONX_APIKEY", "")):
         warn("llm_provider=watsonx: set WATSONX_URL, WATSONX_PROJECT_ID (or --watsonx_url/--watsonx_project_id) " +
              "and the WATSONX_APIKEY environment variable; LLM calls fail until they are set.")
+
+    data_dir = os.path.join(REPO_ROOT, ".tilt/services", profile)
+    triton_port = int(_flag(cfg, "triton_port", 8000))
 
     ctx = {
         "profile": profile,
         "services": services,
+        "llm": service["llm"],
+        "venv": service.get("venv", VENV),
+        "requirements": service.get("requirements", REQUIREMENTS),
         "python_bin": _flag(cfg, "python_bin", ""),
         "llm_provider": llm_provider,
         "ollama_url": _flag(cfg, "ollama_url", os.getenv("OLLAMA_URL", "http://127.0.0.1:11434/v1")),
@@ -97,16 +129,39 @@ def setup():
         "ports": {name: int(_flag(cfg, name + "_port", SERVICES[name]["port"])) for name in services},
         "pg_container": "ai-svc-{}-postgres".format(profile),
         "pg_volume": "ai-svc-{}-postgres-data".format(profile),
-        "data_dir": os.path.join(REPO_ROOT, ".tilt/services", profile),
+        "data_dir": data_dir,
     }
+    ctx["containers"] = [ctx["pg_container"]]
 
-    # `tilt down` only deletes Kubernetes objects, so remove the container, its volume and the
+    if profile == "forecast":
+        ctx.update({
+            "worker_postgres_user": _flag(cfg, "worker_postgres_user", "forecast_worker"),
+            "worker_postgres_password": _flag(cfg, "worker_postgres_password", "ForecastWorker@1234"),
+            # AES-256-GCM key: must be exactly 32 bytes, used as-is (not base64). Override with the
+            # DB_ENCRYPTION_KEY environment variable; changing it makes stored connector secrets unreadable.
+            "db_encryption_key": os.getenv("DB_ENCRYPTION_KEY", "forecast-local-dev-key-012345678"),
+            # The proposal's image (quay.io/powercloud/tritonserver) is ppc64le only. NVIDIA's image is
+            # multi-arch (amd64 + arm64), so by default podman pulls the native build (Apple Silicon: arm64).
+            # Set --triton_platform=linux/amd64 only to force emulation.
+            "triton_image": _flag(cfg, "triton_image", "nvcr.io/nvidia/tritonserver:24.08-py3"),
+            "triton_platform": _flag(cfg, "triton_platform", ""),
+            "triton_port": triton_port,
+            "triton_url": "http://localhost:{}".format(triton_port),
+            "triton_container": "ai-svc-forecast-triton",
+            "model_repo": os.path.join(data_dir, "models"),
+        })
+        ctx["containers"].append(ctx["triton_container"])
+        # len() of a Starlark string is its size in bytes.
+        if len(ctx["db_encryption_key"]) != 32:
+            fail("DB_ENCRYPTION_KEY must be exactly 32 bytes (AES-256), got {}".format(len(ctx["db_encryption_key"])))
+
+    # `tilt down` only deletes Kubernetes objects, so remove the containers, the volume and the
     # service caches here. The Python venv is kept on purpose: it is slow to recreate.
     if config.tilt_subcommand == "down":
         local(
             ("podman rm -f {c} >/dev/null 2>&1 || true; " +
              "podman volume rm -f {v} >/dev/null 2>&1 || true; " +
-             "rm -rf '{d}'").format(c=ctx["pg_container"], v=ctx["pg_volume"], d=ctx["data_dir"]),
+             "rm -rf '{d}'").format(c=" ".join(ctx["containers"]), v=ctx["pg_volume"], d=ctx["data_dir"]),
             quiet=True,
         )
 
@@ -114,15 +169,11 @@ def setup():
     return ctx
 
 
-def _common_env(ctx):
+def _common_env(ctx, llm_env=""):
     """Environment shared by every service (same variables as the rag-dev podman pod templates)."""
     return """
     export PYTHONPATH="{root}/services"
-    export LLM_ENDPOINT="{ms}/llm"
-    export LLM_MODEL="{llm_model}"
-    export LLM_MAX_MODEL_LEN="{max_len}"
-    export LLM_MAX_BATCH_SIZE="32"
-    export LOG_LEVEL="INFO"
+{llm_env}    export LOG_LEVEL="INFO"
     export POSTGRES_HOST="localhost"
     export POSTGRES_PORT="{pg_port}"
     export POSTGRES_USER="postgres"
@@ -132,22 +183,57 @@ def _common_env(ctx):
     export DISABLE_CRASH_HANDLER="1"
 """.format(
         root=REPO_ROOT,
-        ms=ctx["model_server_url"],
-        llm_model=ctx["llm_model"],
-        max_len=ctx["llm_max_model_len"],
+        llm_env=llm_env,
         pg_port=ctx["postgres_port"],
         pg_pass=ctx["postgres_password"],
     )
 
 
+def _llm_env(ctx):
+    """LLM settings of extract / translate / summarize."""
+    return """    export LLM_ENDPOINT="{ms}/llm"
+    export LLM_MODEL="{llm_model}"
+    export LLM_MAX_MODEL_LEN="{max_len}"
+    export LLM_MAX_BATCH_SIZE="32"
+""".format(
+        ms=ctx["model_server_url"],
+        llm_model=ctx["llm_model"],
+        max_len=ctx["llm_max_model_len"],
+    )
+
+
+def _forecast_env(ctx):
+    """Forecast settings (same variables as the proposal's Configuration table)."""
+    return """    export WORKER_POSTGRES_USER="{wuser}"
+    export WORKER_POSTGRES_PASSWORD='{wpass}'
+    export DB_ENCRYPTION_KEY='{key}'
+    export TRITON_URL="{triton_url}"
+    export MODEL_REPO_PATH="{models}"
+    export SCRATCH_DIR="{scratch}"
+    export DATA_DIR="{data}"
+    mkdir -p "$MODEL_REPO_PATH" "$SCRATCH_DIR" "$DATA_DIR"
+""".format(
+        wuser=ctx["worker_postgres_user"],
+        wpass=ctx["worker_postgres_password"],
+        key=ctx["db_encryption_key"],
+        triton_url=ctx["triton_url"],
+        models=ctx["model_repo"],
+        scratch=os.path.join(ctx["data_dir"], "scratch"),
+        data=os.path.join(ctx["data_dir"], "data"),
+    )
+
+
 def _service_env(ctx, name):
-    cache = os.path.join(ctx["data_dir"], name, "cache")
-    return _common_env(ctx) + """
+    service_env = """
     export POSTGRES_DB="{db}"
     export PORT="{port}"
-    export CACHE_DIR="{cache}"
+""".format(db=SERVICES[name]["database"], port=ctx["ports"][name])
+    if SERVICES[name]["llm"]:
+        cache = os.path.join(ctx["data_dir"], name, "cache")
+        return _common_env(ctx, _llm_env(ctx)) + service_env + """    export CACHE_DIR="{cache}"
     mkdir -p "$CACHE_DIR"
-""".format(db=SERVICES[name]["database"], port=ctx["ports"][name], cache=cache)
+""".format(cache=cache)
+    return _common_env(ctx) + service_env + _forecast_env(ctx)
 
 
 def add_python_env(ctx):
@@ -172,8 +258,8 @@ def add_python_env(ctx):
                 "$PY" -m venv {venv}
             fi
             {venv}/bin/pip install -q -r {req}
-        """.format(venv=VENV, py=ctx["python_bin"], req=REQUIREMENTS),
-        deps=[os.path.join(REPO_ROOT, REQUIREMENTS)],
+        """.format(venv=ctx["venv"], py=ctx["python_bin"], req=ctx["requirements"]),
+        deps=[os.path.join(REPO_ROOT, ctx["requirements"])],
         labels=["setup"],
     )
 
@@ -235,7 +321,7 @@ def add_model_server(ctx):
             wx_url=ctx["watsonx_url"],
             wx_project=ctx["watsonx_project_id"],
             wx_model=ctx["watsonx_model"],
-            venv=VENV,
+            venv=ctx["venv"],
         ),
         deps=[os.path.join(REPO_ROOT, "hack/tilt/model_server.py")],
         resource_deps=["python-env"],
@@ -248,12 +334,52 @@ def add_model_server(ctx):
     )
 
 
+def add_triton(ctx):
+    # Same flags as the proposal's Podman template (section 10.2): explicit model control, so nothing
+    # is loaded until the API asks; strict readiness off and exit-on-error off, so one bad model
+    # does not take the server down. The repository is mounted read-only, as in the proposal:
+    # the forecast API (running on the host) is the only writer.
+    local_resource(
+        name="triton",
+        serve_dir=REPO_ROOT,
+        serve_cmd="""
+            mkdir -p '{models}'
+            podman rm -f {container} 2>/dev/null || true
+            exec podman run --rm --name {container} \
+                {platform} \
+                -p {port}:8000 \
+                -v '{models}':/models:ro \
+                {image} \
+                tritonserver \
+                --model-repository=/models \
+                --model-control-mode=explicit \
+                --strict-readiness=false \
+                --exit-on-error=false \
+                --http-port=8000 --grpc-port=8001 --metrics-port=8002
+        """.format(
+            container=ctx["triton_container"],
+            platform=("--platform " + ctx["triton_platform"]) if ctx["triton_platform"] else "",
+            port=ctx["triton_port"],
+            models=ctx["model_repo"],
+            image=ctx["triton_image"],
+        ),
+        labels=["inference"],
+        readiness_probe=probe(
+            initial_delay_secs=15,
+            period_secs=5,
+            timeout_secs=5,
+            http_get=http_get_action(port=ctx["triton_port"], path="/v2/health/ready"),
+        ),
+    )
+
+
 def add_service(ctx, name):
     port = ctx["ports"][name]
     title = SERVICES[name]["title"]
     env = _service_env(ctx, name)
 
-    # Creates the <svc>_metadata database and its schema (idempotent).
+    # Creates the <svc>_metadata database and its schema (idempotent). For forecast the same script
+    # also creates the restricted worker role.
     local_resource(
         name=name + "-db-init",
         dir=REPO_ROOT,
@@ -262,7 +388,7 @@ def add_service(ctx, name):
             {env}
             cd services
             ../{venv}/bin/python {name}/db/scripts/init_db.py
-        """.format(env=env, venv=VENV, name=name),
+        """.format(env=env, venv=ctx["venv"], name=name),
         deps=[
             os.path.join(REPO_ROOT, "services", name, "db/scripts"),
             os.path.join(REPO_ROOT, "services/common/db/scripts"),
@@ -271,7 +397,9 @@ def add_service(ctx, name):
         labels=[name, "setup"],
     )
 
-    # The apps tokenize with the LLM (/llm/tokenize) at startup or first request, so wait for the model server.
+    # The LLM apps tokenize with the LLM (/llm/tokenize) at startup or first request, so wait for the
+    # model server. Forecast waits for Triton instead.
+    runtime_dep = "model-server" if ctx["llm"] else "triton"
     local_resource(
         name=name + "-api",
         serve_dir=REPO_ROOT,
@@ -282,10 +410,11 @@ def add_service(ctx, name):
             exec ../{venv}/bin/python -m uvicorn {name}.app:app \
                 --host 0.0.0.0 --port {port} --reload \
                 --reload-dir {name} --reload-dir common
-        """.format(env=env, venv=VENV, name=name, port=port),
-        resource_deps=[name + "-db-init", "model-server"],
+        """.format(env=env, venv=ctx["venv"], name=name, port=port),
+        resource_deps=[name + "-db-init", runtime_dep],
         labels=[name, "backend"],
-        links=[link("http://localhost:{}".format(port), "{} API (Swagger)".format(title))],
+        links=[link("http://localhost:{}{}".format(port, SERVICES[name].get("docs_path", "")),
+                    "{} API (Swagger)".format(title))],
         readiness_probe=probe(
             initial_delay_secs=5,
             period_secs=5,
@@ -297,16 +426,24 @@ def add_service(ctx, name):
 
 def add_quick_links(ctx):
     lines = "\n".join([
-        'echo "{} API: http://localhost:{}"'.format(SERVICES[n]["title"], ctx["ports"][n])
+        'echo "{} API: http://localhost:{}{}"'.format(
+            SERVICES[n]["title"], ctx["ports"][n], SERVICES[n].get("docs_path", ""))
         for n in ctx["services"]
     ])
+    if ctx["llm"]:
+        lines += '\necho "Model server    : {} (LLM provider: {}, model: {})"'.format(
+            ctx["model_server_url"], ctx["llm_provider"], ctx["llm_model"])
+    else:
+        lines += '\necho "PostgreSQL      : localhost:{}"'.format(ctx["postgres_port"])
+        lines += '\necho "Triton          : {}"'.format(ctx["triton_url"])
+        lines += '\necho "Model repository: {}"'.format(ctx["model_repo"])
     local_resource(
         name="quick-links",
-        cmd=lines + '\necho "Model server    : {} (LLM provider: {}, model: {})"'.format(
-            ctx["model_server_url"], ctx["llm_provider"], ctx["llm_model"]),
+        cmd=lines,
         labels=["quick-links"],
         links=[
-            link("http://localhost:{}".format(ctx["ports"][n]), "{} API (Swagger)".format(SERVICES[n]["title"]))
+            link("http://localhost:{}{}".format(ctx["ports"][n], SERVICES[n].get("docs_path", "")),
+                 "{} API (Swagger)".format(SERVICES[n]["title"]))
             for n in ctx["services"]
         ],
     )
@@ -317,7 +454,10 @@ def run():
     add_quick_links(ctx)
     add_python_env(ctx)
     add_postgres(ctx)
-    add_model_server(ctx)
+    if ctx["llm"]:
+        add_model_server(ctx)
+    else:
+        add_triton(ctx)
     for name in ctx["services"]:
         add_service(ctx, name)
 
