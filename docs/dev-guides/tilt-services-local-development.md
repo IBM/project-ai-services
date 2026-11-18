@@ -110,7 +110,7 @@ Pass any option after `--`, for example `tilt up -f hack/tilt/services/Tiltfile 
 | `llm_max_model_len` | `26208` |
 | `model_server_port` | `8200` (extract), `8201` (translate), `8202` (summarize); not used by forecast |
 | `extract_port` / `translate_port` / `summarize_port` / `forecast_port` | `9500` / `9000` / `6100` / `8500` (only the option of the selected service exists) |
-| `postgres_image` | `docker.io/library/postgres:16-alpine` |
+| `postgres_image` | `docker.io/library/postgres:18-alpine` |
 | `postgres_port` | `5434` (extract), `5435` (translate), `5436` (summarize), `5437` (forecast) |
 | `postgres_password` | `Aiservicesdb@1234` |
 | `python_bin` | first of `python3.12`, `python3.13`, `python3.11`, `python3.10`, `python3` |

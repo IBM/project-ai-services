@@ -116,7 +116,7 @@ def setup():
         "llm_model": watsonx_model if llm_provider == "watsonx" else ollama_model,
         "llm_max_model_len": int(_flag(cfg, "llm_max_model_len", 26208)),
         "model_server_port": int(_flag(cfg, "model_server_port", 8200 + index)),
-        "postgres_image": _flag(cfg, "postgres_image", "docker.io/library/postgres:16-alpine"),
+        "postgres_image": _flag(cfg, "postgres_image", "docker.io/library/postgres:18-alpine"),
         # 5432 is the catalog Tiltfile, 5433 is Tiltfile.rag.
         "postgres_port": int(_flag(cfg, "postgres_port", 5434 + index)),
         # Local development default only (same as Tiltfile.rag / rag-cpu values.yaml).
@@ -260,6 +260,7 @@ def add_python_env(ctx):
 
 
 def add_postgres(ctx):
+    # postgres 18+ refuses to start if the volume is mounted at /var/lib/postgresql/data; mount /var/lib/postgresql.
     local_resource(
         name="postgres",
         serve_dir=REPO_ROOT,
@@ -270,7 +271,7 @@ def add_postgres(ctx):
                 -e POSTGRES_USER=postgres \
                 -e POSTGRES_PASSWORD='{password}' \
                 -e POSTGRES_DB=postgres \
-                -v {volume}:/var/lib/postgresql/data \
+                -v {volume}:/var/lib/postgresql \
                 {image}
         """.format(
             container=ctx["pg_container"],
