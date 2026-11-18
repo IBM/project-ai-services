@@ -68,10 +68,10 @@ It also introduces three things that no existing service has:
 **Decision: The API process and APScheduler tick talks to Triton, and only the APScheduler tick deletes forecaster files.**
 
 - Triton runs in **explicit model-control mode** (`--model-control-mode=explicit`). No model is loaded automatically; the API explicitly issues load requests after successful training and during startup reconciliation.
-- The **database state is authoritative**: Triton serves only forecasters with an active `ready` record in PostgreSQL. Unregistered directories are never loaded.
--- The worker only **creates** a forecaster's directory, by writing a temporary directory on the same volume and renaming it, so the directory appears whole or not at all. The APScheduler tick only **deletes** directories whose row is `retiring`, and the temporary directory of a job that failed.
--- The APScheduler writes the `forecasters` row only after Triton has loaded the forecaster. A row is therefore always `ready`, `retiring` or `deleted`, and the worker has no write grant on `forecasters`.
--- Retention is by count, per connector, and runs after each successful load. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired in this order: its row becomes `retiring`, it is unloaded from Triton, its directory is deleted, and its row becomes `deleted`. The row is kept. Forecasters of other connectors are not affected.
+- The **database state is authoritative**: Triton serves only forecasters with an active record in the PostgreSQL `forecasters` table. Unregistered directories are never loaded.
+- The worker only **creates** a forecaster's directory, by writing a temporary directory on the same volume and renaming it to `fc_<connector_id>_<version>`, so the directory appears whole or not at all.
+- The API writes the `forecasters` row only after Triton has successfully loaded the forecaster. A row's presence in `forecasters` means the model is loaded and ready.
+- Retention is by count, per connector, and runs after each successful load. When the forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest forecaster of that connector is unloaded from Triton, its directory is deleted from disk, and its row is deleted from `forecasters`.
 
 ### 2.3 Decision — Single worker, enforced twice
 
@@ -128,7 +128,7 @@ flowchart TD
     EXIT -- "other non-zero exit, killed or timed out" --> MORE{"attempts left?<br/>TRAINING_MAX_ATTEMPTS"}
     MORE -- yes --> WAIT["delete temp dir<br/>wait TRAINING_RETRY_DELAY_SECONDS<br/>attempt + 1"]
     WAIT --> SPAWN
-    MORE -- no --> FAIL["delete temp dir<br/>job status = failed, jobs.error set, attempts added to jobs.result"]
+    MORE -- no --> FAIL["delete temp dir<br/>job status = failed, jobs.message set, attempts added to jobs.result"]
     FAIL --> PRUNE["prune old finished jobs of the connector"]
 ```
 
@@ -459,7 +459,7 @@ A connector stores the connection details of one source database, with its secre
 
 | Field                | Type   | Required | Description                                                                            |
 |:---------------------|:-------|:---------|:---------------------------------------------------------------------------------------|
-| `id`                 | string | No       | A UUID chosen by the client (for example a catalog). Generated when omitted.           |
+| `id`                 | string | Yes      | Unique connector identifier (UUID).                                                    |
 | `name`               | string | Yes      | Unique, human-readable name, 1–255 characters.                                         |
 | `type`               | string | Yes      | A supported connector type (`db2_for_i`).                                              |
 | `connection_details` | object | Yes      | Fields for the type, as in the connector types table. Unknown fields are rejected.     |
@@ -468,12 +468,11 @@ A connector stores the connection details of one source database, with its secre
 
 **`training` object:**
 
-| Field               | Type   | Required | Description                                                                                                                                                                   |
-|:--------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `table`             | string | Yes      | Table to train on.                                                                                                                                                            |
-| `target_column`     | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
+| Field             | Type   | Required | Description                                                                                                                                                                   |
+|:------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `table`           | string | Yes      | Table to train on.                                                                                                                                                            |
+| `target_column`   | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
 | `input_columns`   | array  | Yes      | The input columns. Each is an object with a `name` and, where AutoGluon needs it, a `type` (`string`, `integer` or `number`). The forecast endpoint checks rows against them. |
-| `validation_metric` | string | No       | The metric AutoGluon validates on. Omitted means AutoGluon's default for the target.                                                                                          |
 
 **Sample request:**
 
@@ -481,7 +480,7 @@ A connector stores the connection details of one source database, with its secre
 curl -X POST http://localhost:8500/v1/connectors \
   -H "Content-Type: application/json" \
   -d '{
-        "id": "c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
         "name": "prod-sales-db",
         "type": "db2_for_i",
         "schedule": "daily",
@@ -508,7 +507,7 @@ curl -X POST http://localhost:8500/v1/connectors \
 
 ```json
 {
-    "id": "c9e6679-7425-40de-944b-e07fc1f90ae7"
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
 }
 ```
 
@@ -644,63 +643,59 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 
 **`connectors`**
 
-| Column       | Description                                                            |
-|:-------------|:-----------------------------------------------------------------------|
-| `id`         | Primary key (UUID).                                                    |
-| `name`       | Unique, human-readable name.                                           |
-| `type`       | Connector type, such as `db2_for_i`.                                   |
-| `config`     | Connection details. Safe fields in plaintext, secret fields encrypted. |
-| `created_at` | UTC creation time.                                                     |
-| `updated_at` | UTC time of the last update.                                           |
-| `status` | Status of the connector.                                           |
-| `message`   | Relevant information from connector.                                           |
+| Column               | Description                                                                                                  |
+|:---------------------|:-------------------------------------------------------------------------------------------------------------|
+| `id`                 | Primary key (UUID).                                                                                          |
+| `name`               | Unique, human-readable name (up to 255 characters).                                                          |
+| `type`               | Connector type, such as `db2_for_i`.                                                                         |
+| `connection_details` | JSON object (`{}` by default). Connection details. Safe fields in plaintext, secret fields encrypted.        |
+| `attached_at`        | UTC time at which the connector was attached.                                                                |
+| `updated_at`         | UTC time of the last update. Kept current by the `update_connectors_updated_at` database trigger.            |
+| `last_trained_at`    | UTC time at which training last completed. `NULL` until then.                                                |
+| `status`             | `ACCEPTED`, `TRAINING`, `TRAINED` or `FAILED`.                                                               |
+| `message`            | Relevant information from the connector. Can be empty.                                                       |
 
 **`training_configs`**
 
-| Column              | Description                                                                |
-|:--------------------|:---------------------------------------------------------------------------|
-| `connector_id`      | Primary key. Foreign key to `connectors`.                                  |
-| `source_table`      | Table to train on.                                                         |
-| `target_column`     | The column to predict.                                                     |
-| `input_columns`   | The input columns, each with a name and, where AutoGluon needs it, a type. |
-| `schedule`        | The schedule at which the training will run.                                      |
-| `created_at`        | UTC time at which the row was stored.                                      |
+| Column          | Description                                                                                                                                              |
+|:----------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `connector_id`  | Primary key. Foreign key to `connectors`. `ON DELETE CASCADE`, so the row is removed with the connector.                                                 |
+| `source_table`  | Table to train on.                                                                                                                                       |
+| `target_column` | The column to predict.                                                                                                                                   |
+| `input_columns` | JSON array of the input columns, each with a `name` and, where AutoGluon needs it, a `type`.                                                             |
+| `schedule`      | `hourly`, `daily`, `weekly`, `monthly` or `yearly` (compared in lower case). `NULL`: only the first training runs.                                       |
 
 **`jobs`**
 
 | Column         | Description                                                                                                                                                                                                                                            |
 |:---------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `id`           | Primary key (UUID).                                                                                                                                                                                                                                    |
-| `seq`          | Identity column. Its value is the forecaster version.                                                                                                                                                                                                  |
+| `seq`          | Primary key. Identity column (`GENERATED ALWAYS`), so the database assigns it. Its value is the forecaster version.                                                                                                                                    |
 | `connector_id` | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.                                                                                                                                                   |
-| `status`       | `queued`, `running`, `completed` or `failed`.                                                                                                                                                                                                          |
-| `message`        | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
-| `total_rows`        | Number of rows used for training the model.                                                      |
-| `result`       | Written when training finishes. The worker writes the algorithm AutoGluon chose, the validation metric and score, the training time in seconds and the rows read. The API adds the number of attempts used. On a failed job only the attempts are set. |
+| `status`       | `QUEUED`, `RUNNING`, `COMPLETED` or `FAILED`.                                                                                                                                                                                                          |
+| `message`      | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
+| `result`       | JSON object. The worker writes `rows_read` (the number of rows available for training) once, when the data load finishes. When training finishes it overwrites the object with `rows_read` repeated plus `algorithm` (the algorithm AutoGluon chose) and `training_seconds`. The API adds `attempts` after the worker exits. A failed job keeps `rows_read` if the failure came after the load, and always has `attempts`. Readers must tolerate missing keys. |
 | `created_at`   | UTC time at which the job was queued.                                                                                                                                                                                                                  |
 | `started_at`   | UTC time at which the job started running.                                                                                                                                                                                                             |
 | `finished_at`  | UTC time at which the job completed or failed.                                                                                                                                                                                                         |
 
 **`forecasters`**
 
-| Column       | Description                                                                                                      |
-|:-------------|:-----------------------------------------------------------------------------------------------------------------|
-| `id`         | Primary key (UUID).                                                                                              |
-| `job_id`     | Foreign key to the job that trained the forecaster. Set to `NULL` when run history deletes that job.             |
-| `version`    | The `seq` of that job.                                                                                           |
-| `name`       | `fc_<connector_id>_<version>`. Unique. It is also the directory name on the volume and the model name in Triton. |
-| `status`     | `ready`, `retiring` or `deleted`.                                                                                |
-| `metrics`    | Validation metric name and score, and the training time. Copied from the job's `result`.                         |
-| `created_at` | UTC time at which the forecaster was loaded and recorded.                                                        |
+| Column         | Description                                                                                                          |
+|:---------------|:---------------------------------------------------------------------------------------------------------------------|
+| `connector_id` | Part of the primary key. Foreign key to `connectors`. `ON DELETE CASCADE`, so the row is removed with the connector. |
+| `job_id`       | Foreign key to `jobs.seq`: the job that trained the forecaster. Set to `NULL` when run history deletes that job.     |
+| `version`      | Part of the primary key. The `seq` of that job.                                                                      |
+| `metrics`      | JSON object with the algorithm and the training time. Copied from the job's `result`.                                |
+| `created_at`   | UTC time at which the forecaster was loaded and recorded.                                                            |
 
 **Constraints.**
 
 - `idx_jobs_single_running`: a unique partial index that allows at most one `running` job.
-- `forecasters.name` is unique.
+- `forecasters` primary key `(connector_id, version)` guarantees uniqueness per connector.
 - A CHECK constraint on `jobs` requires a `queued` or `running` job to keep its `connector_id`.
 - `forecasters.job_id` is `ON DELETE SET NULL`, so deleting an old job does not delete its forecaster.
 
-**Run history.** The `jobs` table is also the run history. Each finished job keeps its `status`, `error`, timestamps (the time taken is `finished_at - started_at`) and `result` (algorithm, validation metric and score, training time, rows read, attempts). After each run finishes, the API keeps the newest `FORECASTER_RETENTION_COUNT` finished jobs (`completed` or `failed`) of that `connector_id` and deletes the older ones. `queued` and `running` jobs are never deleted. The details a forecaster needs to be served live in its own `metrics`, so they survive the deletion of its job.
+**Run history.** The `jobs` table is also the run history. Each finished job keeps its `status`, `message`, timestamps (the time taken is `finished_at - started_at`) and `result` (algorithm, validation metric and score, training time, rows read, attempts). After each run finishes, the API keeps the newest `FORECASTER_RETENTION_COUNT` finished jobs (`completed` or `failed`) of that `connector_id` and deletes the older ones. `queued` and `running` jobs are never deleted. The details a forecaster needs to be served live in its own `metrics`, so they survive the deletion of its job.
 
 ## 8. Data Loader
 
@@ -760,6 +755,7 @@ sequenceDiagram
     A->>W: spawn (own process group, time and memory limits)
     W->>DB: read job, training config and connector row, decrypt its secrets
     W->>S: read-only query with the connector's details, stream rows
+    W->>DB: write job result (rows read)
     W->>W: AutoGluon training, ONNX export
 
     alt worker exits 0
@@ -1020,7 +1016,7 @@ spec:
 └── fc_<connector_id>_<version+1>/ ...
 ```
 
-**One Triton model per forecaster version.** The Triton model name is `fc_<connector_id>_<version>` (`forecasters.name`, where `version` is `jobs.seq`), and its single Triton model version directory is always `1`. This follows from how Triton works and from Section 2.2:
+**One Triton model per forecaster version.** The Triton model name is `fc_<connector_id>_<version>` (where `version` is `jobs.seq`), and its single Triton model version directory is always `1`. This follows from how Triton works and from Section 2.2:
 
 - Triton's unload call acts on a **whole model with all its versions**. There is no call to unload one version of a model.
 - The service keeps several versions per connector and retires the oldest while the newest keeps serving.
@@ -1199,7 +1195,7 @@ These stories break the design above into units of work. Each one has a descript
 **Acceptance criteria.**
 
 - The init container creates `connectors`, `training_configs`, `jobs` and `forecasters` with the columns in the Database Tables section, and runs again without error.
-- The constraints exist: the unique partial index `idx_jobs_single_running`, the unique `forecasters.name`, the CHECK constraint that keeps `connector_id` on a `queued` or `running` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
+- The constraints exist: the unique partial index `idx_jobs_single_running`, the primary key `(connector_id, version)` on `forecasters`, the CHECK constraint that keeps `connector_id` on a `queued` or `running` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
 - `jobs.seq` is an identity column.
 - The `scheduler` schema exists for the APScheduler job store.
 - The restricted `forecast_worker` role has column-level grants: it can read the connector and its training configuration, and can write the job's `result` and `message`. It has no write grant on `forecasters`.
@@ -1234,7 +1230,7 @@ These stories break the design above into units of work. Each one has a descript
 - A secret field is never returned, and a field that is not on the allowlist is encrypted.
 - `POST` returns `409` when the `id` or `name` already exists, and `409` when another connector already exists. In both cases nothing is stored: no job and no schedule.
 - `POST` returns `422` for an unknown type, an `id` that is not a UUID, or a missing or unknown field in `connection_details` or `training`.
-- The list and get responses return `status` and `message` from the `connectors` row and, on get, `last_trained_at` from the `jobs` table.
+- The list and get responses return `status`, `message`, and `last_trained_at` from the `connectors` row.
 - `PUT` rejects `type` and `training` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
 - Cleanup of the schedule and the forecasters of a deleted connector is not part of this story.
 

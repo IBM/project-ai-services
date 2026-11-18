@@ -83,6 +83,12 @@ class ConnectorError(str, Enum):
     (finalize_sync_log_and_update_connector with COMPLETED status sets message=None).
     """
 
+
+# Prefix of every failure message persisted on the Connector row by
+# finalize_sync_log_and_update_connector(). The message is sticky: it survives
+# the start of the next sync and any progress updates until a sync COMPLETES.
+LAST_SYNC_ERROR_PREFIX = "Error from last sync:"
+
 # ---------------------------------------------------------------------------
 # Connector type enum
 # ---------------------------------------------------------------------------

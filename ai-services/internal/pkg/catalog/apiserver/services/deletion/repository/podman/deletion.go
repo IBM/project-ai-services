@@ -3,21 +3,17 @@ package podman
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/common"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
-	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // PodmanDeletion handles application deletion operations.
@@ -143,13 +139,13 @@ func (s *PodmanDeletion) deleteServices(ctx context.Context, services []models.S
 		}
 
 		// Delete service secrets
-		secretErrors := s.deleteSecretsFromPods(ctx, pods, keepData, "service", svc.ID)
+		secretErrors := podmanutils.DeleteSecretsFromPods(ctx, s.rt, pods, keepData, "service", svc.ID)
 		if len(secretErrors) > 0 {
 			errorMessages = append(errorMessages, secretErrors...)
 		}
 
 		// Delete service pods first so runtime releases attached volumes.
-		podErrors := s.deletePods(ctx, pods, forceDelete)
+		podErrors := podmanutils.DeletePods(ctx, s.rt, pods, forceDelete)
 		hasDeletionErrors := false
 		if len(podErrors) > 0 {
 			hasDeletionErrors = true
@@ -160,7 +156,7 @@ func (s *PodmanDeletion) deleteServices(ctx context.Context, services []models.S
 
 		// Delete volumes only after pods are deleted and only when keepData is false.
 		if !keepData {
-			volumeErrors := s.deleteVolumesFromPods(ctx, pods, "service", svc.ID)
+			volumeErrors := podmanutils.DeleteVolumesFromPods(ctx, s.rt, pods, "service", svc.ID)
 			if len(volumeErrors) > 0 {
 				hasDeletionErrors = true
 				errorMessages = append(errorMessages, volumeErrors...)
@@ -182,204 +178,9 @@ func (s *PodmanDeletion) deleteServices(ctx context.Context, services []models.S
 	return errorMessages
 }
 
-// deletePods deletes all pods and returns any error messages.
-func (s *PodmanDeletion) deletePods(ctx context.Context, pods []runtimeTypes.Pod, forceDelete bool) []string {
-	var podErrors []string
-	for _, pod := range pods {
-		if err := s.rt.DeletePod(ctx, pod.ID, &forceDelete); err != nil {
-			// Ignore "not found" errors - pod already deleted or never existed
-			if utils.IsNotFoundError(err) {
-				logger.InfofCtx(ctx, "Pod %s already deleted or does not exist", pod.ID)
-
-				continue
-			}
-			errMsg := fmt.Sprintf("failed to delete pod %s: %s", pod.ID, err)
-			podErrors = append(podErrors, errMsg)
-		}
-	}
-
-	return podErrors
-}
-
 // deleteOrphanedComponents deletes orphaned components (pods + DB records) and returns any error messages.
-//
-//nolint:cyclop // Function complexity is acceptable for deletion orchestration
 func (s *PodmanDeletion) deleteOrphanedComponents(ctx context.Context, componentIDs []uuid.UUID, keepData bool) []string {
-	var errorMessages []string
-	forceDelete := true
-
-	for _, componentID := range componentIDs {
-		// List component pods
-		pods, err := s.rt.ListPods(ctx, map[string][]string{
-			"label": {fmt.Sprintf("ai-services.io/template=%s", componentID)},
-		})
-		if err != nil {
-			errMsg := fmt.Sprintf("component %s: failed to list pods: %s", componentID, err)
-			errorMessages = append(errorMessages, errMsg)
-			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to list pods: %s", err))
-
-			continue
-		}
-
-		// Delete component secrets
-		secretErrors := s.deleteSecretsFromPods(ctx, pods, keepData, "component", componentID)
-		if len(secretErrors) > 0 {
-			errorMessages = append(errorMessages, secretErrors...)
-		}
-
-		// Delete component pods first so runtime releases attached volumes.
-		podErrors := s.deletePods(ctx, pods, forceDelete)
-		hasDeletionErrors := false
-		if len(podErrors) > 0 {
-			hasDeletionErrors = true
-			errMsg := fmt.Sprintf("component %s: failed to delete %d pod(s)", componentID, len(podErrors))
-			errorMessages = append(errorMessages, errMsg)
-			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete %d pod(s)", len(podErrors)))
-		}
-
-		// Delete component volumes only after pods are deleted and only when keepData is false.
-		if !keepData {
-			volumeErrors := s.deleteVolumesFromPods(ctx, pods, "component", componentID)
-			if len(volumeErrors) > 0 {
-				hasDeletionErrors = true
-				errorMessages = append(errorMessages, volumeErrors...)
-			}
-		}
-
-		if hasDeletionErrors {
-			continue
-		}
-
-		// Delete component from DB
-		if err := s.componentRepo.Delete(ctx, componentID); err != nil {
-			errMsg := fmt.Sprintf("component %s: failed to delete from DB: %s", componentID, err)
-			errorMessages = append(errorMessages, errMsg)
-			_ = catalogutils.UpdateComponentStatus(ctx, s.componentRepo, componentID, models.ComponentStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
-		}
-	}
-
-	return errorMessages
-}
-
-// deleteVolumesFromPods extracts volume names from pod labels and deletes them using the runtime client.
-// Volumes are always deleted when keepData=false. This method is only called when keepData=false.
-//
-// Returns a list of error messages for any volumes that failed to delete.
-func (s *PodmanDeletion) deleteVolumesFromPods(ctx context.Context, pods []runtimeTypes.Pod, instanceType string, instanceID uuid.UUID) []string {
-	var errorMessages []string
-	volumesToDelete := make(map[string]bool) // Use map to avoid duplicates
-
-	// Extract volume names from pod labels
-	for _, pod := range pods {
-		if volumeNames, ok := pod.Labels[constants.VolumeLabel]; ok && volumeNames != "" {
-			// Split comma-separated volume names (in case a pod has multiple volumes)
-			volumes := strings.Split(volumeNames, ",")
-			for _, volumeName := range volumes {
-				volumeName = strings.TrimSpace(volumeName)
-				if volumeName != "" {
-					volumesToDelete[volumeName] = true
-				}
-			}
-		}
-	}
-
-	if len(volumesToDelete) == 0 {
-		// Just return if there are no volumes to delete
-		return nil
-	}
-
-	logger.InfofCtx(ctx, "Deleting %d volume(s) for %s %s", len(volumesToDelete), instanceType, instanceID)
-
-	// Delete each unique volume using the runtime client
-	for volumeName := range volumesToDelete {
-		if err := s.rt.DeleteVolume(ctx, volumeName); err != nil {
-			// Ignore "not found" errors - volume already deleted or never existed
-			if utils.IsNotFoundError(err) {
-				logger.InfofCtx(ctx, "Volume %s already deleted or does not exist", volumeName)
-
-				continue
-			}
-			errMsg := fmt.Sprintf("%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
-			errorMessages = append(errorMessages, errMsg)
-			logger.ErrorfCtx(ctx, "%s %s: failed to delete volume %s: %s", instanceType, instanceID, volumeName, err)
-		} else {
-			logger.InfofCtx(ctx, "Successfully deleted volume: %s", volumeName)
-		}
-	}
-
-	return errorMessages
-}
-
-// deleteSecretsFromPods extracts secret names from pod labels and deletes them.
-//
-// Deletion logic:
-//   - If keepData=false: Delete ALL secrets (default behavior - complete cleanup)
-//   - If keepData=true: Only delete secrets WITHOUT skip-cleanup label OR with skip-cleanup="false" (e.g., API keys)
-//     Preserve secrets WITH skip-cleanup="true" (e.g., DB credentials)
-//
-// Returns a list of error messages for any secrets that failed to delete.
-func (s *PodmanDeletion) deleteSecretsFromPods(ctx context.Context, pods []runtimeTypes.Pod, keepData bool, instanceType string, instanceID uuid.UUID) []string {
-	secretsToDelete := collectSecretsFromPods(pods, keepData)
-
-	if len(secretsToDelete) == 0 {
-		return nil
-	}
-
-	logger.InfofCtx(ctx, "Deleting %d secret(s) for %s %s (keepData=%v)", len(secretsToDelete), instanceType, instanceID, keepData)
-
-	return s.deleteSecrets(ctx, secretsToDelete, instanceType, instanceID)
-}
-
-// collectSecretsFromPods extracts the set of secret names to delete from pod labels,
-// respecting the keepData flag to preserve secrets marked with the skip-cleanup label.
-func collectSecretsFromPods(pods []runtimeTypes.Pod, keepData bool) map[string]bool {
-	secretsToDelete := make(map[string]bool)
-
-	for _, pod := range pods {
-		secretNames, ok := pod.Labels[catalogconstants.CatalogSecretLabel]
-		if !ok {
-			continue
-		}
-
-		// With keepData enabled, preserve secrets explicitly marked for cleanup skip.
-		if skipValue, hasSkipLabel := pod.Labels[catalogconstants.CatalogSecretSkipLabel]; keepData && hasSkipLabel && skipValue != "false" {
-			continue
-		}
-
-		// Trim entries and use a map so duplicate secret names are deleted once.
-		for secretName := range strings.SplitSeq(secretNames, ",") {
-			secretName = strings.TrimSpace(secretName)
-			if secretName != "" {
-				secretsToDelete[secretName] = true
-			}
-		}
-	}
-
-	return secretsToDelete
-}
-
-// deleteSecrets deletes each secret in the provided set, ignoring not-found errors.
-// Returns a list of error messages for any secrets that failed to delete.
-func (s *PodmanDeletion) deleteSecrets(ctx context.Context, secretsToDelete map[string]bool, instanceType string, instanceID uuid.UUID) []string {
-	var errorMessages []string
-
-	for secretName := range secretsToDelete {
-		if err := s.rt.DeleteSecret(ctx, secretName); err != nil {
-			// Ignore "not found" errors - secret already deleted or never existed
-			if utils.IsNotFoundError(err) {
-				logger.InfofCtx(ctx, "Secret %s already deleted or does not exist", secretName)
-
-				continue
-			}
-			errMsg := fmt.Sprintf("%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
-			errorMessages = append(errorMessages, errMsg)
-			logger.ErrorfCtx(ctx, "%s %s: failed to delete secret %s: %s", instanceType, instanceID, secretName, err)
-		} else {
-			logger.InfofCtx(ctx, "Successfully deleted secret: %s", secretName)
-		}
-	}
-
-	return errorMessages
+	return podmanutils.DeleteComponents(ctx, s.rt, s.componentRepo, componentIDs, keepData)
 }
 
 // Made with Bob

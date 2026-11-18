@@ -5,6 +5,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
@@ -36,6 +37,31 @@ func (m ModelCatalog) ProviderNames() map[string]string {
 	}
 
 	return names
+}
+
+// ComponentTypeInfos maps a model component type id to its id and display names, taken from the
+// catalog once per request instead of once per row.
+func (m ModelCatalog) ComponentTypeInfos() map[string]types.ComponentType {
+	comps := m.Components()
+	infos := make(map[string]types.ComponentType)
+
+	for _, id := range m.ComponentTypes() {
+		ct := types.ComponentType{ID: id}
+		catalogmodels.SetComponentTypeNames(&ct, comps)
+		infos[id] = ct
+	}
+
+	return infos
+}
+
+// componentTypeInfo is the component type of a model with its display names, which are left empty
+// when the catalog no longer lists the type.
+func componentTypeInfo(row dbrepo.ModelRow, componentTypes map[string]types.ComponentType) types.ComponentType {
+	if ct, ok := componentTypes[row.ComponentType]; ok {
+		return ct
+	}
+
+	return types.ComponentType{ID: row.ComponentType}
 }
 
 func providerKey(deploymentType catalogconstants.DeploymentType, providerID string) string {
@@ -73,12 +99,14 @@ func ModelDependencyType(row dbrepo.ModelRow) dbmodels.DependencyType {
 }
 
 // ToModelBase maps a database row to the fields shared by the list and detail responses.
-// providers comes from ProviderNames; services is the number of services using the model.
-func ToModelBase(row dbrepo.ModelRow, providers map[string]string, services int) apimodels.ModelBase {
+// providers comes from ProviderNames and componentTypes from ComponentTypeInfos; services is the
+// number of services using the model.
+func ToModelBase(row dbrepo.ModelRow, providers map[string]string, componentTypes map[string]types.ComponentType, services int) apimodels.ModelBase {
 	return apimodels.ModelBase{
 		ID:                row.ID.String(),
 		DeploymentType:    row.DeploymentType,
 		Name:              row.Name,
+		ComponentType:     componentTypeInfo(row, componentTypes),
 		Provider:          providerInfo(row, providers),
 		Worker:            workerInfo(row),
 		Model:             row.Model,

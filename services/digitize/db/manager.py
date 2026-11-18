@@ -21,7 +21,7 @@ from digitize.db.models import (
 )
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
-from digitize.connectors.models import ConnectorStatus, SyncLogStatus
+from digitize.connectors.models import ConnectorStatus, SyncLogStatus, LAST_SYNC_ERROR_PREFIX
 
 logger = get_logger("db_repository")
 
@@ -916,6 +916,49 @@ class DatabaseManager:
             raise
 
     @staticmethod
+    def update_connector_total_files_and_progress_message(
+        connector_id: str, total_files: int, message: str
+    ) -> None:
+        """
+        Update total_files and, unless the connector holds a failure message
+        from a previous sync, the progress message.
+
+        A message starting with LAST_SYNC_ERROR_PREFIX is sticky until a sync
+        completes successfully, so it is preserved here.
+
+        Raises FileNotFoundError if no connector with the given id exists.
+        """
+        try:
+            with get_db_session() as session:
+                result = session.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(
+                        total_files=total_files,
+                        message=case(
+                            (
+                                or_(
+                                    Connector.message.is_(None),
+                                    ~Connector.message.startswith(LAST_SYNC_ERROR_PREFIX),
+                                ),
+                                message,
+                            ),
+                            else_=Connector.message,
+                        ),
+                    )
+                )
+                if result.rowcount == 0:
+                    raise FileNotFoundError(f"Connector id={connector_id!r} not found")
+        except FileNotFoundError:
+            raise
+        except SQLAlchemyError as e:
+            logger.error(
+                f"DB error in update_connector_total_files_and_progress_message({connector_id}): {e}",
+                exc_info=True,
+            )
+            raise
+
+    @staticmethod
     def get_connector_by_id(connector_id: str) -> Optional[Connector]:
         """
         Fetch a single connector by id, attributes eagerly loaded and expunged.
@@ -1349,7 +1392,11 @@ class DatabaseManager:
 
     @staticmethod
     def set_connector_sync_status_syncing(connector_id: str) -> None:
-        """Set status=SYNCING and clear message on the connector row (never for DELETE_PENDING)."""
+        """Set status=SYNCING on the connector row (never for DELETE_PENDING).
+
+        The message is intentionally left untouched so a failure from the
+        previous sync stays visible until a sync completes successfully.
+        """
         try:
             with get_db_session() as session:
                 session.execute(
@@ -1358,7 +1405,7 @@ class DatabaseManager:
                         Connector.id == connector_id,
                         Connector.status != ConnectorStatus.DELETE_PENDING,
                     )
-                    .values(status=ConnectorStatus.SYNCING, message=None)
+                    .values(status=ConnectorStatus.SYNCING)
                 )
         except SQLAlchemyError as e:
             logger.error(f"DB error in set_connector_sync_status_syncing({connector_id}): {e}", exc_info=True)
@@ -1431,8 +1478,9 @@ class DatabaseManager:
         CANCELLED/FAILED both map to OUT_OF_SYNC so the scheduler can retry;
         any other status (e.g. COMPLETED) is written through verbatim.
 
-        ``message`` carries error detail on failure/cancel paths and is
-        cleared to NULL on a successful completion.
+        ``message`` carries error detail on the failure path. It is cleared to
+        NULL only on a successful completion; a cancelled sync (no message)
+        leaves any previous failure message in place.
 
         A connector in DELETE_PENDING is never modified, so a tick finishing
         after a DELETE request cannot overwrite the pending deletion.
@@ -1447,8 +1495,11 @@ class DatabaseManager:
                 values: Dict[str, Any] = {
                     "last_sync_at": last_sync_at or datetime.now(timezone.utc),
                     "status": connector_sync_status,
-                    "message": message if status != SyncLogStatus.COMPLETED else None,
                 }
+                if status == SyncLogStatus.COMPLETED:
+                    values["message"] = None
+                elif message is not None:
+                    values["message"] = message
                 session.execute(
                     update(Connector)
                     .where(
@@ -2606,6 +2657,98 @@ class DatabaseManager:
                 exc_info=True,
             )
             return False
+
+
+    # ------------------------------------------------------------------ #
+    # Import / export queries                                             #
+    # ------------------------------------------------------------------ #
+    # Unlike the getters above, these deliberately do NOT swallow database
+    # errors: a failure must surface as an error, never as an empty backup.
+
+    @staticmethod
+    def _user_export_stmt(entity: str):
+        """
+        Build the unpaginated SELECT for one user-data export entity.
+
+        entity is one of 'jobs', 'documents', 'document_checksums'. Connector data
+        is never exported. 'already_exists' / 'skipped' documents are job-scoped
+        audit records and are left out, as in the global document listing. Every
+        ORDER BY ends in a unique key so offset pagination is stable.
+        """
+        if entity == "jobs":
+            return (
+                select(Job)
+                .where(Job.source == JobSource.USER.value)
+                .order_by(Job.submitted_at.desc(), Job.job_id)
+            )
+        if entity == "documents":
+            return (
+                select(Document)
+                .where(
+                    Document.source == DocumentSource.USER.value,
+                    Document.status.notin_(
+                        [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                    ),
+                )
+                .order_by(Document.submitted_at.desc(), Document.doc_id)
+            )
+        if entity == "document_checksums":
+            return select(DocumentChecksum).order_by(
+                DocumentChecksum.checksum, DocumentChecksum.type
+            )
+        raise ValueError(f"Unknown export entity: {entity!r}")
+
+    @staticmethod
+    def count_user_export_rows(entity: str) -> int:
+        """Return how many rows of *entity* the user-data export includes."""
+        stmt = DatabaseManager._user_export_stmt(entity)
+        with get_db_session() as session:
+            return session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+    @staticmethod
+    def get_user_export_rows(entity: str, limit: Optional[int] = None, offset: int = 0) -> list:
+        """
+        Return rows of *entity* in export order, detached from the session.
+
+        Args:
+            entity: see ``_user_export_stmt``.
+            limit: maximum rows to return; None returns every row from *offset* on.
+            offset: rows to skip.
+        """
+        stmt = DatabaseManager._user_export_stmt(entity)
+        if offset:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        with get_db_session() as session:
+            rows = list(session.scalars(stmt).all())
+            for row in rows:
+                session.expunge(row)
+            return rows
+
+    @staticmethod
+    def insert_document_checksum(checksum: str, doc_type: str, doc_id: str) -> bool:
+        """
+        Insert one document_checksum row, leaving any existing row untouched.
+
+        The document row must already exist (``doc_id`` is a foreign key). Raises on
+        database failure.
+
+        Returns:
+            True if a row was inserted, False if (checksum, type) or doc_id was already
+            registered.
+        """
+        with get_db_session() as session:
+            result = cast(
+                CursorResult,
+                session.execute(
+                    pg_insert(DocumentChecksum)
+                    .values(checksum=checksum, type=doc_type, doc_id=doc_id)
+                    .on_conflict_do_nothing()
+                ),
+            )
+            return result.rowcount == 1
 
 
 # Singleton instance for easy access
