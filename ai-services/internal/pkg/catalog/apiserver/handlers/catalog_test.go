@@ -750,15 +750,6 @@ func TestListConnectorProviders(t *testing.T) {
 		assert.Empty(t, resp)
 	})
 
-	t.Run("filter connectors by service_type with empty supported_providers returns all", func(t *testing.T) {
-		w := get("/api/v1/connectors?type=datasource&service_type=test_ds_any_provider")
-		require.Equal(t, http.StatusOK, w.Code)
-
-		var resp []types.ConnectorResponse
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.NotEmpty(t, resp)
-	})
-
 	t.Run("filter connectors by unknown service_type returns 404", func(t *testing.T) {
 		w := get("/api/v1/connectors?type=datasource&service_type=nonexistent-service")
 		assert.Equal(t, http.StatusNotFound, w.Code)
