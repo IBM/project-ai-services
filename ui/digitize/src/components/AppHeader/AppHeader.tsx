@@ -38,7 +38,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
 
   return (
     <>
-      <Header aria-label="IBM AI Services" className={styles.header}>
+      <Header aria-label="IBM Power AI Launchpad" className={styles.header}>
         <HeaderMenuButton
           aria-label="Open menu"
           onClick={(e) => {
@@ -56,7 +56,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
           onClick={handleLogoClick}
           className={styles.headerName}
         >
-          AI Services
+          Power AI Launchpad
         </HeaderName>
 
         <HeaderGlobalBar>

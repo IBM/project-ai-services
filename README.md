@@ -5,7 +5,7 @@
 [![Contributing](https://img.shields.io/badge/contributions-welcome-brightgreen)](CONTRIBUTING.md)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/IBM/project-ai-services)
 
-IBM Power AI Launchpad, part of the [IBM Open-Source AI Foundation for Power](https://www.ibm.com/docs/en/aiservices), deliver pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, they enable fast deployment and support models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
+IBM Power AI Launchpad, part of the [IBM Open-Source AI Foundation for Power](https://www.ibm.com/docs/en/aiservices), delivers pre-built AI capabilities and integration with inferencing solutions like Red Hat AI Inference Server. Optimized for IBM Spyre™ on Power, it enables fast deployment and supports models such as LLMs, embeddings, and re-rankers—helping enterprises scale AI efficiently.
 
 ## 📺 Demo
 
