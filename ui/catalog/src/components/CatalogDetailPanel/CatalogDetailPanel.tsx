@@ -248,7 +248,7 @@ const CatalogDetailPanel = ({
                 {certifiedBy && (
                   <div className={styles.certifiedTag}>
                     <Badge size={16} className={styles.checkIcon} />
-                    {certifiedBy} certified
+                    {certifiedBy} validated
                   </div>
                 )}
                 {license && (
