@@ -5,13 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"sort"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	clitemplates "github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
-	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 // ErrModelNotFound is returned when no provider lists the requested model.
@@ -32,7 +31,7 @@ func (p *CatalogProvider) GetModelDeployOptions(ctx context.Context, modelID, pr
 	// TODO: cache a model-id -> providers index instead of scanning every item's models.yaml per request.
 	// Warm latency is ~2ms currently.
 
-	for _, item := range p.allItems() {
+	for _, item := range p.sortedItems() {
 		model, err := findModel(item, modelID)
 		if err != nil {
 			return nil, err
@@ -51,7 +50,13 @@ func (p *CatalogProvider) GetModelDeployOptions(ctx context.Context, modelID, pr
 		return nil, fmt.Errorf("%w: %s", ErrModelNotFound, modelID)
 	}
 
-	result.Providers = filterAndSortModelProviders(result.Providers, providerID)
+	components, err := p.ListComponents()
+	if err != nil {
+		return nil, err
+	}
+	models.SetComponentTypeNames(&result.ComponentType, components)
+
+	result.Providers = models.FilterAndSortProviders(result.Providers, providerID)
 
 	return result, nil
 }
@@ -59,7 +64,7 @@ func (p *CatalogProvider) GetModelDeployOptions(ctx context.Context, modelID, pr
 // addModelProvider appends the provider behind item to result, unless it cannot deploy the model here.
 func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.ModelDeployOptions, item *catalogItem, model *types.Model, runtimeType string) error {
 	if item.Connector != nil {
-		setModelInfo(result, model.Name, model.ComponentType)
+		models.SetInfo(result, model.Name, model.ComponentType)
 		result.Providers = append(result.Providers, types.ModelDeployProvider{
 			ID:             item.Connector.ID,
 			Name:           item.Connector.Name,
@@ -70,7 +75,7 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 		return nil
 	}
 
-	setModelInfo(result, model.Name, item.Component.ComponentType)
+	models.SetInfo(result, model.Name, item.Component.ComponentType.ID)
 
 	// No profiles in models.yaml: a legacy per-app component (e.g. llm/watsonx), not deployable on its own.
 	if len(model.Profiles) == 0 {
@@ -78,7 +83,7 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 	}
 	// No metadata file for this runtime: provider is unsupported here.
 	// Any other failure (e.g. corrupt YAML) is a real error and must surface.
-	md, err := p.LoadComponentRuntimeMetadata(item.Component.ComponentType, item.Component.ID)
+	md, err := p.LoadComponentRuntimeMetadata(item.Component.ComponentType.ID, item.Component.ID)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -97,34 +102,13 @@ func (p *CatalogProvider) addModelProvider(ctx context.Context, result *types.Mo
 }
 
 // findModel returns modelID's entry from the item's models.yaml, or nil if the item doesn't list it.
-// Only components and model connectors have a models.yaml; other items return nil.
+// Only model components and model connectors have a models.yaml; other items return nil.
 func findModel(item *catalogItem, modelID string) (*types.Model, error) {
-	isModelConnector := item.Connector != nil && item.Connector.ConnectorType == constants.ConnectorTypeModels
-	if item.Component == nil && !isModelConnector {
+	if !models.IsModelProvider(item.Component, item.Connector) {
 		return nil, nil
 	}
 
-	models, err := utils.LoadYAMLList[types.Model](item.itemFS, item.Path, modelsFileName)
-	if err != nil {
-		return nil, err
-	}
-	for i := range models {
-		if models[i].ID == modelID {
-			return &models[i], nil
-		}
-	}
-
-	return nil, nil
-}
-
-// setModelInfo sets the response's name and type once, from the first provider seen.
-func setModelInfo(result *types.ModelDeployOptions, name, componentType string) {
-	if result.Name == "" {
-		result.Name = name
-	}
-	if result.ComponentType == "" {
-		result.ComponentType = componentType
-	}
+	return models.Find(item.itemFS, item.Path, modelID)
 }
 
 // buildLocalModelProvider builds a local provider entry. models.yaml lists which profile
@@ -138,29 +122,14 @@ func (p *CatalogProvider) buildLocalModelProvider(ctx context.Context, item *cat
 	}
 	profilesByID := profiles.ByID(allProfiles)
 
-	var cpu, storage int
+	var base types.Resources
 	if md.Resources != nil {
-		cpu, storage = md.Resources.CPU, md.Resources.Storage
+		base.CPU, base.Storage = md.Resources.CPU, md.Resources.Storage
 	}
 
-	deployProfiles := make([]types.ModelDeployProfile, 0, len(model.Profiles))
-	for _, id := range model.Profiles {
-		pr, ok := profilesByID[id]
-		if !ok {
-			return nil, fmt.Errorf("model '%s' lists profile '%s' which is not defined in %s for provider '%s'", model.ID, id, profiles.FileName, comp.ID)
-		}
-		deployProfiles = append(deployProfiles, types.ModelDeployProfile{
-			ID:          pr.ID,
-			Name:        pr.Name,
-			Description: pr.Description,
-			Default:     profiles.IsDefault(model.DefaultProfile, pr),
-			Resources: types.Resources{
-				CPU:          cpu,
-				Memory:       pr.Params.Resources.Memory,
-				Storage:      storage,
-				Accelerators: pr.Params.Resources.Accelerators,
-			},
-		})
+	deployProfiles, err := models.BuildDeployProfiles(model, profilesByID, comp.ID, base)
+	if err != nil {
+		return nil, err
 	}
 
 	provider := &types.ModelDeployProvider{
@@ -172,34 +141,9 @@ func (p *CatalogProvider) buildLocalModelProvider(ctx context.Context, item *cat
 	}
 
 	// Omit the schema link when the provider has no settings to fill in.
-	if schema, err := p.GetComponentProviderParams(ctx, comp.ComponentType, comp.ID); err == nil && hasNonEmptyProperties(schema) {
-		provider.Schema = fmt.Sprintf(constants.ComponentParamsURLFormat, comp.ComponentType, comp.ID, runtimeType)
+	if schema, err := p.GetComponentProviderParams(ctx, comp.ComponentType.ID, comp.ID); err == nil && hasNonEmptyProperties(schema) {
+		provider.Schema = fmt.Sprintf(constants.ComponentParamsURLFormat, comp.ComponentType.ID, comp.ID, runtimeType)
 	}
 
 	return provider, nil
-}
-
-// filterAndSortModelProviders applies the provider filter, then sorts:
-// local first, default first, then by id.
-func filterAndSortModelProviders(providers []types.ModelDeployProvider, providerID string) []types.ModelDeployProvider {
-	filtered := make([]types.ModelDeployProvider, 0, len(providers))
-	for _, pr := range providers {
-		if providerID == "" || pr.ID == providerID {
-			filtered = append(filtered, pr)
-		}
-	}
-
-	sort.Slice(filtered, func(i, j int) bool {
-		a, b := filtered[i], filtered[j]
-		if a.DeploymentType != b.DeploymentType {
-			return a.DeploymentType == constants.DeploymentTypeLocal
-		}
-		if a.Default != b.Default {
-			return a.Default
-		}
-
-		return a.ID < b.ID
-	})
-
-	return filtered
 }

@@ -1,17 +1,20 @@
 import { Tag } from "@carbon/react";
 import { ProductiveCard } from "@carbon/ibm-products";
 import { Badge, Deploy, ArrowRight } from "@carbon/icons-react";
-import type { ModelProvider, ComponentType } from "@/api/models.api";
+import type {
+  CatalogModelProvider,
+  ModelComponentType,
+} from "@/types/api.types";
 import { PROVIDER_TAG_LABELS } from "@/constants/app.constants";
 import styles from "./ModelCard.module.scss";
 
 export interface ModelCardProps {
   id: string;
   name: string;
-  componentType: ComponentType;
+  componentType: ModelComponentType;
   description: string;
   certifiedBy: string;
-  providers: ModelProvider[];
+  providers: CatalogModelProvider[];
   onDeploy?: (id: string) => void;
   onLearnMore?: (id: string) => void;
 }
@@ -26,7 +29,6 @@ const ModelCard = ({
   onDeploy,
   onLearnMore,
 }: ModelCardProps) => {
-  const providerNames = [...new Set(providers.map((p) => p.name))].join(", ");
   const providerTags = [
     ...new Set(providers.map((p) => PROVIDER_TAG_LABELS[p.id] ?? p.id)),
   ];
@@ -34,30 +36,32 @@ const ModelCard = ({
   return (
     <div className={styles.cardWrapper}>
       <ProductiveCard
-        primaryButtonIcon={ArrowRight}
-        primaryButtonText={" "}
+        actionIcons={[
+          {
+            id: "view-details",
+            icon: () => <ArrowRight size={16} />,
+            iconDescription: "View details",
+            onClick: () => onLearnMore?.(id),
+          },
+        ]}
+        actionsPlacement="bottom"
         secondaryButtonIcon={Deploy}
         secondaryButtonText="Deploy"
-        onPrimaryButtonClick={() => onLearnMore?.(id)}
-        onClick={() => onLearnMore?.(id)}
         onSecondaryButtonClick={() => onDeploy?.(id)}
-        clickZone="two"
+        onClick={() => onLearnMore?.(id)}
         className={styles.productiveCard}
       >
         <div className={styles.cardHeader}>
-          <span className={styles.componentTypeBadge}>
-            <Badge size={16} className={styles.badgeIcon} />
-            <span className={styles.componentTypeLabel}>
-              {componentType.short_name}
-            </span>
+          <span className={styles.componentTypeLabel}>
+            {componentType.short_name}
           </span>
           <h3 className={styles.cardTitle}>{name}</h3>
-          <span className={styles.certifiedBy}>By {certifiedBy}</span>
+          <span className={styles.certifiedBadge}>
+            <Badge size={16} className={styles.badgeIcon} />
+            <span className={styles.certifiedBy}>{certifiedBy}</span>
+          </span>
         </div>
         <p className={styles.description}>{description}</p>
-        {providerNames && (
-          <p className={styles.providerNames}>{providerNames}</p>
-        )}
       </ProductiveCard>
       {providerTags.length > 0 && (
         <div className={styles.providerTags}>

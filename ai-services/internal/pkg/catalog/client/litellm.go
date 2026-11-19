@@ -25,6 +25,32 @@ type LiteLLMClient interface {
 	RegisterPassThrough(ctx context.Context, req LiteLLMPassThroughRequest) error
 	DeregisterPassThrough(ctx context.Context, endpointID string) error
 	HealthProbe(ctx context.Context, modelID string) (*LiteLLMHealthResponse, error)
+	// DeleteKeysByAlias revokes the virtual keys with the given aliases. An alias that has no key
+	// is not an error.
+	DeleteKeysByAlias(ctx context.Context, aliases []string) error
+	// GenerateKey creates a virtual key and returns its raw "sk-..." value. The value must never
+	// be logged or stored.
+	GenerateKey(ctx context.Context, req LiteLLMKeyGenerateRequest) (string, error)
+}
+
+// LiteLLMKeyGenerateRequest is the payload for POST /key/generate. No duration is sent, so the
+// key never expires.
+type LiteLLMKeyGenerateRequest struct {
+	KeyAlias string             `json:"key_alias"`
+	Models   []string           `json:"models"`
+	Metadata LiteLLMKeyMetadata `json:"metadata"`
+}
+
+// LiteLLMKeyMetadata is the metadata of a virtual key. Tags are the deployment IDs the key may
+// reach: with tag filtering enabled, a request made with the key only goes to routes whose
+// litellm_params.tags contain one of them.
+type LiteLLMKeyMetadata struct {
+	Tags []string `json:"tags"`
+}
+
+// LiteLLMKeyGenerateResponse is the response payload from POST /key/generate.
+type LiteLLMKeyGenerateResponse struct {
+	Key string `json:"key"`
 }
 
 // LiteLLMModelInfo holds routing mode in /model/new (embedding/rerank).
@@ -143,15 +169,19 @@ func (c *litellmClient) RegisterModel(ctx context.Context, req LiteLLMModelNewRe
 
 func (c *litellmClient) DeregisterModel(ctx context.Context, modelID string) error {
 	body := map[string]string{"id": modelID}
-	respBytes, statusCode, err := c.doRequest(ctx, http.MethodDelete, "/model/delete", body)
+	respBytes, statusCode, err := c.doRequest(ctx, http.MethodPost, "/model/delete", body)
 	if err != nil {
 		return fmt.Errorf("failed to delete route from litellm: %w", err)
 	}
-	if statusCode < 200 || statusCode >= 300 && statusCode != http.StatusNotFound {
-		return fmt.Errorf("litellm /model/delete returned status %d: %s", statusCode, string(respBytes))
+	if statusCode >= 200 && statusCode < 300 {
+		return nil
+	}
+	// LiteLLM reports a missing model as 404, or as a 400 with "not found" in the error message.
+	if statusCode == http.StatusNotFound || (statusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(string(respBytes)), "not found")) {
+		return nil
 	}
 
-	return nil
+	return fmt.Errorf("litellm /model/delete returned status %d: %s", statusCode, string(respBytes))
 }
 
 func (c *litellmClient) RegisterPassThrough(ctx context.Context, req LiteLLMPassThroughRequest) error {
@@ -172,11 +202,53 @@ func (c *litellmClient) DeregisterPassThrough(ctx context.Context, endpointID st
 	if err != nil {
 		return fmt.Errorf("failed to delete passthrough endpoint from litellm: %w", err)
 	}
-	if statusCode < 200 || (statusCode >= 300 && statusCode != http.StatusNotFound) {
-		return fmt.Errorf("litellm DELETE /config/pass_through_endpoint returned status %d: %s", statusCode, string(respBytes))
+	if statusCode >= 200 && statusCode < 300 {
+		return nil
+	}
+	respStr := strings.ToLower(string(respBytes))
+	if statusCode == http.StatusNotFound || (statusCode == http.StatusBadRequest && (strings.Contains(respStr, "not found") || strings.Contains(respStr, "no pass-through endpoints"))) {
+		return nil
 	}
 
-	return nil
+	return fmt.Errorf("litellm DELETE /config/pass_through_endpoint returned status %d: %s", statusCode, string(respBytes))
+}
+
+func (c *litellmClient) DeleteKeysByAlias(ctx context.Context, aliases []string) error {
+	body := map[string][]string{"key_aliases": aliases}
+	respBytes, statusCode, err := c.doRequest(ctx, http.MethodPost, "/key/delete", body)
+	if err != nil {
+		return fmt.Errorf("failed to delete keys from litellm: %w", err)
+	}
+	if statusCode >= 200 && statusCode < 300 {
+		return nil
+	}
+	// LiteLLM reports an alias without a key as 404, or as a 400 with "not found" in the error message.
+	if statusCode == http.StatusNotFound || (statusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(string(respBytes)), "not found")) {
+		return nil
+	}
+
+	return fmt.Errorf("litellm /key/delete returned status %d: %s", statusCode, string(respBytes))
+}
+
+// GenerateKey never includes the response body in an error or log: on success it holds the key.
+func (c *litellmClient) GenerateKey(ctx context.Context, req LiteLLMKeyGenerateRequest) (string, error) {
+	respBytes, statusCode, err := c.doRequest(ctx, http.MethodPost, "/key/generate", req)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate key in litellm: %w", err)
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		return "", fmt.Errorf("litellm /key/generate returned status %d", statusCode)
+	}
+
+	var resp LiteLLMKeyGenerateResponse
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse litellm /key/generate response: %w", err)
+	}
+	if resp.Key == "" {
+		return "", fmt.Errorf("litellm /key/generate response did not contain a key")
+	}
+
+	return resp.Key, nil
 }
 
 func (c *litellmClient) HealthProbe(ctx context.Context, modelID string) (*LiteLLMHealthResponse, error) {

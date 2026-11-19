@@ -4,10 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -234,6 +238,77 @@ func (h *CatalogHandler) GetServiceDeployOptions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, deployOptions)
+}
+
+// ListModels godoc
+//
+//	@Summary		List catalog models
+//	@Description	Lists every deployable model of the catalog, once per model id, sorted by id, with the providers that serve it. Covers the models of local model components and of remote model connectors.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			component_type	query		string	false	"Only models of this role: 'llm', 'embedding' or 'reranker'. Omit for all."
+//	@Success		200				{array}		types.ModelCatalogEntry
+//	@Failure		400				{object}	ErrorResponse	"Invalid component_type"
+//	@Failure		401				{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		500				{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/catalog/models [get]
+func (h *CatalogHandler) ListModels(c *gin.Context) {
+	componentType := c.Query("component_type")
+	if componentType != "" {
+		if err := helpers.New(h.provider).ValidateType(componentType); err != nil {
+			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+
+			return
+		}
+	}
+
+	entries, err := h.provider.ListModelCatalog(componentType)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to list catalog models: %v", err),
+		})
+
+		return
+	}
+
+	slices.SortFunc(entries, func(a, b types.ModelCatalogEntry) int { return strings.Compare(a.ID, b.ID) })
+
+	c.JSON(http.StatusOK, entries)
+}
+
+// GetCatalogModel godoc
+//
+//	@Summary		Get a catalog model
+//	@Description	Returns one model of the catalog with the providers that serve it, its license and its about details.
+//	@Tags			Catalog
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'"
+//	@Success		200	{object}	types.ModelDetail
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized - Invalid or missing access token"
+//	@Failure		404	{object}	ErrorResponse	"Model not found in catalog"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/catalog/models/{id} [get]
+func (h *CatalogHandler) GetCatalogModel(c *gin.Context) {
+	modelID := c.Param("id")
+
+	model, err := h.provider.GetModel(modelID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrModelNotFound) {
+			c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
+
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, ErrorResponse{
+			Error: fmt.Sprintf("Failed to get model '%s': %v", modelID, err),
+		})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, model)
 }
 
 // GetModelDeployOptions godoc
@@ -689,6 +764,15 @@ func (h *CatalogHandler) GetServiceSteps(c *gin.Context) {
 // ErrorResponse represents an error response.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// parsePagination reads the page and page_size query parameters and validates them, applying the
+// defaults. A non-numeric value is read as 0 and falls back to the default.
+func parsePagination(c *gin.Context) (page, pageSize int, err error) {
+	page, _ = strconv.Atoi(c.Query("page"))
+	pageSize, _ = strconv.Atoi(c.Query("page_size"))
+
+	return repository.ValidatePaginationParams(page, pageSize)
 }
 
 // resolveRuntimeParam validates the optional ?runtime= query parameter.

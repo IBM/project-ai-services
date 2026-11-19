@@ -43,13 +43,14 @@ jobs:
           git diff --exit-code go.mod go.sum
 
       - name: Run golangci-lint
+        if: ${{ !cancelled() }}
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12
           working-directory: ${{ inputs.working-directory }}
 
       - name: Check Swagger format and docs are up to date
-        if: ${{ !inputs.skipSwaggerValidation }}
+        if: ${{ !cancelled() && !inputs.skipSwaggerValidation }}
         working-directory: ${{ inputs.working-directory }}
         run: |
           go install github.com/swaggo/swag/cmd/swag@latest
@@ -63,6 +64,8 @@ jobs:
           echo "✅ Swagger comments and documentation are up to date!"
 
       - name: Run unit tests with coverage
+        id: unit-tests
+        if: ${{ !cancelled() }}
         working-directory: ${{ inputs.working-directory }}
         run: |
           go test \
@@ -73,10 +76,12 @@ jobs:
             $(go list ./... | grep -v '/tests/e2e')
 
       - name: Print coverage summary
+        if: ${{ !cancelled() && steps.unit-tests.outcome == 'success' }}
         working-directory: ${{ inputs.working-directory }}
         run: go tool cover -func=coverage.out
       
       - name: Build Go binary
+        if: ${{ !cancelled() }}
         working-directory: ${{ inputs.working-directory }}
         run: |
           GOOS=linux GOARCH=ppc64le make binary

@@ -19,7 +19,11 @@ dependencies:
   - id: llm
 
 standalone: true
-accepts_datasource: true
+datasource:
+  required: false
+  supported_providers:
+    - object_storage
+    - file_system
 
 # About field containing detailed service information
 about:
@@ -70,6 +74,9 @@ about:
         values:
           - "PDF"
           - "DOCX"
+          - "HTML"
+          - "Markdown"
+          - "Text"
       - title: "Content"
         values:
           - "Text"

@@ -80,6 +80,14 @@ func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) err
 		return err
 	}
 
+	// Persist the LiteLLM model ID so the route can be found (and removed) later. If it cannot be
+	// saved the ID would be lost, so roll the route back instead of leaving it orphaned.
+	if err := e.saveLiteLLMModelID(ctx, plan); err != nil {
+		e.gateway.Deregister(ctx, plan.Route)
+
+		return err
+	}
+
 	endpoints := []map[string]any{{"type": "internal", "url": "http://" + eps.Internal}}
 	if err := e.componentRepo.UpdateEndpoints(ctx, plan.ComponentID, endpoints); err != nil {
 		return fmt.Errorf("failed to save endpoints: %w", err)
@@ -90,6 +98,41 @@ func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) err
 	}
 
 	return nil
+}
+
+// saveLiteLLMModelID adds {"litellm": {"model_id": <id>}} to the component's stored metadata. The
+// row is read first so the metadata written at insert (model, profile, params) is kept as is.
+func (e *ModelExecutor) saveLiteLLMModelID(ctx context.Context, plan *types.LocalPlan) error {
+	comp, err := e.componentRepo.GetByID(ctx, plan.ComponentID)
+	if err != nil {
+		return fmt.Errorf("failed to load component to save litellm model id: %w", err)
+	}
+
+	if comp == nil {
+		return fmt.Errorf("component %s not found to save litellm model id", plan.ComponentID)
+	}
+
+	metadata := liteLLMMetadata(comp.Metadata, plan.Route.LiteLLMModelID)
+
+	if err := e.componentRepo.UpdateMetadata(ctx, plan.ComponentID, metadata); err != nil {
+		return fmt.Errorf("failed to save litellm model id: %w", err)
+	}
+
+	return nil
+}
+
+// liteLLMMetadata adds {"litellm": {"model_id": <id>}} to metadata, keeping every other key, and
+// returns it. A nil metadata is replaced by a new map.
+func liteLLMMetadata(metadata map[string]any, modelID string) map[string]any {
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+
+	metadata[catalogconstants.MetadataKeyLiteLLM] = map[string]any{
+		catalogconstants.MetadataKeyLiteLLMModelID: modelID,
+	}
+
+	return metadata
 }
 
 func (e *ModelExecutor) failLocal(ctx context.Context, plan *types.LocalPlan, cause error) {
@@ -122,6 +165,8 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 		return err
 	}
 
+	// The route is registered before the connector row is written, so the LiteLLM model ID is
+	// already known here and is stored together with the rest of the metadata.
 	connector := &dbmodels.Connector{
 		ID:        plan.ConnectorID,
 		Name:      plan.Req.Name,
@@ -129,7 +174,7 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 		Provider:  plan.Req.ProviderID,
 		Status:    dbmodels.ConnectorStatusConnected,
 		CreatedBy: plan.Req.CreatedBy,
-		Metadata:  plan.Metadata,
+		Metadata:  liteLLMMetadata(plan.Metadata, plan.Route.LiteLLMModelID),
 	}
 	if err := e.connectorRepo.Insert(ctx, connector); err != nil {
 		e.gateway.Deregister(ctx, plan.Route)

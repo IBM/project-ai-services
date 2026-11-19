@@ -19,3 +19,9 @@ The operations team successfully reduced average delivery time from five days to
 ## Outlook
 
 The company expects continued growth in 2025, with a target revenue increase of ten percent.
+
+## Priorities
+
+- Expand the warehouse network in Europe.
+- Reduce delivery time further.
+- Improve customer satisfaction.

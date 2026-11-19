@@ -697,21 +697,9 @@ func (s *ApplicationServiceBase) ListApplications(ctx context.Context, req ListA
 		apps = append(apps, appData)
 	}
 
-	totalPages := 0
-	if totalCount > 0 {
-		totalPages = (totalCount + req.PageSize - 1) / req.PageSize
-	}
-
 	return &types.ApplicationListResponse{
-		Data: apps,
-		Pagination: types.PaginationMetadata{
-			Page:       req.Page,
-			PageSize:   req.PageSize,
-			TotalItems: totalCount,
-			TotalPages: totalPages,
-			HasNext:    req.Page < totalPages,
-			HasPrev:    req.Page > 1,
-		},
+		Data:       apps,
+		Pagination: types.NewPaginationMetadata(req.Page, req.PageSize, totalCount),
 	}, nil
 }
 

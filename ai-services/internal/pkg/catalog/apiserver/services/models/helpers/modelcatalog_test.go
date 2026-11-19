@@ -66,10 +66,10 @@ func TestModelCatalog_ModeFor(t *testing.T) {
 
 func TestModeOf_NoModeDeclaredIsEmptyNotAnError(t *testing.T) {
 	comps := []types.Component{
-		{ComponentType: "llm", ID: "a", LiteLLM: &types.LiteLLMConfig{}},
-		{ComponentType: "llm", ID: "b"},
-		{ComponentType: "llm", ID: "c", LiteLLM: &types.LiteLLMConfig{ModelMode: "chat"}},
-		{ComponentType: "reranker", ID: "d"},
+		{ComponentType: types.ComponentType{ID: "llm"}, ID: "a", LiteLLM: &types.LiteLLMConfig{}},
+		{ComponentType: types.ComponentType{ID: "llm"}, ID: "b"},
+		{ComponentType: types.ComponentType{ID: "llm"}, ID: "c", LiteLLM: &types.LiteLLMConfig{ModelMode: "chat"}},
+		{ComponentType: types.ComponentType{ID: "reranker"}, ID: "d"},
 	}
 
 	assert.Equal(t, "chat", modeOf(comps, "llm"), "skips providers that declare no mode")

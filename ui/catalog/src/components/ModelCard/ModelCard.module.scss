@@ -20,32 +20,6 @@
     background-color: $layer-hover;
   }
 
-  &:focus,
-  &:focus-visible,
-  &:active {
-    outline: none;
-    border: none;
-    box-shadow: none;
-    background-color: $layer;
-  }
-
-  &:focus:hover,
-  &:focus-visible:hover,
-  &:active:hover {
-    background-color: $layer-hover;
-  }
-
-  :global(.c4p--card__clickable) {
-    &:focus,
-    &:focus-visible,
-    &:active {
-      outline: none;
-      border: none;
-      box-shadow: none;
-      background-color: transparent;
-    }
-  }
-
   :global(.c4p--card__header) {
     padding: 0;
   }
@@ -86,7 +60,6 @@
     }
   }
 
-  // Arrow button (primary slot — renders last in DOM)
   :global(.c4p--card__footer button:last-child) {
     background-color: transparent;
     color: var(--cds-text-primary);
@@ -111,7 +84,7 @@
   gap: $spacing-02;
 }
 
-.componentTypeBadge {
+.certifiedBadge {
   @include type-style("label-01");
   display: inline-flex;
   align-items: center;
@@ -148,12 +121,6 @@
   overflow: hidden;
 }
 
-.providerNames {
-  @include type-style("label-01");
-  color: var(--cds-text-secondary);
-  margin-bottom: $spacing-05;
-}
-
 .providerTags {
   display: flex;
   flex-wrap: wrap;
@@ -163,7 +130,6 @@
   bottom: calc(#{$spacing-09} + #{$spacing-07});
   left: $spacing-05;
   right: $spacing-05;
-  pointer-events: none;
 }
 
 .skeletonCard {

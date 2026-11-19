@@ -21,9 +21,19 @@ func NotFound(format string, args ...any) *ValidationError {
 	return newError(http.StatusNotFound, format, args...)
 }
 
+// Forbidden returns an error that maps to HTTP 403.
+func Forbidden(format string, args ...any) *ValidationError {
+	return newError(http.StatusForbidden, format, args...)
+}
+
 // Conflict returns an error that maps to HTTP 409.
 func Conflict(format string, args ...any) *ValidationError {
 	return newError(http.StatusConflict, format, args...)
+}
+
+// BadGateway returns an error that maps to HTTP 502.
+func BadGateway(format string, args ...any) *ValidationError {
+	return newError(http.StatusBadGateway, format, args...)
 }
 
 // Unprocessable returns an error that maps to HTTP 422.

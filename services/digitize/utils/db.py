@@ -20,6 +20,7 @@ from digitize.models import (
     JobStats,
     ExportJobRecord,
     ExportDocumentRecord,
+    ExportDocumentChecksumRecord,
     ImportRequest,
     ImportResponse,
     ImportSummary,
@@ -38,6 +39,8 @@ from digitize.db.models import (
     DocumentSource,
     JobSource,
 )
+from digitize.connectors.models import LAST_SYNC_ERROR_PREFIX
+
 from digitize.db.manager import db_manager
 from digitize.db.connection import engine
 
@@ -220,6 +223,16 @@ def create_job(
         raise
 
 
+def _document_message(doc) -> Optional[str]:
+    """Build the human-readable message shown for shadow (already_exists / skipped) docs."""
+    metadata = doc.doc_metadata or {}
+    if doc.status == DocStatus.ALREADY_EXISTS.value:
+        return f"already exists: ingested as {metadata.get('existing_doc_name')}"
+    if doc.status == DocStatus.SKIPPED.value:
+        return f"skipped: duplicate of in progress {metadata.get('existing_doc_name')}"
+    return None
+
+
 def get_job(job_id: str) -> Optional[dict]:
     """
     Get job data from database.
@@ -244,8 +257,7 @@ def get_job(job_id: str) -> Optional[dict]:
                     id=doc.doc_id,
                     name=doc.name,
                     status=doc.status,
-                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
-                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
+                    message=_document_message(doc),
                 )
                 for doc in documents
             ]
@@ -314,8 +326,7 @@ def get_all_jobs(
                     id=doc.doc_id,
                     name=doc.name,
                     status=doc.status,
-                    message=f"Already ingested as {doc.doc_metadata.get('existing_doc_name')}"
-                    if doc.status == DocStatus.ALREADY_EXISTS.value else None,
+                    message=_document_message(doc),
                 )
                 for doc in documents
             ]
@@ -478,11 +489,11 @@ def get_document(doc_id: str, include_details: bool = True) -> DocumentDetailRes
 
 def get_shadow_documents_for(doc_id: str) -> List[str]:
     """
-    Return the names of all 'already_exists' shadow document rows whose
+    Return the names of all 'already_exists'/'skipped' shadow document rows whose
     ``existing_doc_id`` metadata key references *doc_id*.
 
     These placeholder rows are created whenever a duplicate file is submitted
-    (the original was already ingested).  They will be automatically removed
+    (the original was already ingested or is in progress).  They will be automatically removed
     by :meth:`~digitize.db.manager.DatabaseManager.delete_document` when the
     original document is deleted, so callers should surface this list to the
     user before confirming deletion.
@@ -499,7 +510,9 @@ def get_shadow_documents_for(doc_id: str) -> List[str]:
             stmt = (
                 _select(Document.name)
                 .where(
-                    Document.status == DocStatus.ALREADY_EXISTS.value,
+                    Document.status.in_(
+                        [DocStatus.ALREADY_EXISTS.value, DocStatus.SKIPPED.value]
+                    ),
                     Document.doc_metadata["existing_doc_id"].as_string() == doc_id,
                 )
                 .order_by(Document.submitted_at)
@@ -578,6 +591,7 @@ def get_all_documents_paginated(
                 "name": doc.name,
                 "type": doc.type,
                 "status": doc.status,
+                "output_format": doc.output_format,
                 "submitted_at": doc.submitted_at.isoformat().replace("+00:00", "Z")
             }
             for doc in documents
@@ -709,24 +723,35 @@ def _serialize_datetime(timestamp: Optional[datetime]) -> Optional[str]:
 def _build_import_summary(
     total_jobs: int,
     total_documents: int,
+    total_document_checksums: int = 0,
 ) -> ImportSummary:
     """Create an initialized import summary object."""
     return ImportSummary(
         jobs=ImportEntitySummary(total_received=total_jobs),
         documents=ImportEntitySummary(total_received=total_documents),
+        document_checksums=ImportEntitySummary(total_received=total_document_checksums),
     )
+
+
+# Entities in the order they are exported (and must be imported): each entity
+# only references entities that come before it.
+EXPORT_ENTITY_ORDER = ("jobs", "documents", "document_checksums")
 
 
 def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -> ExportResponse:
     """
-    Export jobs and documents from PostgreSQL as JSON-serializable metadata.
+    Export user jobs, user documents and the document_checksum registry as
+    JSON-serializable metadata. Connector data is not exported.
 
     Args:
         limit: Maximum combined records to return. Use -1 to return all records.
         offset: Number of combined records to skip.
 
+    ``limit``/``offset`` apply to one sequence made of jobs, then documents, then
+    document_checksums, so consecutive pages neither overlap nor skip records.
+
     Returns:
-        ExportResponse with exported jobs/documents and pagination metadata.
+        ExportResponse with exported records and pagination metadata.
     """
     if engine is None:
         raise RuntimeError("Database not available. Cannot export metadata without database connection.")
@@ -739,54 +764,24 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
     started_at = perf_counter()
 
-    if limit == -1:
-        # Fetch all records in batches
-        jobs, total_jobs = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
-        documents, total_documents = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
+    counts = {entity: db_manager.count_user_export_rows(entity) for entity in EXPORT_ENTITY_ORDER}
+    total_records = sum(counts.values())
 
-        # Fetch remaining jobs
-        remaining_job_offset = len(jobs)
-        while remaining_job_offset < total_jobs:
-            batch, _ = db_manager.get_all_jobs(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_job_offset)
-            if not batch:
-                break
-            jobs.extend(batch)
-            remaining_job_offset += len(batch)
-
-        # Fetch remaining documents
-        remaining_doc_offset = len(documents)
-        while remaining_doc_offset < total_documents:
-            batch, _ = db_manager.get_all_documents(limit=IMPORT_EXPORT_DEFAULT_LIMIT, offset=remaining_doc_offset)
-            if not batch:
-                break
-            documents.extend(batch)
-            remaining_doc_offset += len(batch)
-    else:
-        # Fetch records respecting the combined limit across jobs and documents
-        # First, get total counts
-        _, total_jobs = db_manager.get_all_jobs(limit=1, offset=0)
-        _, total_documents = db_manager.get_all_documents(limit=1, offset=0)
-
-        # Calculate how many records to skip and fetch
-        total_records = total_jobs + total_documents
-
-        # Determine which records fall within the requested range
-        jobs = []
-        documents = []
-
-        if offset < total_jobs:
-            # We need some jobs
-            jobs_to_fetch = min(limit, total_jobs - offset)
-            jobs, _ = db_manager.get_all_jobs(limit=jobs_to_fetch, offset=offset)
-
-            # If we haven't reached the limit, fetch documents
-            remaining_limit = limit - len(jobs)
-            if remaining_limit > 0:
-                documents, _ = db_manager.get_all_documents(limit=remaining_limit, offset=0)
-        else:
-            # Skip all jobs, fetch only documents
-            doc_offset = offset - total_jobs
-            documents, _ = db_manager.get_all_documents(limit=limit, offset=doc_offset)
+    # Walk the entities in order, skipping `offset` records and then taking up to `limit`.
+    rows_by_entity = {entity: [] for entity in EXPORT_ENTITY_ORDER}
+    to_skip = offset
+    remaining = None if limit == -1 else limit
+    for entity in EXPORT_ENTITY_ORDER:
+        if remaining == 0:
+            break
+        if to_skip >= counts[entity]:
+            to_skip -= counts[entity]
+            continue
+        rows = db_manager.get_user_export_rows(entity, limit=remaining, offset=to_skip)
+        to_skip = 0
+        rows_by_entity[entity] = rows
+        if remaining is not None:
+            remaining -= len(rows)
 
     exported_jobs = [
         ExportJobRecord(
@@ -800,7 +795,7 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             stats=job.stats or {},
             error=job.error,
         )
-        for job in jobs
+        for job in rows_by_entity["jobs"]
     ]
 
     exported_documents = [
@@ -817,25 +812,29 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
             error=doc.error,
             metadata=doc.doc_metadata or {},
         )
-        for doc in documents
+        for doc in rows_by_entity["documents"]
     ]
 
-    returned_records = len(exported_jobs) + len(exported_documents)
-    total_records = total_jobs + total_documents
-    effective_limit = returned_records if limit == -1 else limit
+    exported_checksums = [
+        ExportDocumentChecksumRecord(checksum=row.checksum, type=row.type, doc_id=row.doc_id)
+        for row in rows_by_entity["document_checksums"]
+    ]
+
+    returned_records = len(exported_jobs) + len(exported_documents) + len(exported_checksums)
 
     return ExportResponse(
         status="completed",
         data=ImportExportData(
             jobs=exported_jobs,
             documents=exported_documents,
+            document_checksums=exported_checksums,
         ),
         summary=ExportSummary(
             jobs=ExportEntitySummary(
                 total_exported=len(exported_jobs),
                 completed=sum(
                     1 for job in exported_jobs
-                    if job.status in (JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value)
+                    if job.status == JobStatus.COMPLETED.value
                 ),
                 failed=sum(1 for job in exported_jobs if job.status == JobStatus.FAILED.value),
             ),
@@ -843,16 +842,17 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
                 total_exported=len(exported_documents),
                 completed=sum(
                     1 for doc in exported_documents
-                    if doc.status in (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+                    if doc.status == DocStatus.COMPLETED.value
                 ),
                 failed=sum(1 for doc in exported_documents if doc.status == DocStatus.FAILED.value),
             ),
+            document_checksums=ExportEntitySummary(total_exported=len(exported_checksums)),
         ),
         export_timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         duration_seconds=round(perf_counter() - started_at, 4),
         pagination=ExportPagination(
-            limit=effective_limit,
-            offset=0 if limit == -1 else offset,
+            limit=returned_records if limit == -1 else limit,
+            offset=offset,
             has_more=False if limit == -1 else (offset + returned_records) < total_records,
             total_records=total_records,
             returned_records=returned_records,
@@ -862,7 +862,12 @@ def export_metadata(limit: int = IMPORT_EXPORT_DEFAULT_LIMIT, offset: int = 0) -
 
 def import_metadata(payload: ImportRequest) -> ImportResponse:
     """
-    Import jobs and documents into PostgreSQL in skip-existing mode.
+    Import jobs, documents and document checksums into PostgreSQL in skip-existing mode.
+
+    Records are imported in dependency order, whatever order the payload lists them
+    in: jobs → documents → document_checksums. Each stage only references records
+    that already exist in the database or were imported by an earlier stage; records
+    whose parent is missing are reported as warnings and counted as failed.
 
     Args:
         payload: Import request payload.
@@ -877,6 +882,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     summary = _build_import_summary(
         len(payload.data.jobs),
         len(payload.data.documents),
+        len(payload.data.document_checksums),
     )
     warnings: list[ImportRecordIssue] = []
     errors: list[ImportRecordIssue] = []
@@ -885,6 +891,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
     existing_document_ids = set(get_all_document_ids())
 
     importable_job_ids = set(existing_job_ids)
+    importable_document_ids = set(existing_document_ids)
 
     # ── Jobs ─────────────────────────────────────────────────────────────────
     for job_record in payload.data.jobs:
@@ -975,6 +982,7 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
 
         if payload.validate_only:
             summary.documents.imported += 1
+            importable_document_ids.add(document_record.id)
             continue
 
         doc_source = (
@@ -1009,6 +1017,52 @@ def import_metadata(payload: ImportRequest) -> ImportResponse:
             continue
 
         summary.documents.imported += 1
+        importable_document_ids.add(document_record.id)
+
+    # ── Document checksums ────────────────────────────────────────────────────
+    for checksum_record in payload.data.document_checksums:
+        if checksum_record.doc_id not in importable_document_ids:
+            summary.document_checksums.failed += 1
+            warnings.append(
+                ImportRecordIssue(
+                    record_type="document_checksum",
+                    record_id=checksum_record.doc_id,
+                    type="orphaned_document_checksum",
+                    message=(
+                        f"Document checksum references non-existent doc_id: {checksum_record.doc_id}"
+                    ),
+                )
+            )
+            continue
+
+        if payload.validate_only:
+            summary.document_checksums.imported += 1
+            continue
+
+        try:
+            inserted = db_manager.insert_document_checksum(
+                checksum_record.checksum, checksum_record.type, checksum_record.doc_id
+            )
+        except Exception as exc:
+            logger.error(
+                f"Failed to import document checksum for doc_id={checksum_record.doc_id}: {exc}",
+                exc_info=True,
+            )
+            summary.document_checksums.failed += 1
+            errors.append(
+                ImportRecordIssue(
+                    record_type="document_checksum",
+                    record_id=checksum_record.doc_id,
+                    type="database_error",
+                    message="Failed to create document checksum record",
+                )
+            )
+            continue
+
+        if inserted:
+            summary.document_checksums.imported += 1
+        else:
+            summary.document_checksums.skipped += 1
 
     return ImportResponse(
         status="completed",
@@ -1155,16 +1209,7 @@ class DatabaseStatusManager:
         # Perform database update
         if update_params:
             success = db_manager.update_document(doc_id, **update_params)
-            if success:
-                # Register the checksum when the document reaches any terminal success
-                # state (COMPLETED or COMPLETED_WITH_ERRORS) so future re-uploads of
-                # the same content are de-duplicated via document_checksum.
-                if (
-                    update_params.get("status") in [DocStatus.COMPLETED, DocStatus.COMPLETED_WITH_ERRORS]
-                    and "file_hash" in metadata_fields
-                ):
-                    db_manager.upsert_file_checksum(metadata_fields["file_hash"], doc_id)
-            else:
+            if not success:
                 logger.warning(f"Document {doc_id} not found in database for update")
 
     def _update_job(
@@ -1204,7 +1249,6 @@ class DatabaseStatusManager:
             JobStatus.FAILED,
             JobStatus.CANCELLED,
             JobStatus.CANCEL_PENDING,
-            JobStatus.COMPLETED_WITH_ERRORS,
         }
         current_db_status = JobStatus(job.status) if job.status in JobStatus._value2member_map_ else None
         if current_db_status in protected_statuses and job_status not in protected_statuses:
@@ -1219,12 +1263,11 @@ class DatabaseStatusManager:
         documents = db_manager.get_documents_by_job_id(self.job_id)
 
         # Recalculate statistics.
-        # ALREADY_EXISTS and COMPLETED_WITH_ERRORS are both terminal success states;
-        # count them with completed.
+        # ALREADY_EXISTS and SKIPPED are terminal success states; count them with completed.
         _terminal_ok = (
             DocStatus.COMPLETED.value,
             DocStatus.ALREADY_EXISTS.value,
-            DocStatus.COMPLETED_WITH_ERRORS.value,
+            DocStatus.SKIPPED.value,
         )
         stats = {
             "total_documents": len(documents),
@@ -1254,11 +1297,11 @@ class DatabaseStatusManager:
         }
 
         # Set completed_at if job is finished
-        if job_status in [JobStatus.COMPLETED, JobStatus.COMPLETED_WITH_ERRORS, JobStatus.FAILED, JobStatus.CANCELLED]:
+        if job_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED]:
             update_params["completed_at"] = datetime.now(timezone.utc)
 
-        # Set error for hard failures and completed_with_errors (when an error message is provided)
-        if error and job_status in (JobStatus.FAILED, JobStatus.COMPLETED_WITH_ERRORS):
+        # Set error for hard failures (when an error message is provided)
+        if error and job_status == JobStatus.FAILED:
             update_params["error"] = error
 
         # Perform database update
@@ -1296,7 +1339,7 @@ def _categorize_fields(details: Mapping[str, Any]) -> tuple[dict[str, Any], dict
     Returns:
         Tuple of (metadata_fields, top_level_fields)
     """
-    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "file_hash", "existing_doc_id", "existing_doc_name", "had_table_failures"}
+    METADATA_KEYS = {"pages", "tables", "chunks", "timing_in_secs", "existing_doc_id", "existing_doc_name"}
 
     metadata_fields = {
         k: v if k == "timing_in_secs" and isinstance(v, dict) else _extract_value(v)
@@ -1520,7 +1563,8 @@ def init_sync_log_and_update_connector(
     Initialise a new sync run across two tables:
       - connector_sync_log: inserts a new row with status=STARTED and an
         auto-incremented seq (COALESCE(MAX(seq), 0) + 1) scoped to this connector.
-      - connector: sets status=SYNCING on the matching row.
+      - connector: sets status=SYNCING on the matching row (message is kept so
+        a previous failure stays visible).
 
     Returns the generated seq value.
     """
@@ -1545,7 +1589,8 @@ def finalize_sync_log_and_update_connector(
         and optional file counts / error message.
       - connector: UPDATEs last_sync_at to now, status to the terminal
         state, and message — CANCELLED/FAILED both map to OUT_OF_SYNC so
-        the scheduler can retry; COMPLETED clears message to NULL.
+        the scheduler can retry; COMPLETED clears message to NULL, FAILED
+        sets it, CANCELLED leaves it unchanged.
 
     Returns True on success, False if the sync-log row was not found.
     """
@@ -1562,7 +1607,7 @@ def finalize_sync_log_and_update_connector(
     )
     if not found:
         return False
-    connector_message = f"Error from last sync: {error}" if error else None
+    connector_message = f"{LAST_SYNC_ERROR_PREFIX} {error}" if error else None
     db_manager.update_connector_after_sync(
         connector_id, status=status, last_sync_at=now, message=connector_message
     )
@@ -1572,8 +1617,12 @@ def finalize_sync_log_and_update_connector(
 def update_connector_total_files_and_message(
     connector_id: str, total_files: int, message: str
 ) -> None:
-    """Update total_files and message on the connector row in a single DB call."""
-    db_manager.update_connector(connector_id=connector_id, total_files=total_files, message=message)
+    """Update total_files and message on the connector row in a single DB call.
+
+    A failure message left by a previous sync is preserved (sticky until a
+    sync completes successfully); only total_files is updated in that case.
+    """
+    db_manager.update_connector_total_files_and_progress_message(connector_id, total_files, message)
 
 
 def set_connector_message(connector_id: str, error: Optional[str]) -> None:

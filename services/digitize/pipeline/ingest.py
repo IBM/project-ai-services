@@ -26,7 +26,6 @@ def create_indexing_handler(
     emb_model_dict: dict,
     status_mgr: Optional[DatabaseStatusManager],
     doc_id_dict: Optional[dict],
-    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ):
     """
     Create an indexing handler that can be called immediately after chunking of a document.
@@ -35,7 +34,6 @@ def create_indexing_handler(
         emb_model_dict: Dictionary containing embedding model configuration
         status_mgr: Status manager for updating document status
         doc_id_dict: Mapping of document names to IDs
-        file_checksum_dict: Optional mapping of filename -> md5 hex digest
 
     Returns:
         Callable that handles indexing of a single document's chunks
@@ -88,36 +86,19 @@ def create_indexing_handler(
                     status_mgr.update_job_progress(doc_id, DocStatus.FAILED, JobStatus.IN_PROGRESS)
                 return False
 
-            # Update status to COMPLETED (or COMPLETED_WITH_ERRORS if table failures
-            # were recorded earlier in the pipeline for this document).
+            # Update status to COMPLETED with indexing timing
             if status_mgr and doc_id_dict:
-                from digitize.utils.db import get_document
-                try:
-                    current_doc = get_document(doc_id)
-                    had_partial = bool(
-                        (current_doc.metadata or {}).get("had_table_failures", False)
-                    )
-                except Exception:
-                    had_partial = False
-
-                final_doc_status = DocStatus.COMPLETED_WITH_ERRORS if had_partial else DocStatus.COMPLETED
                 logger.debug(
-                    f"Indexing Done: updating doc metadata to {final_doc_status.value} "
+                    f"Indexing Done: updating doc metadata to {DocStatus.COMPLETED.value} "
                     f"for document: {doc_id}"
                 )
-                file_hash = (
-                    file_checksum_dict.get(Path(path).name)
-                    if file_checksum_dict else None
-                )
                 metadata_update = {
-                    "status": final_doc_status,
+                    "status": DocStatus.COMPLETED,
                     "completed_at": get_utc_timestamp(),
                     "timing_in_secs": {"indexing": round(indexing_time, 2)},
                 }
-                if file_hash:
-                    metadata_update["file_hash"] = file_hash
                 status_mgr.update_doc_metadata(doc_id, metadata_update)
-                status_mgr.update_job_progress(doc_id, final_doc_status, JobStatus.IN_PROGRESS)
+                status_mgr.update_job_progress(doc_id, DocStatus.COMPLETED, JobStatus.IN_PROGRESS)
 
             logger.info(f"✅ Successfully indexed document {doc_id}")
             return True
@@ -156,7 +137,6 @@ def ingest(
     directory_path: Path,
     job_id: Optional[str] = None,
     doc_id_dict: Optional[dict] = None,
-    file_checksum_dict: Optional[dict] = None,  # filename -> md5 hex
 ):
     """Injest documents in the specified directory path.
 
@@ -181,10 +161,13 @@ def ingest(
 
     try:
         # Files are already staged and validated at API level in app.py
-        # Collect both PDF and DOCX files from the staging directory
+        # Collect PDF, DOCX, HTML, Markdown, and text files from the staging directory
         pdf_files = list(directory_path.glob("*.pdf"))
         docx_files = list(directory_path.glob("*.docx"))
-        input_file_paths = [str(p) for p in pdf_files + docx_files]
+        html_files = list(directory_path.glob("*.html"))
+        md_files = list(directory_path.glob("*.md"))
+        txt_files = list(directory_path.glob("*.txt"))
+        input_file_paths = [str(p) for p in pdf_files + docx_files + html_files + md_files + txt_files]
 
         # Total includes already-exists files (doc_id_dict covers all submitted files).
         total_documents = len(doc_id_dict) if doc_id_dict else len(input_file_paths)
@@ -198,7 +181,7 @@ def ingest(
 
         # Create indexing handler for immediate indexing after chunking
         indexing_handler = create_indexing_handler(
-            emb_model_dict, status_mgr, doc_id_dict, file_checksum_dict
+            emb_model_dict, status_mgr, doc_id_dict
         )
 
         # CHECK 1: abort before launching pipeline if cancellation was requested
@@ -233,12 +216,10 @@ def ingest(
             doc_stats = get_job_document_stats(job_id)
             failed_docs = doc_stats["failed_docs"]
             completed_docs = doc_stats["completed_docs"]
-            completed_with_errors_docs = doc_stats["completed_with_errors_docs"]
 
-            all_terminal_docs = len(completed_docs) + len(completed_with_errors_docs)
-            pct = (all_terminal_docs / total_documents * 100) if total_documents > 0 else 100.0
+            pct = (len(completed_docs) / total_documents * 100) if total_documents > 0 else 100.0
             logger.info(
-                f"Ingestion summary: {all_terminal_docs}/{total_documents} files ingested "
+                f"Ingestion summary: {len(completed_docs)}/{total_documents} files ingested "
                 f"({pct:.2f}% of total documents)"
             )
 
@@ -263,20 +244,6 @@ def ingest(
                 )
 
                 status_mgr.update_job_progress("", DocStatus.FAILED, JobStatus.FAILED, error=job_error_message)
-
-            elif len(completed_with_errors_docs) > 0:
-                # All documents reached a terminal state, but some had table summarization errors
-                cwe_msg = (
-                    f"{len(completed_with_errors_docs)} of {total_documents} document(s) completed with errors "
-                    f"due to table summarization failures. Those documents are queryable but their table summaries "
-                    f"may be incomplete."
-                )
-                logger.info(
-                    f"✅ Ingestion completed with errors, Time taken: {file_processing_time:.2f} seconds. "
-                    f"{cwe_msg}"
-                )
-                status_mgr.update_job_progress("", DocStatus.COMPLETED_WITH_ERRORS, JobStatus.COMPLETED_WITH_ERRORS,
-                                               error=cwe_msg)
 
             else:
                 # All documents completed successfully
@@ -303,7 +270,6 @@ def ingest(
                 doc_stats = get_job_document_stats(job_id)
                 processed_doc_ids = set(
                     [doc["id"] for doc in doc_stats["completed_docs"]] +
-                    [doc["id"] for doc in doc_stats["completed_with_errors_docs"]] +
                     [doc["id"] for doc in doc_stats["failed_docs"]]
                 )
 

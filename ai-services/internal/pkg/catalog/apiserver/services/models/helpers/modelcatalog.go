@@ -26,7 +26,7 @@ func New(provider *catalog.CatalogProvider) ModelCatalog {
 func (m ModelCatalog) Components() []types.Component {
 	comps := m.provider.ListComponentsByCategory(catalogconstants.ComponentCategoryModels)
 	slices.SortFunc(comps, func(a, b types.Component) int {
-		return strings.Compare(a.ComponentType+"/"+a.ID, b.ComponentType+"/"+b.ID)
+		return strings.Compare(a.ComponentType.ID+"/"+a.ID, b.ComponentType.ID+"/"+b.ID)
 	})
 
 	return comps
@@ -36,8 +36,8 @@ func (m ModelCatalog) Components() []types.Component {
 func (m ModelCatalog) ComponentTypes() []string {
 	var out []string
 	for _, c := range m.Components() {
-		if !slices.Contains(out, c.ComponentType) {
-			out = append(out, c.ComponentType)
+		if !slices.Contains(out, c.ComponentType.ID) {
+			out = append(out, c.ComponentType.ID)
 		}
 	}
 
@@ -70,7 +70,7 @@ func (m ModelCatalog) ModeFor(componentType string) (string, error) {
 // modeOf returns the first non-empty LiteLLM model mode declared by a provider of componentType.
 func modeOf(comps []types.Component, componentType string) string {
 	for _, c := range comps {
-		if c.ComponentType == componentType && c.LiteLLM != nil && c.LiteLLM.ModelMode != "" {
+		if c.ComponentType.ID == componentType && c.LiteLLM != nil && c.LiteLLM.ModelMode != "" {
 			return c.LiteLLM.ModelMode
 		}
 	}

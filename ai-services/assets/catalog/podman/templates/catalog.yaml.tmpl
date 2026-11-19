@@ -126,6 +126,8 @@ spec:
         # LiteLLM runs in its own pod; the catalog backend registers model routes through it.
         - name: LITELLM_ENDPOINT
           value: "http://{{ .AppName }}--litellm:{{ .Values.litellm.port }}"
+        - name: MODEL_GATEWAY_PUBLIC_ENDPOINT
+          value: "https://model-gateway.{{ .DomainSuffix }}{{ if ne (printf "%v" .Values.caddy.httpsPort) "443" }}:{{ .Values.caddy.httpsPort }}{{ end }}"
       ports:
         - containerPort: 8080
           protocol: TCP

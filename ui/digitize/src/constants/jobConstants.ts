@@ -6,7 +6,6 @@ export const JOB_STATUS = {
   ACCEPTED: "accepted",
   IN_PROGRESS: "in_progress",
   COMPLETED: "completed",
-  COMPLETED_WITH_ERRORS: "completed_with_errors",
   FAILED: "failed",
   CANCEL_PENDING: "cancel_pending",
   CANCELLED: "cancelled",
@@ -27,9 +26,9 @@ export const DOC_STATUS = {
   PROCESSED: "processed",
   CHUNKED: "chunked",
   COMPLETED: "completed",
-  COMPLETED_WITH_ERRORS: "completed_with_errors",
   FAILED: "failed",
   ALREADY_EXISTS: "already_exists",
+  SKIPPED: "skipped",
   CANCELLED: "cancelled",
 } as const;
 

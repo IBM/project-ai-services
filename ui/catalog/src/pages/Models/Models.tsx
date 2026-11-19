@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import { ModelCard, ModelCardSkeleton } from "@/components/ModelCard";
-import { ModelDetailPanel } from "@/components";
+import { ModelsTable, ModelDetailPanel } from "@/components";
 import { useModels } from "@/hooks/useModels";
 import styles from "./Models.module.scss";
 
@@ -45,11 +45,13 @@ const Models = () => {
           contained={false}
           className={styles.tabList}
         >
-          <Tab>Deployments</Tab>
+          <Tab>Model deployments</Tab>
           <Tab>Catalog</Tab>
         </TabList>
         <TabPanels>
-          <TabPanel />
+          <TabPanel>
+            <ModelsTable />
+          </TabPanel>
           <TabPanel>
             {isLoading ? (
               <div className={styles.catalogGrid}>
