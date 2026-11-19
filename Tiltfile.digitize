@@ -1,0 +1,235 @@
+# -*- mode: Python -*-
+
+# =============================================================================
+# Tiltfile.digitize - Digitize service + UI wired to the local catalog's token issuer
+# =============================================================================
+#
+# Purpose: validate the Phase 1 service API authentication locally (macOS).
+# Digitize verifies catalog-issued ES256 tokens against the catalog's JWKS, and the Digitize UI
+# logs in through the catalog UI (/authorize, PKCE) and exchanges the code at the catalog.
+#
+# Needs the catalog stack running (root Tiltfile: `tilt up`, UI :5173, API :8080).
+# Does NOT start OpenSearch or the model server: login, token and API-auth checks do not need
+# them. Uploading a document for processing will fail until they are available (Tiltfile.rag).
+#
+# Usage (second Tilt instance, the catalog one owns port 10350):
+#   tilt up -f Tiltfile.digitize --port 10351
+#   tilt down -f Tiltfile.digitize --port 10351
+#
+# Resources:
+#   digitize-db / -db-init : dedicated PostgreSQL (Podman, port 5433) + schema
+#   digitize-register      : registers a "digitize" service with ui endpoint http://localhost:<ui port>
+#                            in the catalog DB. The catalog only accepts redirect URIs that match a
+#                            deployed service's ui endpoint, and nothing is deployed on a Mac.
+#   digitize-api           : the digitize API from source, with AUTH_JWKS_URL / AUTH_AUDIENCE set
+#   digitize-ui            : the digitize UI via Vite (ui/digitize/vite.tilt.config.ts)
+#   digitize-e2e           : manual trigger, runs scripts/e2e-service-auth.sh
+# =============================================================================
+
+config.define_string("python_bin", args=False)
+config.define_string("digitize_port", args=False)
+config.define_string("digitize_ui_port", args=False)
+config.define_string("digitize_db_image", args=False)
+config.define_string("digitize_db_port", args=False)
+config.define_string("digitize_db_password", args=False)
+config.define_string("catalog_api_url", args=False)
+config.define_string("catalog_ui_url", args=False)
+config.define_string("catalog_db_container", args=False)
+config.define_string("catalog_db_user", args=False)
+config.define_string("catalog_db_name", args=False)
+
+cfg = config.parse()
+
+# `tilt down` only deletes Kubernetes objects: remove what this Tiltfile created.
+if config.tilt_subcommand == "down":
+    local(
+        "podman rm -f digitize-db >/dev/null 2>&1 || true; "
+        + "podman volume rm -f digitize-db-data >/dev/null 2>&1 || true; "
+        + "podman exec catalog-db psql -U postgres -d ai_services -c "
+        + "\"DELETE FROM applications WHERE name = 'tilt-digitize'\" >/dev/null 2>&1 || true; "
+        + "rm -rf hack/tilt/.data/digitize-cache",
+        quiet=True,
+    )
+
+python_bin = str(cfg.get("python_bin", "python3"))
+digitize_port = int(cfg.get("digitize_port", 4000))
+digitize_ui_port = int(cfg.get("digitize_ui_port", 4001))
+digitize_db_img = str(cfg.get("digitize_db_image", "docker.io/library/postgres:16-alpine"))
+digitize_db_port = int(cfg.get("digitize_db_port", 5433))  # not 5432: the catalog DB uses it
+# Local development default only.
+digitize_db_pass = str(cfg.get("digitize_db_password", "Aiservicesdb@1234"))
+catalog_api_url = str(cfg.get("catalog_api_url", "http://localhost:8080"))
+catalog_ui_url = str(cfg.get("catalog_ui_url", "http://localhost:5173"))
+catalog_db_container = str(cfg.get("catalog_db_container", "catalog-db"))
+catalog_db_user = str(cfg.get("catalog_db_user", "postgres"))
+catalog_db_name = str(cfg.get("catalog_db_name", "ai_services"))
+
+venv = "hack/tilt/.venv"
+cache_dir = "hack/tilt/.data/digitize-cache"
+
+digitize_env = """
+    export PYTHONPATH="$(pwd)/services"
+    export LOG_LEVEL="INFO"
+    export DISABLE_CRASH_HANDLER="1"
+    export POSTGRES_HOST="localhost"
+    export POSTGRES_PORT="{db_port}"
+    export POSTGRES_DB="digitize_metadata"
+    export POSTGRES_USER="postgres"
+    export POSTGRES_PASSWORD="{db_pass}"
+    export DB_POOL_SIZE="5"
+    export DB_MAX_OVERFLOW="5"
+    # Local development key only (same default as values.yaml).
+    export DB_ENCRYPTION_KEY="B374A26A71490437AA024E4FADD5B497"
+    export CACHE_DIR="$(pwd)/{cache}"
+    export LOCAL_CACHE_DIR="$(pwd)/{cache}"
+    mkdir -p "$CACHE_DIR"
+    # Service API authentication: verify catalog-issued tokens. http is accepted for loopback hosts only.
+    export AUTH_JWKS_URL="{catalog_api}/.well-known/jwks.json"
+    export AUTH_AUDIENCE="digitize"
+""".format(db_port=digitize_db_port, db_pass=digitize_db_pass, cache=cache_dir, catalog_api=catalog_api_url)
+
+local_resource(
+    name="quick-links",
+    cmd="""
+        echo "1. Open the Digitize UI : http://localhost:{ui}   (redirects to the catalog login)"
+        echo "2. Log in to the catalog: admin / admin123"
+        echo "3. Digitize API         : http://localhost:{api}  (needs a Bearer token)"
+        echo "Trigger 'digitize-e2e' to run the scripted checks."
+    """.format(ui=digitize_ui_port, api=digitize_port),
+    labels=["quick-links"],
+    links=[
+        link("http://localhost:{}".format(digitize_ui_port), "Digitize UI"),
+        link(catalog_ui_url, "Catalog UI"),
+    ],
+)
+
+# Reuses the venv of Tiltfile.rag; PyJWT (needed by services/common/auth) is in hack/tilt/requirements.txt.
+local_resource(
+    name="digitize-python-env",
+    cmd="""
+        set -e
+        if [ ! -x {venv}/bin/python ]; then
+            {py} -m venv {venv}
+        fi
+        {venv}/bin/pip install -q -r hack/tilt/requirements.txt
+    """.format(venv=venv, py=python_bin),
+    deps=["hack/tilt/requirements.txt"],
+    labels=["digitize", "setup"],
+)
+
+local_resource(
+    name="digitize-db",
+    serve_cmd="""
+        podman rm -f digitize-db 2>/dev/null || true
+        podman run --rm --name digitize-db \
+            -p {port}:5432 \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD='{password}' \
+            -e POSTGRES_DB=postgres \
+            -v digitize-db-data:/var/lib/postgresql/data \
+            {image}
+    """.format(port=digitize_db_port, password=digitize_db_pass, image=digitize_db_img),
+    labels=["digitize", "database"],
+    readiness_probe=probe(
+        initial_delay_secs=5,
+        period_secs=3,
+        exec=exec_action(["podman", "exec", "digitize-db", "pg_isready", "-U", "postgres"]),
+    ),
+)
+
+local_resource(
+    name="digitize-db-init",
+    cmd="""
+        set -e
+        {env}
+        cd services
+        ../{venv}/bin/python digitize/db/scripts/init_db.py
+    """.format(env=digitize_env, venv=venv),
+    deps=["services/digitize/db/scripts"],
+    resource_deps=["digitize-db", "digitize-python-env"],
+    labels=["digitize", "setup"],
+)
+
+# The catalog matches redirect_uri byte for byte against "<ui endpoint of a deployed digitize service>/auth/callback".
+local_resource(
+    name="digitize-register",
+    cmd="""
+        set -e
+        podman exec -i {container} psql -U {user} -d {db} -v ON_ERROR_STOP=1 <<'SQL'
+DELETE FROM applications WHERE name = 'tilt-digitize';
+WITH w AS (SELECT id FROM workers ORDER BY registered_at LIMIT 1),
+app AS (
+    INSERT INTO applications (name, catalog_id, deployment_type, status, version, created_by, worker_id)
+    SELECT 'tilt-digitize', 'digitize', 'services', 'Running', 'dev', 'tilt', w.id FROM w
+    RETURNING id
+)
+INSERT INTO services (app_id, catalog_id, status, endpoints, version)
+SELECT id, 'digitize', 'Running',
+       '[{{"type":"ui","url":"http://localhost:{ui}"}}]'::jsonb, 'dev'
+FROM app;
+SELECT s.catalog_id, s.endpoints FROM services s JOIN applications a ON a.id = s.app_id WHERE a.name = 'tilt-digitize';
+SQL
+    """.format(container=catalog_db_container, user=catalog_db_user, db=catalog_db_name, ui=digitize_ui_port),
+    labels=["digitize", "setup"],
+)
+
+local_resource(
+    name="digitize-api",
+    serve_cmd="""
+        set -e
+        {env}
+        export PORT="{port}"
+        cd services
+        exec ../{venv}/bin/python -m uvicorn digitize.app:app \
+            --host 0.0.0.0 --port {port} --reload \
+            --reload-dir digitize --reload-dir common
+    """.format(env=digitize_env, port=digitize_port, venv=venv),
+    resource_deps=["digitize-db-init"],
+    labels=["digitize", "backend"],
+    links=[link("http://localhost:{}".format(digitize_port), "Digitize API")],
+    readiness_probe=probe(
+        initial_delay_secs=10,
+        period_secs=5,
+        timeout_secs=5,
+        http_get=http_get_action(port=digitize_port, path="/health"),
+    ),
+)
+
+local_resource(
+    name="digitize-ui",
+    serve_cmd="""
+        set -e
+        cd ui/digitize
+        if [ ! -d node_modules ]; then
+            echo "Installing npm dependencies..."
+            npm install
+        fi
+        export VITE_PORT="{ui}"
+        export VITE_API_TARGET="http://localhost:{api}"
+        export VITE_CATALOG_UI_URL="{catalog_ui}"
+        export CATALOG_API_URL="{catalog_api}"
+        exec npx vite --config vite.tilt.config.ts --host 0.0.0.0 --port {ui}
+    """.format(ui=digitize_ui_port, api=digitize_port, catalog_ui=catalog_ui_url, catalog_api=catalog_api_url),
+    resource_deps=["digitize-api", "digitize-register"],
+    labels=["digitize", "frontend"],
+    links=[link("http://localhost:{}".format(digitize_ui_port), "Digitize UI")],
+    readiness_probe=probe(
+        initial_delay_secs=3,
+        period_secs=5,
+        http_get=http_get_action(port=digitize_ui_port, path="/"),
+    ),
+)
+
+# Manual: ADMIN_USER / ADMIN_PASSWORD are the local catalog defaults (see the root Tiltfile).
+local_resource(
+    name="digitize-e2e",
+    cmd="""
+        CATALOG_URL="{catalog_api}" DIGITIZE_URL="http://localhost:{api}" \
+        ADMIN_USER=admin ADMIN_PASSWORD=admin123 \
+        bash scripts/e2e-service-auth.sh
+    """.format(catalog_api=catalog_api_url, api=digitize_port),
+    resource_deps=["digitize-api", "digitize-register"],
+    trigger_mode=TRIGGER_MODE_MANUAL,
+    auto_init=False,
+    labels=["digitize", "test"],
+)

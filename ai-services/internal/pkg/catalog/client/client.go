@@ -270,6 +270,31 @@ func (c *Client) RefreshToken(ctx context.Context) error {
 	return config.Save(c.creds)
 }
 
+// ServiceTokenResponse is the response of POST /api/v1/auth/service-token.
+type ServiceTokenResponse struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// ServiceToken calls POST /api/v1/auth/service-token and returns a short-lived token for one service.
+func (c *Client) ServiceToken(ctx context.Context, service string) (ServiceTokenResponse, error) {
+	var resp ServiceTokenResponse
+	httpResp, err := c.httpClient.R().
+		SetContext(ctx).
+		SetBody(map[string]string{"service": service}).
+		SetResult(&resp).
+		Post("/api/v1/auth/service-token")
+	if err != nil {
+		return ServiceTokenResponse{}, fmt.Errorf("service token request: %w", err)
+	}
+
+	if httpResp.IsError() {
+		return ServiceTokenResponse{}, fmt.Errorf("service token failed: %s", httpErrorMessage(httpResp))
+	}
+
+	return resp, nil
+}
+
 // Me calls GET /api/v1/auth/me and returns the current user info.
 func (c *Client) Me(ctx context.Context) (UserInfo, error) {
 	var info UserInfo

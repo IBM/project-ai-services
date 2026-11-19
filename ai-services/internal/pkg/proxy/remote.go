@@ -88,12 +88,17 @@ func (r *RemoteProxyManager) GetRouteByID(ctx context.Context, routeID string) (
 // RegisterIngressRoute implements ProxyManager. It registers a path-based route
 // on the remote worker's private mTLS ingress server over the CommandStream.
 func (r *RemoteProxyManager) RegisterIngressRoute(ctx context.Context, route IngressRoute) error {
+	rules := make([]payload.RouteRule, 0, len(route.AllowedRules))
+	for _, rule := range route.AllowedRules {
+		rules = append(rules, payload.RouteRule{Method: rule.Method, Path: rule.Path})
+	}
 	_, err := r.send(ctx, payload.ProxyRoute{
-		Op:         payload.ProxyRouteOpRegisterIngress,
-		ID:         route.ID,
-		PathPrefix: route.PathPrefix,
-		Upstream:   route.Upstream,
-		Terminal:   route.Terminal,
+		Op:           payload.ProxyRouteOpRegisterIngress,
+		ID:           route.ID,
+		PathPrefix:   route.PathPrefix,
+		Upstream:     route.Upstream,
+		Terminal:     route.Terminal,
+		AllowedRules: rules,
 	})
 
 	return err

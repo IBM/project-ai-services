@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/middleware"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/miq"
 )
@@ -184,6 +185,11 @@ func (h *AuthHandler) TokenLogin(c *gin.Context) {
 
 	access, refresh, err := h.svc.LoginWithToken(c.Request.Context(), raw)
 	if err != nil {
+		if errors.Is(err, repository.ErrReservedIdentity) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "identity not allowed"})
+
+			return
+		}
 		if errors.Is(err, miq.ErrUnauthorized) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired ManageIQ token"})
 

@@ -61,7 +61,13 @@ const LoginPage = () => {
         password,
       });
 
-      navigate(ROUTES.DIGITAL_ASSISTANTS);
+      const searchParams = new URLSearchParams(location.search);
+      const returnTo = searchParams.get("return_to");
+      if (returnTo) {
+        navigate(returnTo);
+      } else {
+        navigate(ROUTES.DIGITAL_ASSISTANTS);
+      }
     } catch (error) {
       const axiosError = axios.isAxiosError(error)
         ? error

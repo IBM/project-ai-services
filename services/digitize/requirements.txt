@@ -70,6 +70,8 @@ python-docx==1.2.0
 python-dotenv==1.2.4
 python-oxmsg==0.0.2
 python-pptx==1.0.2
+PyJWT[crypto]==2.15.1
+requests==2.34.2
 PyYAML==6.0.3
 rapidocr==3.10.0
 referencing==0.37.0

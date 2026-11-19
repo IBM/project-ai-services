@@ -3,6 +3,7 @@ export const AUTH_ENDPOINTS = {
   LOGOUT: "/auth/logout",
   REFRESH: "/auth/refresh",
   ME: "/auth/me",
+  AUTHORIZE: "/auth/authorize",
 };
 
 export const DIGITAL_ASSISTANTS_ENDPOINTS = {

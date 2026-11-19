@@ -184,9 +184,27 @@ func (c *caddyManager) RegisterIngressRoute(ctx context.Context, route IngressRo
 
 	prefix := strings.TrimRight(route.PathPrefix, "/")
 
+	var matchers []map[string]any
+	if len(route.AllowedRules) > 0 {
+		matchers = make([]map[string]any, 0, len(route.AllowedRules))
+		for _, rule := range route.AllowedRules {
+			relPath := "/" + strings.TrimLeft(rule.Path, "/")
+			fullPath := prefix + relPath
+			m := map[string]any{
+				"path": []string{fullPath},
+			}
+			if rule.Method != "" {
+				m["method"] = []string{strings.ToUpper(rule.Method)}
+			}
+			matchers = append(matchers, m)
+		}
+	} else {
+		matchers = []map[string]any{{"path": []string{prefix, prefix + "/*"}}}
+	}
+
 	routeConfig := map[string]any{
 		"@id":   route.ID,
-		"match": []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
+		"match": matchers,
 		"handle": []map[string]any{
 			{"handler": "rewrite", "strip_path_prefix": prefix},
 			{

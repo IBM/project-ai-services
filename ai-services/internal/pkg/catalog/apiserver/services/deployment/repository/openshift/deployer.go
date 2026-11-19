@@ -9,6 +9,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	deploymentauth "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/auth"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -18,6 +19,7 @@ import (
 	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	k8sutils "github.com/project-ai-services/ai-services/internal/pkg/utils/k8s"
 )
 
@@ -189,6 +191,14 @@ func (d *OpenShiftDeployer) deployServicesConcurrently(ctx context.Context, plan
 // then reads the OpenShift Routes for the release and stores endpoints in the database.
 func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentPlan, svc *ServicePlan) error {
 	releaseName := catalogutils.HelmReleaseName(plan.ApplicationID, svc.CatalogID)
+
+	isRemote := false
+	if _, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		isRemote = true
+	}
+	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtime.Type().String(), isRemote); err != nil {
+		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
+	}
 
 	fsys, err := d.catalogProvider.GetItemFS(svc.CatalogID)
 	if err != nil {

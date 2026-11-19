@@ -17,10 +17,21 @@ http {
     server {
         listen 4001;
 
+        add_header Content-Security-Policy "frame-ancestors 'none';" always;
+        add_header X-Frame-Options "DENY" always;
+
         location / {
             root /usr/share/nginx/html;
             index index.html;
             try_files $uri /index.html;
+        }
+
+        location = /auth/exchange {
+            proxy_pass ${CATALOG_API_URL}/api/v1/auth/code/exchange;
+            proxy_set_header Host $proxy_host;
+            proxy_ssl_server_name on;
+            proxy_ssl_verify on;
+            proxy_ssl_trusted_certificate ${AUTH_CATALOG_CA_BUNDLE};
         }
 
         location /v1/ {

@@ -107,6 +107,82 @@ func TestRegisterIngressRoute(t *testing.T) {
 	assert.Equal(t, "reverse_proxy", handle[1].(map[string]any)["handler"])
 }
 
+func TestRegisterIngressRoute_ExactAllowList(t *testing.T) {
+	f, c := newFakeCaddyAdmin(t)
+
+	err := c.RegisterIngressRoute(context.Background(), IngressRoute{
+		ID:         "catalog-auth-ingress",
+		PathPrefix: "/catalog-auth",
+		Upstream:   "catalog-backend:8080",
+		Terminal:   true,
+		AllowedRules: []RouteRule{
+			{Method: "GET", Path: "/.well-known/jwks.json"},
+			{Method: "POST", Path: "/api/v1/auth/code/exchange"},
+		},
+	})
+	require.NoError(t, err)
+
+	routes := f.posted[CaddyIngressServerName]
+	require.Len(t, routes, 1)
+
+	r := routes[0]
+	assert.Equal(t, "catalog-auth-ingress", r["@id"])
+
+	rawMatches, ok := r["match"].([]any)
+	require.True(t, ok)
+	require.Len(t, rawMatches, 2)
+
+	m0 := rawMatches[0].(map[string]any)
+	m1 := rawMatches[1].(map[string]any)
+
+	assert.Equal(t, []any{"/catalog-auth/.well-known/jwks.json"}, m0["path"])
+	assert.Equal(t, []any{"GET"}, m0["method"])
+
+	assert.Equal(t, []any{"/catalog-auth/api/v1/auth/code/exchange"}, m1["path"])
+	assert.Equal(t, []any{"POST"}, m1["method"])
+
+	// Negative matcher tests: verify that unallowed paths/methods do not match the rule set
+	isAllowed := func(method, path string) bool {
+		for _, item := range rawMatches {
+			m := item.(map[string]any)
+			mPaths := m["path"].([]any)
+			mMethods := m["method"].([]any)
+			pathMatched := false
+			for _, p := range mPaths {
+				if p.(string) == path {
+					pathMatched = true
+					break
+				}
+			}
+			methodMatched := false
+			for _, meth := range mMethods {
+				if meth.(string) == method {
+					methodMatched = true
+					break
+				}
+			}
+			if pathMatched && methodMatched {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Positive cases: exactly allowed
+	assert.True(t, isAllowed("GET", "/catalog-auth/.well-known/jwks.json"))
+	assert.True(t, isAllowed("POST", "/catalog-auth/api/v1/auth/code/exchange"))
+
+	// Negative cases: must return false (Caddy 404 / no match)
+	assert.False(t, isAllowed("GET", "/catalog-auth/api/v1/auth/code/exchange"), "GET on exchange must not match")
+	assert.False(t, isAllowed("POST", "/catalog-auth/.well-known/jwks.json"), "POST on jwks must not match")
+	assert.False(t, isAllowed("POST", "/catalog-auth/api/v1/auth/login"), "login must not match")
+	assert.False(t, isAllowed("POST", "/catalog-auth/api/v1/auth/service-token"), "service-token must not match")
+	assert.False(t, isAllowed("POST", "/catalog-auth/api/v1/auth/authorize"), "authorize must not match")
+	assert.False(t, isAllowed("GET", "/catalog-auth/api/v1/auth/me"), "me must not match")
+	assert.False(t, isAllowed("GET", "/catalog-auth/"), "root must not match")
+	assert.False(t, isAllowed("GET", "/catalog-auth/health"), "health must not match")
+}
+
 func TestRegisterEgressRoute(t *testing.T) {
 	f, c := newFakeCaddyAdmin(t)
 

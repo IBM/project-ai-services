@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 os.environ.setdefault("TZ", "UTC")
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from lingua import Language
 
@@ -30,6 +30,7 @@ from common.misc_utils import set_log_level, get_logger
 from common.misc_utils import set_request_id, configure_uvicorn_logging
 from common.lang_utils import setup_language_detector
 from common.error_utils import http_exception_handler
+from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
 from digitize.settings import settings
 
 set_log_level(settings.common.app.log_level)
@@ -238,6 +239,14 @@ async def lifespan(app: FastAPI):
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     logger.info("Application starting up...")
 
+    # Fail closed: refuse to start without a complete, safe auth configuration. This runs
+    # before the database is touched. The catalog need not be reachable yet.
+    try:
+        get_verifier()
+    except AuthConfigError as exc:
+        logger.error(f"❌ Startup aborted, authentication is not configured: {exc}")
+        raise
+
     # Language detector for document processing.
     _init_language_detector()
 
@@ -302,6 +311,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     openapi_tags=tags_metadata,
+    # The built-in docs pages are served unauthenticated; "/" below serves Swagger behind auth.
+    docs_url=None,
+    redoc_url=None,
 )
 
 
@@ -333,11 +345,16 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
+# Added last, so it is the outermost layer: every request is authenticated (deny by
+# default) before any other middleware or route code runs, and before a body is read.
+app.add_middleware(AuthMiddleware)
+
+
 # ------------------------------------------------------------------ #
 # Built-in routes                                                     #
 # ------------------------------------------------------------------ #
 
-@app.get("/", include_in_schema=False)
+@app.get("/", include_in_schema=False, dependencies=[Depends(require_role("admin"))])
 def swagger_root():
     """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
@@ -363,6 +380,27 @@ async def health_check():
     return {"status": "ok"}
 
 
+@app.get(
+    "/ready",
+    status_code=status.HTTP_200_OK,
+    tags=["health"],
+    summary="Readiness check",
+    description="Check if the service is ready to serve requests. Requires JWKS keys to be loaded.",
+    response_description="Service readiness status",
+)
+async def readiness_check():
+    """Perform a readiness check requiring one JWKS fetch."""
+    try:
+        await get_verifier().jwks.check()
+    except Exception as exc:
+        logger.error(f"Readiness check failed, JWKS is unavailable: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWKS is unavailable",
+        )
+    return {"status": "ready"}
+
+
 # ------------------------------------------------------------------ #
 # Router registration                                                 #
 # ------------------------------------------------------------------ #
@@ -372,10 +410,15 @@ from digitize.api.v1.admin import router as admin_router
 from digitize.api.v1.documents import router as documents_router
 from digitize.api.v1.connectors import router as connectors_router
 
-app.include_router(jobs_router, prefix="/v1/jobs", tags=["jobs"])
-app.include_router(admin_router, prefix="/v1", tags=["jobs"])
-app.include_router(documents_router, prefix="/v1/documents", tags=["documents"])
-app.include_router(connectors_router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False)
+_admin_only = [Depends(require_role("admin"))]
+
+app.include_router(jobs_router, prefix="/v1/jobs", tags=["jobs"], dependencies=_admin_only)
+app.include_router(admin_router, prefix="/v1", tags=["jobs"], dependencies=_admin_only)
+app.include_router(documents_router, prefix="/v1/documents", tags=["documents"], dependencies=_admin_only)
+app.include_router(
+    connectors_router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False,
+    dependencies=_admin_only,
+)
 
 
 if __name__ == "__main__":

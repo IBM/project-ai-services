@@ -135,7 +135,7 @@ async def list_documents(
         logger.error(f"Unexpected error in list_documents: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error listing documents: {exc}",
+            "Unexpected error listing documents",
         )
 
 
@@ -185,7 +185,7 @@ async def get_document_metadata(
         logger.error(f"Unexpected error in get_document_metadata: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error fetching metadata for document '{doc_id}': {exc}",
+            f"Unexpected error fetching metadata for document '{doc_id}'",
         )
 
 
@@ -212,7 +212,7 @@ async def get_document_content(doc_id: str):
         logger.error(f"Failed to parse content file for document '{doc_id}': {exc}")
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Failed to parse content file for document '{doc_id}': {exc}",
+            f"Failed to parse content file for document '{doc_id}'",
         )
     except HTTPException as exc:
         message = f"Failed to get content for document '{doc_id}': {extract_http_error_message(exc)}"
@@ -222,7 +222,7 @@ async def get_document_content(doc_id: str):
         logger.error(f"Unexpected error in get_document_content: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error fetching content for document '{doc_id}': {exc}",
+            f"Unexpected error fetching content for document '{doc_id}'",
         )
 
 
@@ -284,7 +284,7 @@ async def delete_document(doc_id: str):
             logger.error(f"Document teardown failed for {doc_id}: {exc}")
             APIError.raise_error(
                 ErrorCode.INTERNAL_SERVER_ERROR,
-                f"Document teardown failed for '{doc_id}': {exc}",
+                f"Document teardown failed for '{doc_id}'",
             )
 
         return None
@@ -297,7 +297,7 @@ async def delete_document(doc_id: str):
         logger.error(f"Unexpected error deleting document {doc_id}: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error deleting document '{doc_id}': {exc}",
+            f"Unexpected error deleting document '{doc_id}'",
         )
 
 
@@ -337,7 +337,7 @@ async def bulk_delete_documents(
             logger.error(f"Bulk delete rejected: {len(active_job_ids)} active job(s) found")
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
-                f"Cannot perform bulk deletion while jobs are active. "
+                "Cannot perform bulk deletion while jobs are active. "
                 f"Active jobs: {', '.join(active_job_ids)}",
             )
 
@@ -354,5 +354,5 @@ async def bulk_delete_documents(
         logger.error(f"Unexpected error during bulk deletion: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error during bulk document deletion: {exc}",
+            "Unexpected error during bulk document deletion",
         )

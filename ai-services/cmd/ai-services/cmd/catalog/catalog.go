@@ -27,6 +27,7 @@ deploy them, and handle service metadata`,
 	catalogCMD.AddCommand(NewHashpwCmd())
 	catalogCMD.AddCommand(NewLoginCmd())
 	catalogCMD.AddCommand(NewLogoutCmd())
+	catalogCMD.AddCommand(NewServiceTokenCmd())
 	catalogCMD.AddCommand(NewWhoamiCmd())
 	catalogCMD.AddCommand(NewMigrateCmd())
 	catalogCMD.AddCommand(NewInfoCmd())

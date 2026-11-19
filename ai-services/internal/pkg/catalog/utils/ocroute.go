@@ -15,6 +15,8 @@ const (
 	gatewayRouteName = "catalog-worker-gateway"
 	// modelGatewayRouteName is the OpenShift Route name for the LiteLLM model gateway.
 	modelGatewayRouteName = "model-gateway"
+	// catalogAPIRouteName is the OpenShift Route name for the catalog backend API route.
+	catalogAPIRouteName = "catalog-api"
 )
 
 // GatewayRouteHost looks up the live OpenShift passthrough route for the worker
@@ -60,4 +62,10 @@ func routeHost(ctx context.Context, routeName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("route %q not found (selector=%s)", routeName, labelSelector)
+}
+
+// CatalogAPIRouteHost looks up the live OpenShift Route for the catalog API
+// and returns its hostname (.spec.host).
+func CatalogAPIRouteHost(ctx context.Context) (string, error) {
+	return routeHost(ctx, catalogAPIRouteName)
 }

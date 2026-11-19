@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	deploymentauth "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/auth"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -564,6 +565,14 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	if err := catalogutils.UpdateServiceStatus(ctx, d.serviceRepo, svc.DatabaseID, models.ServiceStatusInitializing, "Deploying service"); err != nil {
 		logger.ErrorfCtx(ctx, "Failed to update service status to Initializing: %v\n", err)
 		// Don't fail the deployment if status update fails
+	}
+
+	isRemote := false
+	if _, ok := d.runtime.(*remoteruntime.RemoteRuntime); ok {
+		isRemote = true
+	}
+	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtimeType, isRemote); err != nil {
+		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
 	}
 
 	// Load service from catalog

@@ -36,6 +36,7 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/handlers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
@@ -59,6 +60,8 @@ type APIServerOptions struct {
 	ModelService       repository.ModelServiceInterface
 	BundleService      bundlesvc.BundleServiceInterface
 	CatalogProvider    *catalog.CatalogProvider
+	// ServiceTokenHandler serves the JWKS and the service-token, authorize and exchange endpoints.
+	ServiceTokenHandler *handlers.ServiceTokenHandler
 
 	// WorkerGatewayPort is the port the gRPC worker gateway listens on.
 	// Defaults to 9191 when zero.
@@ -81,6 +84,7 @@ type APIserver struct {
 	modelService       repository.ModelServiceInterface
 	bundleService      bundlesvc.BundleServiceInterface
 	catalogProvider    *catalog.CatalogProvider
+	serviceTokenH      *handlers.ServiceTokenHandler
 
 	workerGatewayPort int
 	workerRegistry    *registry.Registry
@@ -107,6 +111,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		modelService:       options.ModelService,
 		bundleService:      options.BundleService,
 		catalogProvider:    options.CatalogProvider,
+		serviceTokenH:      options.ServiceTokenHandler,
 		workerGatewayPort:  options.WorkerGatewayPort,
 		workerRegistry:     options.WorkerRegistry,
 		workerRepository:   options.WorkerRepository,
@@ -137,7 +142,7 @@ func (a *APIserver) Start(ctx context.Context) error {
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.workerRepository, a.workerGatewayPort, a.datasourceService, a.bundleService, a.catalogProvider, a.modelService)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.workerRepository, a.workerGatewayPort, a.datasourceService, a.bundleService, a.catalogProvider, a.modelService, a.serviceTokenH)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err

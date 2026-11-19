@@ -20,7 +20,7 @@ import (
 )
 
 // CreateRouter sets up the Gin router with the necessary routes and authentication middleware for the API server.
-func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, workerRepo dbrepo.WorkerRepository, workerGatewayPort int, datasourceSvc repository.DatasourceServiceInterface, bundleService bundlesvc.BundleServiceInterface, catalogProvider *catalog.CatalogProvider, modelService repository.ModelServiceInterface) *gin.Engine {
+func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist, appService repository.ApplicationServiceInterface, workerReg *registry.Registry, workerRepo dbrepo.WorkerRepository, workerGatewayPort int, datasourceSvc repository.DatasourceServiceInterface, bundleService bundlesvc.BundleServiceInterface, catalogProvider *catalog.CatalogProvider, modelService repository.ModelServiceInterface, serviceTokenH *handlers.ServiceTokenHandler) *gin.Engine {
 	if mode := os.Getenv("GIN_MODE"); mode != "" {
 		gin.SetMode(mode)
 	}
@@ -36,8 +36,11 @@ func CreateRouter(authSvc auth.Service, tokenMgr *auth.TokenManager, blacklist r
 	router.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "ok"}) })
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	// Public keys for verifying service tokens. Registered at the root, outside /api/v1.
+	router.GET("/.well-known/jwks.json", serviceTokenH.JWKS)
+
 	v1 := router.Group("/api/v1")
-	registerAuthRoutes(v1, handlers.NewAuthHandler(authSvc), tokenMgr, blacklist)
+	registerAuthRoutes(v1, handlers.NewAuthHandler(authSvc), serviceTokenH, tokenMgr, blacklist)
 
 	auth := middleware.AuthMiddleware(tokenMgr, blacklist)
 	datasourceH := handlers.NewDatasourceHandler(datasourceSvc)
@@ -68,13 +71,18 @@ func registerModelRoutes(v1 *gin.RouterGroup, h *handlers.ModelHandler, authMw g
 	}
 }
 
-func registerAuthRoutes(v1 *gin.RouterGroup, h *handlers.AuthHandler, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist) {
+func registerAuthRoutes(v1 *gin.RouterGroup, h *handlers.AuthHandler, st *handlers.ServiceTokenHandler, tokenMgr *auth.TokenManager, blacklist repository.TokenBlacklist) {
 	authMw := middleware.AuthMiddleware(tokenMgr, blacklist)
 	v1.POST("/auth/login", h.Login)
 	v1.POST("/auth/token", h.TokenLogin)
 	v1.POST("/auth/logout", authMw, h.Logout)
 	v1.POST("/auth/refresh", h.Refresh)
 	v1.GET("/auth/me", authMw, h.Me)
+	// Service tokens. service-token and authorize need a catalog access token; the
+	// exchange is authenticated by the one-time code plus the PKCE verifier.
+	v1.POST("/auth/service-token", authMw, st.ServiceToken)
+	v1.POST("/auth/authorize", authMw, st.Authorize)
+	v1.POST("/auth/code/exchange", st.Exchange)
 }
 
 func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler, resources *handlers.ResourcesHandler, authMw gin.HandlerFunc) {

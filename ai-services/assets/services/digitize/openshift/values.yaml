@@ -46,3 +46,11 @@ mcp:
       cpu: "250m"
       memory: "512Mi"
 
+authJwksUrl: ""
+authAudience: "digitize"
+authCatalogApiUrl: ""
+authCatalogCaBundle: ""
+authCatalogHostAliases: ""
+# Comma-separated hosts allowed to serve JWKS over plain HTTP. Empty (HTTPS only) by default.
+authJwksPlaintextHosts: ""
+

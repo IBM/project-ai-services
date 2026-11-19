@@ -384,6 +384,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 			Upstream:               req.Upstream,
 			Terminal:               req.Terminal,
 			Type:                   req.Type,
+			AllowedRules:           req.AllowedRules,
 			ClientCertPath:         req.ClientCertPath,
 			EncryptedClientKeyPath: req.EncryptedClientKeyPath,
 			SecretFilePath:         req.SecretFilePath,

@@ -81,3 +81,24 @@ export const refreshAccessToken = async () => {
 
   return newAccessToken;
 };
+
+export interface AuthorizeRequest {
+  service: string;
+  redirect_uri: string;
+  code_challenge: string;
+  state: string;
+}
+
+export interface AuthorizeResponse {
+  redirect_to: string;
+}
+
+export const authorize = async (
+  payload: AuthorizeRequest,
+): Promise<AuthorizeResponse> => {
+  const response = await api.post(AUTH_ENDPOINTS.AUTHORIZE, {
+    ...payload,
+    code_challenge_method: "S256",
+  });
+  return response.data;
+};

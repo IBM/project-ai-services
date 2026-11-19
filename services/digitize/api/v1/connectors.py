@@ -148,7 +148,7 @@ async def create_connector(body: ConnectorCreateRequest):
         logger.error(f"Runtime error creating connector: {exc}")
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Failed to create connector {connector_id!r} (name={body.name!r}): {exc}",
+            f"Failed to create connector {connector_id!r} (name={body.name!r})",
         )
     except HTTPException as exc:
         message = f"Failed to create connector {connector_id!r}: {extract_http_error_message(exc)}"
@@ -158,7 +158,7 @@ async def create_connector(body: ConnectorCreateRequest):
         logger.error(f"Unexpected error creating connector: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error creating connector {connector_id!r} (name={body.name!r}): {exc}",
+            f"Unexpected error creating connector {connector_id!r} (name={body.name!r})",
         )
 
 
@@ -272,7 +272,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
         logger.error(f"Encryption key error: {exc}")
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Failed to update connector {connector_id!r}: encryption error — {exc}",
+            f"Failed to update connector {connector_id!r}: encryption error",
         )
     except HTTPException as exc:
         message = f"Failed to update connector {connector_id!r}: {extract_http_error_message(exc)}"
@@ -282,7 +282,7 @@ async def update_connector(connector_id: str, body: ConnectorUpdateRequest):
         logger.error(f"Unexpected error updating connector {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error updating connector {connector_id!r}: {exc}",
+            f"Unexpected error updating connector {connector_id!r}",
         )
 
 
@@ -334,7 +334,7 @@ async def delete_connector(connector_id: str):
         logger.error(f"Unexpected error deleting connector {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error deleting connector {connector_id!r}: {exc}",
+            f"Unexpected error deleting connector {connector_id!r}",
         )
 
 
@@ -436,7 +436,7 @@ async def _run_teardown(connector_id: str) -> None:
             f"Unexpected error during teardown for connector {connector_id!r}: {exc}",
             exc_info=True,
         )
-        db_ops.set_connector_message(connector_id, f"Unexpected error during teardown: {exc}")
+        db_ops.set_connector_message(connector_id, "Unexpected error during teardown; see service logs")
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +490,7 @@ async def list_connectors(
         logger.error(f"Unexpected error listing connectors: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error listing connectors: {exc}",
+            "Unexpected error listing connectors",
         )
 
 
@@ -546,7 +546,7 @@ async def get_connector(connector_id: str):
         logger.error(f"Unexpected error fetching connector {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error fetching connector {connector_id!r}: {exc}",
+            f"Unexpected error fetching connector {connector_id!r}",
         )
 
 
@@ -668,7 +668,7 @@ async def trigger_sync(connector_id: str):
         logger.error(f"Unexpected error triggering sync for {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error triggering sync for connector {connector_id!r}: {exc}",
+            f"Unexpected error triggering sync for connector {connector_id!r}",
         )
 
 
@@ -739,7 +739,7 @@ async def cancel_sync(connector_id: str, sync_seq: int):
         logger.error(f"Unexpected error cancelling sync for {connector_id}: {exc}", exc_info=True)
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error cancelling sync for connector {connector_id!r} (seq={sync_seq}): {exc}",
+            f"Unexpected error cancelling sync for connector {connector_id!r} (seq={sync_seq})",
         )
 
 
@@ -802,7 +802,7 @@ async def get_sync_history(
         )
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error fetching sync history for connector {connector_id!r}: {exc}",
+            f"Unexpected error fetching sync history for connector {connector_id!r}",
         )
 
 
@@ -868,7 +868,7 @@ async def get_sync(connector_id: str, sync_seq: int):
         )
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
-            f"Unexpected error fetching sync {sync_seq} for connector {connector_id!r}: {exc}",
+            f"Unexpected error fetching sync {sync_seq} for connector {connector_id!r}",
         )
 
 # Made with Bob
