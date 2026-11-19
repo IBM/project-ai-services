@@ -7,7 +7,11 @@ volume and never writes to ``forecasters``: the API loads the forecaster into Tr
 records it and owns every status change. Its only database writes are jobs.result and
 jobs.message. It removes only its own local scratch directory.
 
-Exit codes (``common.forecast_errors``): 0 success, 1 failure that a retry may fix,
+jobs.message holds the text of a ``TrainingFailure``, which is written for the user. Any other
+exception is stored as a fixed text with its class name, and its details go to the log only,
+because the message of a driver or library error can carry hosts, user names or data.
+
+Exit codes (``forecast.errors``): 0 success, 1 failure that a retry may fix,
 3 failure that would only repeat.
 """
 import argparse
@@ -20,7 +24,7 @@ from typing import Callable
 
 import pandas as pd
 
-from common.forecast_errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure
+from forecast.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure, TrainingFailure
 from common.misc_utils import get_logger
 from forecast.db.jobs import JobStore, TrainingJob, worker_engine
 from forecast.settings import settings
@@ -32,6 +36,7 @@ from forecast.training.training import train
 logger = get_logger("forecast_worker")
 
 _MAX_MESSAGE_CHARS = 1000
+_UNEXPECTED_FAILURE = "Training failed with an unexpected {name}. The details are in the worker log."
 
 Loader = Callable[[TrainingJob, Path], pd.DataFrame]
 
@@ -86,7 +91,7 @@ def peak_memory_mb() -> dict[str, float]:
 
 
 def _record_failure(store: JobStore, job_id: int, exc: Exception) -> None:
-    message = str(exc) if isinstance(exc, PermanentFailure) else f"{type(exc).__name__}: {exc}"
+    message = str(exc) if isinstance(exc, TrainingFailure) else _UNEXPECTED_FAILURE.format(name=type(exc).__name__)
     try:
         store.write_failure(job_id, message[:_MAX_MESSAGE_CHARS])
     except Exception:
@@ -101,7 +106,7 @@ def main(argv: list[str]) -> int:
     try:
         published = run(args.job_id, store)
     except PermanentFailure as exc:
-        logger.error("Job %s failed permanently: %s", args.job_id, exc)
+        logger.error("Job %s failed permanently: %s", args.job_id, exc, exc_info=exc if exc.__cause__ else False)
         _record_failure(store, args.job_id, exc)
         return EXIT_PERMANENT
     except Exception as exc:

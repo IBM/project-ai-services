@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from common.forecast_errors import PermanentFailure
+from forecast.errors import PermanentFailure, TransientFailure
 from forecast.db.jobs import TrainingJob
 
 
@@ -24,6 +24,7 @@ def load_training_data(job: TrainingJob, output_path: Path) -> pd.DataFrame:
     Raises:
         PermanentFailure: the loader reports a failure that a retry cannot fix, such as a
             connector that cannot be decrypted, or a table or column that does not exist.
+        TransientFailure: any other loader failure, such as a dropped connection.
     """
     from forecast.data_loader import DataLoaderError, Db2DataLoader  # Only the worker needs it here.
 
@@ -40,5 +41,5 @@ def load_training_data(job: TrainingJob, output_path: Path) -> pd.DataFrame:
         if exc.is_permanent_failure:
             # The loader's messages name the connector or table and hold no secret.
             raise PermanentFailure(str(exc)) from exc
-        raise
+        raise TransientFailure(str(exc)) from exc
     return pd.read_parquet(output_path).rename(columns=dict(zip(result.columns, job.columns)))

@@ -6,11 +6,13 @@ AutoGluon picks can always be exported. XGBoost is left out on purpose: AutoGluo
 it a sparse matrix, which makes XGBoost read 0 as missing, and the ONNX graph does not
 reproduce that, so its predictions would differ from AutoGluon's.
 
-The graph takes one tensor per input column, FLOAT for a numeric column and STRING for
-a category column, and returns:
-  classification  ``label`` (STRING, the original class value) and ``probabilities``
+The graph takes one STRING tensor per input column and returns:
+  classification  ``prediction`` (STRING, the class value) and ``probabilities`` (FLOAT)
   regression      ``prediction`` (FLOAT)
-A category value that was not seen in training maps to -1.
+Every input is a STRING, whatever the column's type, because the type of an input column is
+optional in the connector and the Triton client could not otherwise know which datatype to send.
+The graph turns a numeric column into FLOAT with Cast, and a category column into the index of its
+value. A category value that was not seen in training maps to -1.
 """
 import json
 
@@ -19,7 +21,6 @@ from onnx import TensorProto, helper
 
 from forecast.training.features import Encoding
 
-LABEL = "label"
 PROBABILITIES = "probabilities"
 PREDICTION = "prediction"
 
@@ -83,9 +84,9 @@ def export(predictor, encoding: Encoding) -> onnx.ModelProto:
 
     inputs, before, parts = [], [], []
     for i, name in enumerate(encoding.columns):
+        inputs.append(helper.make_tensor_value_info(name, TensorProto.STRING, [None, 1]))
         if name in encoding.categories:
             values = encoding.categories[name]
-            inputs.append(helper.make_tensor_value_info(name, TensorProto.STRING, [None, 1]))
             before.append(
                 helper.make_node(
                     "CategoryMapper", [name], [f"_id{i}"], domain="ai.onnx.ml",
@@ -95,8 +96,8 @@ def export(predictor, encoding: Encoding) -> onnx.ModelProto:
             before.append(helper.make_node("Cast", [f"_id{i}"], [f"_col{i}"], to=TensorProto.FLOAT))
             parts.append(f"_col{i}")
         else:
-            inputs.append(helper.make_tensor_value_info(name, TensorProto.FLOAT, [None, 1]))
-            parts.append(name)
+            before.append(helper.make_node("Cast", [name], [f"_col{i}"], to=TensorProto.FLOAT))
+            parts.append(f"_col{i}")
     before.append(helper.make_node("Concat", parts, [tree_input], axis=1))
 
     after = []
@@ -108,14 +109,14 @@ def export(predictor, encoding: Encoding) -> onnx.ModelProto:
         classes = sorted(index, key=index.get)  # Class values in the order of the model's columns.
         after.append(
             helper.make_node(
-                "CategoryMapper", [tree_outputs[0]], [LABEL], domain="ai.onnx.ml",
+                "CategoryMapper", [tree_outputs[0]], [PREDICTION], domain="ai.onnx.ml",
                 cats_int64s=list(range(len(classes))), cats_strings=[str(c) for c in classes],
                 default_string="",
             )
         )
         after.append(helper.make_node("Identity", [tree_outputs[1]], [PROBABILITIES]))
         outputs = [
-            helper.make_tensor_value_info(LABEL, TensorProto.STRING, [None]),
+            helper.make_tensor_value_info(PREDICTION, TensorProto.STRING, [None]),
             helper.make_tensor_value_info(PROBABILITIES, TensorProto.FLOAT, [None, len(classes)]),
         ]
 

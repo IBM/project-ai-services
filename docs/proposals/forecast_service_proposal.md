@@ -99,7 +99,7 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 - **Same library as digitize.** An `AsyncIOScheduler` with a `SQLAlchemyJobStore` on the service's PostgreSQL database, in a `scheduler` schema that the init container creates. APScheduler is pinned to the version digitize uses. The persistent store keeps the schedules across restarts.
 - **One job per connector.** Creating a connector registers a one-off job that fires at once for the first training and, when a training schedule is set, a cron job for the later ones. The cron runs in UTC. When training schedule is unset, only the first training runs.
 - **What a fired job does.** A cron run spawns the worker and waits for it. On success it loads the forecaster into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `failed` and deletes the temporary directory that the worker left.
-- **Retry of the worker step.** If the worker fails, the job function runs it again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `running` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the temporary directory before the next attempt. The worker exits with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, an unknown table or column, no rows, or more than `MAX_TRAINING_ROWS` rows), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `failed` with the last error, and the number of attempts is recorded in `result`. Only the worker step is retried. The Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
+- **Retry of the worker step.** If the worker fails, the job function runs it again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `running` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the temporary directory before the next attempt. The worker exits with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, an unknown table or column, no rows, a target with fewer than two different values, fewer than 10 rows with a target value, or data that AutoGluon cannot fit), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `failed` with the last error, and the number of attempts is recorded in `result`. Only the worker step is retried. The Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
 - **Missed runs are skipped.** The jobs use a short misfire grace time, so a late run is skipped instead of run late. A run missed while the API was down, or skipped because the connector still has a `queued` or `running` job, is logged with the reason.
 - **Startup.** The API registers a cron job only for a connector that has none, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that are in `running` state when the API stopped are marked `failed` by the boot recovery.
 - **Startup Recovery for one-off jobs** Startup recovery marks all in-progress jobs as failed, in case of a one-off job getting marked failed in such a way, the job is requeued to ensure at least one training getting completed.
@@ -673,7 +673,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `seq`          | Primary key. Identity column (`GENERATED ALWAYS`), so the database assigns it. Its value is the forecaster version.                                                                                                                                    |
 | `connector_id` | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.                                                                                                                                                   |
 | `status`       | `QUEUED`, `RUNNING`, `COMPLETED` or `FAILED`.                                                                                                                                                                                                          |
-| `message`      | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
+| `message`      | Failure reason. Empty unless the job failed. It is a message written for the user, such as "Table X has no rows", or a fixed text that names only the class of an unexpected error. The details of an unexpected error go to the worker log, because they can carry hosts, user names or data.                                                                                                                                                                                                           |
 | `result`       | JSON object. The worker writes `rows_read` (the number of rows available for training) once, when the data load finishes. When training finishes it overwrites the object with `rows_read` repeated plus `algorithm` (the algorithm AutoGluon chose), `validation_metric`, `validation_score` (AutoGluon's score on its own validation rows), `test_score` (the same metric on a held-out 20% of the rows the model never saw) and `training_seconds`. The API adds `attempts` after the worker exits. A failed job keeps `rows_read` if the failure came after the load, and always has `attempts`. Readers must tolerate missing keys. |
 | `created_at`   | UTC time at which the job was queued.                                                                                                                                                                                                                  |
 | `started_at`   | UTC time at which the job started running.                                                                                                                                                                                                             |
@@ -1075,10 +1075,16 @@ During the gap between a Triton restart and step 3, a forecast request returns `
 ```
 name: "fc_<connector_id>_<version>"
 backend: "onnxruntime"
-max_batch_size: <TBD>
+max_batch_size: 0
 instance_group [ { kind: KIND_CPU, count: 1 } ]
 # input / output tensor entries: produced by the ONNX export, one per input column in input_schema
 ```
+
+**Model contract between the worker and the Forecast API.**
+
+- **Inputs.** One tensor per input column, named as the column, of datatype `TYPE_STRING` and shape `[-1, 1]`. The API sends every value as text (`BYTES`), whatever the column's type, because the type of an input column is optional. The graph turns a numeric column into a number and looks up a category column in the list of values seen in training. A category value that was not seen in training does not fail the request. It maps to an index below every known category.
+- **Outputs, classification.** `prediction` (`TYPE_STRING`, the class value) and `probabilities` (`TYPE_FP32`, one column per class). The confidence of a row is the largest probability.
+- **Regression is not supported.** The ONNX export can already produce a `prediction` output for a regression target, but the API requires a confidence and a regression model has none.
 
 ### 10.5 OpenShift deployment
 
@@ -1113,7 +1119,6 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 | `TRAINING_MAX_ATTEMPTS`               | Attempts of the worker step per job, the first one included. `1` means no retry. A failure that the worker marks as permanent is not retried.                                           | `2`                              |
 | `TRAINING_RETRY_DELAY_SECONDS`        | Wait between two attempts of the same job. The job keeps the lock during the wait.                                                                                                      | `60`                             |
 | `MAX_QUEUED_JOBS`                     | Queued jobs accepted before `POST /v1/connectors` returns `429`.                                                                                                                        | `10`                             |
-| `MAX_TRAINING_ROWS`                   | Largest row count a job may train on (after the row selection).                                                                                                                         | `10000000`                       |
 | `MAX_INFERENCE_ROWS`                  | Largest row count a forecast may use for inference                        | `5000`                           |
 | `LOADER_CHUNK_ROWS`                   | Rows per chunk when streaming the source to scratch.                                                                                                                                    | `100000`                         |
 | `WORKER_MEMORY_LIMIT_MB`              | Hard memory cap applied to the worker subprocess. Must be below the container limit.                                                                                                    | — (to be set after benchmarking) |
@@ -1128,7 +1133,7 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 These are undecided and need an answer before or during implementation.
 
 1. **Promotion gate.** Whether a forecaster from a scheduled run must beat or match the current one on its validation metric before it becomes `ready`. The design activates every successful training.
-2. **Resource sizing.** CPU, memory, scratch and volume sizes, and expected training duration for the target dataset sizes, are to be provided by DEV. They set `WORKER_MEMORY_LIMIT_MB` and `MAX_TRAINING_ROWS`.
+2. **Resource sizing.** CPU, memory, scratch and volume sizes, and expected training duration for the target dataset sizes, are to be provided by DEV. They set `WORKER_MEMORY_LIMIT_MB`. Training has no row limit, so the memory limit is the only bound on the size of a table.
 3. **Loss of the repository volume.** If the volume is lost while the database survives, `ready` rows have no files. Whether reconciliation should mark them `deleted` and queue a retrain is undecided.
 4. **Connector Deletion** If a DB2 connector already connected to a forecast service is deleted, what should be done to the existing schedule/forecast models.
 
@@ -1246,7 +1251,7 @@ These stories break the design above into units of work. Each one has a descript
 - Every identifier supplied by the user is quoted through the driver. Raw SQL is not accepted.
 - A connector that no longer exists or cannot be decrypted fails with an error that names the connector and holds no secret.
 - Authentication and network failures raise distinct errors, and the error message is stored on the job.
-- A table with more than `MAX_TRAINING_ROWS` rows fails the job with a permanent-failure error.
+- Every row of the table is read. There is no limit on the number of rows.
 - The loader has been run against a real Db2 for i.
 
 ### 14.6 Story 6 — Training worker
@@ -1259,14 +1264,14 @@ These stories break the design above into units of work. Each one has a descript
 - AutoGluon training on the input columns and the target, and ONNX export.
 - Atomic publish: write `model.onnx` and `config.pbtxt` to `.staging/<job_id>/` on the repository volume, then rename the directory to `fc_<connector_id>_<version>`.
 - Write `jobs.result`: the algorithm AutoGluon chose, the validation metric and score, the training time and the rows read.
-- Exit codes, including a dedicated code for a failure that would only repeat.
+- Exit codes, including a dedicated code for a failure that would only repeat. A failure message for the user is stored in `jobs.message`. An unexpected error is stored as a fixed text and its details go to the log.
 - Memory and time measurement on the target image, to set `WORKER_MEMORY_LIMIT_MB`.
 
 **Acceptance criteria.**
 
 - A successful run leaves a complete `fc_<connector_id>_<version>` directory on the volume and exits `0`.
 - The worker never deletes anything and never writes to `forecasters`.
-- The permanent-failure exit code is used when the connector is missing or cannot be decrypted, the table or a column does not exist, the table has no rows, or it has more than `MAX_TRAINING_ROWS` rows.
+- The permanent-failure exit code is used when the connector is missing or cannot be decrypted, the table or a column does not exist, the table has no rows, the target column has fewer than two different values, fewer than 10 rows have a target value, or AutoGluon cannot fit the data.
 - Directories and files are created as `0755` and `0644`.
 - `WORKER_MEMORY_LIMIT_MB` has a measured value.
 

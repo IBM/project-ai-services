@@ -15,7 +15,7 @@ from sqlalchemy.engine import URL, Engine
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy.pool import NullPool
 
-from common.forecast_errors import PermanentFailure
+from forecast.errors import PermanentFailure
 from forecast.db.models import Connector, Job, TrainingConfig
 from forecast.settings import settings
 
