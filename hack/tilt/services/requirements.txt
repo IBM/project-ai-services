@@ -1,7 +1,7 @@
-# Python dependencies for the extract / translate / summarize Tiltfiles (hack/tilt/services).
-# Installed into hack/tilt/services/.venv by the Tiltfiles. Local development only.
+# Python dependencies for the extract / translate / summarize / forecast services (hack/tilt/services/Tiltfile).
+# Installed into hack/tilt/services/.venv by the Tiltfile. Local development only.
 #
-# Deliberately lean: these services only need PostgreSQL and an LLM endpoint, so there is no
+# Deliberately lean: extract / translate / summarize only need PostgreSQL and an LLM endpoint, so there is no
 # torch, sentence-transformers, docling or OpenSearch client here (see hack/tilt/requirements.txt
 # for the full RAG stack).
 
@@ -38,3 +38,9 @@ spacy
 
 # --- summarize ---
 pypdfium2
+
+# --- forecast ---
+# Connector secret encryption (AES-256-GCM). The training stack (autogluon.tabular, lightgbm, xgboost,
+# pandas, pyarrow, tritonclient[http], apscheduler) is not imported by the merged code yet; add it
+# here from services/forecast/requirements.txt when the training worker lands.
+cryptography>=42.0.0

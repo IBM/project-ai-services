@@ -2,6 +2,11 @@
 
 .modelsContainer {
   background-color: var(--cds-layer-02);
+
+  :global(.cds--tab-content) {
+    background-color: var(--cds-layer-02);
+    min-height: $spacing-13;
+  }
 }
 
 .pageHeader {
@@ -22,7 +27,7 @@
   @include type-style("heading-compact-01");
   margin: 0;
   background-color: var(--cds-layer-01);
-  padding-left: $spacing-06;
+  padding-left: $spacing-05;
   border-bottom: 1px solid var(--cds-border-subtle-01);
 
   :global(.cds--tabs__nav-item),
@@ -33,4 +38,21 @@
   :global(.cds--tabs__nav-item--selected) {
     border-bottom: 3px solid var(--cds-border-interactive);
   }
+}
+
+.catalogGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  column-gap: $spacing-05;
+  row-gap: $spacing-05;
+  margin: $spacing-05;
+  margin-bottom: 0;
+}
+
+.errorMessage {
+  @include type-style("body-long-01");
+  padding: $spacing-07;
+  margin: $spacing-05 $spacing-06;
+  text-align: center;
+  color: var(--cds-text-error);
 }

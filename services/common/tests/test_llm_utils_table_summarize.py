@@ -9,6 +9,8 @@ Covers:
 - Empty input edge case
 """
 
+import json
+
 import pytest
 from unittest.mock import Mock, patch
 import requests
@@ -59,14 +61,14 @@ def mock_llm_settings(monkeypatch):
 
 @pytest.mark.unit
 class TestSummarizeAndClassifySingleTable:
-    """Tests for the single-table worker function."""
+    """Tests for the single-table worker function (guided-JSON response contract)."""
 
     def test_successful_summarization(self, mock_session, mock_llm_settings):
-        """Returns (summary, decision) on a well-formed LLM response."""
+        """Returns (summary, decision) from a JSON response."""
         from common.llm_utils import summarize_and_classify_single_table
 
         mock_session.post.return_value = _make_response(
-            "Summary: A data table.\nDecision: Yes"
+            json.dumps({"summary": "A data table.", "decision": "yes"})
         )
 
         summary, decision = summarize_and_classify_single_table(
@@ -75,6 +77,37 @@ class TestSummarizeAndClassifySingleTable:
 
         assert summary == "A data table."
         assert decision is True
+
+    def test_decision_no_returns_false(self, mock_session, mock_llm_settings):
+        from common.llm_utils import summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response(
+            json.dumps({"summary": "Prepared by John Smith.", "decision": "no"})
+        )
+
+        summary, decision = summarize_and_classify_single_table(
+            "prompt", "model", "http://llm", 512
+        )
+
+        assert summary == "Prepared by John Smith."
+        assert decision is False
+
+    def test_request_is_constrained_to_json_schema(self, mock_session, mock_llm_settings):
+        """The payload must carry the schema so the server enforces the output format."""
+        from common.llm_utils import TABLE_SUMMARY_SCHEMA, summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response(
+            json.dumps({"summary": "s", "decision": "yes"})
+        )
+
+        summarize_and_classify_single_table("prompt", "model", "http://llm", 512)
+
+        payload = mock_session.post.call_args.kwargs["json"]
+        assert payload["response_format"]["type"] == "json_schema"
+        assert payload["response_format"]["json_schema"]["schema"] == TABLE_SUMMARY_SCHEMA
+        assert payload["max_tokens"] == 512
+        assert TABLE_SUMMARY_SCHEMA["required"] == ["summary", "decision"]
+        assert TABLE_SUMMARY_SCHEMA["properties"]["decision"]["enum"] == ["yes", "no"]
 
     def test_raises_on_http_error_after_retries(self, mock_session, mock_llm_settings):
         """Raises after all retries are exhausted on a 500 error."""
@@ -94,7 +127,7 @@ class TestSummarizeAndClassifySingleTable:
         """Succeeds on second attempt after one transient 500."""
         from common.llm_utils import summarize_and_classify_single_table
 
-        good_resp = _make_response("Summary: Table ok.\nDecision: No")
+        good_resp = _make_response(json.dumps({"summary": "Table ok.", "decision": "no"}))
         mock_session.post.side_effect = [
             _make_http_error(500),
             good_resp,
@@ -108,11 +141,12 @@ class TestSummarizeAndClassifySingleTable:
         assert decision is False
         assert mock_session.post.call_count == 2
 
-    def test_no_summary_fallback(self, mock_session, mock_llm_settings):
-        """Returns 'No summary.' when LLM response has no Summary: line."""
+    def test_empty_summary_falls_back_to_no_summary(self, mock_session, mock_llm_settings):
         from common.llm_utils import summarize_and_classify_single_table
 
-        mock_session.post.return_value = _make_response("Decision: No")
+        mock_session.post.return_value = _make_response(
+            json.dumps({"summary": "  ", "decision": "no"})
+        )
 
         summary, decision = summarize_and_classify_single_table(
             "prompt", "model", "http://llm", 512
@@ -120,6 +154,50 @@ class TestSummarizeAndClassifySingleTable:
 
         assert summary == "No summary."
         assert decision is False
+
+    @pytest.mark.parametrize(
+        "response_text",
+        [
+            '{"summary": "Row one and row',  # truncated at max_tokens
+            "Summary: A data table.\nDecision: yes",  # old line format is no longer accepted
+            '{"summary": "x"}',  # missing decision
+            '{"decision": "yes"}',  # missing summary
+            "",  # empty content
+        ],
+    )
+    def test_invalid_response_raises_and_logs_error(
+        self, mock_session, mock_llm_settings, response_text
+    ):
+        """A response that is not the expected JSON fails loudly instead of being guessed at."""
+        from common.llm_utils import summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response(response_text)
+
+        with patch("common.llm_utils.logger") as mock_logger:
+            with pytest.raises(ValueError, match="Invalid table summary response"):
+                summarize_and_classify_single_table("prompt", "model", "http://llm", 512)
+
+        errors = [c.args[0] for c in mock_logger.error.call_args_list]
+        assert any("not the expected JSON" in e for e in errors)
+
+    def test_parse_logs_decision_and_summary(self, mock_session, mock_llm_settings):
+        """An info log records the decision, keep flag and summary size."""
+        from common.llm_utils import summarize_and_classify_single_table
+
+        mock_session.post.return_value = _make_response(
+            json.dumps({"summary": "Ridership rose.", "decision": "yes"})
+        )
+
+        with patch("common.llm_utils.logger") as mock_logger:
+            summarize_and_classify_single_table("prompt", "model", "http://llm", 512)
+
+        debug_msgs = [c.args[0] for c in mock_logger.debug.call_args_list]
+        parsed = [m for m in debug_msgs if "Parsed table LLM response" in m]
+        assert len(parsed) == 1
+        assert "decision='yes'" in parsed[0]
+        assert "keep=True" in parsed[0]
+        assert "summary_chars=15" in parsed[0]
+        mock_logger.error.assert_not_called()
 
 
 @pytest.mark.unit

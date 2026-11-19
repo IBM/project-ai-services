@@ -259,10 +259,10 @@ func TestSetComponentTypeNames(t *testing.T) {
 
 func TestBuildDeployProfiles(t *testing.T) {
 	byID := map[string]profiles.Profile{
-		"p1": {ID: "p1", Name: "P1", Description: "d1", Default: true, Params: profiles.Param{
-			Resources: profiles.Resources{Memory: 100, Accelerators: map[string]int{"ibm.com/spyre_pf": 4}},
+		"p1": {ID: "p1", Name: "P1", Description: "d1", Default: true, Params: map[string]any{
+			"resources": map[string]any{"memory": 100, "accelerators": map[string]any{"ibm.com/spyre_pf": 4}},
 		}},
-		"p2": {ID: "p2", Name: "P2", Params: profiles.Param{Resources: profiles.Resources{Memory: 200}}},
+		"p2": {ID: "p2", Name: "P2", Params: map[string]any{"resources": map[string]any{"memory": 200}}},
 	}
 
 	t.Run("maps profiles in model order with cpu and storage", func(t *testing.T) {
@@ -306,6 +306,58 @@ func TestBuildDeployProfiles(t *testing.T) {
 		got, err := BuildDeployProfiles(&types.Model{ID: "m"}, byID, "prov", types.Resources{})
 		if err != nil || got == nil || len(got) != 0 {
 			t.Errorf("got %v, %v", got, err)
+		}
+	})
+
+	t.Run("invalid memory type returns error", func(t *testing.T) {
+		invalidMemByID := map[string]profiles.Profile{
+			"bad-mem": {ID: "bad-mem", Params: map[string]any{
+				"resources": map[string]any{"memory": "200Gi"},
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-mem"}}, invalidMemByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-int memory")
+		}
+	})
+
+	t.Run("invalid resources type returns error", func(t *testing.T) {
+		invalidResByID := map[string]profiles.Profile{
+			"bad-res": {ID: "bad-res", Params: map[string]any{
+				"resources": "not-a-map",
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-res"}}, invalidResByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-map resources")
+		}
+	})
+
+	t.Run("invalid accelerator count type returns error", func(t *testing.T) {
+		invalidAccByID := map[string]profiles.Profile{
+			"bad-acc": {ID: "bad-acc", Params: map[string]any{
+				"resources": map[string]any{
+					"accelerators": map[string]any{"ibm.com/spyre_pf": "four"},
+				},
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-acc"}}, invalidAccByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-int accelerator count")
+		}
+	})
+
+	t.Run("invalid accelerator map type returns error", func(t *testing.T) {
+		invalidAccByID := map[string]profiles.Profile{
+			"bad-acc": {ID: "bad-acc", Params: map[string]any{
+				"resources": map[string]any{
+					"accelerators": "not-a-map",
+				},
+			}},
+		}
+		_, err := BuildDeployProfiles(&types.Model{ID: "m", Profiles: []string{"bad-acc"}}, invalidAccByID, "prov", types.Resources{})
+		if err == nil {
+			t.Fatal("expected error for non-map accelerators")
 		}
 	})
 }
