@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -286,17 +287,81 @@ func (s *DatasourceService) DeleteDatasource(ctx context.Context, id uuid.UUID) 
 	return nil
 }
 
+func (s *DatasourceService) resolveServiceProviders(serviceType, provider string) ([]string, bool, error) {
+	if serviceType == "" {
+		if provider != "" {
+			return []string{provider}, false, nil
+		}
+
+		return nil, false, nil
+	}
+
+	if s.catalogProvider == nil {
+		return nil, false, &ValidationError{
+			Code:    http.StatusInternalServerError,
+			Message: "catalog provider not configured",
+		}
+	}
+
+	svc, err := s.catalogProvider.LoadService(serviceType)
+	if err != nil {
+		return nil, false, validators.NotFound("service %q not found", serviceType)
+	}
+
+	if svc.Datasource == nil {
+		return nil, true, nil
+	}
+
+	supported := svc.Datasource.SupportedProviders
+	if len(supported) == 0 {
+		if provider != "" {
+			return []string{provider}, false, nil
+		}
+
+		return nil, false, nil
+	}
+
+	if provider != "" {
+		if !slices.Contains(supported, provider) {
+			return nil, true, nil
+		}
+
+		return []string{provider}, false, nil
+	}
+
+	return supported, false, nil
+}
+
+func emptyDatasourceList(page, pageSize int) *apimodels.DatasourceListResponse {
+	return &apimodels.DatasourceListResponse{
+		Data: []apimodels.DatasourceResponse{},
+		Pagination: catalogtypes.PaginationMetadata{
+			Page:     page,
+			PageSize: pageSize,
+			HasPrev:  page > 1,
+		},
+	}
+}
+
 // ListDatasources returns a paginated list of datasource connectors, optionally filtered
-// by status and provider. Pagination mirrors the application and bundle list patterns:
+// by status, provider, and service compatibility. Pagination mirrors the application and bundle list patterns:
 // uses repository.ConnectorFilters with Limit/Offset derived from Page/PageSize.
 func (s *DatasourceService) ListDatasources(ctx context.Context, req apimodels.ListDatasourcesRequest) (*apimodels.DatasourceListResponse, error) {
+	providers, emptyResult, err := s.resolveServiceProviders(req.ServiceType, req.Provider)
+	if err != nil {
+		return nil, err
+	}
+	if emptyResult {
+		return emptyDatasourceList(req.Page, req.PageSize), nil
+	}
+
 	filters := &dbrepo.ConnectorFilters{
-		Type:     catalogconstants.ConnectorTypeDatasource,
-		Status:   dbmodels.ConnectorStatus(req.Status),
-		Provider: req.Provider,
-		Search:   req.Search,
-		Limit:    req.PageSize,
-		Offset:   (req.Page - 1) * req.PageSize,
+		Type:      catalogconstants.ConnectorTypeDatasource,
+		Status:    dbmodels.ConnectorStatus(req.Status),
+		Providers: providers,
+		Search:    req.Search,
+		Limit:     req.PageSize,
+		Offset:    (req.Page - 1) * req.PageSize,
 	}
 
 	totalCount, err := s.connectorRepo.GetCount(ctx, filters)

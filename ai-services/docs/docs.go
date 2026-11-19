@@ -1885,7 +1885,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types.",
+                "description": "Returns registered providers. When type is supplied only that type is returned; omitting it returns all providers across all connector types. When service_type is supplied, filters providers compatible with the specified service.",
                 "produces": [
                     "application/json"
                 ],
@@ -1898,6 +1898,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by connector type (e.g. 'datasource'). Omit to return all types.",
                         "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by service catalog ID (e.g. 'digitize')",
+                        "name": "service_type",
                         "in": "query"
                     }
                 ],
@@ -1918,7 +1924,7 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "Connector type not found",
+                        "description": "Connector type or service not found",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }
@@ -1987,7 +1993,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a paginated list of datasource connectors with optional filters by status and provider.",
+                "description": "Returns a paginated list of datasource connectors with optional filters by status, provider, and service compatibility.",
                 "produces": [
                     "application/json"
                 ],
@@ -2024,6 +2030,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Filter by service catalog ID (e.g. 'digitize')",
+                        "name": "service_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Case-insensitive substring search on datasource name",
                         "name": "q",
                         "in": "query"
@@ -2044,6 +2056,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Service not found",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }

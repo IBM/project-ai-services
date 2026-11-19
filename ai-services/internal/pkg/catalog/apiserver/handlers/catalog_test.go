@@ -695,4 +695,65 @@ func TestGetModelDeployOptions(t *testing.T) {
 	})
 }
 
+func TestListConnectorProviders(t *testing.T) {
+	router := setupTestRouter()
+	handler := newTestCatalogHandler(t)
+	router.GET("/api/v1/connectors", handler.ListConnectorProviders)
+
+	get := func(url string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		router.ServeHTTP(w, req)
+
+		return w
+	}
+
+	t.Run("list all connectors", func(t *testing.T) {
+		w := get("/api/v1/connectors")
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp []types.ConnectorResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.NotEmpty(t, resp)
+	})
+
+	t.Run("list connectors by type", func(t *testing.T) {
+		w := get("/api/v1/connectors?type=datasource")
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp []types.ConnectorResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.NotEmpty(t, resp)
+		for _, item := range resp {
+			assert.Equal(t, "datasource", item.Type)
+		}
+	})
+
+	t.Run("filter connectors by service_type with supported providers", func(t *testing.T) {
+		w := get("/api/v1/connectors?type=datasource&service_type=digitize")
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp []types.ConnectorResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.NotEmpty(t, resp)
+		for _, item := range resp {
+			assert.Contains(t, []string{"object_storage", "file_system"}, item.Provider.ID)
+		}
+	})
+
+	t.Run("filter connectors by service_type with nil datasource returns empty", func(t *testing.T) {
+		w := get("/api/v1/connectors?type=datasource&service_type=translate")
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp []types.ConnectorResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Empty(t, resp)
+	})
+
+	t.Run("filter connectors by unknown service_type returns 404", func(t *testing.T) {
+		w := get("/api/v1/connectors?type=datasource&service_type=nonexistent-service")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
 // Made with Bob

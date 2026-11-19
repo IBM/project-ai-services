@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -130,6 +131,112 @@ func TestBuildDatasourcePage_PreservesOrder(t *testing.T) {
 	for i, item := range items {
 		assert.Equal(t, order[i], item.ID)
 	}
+}
+
+type mockConnectorRepoForListTest struct {
+	dbrepo.ConnectorRepository
+	capturedFilters *dbrepo.ConnectorFilters
+	connectors      []dbmodels.Connector
+	count           int
+	err             error
+}
+
+func (m *mockConnectorRepoForListTest) GetCount(_ context.Context, f *dbrepo.ConnectorFilters) (int, error) {
+	m.capturedFilters = f
+
+	return m.count, m.err
+}
+
+func (m *mockConnectorRepoForListTest) List(_ context.Context, f *dbrepo.ConnectorFilters) ([]dbmodels.Connector, error) {
+	m.capturedFilters = f
+
+	return m.connectors, m.err
+}
+
+type mockSvcDepRepoForTest struct {
+	dbrepo.ServiceDependencyRepository
+}
+
+func (m *mockSvcDepRepoForTest) GetServiceCountByDependency(_ context.Context, _ []uuid.UUID, _ dbmodels.DependencyType) (map[uuid.UUID]int, error) {
+	return make(map[uuid.UUID]int), nil
+}
+
+func TestListDatasources_ServiceTypeFiltering(t *testing.T) {
+	catalogProvider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	connRepo := &mockConnectorRepoForListTest{}
+	svcDepRepo := &mockSvcDepRepoForTest{}
+	svc := &DatasourceService{
+		connectorRepo:   connRepo,
+		svcDepRepo:      svcDepRepo,
+		catalogProvider: catalogProvider,
+	}
+
+	t.Run("unknown service_type returns 404", func(t *testing.T) {
+		resp, err := svc.ListDatasources(context.Background(), apimodels.ListDatasourcesRequest{
+			Page:        1,
+			PageSize:    10,
+			ServiceType: "nonexistent-service",
+		})
+		assert.Nil(t, resp)
+		require.Error(t, err)
+
+		valErr, ok := err.(*ValidationError)
+		require.True(t, ok)
+		assert.Equal(t, http.StatusNotFound, valErr.Code)
+		assert.Contains(t, valErr.Message, "nonexistent-service")
+	})
+
+	t.Run("service with nil datasource returns empty result", func(t *testing.T) {
+		resp, err := svc.ListDatasources(context.Background(), apimodels.ListDatasourcesRequest{
+			Page:        1,
+			PageSize:    10,
+			ServiceType: "translate",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Empty(t, resp.Data)
+		assert.Equal(t, 0, resp.Pagination.TotalItems)
+	})
+
+	t.Run("service with supported_providers filters by them", func(t *testing.T) {
+		resp, err := svc.ListDatasources(context.Background(), apimodels.ListDatasourcesRequest{
+			Page:        1,
+			PageSize:    10,
+			ServiceType: "digitize",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, connRepo.capturedFilters)
+		assert.ElementsMatch(t, []string{"object_storage", "file_system"}, connRepo.capturedFilters.Providers)
+	})
+
+	t.Run("service with compatible provider query param", func(t *testing.T) {
+		resp, err := svc.ListDatasources(context.Background(), apimodels.ListDatasourcesRequest{
+			Page:        1,
+			PageSize:    10,
+			ServiceType: "digitize",
+			Provider:    "object_storage",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, connRepo.capturedFilters)
+		assert.Equal(t, []string{"object_storage"}, connRepo.capturedFilters.Providers)
+	})
+
+	t.Run("service with incompatible provider query param returns empty result", func(t *testing.T) {
+		resp, err := svc.ListDatasources(context.Background(), apimodels.ListDatasourcesRequest{
+			Page:        1,
+			PageSize:    10,
+			ServiceType: "digitize",
+			Provider:    "unsupported_provider",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Empty(t, resp.Data)
+		assert.Equal(t, 0, resp.Pagination.TotalItems)
+	})
 }
 
 // mockSvcDepRepoForCount embeds the interface so only GetDependenciesByServiceID needs to be implemented.

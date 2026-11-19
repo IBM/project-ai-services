@@ -32,12 +32,12 @@ var connectorStatusPriority = buildStatusPriorityCase("status",
 // WHERE clause. Callers that scope queries to a specific type (e.g. ListDatasources, which
 // always sets Type = "datasource") are responsible for populating the relevant fields.
 type ConnectorFilters struct {
-	Type     string                 // Optional: filter by connector type (e.g. "datasource")
-	Status   models.ConnectorStatus // Optional: filter by connector status
-	Provider string                 // Optional: filter by provider identifier (e.g. "object_storage", "file_system")
-	Search   string                 // Optional: case-insensitive substring search on connector name
-	Limit    int                    // Optional: maximum number of records to return
-	Offset   int                    // Optional: number of records to skip
+	Type      string                 // Optional: filter by connector type (e.g. "datasource")
+	Status    models.ConnectorStatus // Optional: filter by connector status
+	Providers []string               // Optional: filter by provider identifiers (e.g. "object_storage", "file_system")
+	Search    string                 // Optional: case-insensitive substring search on connector name
+	Limit     int                    // Optional: maximum number of records to return
+	Offset    int                    // Optional: number of records to skip
 }
 
 // ConnectorUpdateFields holds the fields that may be changed after creation.
@@ -297,9 +297,9 @@ func buildWhereClause(filters *ConnectorFilters) (string, []interface{}) {
 			whereClauses = append(whereClauses, fmt.Sprintf("status = $%d", len(args)+1))
 			args = append(args, filters.Status)
 		}
-		if filters.Provider != "" {
-			whereClauses = append(whereClauses, fmt.Sprintf("provider = $%d", len(args)+1))
-			args = append(args, filters.Provider)
+		if len(filters.Providers) > 0 {
+			whereClauses = append(whereClauses, fmt.Sprintf("provider = ANY($%d)", len(args)+1))
+			args = append(args, filters.Providers)
 		}
 		if filters.Search != "" {
 			whereClauses = append(whereClauses, buildSearchClause(connectorSearchColumns, &args, filters.Search))
