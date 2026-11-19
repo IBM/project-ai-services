@@ -57,8 +57,8 @@ const DeregisterWorkerModal = ({
         )}
 
         <p className={styles.description}>
-          Deregistering a worker resource will remove the node from IBM Power
-          AI Launchpad. The resource itself will not be deleted and can be
+          Deregistering a worker resource will remove the node from IBM Power AI
+          Launchpad. The resource itself will not be deleted and can be
           re-registered at any time.
         </p>
 
