@@ -875,6 +875,10 @@ definitions:
     type: object
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings:
     properties:
+      allow_connect:
+        type: boolean
+      allow_disconnect:
+        type: boolean
       max_connections:
         description: |-
           MaxConnections is the maximum number of datasources that may be attached to the service at any

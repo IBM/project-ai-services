@@ -30,10 +30,11 @@ import (
 
 // DatasourceConnector is the minimal interface used by ApplicationServiceBase for
 // post-deploy connector attachment. It exposes only ConnectDatasourcesToApplication,
-// which is the single method called after a successful deployment. This narrow interface
+// which is the single method called after a successful deployment (with enforceAllowConnect
+// set to false, since allow_connect only restricts the connect API). This narrow interface
 // breaks the import cycle between the application_service and repository packages.
 type DatasourceConnector interface {
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, enforceAllowConnect bool) (*apimodels.ConnectDatasourcesResponse, error)
 }
 
 // ValidationError represents a validation error with HTTP status code.
@@ -867,7 +868,8 @@ func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context,
 		return
 	}
 
-	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs)
+	// Datasources selected at app creation are always attached; allow_connect only restricts the connect API.
+	resp, err := s.DatasourceService.ConnectDatasourcesToApplication(ctx, applicationID, userID, datasourceIDs, false)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "post-deploy connector attachment failed for application %s: %v", applicationID, err)
 

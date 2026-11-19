@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -62,7 +63,7 @@ func TestConnectDatasourcesToApplication_OwnershipCheck(t *testing.T) {
 	}
 
 	// 1. Attacker calls connect on victim-owned application -> 403 Forbidden
-	resp, err := svc.ConnectDatasourcesToApplication(context.Background(), appID, "attacker-user", []uuid.UUID{dsID})
+	resp, err := svc.ConnectDatasourcesToApplication(context.Background(), appID, "attacker-user", []uuid.UUID{dsID}, true)
 	assert.Nil(t, resp)
 	require.Error(t, err)
 
@@ -95,6 +96,24 @@ func TestDisconnectDatasourcesFromApplication_OwnershipCheck(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusForbidden, valErr.Code)
 	assert.Equal(t, "user does not own this application", valErr.Message)
+}
+
+func newAllowFlagTestService(t *testing.T) *DatasourceService {
+	t.Helper()
+
+	provider, err := catalog.NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	return &DatasourceService{catalogProvider: provider}
+}
+
+func TestCheckAllowConnectAndDisconnect_ExplicitlyAllowed(t *testing.T) {
+	svc := newAllowFlagTestService(t)
+	rows := []dbrepo.LinkedServiceRow{{ServiceCatalogID: "digitize"}}
+
+	// digitize sets allow_connect and allow_disconnect to true.
+	require.NoError(t, svc.checkAllowConnect(rows))
+	require.NoError(t, svc.checkAllowDisconnect(rows))
 }
 
 // mockConnectorRepoForTest embeds the interface so only GetByIDs needs to be implemented.

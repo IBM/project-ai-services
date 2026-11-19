@@ -432,7 +432,7 @@ func (h *DatasourceHandler) ConnectDatasourcesToApplication(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, userID, datasourceIDs)
+	resp, err := h.datasourceSvc.ConnectDatasourcesToApplication(c.Request.Context(), applicationID, userID, datasourceIDs, true)
 	if err != nil {
 		if valErr, ok := err.(*repository.ValidationError); ok {
 			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})

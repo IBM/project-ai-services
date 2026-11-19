@@ -117,7 +117,7 @@ func (m *mockDatasourceServiceForAuth) ListApplicationDatasources(_ context.Cont
 	return nil, nil
 }
 
-func (m *mockDatasourceServiceForAuth) ConnectDatasourcesToApplication(_ context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+func (m *mockDatasourceServiceForAuth) ConnectDatasourcesToApplication(_ context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, _ bool) (*apimodels.ConnectDatasourcesResponse, error) {
 	m.connectCalled = true
 	m.lastAppID = applicationID
 	m.lastUserID = userID

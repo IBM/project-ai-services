@@ -440,9 +440,11 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 // returns 422 if none are found.
 //
 // This method is the single reusable core for both:
-//   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect)
-//   - the app-creation flow where datasources are pre-attached at deploy time.
-func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error) {
+//   - the PUT /applications/:id/datasources HTTP endpoint (post-creation connect), which passes
+//     enforceAllowConnect == true so that services with allow_connect == false reject the request
+//   - the app-creation flow where datasources are pre-attached at deploy time, which passes
+//     enforceAllowConnect == false because allow_connect only restricts the connect API.
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, enforceAllowConnect bool) (*apimodels.ConnectDatasourcesResponse, error) {
 	// Verify application exists and ownership.
 	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
@@ -456,6 +458,13 @@ func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context,
 		return nil, &ValidationError{
 			Code:    http.StatusUnprocessableEntity,
 			Message: "no eligible running service with an API endpoint found in application",
+		}
+	}
+
+	// Guard: for the connect API, reject if any eligible service does not permit post-creation connect.
+	if enforceAllowConnect {
+		if err := s.checkAllowConnect(linkedServices); err != nil {
+			return nil, err
 		}
 	}
 
@@ -880,7 +889,8 @@ func (s *DatasourceService) GetApplicationDatasource(ctx context.Context, applic
 //  2. Verify the datasource exists — return 404 if not.
 //  3. Query service_dependencies for (datasourceID, applicationID) to confirm the datasource
 //     is actually connected. Return 404 if no rows are found.
-//  4. For each confirmed row, call DELETE /v1/connectors/{id} on the Digitize endpoint,
+//  4. Guard: reject if any linked service does not permit disconnect (allow_disconnect == false).
+//  5. For each confirmed row, call DELETE /v1/connectors/{id} on the Digitize endpoint,
 //     then remove the service_dependency row.
 func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error {
 	// Step 1: verify application exists and ownership.
@@ -912,6 +922,11 @@ func (s *DatasourceService) DisconnectDatasourcesFromApplication(ctx context.Con
 			Code:    http.StatusNotFound,
 			Message: fmt.Sprintf("datasource %s is not connected to application %s", datasourceID, applicationID),
 		}
+	}
+
+	// Step 4: guard — reject before any downstream call if any service blocks disconnect.
+	if err := s.checkAllowDisconnect(appLinked); err != nil {
+		return err
 	}
 
 	// Resolve proxier once from the already-loaded app.
@@ -948,6 +963,32 @@ func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, proxy h
 
 		if err := s.svcDepRepo.RemoveDependency(ctx, svc.ServiceID, datasourceID); err != nil {
 			logger.ErrorfCtx(ctx, "failed to remove connector dependency for service %s: %v", svc.ServiceID, err)
+		}
+	}
+
+	return nil
+}
+
+// checkAllowConnect returns a 422 ValidationError if any service in the list has
+// allow_connect == false in its catalog datasource settings.
+func (s *DatasourceService) checkAllowConnect(services []dbrepo.LinkedServiceRow) error {
+	for _, svc := range services {
+		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
+		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanConnectDatasource(catalogSvc.Datasource) {
+			return validators.Unprocessable("service %q does not allow post-creation datasource connect", svc.ServiceCatalogID)
+		}
+	}
+
+	return nil
+}
+
+// checkAllowDisconnect returns a 422 ValidationError if any service in the list has
+// allow_disconnect == false in its catalog datasource settings.
+func (s *DatasourceService) checkAllowDisconnect(services []dbrepo.LinkedServiceRow) error {
+	for _, svc := range services {
+		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
+		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanDisconnectDatasource(catalogSvc.Datasource) {
+			return validators.Unprocessable("service %q does not allow datasource disconnect", svc.ServiceCatalogID)
 		}
 	}
 

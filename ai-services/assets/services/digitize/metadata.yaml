@@ -21,6 +21,8 @@ dependencies:
 standalone: true
 datasource:
   required: false
+  allow_connect: true
+  allow_disconnect: true
   supported_providers:
     - object_storage
     - file_system

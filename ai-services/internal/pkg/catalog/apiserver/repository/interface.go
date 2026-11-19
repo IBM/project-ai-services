@@ -36,7 +36,8 @@ type DatasourceServiceInterface interface {
 	// and persists a new datasource connector record.
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
 	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a running application.
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID) (*apimodels.ConnectDatasourcesResponse, error)
+	// When enforceAllowConnect is true, a 422 ValidationError is returned if any eligible service has allow_connect set to false.
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, enforceAllowConnect bool) (*apimodels.ConnectDatasourcesResponse, error)
 	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
 	// eligible service in a running application and removes the service_dependency record.
 	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error
