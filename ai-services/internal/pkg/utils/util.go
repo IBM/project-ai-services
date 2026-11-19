@@ -24,6 +24,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -32,6 +33,14 @@ const (
 
 	CaddyFileIndent   = 10
 	CertContentIndent = 4
+
+	SpyreClusterPolicyGroup   = "spyre.ibm.com"
+	SpyreClusterPolicyVersion = "v1alpha1"
+	SpyreClusterPolicyKind    = "SpyreClusterPolicy"
+	SpyreClusterPolicyName    = "spyreclusterpolicy"
+
+	SpyreStateReady        = "ready"
+	SpyreStateNoSpyreNodes = "no Spyre nodes"
 )
 
 // IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
@@ -457,6 +466,42 @@ func GetExistingCustomResource(ctx context.Context, client *openshift.OpenshiftC
 	}
 
 	return &list.Items[0], true, nil
+}
+
+// GetSpyreClusterPolicyState retrieves the current status.state of the SpyreClusterPolicy CR.
+// It returns the state string, whether it was found, and any error encountered.
+func GetSpyreClusterPolicyState(ctx context.Context, client *openshift.OpenshiftClient) (string, bool, error) {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   SpyreClusterPolicyGroup,
+		Version: SpyreClusterPolicyVersion,
+		Kind:    SpyreClusterPolicyKind,
+	})
+
+	if err := client.Client.Get(ctx, types.NamespacedName{Name: SpyreClusterPolicyName}, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", false, fmt.Errorf("SpyreClusterPolicy %s not found: %w", SpyreClusterPolicyName, err)
+		}
+		if apierrors.IsForbidden(err) {
+			return "", false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
+		}
+		if IsTransientK8sError(err) {
+			// Treat rate-limit / timeout errors as "not found yet"; callers
+			// that poll will retry, and one-shot callers will skip validation.
+			logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout)...")
+
+			return "", false, nil
+		}
+
+		return "", false, fmt.Errorf("failed to get SpyreClusterPolicy: %w", err)
+	}
+
+	state, found, err := unstructured.NestedString(obj.Object, "status", "state")
+	if err != nil {
+		return "", false, fmt.Errorf("failed to parse status.state from SpyreClusterPolicy: %w", err)
+	}
+
+	return state, found, nil
 }
 
 // FlattenMapToKeys converts a nested map into a flat map with dotted keys
