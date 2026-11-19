@@ -172,7 +172,9 @@ args:
     export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
     export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
     {{- end }}
+    {{- if and .Values.llm .Values.vector_store }}
     export DB_ENCRYPTION_KEY=$(cat /etc/secret/digitize-db-encryption-secret/db-encryption-key)
+     {{- end }}
     {{- if and .Values.llm .Values.llm.apiKey }}
     export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
     {{- end }}
