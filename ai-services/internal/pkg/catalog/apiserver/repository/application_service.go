@@ -7,6 +7,7 @@ import (
 	appservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/application_service"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -68,18 +69,20 @@ func NewApplicationService(
 		validator = validator.WithConnectorRepo(connectorRepo)
 	}
 
+	workers := worker.NewResolver(reg)
+
 	return &appservice.ApplicationServiceBase{
 		AppRepo:               appRepo,
 		ServiceRepo:           serviceRepo,
 		ComponentRepo:         componentRepo,
 		ServiceDependencyRepo: serviceDependencyRepo,
 		Provider:              provider,
-		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo).WithWorkerRegistry(reg),
-		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo).WithWorkerRegistry(reg),
+		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo, workers),
+		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo, workers),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validator,
 		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
-		WorkerRegistry:        reg,
+		Workers:               workers,
 		DatasourceService:     datasourceSvc,
 	}
 }

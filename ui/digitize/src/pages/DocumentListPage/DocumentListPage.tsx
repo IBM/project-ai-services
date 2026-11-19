@@ -25,6 +25,7 @@ import {
   TextInput,
   InlineLoading,
   Tooltip,
+  Tag,
 } from "@carbon/react";
 import {
   Renew,
@@ -34,7 +35,7 @@ import {
   ErrorFilled,
   InProgress,
 } from "@carbon/icons-react";
-import { DOC_STATUS } from "../../constants/jobConstants";
+import { DOC_STATUS, JOB_OPERATION } from "../../constants/jobConstants";
 import { useTheme } from "../../contexts/useTheme";
 import {
   listDocuments,
@@ -332,11 +333,31 @@ const documentListReducer = (
 
 const headers = [
   { key: "name", header: "Document Name" },
+  { key: "type", header: "Type" },
   { key: "status", header: "Status" },
   { key: "submitted_at", header: "Submitted" },
   { key: "view_action", header: "" },
   { key: "delete_action", header: "" },
 ];
+
+const getDocType = (doc: Document) => {
+  if (doc.type === JOB_OPERATION.INGESTION) {
+    return "Ingestion";
+  }
+  if (doc.type === JOB_OPERATION.DIGITIZATION) {
+    return doc.output_format
+      ? `Digitization:${doc.output_format}`
+      : "Digitization";
+  }
+  return doc.type || "N/A";
+};
+
+const getTypeTagStyle = (type: string) => {
+  if (type.startsWith("Digitization")) {
+    return "cool-gray";
+  }
+  return "gray";
+};
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -351,7 +372,7 @@ const getStatusIcon = (status: string) => {
     case DOC_STATUS.CHUNKED:
       return <InProgress size={16} className={styles.statusIconProgress} />;
     case DOC_STATUS.ALREADY_EXISTS:
-    case DOC_STATUS.COMPLETED_WITH_ERRORS:
+    case DOC_STATUS.SKIPPED:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case DOC_STATUS.CANCELLED:
       return <ErrorFilled size={16} className={styles.statusIconCancelled} />;
@@ -639,6 +660,7 @@ const DocumentListPage = () => {
       // Create rows for export (excluding action columns)
       const exportRows = state.documents.map((doc) => ({
         name: doc.name || doc.filename || "N/A",
+        type: getDocType(doc),
         status: doc.status,
         submitted_at: doc.submitted_at
           ? new Date(doc.submitted_at).toLocaleString("en-US", {
@@ -680,15 +702,19 @@ const DocumentListPage = () => {
 
   const rows = state.documents.map((doc) => {
     const hasError = doc.status === "failed";
+    const docType = getDocType(doc);
 
     return {
       id: doc.id,
       name: doc.name || doc.filename || "N/A",
+      type: (
+        <Tag type={getTypeTagStyle(docType)} size="md">
+          {docType}
+        </Tag>
+      ),
       status: (
         <div className={styles.statusCell}>
-          {!hasError && getStatusIcon(doc.status)}
-          <span className={styles.statusText}>{doc.status}</span>
-          {hasError && (
+          {hasError ? (
             <Tooltip
               align="bottom"
               autoAlign={true}
@@ -700,10 +726,13 @@ const DocumentListPage = () => {
                 className={styles.errorInfoButton}
                 aria-label="Error details"
               >
-                <ErrorFilled size={16} className={styles.errorInfoIcon} />
+                {getStatusIcon(doc.status)}
               </button>
             </Tooltip>
+          ) : (
+            getStatusIcon(doc.status)
           )}
+          <span className={styles.statusText}>{doc.status}</span>
         </div>
       ),
       submitted_at: doc.submitted_at

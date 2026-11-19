@@ -20,10 +20,62 @@ const (
 	CatalogTypeConnectors = "connectors"
 )
 
+// Component category constants, matching the `category` field of a component's metadata.yaml.
+const (
+	// ComponentCategoryModels marks components that serve a model (llm, embedding, reranker, ...).
+	ComponentCategoryModels = "models"
+)
+
+// Model metadata key constants used when persisting model connector metadata.
+const (
+	// MetadataKeyComponentType is the metadata key that stores the component type of a model connector.
+	MetadataKeyComponentType = "component_type"
+	// MetadataKeyModel is the metadata key that stores the model name of a model connector.
+	MetadataKeyModel = "model"
+	// MetadataKeyProfile is the metadata key that stores the deployment profile of a local model.
+	MetadataKeyProfile = "profile"
+	// MetadataKeyParams is the metadata key that holds the non-sensitive provider params of a model.
+	MetadataKeyParams = "params"
+	// MetadataKeyLiteLLM is the metadata key that holds the LiteLLM gateway details of a model.
+	MetadataKeyLiteLLM = "litellm"
+	// MetadataKeyLiteLLMModelID is the key, nested under MetadataKeyLiteLLM, that stores the model ID
+	// LiteLLM assigned on registration.
+	MetadataKeyLiteLLMModelID = "model_id"
+)
+
+const (
+	// ConnectorParamsURLFormat takes connector type and provider ID.
+	ConnectorParamsURLFormat = "/api/v1/connectors/%s/providers/%s/params"
+	// ComponentParamsURLFormat takes component type, provider ID and runtime.
+	ComponentParamsURLFormat = "/api/v1/components/%s/providers/%s/params?runtime=%s"
+)
+
 // Connector type constants.
 const (
 	// ConnectorTypeDatasource is the catalog connector type shared by all datasource providers.
 	ConnectorTypeDatasource = "datasource"
+	// ConnectorTypeModels is the connector type for remote model connectors. It is set server-side
+	// and separates model connectors from datasource connectors in the shared connectors table.
+	ConnectorTypeModels = "models"
+)
+
+// Model connector provider ID constants.
+// These values must match the connector IDs defined in the catalog assets
+// (assets/connectors/models/<id>/metadata.yaml).
+const (
+	// ConnectorProviderWatsonx is the provider ID for IBM watsonx.ai model connectors.
+	ConnectorProviderWatsonx = "watsonx"
+)
+
+// DeploymentType selects how a model is provisioned.
+type DeploymentType string
+
+// Model deployment type constants.
+const (
+	// DeploymentTypeLocal starts a model pod on a worker and registers a LiteLLM route (async).
+	DeploymentTypeLocal DeploymentType = "local"
+	// DeploymentTypeRemote registers an externally hosted endpoint as a connector (sync).
+	DeploymentTypeRemote DeploymentType = "remote"
 )
 
 // Datasource provider ID constants.
@@ -90,6 +142,14 @@ const (
 	// DBEncryptionKeyEnv is the environment variable that holds the AES-256 key used to
 	// encrypt sensitive connector credential fields at rest.
 	DBEncryptionKeyEnv = "DB_ENCRYPTION_KEY"
+
+	// ModelGatewayPublicEndpointEnv is the environment variable that holds the URL under which the
+	// model gateway is reachable by consumers of a model. It is reported as the model's endpoint.
+	ModelGatewayPublicEndpointEnv = "MODEL_GATEWAY_PUBLIC_ENDPOINT"
+
+	// ModelEndpointTypeExternal is the type of the model endpoint that consumers outside the
+	// platform call: the public model gateway.
+	ModelEndpointTypeExternal = "external"
 )
 
 // Made with Bob

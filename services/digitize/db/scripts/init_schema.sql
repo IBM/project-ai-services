@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     stats JSONB NOT NULL DEFAULT '{"total_documents": 0, "completed": 0, "failed": 0, "in_progress": 0}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'completed_with_errors', 'failed', 'cancel_pending', 'cancelled')),
+    CONSTRAINT chk_job_status CHECK (status IN ('accepted', 'in_progress', 'completed', 'failed', 'cancel_pending', 'cancelled')),
     CONSTRAINT chk_job_operation CHECK (operation IN ('ingestion', 'digitization')),
     CONSTRAINT chk_job_source CHECK (source IN ('user', 'connector'))
 );
@@ -30,20 +30,25 @@ CREATE TABLE IF NOT EXISTS documents (
     error TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  -- Last modification time (UTC)
-    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'completed_with_errors', 'failed', 'already_exists', 'cancelled')),
+    CONSTRAINT chk_doc_status CHECK (status IN ('accepted', 'in_progress', 'digitized', 'processed', 'chunked', 'completed', 'failed', 'already_exists', 'skipped', 'cancelled')),
     CONSTRAINT chk_doc_type CHECK (type IN ('ingestion', 'digitization')),
     CONSTRAINT chk_doc_source CHECK (source IN ('user', 'connector')),
     CONSTRAINT chk_output_format CHECK (output_format IN ('txt', 'md', 'json'))
 );
 
--- Checksum registry — one row per unique file content, points to the
--- authoritative completed Document for duplicate detection.
+-- Checksum registry — one row per unique (file content, operation type), points to the
+-- Document that owns that content, for duplicate detection.
+-- The row is claimed atomically (INSERT ... ON CONFLICT DO UPDATE) right after the
+-- document row is created. If the owner fails or is cancelled the row is kept, and
+-- the next claim of the same content re-points it to the new document.
 -- ON DELETE CASCADE ensures stale registry entries are automatically removed
 -- when the referenced document is deleted, preventing orphaned hash entries
 -- from blocking future re-ingestion of the same file.
 CREATE TABLE IF NOT EXISTS document_checksum (
-    checksum      TEXT        PRIMARY KEY,
-    doc_id        TEXT        NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE
+    checksum      TEXT        NOT NULL,
+    type          VARCHAR(50) NOT NULL,
+    doc_id        TEXT        NOT NULL UNIQUE REFERENCES documents(doc_id) ON DELETE CASCADE,
+    PRIMARY KEY (checksum, type)
 );
 
 -- Schema for APScheduler job store

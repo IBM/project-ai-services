@@ -1,0 +1,46 @@
+# Python dependencies for the extract / translate / summarize / forecast services (hack/tilt/services/Tiltfile).
+# Installed into hack/tilt/services/.venv by the Tiltfile. Local development only.
+#
+# Deliberately lean: extract / translate / summarize only need PostgreSQL and an LLM endpoint, so there is no
+# torch, sentence-transformers, docling or OpenSearch client here (see hack/tilt/requirements.txt
+# for the full RAG stack).
+
+# --- local model server in LLM-only mode (hack/tilt/model_server.py, MODEL_SERVER_MODELS=llm) ---
+# transformers is used only for the LLM tokenizer behind /tokenize; no torch needed for that.
+fastapi
+filelock==4.2.4
+uvicorn
+litellm
+transformers
+
+# --- services/common + shared service plumbing ---
+pydantic
+pydantic-settings
+requests
+httpx
+psutil
+python-multipart
+# Imported by common/retry_utils.py (llm_utils -> retry_utils), so every service needs them.
+# Only the client libraries: no OpenSearch server runs for these services.
+paramiko
+opensearch-py
+SQLAlchemy==2.0.49
+psycopg2-binary
+
+# --- extract ---
+jsonschema
+
+# --- translate (imported through common/lang_utils.py) ---
+# The Japanese spaCy model (ja_core_news_sm) is intentionally not installed.
+lingua-language-detector
+sentence-splitter
+spacy
+
+# --- summarize ---
+pypdfium2
+
+# --- forecast ---
+# Connector secret encryption (AES-256-GCM). The training stack (autogluon.tabular, lightgbm, xgboost,
+# pandas, pyarrow, tritonclient[http], apscheduler) is not imported by the merged code yet; add it
+# here from services/forecast/requirements.txt when the training worker lands.
+cryptography>=42.0.0

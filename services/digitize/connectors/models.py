@@ -83,6 +83,12 @@ class ConnectorError(str, Enum):
     (finalize_sync_log_and_update_connector with COMPLETED status sets message=None).
     """
 
+
+# Prefix of every failure message persisted on the Connector row by
+# finalize_sync_log_and_update_connector(). The message is sticky: it survives
+# the start of the next sync and any progress updates until a sync COMPLETES.
+LAST_SYNC_ERROR_PREFIX = "Error from last sync:"
+
 # ---------------------------------------------------------------------------
 # Connector type enum
 # ---------------------------------------------------------------------------
@@ -114,7 +120,7 @@ class ConnectorCreateRequest(BaseModel):
     )
     name: str = Field(..., description="Human-readable unique name, e.g. 'prod-sftp-reports'")
     type: str = Field(..., description="Connector transport type: 'file_system' or 'object_storage'")
-    allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx']")
+    allowed_extensions: List[str] = Field(..., description="File extensions to accept, e.g. ['.pdf', '.docx', '.html', '.md', '.txt']")
     connection_details: Dict[str, Any] = Field(..., description="Transport-specific connection parameters")
 
     model_config = {
@@ -122,7 +128,7 @@ class ConnectorCreateRequest(BaseModel):
             "example": {
                 "name": "prod-sftp-reports",
                 "type": "file_system",
-                "allowed_extensions": [".pdf", ".docx"],
+                "allowed_extensions": [".pdf", ".docx", ".html", ".md", ".txt"],
                 "connection_details": {
                     "host": "sftp.example.com",
                     "port": 22,
@@ -162,7 +168,7 @@ class ConnectorCreateRequest(BaseModel):
     @classmethod
     def validate_allowed_extensions(cls, v: List[str]) -> List[str]:
         normalised = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in v]
-        supported = {".pdf", ".docx"}
+        supported = {".pdf", ".docx", ".html", ".md", ".txt"}
         unsupported = [e for e in normalised if e not in supported]
         if unsupported:
             raise ValueError(
@@ -208,11 +214,26 @@ class ConnectorUpdateRequest(BaseModel):
         description="Partial connection details — only supplied keys are overwritten",
     )
 
+    @field_validator("allowed_extensions")
+    @classmethod
+    def validate_allowed_extensions(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return v
+        normalised = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in v]
+        supported = {".pdf", ".docx", ".html", ".md", ".txt"}
+        unsupported = [e for e in normalised if e not in supported]
+        if unsupported:
+            raise ValueError(
+                f"Unsupported extension(s): {unsupported!r}. "
+                f"Supported extensions: {sorted(supported)}"
+            )
+        return normalised
+
     model_config = {
         "json_schema_extra": {
             "example": {
                 "name": "prod-sftp-reports-updated",
-                "allowed_extensions": [".pdf", ".docx"],
+                "allowed_extensions": [".pdf", ".docx", ".html", ".md", ".txt"],
                 "connection_details": {
                     "remote_path": "/exports/v2",
                 },
@@ -288,7 +309,7 @@ class ConnectorDetailResponse(BaseModel):
                 "id": "c1d2e3f4-a5b6-7890-abcd-ef1234567890",
                 "name": "prod-sftp-reports",
                 "type": "file_system",
-                "allowed_extensions": [".pdf", ".docx"],
+                "allowed_extensions": [".pdf", ".docx", ".html", ".md", ".txt"],
                 "sync_interval_seconds": 60,
                 "attached_at": "2025-01-15T10:00:00Z",
                 "last_sync_at": "2025-01-15T10:30:00Z",

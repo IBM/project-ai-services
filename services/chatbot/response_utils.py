@@ -97,6 +97,14 @@ class ChatCompletionResponse(BaseModel):
     }
 
 
+class ChatCompletionWithDocsResponse(ChatCompletionResponse):
+    """Non-streaming chat completion response including retrieved reference documents.
+
+    Returned only when the request sets the `include_docs=true` query parameter.
+    """
+    docs: list[dict] = Field(default_factory=list, description="Retrieved reference documents")
+
+
 class ModelInfo(BaseModel):
     """Model information."""
     id: str = Field(..., description="Model identifier")

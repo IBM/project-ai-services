@@ -43,15 +43,6 @@ http {
         }
 
         # Proxy API requests
-        location /v1/similarity-search {
-          proxy_pass http://${SIMILARITY_SEARCH_HOST}:${SIMILARITY_SEARCH_PORT};
-          proxy_http_version 1.1;
-          proxy_set_header Upgrade $http_upgrade;
-          proxy_set_header Connection 'upgrade';
-          proxy_set_header Host $host;
-          proxy_cache_bypass $http_upgrade;
-        }
-
         location /v1/chat/completions {
           proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
           proxy_http_version 1.1;
@@ -78,12 +69,6 @@ http {
           proxy_set_header Host $host;
           proxy_cache_bypass $http_upgrade;
         }
-
-        location /config {
-          default_type application/json;
-          return 200 '{"searchMode":"${CHATBOT_SEARCH_MODE}","numChunksPostReranker":"${CHATBOT_NUM_CHUNKS_POST_RERANKER}","rerank":"${CHATBOT_RERANK}"}';
-        }
-
     }
 
     include /etc/nginx/conf.d/*.conf;

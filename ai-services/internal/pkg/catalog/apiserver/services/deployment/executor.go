@@ -8,12 +8,12 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	openshiftRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	podmanRuntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
 // DeploymentExecutor orchestrates the execution of an already-planned
@@ -23,8 +23,8 @@ type DeploymentExecutor struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
-	// workerRegistry is used to resolve a RemoteRuntime for worker deployments.
-	workerRegistry stream.WorkerRegistry
+	// workers resolves a RemoteRuntime for worker deployments.
+	workers worker.Resolver
 }
 
 // NewDeploymentExecutor creates a new DeploymentExecutor instance.
@@ -33,22 +33,15 @@ func NewDeploymentExecutor(
 	appRepo repository.ApplicationRepository,
 	serviceRepo repository.ServiceRepository,
 	componentRepo repository.ComponentRepository,
+	workers worker.Resolver,
 ) *DeploymentExecutor {
 	return &DeploymentExecutor{
 		catalogProvider: catalogProvider,
 		appRepo:         appRepo,
 		serviceRepo:     serviceRepo,
 		componentRepo:   componentRepo,
+		workers:         workers,
 	}
-}
-
-// WithWorkerRegistry wires the worker registry into the executor so it can
-// resolve a RemoteRuntime for worker deployments. Must be called before any
-// deployment that targets a non-local worker.
-func (e *DeploymentExecutor) WithWorkerRegistry(reg stream.WorkerRegistry) *DeploymentExecutor {
-	e.workerRegistry = reg
-
-	return e
 }
 
 // ExecuteWithPlan runs the deployment described by plan. DB records have
@@ -97,22 +90,14 @@ func (e *DeploymentExecutor) executeWorkerDeployment(
 	plan *DeploymentPlan,
 	req apimodels.CreateApplicationRequest,
 ) error {
-	// Connectivity was already confirmed by ValidateWorker; just read the type.
-	rtStr, ok := e.workerRegistry.WorkerRuntimeType(plan.WorkerName)
-	if !ok || rtStr == "" {
-		return fmt.Errorf("worker %q runtime type not available", plan.WorkerName)
-	}
-	workerType := types.RuntimeType(rtStr)
-	if !workerType.Valid() {
-		return fmt.Errorf("worker %q has unsupported runtime type %q", plan.WorkerName, workerType)
-	}
-
 	// RemoteRuntime forwards every call over the gRPC CommandStream — the
 	// deployer does not need to know it is talking to a remote machine.
-	rt, err := runtime.NewRuntimeFactory(workerType).CreateRemote(plan.WorkerName, e.workerRegistry, plan.Namespace)
+	rt, err := e.workers.NewRuntime(ctx, plan.WorkerName, plan.Namespace)
 	if err != nil {
-		return fmt.Errorf("create remote runtime for worker %q: %w", plan.WorkerName, err)
+		return err
 	}
+
+	workerType := rt.Type()
 
 	switch workerType {
 	case types.RuntimeTypePodman:
