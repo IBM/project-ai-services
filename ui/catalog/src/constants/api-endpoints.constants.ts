@@ -62,5 +62,7 @@ export const WORKERS_ENDPOINTS = {
 
 export const MODEL_MANAGEMENT_ENDPOINTS = {
   GET_CATALOG_MODELS: "/catalog/models",
+  GET_CATALOG_MODEL_DETAILS: (id: string) =>
+    `/catalog/models/${encodeURIComponent(id)}`,
   LIST_MODELS: "/models",
 };

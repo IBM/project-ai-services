@@ -29,6 +29,20 @@ export interface AboutSection {
   sections?: AboutSectionItem[];
 }
 
+export interface CatalogAboutSubSection {
+  title: string;
+  value: string;
+}
+
+export interface CatalogAboutSection {
+  title: string;
+  value?: string;
+  values?: string[] | CatalogAboutSubSection[];
+  sections?: CatalogAboutSection[];
+  ctaLabel?: string;
+  url?: string;
+}
+
 export interface ArchitectureDetailsResponse {
   id: string;
   name: string;
@@ -645,6 +659,21 @@ export interface CatalogModel {
   certified_by: string;
   description: string;
   providers: CatalogModelProvider[];
+}
+
+export interface SupportedProvider extends CatalogModelProvider {
+  accelerator_type: string | null;
+}
+
+export interface CatalogModelDetails {
+  id: string;
+  name: string;
+  component_type: ModelComponentType;
+  certified_by: string;
+  license?: string;
+  description: string;
+  about?: CatalogAboutSection[];
+  supported_providers: SupportedProvider[];
 }
 
 export interface ModelDeployment {

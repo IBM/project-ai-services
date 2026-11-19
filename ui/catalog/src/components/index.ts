@@ -22,6 +22,12 @@ export { default as ModelsTable } from "./ModelsTable";
 export type { ModelsTableProps } from "./ModelsTable";
 export { default as InlineEditableTitle } from "./InlineEditableTitle";
 export type { InlineEditableTitleProps } from "./InlineEditableTitle";
+export { ModelCard, ModelCardSkeleton } from "./ModelCard";
+export type { ModelCardProps } from "./ModelCard";
+export { default as ModelDetailPanel } from "./ModelDetailPanel";
+export type { ModelDetailPanelProps } from "./ModelDetailPanel";
+export { CatalogDetailPanel } from "./CatalogDetailPanel";
+export type { CatalogDetailPanelProps } from "./CatalogDetailPanel";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
   DeployFormData,

@@ -2,6 +2,7 @@ import { api } from "@/api/axios";
 import { MODEL_MANAGEMENT_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
   CatalogModel,
+  CatalogModelDetails,
   ModelDeployment,
   ModelDeploymentsListResponse,
 } from "@/types/api.types";
@@ -11,6 +12,15 @@ import { formatDateTime } from "@/utils/time";
 export async function fetchCatalogModels(): Promise<CatalogModel[]> {
   const response = await api.get<CatalogModel[]>(
     MODEL_MANAGEMENT_ENDPOINTS.GET_CATALOG_MODELS,
+  );
+  return response.data;
+}
+
+export async function fetchCatalogModelDetails(
+  id: string,
+): Promise<CatalogModelDetails> {
+  const response = await api.get<CatalogModelDetails>(
+    MODEL_MANAGEMENT_ENDPOINTS.GET_CATALOG_MODEL_DETAILS(id),
   );
   return response.data;
 }
