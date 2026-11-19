@@ -2,20 +2,22 @@
 Unit tests for the Forecast prediction and listing endpoints (/v1/forecast).
 """
 
-from contextlib import contextmanager
+import asyncio
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import DEFAULT, MagicMock, patch
 from uuid import UUID
 
 import pytest
-import requests
+import httpx
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 import forecast.api.v1.forecast as forecast_api
 import forecast.app as forecast_app
 import forecast.db.connectors as connectors_db
+import forecast.utils.forecast_utils as forecast_utils
 from forecast.db.connectors import ConnectorRow, ForecasterRow
 from forecast.settings import settings
 
@@ -40,6 +42,15 @@ def client():
             yield test_client
 
 
+@contextmanager
+def _patched_db_session(*args, **kwargs):
+    """Patch ``get_db_session`` where the endpoints and the helpers of forecast_utils use it."""
+    with ExitStack() as stack:
+        for module in (forecast_api, forecast_utils):
+            stack.enter_context(patch.object(module, "get_db_session", *args, **kwargs))
+        yield
+
+
 @pytest.fixture
 def db():
     """Replace database session and connector db queries with mocks."""
@@ -57,7 +68,7 @@ def db():
         "get_newest_forecaster": None,
     }
 
-    with patch.object(forecast_api, "get_db_session", fake_session), patch.multiple(
+    with _patched_db_session(fake_session), patch.multiple(
         connectors_db, **{name: DEFAULT for name in defaults}
     ) as mocks:
         for name, value in defaults.items():
@@ -196,7 +207,7 @@ def test_forecast_default_success_array_payload(client, db):
         {"prediction": "Y", "confidence": 0.64},
     ]
 
-    with patch("forecast.api.v1.forecast.triton.run_inference", return_value=triton_predictions) as mock_infer:
+    with patch("forecast.triton_client.triton.run_inference", return_value=triton_predictions) as mock_infer:
         payload = [
             {"REGION": "EMEA", "QUANTITY": 12, "UNIT_PRICE": 19.99},
             {"REGION": "APAC", "QUANTITY": 3, "UNIT_PRICE": 249.0},
@@ -217,7 +228,7 @@ def test_forecast_with_specific_version(client, db):
 
     triton_predictions = [{"prediction": "Y", "confidence": 0.99}]
 
-    with patch("forecast.api.v1.forecast.triton.run_inference", return_value=triton_predictions) as mock_infer:
+    with patch("forecast.triton_client.triton.run_inference", return_value=triton_predictions) as mock_infer:
         payload = [{"REGION": "US", "QUANTITY": 1, "UNIT_PRICE": 10.0}]
         response = client.post(f"/v1/forecast/{CONNECTOR_ID}?version=7", json=payload)
 
@@ -333,7 +344,7 @@ def test_forecast_triton_unavailable_returns_503(client, db):
     db.get_connector.return_value = _mock_connector()
     db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
 
-    with patch("requests.post", side_effect=requests.exceptions.ConnectionError("Connection refused")):
+    with patch("httpx.AsyncClient.post", side_effect=httpx.ConnectError("Connection refused")):
         payload = [{"REGION": "EMEA", "QUANTITY": 10, "UNIT_PRICE": 20.0}]
         response = client.post(f"/v1/forecast/{CONNECTOR_ID}", json=payload)
 
@@ -576,8 +587,8 @@ def test_triton_run_inference_flat_v2_tensor_parsing():
         {"S": "text2", "I": 43, "N": 2.71, "U": "fallback2"},
     ]
 
-    with patch("requests.post", return_value=mock_resp) as mock_post:
-        preds = run_inference("fc_model_1", instances, input_cols)
+    with patch("httpx.AsyncClient.post", return_value=mock_resp) as mock_post:
+        preds = asyncio.run(run_inference("fc_model_1", instances, input_cols))
 
     assert len(preds) == 2
     assert preds[0] == {"prediction": 1, "confidence": 0.9}
@@ -609,8 +620,8 @@ def test_triton_run_inference_probabilities_with_class_labels():
     input_cols = [{"name": "A", "type": "string"}]
     instances = [{"A": "x"}, {"A": "y"}]
 
-    with patch("requests.post", return_value=mock_resp):
-        preds = run_inference("fc_model_1", instances, input_cols)
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
+        preds = asyncio.run(run_inference("fc_model_1", instances, input_cols))
 
     assert len(preds) == 2
     assert preds[0] == {"prediction": "Y", "confidence": 0.9}
@@ -631,8 +642,8 @@ def test_triton_run_inference_reads_the_outputs_of_the_training_worker():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
-        preds = run_inference("fc_model_1", [{"A": "x"}, {"A": "y"}], [{"name": "A", "type": None}])
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
+        preds = asyncio.run(run_inference("fc_model_1", [{"A": "x"}, {"A": "y"}], [{"name": "A", "type": None}]))
 
     assert preds == [{"prediction": "Y", "confidence": 0.8}, {"prediction": "N", "confidence": 0.7}]
 
@@ -651,9 +662,9 @@ def test_triton_scalar_probabilities_raises_500():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}, {"A": 2}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}, {"A": 2}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -673,9 +684,9 @@ def test_triton_probabilities_without_predictions_raises_500():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}, {"A": 2}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}, {"A": 2}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -696,8 +707,8 @@ def test_triton_run_inference_separate_predictions_and_confidences():
     input_cols = [{"name": "A", "type": "string"}]
     instances = [{"A": "x"}, {"A": "y"}]
 
-    with patch("requests.post", return_value=mock_resp):
-        preds = run_inference("fc_model_1", instances, input_cols)
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
+        preds = asyncio.run(run_inference("fc_model_1", instances, input_cols))
 
     assert len(preds) == 2
     assert preds[0] == {"prediction": "Y", "confidence": 0.95}
@@ -713,9 +724,9 @@ def test_triton_malformed_json_response_raises_500():
     mock_resp.status_code = 200
     mock_resp.json.return_value = ["not", "a", "dict"]
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -735,9 +746,9 @@ def test_triton_non_finite_confidence_raises_500():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -758,9 +769,9 @@ def test_triton_non_numeric_probabilities_raises_500():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -780,9 +791,9 @@ def test_triton_non_scalar_prediction_raises_500():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -796,9 +807,9 @@ def test_triton_run_inference_handles_not_served_404_as_503():
     mock_resp.status_code = 404
     mock_resp.text = "Model not found"
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -813,9 +824,9 @@ def test_triton_run_inference_handles_unknown_model_400_as_503():
     mock_resp.status_code = 400
     mock_resp.text = "Request for unknown model: 'fc_model_1' is not ready"
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -830,9 +841,9 @@ def test_triton_run_inference_handles_http_500():
     mock_resp.status_code = 500
     mock_resp.text = "Internal Triton failure"
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton inference failed" in exc_info.value.detail["error"]["message"]
@@ -847,9 +858,9 @@ def test_triton_run_inference_handles_malformed_json():
     mock_resp.status_code = 200
     mock_resp.json.side_effect = ValueError("Invalid JSON")
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -869,13 +880,13 @@ def test_triton_run_inference_output_dimension_mismatch_raises_500():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference(
+            asyncio.run(run_inference(
                 "fc_model_1",
                 [{"A": 1}, {"A": 2}],
                 [{"name": "A", "type": "integer"}],
-            )
+            ))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -890,7 +901,7 @@ def test_triton_run_inference_output_dimension_mismatch_raises_500():
 def test_get_default_forecasters_pool_timeout_fails_429(client):
     from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
-    with patch.object(forecast_api, "get_db_session", side_effect=PoolTimeoutError("Pool timed out")):
+    with _patched_db_session(side_effect=PoolTimeoutError("Pool timed out")):
         response = client.get("/v1/forecast")
 
     assert response.status_code == 429
@@ -901,7 +912,7 @@ def test_get_default_forecasters_pool_timeout_fails_429(client):
 def test_get_connector_forecasters_sqlalchemy_error_fails_500(client):
     from sqlalchemy.exc import SQLAlchemyError
 
-    with patch.object(forecast_api, "get_db_session", side_effect=SQLAlchemyError("DB exploded")):
+    with _patched_db_session(side_effect=SQLAlchemyError("DB exploded")):
         response = client.get(f"/v1/forecast/{CONNECTOR_ID}")
 
     assert response.status_code == 500
@@ -916,7 +927,7 @@ def test_get_connector_forecasters_lock_55p03_fails_409(client):
     exc = SQLAlchemyError("Lock not available")
     exc.orig = orig
 
-    with patch.object(forecast_api, "get_db_session", side_effect=exc):
+    with _patched_db_session(side_effect=exc):
         response = client.get(f"/v1/forecast/{CONNECTOR_ID}")
 
     assert response.status_code == 409
@@ -927,7 +938,7 @@ def test_get_connector_forecasters_lock_55p03_fails_409(client):
 def test_post_forecast_default_db_error_fails_500(client):
     from sqlalchemy.exc import SQLAlchemyError
 
-    with patch.object(forecast_api, "get_db_session", side_effect=SQLAlchemyError("DB error")):
+    with _patched_db_session(side_effect=SQLAlchemyError("DB error")):
         response = client.post(
             "/v1/forecast", json=[{"REGION": "EMEA", "QUANTITY": 10, "UNIT_PRICE": 20.0}]
         )
@@ -1052,8 +1063,8 @@ def test_triton_run_inference_payload_structure_and_datatypes():
         {"INT_COL": 20, "NUM_COL": 25.0, "STR_COL": "val2", "TYPELESS_COL": 99},
     ]
 
-    with patch("requests.post", return_value=mock_resp) as mock_post:
-        preds = run_inference("fc_test_model", instances, input_cols)
+    with patch("httpx.AsyncClient.post", return_value=mock_resp) as mock_post:
+        preds = asyncio.run(run_inference("fc_test_model", instances, input_cols))
 
     assert len(preds) == 2
     mock_post.assert_called_once()
@@ -1074,9 +1085,9 @@ def test_triton_run_inference_timeout_raises_503():
     from fastapi import HTTPException
     from forecast.triton_client.triton import run_inference
 
-    with patch("requests.post", side_effect=requests.exceptions.Timeout("Triton read timeout")):
+    with patch("httpx.AsyncClient.post", side_effect=httpx.ReadTimeout("Triton read timeout")):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -1087,9 +1098,9 @@ def test_triton_run_inference_connection_error_raises_503():
     from fastapi import HTTPException
     from forecast.triton_client.triton import run_inference
 
-    with patch("requests.post", side_effect=requests.exceptions.ConnectionError("Connection refused")):
+    with patch("httpx.AsyncClient.post", side_effect=httpx.ConnectError("Connection refused")):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -1100,9 +1111,9 @@ def test_triton_run_inference_request_exception_raises_500():
     from fastapi import HTTPException
     from forecast.triton_client.triton import run_inference
 
-    with patch("requests.post", side_effect=requests.exceptions.ChunkedEncodingError("Corrupt payload")):
+    with patch("httpx.AsyncClient.post", side_effect=httpx.RemoteProtocolError("Corrupt payload")):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton inference failed" in exc_info.value.detail["error"]["message"]
@@ -1117,9 +1128,9 @@ def test_triton_run_inference_http_400_not_unserved_marker_raises_500():
     mock_resp.status_code = 400
     mock_resp.text = "Invalid tensor shape in inference request"
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton inference failed" in exc_info.value.detail["error"]["message"]
@@ -1138,9 +1149,25 @@ def test_triton_run_inference_missing_confidences_raises_500():
         ]
     }
 
-    with patch("requests.post", return_value=mock_resp):
+    with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}])
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
+
+
+@pytest.mark.unit
+def test_http_client_is_shared_and_recreated_after_close():
+    from forecast.utils import http_client
+
+    asyncio.run(http_client.close_client())
+    first = http_client.get_client()
+    assert http_client.get_client() is first
+
+    asyncio.run(http_client.close_client())
+    assert first.is_closed
+    assert http_client.get_client() is not first
+
+    asyncio.run(http_client.close_client())
+    asyncio.run(http_client.close_client())  # Closing twice is harmless.

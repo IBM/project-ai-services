@@ -1,15 +1,16 @@
 """Triton helpers: startup checks and inference HTTP client."""
 
 import math
-from typing import Any, NoReturn, Optional
+from typing import Any, NoReturn
 from urllib.parse import quote
 
-import requests
+import httpx
 
 from common.error_utils import APIError, ErrorCode
 from common.misc_utils import get_logger
 from forecast.errors import raise_triton_unavailable
 from forecast.settings import settings
+from forecast.utils.http_client import get_client
 
 logger = get_logger("triton_client")
 
@@ -60,7 +61,7 @@ def _rows(output: dict, num_rows: int) -> list:
     return [data[i * width : (i + 1) * width] for i in range(num_rows)]
 
 
-def run_inference(
+async def run_inference(
     model_name: str, instances: list[dict[str, Any]], input_columns: list[dict]
 ) -> list[dict[str, Any]]:
     """Forward an inference request to Triton and parse the predictions and confidences.
@@ -88,11 +89,11 @@ def run_inference(
     payload = {"inputs": inputs_payload}
 
     try:
-        response = requests.post(infer_url, json=payload, timeout=timeout)
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+        response = await get_client().post(infer_url, json=payload, timeout=timeout)
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
         logger.error(f"Triton unreachable for model {model_name}: {type(exc).__name__}")
         raise_triton_unavailable()
-    except requests.exceptions.RequestException as exc:
+    except httpx.RequestError as exc:
         logger.error(f"Triton request failed for model {model_name}: {type(exc).__name__}")
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,

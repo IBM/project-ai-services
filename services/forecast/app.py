@@ -32,6 +32,7 @@ from forecast.db.connection import check_db_configured, close_db_connections  # 
 from forecast.errors import register_exception_handlers  # noqa: E402
 from forecast.triton_client.triton import triton_url_check  # noqa: E402
 from forecast.utils.encryption import validate_cipher  # noqa: E402
+from forecast.utils.http_client import close_client  # noqa: E402
 
 logger = get_logger("forecast_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -69,6 +70,10 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Forecast service shutting down...")
+    try:
+        await close_client()
+    except Exception as exc:
+        logger.error(f"Error closing the Triton client: {exc}", exc_info=True)
     try:
         close_db_connections()
     except Exception as exc:
