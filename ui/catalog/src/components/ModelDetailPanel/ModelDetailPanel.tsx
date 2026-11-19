@@ -4,7 +4,10 @@ import { Badge } from "@carbon/icons-react";
 import { fetchCatalogModelDetails } from "@/api/models.api";
 import { useModelsStore } from "@/store/models.store";
 import { dedupe } from "@/utils/requestManager";
-import { CatalogDetailPanel } from "@/components/CatalogDetailPanel";
+import {
+  CatalogDetailPanel,
+  CatalogDetailSection,
+} from "@/components/CatalogDetailPanel";
 import styles from "./ModelDetailPanel.module.scss";
 
 export interface ModelDetailPanelProps {
@@ -78,33 +81,25 @@ const ModelDetailPanel = ({
       error={error}
     >
       {model?.supported_providers && model.supported_providers.length > 0 && (
-        <div>
-          <section className={styles.section}>
-            <h2 className={styles.sectionTitle}>Supported providers</h2>
-            <div className={styles.providerList}>
-              {model.supported_providers.map((provider) => (
-                <div key={provider.id} className={styles.providerCard}>
-                  <div className={styles.providerInfo}>
-                    <div className={styles.providerName}>{provider.name}</div>
-                    <div className={styles.providerMeta}>
-                      <Tag type="gray" size="sm">
-                        {provider.deployment_type === "local"
-                          ? "Local"
-                          : "Remote"}
-                      </Tag>
-                      {provider.accelerator_type && (
-                        <Tag type="blue" size="sm">
-                          {provider.accelerator_type}
-                        </Tag>
-                      )}
-                    </div>
-                  </div>
+        <CatalogDetailSection title="Supported providers">
+          <div className={styles.providerList}>
+            {model.supported_providers.map((provider) => (
+              <div key={provider.id} className={styles.providerCard}>
+                <div className={styles.providerName}>{provider.name}</div>
+                <div className={styles.providerMeta}>
+                  <Tag type="gray" size="sm">
+                    {provider.deployment_type === "local" ? "Local" : "Remote"}
+                  </Tag>
+                  {provider.accelerator_type && (
+                    <Tag type="blue" size="sm">
+                      {provider.accelerator_type}
+                    </Tag>
+                  )}
                 </div>
-              ))}
-            </div>
-          </section>
-          <div className={styles.divider} />
-        </div>
+              </div>
+            ))}
+          </div>
+        </CatalogDetailSection>
       )}
     </CatalogDetailPanel>
   );

@@ -13,21 +13,6 @@
   flex-shrink: 0;
 }
 
-.section {
-  margin-bottom: $spacing-02;
-}
-
-.sectionTitle {
-  @include type-style("heading-02");
-  color: var(--cds-text-primary);
-  margin: 0 0 $spacing-05 0;
-}
-
-.divider {
-  border: 1px solid var(--cds-border-subtle-01);
-  margin: $spacing-06 0;
-}
-
 .providerList {
   display: flex;
   flex-direction: column;
@@ -36,17 +21,11 @@
 
 .providerCard {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: $spacing-02;
   padding: $spacing-04;
   background-color: var(--cds-layer-01);
   border: 1px solid var(--cds-border-subtle-01);
-}
-
-.providerInfo {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-02;
 }
 
 .providerName {

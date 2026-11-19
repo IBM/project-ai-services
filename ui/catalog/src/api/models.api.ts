@@ -1,32 +1,13 @@
 import { api } from "@/api/axios";
 import { MODEL_MANAGEMENT_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
-  CatalogAboutSection,
   CatalogModel,
-  ModelComponentType,
+  CatalogModelDetails,
   ModelDeployment,
   ModelDeploymentsListResponse,
 } from "@/types/api.types";
 import type { ModelDeploymentRow } from "@/components/ModelsTable/types";
 import { formatDateTime } from "@/utils/time";
-
-export interface SupportedProvider {
-  id: string;
-  name: string;
-  deployment_type: "local" | "remote";
-  accelerator_type: string | null;
-}
-
-export interface CatalogModelDetails {
-  id: string;
-  name: string;
-  component_type: ModelComponentType;
-  certified_by: string;
-  license?: string;
-  description: string;
-  about?: CatalogAboutSection[];
-  supported_providers: SupportedProvider[];
-}
 
 export async function fetchCatalogModels(): Promise<CatalogModel[]> {
   const response = await api.get<CatalogModel[]>(

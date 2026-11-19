@@ -1,2 +1,8 @@
-export { default as CatalogDetailPanel } from "./CatalogDetailPanel";
-export type { CatalogDetailPanelProps } from "./CatalogDetailPanel";
+export {
+  default as CatalogDetailPanel,
+  CatalogDetailSection,
+} from "./CatalogDetailPanel";
+export type {
+  CatalogDetailPanelProps,
+  CatalogDetailSectionProps,
+} from "./CatalogDetailPanel";

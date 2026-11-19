@@ -20,6 +20,26 @@ export interface CatalogDetailPanelProps {
   children?: ReactNode;
 }
 
+export interface CatalogDetailSectionProps {
+  title: string;
+  children: ReactNode;
+}
+
+// A titled section followed by a divider, shared by all catalog detail panels
+export const CatalogDetailSection = ({
+  title,
+  children,
+}: CatalogDetailSectionProps) => (
+  <div>
+    <section className={styles.section}>
+      <h2 className={styles.sectionTitle}>{title}</h2>
+      {children}
+    </section>
+
+    <div className={styles.divider} />
+  </div>
+);
+
 // Renders a single field with title and value
 const renderField = (title: string, value: string) => (
   <div className={styles.demoItem}>
@@ -133,39 +153,33 @@ const renderAboutSection = (
   }
 
   return (
-    <div key={index}>
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>{aboutSection.title}</h2>
+    <CatalogDetailSection key={index} title={aboutSection.title}>
+      {aboutSection.sections.some((s) => s.value) && (
+        <div className={styles.demoGrid}>
+          {aboutSection.sections
+            .filter((s) => s.value)
+            .map((section, idx) => (
+              <div key={idx}>{renderSection(section, idx)}</div>
+            ))}
+        </div>
+      )}
 
-        {aboutSection.sections.some((s) => s.value) && (
-          <div className={styles.demoGrid}>
-            {aboutSection.sections
-              .filter((s) => s.value)
-              .map((section, idx) => (
-                <div key={idx}>{renderSection(section, idx)}</div>
-              ))}
-          </div>
-        )}
-
-        {aboutSection.sections.some((s) => s.values || s.url) && (
-          <div
-            className={
-              aboutSection.sections.length === 2
-                ? styles.twoColumns
-                : styles.threeColumns
-            }
-          >
-            {aboutSection.sections
-              .filter((s) => s.values || s.url)
-              .map((section, idx) => (
-                <div key={idx}>{renderSection(section, idx)}</div>
-              ))}
-          </div>
-        )}
-      </section>
-
-      <div className={styles.divider} />
-    </div>
+      {aboutSection.sections.some((s) => s.values || s.url) && (
+        <div
+          className={
+            aboutSection.sections.length === 2
+              ? styles.twoColumns
+              : styles.threeColumns
+          }
+        >
+          {aboutSection.sections
+            .filter((s) => s.values || s.url)
+            .map((section, idx) => (
+              <div key={idx}>{renderSection(section, idx)}</div>
+            ))}
+        </div>
+      )}
+    </CatalogDetailSection>
   );
 };
 

@@ -661,6 +661,21 @@ export interface CatalogModel {
   providers: CatalogModelProvider[];
 }
 
+export interface SupportedProvider extends CatalogModelProvider {
+  accelerator_type: string | null;
+}
+
+export interface CatalogModelDetails {
+  id: string;
+  name: string;
+  component_type: ModelComponentType;
+  certified_by: string;
+  license?: string;
+  description: string;
+  about?: CatalogAboutSection[];
+  supported_providers: SupportedProvider[];
+}
+
 export interface ModelDeployment {
   id: string;
   deployment_type: "local" | "remote";
