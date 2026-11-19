@@ -71,34 +71,19 @@ def run_inference(
     infer_url = f"{triton_url}/v2/models/{quote(model_name, safe='')}/infer"
     timeout = settings.forecast.triton_infer_timeout_s
 
-    # Build Triton V2 HTTP request inputs
+    # Build Triton V2 HTTP request inputs. Every column is sent as text (BYTES). The type of an
+    # input column is optional, and the forecaster's inputs are all TYPE_STRING: its graph parses
+    # a numeric column and looks up a category column itself (see the proposal, section 10.4).
     num_rows = len(instances)
-    inputs_payload = []
-    for col in input_columns:
-        col_name = col["name"]
-        col_type = col.get("type")
-        raw_vals = [row[col_name] for row in instances]
-
-        if col_type == "integer":
-            datatype = "INT64"
-            data = [int(v) for v in raw_vals]
-        elif col_type == "number":
-            datatype = "FP32"
-            data = [float(v) for v in raw_vals]
-        elif col_type == "string":
-            datatype = "BYTES"
-            data = [str(v) for v in raw_vals]
-        else:
-            # Default typeless columns to BYTES to prevent per-batch datatype drift
-            datatype = "BYTES"
-            data = [str(v) for v in raw_vals]
-
-        inputs_payload.append({
-            "name": col_name,
+    inputs_payload = [
+        {
+            "name": col["name"],
             "shape": [num_rows, 1],
-            "datatype": datatype,
-            "data": data,
-        })
+            "datatype": "BYTES",
+            "data": [str(row[col["name"]]) for row in instances],
+        }
+        for col in input_columns
+    ]
 
     payload = {"inputs": inputs_payload}
 

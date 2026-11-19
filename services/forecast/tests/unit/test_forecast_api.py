@@ -618,6 +618,26 @@ def test_triton_run_inference_probabilities_with_class_labels():
 
 
 @pytest.mark.unit
+def test_triton_run_inference_reads_the_outputs_of_the_training_worker():
+    """The worker's classification model returns ``prediction`` (one class per row) and ``probabilities``."""
+    from forecast.triton_client.triton import run_inference
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "outputs": [
+            {"name": "prediction", "datatype": "BYTES", "shape": [2], "data": ["Y", "N"]},
+            {"name": "probabilities", "datatype": "FP32", "shape": [2, 2], "data": [0.2, 0.8, 0.7, 0.3]},
+        ]
+    }
+
+    with patch("requests.post", return_value=mock_resp):
+        preds = run_inference("fc_model_1", [{"A": "x"}, {"A": "y"}], [{"name": "A", "type": None}])
+
+    assert preds == [{"prediction": "Y", "confidence": 0.8}, {"prediction": "N", "confidence": 0.7}]
+
+
+@pytest.mark.unit
 def test_triton_scalar_probabilities_raises_500():
     from fastapi import HTTPException
     from forecast.triton_client.triton import run_inference
@@ -1040,35 +1060,13 @@ def test_triton_run_inference_payload_structure_and_datatypes():
     _, kwargs = mock_post.call_args
     sent_inputs = kwargs["json"]["inputs"]
 
-    assert len(sent_inputs) == 4
-    # INT64
-    assert sent_inputs[0] == {
-        "name": "INT_COL",
-        "shape": [2, 1],
-        "datatype": "INT64",
-        "data": [10, 20],
-    }
-    # FP32
-    assert sent_inputs[1] == {
-        "name": "NUM_COL",
-        "shape": [2, 1],
-        "datatype": "FP32",
-        "data": [12.5, 25.0],
-    }
-    # BYTES
-    assert sent_inputs[2] == {
-        "name": "STR_COL",
-        "shape": [2, 1],
-        "datatype": "BYTES",
-        "data": ["val1", "val2"],
-    }
-    # TYPELESS -> BYTES fallback
-    assert sent_inputs[3] == {
-        "name": "TYPELESS_COL",
-        "shape": [2, 1],
-        "datatype": "BYTES",
-        "data": ["x", "99"],
-    }
+    # Every column goes as text, whatever its type, because the forecaster's inputs are TYPE_STRING.
+    assert sent_inputs == [
+        {"name": "INT_COL", "shape": [2, 1], "datatype": "BYTES", "data": ["10", "20"]},
+        {"name": "NUM_COL", "shape": [2, 1], "datatype": "BYTES", "data": ["12.5", "25.0"]},
+        {"name": "STR_COL", "shape": [2, 1], "datatype": "BYTES", "data": ["val1", "val2"]},
+        {"name": "TYPELESS_COL", "shape": [2, 1], "datatype": "BYTES", "data": ["x", "99"]},
+    ]
 
 
 @pytest.mark.unit
