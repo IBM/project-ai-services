@@ -1331,7 +1331,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 							return status.Status
 						}, mcpFlowIngestTimeout, mcpFlowPollInterval).Should(
-							gomega.BeElementOf("completed", "completed_with_errors", "failed", "cancelled"),
+							gomega.BeElementOf("completed", "failed", "cancelled"),
 							"[MCP-FLOW] ingestion job %s did not reach a terminal state in time", mcpJobID)
 
 						gomega.Expect(last.Status).To(gomega.Equal("completed"),
@@ -2561,8 +2561,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			importResp, err := digitization.ImportData(ctx, digitizeBaseURL, map[string]interface{}{
 				"data": map[string]interface{}{
-					"jobs":      exportResp.Data.Jobs,
-					"documents": exportResp.Data.Documents,
+					"jobs":               exportResp.Data.Jobs,
+					"documents":          exportResp.Data.Documents,
+					"document_checksums": exportResp.Data.DocumentChecksums,
 				},
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2572,6 +2573,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				To(gomega.BeNumerically(">=", 1), "import should have imported or skipped at least one record")
 			gomega.Expect(importResp.Summary.Jobs.Failed).To(gomega.Equal(0), "no jobs should have failed during import")
 			gomega.Expect(importResp.Summary.Documents.Failed).To(gomega.Equal(0), "no documents should have failed during import")
+			gomega.Expect(importResp.Summary.DocumentChecksums.Failed).To(gomega.Equal(0), "no document checksums should have failed during import")
 
 			logger.Infof("[TEST] ✓ Import round-trip: jobs(imported=%d skipped=%d) docs(imported=%d skipped=%d)",
 				importResp.Summary.Jobs.Imported, importResp.Summary.Jobs.Skipped,

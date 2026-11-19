@@ -170,7 +170,7 @@ class TestProcessConvertedDocumentDispatch:
         mock_load.return_value = Mock()
         mock_process_html_md_txt.return_value = (2, 0.12)
         mock_detect_lang.return_value = "EN"
-        mock_process_table.return_value = (0, 0.05, {})
+        mock_process_table.return_value = (0, 0.05)
 
         # Create dummy json file for text read
         text_json = tmp_path / "doc1_text.json"
@@ -218,7 +218,7 @@ class TestProcessConvertedDocumentDispatch:
         mock_load.return_value = Mock()
         mock_process_html_md_txt.return_value = (1, 0.1)
         mock_detect_lang.return_value = "EN"
-        mock_process_table.return_value = (0, 0.05, {})
+        mock_process_table.return_value = (0, 0.05)
 
         (tmp_path / "doc4_text.json").write_text("[]", encoding="utf-8")
         conv_json = tmp_path / "doc4.json"
@@ -261,7 +261,7 @@ class TestProcessConvertedDocumentDispatch:
         mock_load.return_value = Mock()
         mock_process_docx.return_value = (3, 0.15)
         mock_detect_lang.return_value = "EN"
-        mock_process_table.return_value = (0, 0.05, {})
+        mock_process_table.return_value = (0, 0.05)
 
         text_json = tmp_path / "doc2_text.json"
         text_json.write_text("[]", encoding="utf-8")
@@ -306,7 +306,7 @@ class TestProcessConvertedDocumentDispatch:
         mock_load.return_value = Mock()
         mock_process_text.return_value = (10, 0.25)
         mock_detect_lang.return_value = "EN"
-        mock_process_table.return_value = (0, 0.05, {})
+        mock_process_table.return_value = (0, 0.05)
 
         text_json = tmp_path / "doc3_text.json"
         text_json.write_text("[]", encoding="utf-8")

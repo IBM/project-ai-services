@@ -19,7 +19,11 @@ dependencies:
   - id: llm
 
 standalone: true
-accepts_datasource: true
+datasource:
+  required: false
+  supported_providers:
+    - object_storage
+    - file_system
 
 # About field containing detailed service information
 about:

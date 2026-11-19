@@ -888,7 +888,7 @@ class TestOrchestratorCancellationAtChunkingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en"))
 
         # chunk_future raises JobCancelledError — simulates the chunker worker
         # being interrupted by the _process_stop_event.
@@ -948,7 +948,7 @@ class TestOrchestratorCancellationAtIndexingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en"))
 
         chunk_fut: Future = Future()
         chunk_result = ("text_chunks.json", "table_chunks.json", 2.5)
@@ -1034,7 +1034,7 @@ class TestOrchestratorCancellationAtIndexingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en"))
 
         chunk_fut: Future = Future()
         chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 2.5))
@@ -1125,7 +1125,7 @@ class TestOrchestratorHappyPath:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 10, 3, {"process_text": 0.5, "process_tables": 0.3}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 10, 3, {"process_text": 0.5, "process_tables": 0.3}, "en"))
 
         chunk_fut: Future = Future()
         chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 1.2))
@@ -1737,7 +1737,7 @@ class TestOrchestratorIndexCancelEventCleanFilesGating:
 
         proc_fut: Future = Future()
         proc_fut.set_result(
-            ("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {})
+            ("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en")
         )
 
         chunk_fut: Future = Future()
