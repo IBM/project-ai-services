@@ -309,7 +309,24 @@ func (v *ApplicationValidator) ValidateSingleComponent(ctx context.Context, comp
 	}
 
 	// Validate component parameters
-	_, err = ValidateComponentParams(ctx, v.provider, component.ComponentType, component.ProviderID, component.Params)
+	if _, err = ValidateComponentParams(ctx, v.provider, component.ComponentType, component.ProviderID, component.Params); err != nil {
+		return err
+	}
+
+	return v.validateModel(component)
+}
+
+// validateModel rejects a model that the component's provider does not list in its models.yaml.
+func (v *ApplicationValidator) validateModel(component apimodels.Component) error {
+	model := component.EffectiveModel()
+	if model == "" {
+		return nil
+	}
+
+	_, err := v.provider.LoadComponentValuesForModel(component.ComponentType, component.ProviderID, model, "", nil)
+	if errors.Is(err, catalog.ErrModelNotSupported) {
+		return BadRequest("Component '%s/%s': %v", component.ComponentType, component.ProviderID, err)
+	}
 
 	return err
 }
@@ -631,7 +648,8 @@ type seenComponent struct {
 func checkComponentConsistency(serviceName string, service apimodels.Service, seen map[string]seenComponent) error {
 	for _, component := range service.Components {
 		key := fmt.Sprintf("%s/%s", component.ComponentType, component.ProviderID)
-		hash := utils.CalculateComponentHash(component.ComponentType, component.ProviderID, component.Params)
+		params := component.ParamsWithModel()
+		hash := utils.CalculateComponentHash(component.ComponentType, component.ProviderID, params)
 
 		if first, exists := seen[key]; exists {
 			if first.hash != hash {
@@ -642,12 +660,12 @@ func checkComponentConsistency(serviceName string, service apimodels.Service, se
 							"Different values given for %s",
 						first.serviceName,
 						serviceName,
-						formatParamKeys(diffParamKeys(first.params, component.Params)),
+						formatParamKeys(diffParamKeys(first.params, params)),
 					),
 				}
 			}
 		} else {
-			seen[key] = seenComponent{hash: hash, params: component.Params, serviceName: serviceName}
+			seen[key] = seenComponent{hash: hash, params: params, serviceName: serviceName}
 		}
 	}
 

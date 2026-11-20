@@ -1,5 +1,7 @@
 package models
 
+import "maps"
+
 // CreateApplicationRequest represents the request body for creating a new application.
 type CreateApplicationRequest struct {
 	Name      string    `json:"name" binding:"required,min=3,max=100"`
@@ -38,11 +40,43 @@ type ConnectorRef struct {
 }
 
 // Component represents a component configuration for a service.
+// There is deliberately no profile field: the hardware profile of a model component is chosen by the
+// backend (the model's default_profile, later the service's recommendation).
 type Component struct {
-	ComponentType string         `json:"component_type" binding:"required"`
-	ProviderID    string         `json:"provider_id" binding:"required"`
-	Version       string         `json:"version" binding:"required"`
-	Params        map[string]any `json:"params"`
+	ComponentType string `json:"component_type" binding:"required"`
+	ProviderID    string `json:"provider_id" binding:"required"`
+	Version       string `json:"version" binding:"required"`
+	// Model is the model ID for llm / embedding / reranker components.
+	Model  string         `json:"model,omitempty"`
+	Params map[string]any `json:"params"`
+}
+
+// EffectiveModel returns the requested model: the top-level Model, else the legacy params.model
+// so existing clients keep working.
+func (c Component) EffectiveModel() string {
+	if c.Model != "" {
+		return c.Model
+	}
+
+	m, _ := c.Params["model"].(string)
+
+	return m
+}
+
+// ParamsWithModel returns the component params with the effective model set under "model", so a
+// top-level model is treated like params.model everywhere params are used (hashing, model download,
+// persisted metadata, template values). The request's own Params map is never modified.
+func (c Component) ParamsWithModel() map[string]any {
+	model := c.EffectiveModel()
+	if model == "" {
+		return c.Params
+	}
+
+	out := make(map[string]any, len(c.Params)+1)
+	maps.Copy(out, c.Params)
+	out["model"] = model
+
+	return out
 }
 
 // CreateApplicationResponse represents the response after creating an application.

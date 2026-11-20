@@ -1,5 +1,3 @@
 image: registry.redhat.io/rhaii/vllm-spyre-rhel9:3.5.3
 model: ""
 apiKey: ""
-maxModelLen: 32768
-maxBatchSize: 32

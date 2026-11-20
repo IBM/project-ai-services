@@ -8,7 +8,7 @@ metadata:
     io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     io.podman.annotations.userns: "keep-id"
     run.oci.keep_original_groups: "1"
-    ai-services.io/reranker--spyre-cards: "1"
+    ai-services.io/reranker--spyre-cards: "{{ index .Values.resources.accelerators "ibm.com/spyre_pf" }}"
 spec:
   restartPolicy: always
   volumes:
@@ -43,7 +43,7 @@ spec:
         - name: VLLM_MODEL_PATH
           value: "/models/{{ .Values.model }}"
         - name: AIU_WORLD_SIZE
-          value: "1"
+          value: "{{ index .Values.resources.accelerators "ibm.com/spyre_pf" }}"
         - name: SENDNN_INFERENCE_WARMUP_BATCH_SIZES
           value: "4"
         - name: SENDNN_INFERENCE_WARMUP_PROMPT_LENS
@@ -60,10 +60,10 @@ spec:
         {{- end }}
       resources:
         requests:
-          podman.io/device=/dev/vfio: 1
-          memory: "5Gi"
+          podman.io/device=/dev/vfio: {{ index .Values.resources.accelerators "ibm.com/spyre_pf" }}
+          memory: "{{ .Values.resources.memory }}"
         limits:
-          memory: "5Gi"
+          memory: "{{ .Values.resources.memory }}"
       ports:
         - containerPort: 8002
       volumeMounts:
