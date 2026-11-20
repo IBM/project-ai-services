@@ -11,7 +11,7 @@ import digitize.api.v1.documents as documents_router_module
 import digitize.api.v1.jobs as jobs_router
 import digitize.utils.db as db_ops
 import digitize.db.connection as db_conn
-from digitize.models import JobStatus, OperationType, OutputFormat, ImportRequest
+from digitize.models import JobStatus, OperationType, OutputFormat, ImportRequest, ImportResponse, ExportResponse
 
 
 @pytest.fixture
@@ -726,16 +726,14 @@ class TestImportExportEndpoints:
             db_ops,
             "import_metadata",
             Mock(
-                return_value={
-                    "status": "completed",
-                    "summary": {
+                return_value=ImportResponse(
+                    status="completed",
+                    summary={
                         "jobs": {"total_received": 1, "imported": 1, "skipped": 0, "failed": 0},
                         "documents": {"total_received": 1, "imported": 1, "skipped": 0, "failed": 0},
                     },
-                    "duration_seconds": 0.1,
-                    "errors": [],
-                    "warnings": [],
-                }
+                    duration_seconds=0.1,
+                )
             ),
         )
 
@@ -800,23 +798,23 @@ class TestImportExportEndpoints:
 
     def test_export_metadata_default_limit(self, digitize_test_client, monkeypatch):
         export_metadata_mock = Mock(
-            return_value={
-                "status": "completed",
-                "data": {"jobs": [], "documents": []},
-                "summary": {
+            return_value=ExportResponse(
+                status="completed",
+                data={"jobs": [], "documents": []},
+                summary={
                     "jobs": {"total_exported": 0, "completed": 0, "failed": 0},
                     "documents": {"total_exported": 0, "completed": 0, "failed": 0},
                 },
-                "export_timestamp": "2024-01-01T00:00:00Z",
-                "duration_seconds": 0.1,
-                "pagination": {
+                export_timestamp="2024-01-01T00:00:00Z",
+                duration_seconds=0.1,
+                pagination={
                     "limit": db_ops.IMPORT_EXPORT_DEFAULT_LIMIT,
                     "offset": 0,
                     "has_more": False,
                     "total_records": 0,
                     "returned_records": 0,
                 },
-            }
+            )
         )
         monkeypatch.setattr(db_ops, "export_metadata", export_metadata_mock)
 
@@ -829,23 +827,23 @@ class TestImportExportEndpoints:
 
     def test_export_metadata_limit_minus_one(self, digitize_test_client, monkeypatch):
         export_metadata_mock = Mock(
-            return_value={
-                "status": "completed",
-                "data": {"jobs": [{"job_id": "job-1", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}}], "documents": []},
-                "summary": {
+            return_value=ExportResponse(
+                status="completed",
+                data={"jobs": [{"job_id": "job-1", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}}], "documents": []},
+                summary={
                     "jobs": {"total_exported": 1, "completed": 1, "failed": 0},
                     "documents": {"total_exported": 0, "completed": 0, "failed": 0},
                 },
-                "export_timestamp": "2024-01-01T00:00:00Z",
-                "duration_seconds": 0.1,
-                "pagination": {
+                export_timestamp="2024-01-01T00:00:00Z",
+                duration_seconds=0.1,
+                pagination={
                     "limit": 1,
                     "offset": 0,
                     "has_more": False,
                     "total_records": 1,
                     "returned_records": 1,
                 },
-            }
+            )
         )
         monkeypatch.setattr(db_ops, "export_metadata", export_metadata_mock)
 
