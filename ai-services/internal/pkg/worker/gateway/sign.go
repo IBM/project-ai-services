@@ -8,11 +8,32 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
+
+var (
+	rfc1123LabelRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$`)
+	domainSuffixRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?$`)
+)
+
+func isValidWorkerName(name string) bool {
+	return len(name) >= 1 && len(name) <= 64 && rfc1123LabelRegex.MatchString(name)
+}
+
+func isValidDomainSuffix(suffix string) bool {
+	if suffix == "" || strings.HasPrefix(suffix, ".") || strings.HasSuffix(suffix, ".") || strings.Contains(suffix, "..") {
+		return false
+	}
+	if strings.Contains(suffix, "*") {
+		return false
+	}
+	return domainSuffixRegex.MatchString(suffix)
+}
 
 // workerCertDNSNames returns the DNS SANs the gateway embeds in a worker's
 // certificate. They are derived from the token-bound worker name and the
@@ -24,9 +45,12 @@ func workerCertDNSNames(workerName string, runtimeType types.RuntimeType, meta m
 	if runtimeType != types.RuntimeTypePodman {
 		return nil
 	}
+	if !isValidWorkerName(workerName) {
+		return nil
+	}
 
 	domainSuffix := meta[workerconstants.MetaKeyDomainSuffix]
-	if domainSuffix == "" {
+	if !isValidDomainSuffix(domainSuffix) {
 		return nil
 	}
 
