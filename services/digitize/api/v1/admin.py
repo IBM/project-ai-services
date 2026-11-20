@@ -77,7 +77,16 @@ async def import_metadata(payload: models.ImportRequest):
                     f"Active jobs: {', '.join(active_job_ids)}",
                 )
 
-            return db_ops.import_metadata(payload)
+            result = db_ops.import_metadata(payload)
+            s = result.summary
+            logger.info(
+                f"Import completed in {result.duration_seconds}s: "
+                f"jobs {s.jobs.imported}/{s.jobs.skipped}/{s.jobs.failed}, "
+                f"documents {s.documents.imported}/{s.documents.skipped}/{s.documents.failed}, "
+                f"checksums {s.document_checksums.imported}/{s.document_checksums.skipped}/"
+                f"{s.document_checksums.failed} (imported/skipped/failed)"
+            )
+            return result
         finally:
             await db_ops.release_import_export_lock()
 
@@ -93,6 +102,80 @@ async def import_metadata(payload: models.ImportRequest):
         APIError.raise_error(
             ErrorCode.INTERNAL_SERVER_ERROR,
             f"Import failed: {exc}",
+        )
+
+
+@router.post(
+    "/import/content/{doc_id}",
+    responses={
+        400: http_error_responses[400],
+        404: http_error_responses[404],
+        409: http_error_responses[409],
+        500: http_error_responses[500],
+    },
+    summary="Restore digitized content of a document",
+    description=(
+        "Write back the digitized content file (json/md/txt) of an already imported document. "
+        "The document must exist and `output_format` must match its stored output format. "
+        "Existing content files are never overwritten."
+    ),
+    response_description="Whether the content file was written or skipped because it already existed",
+)
+async def import_document_content(doc_id: str, payload: models.DocumentContentResponse):
+    """Restore the digitized content file for a previously imported document."""
+    from digitize.utils.storage import storage_manager
+
+    try:
+        if not await db_ops.acquire_import_export_lock():
+            APIError.raise_error(
+                ErrorCode.RESOURCE_LOCKED,
+                "Another import/export operation is already in progress. "
+                "Please wait for it to complete.",
+            )
+
+        try:
+            has_active, active_job_ids = dg_util.has_active_jobs()
+            if has_active:
+                APIError.raise_error(
+                    ErrorCode.RESOURCE_LOCKED,
+                    f"Cannot import while jobs are active. "
+                    f"Active jobs: {', '.join(active_job_ids)}",
+                )
+
+            # The doc_id must come from the database: this both guarantees the
+            # content belongs to an imported document and keeps arbitrary path
+            # segments out of the content file name.
+            try:
+                document = dg_util.get_document(doc_id, include_details=False)
+            except FileNotFoundError as exc:
+                APIError.raise_error(ErrorCode.RESOURCE_NOT_FOUND, str(exc))
+
+            if payload.output_format != document.output_format:
+                APIError.raise_error(
+                    ErrorCode.INVALID_REQUEST,
+                    f"output_format '{payload.output_format}' does not match the stored "
+                    f"output format '{document.output_format}' of document '{doc_id}'",
+                )
+
+            written = storage_manager.write_document_content(
+                doc_id, payload.output_format, payload.result
+            )
+            return {"doc_id": doc_id, "status": "imported" if written else "skipped"}
+        finally:
+            await db_ops.release_import_export_lock()
+
+    except HTTPException as exc:
+        message = f"Failed to import content for '{doc_id}': {extract_http_error_message(exc)}"
+        logger.error(message)
+        raise HTTPException(status_code=exc.status_code, detail=build_http_error_detail(exc, message))
+    except ValueError as exc:
+        logger.error(f"Invalid content import request for '{doc_id}': {exc}")
+        APIError.raise_error(ErrorCode.INVALID_REQUEST, str(exc))
+    except Exception as exc:
+        logger.error(f"Failed to import content for '{doc_id}': {exc}", exc_info=True)
+        APIError.raise_error(
+            ErrorCode.INTERNAL_SERVER_ERROR,
+            f"Content import failed: {exc}",
         )
 
 
@@ -119,23 +202,15 @@ async def export_metadata(
     ),
     offset: int = Query(0, ge=0, description="Number of combined records to skip"),
 ):
-    """Export job and document metadata from PostgreSQL."""
-    import os
-
-    pid = os.getpid()
-    logger.warning(f"[PID {pid}] 🔵 Export request received (limit={limit}, offset={offset})")
-
+    """Export job, document and dedup checksum metadata from PostgreSQL."""
     try:
-        logger.info(f"[PID {pid}] Trying to acquire lock for export...")
         if not await db_ops.acquire_import_export_lock():
-            logger.warning(f"[PID {pid}] ❌ Export REJECTED — lock held by another process")
             APIError.raise_error(
                 ErrorCode.RESOURCE_LOCKED,
                 "Another import/export operation is already in progress. "
                 "Please wait for it to complete.",
             )
 
-        logger.warning(f"[PID {pid}] ✅ Export proceeding with lock acquired")
         try:
             if limit < -1 or limit == 0:
                 APIError.raise_error(
@@ -151,9 +226,15 @@ async def export_metadata(
                     f"Active jobs: {', '.join(active_job_ids)}",
                 )
 
-            logger.info(f"[PID {pid}] Starting export operation...")
             result = db_ops.export_metadata(limit=limit, offset=offset)
-            logger.warning(f"[PID {pid}] ✅ Export completed successfully")
+            p = result.pagination
+            logger.info(
+                f"Export completed in {result.duration_seconds}s: "
+                f"jobs={result.summary.jobs.total_exported}, "
+                f"documents={result.summary.documents.total_exported}, "
+                f"checksums={result.summary.document_checksums.total_exported} "
+                f"(offset={p.offset}, limit={p.limit}, total={p.total_records}, has_more={p.has_more})"
+            )
             return result
         finally:
             await db_ops.release_import_export_lock()

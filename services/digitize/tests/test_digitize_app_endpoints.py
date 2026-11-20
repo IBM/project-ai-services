@@ -11,7 +11,7 @@ import digitize.api.v1.documents as documents_router_module
 import digitize.api.v1.jobs as jobs_router
 import digitize.utils.db as db_ops
 import digitize.db.connection as db_conn
-from digitize.models import JobStatus, OperationType, OutputFormat, ImportRequest
+from digitize.models import JobStatus, OperationType, OutputFormat, ImportRequest, ImportResponse, ExportResponse
 
 
 @pytest.fixture
@@ -726,16 +726,14 @@ class TestImportExportEndpoints:
             db_ops,
             "import_metadata",
             Mock(
-                return_value={
-                    "status": "completed",
-                    "summary": {
+                return_value=ImportResponse(
+                    status="completed",
+                    summary={
                         "jobs": {"total_received": 1, "imported": 1, "skipped": 0, "failed": 0},
                         "documents": {"total_received": 1, "imported": 1, "skipped": 0, "failed": 0},
                     },
-                    "duration_seconds": 0.1,
-                    "errors": [],
-                    "warnings": [],
-                }
+                    duration_seconds=0.1,
+                )
             ),
         )
 
@@ -800,50 +798,52 @@ class TestImportExportEndpoints:
 
     def test_export_metadata_default_limit(self, digitize_test_client, monkeypatch):
         export_metadata_mock = Mock(
-            return_value={
-                "status": "completed",
-                "data": {"jobs": [], "documents": []},
-                "summary": {
+            return_value=ExportResponse(
+                status="completed",
+                data={"jobs": [], "documents": []},
+                summary={
                     "jobs": {"total_exported": 0, "completed": 0, "failed": 0},
                     "documents": {"total_exported": 0, "completed": 0, "failed": 0},
                 },
-                "export_timestamp": "2024-01-01T00:00:00Z",
-                "duration_seconds": 0.1,
-                "pagination": {
+                export_timestamp="2024-01-01T00:00:00Z",
+                duration_seconds=0.1,
+                pagination={
                     "limit": db_ops.IMPORT_EXPORT_DEFAULT_LIMIT,
                     "offset": 0,
                     "has_more": False,
                     "total_records": 0,
                     "returned_records": 0,
                 },
-            }
+            )
         )
         monkeypatch.setattr(db_ops, "export_metadata", export_metadata_mock)
 
         response = digitize_test_client.get("/v1/export")
 
         assert response.status_code == 200
-        export_metadata_mock.assert_called_once_with(limit=db_ops.IMPORT_EXPORT_DEFAULT_LIMIT, offset=0)
+        export_metadata_mock.assert_called_once_with(
+            limit=db_ops.IMPORT_EXPORT_DEFAULT_LIMIT, offset=0
+        )
 
     def test_export_metadata_limit_minus_one(self, digitize_test_client, monkeypatch):
         export_metadata_mock = Mock(
-            return_value={
-                "status": "completed",
-                "data": {"jobs": [{"job_id": "job-1", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}}], "documents": []},
-                "summary": {
+            return_value=ExportResponse(
+                status="completed",
+                data={"jobs": [{"job_id": "job-1", "operation": "ingestion", "status": "completed", "submitted_at": "2024-01-01T00:00:00Z", "stats": {}}], "documents": []},
+                summary={
                     "jobs": {"total_exported": 1, "completed": 1, "failed": 0},
                     "documents": {"total_exported": 0, "completed": 0, "failed": 0},
                 },
-                "export_timestamp": "2024-01-01T00:00:00Z",
-                "duration_seconds": 0.1,
-                "pagination": {
+                export_timestamp="2024-01-01T00:00:00Z",
+                duration_seconds=0.1,
+                pagination={
                     "limit": 1,
                     "offset": 0,
                     "has_more": False,
                     "total_records": 1,
                     "returned_records": 1,
                 },
-            }
+            )
         )
         monkeypatch.setattr(db_ops, "export_metadata", export_metadata_mock)
 
@@ -858,4 +858,120 @@ class TestImportExportEndpoints:
         assert response.status_code == 400
 
 
-# Made with Bob
+@pytest.mark.unit
+class TestImportContentEndpoint:
+    @pytest.fixture
+    def content_env(self, digitize_test_client, monkeypatch, tmp_path):
+        """Stub lock/active-job/DB lookups and point storage at tmp_path."""
+        import digitize.utils.storage as storage_module
+
+        digitized_dir = tmp_path / "content"
+        digitized_dir.mkdir()
+        monkeypatch.setattr(
+            storage_module,
+            "settings",
+            SimpleNamespace(digitize=SimpleNamespace(digitized_docs_dir=digitized_dir)),
+        )
+        monkeypatch.setattr(db_ops, "acquire_import_export_lock", AsyncMock(return_value=True))
+        monkeypatch.setattr(db_ops, "release_import_export_lock", AsyncMock())
+        monkeypatch.setattr(digitize_app.dg_util, "has_active_jobs", Mock(return_value=(False, [])))
+        monkeypatch.setattr(
+            digitize_app.dg_util,
+            "get_document",
+            Mock(return_value=SimpleNamespace(output_format="json")),
+        )
+        return digitize_test_client, digitized_dir
+
+    def test_writes_json_content(self, content_env):
+        client, digitized_dir = content_env
+
+        response = client.post(
+            "/v1/import/content/doc-1",
+            json={"result": {"pages": [1, 2]}, "output_format": "json"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"doc_id": "doc-1", "status": "imported"}
+        assert (digitized_dir / "doc-1.json").read_text(encoding="utf-8") == '{"pages": [1, 2]}'
+
+    def test_existing_content_is_not_overwritten(self, content_env):
+        client, digitized_dir = content_env
+        (digitized_dir / "doc-1.json").write_text('{"keep": true}', encoding="utf-8")
+
+        response = client.post(
+            "/v1/import/content/doc-1",
+            json={"result": {"keep": False}, "output_format": "json"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "skipped"
+        assert (digitized_dir / "doc-1.json").read_text(encoding="utf-8") == '{"keep": true}'
+
+    def test_unknown_document_returns_404(self, content_env, monkeypatch):
+        client, digitized_dir = content_env
+        monkeypatch.setattr(
+            digitize_app.dg_util, "get_document", Mock(side_effect=FileNotFoundError("nope"))
+        )
+
+        response = client.post(
+            "/v1/import/content/ghost",
+            json={"result": {}, "output_format": "json"},
+        )
+
+        assert response.status_code == 404
+        assert not list(digitized_dir.iterdir())
+
+    def test_format_mismatch_returns_400(self, content_env):
+        client, digitized_dir = content_env
+
+        response = client.post(
+            "/v1/import/content/doc-1",
+            json={"result": "# md", "output_format": "md"},
+        )
+
+        assert response.status_code == 400
+        assert not list(digitized_dir.iterdir())
+
+    def test_rejects_when_active_jobs_exist(self, content_env, monkeypatch):
+        client, digitized_dir = content_env
+        monkeypatch.setattr(
+            digitize_app.dg_util, "has_active_jobs", Mock(return_value=(True, ["job-active"]))
+        )
+
+        response = client.post(
+            "/v1/import/content/doc-1",
+            json={"result": {}, "output_format": "json"},
+        )
+
+        assert response.status_code == 409
+        assert not list(digitized_dir.iterdir())
+
+    def test_text_content_requires_string(self, content_env, monkeypatch):
+        client, digitized_dir = content_env
+        monkeypatch.setattr(
+            digitize_app.dg_util,
+            "get_document",
+            Mock(return_value=SimpleNamespace(output_format="txt")),
+        )
+
+        response = client.post(
+            "/v1/import/content/doc-1",
+            json={"result": {"not": "a string"}, "output_format": "txt"},
+        )
+
+        assert response.status_code == 400
+        assert not list(digitized_dir.iterdir())
+
+    def test_path_traversal_doc_id_cannot_escape(self, content_env, monkeypatch):
+        client, digitized_dir = content_env
+        monkeypatch.setattr(
+            digitize_app.dg_util, "get_document", Mock(side_effect=FileNotFoundError("nope"))
+        )
+
+        response = client.post(
+            "/v1/import/content/..%2F..%2Fevil",
+            json={"result": {}, "output_format": "json"},
+        )
+
+        assert response.status_code in (404, 400)
+        assert not list(digitized_dir.parent.glob("**/evil*"))

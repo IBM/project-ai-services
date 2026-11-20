@@ -60,15 +60,10 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 	}
 }
 
-// restoreDigitize restores digitize metadata using the Import API for OpenShift.
+// restoreDigitize restores digitize metadata (and digitized content, if the backup has it) using the Import APIs for OpenShift.
 func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
 	logger.Infof("Restoring digitize metadata\n")
 	logger.Infof("Digitize Import (API-based Approach)\n")
-
-	importPayload, err := commonrestore.GetDigitizeData(backupFile)
-	if err != nil {
-		return err
-	}
 
 	// Get digitize service API URL from catalog service endpoints
 	digitizeURL, err := commonrestore.GetDigitizeAPIURL(appDetails)
@@ -78,9 +73,7 @@ func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appDetails *
 
 	logger.Infof("Digitize API URL: %s\n", digitizeURL)
 
-	// Create digitize restore client and call Import API
-	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
-	if err := client.CallImportAPI(ctx, importPayload); err != nil {
+	if err := commonrestore.RestoreDigitize(ctx, digitizeURL, backupFile); err != nil {
 		return err
 	}
 

@@ -148,6 +148,62 @@ class StorageManager:
         )
         return DocumentContentResponse(result=content_data, output_format=output_format)
 
+    def write_document_content(
+        self,
+        doc_id: str,
+        output_format: str,
+        content: "dict | str",
+    ) -> bool:
+        """
+        Restore the digitized content file for *doc_id* (skip-existing).
+
+        The file is written to a temporary sibling and renamed into place so a
+        partially written file is never visible to readers.
+
+        Args:
+            doc_id: Unique document identifier.
+            output_format: File extension (``json``, ``md``, or ``txt``).
+            content: Parsed JSON object for ``json``; text for ``md``/``txt``.
+
+        Returns:
+            ``True`` if the file was written, ``False`` if it already existed.
+
+        Raises:
+            ValueError: *output_format* is invalid or *content* does not match it.
+        """
+        valid_formats = {fmt.value for fmt in OutputFormat}
+        if output_format not in valid_formats:
+            raise ValueError(
+                f"Invalid output_format: '{output_format}'. "
+                f"Must be one of: {', '.join(sorted(valid_formats))}"
+            )
+
+        is_json = output_format == OutputFormat.JSON.value
+        if is_json and not isinstance(content, dict):
+            raise ValueError("JSON content must be a JSON object")
+        if not is_json and not isinstance(content, str):
+            raise ValueError(f"'{output_format}' content must be a string")
+
+        target = self.get_content_path(doc_id, output_format)
+        if target.exists():
+            logger.debug(f"Content file for document {doc_id} already exists — skipping")
+            return False
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = target.with_name(f".{target.name}.tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as fh:
+                if is_json:
+                    json.dump(content, fh, ensure_ascii=False)
+                else:
+                    fh.write(content)
+            tmp_path.replace(target)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        logger.debug(f"Restored content file for document {doc_id} ({output_format})")
+        return True
+
     # ------------------------------------------------------------------ #
     # Deletion                                                             #
     # ------------------------------------------------------------------ #
