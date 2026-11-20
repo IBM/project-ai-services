@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -24,6 +25,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -266,6 +268,27 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 	workerName := firstMsg.GetWorkerName()
 	if workerName == "" {
 		return "", nil, status.Error(codes.InvalidArgument, "CommandStream: first message missing worker_name")
+	}
+
+	// Verify the worker's mTLS identity from the TLS interceptor context:
+	// the authenticated cert CN must match the worker_name reported in the message.
+	authenticatedWorker, _ := ctx.Value(authenticatedWorkerKey).(string)
+	if authenticatedWorker == "" {
+		// In case interceptor didn't run (e.g. direct call), check peer auth info
+		if p, ok := peer.FromContext(stream.Context()); ok && p.AuthInfo != nil {
+			if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok && len(tlsInfo.State.VerifiedChains) > 0 && len(tlsInfo.State.VerifiedChains[0]) > 0 {
+				authenticatedWorker = tlsInfo.State.VerifiedChains[0][0].Subject.CommonName
+			}
+		}
+	}
+
+	if authenticatedWorker != "" && !strings.EqualFold(authenticatedWorker, workerName) {
+		logger.WarningfCtx(ctx, "WorkerGateway: worker identity mismatch: cert CN=%q does not match worker_name=%q",
+			authenticatedWorker, workerName)
+
+		return "", nil, status.Errorf(codes.PermissionDenied,
+			"CommandStream: client certificate CN %q does not match worker_name %q",
+			authenticatedWorker, workerName)
 	}
 
 	entry, ok := g.registry.Get(workerName)

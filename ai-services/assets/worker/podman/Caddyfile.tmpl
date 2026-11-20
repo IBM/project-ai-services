@@ -31,6 +31,12 @@
 # files are written by the worker once it has registered with the control plane;
 # until then handshakes on this port fail and then succeed with no Caddy reload.
 :9443 {
+	# Accept only client certificates presented by the control plane (catalog-worker-gateway).
+	@not_control_plane not vars {http.request.tls.client.subject} *catalog-worker-gateway*
+	handle @not_control_plane {
+		abort
+	}
+
 	handle /internal/health {
 		# @id internal-private-health
 		respond "OK" 200
