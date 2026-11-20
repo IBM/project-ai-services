@@ -25,8 +25,14 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
+	"crypto/tls"
+
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -310,6 +316,96 @@ func TestGateway_CommandStream_MissingWorkerName(t *testing.T) {
 	}
 }
 
+type fakeBidiStream struct {
+	grpc.ServerStream
+	ctx     context.Context
+	recvMsg *workerpb.CommandResult
+}
+
+func (s *fakeBidiStream) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
+func (s *fakeBidiStream) Recv() (*workerpb.CommandResult, error) {
+	return s.recvMsg, nil
+}
+
+func (s *fakeBidiStream) Send(*workerpb.Command) error {
+	return nil
+}
+
+// TestGateway_CommandStream_IdentityMismatch verifies that identifyWorker rejects
+// a client whose cert CN does not match the worker_name sent in the first message.
+func TestGateway_CommandStream_IdentityMismatch(t *testing.T) {
+	reg := registry.New(newFakeWorkerRepo())
+	_ = preregister(t, reg, "worker-1")
+	_ = preregister(t, reg, "worker-2")
+
+	gw := &Gateway{registry: reg}
+
+	peerCtx := peer.NewContext(context.Background(), &peer.Peer{
+		AuthInfo: credentials.TLSInfo{
+			State: tls.ConnectionState{
+				VerifiedChains: [][]*x509.Certificate{{
+					{Subject: pkix.Name{CommonName: "worker-1"}},
+				}},
+			},
+		},
+	})
+
+	stream := &fakeBidiStream{
+		ctx:     peerCtx,
+		recvMsg: &workerpb.CommandResult{WorkerName: "worker-2"},
+	}
+
+	_, _, err := gw.identifyWorker(peerCtx, stream)
+	if err == nil {
+		t.Fatal("expected error on CN and worker_name mismatch")
+	}
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("status code = %v, want %v", status.Code(err), codes.PermissionDenied)
+	}
+}
+
+// TestGateway_CommandStream_IdentityMatches verifies that identifyWorker succeeds
+// when the cert CN matches the worker_name in the first message.
+func TestGateway_CommandStream_IdentityMatches(t *testing.T) {
+	reg := registry.New(newFakeWorkerRepo())
+	_ = preregister(t, reg, "worker-1")
+	_, err := reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	gw := &Gateway{registry: reg}
+
+	peerCtx := peer.NewContext(context.Background(), &peer.Peer{
+		AuthInfo: credentials.TLSInfo{
+			State: tls.ConnectionState{
+				VerifiedChains: [][]*x509.Certificate{{
+					{Subject: pkix.Name{CommonName: "worker-1"}},
+				}},
+			},
+		},
+	})
+
+	stream := &fakeBidiStream{
+		ctx:     peerCtx,
+		recvMsg: &workerpb.CommandResult{WorkerName: "worker-1"},
+	}
+
+	name, entry, err := gw.identifyWorker(peerCtx, stream)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "worker-1" || entry == nil {
+		t.Errorf("name=%s, entry=%v; want worker-1 and non-nil entry", name, entry)
+	}
+}
+
 func TestGateway_CommandStream_CommandDelivered(t *testing.T) {
 	repo := newFakeWorkerRepo()
 	reg := registry.New(repo)
@@ -541,18 +637,24 @@ func TestGenerateAndPersistPKI_NoPlaintextKeyOnDisk(t *testing.T) {
 		t.Fatalf("loadOrGeneratePKI: %v", err)
 	}
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			t.Fatal(err)
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
 		}
 		if bytes.Contains(data, []byte("PRIVATE KEY")) {
-			t.Errorf("%s holds a plaintext private key; none may be written to disk", e.Name())
+			t.Errorf("%s holds a plaintext private key; none may be written to disk", filepath.Base(path))
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	assertCaddyReadablePKI(t, dir)
@@ -561,15 +663,16 @@ func TestGenerateAndPersistPKI_NoPlaintextKeyOnDisk(t *testing.T) {
 func assertCaddyReadablePKI(t *testing.T, dir string) {
 	t.Helper()
 
-	dirInfo, err := os.Stat(dir)
+	publicDir := filepath.Join(dir, "public")
+	dirInfo, err := os.Stat(publicDir)
 	if err != nil {
-		t.Fatalf("stat %s: %v", dir, err)
+		t.Fatalf("stat %s: %v", publicDir, err)
 	}
 	if dirInfo.Mode().Perm()&0o055 != 0o055 {
-		t.Errorf("dir mode %v: must be traversable by the Caddy user", dirInfo.Mode().Perm())
+		t.Errorf("public dir mode %v: must be traversable by the Caddy user", dirInfo.Mode().Perm())
 	}
 
-	srvInfo, err := os.Stat(filepath.Join(dir, "server.key"))
+	srvInfo, err := os.Stat(filepath.Join(publicDir, "server.key"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,6 +703,9 @@ func TestGenerateServerCert_ServerAndClientAuth(t *testing.T) {
 		t.Fatalf("ParseCertificate: %v", err)
 	}
 
+	if leaf.Subject.CommonName != workerconstants.WorkerGatewayName {
+		t.Errorf("CN = %q, want %q", leaf.Subject.CommonName, workerconstants.WorkerGatewayName)
+	}
 	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageServerAuth, "cp.example.com")
 	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageClientAuth, "")
 }
@@ -677,6 +783,8 @@ func TestWorkerCertDNSNames(t *testing.T) {
 		{"podman without domain suffix", types.RuntimeTypePodman, map[string]string{}, nil},
 		{"podman nil metadata", types.RuntimeTypePodman, nil, nil},
 		{"openshift is not supported yet", types.RuntimeTypeOpenShift, meta, nil},
+		{"podman with wildcard domain suffix", types.RuntimeTypePodman, map[string]string{workerconstants.MetaKeyDomainSuffix: "*.example.com"}, nil},
+		{"podman with leading dot domain suffix", types.RuntimeTypePodman, map[string]string{workerconstants.MetaKeyDomainSuffix: ".example.com"}, nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
