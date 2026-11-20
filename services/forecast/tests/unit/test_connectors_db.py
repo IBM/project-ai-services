@@ -246,3 +246,85 @@ def test_list_jobs_queries_jobs():
     session.execute.assert_called_once()
     stmt_str = str(session.execute.call_args[0][0])
     assert "jobs" in stmt_str
+
+
+CONN_ID = "11111111-1111-1111-1111-111111111111"
+CONNECTOR_FIELDS = {
+    "id": uuid.UUID(CONN_ID), "name": "prod", "type": "db2_for_i", "config": {"host": "h"},
+    "status": "ACCEPTED", "message": None, "created_at": NOW, "updated_at": NOW,
+    "last_trained_at": None, "source_table": "ORDERS", "target_column": "LATE",
+    "schedule": "daily", "input_columns": [{"name": "REGION"}],
+}
+FORECASTER_FIELDS = {"version": 3, "metrics": {"metric": "accuracy"}, "created_at": NOW}
+
+
+@pytest.mark.unit
+def test_get_default_connector_returns_the_oldest_with_its_input_columns():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = CONNECTOR_FIELDS
+
+    result = connectors_db.get_default_connector(session)
+
+    assert isinstance(result, connectors_db.ConnectorRow)
+    assert result.input_columns == [{"name": "REGION"}]
+    stmt_str = str(session.execute.call_args[0][0])
+    assert "ORDER BY connectors.attached_at ASC" in stmt_str
+    assert "LIMIT" in stmt_str
+
+
+@pytest.mark.unit
+def test_get_default_connector_without_a_connector_returns_none():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = None
+
+    assert connectors_db.get_default_connector(session) is None
+
+
+@pytest.mark.unit
+def test_list_forecasters_returns_rows_newest_first():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.all.return_value = [FORECASTER_FIELDS]
+
+    rows = connectors_db.list_forecasters(session, CONN_ID)
+
+    assert rows == [connectors_db.ForecasterRow(**FORECASTER_FIELDS)]
+    assert "ORDER BY forecasters.version DESC" in str(session.execute.call_args[0][0])
+
+
+@pytest.mark.unit
+def test_get_forecaster_filters_on_the_version():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = FORECASTER_FIELDS
+
+    row = connectors_db.get_forecaster(session, CONN_ID, 3)
+
+    assert row.version == 3
+    assert "forecasters.version =" in str(session.execute.call_args[0][0])
+
+
+@pytest.mark.unit
+def test_get_forecaster_unknown_version_returns_none():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = None
+
+    assert connectors_db.get_forecaster(session, CONN_ID, 9) is None
+
+
+@pytest.mark.unit
+def test_get_newest_forecaster_takes_the_highest_version():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = FORECASTER_FIELDS
+
+    row = connectors_db.get_newest_forecaster(session, CONN_ID)
+
+    assert row.metrics == {"metric": "accuracy"}
+    stmt_str = str(session.execute.call_args[0][0])
+    assert "ORDER BY forecasters.version DESC" in stmt_str and "LIMIT" in stmt_str
+
+
+@pytest.mark.unit
+def test_get_newest_forecaster_without_one_returns_none():
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.first.return_value = None
+
+    assert connectors_db.get_newest_forecaster(session, CONN_ID) is None
