@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -24,6 +25,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -166,7 +168,14 @@ func (g *Gateway) Register(ctx context.Context, req *workerpb.RegisterRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "CSR is required")
 	}
 
-	tlsCertPEM, caCertPEM, notAfter, signErr := signWorkerCSR(csrPEM, workerName, g.caCert, g.caKey)
+	runtimeType := types.RuntimeType(req.GetRuntimeType())
+	dnsNames := workerCertDNSNames(workerName, runtimeType, req.GetMetadata())
+	if len(dnsNames) == 0 {
+		logger.WarningfCtx(ctx, "WorkerGateway: worker=%s (runtime=%s) produced no DNS SANs — private-ingress hostname verification against this worker will fail",
+			workerName, runtimeType)
+	}
+
+	tlsCertPEM, caCertPEM, notAfter, signErr := signWorkerCSR(csrPEM, workerName, dnsNames, g.caCert, g.caKey)
 	if signErr != nil {
 		logger.WarningfCtx(ctx, "WorkerGateway: CSR error for worker=%s: %v", workerName, signErr)
 
@@ -259,6 +268,27 @@ func (g *Gateway) identifyWorker(ctx context.Context, stream grpc.BidiStreamingS
 	workerName := firstMsg.GetWorkerName()
 	if workerName == "" {
 		return "", nil, status.Error(codes.InvalidArgument, "CommandStream: first message missing worker_name")
+	}
+
+	// Verify the worker's mTLS identity from the TLS interceptor context:
+	// the authenticated cert CN must match the worker_name reported in the message.
+	authenticatedWorker, _ := ctx.Value(authenticatedWorkerKey).(string)
+	if authenticatedWorker == "" {
+		// In case interceptor didn't run (e.g. direct call), check peer auth info
+		if p, ok := peer.FromContext(stream.Context()); ok && p.AuthInfo != nil {
+			if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok && len(tlsInfo.State.VerifiedChains) > 0 && len(tlsInfo.State.VerifiedChains[0]) > 0 {
+				authenticatedWorker = tlsInfo.State.VerifiedChains[0][0].Subject.CommonName
+			}
+		}
+	}
+
+	if authenticatedWorker != "" && !strings.EqualFold(authenticatedWorker, workerName) {
+		logger.WarningfCtx(ctx, "WorkerGateway: worker identity mismatch: cert CN=%q does not match worker_name=%q",
+			authenticatedWorker, workerName)
+
+		return "", nil, status.Errorf(codes.PermissionDenied,
+			"CommandStream: client certificate CN %q does not match worker_name %q",
+			authenticatedWorker, workerName)
 	}
 
 	entry, ok := g.registry.Get(workerName)
