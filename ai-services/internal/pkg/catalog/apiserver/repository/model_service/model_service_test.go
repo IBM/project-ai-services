@@ -6,6 +6,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -477,8 +478,10 @@ func TestCreateModel_Remote(t *testing.T) {
 				assert.Equal(t, "ibm/granite-4-h-small", conn.Metadata["model"])
 				assert.Equal(t, map[string]any{"model_id": "litellm-id-ibm/granite-4-h-small"}, conn.Metadata["litellm"])
 
-				params, ok := conn.Metadata["params"].(map[string]any)
+				params, ok := conn.Metadata[constants.MetadataKeyParams].(map[string]any)
 				require.True(t, ok, "provider params are nested under \"params\"")
+				assert.Equal(t, 131072, params[constants.ParamMaxModelLen])
+				assert.Equal(t, 32, params[constants.ParamMaxBatchSize])
 				assert.NotContains(t, params, "api_key", "credentials must never be persisted")
 				assert.NotContains(t, conn.Metadata, "api_key")
 				assert.NotContains(t, conn.Metadata, "api_base", "params are not stored flat")
@@ -1018,8 +1021,8 @@ func TestPlanRemote(t *testing.T) {
 				Model:          "ibm/embed",
 				Params:         map[string]any{"api_base": "http://vllm.example.com:8000/v1", "api_key": "secret"},
 			},
-			wantParams:       map[string]any{"api_base": "http://vllm.example.com:8000/v1"},
-			wantGateway:      map[string]any{"api_key": "secret"},
+			wantParams:       map[string]any{"api_base": "http://vllm.example.com:8000"},
+			wantGateway:      map[string]any{"api_base": "http://vllm.example.com:8000/v1", "api_key": "secret"},
 			wantComponent:    "embedding",
 			wantTokenizeURL:  "http://vllm.example.com:8000/tokenize",
 			wantNotPersisted: "api_key",
@@ -1166,6 +1169,20 @@ func (m *mockLiteLLMClient) GenerateKey(_ context.Context, req catalogclient.Lit
 	return "sk-test", nil
 }
 
+func (m *mockLiteLLMClient) GetModelInfo(_ context.Context, litellmModelID string) (*catalogclient.LiteLLMModelInfoResponse, error) {
+	return &catalogclient.LiteLLMModelInfoResponse{
+		Data: []catalogclient.LiteLLMModelData{
+			{
+				ModelName: "ibm/granite-4-h-small",
+				ModelInfo: catalogclient.LiteLLMInfoRec{
+					ID:             litellmModelID,
+					MaxInputTokens: 131072,
+				},
+			},
+		},
+	}, nil
+}
+
 func TestGenerateModelKey_Ownership(t *testing.T) {
 	id := uuid.New()
 	row := dbrepo.ModelRow{ID: id, DeploymentType: "remote", Provider: "watsonx", Model: "ibm/granite", CreatedBy: "alice"}
@@ -1227,4 +1244,53 @@ func TestGenerateModelKey_RepositoryError(t *testing.T) {
 	var valErr *validators.ValidationError
 	assert.False(t, errors.As(err, &valErr), "an internal failure must not look like a client error")
 	assert.Empty(t, lite.deletedKeys)
+}
+
+func TestCreateRemoteModel_HostedVllm(t *testing.T) {
+	setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
+
+	// Start local mock vLLM server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{
+				"data": [
+					{
+						"id": "ibm-granite/granite-3.3-8b-instruct",
+						"max_model_len": 4096
+					}
+				]
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	conns := newMockConnectorRepo()
+	lite := &mockLiteLLMClient{}
+	svc := newTestModelService(t, newMockComponentRepo(), conns, worker.NewResolver(nil), lite)
+
+	req := apimodels.CreateModelRequest{
+		DeploymentType: constants.DeploymentTypeRemote,
+		ComponentType:  "llm",
+		Name:           "hosted-vllm-test",
+		ProviderID:     "hosted_vllm",
+		Model:          "ibm-granite/granite-3.3-8b-instruct",
+		Params:         map[string]any{"api_base": server.URL, "maxBatchSize": 64},
+	}
+
+	resp, err := svc.CreateModel(context.Background(), req)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	conn, ok := conns.connectors["hosted-vllm-test"]
+	require.True(t, ok)
+	assert.Equal(t, dbmodels.ConnectorStatusConnected, conn.Status)
+
+	params, ok := conn.Metadata[constants.MetadataKeyParams].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, 4096, params[constants.ParamMaxModelLen])
+	assert.Equal(t, 64, params[constants.ParamMaxBatchSize])
 }
