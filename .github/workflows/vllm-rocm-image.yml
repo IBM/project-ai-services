@@ -1,0 +1,36 @@
+name: vLLM ROCm
+on:
+  push:
+    paths:
+      - 'images/vllm-rocm/**'
+    branches:
+      - main
+      - 'release-*'
+  pull_request:
+    paths:
+      - 'images/vllm-rocm/**'
+      - '.github/workflows/vllm-rocm-image.yml'
+    branches:
+      - main
+      - 'release-*'
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-publish-image:
+    name: Build and Publish Image
+    uses: ./.github/workflows/build-and-publish-image.yml
+    with:
+      working-directory: 'images/vllm-rocm'
+    secrets: inherit
+
+  scan:
+    uses: ./.github/workflows/scanner.yml
+    with:
+      path: 'images/vllm-rocm'
+      image: 'vllm-rocm'
