@@ -48,10 +48,11 @@ spec:
           mountPath: /data:z
         - name: caddy-data
           mountPath: /config:z
-        # Gateway CA, server cert and the AES-GCM encrypted server key (server.key) used
-        # by the :9443 private ingress. Written by the catalog pod, which starts first.
+        # Mount only public/ subdirectory to isolate the Root CA private key (ca.key)
+        # from the Caddy container. Contains ca.crt, server.crt, and encrypted server.key.
         - name: gateway-pki
           mountPath: /data/gateway-pki
+          subPath: public
           readOnly: true
         # Secret the encrypted_file module uses to decrypt server.key in memory.
         - name: catalog-mtls-encryption-secret

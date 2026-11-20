@@ -58,9 +58,16 @@ type pkiResult struct {
 // or generates a new ECDSA P-256 root CA and server certificate on first start.
 func loadOrGeneratePKI(ctx context.Context, pkiDir string, runtimeType types.RuntimeType) (pkiResult, error) {
 	caKeyPath := filepath.Join(pkiDir, "ca.key")
-	caCrtPath := filepath.Join(pkiDir, "ca.crt")
-	srvKeyPath := filepath.Join(pkiDir, "server.key")
-	srvCrtPath := filepath.Join(pkiDir, "server.crt")
+	caCrtPath := filepath.Join(pkiDir, "public", "ca.crt")
+	srvKeyPath := filepath.Join(pkiDir, "public", "server.key")
+	srvCrtPath := filepath.Join(pkiDir, "public", "server.crt")
+
+	// Backward compatibility fallback if public/ subdirectory files do not exist
+	if !fileExists(caCrtPath) && fileExists(filepath.Join(pkiDir, "ca.crt")) {
+		caCrtPath = filepath.Join(pkiDir, "ca.crt")
+		srvKeyPath = filepath.Join(pkiDir, "server.key")
+		srvCrtPath = filepath.Join(pkiDir, "server.crt")
+	}
 
 	if fileExists(caKeyPath) && fileExists(caCrtPath) && fileExists(srvKeyPath) && fileExists(srvCrtPath) {
 		logger.InfofCtx(ctx, "worker gateway: PKI files found in %s, loading existing material", pkiDir)
@@ -113,7 +120,7 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNa
 	srvSerial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), serialBitSize))
 	srvTemplate := &x509.Certificate{
 		SerialNumber: srvSerial,
-		Subject:      pkix.Name{CommonName: "Catalog"},
+		Subject:      pkix.Name{CommonName: workerconstants.WorkerGatewayName},
 		DNSNames:     dnsNames,
 		NotBefore:    time.Now(),
 		NotAfter:     time.Now().Add(serverCertTTL),
@@ -133,6 +140,8 @@ func generateServerCert(caCert *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNa
 }
 
 // writePKIFiles encrypts the two private key PEMs and writes all four PKI files to pkiDir.
+// ca.key stays in pkiDir (0600), while ca.crt, server.crt, and server.key are placed
+// in the public/ subdirectory (which Caddy mounts via subPath: public).
 func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []byte, secret string) error {
 	caKeyEnc, err := catalogutils.Encrypt(string(caKeyPEM), secret)
 	if err != nil {
@@ -144,15 +153,20 @@ func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []b
 		return fmt.Errorf("encrypt server.key: %w", err)
 	}
 
+	publicDir := filepath.Join(pkiDir, "public")
+	if err := os.MkdirAll(publicDir, dirPerm); err != nil {
+		return fmt.Errorf("create public pki directory: %w", err)
+	}
+
 	files := []struct {
 		path string
 		perm os.FileMode
 		data []byte
 	}{
 		{filepath.Join(pkiDir, "ca.key"), caKeyPerm, []byte(caKeyEnc)},
-		{filepath.Join(pkiDir, "ca.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER})},
-		{filepath.Join(pkiDir, "server.key"), keyPerm, []byte(srvKeyEnc)},
-		{filepath.Join(pkiDir, "server.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvCertDER})},
+		{filepath.Join(publicDir, "ca.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER})},
+		{filepath.Join(publicDir, "server.key"), keyPerm, []byte(srvKeyEnc)},
+		{filepath.Join(publicDir, "server.crt"), certPerm, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvCertDER})},
 	}
 	for _, f := range files {
 		if err := os.WriteFile(f.path, f.data, f.perm); err != nil {
