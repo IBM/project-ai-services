@@ -119,7 +119,7 @@ def setup():
         "postgres_image": _flag(cfg, "postgres_image", "docker.io/library/postgres:18-alpine"),
         # 5432 is the catalog Tiltfile, 5433 is Tiltfile.rag.
         "postgres_port": int(_flag(cfg, "postgres_port", 5434 + index)),
-        # Local development default only (same as Tiltfile.rag / rag-cpu values.yaml).
+        # Local development default only (same as Tiltfile.rag / services values.yaml).
         "postgres_password": _flag(cfg, "postgres_password", "Aiservicesdb@1234"),
         "ports": {name: int(_flag(cfg, name + "_port", SERVICES[name]["port"])) for name in services},
         "pg_container": "ai-svc-{}-postgres".format(profile),
@@ -166,7 +166,7 @@ def setup():
 
 
 def _common_env(ctx, llm_env=""):
-    """Environment shared by every service (same variables as the rag-dev podman pod templates)."""
+    """Environment shared by every service (same variables as the service podman pod templates)."""
     return """
     export PYTHONPATH="{root}/services"
 {llm_env}    export LOG_LEVEL="INFO"
