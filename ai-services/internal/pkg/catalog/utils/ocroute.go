@@ -1,4 +1,4 @@
-package gateway
+package utils
 
 import (
 	"context"
@@ -39,24 +39,24 @@ func ModelGatewayRouteHost(ctx context.Context) (string, error) {
 func routeHost(ctx context.Context, routeName string) (string, error) {
 	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogAppName)
 	if err != nil {
-		return "", fmt.Errorf("worker gateway: create OpenShift client to look up route %q: %w", routeName, err)
+		return "", fmt.Errorf("create OpenShift client to look up route %q: %w", routeName, err)
 	}
 
 	labelSelector := fmt.Sprintf("%s=%s", constants.ApplicationAnnotationKey, catalogconstants.CatalogAppName)
 	routes, err := oc.ListRoutes(ctx, labelSelector)
 	if err != nil {
-		return "", fmt.Errorf("worker gateway: list routes (selector=%s): %w", labelSelector, err)
+		return "", fmt.Errorf("list routes (selector=%s): %w", labelSelector, err)
 	}
 
 	for _, r := range routes {
 		if r.Name == routeName {
 			if r.HostPort == "" {
-				return "", fmt.Errorf("worker gateway: route %q exists but has no host assigned yet", routeName)
+				return "", fmt.Errorf("route %q exists but has no host assigned yet", routeName)
 			}
 
 			return r.HostPort, nil
 		}
 	}
 
-	return "", fmt.Errorf("worker gateway: route %q not found (selector=%s)", routeName, labelSelector)
+	return "", fmt.Errorf("route %q not found (selector=%s)", routeName, labelSelector)
 }
