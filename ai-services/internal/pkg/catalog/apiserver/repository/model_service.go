@@ -9,10 +9,10 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 )
 
@@ -22,7 +22,7 @@ import (
 // reported with an empty endpoint url.
 func modelGatewayPublicEndpoint() string {
 	if vars.RuntimeFactory != nil && vars.RuntimeFactory.GetRuntimeType() == runtimeTypes.RuntimeTypeOpenShift {
-		host, err := gateway.ModelGatewayRouteHost(context.Background())
+		host, err := catalogutils.ModelGatewayRouteHost(context.Background())
 		if err != nil {
 			logger.Warningf("Unable to resolve the model gateway route host: %v\n", err)
 
