@@ -24,13 +24,6 @@
       "title": "API endpoint",
       "description": "API Endpoint for accessing watsonx",
       "pattern": "^https://[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*(/.*)?$"
-    },
-    "maxBatchSize": {
-      "type": "integer",
-      "title": "Maximum Batch Size",
-      "description": "Maximum batch size for requests.",
-      "default": 32,
-      "minimum": 1
     }
   }
 }

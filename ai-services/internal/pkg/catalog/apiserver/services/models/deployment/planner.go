@@ -26,6 +26,9 @@ const (
 
 	// watsonxTokenizeURL is the tokenize passthrough target for watsonx remote models.
 	watsonxTokenizeURL = "http://localhost:4000/watsonx/ml/v1/text/tokenization"
+
+	// openAIAPIPath is the path under which OpenAI-style servers (e.g. vLLM) serve their API.
+	openAIAPIPath = "/v1"
 )
 
 // ModelPlanner plans model deployments by:
@@ -195,14 +198,20 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 	connectorID := uuid.New()
 
 	// The params were validated against the provider's schema.json, so they are forwarded to
-	// LiteLLM as is: a field added to the schema reaches the gateway without a code change.
+	// LiteLLM as is (apart from the vLLM api_base): a field added to the schema reaches the
+	// gateway without a code change.
+	routeParams := maps.Clone(req.Params)
+	if req.ProviderID == constants.ConnectorProviderHostedVLLM {
+		normalizeVLLMAPIBase(req.Params, routeParams)
+	}
+
 	r := litellm.Route{
 		Tag:           connectorID.String(),
 		Provider:      req.ProviderID,
 		Mode:          mode,
 		Model:         req.Model,
 		UpstreamModel: fmt.Sprintf("%s/%s", req.ProviderID, req.Model),
-		Params:        maps.Clone(req.Params),
+		Params:        routeParams,
 	}
 	// A tokenize passthrough is registered by default. A provider whose endpoint cannot be
 	// reached at the resolved target will cause registration to fail.
@@ -217,6 +226,21 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 	}
 
 	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Metadata: metadata}, nil
+}
+
+// normalizeVLLMAPIBase handles the vLLM api_base, which the user may give with or without /v1.
+// planParams (used for the stored metadata, the models lookup and the tokenize target) get the
+// bare server URL, and routeParams get it with /v1, since vLLM serves its OpenAI API under /v1 and
+// LiteLLM appends only the endpoint path (e.g. /chat/completions).
+func normalizeVLLMAPIBase(planParams, routeParams map[string]any) {
+	apiBase, _ := planParams[litellm.ParamAPIBase].(string)
+	if apiBase == "" {
+		return
+	}
+
+	bare := bareAPIBase(apiBase)
+	planParams[litellm.ParamAPIBase] = bare
+	routeParams[litellm.ParamAPIBase] = bare + openAIAPIPath
 }
 
 // remoteTokenizeURL returns the target of the tokenize passthrough for a remote provider, or ""
@@ -234,7 +258,12 @@ func remoteTokenizeURL(providerID string, params map[string]any) string {
 	return ""
 }
 
+// bareAPIBase strips any trailing slashes and a trailing openAIAPIPath from an OpenAI-style api_base.
+func bareAPIBase(apiBase string) string {
+	return strings.TrimSuffix(strings.TrimRight(apiBase, "/"), openAIAPIPath)
+}
+
 // tokenizeURL derives the /tokenize target from an OpenAI-style api_base.
 func tokenizeURL(apiBase string) string {
-	return strings.TrimSuffix(strings.TrimRight(apiBase, "/"), "/v1") + "/tokenize"
+	return bareAPIBase(apiBase) + "/tokenize"
 }
