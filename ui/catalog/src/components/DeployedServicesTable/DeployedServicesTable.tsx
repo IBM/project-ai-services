@@ -1,4 +1,12 @@
-import { Fragment, useReducer, useCallback, useMemo, useRef } from "react";
+import {
+  Fragment,
+  useReducer,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+} from "react";
+import axios from "axios";
 import {
   deleteApplication,
   fetchDeployedServicesPage,
@@ -47,10 +55,8 @@ import TableEmptyStates from "@/components/Table/components/TableEmptyStates";
 import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
 import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
 import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
-import {
-  filterRowsBySearch,
-  getVisibleHeaders,
-} from "@/components/Table/utils/tableUtils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { getVisibleHeaders } from "@/components/Table/utils/tableUtils";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 
 // Generic cell renderer wrapper
@@ -132,6 +138,15 @@ const DeployedServicesTable = ({
   pageSizeRef.current = state.pageSize;
   selectedServicesRef.current = state.selectedServices;
 
+  const debouncedSearch = useDebouncedValue(state.search.trim(), 400);
+  const debouncedSearchRef = useRef(debouncedSearch);
+  debouncedSearchRef.current = debouncedSearch;
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Flips to true after the very first successful fetch. Used by showSkeleton
+  // so that all subsequent loads use the dimming overlay instead of the full skeleton.
+  const hasEverLoadedRef = useRef(false);
+
   const { services } = useServiceDeployStore();
 
   // Generate dynamic service filter options from backend services
@@ -158,25 +173,39 @@ const DeployedServicesTable = ({
   const hasTransitionalRowRef = useRef(hasTransitionalRow);
   hasTransitionalRowRef.current = hasTransitionalRow;
 
-  // Fetch deployed services data.
+  // `silent` skips the loading state; only background refreshes set it
   const fetchDeployedServices = useCallback(
     async (
       page = pageRef.current,
       pageSize = pageSizeRef.current,
       selectedServices = selectedServicesRef.current,
+      search = debouncedSearchRef.current,
+      options?: { silent?: boolean },
     ) => {
-      // Skip the skeleton while rows are transitional so polling updates statuses in place
-      if (!hasTransitionalRowRef.current) {
+      const silent = options?.silent ?? false;
+
+      // Cancel previous pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      if (!silent) {
         dispatch({ type: "SHARED_SET_LOADING", payload: true });
       }
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
-        const { data: rawData, pagination } = await fetchDeployedServicesPage({
-          page,
-          pageSize,
-          catalogId: selectedServices[0],
-        });
+        const { data: rawData, pagination } = await fetchDeployedServicesPage(
+          {
+            page,
+            pageSize,
+            catalogId: selectedServices[0],
+          },
+          search,
+          { signal: controller.signal },
+        );
 
         const totalItems = pagination?.total_items ?? rawData.length;
         const totalPages = pagination?.total_pages ?? 1;
@@ -184,11 +213,19 @@ const DeployedServicesTable = ({
         // If the current page is beyond total_pages (e.g. last item on page N was deleted),
         // jump back to the last valid page and re-fetch.
         if (page > totalPages && totalPages >= 1) {
+          pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          fetchDeployedServices(totalPages, pageSize);
+          void fetchDeployedServices(
+            totalPages,
+            pageSize,
+            selectedServices,
+            search,
+            { silent },
+          );
           return;
         }
 
+        hasEverLoadedRef.current = true;
         dispatch({
           type: ACTION_TYPES.DEPLOYED_SERVICES_SET_TOTAL_ITEMS,
           payload: totalItems,
@@ -201,6 +238,16 @@ const DeployedServicesTable = ({
 
         dispatch({ type: "SHARED_SET_LOADING", payload: false });
       } catch (error) {
+        // The axios interceptor wraps cancellations in a generic Error, so
+        // check the signal itself to ignore superseded requests.
+        if (
+          controller.signal.aborted ||
+          (error instanceof Error && error.name === "AbortError") ||
+          axios.isCancel(error)
+        ) {
+          return;
+        }
+
         const errorMessage =
           error instanceof Error
             ? error.message
@@ -212,10 +259,52 @@ const DeployedServicesTable = ({
     [],
   );
 
+  // Used by useAutoRefresh; silent while rows are transitional
+  const refreshDeployedServices = useCallback(
+    () =>
+      fetchDeployedServices(
+        pageRef.current,
+        pageSizeRef.current,
+        selectedServicesRef.current,
+        debouncedSearchRef.current,
+        { silent: hasTransitionalRowRef.current },
+      ),
+    [fetchDeployedServices],
+  );
+
+  const isFirstMount = useRef(true);
+
+  // Trigger search on debounced term changes (resetting page to 1)
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    pageRef.current = 1;
+    dispatch({ type: "SHARED_SET_PAGE", payload: 1 });
+    void fetchDeployedServices(
+      1,
+      pageSizeRef.current,
+      selectedServicesRef.current,
+      debouncedSearch,
+    );
+  }, [debouncedSearch, fetchDeployedServices]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   // Mount fetch + 2-minute auto-refresh interval (shared hook).
+  // hasData is always true so auto-refresh keeps running on empty/no-match results.
   useAutoRefresh({
-    fetchFn: fetchDeployedServices,
-    hasData: state.rowsData.length > 0,
+    fetchFn: refreshDeployedServices,
+    hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
     refreshTrigger,
     hasTransitionalRow,
@@ -264,19 +353,16 @@ const DeployedServicesTable = ({
     csvFileName: state.csvFileName,
     totalItems: state.totalItems,
     search: state.search,
-    searchFields: [
-      "name",
-      "status",
-      "uptime",
-      "workerResource",
-      "workerType",
-      "messages",
-      "service",
-    ],
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
+    serverSideSearch: true,
     fetchAllRows: async () => {
-      const allData = await fetchAllDeployedServices(state.selectedServices[0]);
+      // Use state.search.trim() (the immediate input value) so the export
+      // always reflects what the user sees in the search box
+      const allData = await fetchAllDeployedServices(
+        state.selectedServices[0],
+        state.search.trim(),
+      );
       return allData.map(transformDeployedServiceToRow) as unknown as Record<
         string,
         unknown
@@ -285,31 +371,24 @@ const DeployedServicesTable = ({
     dispatch,
   });
 
-  // Apply search filter with shared utility
-  const filteredRows = filterRowsBySearch<Record<string, unknown>>(
-    state.rowsData as unknown as Record<string, unknown>[],
-    state.search,
-    [
-      "name",
-      "status",
-      "uptime",
-      "workerResource",
-      "workerType",
-      "messages",
-      "service",
-    ],
-  ) as unknown as DeployedServicesRow[];
-
   const noApplications =
-    !state.isLoading && state.rowsData.length === 0 && !state.fetchError;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !debouncedSearch;
   const noSearchResults =
-    !state.isLoading && state.rowsData.length > 0 && filteredRows.length === 0;
+    state.rowsData.length === 0 &&
+    !state.isLoading &&
+    !state.fetchError &&
+    !!debouncedSearch;
 
   // Visible headers for the DataTable (shared utility)
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
   const selectedItemName =
     state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
+  // Show the full skeleton only on the very first load
+  const showSkeleton = state.isLoading && !hasEverLoadedRef.current;
 
   // Service filter slot — injected into the shared toolbar's filterSlot prop
   const serviceFilterSlot = (
@@ -388,14 +467,18 @@ const DeployedServicesTable = ({
       <div className={styles.tableContent}>
         <Grid fullWidth>
           <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-            {state.isLoading ? (
+            {showSkeleton ? (
               <DataTableSkeleton
                 headers={HEADERS}
                 rowCount={state.pageSize}
                 columnCount={HEADERS.length}
               />
             ) : (
-              <DataTable rows={filteredRows} headers={visibleHeaders} size="lg">
+              <DataTable
+                rows={state.rowsData}
+                headers={visibleHeaders}
+                size="lg"
+              >
                 {({
                   rows,
                   headers,
@@ -445,7 +528,12 @@ const DeployedServicesTable = ({
                         </Button>
                       </TableToolbarActions>
 
-                      <Table {...getTableProps()}>
+                      <Table
+                        className={
+                          state.isLoading ? styles.loadingTable : undefined
+                        }
+                        {...getTableProps()}
+                      >
                         <TableHead>
                           <TableRow>
                             {headers.map((header) => {
@@ -480,7 +568,7 @@ const DeployedServicesTable = ({
                                           getCellProps({ cell });
 
                                         // Find the full row data for this row
-                                        const rowData = filteredRows.find(
+                                        const rowData = state.rowsData.find(
                                           (r) => r.id === row.id,
                                         ) as DeployedServicesRow;
 
@@ -513,10 +601,13 @@ const DeployedServicesTable = ({
                       />
                     </TableContainer>
 
-                    {!state.isLoading &&
-                      state.totalItems > state.pageSize &&
-                      filteredRows.length > 0 && (
+                    {state.totalItems > state.pageSize &&
+                      state.rowsData.length > 0 && (
                         <Pagination
+                          className={
+                            state.isLoading ? styles.loadingTable : undefined
+                          }
+                          disabled={state.isLoading}
                           page={state.page}
                           pageSize={state.pageSize}
                           pageSizes={[20, 30, 50]}
