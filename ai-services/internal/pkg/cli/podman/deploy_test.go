@@ -32,7 +32,7 @@ func loadLLMPodSpec(t *testing.T, templatePath string) *models.PodSpec {
 		"TemplateID":   "00000000-0000-0000-0000-000000000000",
 		"BaseDir":      "/var/lib/ai-services",
 		"Values": map[string]any{
-			"image":               "icr.io/ppc64le-oss/vllm-ppc64le:0.31.0",
+			"image":               "icr.io/ppc64le-oss/vllm-ppc64le:0.33.0",
 			"model":               "ibm-granite/granite-3.3-8b-instruct",
 			"apiKey":              "",
 			"maxNumBatchedTokens": "8096",
