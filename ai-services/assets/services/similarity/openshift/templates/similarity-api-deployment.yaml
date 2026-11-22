@@ -22,6 +22,16 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
+      {{- if .Values.authCatalogHostAliases }}
+      hostAliases:
+      {{- range .Values.authCatalogHostAliases }}
+      - ip: "{{ or .IP .ip }}"
+        hostnames:
+        {{- range or .Hostnames .hostnames }}
+          - "{{ . }}"
+        {{- end }}
+      {{- end }}
+      {{- end }}
       containers:
         - name: similarity-api
           image: "{{ .Values.similarity.image }}"
@@ -71,6 +81,18 @@ spec:
                   key: password
             - name: LOG_LEVEL
               value: "{{ .Values.similarity.log_level }}"
+            - name: AUTH_JWKS_URL
+              value: "{{ .Values.authJwksUrl }}"
+            - name: AUTH_AUDIENCE
+              value: "{{ .Values.authAudience }}"
+            {{- if .Values.authJwksPlaintextHosts }}
+            - name: AUTH_JWKS_PLAINTEXT_HOSTS
+              value: "{{ .Values.authJwksPlaintextHosts }}"
+            {{- end }}
+            {{- if .Values.authCatalogCaBundle }}
+            - name: AUTH_CATALOG_CA_BUNDLE
+              value: "/etc/ssl/certs/catalog-ca-bundle.crt"
+            {{- end }}
           ports:
             - containerPort: 7000
               protocol: TCP
@@ -84,7 +106,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 7000
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -97,6 +119,13 @@ spec:
             limits:
               cpu: {{ .Values.similarity.resources.limits.cpu | quote }}
               memory: {{ .Values.similarity.resources.limits.memory | quote }}
+          {{- if .Values.authCatalogCaBundle }}
+          volumeMounts:
+            - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
+              subPath: ca-bundle.crt
+              name: ca-bundle
+              readOnly: true
+          {{- end }}
         {{- if .Values.mcp.enabled }}
         # No readinessProbe: a pod is only Ready when every container is, so a
         # failing sidecar would pull similarity-api out of the Service endpoints
@@ -132,3 +161,9 @@ spec:
               cpu: {{ .Values.mcp.resources.limits.cpu | quote }}
               memory: {{ .Values.mcp.resources.limits.memory | quote }}
         {{- end }}
+      {{- if .Values.authCatalogCaBundle }}
+      volumes:
+        - name: ca-bundle
+          configMap:
+            name: "similarity-ca-bundle"
+      {{- end }}

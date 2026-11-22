@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/tests/e2e/common"
 )
 
 // similaritySearchPath is the POST endpoint on the similarity service.
@@ -30,7 +31,7 @@ const similaritySearchPath = "/v1/similarity-search"
 //
 // Reuse of existing HTTP infrastructure:
 //   - buildPostJSONRequest (evaluator.go) — reused for JSON marshalling, Content-Type,
-//     Bearer-token injection, and the shared TLS-skipping transport configuration.
+//     injection of a similarity service token, and the shared TLS-skipping transport configuration.
 //   - sharedRAGClient (evaluator.go)      — reused as the single pooled HTTP client for
 //     all RAG requests, keeping connection behaviour consistent.
 //
@@ -43,7 +44,7 @@ func PostSimilaritySearchRaw(
 	baseURL string,
 	body map[string]any,
 ) (statusCode int, rawBody string, err error) {
-	req, err := buildPostJSONRequest(ctx, baseURL, similaritySearchPath, body)
+	req, err := buildPostJSONRequest(ctx, common.ServiceSimilarity, baseURL, similaritySearchPath, body)
 	if err != nil {
 		return 0, "", fmt.Errorf("build similarity search request: %w", err)
 	}

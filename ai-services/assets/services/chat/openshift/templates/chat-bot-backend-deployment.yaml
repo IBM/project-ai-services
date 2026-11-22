@@ -22,6 +22,16 @@ spec:
         ai-services.io/component-type: api
     spec:
       automountServiceAccountToken: false
+      {{- if .Values.authCatalogHostAliases }}
+      hostAliases:
+      {{- range .Values.authCatalogHostAliases }}
+      - ip: "{{ or .IP .ip }}"
+        hostnames:
+        {{- range or .Hostnames .hostnames }}
+          - "{{ . }}"
+        {{- end }}
+      {{- end }}
+      {{- end }}
       containers:
         - name: backend-server
           image: "{{ .Values.backend.image }}"
@@ -85,6 +95,26 @@ spec:
               value: "{{ .Values.backend.systemPrompt }}"
             - name: CHATBOT_SIMILARITY_SERVICE_URL
               value: "http://similarity-api:7000"
+            # Inbound auth: every route except /health, /ready and /openapi.json needs a catalog token.
+            - name: AUTH_JWKS_URL
+              value: "{{ .Values.authJwksUrl }}"
+            - name: AUTH_AUDIENCE
+              value: "{{ .Values.authAudience }}"
+          {{- if .Values.authJwksPlaintextHosts }}
+            - name: AUTH_JWKS_PLAINTEXT_HOSTS
+              value: "{{ .Values.authJwksPlaintextHosts }}"
+          {{- end }}
+          {{- if .Values.authCatalogCaBundle }}
+            - name: AUTH_CATALOG_CA_BUNDLE
+              value: "/etc/ssl/certs/catalog-ca-bundle.crt"
+          {{- end }}
+          {{- if .Values.authServiceCredential }}
+            # Credential to obtain a similarity token from the catalog. Mounted from a Secret, never a literal value.
+            - name: AUTH_SERVICE_CREDENTIAL_FILE
+              value: "/etc/secret/service-credential/credential"
+            - name: AUTH_CATALOG_API_URL
+              value: "{{ .Values.authCatalogApiUrl }}"
+          {{- end }}
           {{- if .Values.llm.apiKey }}
             - name: LLM_API_KEY
               valueFrom:
@@ -105,7 +135,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 5000
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -118,6 +148,20 @@ spec:
             limits:
               cpu: {{ .Values.backend.resources.limits.cpu | quote }}
               memory: {{ .Values.backend.resources.limits.memory | quote }}
+          {{- if or .Values.authServiceCredential .Values.authCatalogCaBundle }}
+          volumeMounts:
+          {{- if .Values.authServiceCredential }}
+            - mountPath: /etc/secret/service-credential
+              name: service-credential
+              readOnly: true
+          {{- end }}
+          {{- if .Values.authCatalogCaBundle }}
+            - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
+              subPath: ca-bundle.crt
+              name: ca-bundle
+              readOnly: true
+          {{- end }}
+          {{- end }}
         {{- if .Values.mcp.enabled }}
         # No readinessProbe: a pod is only Ready when every container is, so a
         # failing sidecar would pull the backend out of the Service endpoints
@@ -153,3 +197,16 @@ spec:
               cpu: {{ .Values.mcp.resources.limits.cpu | quote }}
               memory: {{ .Values.mcp.resources.limits.memory | quote }}
         {{- end }}
+      {{- if or .Values.authServiceCredential .Values.authCatalogCaBundle }}
+      volumes:
+      {{- if .Values.authServiceCredential }}
+        - name: service-credential
+          secret:
+            secretName: "chat-service-credential"
+      {{- end }}
+      {{- if .Values.authCatalogCaBundle }}
+        - name: ca-bundle
+          configMap:
+            name: "chat-ca-bundle"
+      {{- end }}
+      {{- end }}

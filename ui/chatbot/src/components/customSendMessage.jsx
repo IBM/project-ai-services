@@ -1,6 +1,11 @@
 import { UserType } from '@carbon/ai-chat';
 import axios from 'axios';
 import { OpenAI } from 'openai';
+import {
+  getServiceToken,
+  isTokenExpiringSoon,
+  signedInJustNow,
+} from '../services/auth.js';
 
 const DEFAULT_STREAM_ERROR_MESSAGE =
   '⚠️ Error occurred during active stream. Please contact System Administrator.';
@@ -16,22 +21,33 @@ async function customSendMessage(
   request,
   _options,
   instance,
-  apiKey,
   onAuthError,
   conversationHistory,
   setConversationHistory,
 ) {
   const userInput = request.input.text;
 
-  // Create OpenAI client with the provided API key
+  // The token is renewed only here, between messages (DA5). A redirect cannot be done in the
+  // middle of an answer, and the token is checked once per request by the backend, so an
+  // answer that is already streaming is not cut when the token expires.
+  if (isTokenExpiringSoon()) {
+    onAuthError();
+    return;
+  }
+
+  // The catalog token is the OpenAI client's "API key": it goes out as `Authorization: Bearer`.
+  // It is a catalog token, not the vLLM key. The backend holds the vLLM key itself.
+  const token = getServiceToken();
   const client = new OpenAI({
     baseURL: window.location.origin + '/v1',
-    apiKey: apiKey || 'not-needed',
-    dangerouslyAllowBrowser: true, // Required for browser-side use to allow api-key
+    apiKey: token,
+    dangerouslyAllowBrowser: true, // Required for browser-side use to pass the token
   });
 
   try {
-    const res = await axios.get('/db-status');
+    const res = await axios.get('/db-status', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (res.data.ready === false) {
       await instance.messaging.addMessage({
         output: {
@@ -266,12 +282,18 @@ async function customSendMessage(
       errorStatus === 401 ||
       (err.error && err.error.code === 'AUTHENTICATION_FAILED')
     ) {
-      errorMessage =
-        '⚠️ Authentication failed. Please provide a valid API key or contact your system administrator.';
-      // Trigger auth error callback to show API key dialog
-      if (onAuthError) {
+      // A 401 right after signing in means the backend refused a fresh token, so signing in
+      // again would loop. Only an old token is worth renewing.
+      if (signedInJustNow()) {
+        errorMessage =
+          '⚠️ Authentication failed. Please contact your system administrator.';
+      } else {
+        errorMessage = '⚠️ Your session expired. Signing in again.';
         setTimeout(() => onAuthError(), 1000);
       }
+    } else if (errorStatus === 403) {
+      errorMessage =
+        '⚠️ You do not have access to this assistant. Please contact your system administrator.';
     }
     // Handle specific HTTP status codes
     else if (errorStatus === 429) {

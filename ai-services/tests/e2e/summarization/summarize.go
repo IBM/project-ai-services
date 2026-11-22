@@ -172,14 +172,22 @@ func buildJobCreateURL(baseURL, level, jobName string, stream bool) string {
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
+// httpCfg returns the HTTP config for the summarize API, which enforces service tokens.
+func httpCfg(timeout time.Duration) common.HTTPClientConfig {
+	cfg := common.HTTPConfigForTimeout(timeout)
+	cfg.Service = common.ServiceSummarize
+
+	return cfg
+}
+
 // doGET sends a GET request and returns the response body and status code.
 func doGET(ctx context.Context, url string) ([]byte, int, error) {
-	return common.DoGET(ctx, url, common.HTTPConfigForTimeout(getCallTimeout))
+	return common.DoGET(ctx, url, httpCfg(getCallTimeout))
 }
 
 // doPOST sends a POST request with the given body and content type.
 func doPOST(ctx context.Context, url string, body *bytes.Buffer, contentType string) ([]byte, int, error) {
-	return common.DoPOST(ctx, url, body, contentType, common.HTTPConfigForTimeout(postCallTimeout))
+	return common.DoPOST(ctx, url, body, contentType, httpCfg(postCallTimeout))
 }
 
 // ── Service operations ────────────────────────────────────────────────────────
@@ -389,7 +397,7 @@ func ListJobs(ctx context.Context, baseURL string, limit, offset int, status, jo
 
 // deleteJobWithURL sends DELETE to url and accepts 200 or 204 as success.
 func deleteJobWithURL(ctx context.Context, url, logMsg string) error {
-	if err := common.DeleteURL(ctx, url, common.HTTPConfigForTimeout(getCallTimeout)); err != nil {
+	if err := common.DeleteURL(ctx, url, httpCfg(getCallTimeout)); err != nil {
 		return err
 	}
 

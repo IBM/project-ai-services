@@ -97,6 +97,69 @@ func (s *TokenService) IssueServiceToken(ctx context.Context, userID, service st
 	return s.issue(ctx, userID, service)
 }
 
+// internalGrants is the fixed list of roles the catalog may give itself on a service (DA2).
+// It is deliberately not part of the ScopeResolver: no request, user or database row can
+// extend it, and it never contains RoleAdmin. Add a line only for a call the catalog
+// itself makes to that service.
+var internalGrants = map[string][]string{
+	// The catalog manages connectors on Digitize (POST/PUT/DELETE/GET /v1/connectors).
+	"digitize": {RoleWrite},
+}
+
+// IssueInternalToken issues a token for a call the catalog makes itself, with typ=service
+// and sub=InternalSubject. The roles come only from internalGrants, so a service that is
+// not listed gets ErrUnknownService, and RoleAdmin can never be granted this way.
+func (s *TokenService) IssueInternalToken(ctx context.Context, service string) (string, time.Time, error) {
+	roles, ok := internalGrants[service]
+	if !ok {
+		return "", time.Time{}, ErrUnknownService
+	}
+
+	return s.issueFixed(ctx, InternalSubject, service, roles)
+}
+
+// issueFixed signs a typ=service, idp=internal token for subject with exactly these roles.
+// The caller must take roles from a fixed in-code table, never from a request.
+func (s *TokenService) issueFixed(ctx context.Context, subject, service string, roles []string) (string, time.Time, error) {
+	if _, ok := s.registry.Lookup(service); !ok {
+		return "", time.Time{}, ErrUnknownService
+	}
+
+	scopes := make([]string, len(roles))
+	for i, r := range roles {
+		scopes[i] = service + ":" + r
+	}
+
+	jti, err := randomHex(jtiBytes)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+
+	now := time.Now()
+	exp := now.Add(s.ttl)
+	token, err := s.signer.Sign(ServiceClaims{
+		Scope: strings.Join(scopes, " "),
+		IDP:   IDPInternal,
+		Type:  jwtTypeService,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    ServiceTokenIssuer,
+			Subject:   subject,
+			Audience:  []string{service},
+			ExpiresAt: jwt.NewNumericDate(exp),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ID:        jti,
+		},
+	})
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign internal token: %w", err)
+	}
+
+	logger.DebugfCtx(ctx, "internal token issued: jti=%s sub=%s aud=%s scope=%q", jti, subject, service, strings.Join(scopes, " "))
+
+	return token, exp, nil
+}
+
 func (s *TokenService) issue(ctx context.Context, userID, service string) (string, time.Time, error) {
 	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {

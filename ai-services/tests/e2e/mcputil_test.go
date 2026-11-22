@@ -20,13 +20,21 @@ import (
 // mcpCallTool opens a fresh MCP session on endpoint, then invokes the named
 // tool with the given params map via a tools/call request.
 // The MCP sidecars run with --auth-passthrough, so every tools/call must carry
-// the catalog bearer token in the Authorization header.
+// a bearer token in the Authorization header. The translate and extract services do not
+// enforce auth and get the catalog access token. The Digital Assistant services reject it, so
+// mcpCallToolAs sends a token issued for the target service instead.
 // The raw SSE-unwrapped JSON-RPC response payload is returned so callers can
 // unmarshal the result.content array themselves.
 func mcpCallTool(ctx context.Context, endpoint, toolName string, params map[string]any) ([]byte, error) {
+	return mcpCallToolAs(ctx, "", endpoint, toolName, params)
+}
+
+// mcpCallToolAs is mcpCallTool for a service that enforces auth. service is the catalog service
+// name (the token audience) of the API behind the sidecar, for example common.ServiceChat.
+func mcpCallToolAs(ctx context.Context, service, endpoint, toolName string, params map[string]any) ([]byte, error) {
 	client := mcpToolCallHTTPClient()
 
-	token, err := mcpBearerToken()
+	token, err := mcpBearerToken(ctx, service)
 	if err != nil {
 		return nil, err
 	}
@@ -55,8 +63,13 @@ func mcpCallTool(ctx context.Context, endpoint, toolName string, params map[stri
 	return sseExtractData(raw), nil
 }
 
-// mcpBearerToken returns the catalog access token saved by 'catalog login'.
-func mcpBearerToken() (string, error) {
+// mcpBearerToken returns the token for an MCP call. With a service name it is a token issued for
+// that service. With an empty name it is the catalog access token saved by 'catalog login'.
+func mcpBearerToken(ctx context.Context, service string) (string, error) {
+	if service != "" {
+		return common.ServiceToken(ctx, service)
+	}
+
 	creds, err := catalogConfig.Load()
 	if err != nil {
 		return "", fmt.Errorf("load catalog credentials: %w", err)

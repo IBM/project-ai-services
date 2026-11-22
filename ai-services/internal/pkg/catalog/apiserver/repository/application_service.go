@@ -7,6 +7,7 @@ import (
 	appservice "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository/application_service"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
+	deploymentauth "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/auth"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
@@ -59,6 +60,7 @@ func NewApplicationService(
 	reg stream.WorkerRegistry,
 	connectorRepo dbrepo.ConnectorRepository,
 	datasourceSvc appservice.DatasourceConnector,
+	credentials deploymentauth.CredentialProvisioner,
 ) ApplicationServiceInterface {
 	if runtimeType != runtimeTypes.RuntimeTypePodman && runtimeType != runtimeTypes.RuntimeTypeOpenShift {
 		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
@@ -78,7 +80,7 @@ func NewApplicationService(
 		ServiceDependencyRepo: serviceDependencyRepo,
 		Provider:              provider,
 		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo, workers),
-		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo, workers),
+		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo, workers).WithCredentialProvisioner(credentials),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validator,
 		DeploymentRegistry:    appservice.NewDeploymentRegistry(),

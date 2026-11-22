@@ -1,5 +1,8 @@
 name: similarity
 version: "1.0.0"
+podTemplateExecutions:
+  - [similarity-ca-secret.yaml.tmpl]
+  - [similarity-api.yaml.tmpl]
 
 # Resource requirements
 resources:

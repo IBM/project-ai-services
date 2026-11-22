@@ -3,6 +3,27 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "authJwksUrl": {
+      "type": "string"
+    },
+    "authAudience": {
+      "type": "string"
+    },
+    "authCatalogApiUrl": {
+      "type": "string"
+    },
+    "authCatalogCaBundle": {
+      "type": "string"
+    },
+    "authCatalogHostAliases": {
+      "type": "string"
+    },
+    "authServiceCredential": {
+      "type": "string"
+    },
+    "authJwksPlaintextHosts": {
+      "type": "string"
+    },
     "backend": {
       "type": "object",
       "additionalProperties": false,

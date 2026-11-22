@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
 // HTTPClientConfig holds configuration for HTTP clients.
@@ -22,6 +24,9 @@ type HTTPClientConfig struct {
 	Timeout            time.Duration
 	InsecureSkipVerify bool // skip TLS verification (self-signed certs in test envs)
 	PoolConnections    bool // enable connection pooling for repeated requests
+	// Service, when set, makes DoRequestFull send a catalog-issued token for that service
+	// (see ServiceToken). Leave it empty for services that do not enforce auth.
+	Service string
 }
 
 // DefaultHTTPConfig returns sensible defaults for HTTP communication.
@@ -92,6 +97,16 @@ func DoRequestFull(ctx context.Context, method, url string, body *bytes.Buffer, 
 
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+
+	if config.Service != "" {
+		// Without a catalog login the request goes out unauthenticated, as it did before the
+		// services enforced auth. An auth-enforcing service then answers 401, which the caller sees.
+		if token, tokenErr := ServiceToken(ctx, config.Service); tokenErr != nil {
+			logger.Warningf("[E2E] %v", tokenErr)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 
 	client := GetHTTPClient(config)

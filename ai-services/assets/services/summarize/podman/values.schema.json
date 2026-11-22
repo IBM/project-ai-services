@@ -1,6 +1,25 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "properties": {},
+  "properties": {
+    "authJwksUrl": {
+      "type": "string"
+    },
+    "authAudience": {
+      "type": "string"
+    },
+    "authCatalogApiUrl": {
+      "type": "string"
+    },
+    "authCatalogCaBundle": {
+      "type": "string"
+    },
+    "authCatalogHostAliases": {
+      "type": "string"
+    },
+    "authJwksPlaintextHosts": {
+      "type": "string"
+    }
+  },
   "additionalProperties": false
 }

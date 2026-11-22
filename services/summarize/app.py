@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Request, UploadFile, File, Form, BackgroundTasks
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile, File, Form, BackgroundTasks
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from starlette.concurrency import iterate_in_threadpool
@@ -33,6 +33,7 @@ from common.llm_utils import query_vllm_summarize, query_vllm_summarize_stream, 
 from common.misc_utils import get_llm_endpoint, set_request_id, configure_uvicorn_logging, create_llm_session
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 
+from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from summarize.summ_utils import (
     word_count,
@@ -65,6 +66,17 @@ diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_ha
 
 concurrency_limiter = asyncio.BoundedSemaphore(settings.common.llm.max_batch_size)
 
+
+class JobError(Exception):
+    """A job failure whose message is safe to show to callers.
+
+    Anything else that fails a job is logged in full and stored as a generic message.
+    """
+
+
+GENERIC_JOB_ERROR = "Summarization failed due to an internal error"
+
+
 @asynccontextmanager
 async def lifespan(app):
     """Manage application lifespan events (startup and shutdown).
@@ -72,7 +84,16 @@ async def lifespan(app):
     Sets up logging, connection pooling, model initializations, database tables,
     cache directories, and initiates recovering zombie jobs.
     """
-    filtered_paths = ['/health']
+    # Fail closed: refuse to start without a complete, safe auth configuration. This runs
+    # before anything touches the LLM, the database or the job files (recover_zombie_jobs
+    # writes to the database). The catalog need not be reachable yet; /ready reports that.
+    try:
+        get_verifier()
+    except AuthConfigError as exc:
+        logger.error(f"Startup aborted, authentication is not configured: {exc}")
+        raise
+
+    filtered_paths = ['/health', '/ready']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     initialize_models()
@@ -144,7 +165,10 @@ app = FastAPI(
     title="AI-Services Summarization API",
     description="Accepts text or files (.txt / .pdf) and returns AI-generated summaries.",
     version="1.0.0",
-    openapi_tags=tags_metadata
+    openapi_tags=tags_metadata,
+    # The built-in docs pages are served unauthenticated; "/" below serves Swagger behind auth.
+    docs_url=None,
+    redoc_url=None,
 )
 
 @app.middleware("http")
@@ -160,7 +184,13 @@ async def add_request_id(request: Request, call_next):
     response.headers["X-Request-ID"] = request_id
     return response
 
-@app.get("/", include_in_schema=False)
+
+# Added last, so it is the outermost layer: every request is authenticated (deny by
+# default) before any other middleware or route code runs, and before a body is read.
+app.add_middleware(AuthMiddleware)
+
+
+@app.get("/", include_in_schema=False, dependencies=[Depends(require_role("admin"))])
 def swagger_root():
     """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
@@ -306,6 +336,7 @@ async def handle_summarize(
 
 @app.post("/v1/summarize",
 response_model=SummarizeSuccessResponse,
+dependencies=[Depends(require_role("write"))],
 responses={
     400: http_error_responses[400],
     413: http_error_responses[413],
@@ -494,11 +525,13 @@ async def process_summarization_job(job_id: str, level):
     try:
         # Step 1: Read staged file
         if not staging_dir.exists():
-            raise Exception(f"Staging directory not found: {staging_dir}")
+            logger.error(f"Staging directory not found for job {job_id}: {staging_dir}")
+            raise JobError("Staged input file not found")
         
         staged_files = list(staging_dir.glob("*"))
         if not staged_files:
-            raise Exception(f"No files found in staging directory: {staging_dir}")
+            logger.error(f"No files found in staging directory for job {job_id}: {staging_dir}")
+            raise JobError("Staged input file not found")
         
         staged_file = staged_files[0]
         filename = staged_file.name
@@ -515,10 +548,10 @@ async def process_summarization_job(job_id: str, level):
             with open(staged_file, 'r', encoding='utf-8') as f:
                 content_text = f.read()
         else:
-            raise Exception(f"Unsupported file type: {ext}")
+            raise JobError("Unsupported file type")
         
         if not content_text or not content_text.strip():
-            raise Exception("Extracted text is empty")
+            raise JobError("Extracted text is empty")
         
         content_text = content_text.strip()
         
@@ -607,7 +640,8 @@ async def process_summarization_job(job_id: str, level):
                 )
 
             if isinstance(result, dict) and "error" in result:
-                raise Exception(f"LLM error: {result.get('error', 'Unknown error')}")
+                logger.error(f"LLM error for job {job_id}: {result.get('error', 'Unknown error')}")
+                raise JobError("LLM error")
 
             summary = trim_to_last_sentence(result) if isinstance(result, str) else ""
 
@@ -713,7 +747,7 @@ async def process_summarization_job(job_id: str, level):
             )
             
             if merge_required_tokens > get_llm_max_model_len():
-                raise Exception(
+                raise JobError(
                     f"FILE_SIZE_OVER_LIMIT: Document too large. "
                     f"Estimated {num_chunks} chunk summaries would require {merge_required_tokens} tokens, "
                     f"exceeding context window of {get_llm_max_model_len()} tokens."
@@ -766,7 +800,10 @@ async def process_summarization_job(job_id: str, level):
                             )
                         
                         if isinstance(chunk_result, dict) and "error" in chunk_result:
-                            raise Exception(f"LLM error on chunk {chunk_index + 1}: {chunk_result.get('error')}")
+                            logger.error(
+                                f"LLM error on chunk {chunk_index + 1} for job {job_id}: {chunk_result.get('error')}"
+                            )
+                            raise JobError(f"LLM error on chunk {chunk_index + 1}")
                         
                         chunk_summary = trim_to_last_sentence(chunk_result) if isinstance(chunk_result, str) else ""
                         
@@ -874,7 +911,8 @@ async def process_summarization_job(job_id: str, level):
                 )
             
             if isinstance(merge_result, dict) and "error" in merge_result:
-                raise Exception(f"LLM error during merge: {merge_result.get('error')}")
+                logger.error(f"LLM error during merge for job {job_id}: {merge_result.get('error')}")
+                raise JobError("LLM error during merge")
             
             summary = trim_to_last_sentence(merge_result) if isinstance(merge_result, str) else ""
             
@@ -929,7 +967,9 @@ async def process_summarization_job(job_id: str, level):
         db_repo.update_job(
             job_id,
             status=JobStatus.FAILED,
-            error=str(e),
+            # Callers can read this text (job list, job details, 422 on /result), so only
+            # deliberate JobError messages are stored. The full detail is in the log above.
+            error=str(e) if isinstance(e, JobError) else GENERIC_JOB_ERROR,
             completed_at=datetime.now(timezone.utc)
         )
     
@@ -946,6 +986,7 @@ async def process_summarization_job(job_id: str, level):
     "/v1/summarize/jobs",
     status_code=202,
     response_model=JobCreatedResponse,
+    dependencies=[Depends(require_role("write"))],
     responses={
         202: {"description": "Job created successfully"},
         400: http_error_responses[400],
@@ -1046,6 +1087,7 @@ async def create_summarization_job(
 @app.get(
     "/v1/summarize/jobs",
     response_model=JobsListResponse,
+    dependencies=[Depends(require_role("read"))],
     responses={
         200: {"description": "Paginated job list"},
         400: http_error_responses[400],
@@ -1142,6 +1184,7 @@ async def list_jobs(
 @app.get(
     "/v1/summarize/jobs/{job_id}",
     response_model=JobDetailResponse,
+    dependencies=[Depends(require_role("read"))],
     responses={
         200: {"description": "Job details"},
         404: http_error_responses[404],
@@ -1195,6 +1238,7 @@ async def get_job_details(job_id: str):
 @app.get(
     "/v1/summarize/jobs/{job_id}/result",
     response_model=JobResultResponse,
+    dependencies=[Depends(require_role("read"))],
     responses={
         200: {"description": "Summary result"},
         202: {"description": "Job still in progress"},
@@ -1267,6 +1311,7 @@ async def get_job_result(job_id: str):
 @app.delete(
     "/v1/summarize/jobs/{job_id}",
     status_code=204,
+    dependencies=[Depends(require_role("write"))],
     responses={
         204: {"description": "Job and associated data deleted"},
         404: http_error_responses[404],
@@ -1322,6 +1367,7 @@ async def delete_job(job_id: str):
 @app.delete(
     "/v1/summarize/jobs",
     status_code=204,
+    dependencies=[Depends(require_role("admin"))],
     responses={
         204: {"description": "All jobs and data deleted"},
         400: http_error_responses[400],
@@ -1385,6 +1431,23 @@ async def bulk_delete_jobs(confirm: Optional[bool] = None):
 async def health():
     """Perform a basic health check indicating the service is running."""
     return {"status": "ok"}
+
+
+@app.get(
+    "/ready",
+    tags=["health"],
+    summary="Readiness check",
+    description="Returns 200 when the service can verify tokens, that is, the JWKS keys are available.",
+    response_description="Service readiness status"
+)
+async def readiness_check():
+    """Perform a readiness check requiring one JWKS fetch."""
+    try:
+        await get_verifier().jwks.check()
+    except Exception as exc:
+        logger.error(f"Readiness check failed, JWKS is unavailable: {exc}")
+        raise HTTPException(status_code=503, detail="JWKS is unavailable")
+    return {"status": "ready"}
 
 
 if __name__ == "__main__":

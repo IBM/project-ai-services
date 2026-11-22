@@ -57,6 +57,37 @@ func InjectServiceAuthValues(
 	return nil
 }
 
+// CredentialProvisioner creates the per-deployment service credential (DA2) for a service
+// that needs one. It returns an empty string, and no error, for a service that needs none.
+type CredentialProvisioner interface {
+	ProvisionIfNeeded(ctx context.Context, serviceID, deploymentID string) (string, error)
+}
+
+// InjectServiceCredential puts a fresh service credential into values as authServiceCredential
+// for a service that needs one (today only chat). The templates deliver it to the pod as a
+// secret. A nil provisioner leaves values unchanged, so a deployment without credential
+// support behaves as before. The value must never be logged.
+func InjectServiceCredential(
+	ctx context.Context,
+	serviceID, deploymentID string,
+	values map[string]any,
+	p CredentialProvisioner,
+) error {
+	if values == nil || p == nil {
+		return nil
+	}
+
+	credential, err := p.ProvisionIfNeeded(ctx, serviceID, deploymentID)
+	if err != nil {
+		return fmt.Errorf("failed to provision service credential for %s: %w", serviceID, err)
+	}
+	if credential != "" {
+		values["authServiceCredential"] = credential
+	}
+
+	return nil
+}
+
 func injectOpenShiftAuth(ctx context.Context, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
 	if !isRemoteWorker {
 		injectCoLocatedOpenShiftAuth(values, existingJwksURL)

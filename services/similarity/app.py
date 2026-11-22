@@ -5,7 +5,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from common.misc_utils import set_log_level
@@ -21,6 +21,7 @@ if level != "":
 set_log_level(log_level)
 
 import common.db_utils as db
+from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
 from common.misc_utils import get_embedding_endpoint, get_reranker_endpoint, set_request_id, create_llm_session
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from common.validation_utils import validate_query_length as _validate_query_length
@@ -63,6 +64,14 @@ async def lifespan(app: FastAPI):
     Sets up the global LLM connection pool, resolves endpoint configurations for
     retrieval models, and initializes the vector store connection.
     """
+    # Fail closed: refuse to start without a complete, safe auth configuration. The catalog
+    # need not be reachable yet; /ready reports that.
+    try:
+        get_verifier()
+    except AuthConfigError as exc:
+        logging.error(f"Startup aborted, authentication is not configured: {exc}")
+        raise
+
     create_llm_session(pool_maxsize=10)
     _initialize_models()
     await asyncio.to_thread(_initialize_vectorstore)
@@ -87,6 +96,9 @@ app = FastAPI(
     ),
     version="1.0.0",
     openapi_tags=tags_metadata,
+    # The built-in docs pages are served unauthenticated; "/" below serves Swagger behind auth.
+    docs_url=None,
+    redoc_url=None,
 )
 
 app.add_exception_handler(HTTPException, http_exception_handler)
@@ -106,7 +118,12 @@ async def add_request_id(request: Request, call_next):
     return response
 
 
-@app.get("/", include_in_schema=False)
+# Added last, so it is the outermost layer: every request is authenticated (deny by
+# default) before any other middleware or route code runs, and before a body is read.
+app.add_middleware(AuthMiddleware)
+
+
+@app.get("/", include_in_schema=False, dependencies=[Depends(require_role("admin"))])
 def swagger_root():
     """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
@@ -118,7 +135,13 @@ def swagger_root():
 @app.post(
     "/v1/similarity-search",
     response_model=SimilaritySearchResponse,
-    responses={400: http_error_responses[400], 500: http_error_responses[500], 503: http_error_responses[503]},
+    dependencies=[Depends(require_role("read"))],
+    responses={
+        400: http_error_responses[400],
+        401: http_error_responses[401],
+        500: http_error_responses[500],
+        503: http_error_responses[503],
+    },
     tags=["similarity", "MCP"],
     operation_id="similarity_search",
     summary="Vector similarity search",
@@ -193,8 +216,13 @@ async def similarity_search(req: SimilaritySearchRequest, response: Response) ->
 
     except db.VectorStoreNotReadyError:
         APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY, "Index is empty. Ingest documents first.")
-    except Exception as e:
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
+    except HTTPException:
+        # Already a structured client error (for example the query-too-long 400).
+        raise
+    except Exception:
+        # Details go to the log, never to the client.
+        logging.exception("Similarity search failed")
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR)
 
     results = [
         SimilaritySearchResult(
@@ -234,6 +262,26 @@ async def health():
         dict: A dictionary indicating the service is running and healthy.
     """
     return {"status": "ok"}
+
+
+@app.get(
+    "/ready",
+    tags=["monitoring"],
+    summary="Readiness check",
+    description="Returns 200 when the service can verify tokens, that is, the JWKS keys are available.",
+)
+async def readiness_check():
+    """Perform a readiness check requiring one JWKS fetch."""
+    try:
+        await get_verifier().jwks.check()
+    except Exception as exc:
+        logging.error(f"Readiness check failed, JWKS is unavailable: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWKS is unavailable",
+        )
+    return {"status": "ready"}
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "7000"))

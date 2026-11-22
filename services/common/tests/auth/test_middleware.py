@@ -86,7 +86,14 @@ def test_valid_admin_token(client, signer):
 
 
 def test_valid_token_without_role_is_403(client, signer):
-    assert client.get("/v1/write-only", headers=_h(signer.token())).status_code == 403
+    tok = signer.token(scope="digitize:read")
+    assert client.get("/v1/write-only", headers=_h(tok)).status_code == 403
+    assert client.get("/v1/admin-only", headers=_h(tok)).status_code == 403
+
+
+def test_admin_token_satisfies_lower_roles(client, signer):
+    # DA1: admin implies write and read.
+    assert client.get("/v1/write-only", headers=_h(signer.token())).status_code == 200
 
 
 def test_token_for_another_service_is_401(client, signer):

@@ -9,6 +9,8 @@ import (
 const (
 	IDPLocal = "local"
 	IDPMIQ   = "miq"
+	// IDPInternal is the `idp` claim of tokens the catalog issues to itself. No user has it.
+	IDPInternal = "internal"
 )
 
 // Role vocabulary (design decision D2). Phase 1 only ever issues RoleAdmin.
@@ -58,13 +60,18 @@ func NewServiceRegistry(defs ...ServiceDef) *ServiceRegistry {
 	return r
 }
 
-// DefaultServiceRegistry returns the registry shipped in Phase 1: digitize only.
+// DefaultServiceRegistry returns the services that tokens can be issued for: digitize and
+// the Digital Assistant services chat, similarity and summarize (DA4: the audience is the
+// catalog template ID, so the chat service is "chat", not "chatbot").
 func DefaultServiceRegistry() *ServiceRegistry {
-	return NewServiceRegistry(ServiceDef{
-		Name:      "digitize",
-		CatalogID: "digitize",
-		Roles:     []string{RoleAdmin, RoleWrite, RoleRead},
-	})
+	roles := []string{RoleAdmin, RoleWrite, RoleRead}
+
+	return NewServiceRegistry(
+		ServiceDef{Name: "digitize", CatalogID: "digitize", Roles: roles},
+		ServiceDef{Name: "chat", CatalogID: "chat", Roles: roles},
+		ServiceDef{Name: "similarity", CatalogID: "similarity", Roles: roles},
+		ServiceDef{Name: "summarize", CatalogID: "summarize", Roles: roles},
+	)
 }
 
 // Lookup returns the definition of a service.

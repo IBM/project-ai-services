@@ -1,5 +1,6 @@
 ## Web / runtime
 fastapi==0.135.3
+PyJWT[crypto]==2.15.1
 psutil==7.2.2
 pydantic==2.14.4
 pydantic-settings==2.16.1

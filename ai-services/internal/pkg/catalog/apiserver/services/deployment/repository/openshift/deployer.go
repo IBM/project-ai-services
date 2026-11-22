@@ -38,6 +38,15 @@ type OpenShiftDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
+	credentials     deploymentauth.CredentialProvisioner
+}
+
+// WithCredentialProvisioner sets the source of per-deployment service credentials (DA2) and
+// returns the deployer. A nil provisioner means no credential is created.
+func (d *OpenShiftDeployer) WithCredentialProvisioner(p deploymentauth.CredentialProvisioner) *OpenShiftDeployer {
+	d.credentials = p
+
+	return d
 }
 
 // NewOpenShiftDeployer creates a deployer for the OpenShift runtime.
@@ -198,6 +207,9 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 	}
 	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtime.Type().String(), isRemote); err != nil {
 		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
+	}
+	if err := deploymentauth.InjectServiceCredential(ctx, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials); err != nil {
+		return err
 	}
 
 	fsys, err := d.catalogProvider.GetItemFS(svc.CatalogID)

@@ -517,12 +517,13 @@ def query_vllm_stream(
         error_details = str(e)
         if e.response is not None:
             error_details += f", Response Text: {e.response.text}"
+        # The detail goes to the log only: this stream is sent to the caller as is.
         logger.error(f"Error calling vLLM stream API: {error_details}")
-        yield f"data: {json.dumps({'error': error_details})}\n\n"
+        yield f"data: {json.dumps({'error': 'Failed to generate response. Please try again later'})}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Error calling vLLM stream API: {e}")
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield f"data: {json.dumps({'error': 'Failed to generate response. Please try again later'})}\n\n"
         yield "data: [DONE]\n\n"
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
@@ -615,12 +616,13 @@ def query_vllm_summarize_stream(
         error_details = str(e)
         if e.response is not None:
             error_details += f", Response Text: {e.response.text}"
+        # The detail goes to the log only: this stream is sent to the caller as is.
         logger.error(f"Error calling vLLM stream API: {error_details}")
-        yield f"data: {json.dumps({'error': error_details})}\n\n"
+        yield f"data: {json.dumps({'error': 'Failed to generate summary. Please try again later'})}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
         logger.error(f"Error calling vLLM stream API: {e}")
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield f"data: {json.dumps({'error': 'Failed to generate summary. Please try again later'})}\n\n"
         yield "data: [DONE]\n\n"
 
 @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)

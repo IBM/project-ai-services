@@ -72,3 +72,28 @@ func TestInjectServiceAuthValues_CABundleFromEnv(t *testing.T) {
 
 	assert.Equal(t, "CERT_PEM_CONTENT", values["authCatalogCaBundle"])
 }
+
+// The injector is generic: the audience is the catalog ID of whichever service is deployed.
+func TestInjectServiceAuthValues_DigitalAssistantServices(t *testing.T) {
+	for _, svc := range []string{"chat", "similarity", "summarize"} {
+		t.Run(svc+"/podman", func(t *testing.T) {
+			values := map[string]any{}
+			require.NoError(t, InjectServiceAuthValues(context.Background(), svc, values, "podman", false))
+
+			assert.Equal(t, svc, values["authAudience"])
+			assert.Equal(t, "http://ai-services--catalog:8080/.well-known/jwks.json", values["authJwksUrl"])
+			assert.Equal(t, "http://ai-services--catalog:8080", values["authCatalogApiUrl"])
+			assert.Equal(t, "ai-services--catalog", values["authJwksPlaintextHosts"])
+		})
+
+		t.Run(svc+"/openshift", func(t *testing.T) {
+			values := map[string]any{}
+			require.NoError(t, InjectServiceAuthValues(context.Background(), svc, values, "openshift", false))
+
+			assert.Equal(t, svc, values["authAudience"])
+			assert.Equal(t, "http://catalog-api.ai-services.svc.cluster.local:8080/.well-known/jwks.json", values["authJwksUrl"])
+			assert.Equal(t, "catalog-api.ai-services.svc.cluster.local", values["authJwksPlaintextHosts"])
+		})
+	}
+}
+

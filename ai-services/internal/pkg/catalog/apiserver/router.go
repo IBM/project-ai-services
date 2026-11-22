@@ -83,6 +83,9 @@ func registerAuthRoutes(v1 *gin.RouterGroup, h *handlers.AuthHandler, st *handle
 	v1.POST("/auth/service-token", authMw, st.ServiceToken)
 	v1.POST("/auth/authorize", authMw, st.Authorize)
 	v1.POST("/auth/code/exchange", st.Exchange)
+	// A deployed service trades its per-deployment credential for a token (DA2). The
+	// credential is the authentication; no catalog access token is involved.
+	v1.POST("/auth/service-credential/token", st.CredentialToken)
 }
 
 func registerCatalogRoutes(v1 *gin.RouterGroup, catalog *handlers.CatalogHandler, resources *handlers.ResourcesHandler, authMw gin.HandlerFunc) {

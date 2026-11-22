@@ -23,8 +23,9 @@ import (
 const (
 	// ServiceTokenIssuer is the `iss` claim of service tokens. It matches the catalog's own tokens.
 	ServiceTokenIssuer = "ai-services-catalog-server"
-	// DefaultServiceTokenTTL is the default lifetime of a service token.
-	DefaultServiceTokenTTL = 15 * time.Minute
+	// DefaultServiceTokenTTL is the default lifetime of a service token. It equals the ceiling because the chat UI
+	// cannot renew a token without a full-page redirect that loses the conversation (DA5).
+	DefaultServiceTokenTTL = time.Hour
 	// MaxServiceTokenTTL is the ceiling for --service-token-ttl.
 	MaxServiceTokenTTL = time.Hour
 
@@ -34,6 +35,10 @@ const (
 	jtiBytes         = 16
 	coordinateBytes  = 32 // P-256
 	jwtTypeUser      = "user"
+	jwtTypeService   = "service"
+
+	// InternalSubject is the `sub` of tokens the catalog issues to itself.
+	InternalSubject = "catalog"
 )
 
 // ServiceClaims are the claims of a service token (design doc section 5.4).

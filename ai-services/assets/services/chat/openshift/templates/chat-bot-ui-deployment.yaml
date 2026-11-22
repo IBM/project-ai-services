@@ -22,6 +22,16 @@ spec:
         ai-services.io/version: {{ default .Chart.AppVersion | quote }}
     spec:
       automountServiceAccountToken: false
+      {{- if .Values.authCatalogHostAliases }}
+      hostAliases:
+      {{- range .Values.authCatalogHostAliases }}
+      - ip: "{{ or .IP .ip }}"
+        hostnames:
+        {{- range or .Hostnames .hostnames }}
+          - "{{ . }}"
+        {{- end }}
+      {{- end }}
+      {{- end }}
       containers:
         - name: ui
           image: "{{ .Values.ui.image }}"
@@ -37,6 +47,15 @@ spec:
               value: "chat-bot-backend"
             - name: BACKEND_PORT
               value: "5000"
+            {{- if .Values.authCatalogApiUrl }}
+            # Sign-in: the UI's Nginx trades the one-time code for a token at the catalog.
+            - name: CATALOG_API_URL
+              value: "{{ .Values.authCatalogApiUrl }}"
+            {{- end }}
+            {{- if .Values.authCatalogCaBundle }}
+            - name: AUTH_CATALOG_CA_BUNDLE
+              value: "/etc/ssl/certs/catalog-ca-bundle.crt"
+            {{- end }}
           ports:
             - containerPort: 3000
               protocol: TCP
@@ -56,3 +75,16 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
+          {{- if .Values.authCatalogCaBundle }}
+          volumeMounts:
+            - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
+              subPath: ca-bundle.crt
+              name: ca-bundle
+              readOnly: true
+          {{- end }}
+      {{- if .Values.authCatalogCaBundle }}
+      volumes:
+        - name: ca-bundle
+          configMap:
+            name: "chat-ca-bundle"
+      {{- end }}

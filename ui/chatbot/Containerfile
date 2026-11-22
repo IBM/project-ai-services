@@ -20,10 +20,11 @@ RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && \
 USER 1001
 
 COPY nginx.conf.tmpl /etc
+COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
 COPY --from=build /app/build /usr/share/nginx/html
 
 EXPOSE 3000
 
-# Render nginx.conf.tmpl with backend server details and start the nginx server
-CMD /bin/bash -c "envsubst '\$BACKEND_HOST \$BACKEND_PORT' < /etc/nginx.conf.tmpl > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+# Render nginx.conf.tmpl with backend and catalog details and start the nginx server
+CMD ["/bin/bash", "/entrypoint.sh"]

@@ -411,13 +411,16 @@ from digitize.api.v1.documents import router as documents_router
 from digitize.api.v1.connectors import router as connectors_router
 
 _admin_only = [Depends(require_role("admin"))]
+# The catalog manages connectors with an internal token that holds `write`, never `admin`
+# (DA2). `admin` still passes, because the role hierarchy implies `write` (DA1).
+_write_only = [Depends(require_role("write"))]
 
 app.include_router(jobs_router, prefix="/v1/jobs", tags=["jobs"], dependencies=_admin_only)
 app.include_router(admin_router, prefix="/v1", tags=["jobs"], dependencies=_admin_only)
 app.include_router(documents_router, prefix="/v1/documents", tags=["documents"], dependencies=_admin_only)
 app.include_router(
     connectors_router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False,
-    dependencies=_admin_only,
+    dependencies=_write_only,
 )
 
 

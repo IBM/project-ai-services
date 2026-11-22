@@ -1,6 +1,7 @@
 import time
 import requests
 from requests.adapters import HTTPAdapter
+from common.auth import AuthConfigError, ServiceTokenUnavailable, get_service_token
 from common.misc_utils import get_logger
 from common.validation_utils import validate_query_length as _validate_query_length
 from chatbot.settings import settings
@@ -8,6 +9,8 @@ from chatbot.settings import settings
 logger = get_logger("backend_utils")
 
 _similarity_session = None
+
+SIMILARITY_AUDIENCE = "similarity"
 
 def get_similarity_session():
     """Get or initialize the global requests.Session instance for similarity searches.
@@ -50,6 +53,18 @@ def search_only(question, top_k, top_r):
     # Call similarity service API
     similarity_url = settings.chatbot.similarity_service_url
 
+    # A catalog-issued token for similarity. None only when this deployment has no service
+    # credential (similarity is then still open). When a credential is configured, no request
+    # is sent without a token.
+    headers = {}
+    try:
+        token = get_service_token(SIMILARITY_AUDIENCE)
+    except (ServiceTokenUnavailable, AuthConfigError) as e:
+        logger.error(f"No service token for similarity: {e}")
+        raise RuntimeError("Similarity service unavailable: no service token") from e
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     try:
         response = get_similarity_session().post(
             f"{similarity_url}/v1/similarity-search",
@@ -59,6 +74,7 @@ def search_only(question, top_k, top_r):
                 "top_k": top_k,
                 "rerank": settings.chatbot.rerank
             },
+            headers=headers,
             timeout=60
         )
         response.raise_for_status()

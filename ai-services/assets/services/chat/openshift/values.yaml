@@ -40,3 +40,16 @@ mcp:
     limits:
       cpu: "250m"
       memory: "128Mi"
+
+# Inbound auth: chat verifies catalog tokens whose audience is authAudience. The catalog sets
+# authJwksUrl and authCatalogApiUrl at deploy time.
+# Outbound auth: chat trades authServiceCredential (set by the catalog at deploy time, never
+# write it here) for a short-lived similarity token.
+authJwksUrl: ""
+authAudience: "chat"
+authCatalogApiUrl: ""
+authCatalogCaBundle: ""
+authCatalogHostAliases: ""
+authServiceCredential: ""
+# Comma-separated hosts allowed to be reached over plain HTTP. Empty (HTTPS only) by default.
+authJwksPlaintextHosts: ""

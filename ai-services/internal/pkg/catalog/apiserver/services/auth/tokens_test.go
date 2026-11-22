@@ -285,6 +285,41 @@ func TestIssueServiceToken_SameIDWrongIDPIsForbidden(t *testing.T) {
 	assert.Empty(t, roles)
 }
 
+func TestDefaultServiceRegistry_DigitalAssistantServices(t *testing.T) {
+	reg := auth.DefaultServiceRegistry()
+	assert.Equal(t, []string{"chat", "digitize", "similarity", "summarize"}, reg.Names())
+
+	for _, name := range reg.Names() {
+		def, ok := reg.Lookup(name)
+		require.True(t, ok, name)
+		// The audience is the catalog template ID (DA4), which the injector also uses.
+		assert.Equal(t, name, def.CatalogID)
+		assert.ElementsMatch(t, []string{auth.RoleAdmin, auth.RoleWrite, auth.RoleRead}, def.Roles, name)
+	}
+
+	// "chatbot" is the Python package name, not a service. It must not mint a token.
+	_, ok := reg.Lookup("chatbot")
+	assert.False(t, ok)
+}
+
+func TestBootstrapAdminResolver_GrantsAdminOnDigitalAssistantServices(t *testing.T) {
+	r := auth.NewBootstrapAdminResolver(adminID, auth.DefaultServiceRegistry())
+
+	for _, svc := range []string{"chat", "similarity", "summarize", "digitize"} {
+		roles, err := r.Resolve(context.Background(), auth.Principal{ID: adminID, IDP: auth.IDPLocal}, svc)
+		require.NoError(t, err)
+		assert.Equal(t, []string{auth.RoleAdmin}, roles, svc)
+
+		roles, err = r.Resolve(context.Background(), auth.Principal{ID: "user1", IDP: auth.IDPLocal}, svc)
+		require.NoError(t, err)
+		assert.Empty(t, roles, svc)
+	}
+
+	roles, err := r.Resolve(context.Background(), auth.Principal{ID: adminID, IDP: auth.IDPLocal}, "chatbot")
+	require.NoError(t, err)
+	assert.Empty(t, roles)
+}
+
 // Extensibility proof: a different resolver grants another user "read" with the unchanged
 // endpoint logic and signer, and the production resolver refuses the same user.
 type readOnlyResolver struct{ userID string }
@@ -559,4 +594,60 @@ func TestCatalogAccessTokenIsNotAValidServiceToken(t *testing.T) {
 	_, err = jwt.ParseWithClaims(access, &auth.ServiceClaims{}, func(*jwt.Token) (any, error) { return nil, assert.AnError },
 		jwt.WithValidMethods([]string{"ES256"}))
 	assert.Error(t, err)
+}
+
+// ---- internal (catalog-originated) tokens, DA2 ----
+
+func TestIssueInternalToken_DigitizeGetsWriteNeverAdmin(t *testing.T) {
+	f := newFixture(t, nil)
+	raw, exp, err := f.svc.IssueInternalToken(context.Background(), "digitize")
+	require.NoError(t, err)
+
+	claims, tok := f.verify(t, raw)
+	assert.Equal(t, "ES256", tok.Method.Alg())
+	assert.Equal(t, "digitize:write", claims.Scope)
+	assert.NotContains(t, claims.Scope, "admin")
+	assert.Equal(t, "service", claims.Type)
+	assert.Equal(t, auth.InternalSubject, claims.Subject)
+	assert.Equal(t, auth.IDPInternal, claims.IDP)
+	assert.Equal(t, []string{"digitize"}, []string(claims.Audience))
+	assert.NotEmpty(t, claims.ID)
+	assert.WithinDuration(t, time.Now().Add(auth.DefaultServiceTokenTTL), exp, 5*time.Second)
+}
+
+func TestIssueInternalToken_OnlyListedServices(t *testing.T) {
+	f := newFixture(t, nil)
+	for _, svc := range []string{"chat", "similarity", "summarize", "nope", ""} {
+		_, _, err := f.svc.IssueInternalToken(context.Background(), svc)
+		assert.ErrorIs(t, err, auth.ErrUnknownService, svc)
+	}
+}
+
+type countingIssuer struct {
+	calls int
+	exp   time.Time
+}
+
+func (c *countingIssuer) IssueInternalToken(_ context.Context, service string) (string, time.Time, error) {
+	c.calls++
+	return service + "-token-" + string(rune('0'+c.calls)), c.exp, nil
+}
+
+func TestInternalTokenSource_ReusesUntilNearExpiry(t *testing.T) {
+	iss := &countingIssuer{exp: time.Now().Add(15 * time.Minute)}
+	src := auth.NewInternalTokenSourceFrom(iss)
+
+	a, err := src.InternalToken(context.Background(), "digitize")
+	require.NoError(t, err)
+	b, err := src.InternalToken(context.Background(), "digitize")
+	require.NoError(t, err)
+	assert.Equal(t, a, b)
+	assert.Equal(t, 1, iss.calls)
+
+	// A token about to expire is replaced.
+	iss.exp = time.Now().Add(30 * time.Second)
+	src2 := auth.NewInternalTokenSourceFrom(iss)
+	_, _ = src2.InternalToken(context.Background(), "digitize")
+	_, _ = src2.InternalToken(context.Background(), "digitize")
+	assert.Equal(t, 3, iss.calls, "a token inside the refresh margin is not reused")
 }

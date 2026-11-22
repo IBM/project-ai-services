@@ -50,6 +50,15 @@ type PodmanDeployer struct {
 	appRepo         repository.ApplicationRepository
 	serviceRepo     repository.ServiceRepository
 	componentRepo   repository.ComponentRepository
+	credentials     deploymentauth.CredentialProvisioner
+}
+
+// WithCredentialProvisioner sets the source of per-deployment service credentials (DA2) and
+// returns the deployer. A nil provisioner means no credential is created.
+func (d *PodmanDeployer) WithCredentialProvisioner(p deploymentauth.CredentialProvisioner) *PodmanDeployer {
+	d.credentials = p
+
+	return d
 }
 
 // NewPodmanDeployer creates a new PodmanDeployer instance.
@@ -573,6 +582,9 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	}
 	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtimeType, isRemote); err != nil {
 		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
+	}
+	if err := deploymentauth.InjectServiceCredential(ctx, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials); err != nil {
+		return err
 	}
 
 	// Load service from catalog

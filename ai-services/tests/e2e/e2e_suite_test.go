@@ -1148,8 +1148,8 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 		//   - request body → "prototype" for create_*/replace_* operations, "data" otherwise
 		//   - query params → {"query": {...}}
 		//   - path params  → top-level keys (e.g. "job_id")
-		// The sidecars run with --auth-passthrough, so mcpCallTool forwards the
-		// catalog bearer token on every tools/call.
+		// The sidecars run with --auth-passthrough, so mcpCallToolAs forwards a token
+		// issued for the target service on every tools/call.
 
 		ginkgo.Context("MCP end-to-end flow: ingest → chat completions → similarity search",
 			ginkgo.Label("spyre-dependent", "mcp-flow"),
@@ -1209,7 +1209,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				}
 
 				ginkgo.BeforeAll(func() {
-					_, tokenErr := mcpBearerToken()
+					_, tokenErr := mcpBearerToken(context.Background(), "")
 					gomega.Expect(tokenErr).NotTo(gomega.HaveOccurred(),
 						"[MCP-FLOW] sidecars use --auth-passthrough, a catalog token is required")
 
@@ -1261,7 +1261,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 						// nested under "query"; output_format is one of txt|md|json.
 						logger.Infof("[MCP-FLOW] calling MCP tool create_digitize_job on %s (POST /v1/jobs, operation=ingestion, file=%s, %d bytes)",
 							digitizeEndpoint, filepath.Base(pdfPath), len(pdfBytes))
-						raw, err := mcpCallTool(ingestCtx, digitizeEndpoint, "create_digitize_job", map[string]any{
+						raw, err := mcpCallToolAs(ingestCtx, common.ServiceDigitize, digitizeEndpoint, "create_digitize_job", map[string]any{
 							"prototype": map[string]any{
 								"files": []string{mcpBase64File(pdfBytes)},
 							},
@@ -1303,7 +1303,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 						// Stop on any terminal state so a failed job fails fast instead of
 						// burning the whole timeout; transient poll errors return "".
 						gomega.Eventually(func() string {
-							raw, pollErr := mcpCallTool(pollCtx, digitizeEndpoint, "get_digitize_job", map[string]any{
+							raw, pollErr := mcpCallToolAs(pollCtx, common.ServiceDigitize, digitizeEndpoint, "get_digitize_job", map[string]any{
 								"job_id": mcpJobID,
 							})
 							if pollErr != nil {
@@ -1351,7 +1351,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 						// is "data".
 						logger.Infof("[MCP-FLOW] calling MCP tool chat_completion on %s (POST /v1/chat/completions), question=%q",
 							chatEndpoint, mcpFlowQuestion)
-						raw, err := mcpCallTool(chatCtx, chatEndpoint, "chat_completion", map[string]any{
+						raw, err := mcpCallToolAs(chatCtx, common.ServiceChat, chatEndpoint, "chat_completion", map[string]any{
 							"data": map[string]any{
 								"messages": []map[string]string{
 									{"role": "user", "content": mcpFlowQuestion},
@@ -1388,7 +1388,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 						// similarity_search also uses the "data" body key.
 						logger.Infof("[MCP-FLOW] calling MCP tool similarity_search on %s (POST /v1/similarity-search), query=%q",
 							simEndpoint, mcpFlowQuestion)
-						raw, err := mcpCallTool(simCtx, simEndpoint, "similarity_search", map[string]any{
+						raw, err := mcpCallToolAs(simCtx, common.ServiceSimilarity, simEndpoint, "similarity_search", map[string]any{
 							"data": map[string]any{
 								"query": mcpFlowQuestion,
 							},

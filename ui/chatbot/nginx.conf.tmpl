@@ -35,6 +35,10 @@ http {
     server {
         listen 3000;
 
+        # The sign-in page must not be framed (clickjacking). The chat holds a bearer token in memory.
+        add_header Content-Security-Policy "frame-ancestors 'none';" always;
+        add_header X-Frame-Options "DENY" always;
+
         # Serve the React app
         location / {
           root /usr/share/nginx/html;
@@ -42,7 +46,17 @@ http {
           try_files $uri /index.html;
         }
 
-        # Proxy API requests
+        # Trade the one-time sign-in code for a token at the catalog. The catalog's certificate is
+        # verified: the code and the token cross this hop.
+        location = /auth/exchange {
+          proxy_pass ${CATALOG_API_URL}/api/v1/auth/code/exchange;
+          proxy_set_header Host $proxy_host;
+          proxy_ssl_server_name on;
+          proxy_ssl_verify on;
+          proxy_ssl_trusted_certificate ${AUTH_CATALOG_CA_BUNDLE};
+        }
+
+        # Proxy API requests. The Authorization header (the catalog token) is passed to the backend as is.
         location /v1/chat/completions {
           proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
           proxy_http_version 1.1;

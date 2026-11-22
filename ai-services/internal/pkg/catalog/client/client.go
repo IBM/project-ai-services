@@ -375,3 +375,20 @@ func jwtExpiry(token string) (time.Time, error) {
 }
 
 // Made with Bob
+
+// ServiceTokenForLoggedInUser returns a short-lived token for one service, issued to the user
+// who ran `catalog login`. The CLI uses it to call a service API directly (for example the
+// digitize export and import used by `application backup` and `restore`).
+func ServiceTokenForLoggedInUser(ctx context.Context, service string) (string, error) {
+	c, err := New(ctx)
+	if err != nil {
+		return "", fmt.Errorf("a catalog login is required to call the %s API (run `ai-services catalog login`): %w", service, err)
+	}
+
+	resp, err := c.ServiceToken(ctx, service)
+	if err != nil {
+		return "", fmt.Errorf("get %s token: %w", service, err)
+	}
+
+	return resp.Token, nil
+}

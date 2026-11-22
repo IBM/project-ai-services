@@ -58,13 +58,30 @@ def test_every_route_requires_a_token(client, method, path):
     assert client.request(method, _fill(path)).status_code == 401
 
 
+def _is_connector_route(path):
+    return path.startswith("/v1/connectors")
+
+
 @pytest.mark.parametrize("method,path", _routes())
-def test_every_route_requires_the_admin_role(client, signer, method, path):
+def test_every_route_requires_write_or_admin(client, signer, method, path):
     if (method, path) in PUBLIC:
         pytest.skip("public by design")
-    tok = signer.token(scope="digitize:read digitize:write")
+    tok = signer.token(scope="digitize:read")
     r = client.request(method, _fill(path), headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 403
+
+
+@pytest.mark.parametrize("method,path", _routes())
+def test_write_role_reaches_only_connector_routes(client, signer, method, path):
+    """The catalog's internal token (digitize:write) must not reach any non-connector route."""
+    if (method, path) in PUBLIC:
+        pytest.skip("public by design")
+    tok = signer.token(scope="digitize:write")
+    r = client.request(method, _fill(path), headers={"Authorization": f"Bearer {tok}"})
+    if _is_connector_route(path):
+        assert r.status_code != 403
+    else:
+        assert r.status_code == 403
 
 
 @pytest.mark.parametrize("method,path", _routes())

@@ -13,4 +13,12 @@ postgres:
 mcp:
   image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.10
   port: "6001"
+
+authJwksUrl: ""
+authAudience: "summarize"
+authCatalogApiUrl: ""
+authCatalogCaBundle: ""
+authCatalogHostAliases: ""
+# Comma-separated hosts allowed to serve JWKS over plain HTTP. Empty (HTTPS only) by default.
+authJwksPlaintextHosts: ""
 # Made with Bob

@@ -13,8 +13,12 @@ sys.path.insert(0, str(services_path))
 from similarity.app import app
 from similarity.similarity_utils import SimilaritySearchRequest
 
-# Create test client
-client = TestClient(app)
+
+@pytest.fixture
+def client():
+    """Test client, created per test so it picks up the authenticated_admin fixture."""
+    return TestClient(app)
+
 
 @pytest.fixture
 def mock_dependencies():
@@ -55,7 +59,7 @@ def mock_dependencies():
 class TestModeParameter:
     """Tests for the mode parameter functionality"""
     
-    def test_dense_mode_accepted(self, mock_dependencies):
+    def test_dense_mode_accepted(self, client, mock_dependencies):
         """Test: mode='dense' is accepted and returns cosine scores"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -67,7 +71,7 @@ class TestModeParameter:
         assert data["score_type"] == "cosine"
         assert len(data["results"]) > 0
     
-    def test_sparse_mode_accepted(self, mock_dependencies):
+    def test_sparse_mode_accepted(self, client, mock_dependencies):
         """Test: mode='sparse' is accepted and returns bm25 scores"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -78,7 +82,7 @@ class TestModeParameter:
         data = response.json()
         assert data["score_type"] == "bm25"
     
-    def test_hybrid_mode_accepted(self, mock_dependencies):
+    def test_hybrid_mode_accepted(self, client, mock_dependencies):
         """Test: mode='hybrid' is accepted and returns hybrid scores"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -89,7 +93,7 @@ class TestModeParameter:
         data = response.json()
         assert data["score_type"] == "hybrid"
     
-    def test_default_mode_is_dense(self, mock_dependencies):
+    def test_default_mode_is_dense(self, client, mock_dependencies):
         """Test to see if default parameter is dense"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query"
@@ -99,7 +103,7 @@ class TestModeParameter:
         data = response.json()
         assert data["score_type"] == "cosine"
     
-    def test_invalid_mode_returns_400(self, mock_dependencies):
+    def test_invalid_mode_returns_400(self, client, mock_dependencies):
         """Test that invalid mode value returns 400 error"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -109,7 +113,7 @@ class TestModeParameter:
         assert response.status_code == 400
         assert "mode must be one of" in response.json()["error"]["message"]
     
-    def test_mode_passed_to_retrieve_documents(self, mock_dependencies):
+    def test_mode_passed_to_retrieve_documents(self, client, mock_dependencies):
         """Test that mode parameter is passed to retrieve_documents"""
         client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -126,7 +130,7 @@ class TestModeParameter:
 class TestRerankingWithModes:
     """Tests for reranking combined with different modes"""
     
-    def test_rerank_overrides_score_type_dense(self, mock_dependencies):
+    def test_rerank_overrides_score_type_dense(self, client, mock_dependencies):
         """Test that rerank=true overrides score_type for dense mode"""
         mock_dependencies["rerank_documents"].return_value = [
             ({"page_content": "test", "filename": "test.pdf", "type": "text",
@@ -143,7 +147,7 @@ class TestRerankingWithModes:
         data = response.json()
         assert data["score_type"] == "relevance"
     
-    def test_rerank_overrides_score_type_hybrid(self, mock_dependencies):
+    def test_rerank_overrides_score_type_hybrid(self, client, mock_dependencies):
         """Test: rerank=true overrides score_type for hybrid mode"""
         mock_dependencies["rerank_documents"].return_value = [
             ({"page_content": "test", "filename": "test.pdf", "type": "text",
@@ -164,7 +168,7 @@ class TestRerankingWithModes:
 class TestRequestValidation:
     """Tests for request validation"""
     
-    def test_missing_query_returns_400(self, mock_dependencies):
+    def test_missing_query_returns_400(self, client, mock_dependencies):
         """Test that missing query returns 400 error"""
         response = client.post("/v1/similarity-search", json={
             "mode": "dense"
@@ -172,7 +176,7 @@ class TestRequestValidation:
         
         assert response.status_code == 422  # FastAPI validation error
     
-    def test_empty_query_returns_400(self, mock_dependencies):
+    def test_empty_query_returns_400(self, client, mock_dependencies):
         """Test that empty query returns 400 error"""
         response = client.post("/v1/similarity-search", json={
             "query": "",
@@ -182,7 +186,7 @@ class TestRequestValidation:
         assert response.status_code == 400
         assert "query is required" in response.json()["error"]["message"]
 
-    def test_top_k_zero_returns_422(self, mock_dependencies):
+    def test_top_k_zero_returns_422(self, client, mock_dependencies):
         """Test that top_k=0 is rejected by Pydantic before hitting OpenSearch"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -190,7 +194,7 @@ class TestRequestValidation:
         })
         assert response.status_code == 422
 
-    def test_top_k_negative_returns_422(self, mock_dependencies):
+    def test_top_k_negative_returns_422(self, client, mock_dependencies):
         """Test that negative top_k is also rejected"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -198,7 +202,7 @@ class TestRequestValidation:
         })
         assert response.status_code == 422
 
-    def test_top_k_one_is_accepted(self, mock_dependencies):
+    def test_top_k_one_is_accepted(self, client, mock_dependencies):
         """Test that top_k=1 is valid and returns a single result"""
         response = client.post("/v1/similarity-search", json={
             "query": "test query",
@@ -207,7 +211,7 @@ class TestRequestValidation:
         assert response.status_code == 200
         assert len(response.json()["results"]) == 1
 
-    def test_top_k_omitted_uses_default(self, mock_dependencies):
+    def test_top_k_omitted_uses_default(self, client, mock_dependencies):
         """Test that omitting top_k falls back to NUM_CHUNKS_POST_SEARCH (default 10)"""
         from similarity.settings import settings
         mock_retrieve = mock_dependencies["retrieve_documents"]

@@ -6,6 +6,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	deploymentauth "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/auth"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
@@ -25,6 +26,16 @@ type DeploymentExecutor struct {
 	componentRepo   repository.ComponentRepository
 	// workers resolves a RemoteRuntime for worker deployments.
 	workers worker.Resolver
+	// credentials creates per-deployment service credentials (DA2). May be nil.
+	credentials deploymentauth.CredentialProvisioner
+}
+
+// WithCredentialProvisioner sets the source of per-deployment service credentials and
+// returns the executor.
+func (e *DeploymentExecutor) WithCredentialProvisioner(p deploymentauth.CredentialProvisioner) *DeploymentExecutor {
+	e.credentials = p
+
+	return e
 }
 
 // NewDeploymentExecutor creates a new DeploymentExecutor instance.
@@ -116,7 +127,8 @@ func (e *DeploymentExecutor) runPodmanDeployer(
 	req apimodels.CreateApplicationRequest,
 	rt runtime.Runtime,
 ) error {
-	deployer := podman.NewPodmanDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo)
+	deployer := podman.NewPodmanDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo).
+		WithCredentialProvisioner(e.credentials)
 
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }
@@ -129,7 +141,8 @@ func (e *DeploymentExecutor) runOpenShiftDeployer(
 	req apimodels.CreateApplicationRequest,
 	rt runtime.Runtime,
 ) error {
-	deployer := openshift.NewOpenShiftDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo)
+	deployer := openshift.NewOpenShiftDeployer(rt, e.catalogProvider, e.appRepo, e.serviceRepo, e.componentRepo).
+		WithCredentialProvisioner(e.credentials)
 
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }
@@ -153,7 +166,7 @@ func (e *DeploymentExecutor) executePodmanDeployment(
 		e.appRepo,
 		e.serviceRepo,
 		e.componentRepo,
-	)
+	).WithCredentialProvisioner(e.credentials)
 
 	// Execute deployment - handles both architectures and standalone services
 	return deployer.ExecuteDeployment(ctx, plan, req)
@@ -180,7 +193,7 @@ func (e *DeploymentExecutor) executeOpenShiftDeployment(
 		e.appRepo,
 		e.serviceRepo,
 		e.componentRepo,
-	)
+	).WithCredentialProvisioner(e.credentials)
 
 	return deployer.ExecuteDeployment(ctx, plan, req)
 }

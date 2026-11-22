@@ -4,8 +4,7 @@ import asyncio
 import uuid
 from typing import Optional
 from urllib.parse import quote
-from fastapi import FastAPI, Request, HTTPException, Header, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import FastAPI, Request, HTTPException, Header, Depends, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import StreamingResponse, Response
 import json
@@ -17,6 +16,7 @@ import uvicorn
 from starlette.concurrency import iterate_in_threadpool
 from lingua import Language
 
+from common.auth import AuthConfigError, AuthMiddleware, get_verifier, require_role
 from common.misc_utils import set_log_level, get_logger
 from common.lang_utils import detect_language, LanguageCodes, get_max_tokens_map
 
@@ -62,10 +62,6 @@ NO_DOCUMENTS_FOUND_MESSAGES = {
     "FR": "Aucun document trouvé dans la base de connaissances pour cette requête.",
     "JA": "このクエリに対してナレッジベースにドキュメントが見つかりませんでした。",
 }
-
-# Cache for auth requirement check
-auth_required_cache = {"checked": False, "required": False}
-auth_cache_lock = asyncio.Lock()
 
 concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
@@ -113,7 +109,15 @@ async def lifespan(app):
     Sets up uvicorn logging configuration, creates a global connection pool
     for the LLM session, and pre-initializes model configurations.
     """
-    filtered_paths = ['/health']
+    # Fail closed: refuse to start without a complete, safe auth configuration. The catalog
+    # need not be reachable yet; /ready reports that.
+    try:
+        get_verifier()
+    except AuthConfigError as exc:
+        logger.error(f"Startup aborted, authentication is not configured: {exc}")
+        raise
+
+    filtered_paths = ['/health', '/ready']
     configure_uvicorn_logging(settings.common.app.log_level, filtered_paths)
     create_llm_session(pool_maxsize=settings.common.llm.max_batch_size)
     initialize_models()
@@ -152,14 +156,17 @@ app = FastAPI(
 - **Multi-language**: Automatic language detection (English, German, French, Italian, Japanese supported)
 - **Performance Metrics**: Detailed timing and token usage tracking
 
-**Authentication**: Optional vLLM API key authentication via Bearer token in Authorization header.
+**Authentication**: Every endpoint except `/health`, `/ready` and `/openapi.json` requires a catalog-issued
+Bearer token (`Authorization: Bearer <token>`) with a role on the `chat` service. The vLLM API key is a
+deployment secret and is never taken from the request.
 """,
     version="1.0.0",
-    openapi_tags=tags_metadata
+    openapi_tags=tags_metadata,
+    # The built-in docs pages are served unauthenticated; "/" below serves Swagger behind auth.
+    docs_url=None,
+    redoc_url=None,
 )
 
-# Simple Bearer token security scheme for Swagger UI
-security = HTTPBearer(auto_error=False, description="Enter your vLLM API key")
 app.add_exception_handler(HTTPException, http_exception_handler)
 
 @app.middleware("http")
@@ -175,7 +182,17 @@ async def add_request_id(request: Request, call_next):
     response.headers["X-Request-ID"] = request_id
     return response
 
-@app.get("/", include_in_schema=False)
+# Added last, so it is the outermost layer: every request is authenticated (deny by
+# default) before any other middleware or route code runs, and before a body is read.
+app.add_middleware(AuthMiddleware)
+
+
+def _vllm_api_key() -> str | None:
+    """The vLLM API key, from the deployment secret only. Never taken from the request."""
+    return settings.common.llm.api_key.get_secret_value() or None
+
+
+@app.get("/", include_in_schema=False, dependencies=[Depends(require_role("admin"))])
 def swagger_root():
     """Expose Swagger UI at the root path (/)."""
     return get_swagger_ui_html(
@@ -219,85 +236,35 @@ def get_stop_words_with_special_tokens(request_stop_words):
             stop_words.append(token)
     return stop_words
 
-async def is_auth_required() -> bool:
-    """
-    Check if vLLM authentication is required and cache the result.
-    Returns True if auth is required, False otherwise.
-    """
-    global auth_required_cache
-
-    # Check cache first
-    if auth_required_cache["checked"]:
-        return auth_required_cache["required"]
-
-    async with auth_cache_lock:
-        # Double-check after acquiring lock
-        if auth_required_cache["checked"]:
-            return auth_required_cache["required"]
-
-        try:
-            llm_endpoint = llm_model_dict['llm_endpoint']
-            # Try to access without API key
-            await asyncio.to_thread(query_vllm_models, llm_endpoint, None)
-            # If successful, auth is not required
-            auth_required_cache["checked"] = True
-            auth_required_cache["required"] = False
-            logger.debug("vLLM authentication is NOT required")
-            return False
-        except Exception as e:
-            # Check if it's an authentication error
-            error_str = str(e).lower()
-            if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
-                # Auth is required
-                auth_required_cache["checked"] = True
-                auth_required_cache["required"] = True
-                logger.debug("vLLM authentication IS required")
-                return True
-            # For other errors, allow subsequent calls
-            logger.debug(f"Error checking auth requirement: {e}, assuming auth is required")
-            auth_required_cache["checked"] = True
-            auth_required_cache["required"] = True
-            return False
-
-
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
     responses={401: http_error_responses[401], 500: http_error_responses[500]},
     tags=["models"],
     summary="List LLM models",
-    description="List available models from the configured vLLM endpoint. **Requires API key in Authorization header** (Bearer token) if vLLM authentication is enabled."
+    description="List available models from the configured vLLM endpoint. Requires the `read` role on `chat`.",
+    dependencies=[Depends(require_role("read"))],
 )
-async def list_models(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    """List available LLM models. Requires Authorization header with Bearer token if authentication is enabled."""
+async def list_models():
+    """List available LLM models. The vLLM API key comes from the deployment, not the caller."""
     logger.debug("List models..")
-
-    # Extract API key from credentials
-    api_key = credentials.credentials if credentials else None
-
-    # Check if auth is required and enforce it
-    if await is_auth_required():
-        if not api_key:
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required when vLLM authentication is enabled")
 
     try:
         llm_endpoint = llm_model_dict['llm_endpoint']
-        return await asyncio.to_thread(query_vllm_models, llm_endpoint, api_key)
+        return await asyncio.to_thread(query_vllm_models, llm_endpoint, _vllm_api_key())
     except Exception as e:
-        # Check if it's an authentication error
-        error_str = str(e).lower()
-        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "Invalid or missing API key")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
+        logger.error(f"Listing models failed: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "An unexpected error occurred")
 
 
 @app.get(
     "/v1/perf_metrics",
     response_model=PerfMetricsResponse,
-    responses={404: http_error_responses[404]},
+    responses={401: http_error_responses[401], 404: http_error_responses[404]},
     tags=["monitoring"],
     summary="Get performance metrics",
-    description="Return collected performance metrics for recent chat completion and retrieval calls. If request ID is provided, returns only that metric"
+    description="Return collected performance metrics for recent chat completion and retrieval calls. If request ID is provided, returns only that metric. Requires the `admin` role on `chat`.",
+    dependencies=[Depends(require_role("admin"))],
 )
 def get_perf_metrics(request_id: Optional[str] = None) -> PerfMetricsResponse:
     """
@@ -372,6 +339,7 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
     response_model=ChatCompletionResponse,
     tags=["chat", "MCP"],
     operation_id="chat_completion",
+    dependencies=[Depends(require_role("read"))],
     summary="Chat with RAG",
     description="""Generate chat completions grounded in retrieved documents using RAG (Retrieval-Augmented Generation).
 
@@ -388,7 +356,7 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
 - Language detection: Automatically detects query language (English, German, French, Italian, Japanese supported)
 - Query rephrasing: Automatically rephrases follow-up questions using conversation context
 
-**Authentication**: Requires API key in Authorization header (Bearer token) if vLLM authentication is enabled.
+**Authentication**: Requires a catalog-issued Bearer token with the `read` role on `chat`. The vLLM API key is a deployment secret and is not accepted from the request.
 
 **Reference Documents**: Set the `include_docs=true` query parameter to also receive the retrieved documents. Non-streaming responses add a `docs` field; streaming responses emit a leading `data: {"choices":[],"docs":[...]}` event. Without it, the response is unchanged.
 
@@ -490,23 +458,16 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
         503: http_error_responses[503]
     }
 )
-async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False, credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> ChatCompletionResponse | StreamingResponse | Response:
+async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False) -> ChatCompletionResponse | StreamingResponse | Response:
     """Generate a chat completion response using Retrieval-Augmented Generation (RAG).
 
     Performs query validation, language detection, document retrieval from the
     vector store, reranking, prompt construction, and invokes the LLM endpoint.
     Supports both standard and streaming responses.
     """
-    # Extract API key from credentials
-    api_key = credentials.credentials if credentials else None
-
-    # Check if auth is required and enforce it
-    if await is_auth_required():
-        if not api_key:
-            message = "API key is required when vLLM authentication is enabled"
-            if req.stream:
-                return _stream_error_response(message, status_code=401)
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, message)
+    # The vLLM key is the deployment's, never the caller's: the inbound Authorization header
+    # is a catalog token and is not forwarded.
+    api_key = _vllm_api_key()
 
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
@@ -652,7 +613,8 @@ async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False
 
             # Handle error responses
             if isinstance(vllm_non_stream, dict) and "error" in vllm_non_stream:
-                APIError.raise_error(ErrorCode.LLM_ERROR, str(vllm_non_stream["error"]))
+                logger.error(f"vLLM returned an error: {vllm_non_stream['error']}")
+                APIError.raise_error(ErrorCode.LLM_ERROR, "The language model returned an error")
 
             # Convert vLLM response to ChatCompletionResponse
             if isinstance(vllm_non_stream, dict) and "choices" in vllm_non_stream:
@@ -689,7 +651,7 @@ async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False
             logger.error(f"Error in non-streaming response: {e}", exc_info=True)
             APIError.raise_error(
                 ErrorCode.LLM_UNAVAILABLE,
-                f"Upstream service error: {e}",
+                "Upstream service error",
                 status_code=upstream_status,
             )
         except Exception as e:
@@ -703,11 +665,13 @@ async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False
                 concurrency_limiter.release()
 
     except db.VectorStoreNotReadyError as e:
-        APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY, str(e))
+        logger.error(f"Vector store is not ready: {e}")
+        APIError.raise_error(ErrorCode.VECTOR_STORE_NOT_READY)
     except HTTPException:
         raise
     except Exception as e:
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
+        logger.error(f"Chat completion failed: {e}", exc_info=True)
+        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, "An unexpected error occurred")
 
 @app.get(
     "/db-status",
@@ -716,7 +680,8 @@ async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False
     responses={500: http_error_responses[500]},
     tags=["monitoring"],
     summary="Vector DB status",
-    description="Check whether the vector store is initialized and populated."
+    description="Check whether the vector store is initialized and populated. Requires the `read` role on `chat`.",
+    dependencies=[Depends(require_role("read"))],
 )
 async def db_status() -> DBStatusResponse:
     """Check the status of the vector database.
@@ -741,7 +706,8 @@ async def db_status() -> DBStatusResponse:
             return DBStatusResponse(ready=False, message="No data ingested")
 
     except Exception as e:
-        return DBStatusResponse(ready=False, message=str(e))
+        logger.error(f"Vector store status check failed: {e}", exc_info=True)
+        return DBStatusResponse(ready=False, message="Vector store status is unavailable")
 
 @app.get(
     "/health",
@@ -758,6 +724,24 @@ async def health() -> HealthResponse:
         HealthResponse indicating the service is running and healthy.
     """
     return HealthResponse(status="ok")
+
+@app.get(
+    "/ready",
+    tags=["monitoring"],
+    summary="Readiness check",
+    description="Returns 200 when the service can verify tokens, that is, the JWKS keys are available."
+)
+async def readiness_check():
+    """Perform a readiness check requiring one JWKS fetch."""
+    try:
+        await get_verifier().jwks.check()
+    except Exception as exc:
+        logger.error(f"Readiness check failed, JWKS is unavailable: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWKS is unavailable",
+        )
+    return {"status": "ready"}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))

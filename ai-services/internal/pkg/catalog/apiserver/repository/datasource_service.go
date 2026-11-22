@@ -10,6 +10,8 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
+
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 )
 
 // NewDatasourceService creates the DatasourceService wired with all known provider testers.
@@ -21,6 +23,7 @@ func NewDatasourceService(
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	provider *catalog.CatalogProvider,
 	workerRegistry stream.WorkerRegistry,
+	tokens catalogclient.InternalTokenProvider,
 ) (DatasourceServiceInterface, error) {
 	encryptionKey := os.Getenv(catalogconstants.DBEncryptionKeyEnv)
 	if encryptionKey == "" {
@@ -37,6 +40,7 @@ func NewDatasourceService(
 		provider,
 		workerRegistry,
 		encryptionKey,
+		tokens,
 	), nil
 }
 

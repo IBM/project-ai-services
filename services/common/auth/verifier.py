@@ -9,6 +9,11 @@ from common.auth.config import AuthConfig
 from common.auth.jwks import JWKSClient, UnknownKeyID
 
 ALGORITHM = "ES256"
+# Role hierarchy (DA1): each role also grants the roles listed here.
+_IMPLIED_ROLES = {
+    "admin": frozenset({"write", "read"}),
+    "write": frozenset({"read"}),
+}
 LEEWAY_SECONDS = 30
 _REQUIRED_CLAIMS = ["exp", "nbf", "iat", "iss", "aud", "sub", "jti", "scope"]
 
@@ -29,8 +34,13 @@ class Principal:
     token_id: str
 
     def has_role(self, role: str) -> bool:
-        """True if the token grants exactly this role (no role hierarchy yet)."""
-        return role in self.roles
+        """True if the token grants this role, directly or through the hierarchy.
+
+        ``admin`` implies ``write`` and ``read``; ``write`` implies ``read``.
+        """
+        if role in self.roles:
+            return True
+        return any(role in _IMPLIED_ROLES.get(held, ()) for held in self.roles)
 
 
 class TokenVerifier:

@@ -168,7 +168,7 @@ func mcpExpectUpstreamError(endpoint, tool string, args map[string]any, wantStat
 // mcpRequireToken fails the spec when no catalog token is available; the sidecars run with
 // --auth-passthrough so every tools/call must carry one.
 func mcpRequireToken(label string) {
-	_, err := mcpBearerToken()
+	_, err := mcpBearerToken(context.Background(), "")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
 		"[%s] sidecars use --auth-passthrough, a catalog token is required", label)
 }

@@ -37,6 +37,7 @@ func httpCfg(timeout time.Duration) common.HTTPClientConfig {
 		Timeout:            timeout,
 		InsecureSkipVerify: true,
 		PoolConnections:    true,
+		Service:            common.ServiceDigitize,
 	}
 }
 

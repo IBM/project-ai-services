@@ -129,7 +129,7 @@ func startBackgroundServices(
 // buildAPIServerOptions wires all service dependencies and returns the options
 // needed to start the API server. pool.Close() and the returned cleanup func
 // must be called by the caller.
-func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, adminUser, adminPassHash string, accessTTL, refreshTTL time.Duration, workerGatewayPort int, manageiqURL string, manageiqInsecure bool, serviceTokenTTL time.Duration) (apiserver.APIServerOptions, func(), error) {
+func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, adminUser, adminPassHash string, accessTTL, refreshTTL time.Duration, workerGatewayPort int, manageiqURL string, manageiqInsecure bool, serviceTokenTTL, serviceCredentialTTL time.Duration) (apiserver.APIServerOptions, func(), error) {
 	encryptionKey := os.Getenv(constants.DBEncryptionKeyEnv)
 
 	userRepo := apirepository.NewInMemoryUserRepoWithAdminHash(bootstrapAdminID, adminUser, "Admin", adminPassHash)
@@ -152,14 +152,14 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 
 	tokenMgr := auth.NewTokenManager(secretKey, accessTTL, refreshTTL)
 
-	serviceTokenH, err := newServiceTokenHandler(ctx, pool, userRepo, encryptionKey, serviceTokenTTL)
+	serviceTokenH, err := newServiceTokenHandler(ctx, pool, userRepo, encryptionKey, serviceTokenTTL, serviceCredentialTTL)
 	if err != nil {
 		return apiserver.APIServerOptions{}, nil, err
 	}
 	workerRepo := repository.NewWorkerRepository(pool)
 	workerReg := workerregistry.New(workerRepo)
 
-	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, appRepo, svcDepRepo, catalogProvider, workerReg)
+	datasourceSvc, err := apirepository.NewDatasourceService(connectorRepo, appRepo, svcDepRepo, catalogProvider, workerReg, serviceTokenH.InternalTokens())
 	if err != nil {
 		return apiserver.APIServerOptions{}, nil, fmt.Errorf("failed to initialize datasource service: %w", err)
 	}
@@ -176,7 +176,7 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 		AuthService:         newAuthService(userRepo, tokenMgr, blacklist, manageiqURL, manageiqInsecure),
 		TokenManager:        tokenMgr,
 		Blacklist:           blacklist,
-		ApplicationService:  apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType(), workerReg, connectorRepo, datasourceSvc),
+		ApplicationService:  apirepository.NewApplicationService(appRepo, svcRepo, compRepo, svcDepRepo, catalogProvider, vars.RuntimeFactory.GetRuntimeType(), workerReg, connectorRepo, datasourceSvc, serviceTokenH.Credentials()),
 		DatasourceService:   datasourceSvc,
 		ModelService:        modelSvc,
 		BundleService:       bundlesvc.NewBundleService(bundleRepo, svcRepo, compRepo, catalogProvider),
@@ -194,10 +194,11 @@ func buildAPIServerOptions(ctx context.Context, pool *pgxpool.Pool, secretKey, a
 	return opts, cleanup, nil
 }
 
-// newServiceTokenHandler wires the ES256 signer, the Phase 1 bootstrap-admin resolver and the
-// authorization-code store. It fails when DB_ENCRYPTION_KEY is missing, because the signing
-// key is stored encrypted with it.
-func newServiceTokenHandler(ctx context.Context, pool *pgxpool.Pool, userRepo *apirepository.InMemoryUserRepo, encryptionKey string, ttl time.Duration) (*handlers.ServiceTokenHandler, error) {
+// newServiceTokenHandler wires the ES256 signer, the Phase 1 bootstrap-admin resolver, the
+// authorization-code store and the service-credential store. It fails when DB_ENCRYPTION_KEY
+// is missing, because the signing key is stored encrypted with it. The credential service is
+// always set, so handler.Credentials() is never a nil pointer.
+func newServiceTokenHandler(ctx context.Context, pool *pgxpool.Pool, userRepo *apirepository.InMemoryUserRepo, encryptionKey string, ttl, credentialTTL time.Duration) (*handlers.ServiceTokenHandler, error) {
 	signer, err := auth.NewSigner(ctx, repository.NewSigningKeyRepository(pool), encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialise service token signer: %w", err)
@@ -212,7 +213,12 @@ func newServiceTokenHandler(ctx context.Context, pool *pgxpool.Pool, userRepo *a
 		return nil, err
 	}
 
-	return handlers.NewServiceTokenHandler(tokens, signer), nil
+	creds, err := auth.NewCredentialService(tokens, repository.NewServiceCredentialRepository(pool), credentialTTL)
+	if err != nil {
+		return nil, err
+	}
+
+	return handlers.NewServiceTokenHandler(tokens, signer).WithCredentials(creds), nil
 }
 
 // newAuthService returns the ManageIQ-backed auth service when manageiqURL is set, otherwise the
@@ -236,8 +242,12 @@ func newAuthService(
 }
 
 // runAPIServer initializes and starts the API server with the provided configuration.
-func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string, workerGatewayPort int, manageiqURL string, manageiqInsecure bool, serviceTokenTTL time.Duration) error {
+func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, adminPassHash string, workerGatewayPort int, manageiqURL string, manageiqInsecure bool, serviceTokenTTL, serviceCredentialTTL time.Duration) error {
 	if err := auth.ValidateServiceTokenTTL(serviceTokenTTL); err != nil {
+		return err
+	}
+
+	if err := auth.ValidateServiceCredentialTTL(serviceCredentialTTL); err != nil {
 		return err
 	}
 
@@ -263,7 +273,7 @@ func runAPIServer(port int, accessTTL, refreshTTL time.Duration, adminUser, admi
 	defer pool.Close()
 	logger.Infoln("Connected to database successfully")
 
-	opts, cleanup, err := buildAPIServerOptions(ctx, pool, secretKey, adminUser, adminPassHash, accessTTL, refreshTTL, workerGatewayPort, manageiqURL, manageiqInsecure, serviceTokenTTL)
+	opts, cleanup, err := buildAPIServerOptions(ctx, pool, secretKey, adminUser, adminPassHash, accessTTL, refreshTTL, workerGatewayPort, manageiqURL, manageiqInsecure, serviceTokenTTL, serviceCredentialTTL)
 	if err != nil {
 		return err
 	}
@@ -287,6 +297,7 @@ func NewAPIServerCmd() *cobra.Command {
 		runtimeType            string
 		workerGatewayPort      int
 		serviceTokenTTL        = auth.DefaultServiceTokenTTL
+		serviceCredentialTTL   = auth.DefaultServiceCredentialTTL
 	)
 
 	apiserverCmd := &cobra.Command{
@@ -315,7 +326,7 @@ Note:
 			return common.InitAndValidateRuntimeFlag(runtimeType)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash, workerGatewayPort, manageiqURL, manageiqInsecure, serviceTokenTTL)
+			return runAPIServer(port, defaultAccessTokenTTL, defaultRefreshTokenTTL, adminUserName, adminPasswordHash, workerGatewayPort, manageiqURL, manageiqInsecure, serviceTokenTTL, serviceCredentialTTL)
 		},
 	}
 
@@ -323,6 +334,7 @@ Note:
 	apiserverCmd.Flags().DurationVarP(&defaultAccessTokenTTL, "access-token-ttl", "", defaultAccessTokenTTL, "Time-to-live for access tokens")
 	apiserverCmd.Flags().DurationVarP(&defaultRefreshTokenTTL, "refresh-token-ttl", "", defaultRefreshTokenTTL, "Time-to-live for refresh tokens")
 	apiserverCmd.Flags().DurationVar(&serviceTokenTTL, "service-token-ttl", serviceTokenTTL, "Time-to-live for service tokens (maximum 1h)")
+	apiserverCmd.Flags().DurationVar(&serviceCredentialTTL, "service-credential-ttl", serviceCredentialTTL, "Lifetime of the per-deployment credential that a service such as chat trades for service tokens")
 	apiserverCmd.Flags().StringVar(&adminUserName, "admin-username", "admin", "Username for the default admin user")
 	apiserverCmd.Flags().StringVar(&adminPasswordHash, "admin-password-hash", "", "Precomputed hash of the password for the default admin user")
 	apiserverCmd.Flags().IntVar(&workerGatewayPort, "workergateway-port", workerConstants.WorkerGatewayPort, "Port for the gRPC worker gateway (always active, default 9191)")

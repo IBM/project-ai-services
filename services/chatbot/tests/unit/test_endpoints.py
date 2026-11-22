@@ -554,7 +554,7 @@ class TestDBStatusEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["ready"] is False
-        assert "Connection error" in data["message"]
+        assert "Connection error" not in data["message"]
 
 
 @pytest.mark.unit

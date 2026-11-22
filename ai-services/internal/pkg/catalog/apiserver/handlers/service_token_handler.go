@@ -15,13 +15,32 @@ const jwksCacheControl = "public, max-age=300"
 
 // ServiceTokenHandler serves the JWKS and the service-token, authorize and exchange endpoints.
 type ServiceTokenHandler struct {
-	tokens *auth.TokenService
-	signer *auth.Signer
+	tokens   *auth.TokenService
+	signer   *auth.Signer
+	internal *auth.InternalTokenSource
+	creds    *auth.CredentialService
 }
 
 // NewServiceTokenHandler creates the handler.
 func NewServiceTokenHandler(tokens *auth.TokenService, signer *auth.Signer) *ServiceTokenHandler {
-	return &ServiceTokenHandler{tokens: tokens, signer: signer}
+	return &ServiceTokenHandler{tokens: tokens, signer: signer, internal: auth.NewInternalTokenSource(tokens)}
+}
+
+// InternalTokens returns the source of the catalog's own tokens for calls it makes to services.
+func (h *ServiceTokenHandler) InternalTokens() *auth.InternalTokenSource {
+	return h.internal
+}
+
+// WithCredentials enables the service-credential endpoint and returns the handler.
+func (h *ServiceTokenHandler) WithCredentials(c *auth.CredentialService) *ServiceTokenHandler {
+	h.creds = c
+
+	return h
+}
+
+// Credentials returns the service-credential service, or nil when it is not enabled.
+func (h *ServiceTokenHandler) Credentials() *auth.CredentialService {
+	return h.creds
 }
 
 // JWKS godoc
@@ -159,6 +178,52 @@ func (h *ServiceTokenHandler) Exchange(c *gin.Context) {
 			return
 		}
 		logger.ErrorfCtx(c.Request.Context(), "code exchange: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, tokenResp{Token: token, ExpiresAt: exp.UTC().Format("2006-01-02T15:04:05Z")})
+}
+
+type credentialTokenReq struct {
+	Credential string `json:"credential" binding:"required"`
+	Service    string `json:"service" binding:"required"`
+}
+
+// CredentialToken godoc
+//
+//	@Summary		Trade a service credential for a service token
+//	@Description	Called by a deployed service (for example chat) with the per-deployment credential the catalog gave it. Returns a short-lived token for one other service, limited to the roles fixed for that pair in the catalog. Every failure returns the same error.
+//	@Tags			Authentication
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		credentialTokenReq	true	"Credential and target service"
+//	@Success		200		{object}	tokenResp
+//	@Failure		401		{object}	map[string]interface{}	"Invalid credential"
+//	@Router			/auth/service-credential/token [post]
+func (h *ServiceTokenHandler) CredentialToken(c *gin.Context) {
+	if h.creds == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+
+		return
+	}
+
+	var req credentialTokenReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credential"})
+
+		return
+	}
+
+	token, exp, err := h.creds.Exchange(c.Request.Context(), req.Credential, req.Service)
+	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredential) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credential"})
+
+			return
+		}
+		logger.ErrorfCtx(c.Request.Context(), "credential exchange: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 
 		return

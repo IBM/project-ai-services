@@ -23,8 +23,23 @@ async def test_valid_admin_token():
     s = Signer()
     v, _ = _verifier(s)
     p = await v.verify(s.token())
-    assert p.has_role("admin") and not p.has_role("write")
+    assert p.has_role("admin")
     assert p.subject == "uid_1" and p.audience == "digitize"
+
+
+async def test_role_hierarchy():
+    s = Signer()
+    v, _ = _verifier(s)
+    admin = await v.verify(s.token(scope="digitize:admin"))
+    assert admin.has_role("admin") and admin.has_role("write") and admin.has_role("read")
+    write = await v.verify(s.token(scope="digitize:write"))
+    assert write.has_role("write") and write.has_role("read") and not write.has_role("admin")
+    read = await v.verify(s.token(scope="digitize:read"))
+    assert read.has_role("read") and not read.has_role("write") and not read.has_role("admin")
+    assert not admin.has_role("unknown")
+    # A scope for another service grants nothing here.
+    other = await v.verify(s.token(scope="other:admin digitize:read"))
+    assert not other.has_role("write")
 
 
 async def test_other_service_scopes_are_ignored():

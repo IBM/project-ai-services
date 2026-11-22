@@ -19,7 +19,8 @@ func NewServiceTokenCmd() *cobra.Command {
 that a service API, such as Digitize, accepts.
 
 The token is printed to stdout only, so it can be used as $(...). It is never written to disk.
-Tokens expire after a few minutes; request a new one when needed.`,
+Tokens expire after at most an hour (the catalog's --service-token-ttl, 1 hour by default);
+request a new one when needed.`,
 		Example: `  curl -H "Authorization: Bearer $(ai-services catalog service-token --service digitize)" $DIGITIZE_URL/v1/documents`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
