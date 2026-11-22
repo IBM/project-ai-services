@@ -32,6 +32,7 @@ func isValidDomainSuffix(suffix string) bool {
 	if strings.Contains(suffix, "*") {
 		return false
 	}
+
 	return domainSuffixRegex.MatchString(suffix)
 }
 
