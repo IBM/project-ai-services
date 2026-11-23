@@ -2434,6 +2434,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "Case-insensitive substring search on model name",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "default": 1,
                         "description": "Page number (1-indexed)",
@@ -3972,6 +3978,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelApplication"
                     }
                 },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
                 "connected_services": {
                     "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"
@@ -4040,6 +4049,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListItem": {
             "type": "object",
             "properties": {
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
                 "connected_services": {
                     "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"
@@ -4135,7 +4147,7 @@ const docTemplate = `{
                     }
                 },
                 "connectors": {
-                    "description": "Connectors lists pre-registered connector records to attach to this service\nafter the application reaches Running status. Each entry is validated against\nthe service's catalog YAML (accepts_datasource) and the connectors table before\ndeployment begins. Omitting this field (or passing an empty list) is valid.",
+                    "description": "Connectors lists pre-registered connector records to attach to this service\nafter the application reaches Running status. Each entry is validated against\nthe service's catalog YAML (datasource block) and the connectors table before\ndeployment begins. Omitting this field (or passing an empty list) is valid.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef"
@@ -4660,6 +4672,24 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings": {
+            "type": "object",
+            "properties": {
+                "max_connections": {
+                    "description": "MaxConnections is the maximum number of datasources that may be attached to the service at any\none time (creation-time and post-creation connections combined). nil means unlimited.\nMust be \u003e= 1 when set.",
+                    "type": "integer"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "supported_providers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference": {
             "type": "object",
             "properties": {
@@ -4748,6 +4778,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent"
                     }
+                },
+                "datasource": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings"
                 },
                 "id": {
                     "type": "string"
@@ -5030,6 +5063,9 @@ const docTemplate = `{
                 },
                 "certified_by": {
                     "type": "string"
+                },
+                "datasource": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings"
                 },
                 "dependencies": {
                     "type": "array",
@@ -5356,8 +5392,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
-	Title:            "AI Services Catalog API",
-	Description:      "API server for managing AI Services catalog, applications, and authentication",
+	Title:            "AI Launchpad Catalog API",
+	Description:      "API server for managing AI Launchpad catalog, applications, and authentication",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -46,6 +46,8 @@ type ListModelsRequest struct {
 	ProviderIDs []string
 	Models      []string
 	Status      string
+	// Search is a case-insensitive substring match on the model name.
+	Search string
 	// CreatedBy restricts the list to models created by this user. It is set from the token by
 	// the handler.
 	CreatedBy string
@@ -56,6 +58,7 @@ type ModelBase struct {
 	ID             string                   `json:"id"`
 	DeploymentType constants.DeploymentType `json:"deployment_type"`
 	Name           string                   `json:"name"`
+	ComponentType  types.ComponentType      `json:"component_type"`
 	Provider       types.ProviderInfo       `json:"provider"`
 	// Worker is null for remote models and for local models on the control-plane Podman socket.
 	Worker *types.ApplicationWorker `json:"worker"`

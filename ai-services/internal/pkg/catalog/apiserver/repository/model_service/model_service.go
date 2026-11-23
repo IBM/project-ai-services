@@ -98,11 +98,7 @@ func (s *ModelService) CreateModel(ctx context.Context, req apimodels.CreateMode
 		return nil, validators.BadRequest("models are unsupported on openshift runtime")
 	}
 
-	if err := validateCreateRequest(req); err != nil {
-		return nil, err
-	}
-
-	if err := s.planner.ValidateComponentType(req.ComponentType); err != nil {
+	if err := s.validateCreateRequest(ctx, req); err != nil {
 		return nil, err
 	}
 

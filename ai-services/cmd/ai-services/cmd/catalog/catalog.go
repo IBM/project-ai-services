@@ -6,12 +6,12 @@ import (
 	"github.com/project-ai-services/ai-services/cmd/ai-services/cmd/catalog/bundle"
 )
 
-// CatalogCmd returns the cobra command for managing the AI Services catalog service, including subcommands for the API server.
+// CatalogCmd returns the cobra command for managing the AI Launchpad catalog service, including subcommands for the API server.
 func CatalogCmd() *cobra.Command {
 	catalogCMD := &cobra.Command{
 		Use:   "catalog",
-		Short: "Manage the AI Services catalog",
-		Long: `The catalog service offers APIs for managing the AI Services catalog, enabling you to list available services,
+		Short: "Manage the AI Launchpad catalog",
+		Long: `The catalog service offers APIs for managing the AI Launchpad catalog, enabling you to list available services,
 deploy them, and handle service metadata`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()

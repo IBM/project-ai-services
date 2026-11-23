@@ -22,9 +22,14 @@ import (
 )
 
 const (
-	dirPerm  = 0o700
+	// dirPerm lets the Caddy container user (a different uid from the worker
+	// process) reach the files in the TLS directory.
+	dirPerm  = 0o755
 	certPerm = 0o644
-	keyPerm  = 0o600
+	// keyPerm is the mode of the AES-GCM encrypted tls.key. The Caddy container
+	// user must be able to read it so the encrypted_file Caddy module can decrypt
+	// it in memory; the file never holds a plaintext key.
+	keyPerm = 0o644
 
 	tlsCertFile = "tls.crt"
 	tlsKeyFile  = "tls.key"

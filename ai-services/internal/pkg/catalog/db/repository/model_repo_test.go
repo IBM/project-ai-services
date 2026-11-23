@@ -66,6 +66,18 @@ func TestBuildModelWhere(t *testing.T) {
 			expectedArgs: []interface{}{"alice", "Running"},
 		},
 		{
+			name:         "search uses ILIKE with ESCAPE on the name",
+			filters:      ModelFilters{CreatedBy: "alice", Search: "granite"},
+			expectedSQL:  " WHERE created_by = $1 AND (name ILIKE $2 ESCAPE '\\')",
+			expectedArgs: []interface{}{"alice", "%granite%"},
+		},
+		{
+			name:         "search escapes LIKE wildcards",
+			filters:      ModelFilters{Search: `100%_\`},
+			expectedSQL:  " WHERE (name ILIKE $1 ESCAPE '\\')",
+			expectedArgs: []interface{}{`%100\%\_\\%`},
+		},
+		{
 			name:         "empty multi-value filters are not applied",
 			filters:      ModelFilters{CreatedBy: "alice", Providers: []string{}, Models: nil},
 			expectedSQL:  " WHERE created_by = $1",
@@ -219,6 +231,20 @@ func TestBuildModelListQuery(t *testing.T) {
 			},
 		},
 		{
+			name:         "search is followed by paging placeholders",
+			filters:      ModelFilters{CreatedBy: "alice", Search: "granite", Limit: 20, Offset: 40},
+			expectedTail: ") m WHERE created_by = $1 AND (name ILIKE $2 ESCAPE '\\')" + modelListOrderBy + " LIMIT $3 OFFSET $4",
+			expectedArgs: []interface{}{"alice", "%granite%", 20, 40},
+		},
+		{
+			name:           "search is numbered after the component types and the other filters",
+			filters:        ModelFilters{CreatedBy: "alice", Status: "Running", Search: "granite", Limit: 10, Offset: 10},
+			componentTypes: []string{"llm"},
+			expectedTail: ") m WHERE created_by = $1 AND component_type = ANY($2) AND status = $3" +
+				" AND (name ILIKE $4 ESCAPE '\\')" + modelListOrderBy + " LIMIT $5 OFFSET $6",
+			expectedArgs: []interface{}{"alice", []string{"llm"}, "Running", "%granite%", 10, 10},
+		},
+		{
 			name:         "empty multi-value filters are not applied",
 			filters:      ModelFilters{CreatedBy: "alice", Providers: []string{}, Models: nil},
 			expectedTail: ") m WHERE created_by = $1" + modelListOrderBy,
@@ -325,6 +351,13 @@ func TestBuildModelCountQuery_SharesUnionAndFilters(t *testing.T) {
 			expectedWhere:      " WHERE created_by = $1 AND status = $2",
 			expectedCountArgs:  []interface{}{"alice", "connected"},
 			expectedListSuffix: []interface{}{20, 20},
+		},
+		{
+			name:               "search with paging",
+			filters:            ModelFilters{CreatedBy: "alice", Search: "granite", Limit: 20, Offset: 40},
+			expectedWhere:      " WHERE created_by = $1 AND (name ILIKE $2 ESCAPE '\\')",
+			expectedCountArgs:  []interface{}{"alice", "%granite%"},
+			expectedListSuffix: []interface{}{20, 40},
 		},
 		{
 			name:               "component types",

@@ -47,12 +47,10 @@ def get_job_document_stats(job_id: str) -> dict:
     Returns:
         Dictionary containing:
         - failed_docs: List of failed document objects with id, name, status
-        - completed_docs: List of completed document objects with id, name, status (includes already_exists and skipped, excludes completed_with_errors)
-        - completed_with_errors_docs: List of docs with status completed_with_errors
+        - completed_docs: List of completed document objects with id, name, status (includes already_exists and skipped)
         - total_docs: Total number of documents
         - failed_count: Number of failed documents
-        - completed_count: Number of completed documents (includes already_exists and skipped, excludes completed_with_errors)
-        - completed_with_errors_count: Number of completed_with_errors documents
+        - completed_count: Number of completed documents (includes already_exists and skipped)
     """
     from digitize.models import DocStatus
 
@@ -72,19 +70,13 @@ def get_job_document_stats(job_id: str) -> dict:
             DocStatus.SKIPPED.value,
         )
         completed_docs = [doc for doc in documents if doc.get("status") in _terminal_ok]
-        completed_with_errors_docs = [
-            doc for doc in documents
-            if doc.get("status") == DocStatus.COMPLETED_WITH_ERRORS.value
-        ]
 
         return {
             "failed_docs": failed_docs,
             "completed_docs": completed_docs,
-            "completed_with_errors_docs": completed_with_errors_docs,
             "total_docs": len(documents),
             "failed_count": len(failed_docs),
             "completed_count": len(completed_docs),
-            "completed_with_errors_count": len(completed_with_errors_docs),
         }
     except Exception as e:
         logger.error(f"Error reading job {job_id} from database: {e}", exc_info=True)
@@ -109,7 +101,15 @@ def generate_uuid():
 
 # Owner statuses that mean "this content was already processed"; any other owner
 # status means it is still being processed.
-_COMPLETED_OWNER_STATUSES = (DocStatus.COMPLETED.value, DocStatus.COMPLETED_WITH_ERRORS.value)
+_COMPLETED_OWNER_STATUSES = (DocStatus.COMPLETED.value,)
+
+
+def dedup_key(operation: str, output_format) -> str:
+    """Registry key for document_checksum.type: digitization dedups per output format,
+    ingestion is format-agnostic."""
+    if operation == models.OperationType.DIGITIZATION.value:
+        return f"{operation}:{getattr(output_format, 'value', output_format)}"
+    return operation
 
 
 def build_duplicate_record(filename: str, file_hash: str, owner):
@@ -213,7 +213,7 @@ def initialize_job_state(
     # of concurrent submissions of the same content exactly one wins.
     lost_claims: dict = {}  # filename -> Document that owns the content
     if file_checksum_dict:
-        op_key = operation.value if hasattr(operation, "value") else operation
+        op_key = dedup_key(operation.value if hasattr(operation, "value") else operation, output_format)
         already_exists_files = already_exists_files if already_exists_files is not None else []
         skipped_files = skipped_files if skipped_files is not None else []
         for doc in documents_info:
@@ -392,7 +392,6 @@ TEARDOWN_JOB_POLL_INTERVAL_S = 2
 
 _TERMINAL_DOC_STATUSES = (
     models.DocStatus.COMPLETED.value,
-    models.DocStatus.COMPLETED_WITH_ERRORS.value,
     models.DocStatus.FAILED.value,
     models.DocStatus.CANCELLED.value,
     models.DocStatus.ALREADY_EXISTS.value,
@@ -401,7 +400,6 @@ _TERMINAL_DOC_STATUSES = (
 
 NON_CANCELLABLE_JOB_STATUSES = (
     models.JobStatus.COMPLETED.value,
-    models.JobStatus.COMPLETED_WITH_ERRORS.value,
     models.JobStatus.FAILED.value,
     models.JobStatus.CANCEL_PENDING.value,
     models.JobStatus.CANCELLED.value,

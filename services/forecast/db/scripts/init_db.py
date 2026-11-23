@@ -93,7 +93,7 @@ def setup_worker_role(
                     print(f"Role '{worker_user}' already exists, updating its password")
                     cursor.execute(
                         sql.SQL(
-                            "ALTER ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}"
+                            "ALTER ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {}"
                         ).format(
                             role, sql.Literal(worker_password)
                         )
@@ -108,7 +108,11 @@ def setup_worker_role(
             finally:
                 cursor.close()
     except Exception as e:
-        print(f"❌ Error configuring worker role: {e}")
+        # The message of a database error can quote the failed statement, which
+        # holds the worker password, so only the error type and SQLSTATE are printed.
+        sqlstate = getattr(e, "pgcode", None)
+        state = f" (SQLSTATE {sqlstate})" if sqlstate else ""
+        print(f"❌ Error configuring worker role: {type(e).__name__}{state}")
         return False
 
 
