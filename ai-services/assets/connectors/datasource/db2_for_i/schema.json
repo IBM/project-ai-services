@@ -27,7 +27,7 @@
     "database": {
       "type": "string",
       "title": "Database name",
-      "description": "Name of the Db2 for i database to read data from.",
+      "description": "Name of the Db2 for i database (schema or library) to read data from. The account must be authorized to access it.",
       "minLength": 1,
       "ui:section": "Location"
     },

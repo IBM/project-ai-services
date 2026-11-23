@@ -19,9 +19,9 @@ const (
 	db2ForITimeout = 10 * time.Second
 	// db2ForIJobID is the identifier of the short-lived Mapepire SQL job used for the test.
 	db2ForIJobID = "db2-for-i-test"
-	// db2ForIAccessQuery is a read-only probe that returns the relational database (RDB) name
-	// the job is connected to.
-	db2ForIAccessQuery = "SELECT CURRENT SERVER AS DB_NAME FROM SYSIBM.SYSDUMMY1"
+	// db2ForIAccessQuery is a read-only probe that returns the configured database (schema/library)
+	// when it exists and the authenticated user is authorized to see it.
+	db2ForIAccessQuery = "SELECT SCHEMA_NAME FROM QSYS2.SYSSCHEMAS WHERE SCHEMA_NAME = ?"
 	// db2ForIProperties works around a misspelled JSON key in the mapepire-go SDK connect payload: the value injects
 	// "technique":"TCP" into the connect payload, forcing the TCP Db2 driver and avoiding the
 	// CCSID 65535 exception. It must be set verbatim.
@@ -39,7 +39,7 @@ func NewDb2ForITester() ConnectionTester {
 // TestConnection runs three sequential checks against a Mapepire daemon:
 //  1. Network — TCP dial to host:port (port defaults to 8076 when not supplied).
 //  2. Auth    — Mapepire WebSocket handshake and IBM i authentication.
-//  3. Access  — read-only query confirming the session is connected to the configured database.
+//  3. Access  — read-only query confirming the configured database is accessible to the user.
 //
 // TLS certificates are always verified.
 func (t *db2ForITester) TestConnection(ctx context.Context, params map[string]any) error {
@@ -123,12 +123,17 @@ func connectDb2ForIJob(ctx context.Context, creds mapepire.DaemonServer, usernam
 	return job, nil
 }
 
-// checkDb2ForIAccess confirms the authenticated user can run a read-only query and that the
-// session is connected to the configured database (compared case-insensitively against
-// CURRENT SERVER, the relational database name of the system).
+// checkDb2ForIAccess confirms the configured database (schema/library) exists and that the
+// authenticated user is authorized to access it. IBM i object names are upper case, so the
+// name is matched case-insensitively. QSYS2.SYSSCHEMAS only lists schemas the user may see.
 func checkDb2ForIAccess(ctx context.Context, job *mapepire.SQLJob, database string) error {
+	name := strings.ToUpper(strings.TrimSpace(database))
+
 	res, err := runDb2ForIStep(ctx, func() (*mapepire.ServerResponse, error) {
-		q, err := job.Query(db2ForIAccessQuery)
+		q, err := job.QueryWithOptions(db2ForIAccessQuery, mapepire.QueryOptions{
+			Rows:       1,
+			Parameters: [][]any{{name}},
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -145,29 +150,14 @@ func checkDb2ForIAccess(ctx context.Context, job *mapepire.SQLJob, database stri
 		}
 	}
 
-	actual := db2ForIFirstValue(res.Data)
-	if !strings.EqualFold(strings.TrimSpace(actual), strings.TrimSpace(database)) {
+	if len(res.Data) == 0 {
 		return &ConnectionCheckError{
 			CheckType: ConnectionCheckAccess,
-			Message:   fmt.Sprintf("Database %q is not accessible: the system reports database %q", database, actual),
+			Message:   fmt.Sprintf("Database %q is not accessible: it does not exist or the user is not authorized to access it", database),
 		}
 	}
 
 	return nil
-}
-
-// db2ForIFirstValue returns the first column value of the first row as a string, or an
-// empty string when the result is empty.
-func db2ForIFirstValue(rows []map[string]any) string {
-	if len(rows) == 0 {
-		return ""
-	}
-
-	for _, v := range rows[0] {
-		return fmt.Sprint(v)
-	}
-
-	return ""
 }
 
 // runDb2ForIStep runs fn in a goroutine and waits for it or for the phase timeout. If the
