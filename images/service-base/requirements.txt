@@ -1,7 +1,7 @@
 ## Web / runtime
 fastapi==0.135.3
 psutil==7.2.2
-pydantic==2.14.1
+pydantic==2.14.4
 pydantic-settings==2.16.1
 python-multipart==0.0.32
 requests==2.34.2
@@ -13,7 +13,7 @@ uvloop==0.22.1
 psycopg2==2.9.11
 
 ## Search / embeddings
-cohere==7.0.3
+cohere==7.3.2
 numpy==2.4.4
 opensearch-py==3.2.0
 tqdm==4.70.1
