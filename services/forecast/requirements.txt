@@ -4,10 +4,8 @@
 # Security & Encryption
 cryptography>=42.0.0
 
-# IBM i / Db2 Data Connector (Mapepire & optional SSH tunneling)
+# IBM i / Db2 Data Connector (Mapepire)
 mapepire-python>=0.2.0
-python-dotenv>=1.0.0
-sshtunnel>=0.4.0
 
 # Data Extraction & Parquet Storage
 pyarrow>=14.0.0
@@ -20,6 +18,8 @@ lightgbm>=4.0.0
 xgboost>=2.0.0
 autogluon.tabular>=1.1.0
 
-# Triton Serving & Model Config (Protobuf Text Format / Triton Client)
+# Triton inference client (async HTTP)
+httpx>=0.24.0
+
+# Triton Model Config (Protobuf Text Format)
 protobuf>=4.25.0
-tritonclient[http]>=2.40.0

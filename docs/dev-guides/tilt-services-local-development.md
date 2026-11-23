@@ -33,7 +33,7 @@ The three services only call an LLM (chat completions plus `/tokenize`) and stor
 | `triton` | Forecast only. See [Forecast](#forecast). |
 | `quick-links` | URLs of the APIs. |
 
-Environment variables passed to the services match the `rag-dev` pod templates (`LLM_ENDPOINT`, `LLM_MODEL`, `LLM_MAX_MODEL_LEN`, `POSTGRES_*`, `DB_POOL_SIZE`, `PORT`).
+Environment variables passed to the services match the service pod templates (`LLM_ENDPOINT`, `LLM_MODEL`, `LLM_MAX_MODEL_LEN`, `POSTGRES_*`, `DB_POOL_SIZE`, `PORT`).
 
 ### Layout
 

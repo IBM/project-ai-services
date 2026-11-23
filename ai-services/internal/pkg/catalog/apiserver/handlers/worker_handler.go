@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,8 @@ const (
 	// workerNameMaxLen is the maximum allowed length for a worker name after trimming whitespace.
 	workerNameMaxLen = 64
 )
+
+var rfc1123LabelRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$`)
 
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
@@ -84,6 +87,11 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 	req.WorkerName = strings.TrimSpace(req.WorkerName)
 	if len(req.WorkerName) < workerNameMinLen || len(req.WorkerName) > workerNameMaxLen {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "worker name must be between 3 and 64 characters"})
+
+		return
+	}
+	if !rfc1123LabelRegex.MatchString(req.WorkerName) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "worker name must be a valid DNS label (alphanumeric and hyphens only, start and end with alphanumeric)"})
 
 		return
 	}

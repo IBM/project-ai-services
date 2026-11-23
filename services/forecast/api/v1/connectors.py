@@ -232,7 +232,9 @@ def get_connector(connector_id: UUID) -> ConnectorResponse:
     ),
     response_description="Connector updated",
 )
-def update_connector(connector_id: UUID, body: Optional[ConnectorUpdateRequest] = None):
+def update_connector(
+    connector_id: UUID, body: Optional[ConnectorUpdateRequest] = None
+) -> Response:
     """Apply a partial update to a connector and validate the merged connection details."""
     body = body or ConnectorUpdateRequest()
     cid = str(connector_id)
