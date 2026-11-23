@@ -212,13 +212,13 @@ func (c *caddyManager) RegisterEgressRoute(ctx context.Context, route EgressRout
 	if route.DialUpstream == "" {
 		return fmt.Errorf("cannot register egress route %s: dial upstream is empty", route.ID)
 	}
-	if route.ClientCertPath == "" || route.ClientKeyPath == "" || route.TrustedCACertPath == "" {
-		return fmt.Errorf("cannot register egress route %s: client cert, client key and trusted CA paths are required", route.ID)
+	if route.ClientCertPath == "" || route.EncryptedClientKeyPath == "" || route.SecretFilePath == "" || route.TrustedCACertPath == "" {
+		return fmt.Errorf("cannot register egress route %s: client cert, encrypted client key, secret file and trusted CA paths are required", route.ID)
 	}
 
+	// The client certificate is supplied by the encrypted_mtls transport, so the
+	// tls block carries only the trusted CA and server name.
 	tlsConfig := map[string]any{
-		"client_certificate_file":     route.ClientCertPath,
-		"client_certificate_key_file": route.ClientKeyPath,
 		"ca": map[string]any{
 			"provider":  "file",
 			"pem_files": []string{route.TrustedCACertPath},
@@ -234,8 +234,14 @@ func (c *caddyManager) RegisterEgressRoute(ctx context.Context, route EgressRout
 		"@id":   route.ID,
 		"match": []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
 		"handle": []map[string]any{{
-			"handler":   "reverse_proxy",
-			"transport": map[string]any{"protocol": "http", "tls": tlsConfig},
+			"handler": "reverse_proxy",
+			"transport": map[string]any{
+				"protocol":                  "encrypted_mtls",
+				"client_cert_file":          route.ClientCertPath,
+				"encrypted_client_key_file": route.EncryptedClientKeyPath,
+				"secret_file":               route.SecretFilePath,
+				"tls":                       tlsConfig,
+			},
 			"upstreams": []map[string]any{{"dial": route.DialUpstream}},
 		}},
 	}

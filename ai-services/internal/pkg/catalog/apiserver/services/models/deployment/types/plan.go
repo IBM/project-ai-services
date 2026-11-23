@@ -17,10 +17,9 @@ import (
 // under repository/ and registering it with the planner; the plan and execute phases do not
 // change.
 //
-// TODO(mTLS): for a non-local worker, Start must create the worker mTLS ingress/egress Caddy
-// routes (worker :8443 -> pod, control-plane private egress -> worker) and return the
-// control-plane private egress as Egress, keeping the pod's own address as Internal. Those
-// routes must also be removed on undeploy.
+// For a non-local worker, Start also creates the worker mTLS ingress and control-plane egress
+// Caddy routes and returns the control-plane egress as Egress, keeping the pod's own address as
+// Internal. Those routes are removed when the model is deleted.
 type Deployer interface {
 	// Check verifies, without side effects, that the worker can host the model right now (e.g.
 	// enough free accelerator cards), so an unsatisfiable request is rejected during planning

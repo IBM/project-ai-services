@@ -98,12 +98,13 @@ func (pr *ProxyRouter) managePrivateRoute(ctx context.Context, op payload.ProxyR
 	}
 
 	return pr.pm.RegisterEgressRoute(ctx, proxy.EgressRoute{
-		ID:                route.ID,
-		PathPrefix:        route.PathPrefix,
-		DialUpstream:      route.Upstream,
-		ClientCertPath:    route.ClientCertPath,
-		ClientKeyPath:     route.ClientKeyPath,
-		TrustedCACertPath: route.TrustedCACertPath,
-		ServerName:        route.ServerName,
+		ID:                     route.ID,
+		PathPrefix:             route.PathPrefix,
+		DialUpstream:           route.Upstream,
+		ClientCertPath:         route.ClientCertPath,
+		EncryptedClientKeyPath: route.EncryptedClientKeyPath,
+		SecretFilePath:         route.SecretFilePath,
+		TrustedCACertPath:      route.TrustedCACertPath,
+		ServerName:             route.ServerName,
 	})
 }
