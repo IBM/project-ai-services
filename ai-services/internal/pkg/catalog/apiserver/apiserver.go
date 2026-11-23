@@ -1,9 +1,9 @@
-// Package apiserver provides the implementation of the API server for the AI Services Catalog.
+// Package apiserver provides the implementation of the API server for the AI Launchpad Catalog.
 // It includes the setup of routes, authentication, and server configuration.
 //
-//	@title						AI Services Catalog API
+//	@title						AI Launchpad Catalog API
 //	@version					1.0
-//	@description				API server for managing AI Services catalog, applications, and authentication
+//	@description				API server for managing AI Launchpad catalog, applications, and authentication
 //	@termsOfService				http://swagger.io/terms/
 //
 //	@contact.name				API Support
@@ -56,6 +56,7 @@ type APIServerOptions struct {
 	Blacklist          repository.TokenBlacklist
 	ApplicationService repository.ApplicationServiceInterface
 	DatasourceService  repository.DatasourceServiceInterface
+	ModelService       repository.ModelServiceInterface
 	BundleService      bundlesvc.BundleServiceInterface
 	CatalogProvider    *catalog.CatalogProvider
 
@@ -77,6 +78,7 @@ type APIserver struct {
 	blacklist          repository.TokenBlacklist
 	applicationService repository.ApplicationServiceInterface
 	datasourceService  repository.DatasourceServiceInterface
+	modelService       repository.ModelServiceInterface
 	bundleService      bundlesvc.BundleServiceInterface
 	catalogProvider    *catalog.CatalogProvider
 
@@ -102,6 +104,7 @@ func NewAPIserver(options APIServerOptions) *APIserver {
 		blacklist:          options.Blacklist,
 		applicationService: options.ApplicationService,
 		datasourceService:  options.DatasourceService,
+		modelService:       options.ModelService,
 		bundleService:      options.BundleService,
 		catalogProvider:    options.CatalogProvider,
 		workerGatewayPort:  options.WorkerGatewayPort,
@@ -134,7 +137,7 @@ func (a *APIserver) Start(ctx context.Context) error {
 	}
 	logger.InfofCtx(ctx, "Worker gateway started on %s", gatewayAddr)
 
-	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.workerRepository, a.workerGatewayPort, a.datasourceService, a.bundleService, a.catalogProvider)
+	r := CreateRouter(a.authService, a.tokenManager, a.blacklist, a.applicationService, a.workerRegistry, a.workerRepository, a.workerGatewayPort, a.datasourceService, a.bundleService, a.catalogProvider, a.modelService)
 
 	if err := r.Run(fmt.Sprintf(":%d", a.port)); err != nil {
 		return err

@@ -44,9 +44,9 @@ func newService(t *testing.T, miqClient miq.Client) auth.Service {
 func TestLoginWithToken_Success(t *testing.T) {
 	stub := &stubMIQClient{
 		info: &miq.UserInfo{
-			UserName:   "admin",
-			FullName:   "Administrator",
-			Groups:     []string{"EvmGroup-super_administrator"},
+			UserName: "admin",
+			FullName: "Administrator",
+			Groups:   []string{"EvmGroup-super_administrator"},
 		},
 	}
 	svc := newService(t, stub)

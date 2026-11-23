@@ -25,19 +25,11 @@ export default defineConfig(() => {
           target: 'http://localhost:3001',
           changeOrigin: true,
         },
-        '/v1/similarity-search': {
-          target: 'http://localhost:3001',
-          changeOrigin: true,
-        },
         '/v1/models': {
           target: 'http://localhost:3001',
           changeOrigin: true,
         },
         '/db-status': {
-          target: 'http://localhost:3001',
-          changeOrigin: true,
-        },
-        '/config': {
           target: 'http://localhost:3001',
           changeOrigin: true,
         },

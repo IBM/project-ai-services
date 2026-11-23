@@ -130,7 +130,7 @@ def test_client(monkeypatch, tmp_path, mock_db_operations):
     monkeypatch.setattr(digitize_app, "configure_uvicorn_logging", Mock())
 
     mock_hash_db_manager = Mock()
-    mock_hash_db_manager.find_completed_document_by_hash = Mock(return_value=None)
+    mock_hash_db_manager.get_file_owner = Mock(return_value=None)
     monkeypatch.setattr(jobs_module, "db_manager", mock_hash_db_manager)
 
     return TestClient(digitize_app.app)
@@ -455,7 +455,7 @@ class TestRunDigitize:
 # 3. _run_ingest background task
 # ===========================================================================
 #
-# Signature (after refactor): _run_ingest(job_id, doc_id_dict, file_checksum_dict=None)
+# Signature: _run_ingest(job_id, doc_id_dict)
 # - No file_list positional arg
 # - No concurrency_manager — staging cleanup is the only finally action
 
@@ -888,7 +888,7 @@ class TestOrchestratorCancellationAtChunkingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en"))
 
         # chunk_future raises JobCancelledError — simulates the chunker worker
         # being interrupted by the _process_stop_event.
@@ -948,7 +948,7 @@ class TestOrchestratorCancellationAtIndexingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en"))
 
         chunk_fut: Future = Future()
         chunk_result = ("text_chunks.json", "table_chunks.json", 2.5)
@@ -1034,7 +1034,7 @@ class TestOrchestratorCancellationAtIndexingStage:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en"))
 
         chunk_fut: Future = Future()
         chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 2.5))
@@ -1125,7 +1125,7 @@ class TestOrchestratorHappyPath:
         task_completed = _make_task_stub("t-1", "completed", result_path="conv.json")
 
         proc_fut: Future = Future()
-        proc_fut.set_result(("txt.json", "tab.json", 10, 3, {"process_text": 0.5, "process_tables": 0.3}, "en", {}))
+        proc_fut.set_result(("txt.json", "tab.json", 10, 3, {"process_text": 0.5, "process_tables": 0.3}, "en"))
 
         chunk_fut: Future = Future()
         chunk_fut.set_result(("text_chunks.json", "table_chunks.json", 1.2))
@@ -1737,7 +1737,7 @@ class TestOrchestratorIndexCancelEventCleanFilesGating:
 
         proc_fut: Future = Future()
         proc_fut.set_result(
-            ("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en", {})
+            ("txt.json", "tab.json", 5, 2, {"process_text": 0.1, "process_tables": 0.1}, "en")
         )
 
         chunk_fut: Future = Future()

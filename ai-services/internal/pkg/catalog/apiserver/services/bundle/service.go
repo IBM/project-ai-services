@@ -176,7 +176,7 @@ func checkNameCollisionComponents(catalog CatalogProvider, componentType, name s
 
 	lower := strings.ToLower(name)
 	for _, comp := range components {
-		if comp.ComponentType == componentType && strings.ToLower(comp.Name) == lower {
+		if comp.ComponentType.ID == componentType && strings.ToLower(comp.Name) == lower {
 			return &validators.ValidationError{
 				Code:    http.StatusUnprocessableEntity,
 				Message: fmt.Sprintf("metadata.yaml: component name %q conflicts with an existing %s component name; choose a unique name", name, componentType),

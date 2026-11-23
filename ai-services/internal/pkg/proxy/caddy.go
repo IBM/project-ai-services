@@ -98,11 +98,6 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, 
 
 	domain := route.Domain + "." + domainSuffix
 
-	// Verify Caddy is reachable before attempting registration.
-	if err := c.HealthCheck(ctx); err != nil {
-		return "", fmt.Errorf("caddy health check failed: %w", err)
-	}
-
 	routeConfig := map[string]any{
 		"@id":   route.ID,
 		"match": []map[string]any{{"host": []string{domain}}},
@@ -113,24 +108,8 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, 
 		"terminal": route.Terminal,
 	}
 
-	idURL, err := url.JoinPath(c.adminURL, "id", route.ID)
-	if err != nil {
+	if err := c.createRouteIfAbsent(ctx, c.serverName, route.ID, routeConfig); err != nil {
 		return "", err
-	}
-
-	// Check if route already exists
-	checkResp, err := c.httpClient.R().SetContext(ctx).Get(idURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to check route existence: %w", err)
-	}
-
-	if checkResp.StatusCode() == http.StatusOK {
-		// Route already exists, skip registration
-		logger.DebugfCtx(ctx, "Route %s already exists, skipping registration\n", route.ID)
-	} else {
-		if err := c.createRoute(ctx, routeConfig); err != nil {
-			return "", err
-		}
 	}
 
 	httpsPort := utils.GetEnv(CaddyHTTPSPortEnvVar, DefaultHTTPSPort)
@@ -138,9 +117,9 @@ func (c *caddyManager) RegisterRoute(ctx context.Context, route Route) (string, 
 	return buildExternalURL(domain, httpsPort), nil
 }
 
-// Helper to append a new route to the server's route array.
-func (c *caddyManager) createRoute(ctx context.Context, routeConfig map[string]any) error {
-	routeURL, err := url.JoinPath(c.adminURL, "config", "apps", "http", "servers", c.serverName, "routes")
+// Helper to append a new route to the given server's route array.
+func (c *caddyManager) createRoute(ctx context.Context, serverName string, routeConfig map[string]any) error {
+	routeURL, err := url.JoinPath(c.adminURL, "config", "apps", "http", "servers", serverName, "routes")
 	if err != nil {
 		return err
 	}
@@ -151,13 +130,117 @@ func (c *caddyManager) createRoute(ctx context.Context, routeConfig map[string]a
 		SetBody(routeConfig).
 		Post(routeURL)
 	if err != nil {
-		return fmt.Errorf("failed to create route: %w", err)
+		return fmt.Errorf("failed to create route on server %s: %w", serverName, err)
 	}
 	if resp.StatusCode() != http.StatusOK && resp.StatusCode() != http.StatusCreated {
-		return fmt.Errorf("caddy returned status %d on creation: %s", resp.StatusCode(), resp.String())
+		return fmt.Errorf("caddy returned status %d on creation for server %s: %s", resp.StatusCode(), serverName, resp.String())
 	}
 
 	return nil
+}
+
+// createRouteIfAbsent appends routeConfig to serverName unless a route with the
+// same @id already exists anywhere in the Caddy config.
+func (c *caddyManager) createRouteIfAbsent(ctx context.Context, serverName, routeID string, routeConfig map[string]any) error {
+	if err := c.HealthCheck(ctx); err != nil {
+		return fmt.Errorf("caddy health check failed: %w", err)
+	}
+
+	idURL, err := url.JoinPath(c.adminURL, "id", routeID)
+	if err != nil {
+		return err
+	}
+
+	checkResp, err := c.httpClient.R().SetContext(ctx).Get(idURL)
+	if err != nil {
+		return fmt.Errorf("failed to check route existence: %w", err)
+	}
+
+	switch checkResp.StatusCode() {
+	case http.StatusOK:
+		logger.DebugfCtx(ctx, "Route %s already exists, skipping registration\n", routeID)
+
+		return nil
+	case http.StatusNotFound:
+		return c.createRoute(ctx, serverName, routeConfig)
+	default:
+		// Caddy could not answer; creating now could duplicate an existing @id.
+		return fmt.Errorf("failed to check route existence: caddy returned status %d for route %s: %s", checkResp.StatusCode(), routeID, checkResp.String())
+	}
+}
+
+// RegisterIngressRoute registers a path-based route on the private mTLS ingress
+// server: match PathPrefix, strip it, reverse-proxy to Upstream.
+func (c *caddyManager) RegisterIngressRoute(ctx context.Context, route IngressRoute) error {
+	if route.ID == "" {
+		return fmt.Errorf("cannot register ingress route: route ID is empty")
+	}
+	if route.PathPrefix == "" {
+		return fmt.Errorf("cannot register ingress route %s: path prefix is empty", route.ID)
+	}
+	if route.Upstream == "" {
+		return fmt.Errorf("cannot register ingress route %s: upstream is empty", route.ID)
+	}
+
+	prefix := strings.TrimRight(route.PathPrefix, "/")
+
+	routeConfig := map[string]any{
+		"@id":   route.ID,
+		"match": []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
+		"handle": []map[string]any{
+			{"handler": "rewrite", "strip_path_prefix": prefix},
+			{
+				"handler":   "reverse_proxy",
+				"upstreams": []map[string]any{{"dial": route.Upstream}},
+			},
+		},
+		"terminal": route.Terminal,
+	}
+
+	return c.createRouteIfAbsent(ctx, CaddyIngressServerName, route.ID, routeConfig)
+}
+
+// RegisterEgressRoute registers a route on the private egress server: match
+// PathPrefix (kept, not stripped) and reverse-proxy to DialUpstream over mTLS.
+func (c *caddyManager) RegisterEgressRoute(ctx context.Context, route EgressRoute) error {
+	if route.ID == "" {
+		return fmt.Errorf("cannot register egress route: route ID is empty")
+	}
+	if route.PathPrefix == "" {
+		return fmt.Errorf("cannot register egress route %s: path prefix is empty", route.ID)
+	}
+	if route.DialUpstream == "" {
+		return fmt.Errorf("cannot register egress route %s: dial upstream is empty", route.ID)
+	}
+	if route.ClientCertPath == "" || route.ClientKeyPath == "" || route.TrustedCACertPath == "" {
+		return fmt.Errorf("cannot register egress route %s: client cert, client key and trusted CA paths are required", route.ID)
+	}
+
+	tlsConfig := map[string]any{
+		"client_certificate_file":     route.ClientCertPath,
+		"client_certificate_key_file": route.ClientKeyPath,
+		"ca": map[string]any{
+			"provider":  "file",
+			"pem_files": []string{route.TrustedCACertPath},
+		},
+	}
+	if route.ServerName != "" {
+		tlsConfig["server_name"] = route.ServerName
+	}
+
+	prefix := strings.TrimRight(route.PathPrefix, "/")
+
+	routeConfig := map[string]any{
+		"@id":   route.ID,
+		"match": []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
+		"handle": []map[string]any{{
+			"handler":   "reverse_proxy",
+			"transport": map[string]any{"protocol": "http", "tls": tlsConfig},
+			"upstreams": []map[string]any{{"dial": route.DialUpstream}},
+		}},
+	}
+
+	return c.createRouteIfAbsent(ctx, CaddyEgressServerName, route.ID, routeConfig)
 }
 
 // extractDomainFromRoute extracts the domain from a Caddy route configuration.
@@ -186,6 +269,25 @@ func extractDomainFromRoute(rawRoute map[string]any) (string, error) {
 	return domain, nil
 }
 
+// isPathOnlyRoute reports whether the route's first matcher has a non-empty
+// "path" and no "host".
+func isPathOnlyRoute(rawRoute map[string]any) bool {
+	matches, ok := rawRoute["match"].([]any)
+	if !ok || len(matches) == 0 {
+		return false
+	}
+
+	first, ok := matches[0].(map[string]any)
+	if !ok {
+		return false
+	}
+
+	paths, hasPath := first["path"].([]any)
+	_, hasHost := first["host"]
+
+	return hasPath && len(paths) > 0 && !hasHost
+}
+
 // GetRouteByID retrieves a specific route by its ID from Caddy.
 func (c *caddyManager) GetRouteByID(ctx context.Context, routeID string) (*Route, error) {
 	idURL, err := url.JoinPath(c.adminURL, "id", routeID)
@@ -208,6 +310,12 @@ func (c *caddyManager) GetRouteByID(ctx context.Context, routeID string) (*Route
 
 	if resp.StatusCode() != http.StatusOK {
 		return nil, fmt.Errorf("caddy returned status %d for route %s", resp.StatusCode(), routeID)
+	}
+
+	// Private ingress/egress routes match on path, not host: there is no domain
+	// or external URL to report.
+	if isPathOnlyRoute(rawRoute) {
+		return &Route{ID: routeID}, nil
 	}
 
 	domain, err := extractDomainFromRoute(rawRoute)

@@ -16,6 +16,10 @@ Point the services at it with:
   EMB_ENDPOINT=http://localhost:<port>/emb
   RERANKER_ENDPOINT=http://localhost:<port>/rerank
 
+MODEL_SERVER_MODELS=llm (default: all) serves only /llm. It skips torch, the embedding model and
+the reranker, and loads just the LLM tokenizer. The extract/translate/summarize Tiltfiles
+(hack/tilt/services) use it because those services only need an LLM.
+
 Local development only. Configuration is read from environment variables (see Config).
 """
 import asyncio
@@ -37,6 +41,8 @@ log = logging.getLogger("model-server")
 class Config:
     port = int(os.getenv("MODEL_SERVER_PORT", "8100"))
     device = os.getenv("MODEL_SERVER_DEVICE", "auto")  # auto | mps | cuda | cpu
+    # all = /llm + /emb + /rerank; llm = /llm only (no torch / embedding / reranker needed).
+    models = os.getenv("MODEL_SERVER_MODELS", "all").strip().lower()
 
     embed_model = os.getenv("EMBED_MODEL", "ibm-granite/granite-embedding-278m-multilingual")
     embed_max_len = int(os.getenv("EMBED_MAX_LEN", "512"))
@@ -64,6 +70,8 @@ class Config:
 
 if Config.llm_provider not in ("ollama", "watsonx"):
     raise SystemExit(f"LLM_PROVIDER must be 'ollama' or 'watsonx', got '{Config.llm_provider}'")
+if Config.models not in ("all", "llm"):
+    raise SystemExit(f"MODEL_SERVER_MODELS must be 'all' or 'llm', got '{Config.models}'")
 
 
 class Models:
@@ -92,21 +100,25 @@ def _resolve_device() -> str:
 
 def _load_models():
     try:
-        from sentence_transformers import CrossEncoder, SentenceTransformer
         from transformers import AutoTokenizer
 
-        device = _resolve_device()
-        log.info("Loading embedding model %s on %s", Config.embed_model, device)
-        Models.embedder = SentenceTransformer(Config.embed_model, device=device)
-        Models.embedder.max_seq_length = Config.embed_max_len
+        if Config.models == "all":
+            from sentence_transformers import CrossEncoder, SentenceTransformer
 
-        log.info("Loading reranker model %s on %s", Config.rerank_model, device)
-        Models.reranker = CrossEncoder(Config.rerank_model, device=device, max_length=Config.rerank_max_len)
+            device = _resolve_device()
+            log.info("Loading embedding model %s on %s", Config.embed_model, device)
+            Models.embedder = SentenceTransformer(Config.embed_model, device=device)
+            Models.embedder.max_seq_length = Config.embed_max_len
+
+            log.info("Loading reranker model %s on %s", Config.rerank_model, device)
+            Models.reranker = CrossEncoder(Config.rerank_model, device=device, max_length=Config.rerank_max_len)
 
         log.info("Loading LLM tokenizer %s", Config.llm_tokenizer)
         try:
             Models.llm_tokenizer = AutoTokenizer.from_pretrained(Config.llm_tokenizer)
         except Exception as e:  # tokenizer is only used to count tokens
+            if Models.embedder is None:  # llm-only mode has no fallback tokenizer
+                raise
             log.warning("LLM tokenizer %s unavailable (%s); falling back to the embedding tokenizer", Config.llm_tokenizer, e)
             Models.llm_tokenizer = Models.embedder.tokenizer
 
@@ -291,8 +303,9 @@ async def chat_completions(request: Request):
     return StreamingResponse(_sse(), media_type="text/event-stream")
 
 
-app.include_router(emb)
-app.include_router(rerank)
+if Config.models == "all":
+    app.include_router(emb)
+    app.include_router(rerank)
 app.include_router(llm)
 
 

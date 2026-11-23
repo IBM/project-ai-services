@@ -1,7 +1,7 @@
 @use "carbonTokens" as *;
 
 .tableContent {
-  padding: $spacing-07;
+  padding: $spacing-05;
 
   :global(.cds--data-table) {
     width: 100%;
@@ -49,10 +49,15 @@
   margin: 0;
 }
 
+.loadingTable {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 // AboutTab styles — DA-specific
 
 .aboutContent {
-  padding: $spacing-06;
+  padding: $spacing-05;
 }
 
 .aboutSection {

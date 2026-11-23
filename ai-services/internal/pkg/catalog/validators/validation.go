@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -155,35 +157,42 @@ func (v *ApplicationValidator) ValidateComponentVersion(componentType, providerI
 	})
 }
 
-// validateParamsWithSchema is a parameter validator that loads schema and validates params.
-func (v *ApplicationValidator) validateParamsWithSchema(
-	params map[string]any,
-	loadSchema func() (map[string]any, error),
-	contextName string,
-) error {
+// ValidateServiceParams validates service-level params against the service's values.schema.json
+// and returns its sensitive (format: password) field names. Empty params are valid.
+func ValidateServiceParams(ctx context.Context, provider *catalog.CatalogProvider, serviceID string, params map[string]any) (map[string]bool, error) {
 	if len(params) == 0 {
-		return nil
-	}
-	schema, err := loadSchema()
-	if err == nil && len(schema) > 0 {
-		return ValidateParams(params, schema, contextName)
+		return nil, nil
 	}
 
-	return nil
+	schema, err := provider.GetServiceParams(ctx, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load param schema for service %q: %w", serviceID, err)
+	}
+
+	if err := ValidateParams(params, schema, fmt.Sprintf("service '%s'", serviceID)); err != nil {
+		return nil, err
+	}
+
+	return utils.SensitiveFieldsFromSchema(schema), nil
 }
 
-// ValidateServiceParams validates service-level parameters against schema.
-func (v *ApplicationValidator) ValidateServiceParams(ctx context.Context, serviceID string, params map[string]any) error {
-	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetServiceParams(ctx, serviceID)
-	}, fmt.Sprintf("service '%s'", serviceID))
-}
+// ValidateComponentParams validates component params against the provider's values.schema.json
+// and returns its sensitive (format: password) field names. Empty params are valid.
+func ValidateComponentParams(ctx context.Context, provider *catalog.CatalogProvider, componentType, providerID string, params map[string]any) (map[string]bool, error) {
+	if len(params) == 0 {
+		return nil, nil
+	}
 
-// ValidateComponentParams validates component parameters against schema.
-func (v *ApplicationValidator) ValidateComponentParams(ctx context.Context, componentType, providerID string, params map[string]any) error {
-	return v.validateParamsWithSchema(params, func() (map[string]any, error) {
-		return v.provider.GetComponentProviderParams(ctx, componentType, providerID)
-	}, fmt.Sprintf("component '%s/%s'", componentType, providerID))
+	schema, err := provider.GetComponentProviderParams(ctx, componentType, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load param schema for component %s/%s: %w", componentType, providerID, err)
+	}
+
+	if err := ValidateParams(params, schema, fmt.Sprintf("component '%s/%s'", componentType, providerID)); err != nil {
+		return nil, err
+	}
+
+	return utils.SensitiveFieldsFromSchema(schema), nil
 }
 
 // validateServiceComponents validates all components in a service.
@@ -265,7 +274,7 @@ func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service 
 	}
 
 	// Validate service-level parameters
-	if err := v.ValidateServiceParams(ctx, service.CatalogID, service.Params); err != nil {
+	if _, err := ValidateServiceParams(ctx, v.provider, service.CatalogID, service.Params); err != nil {
 		return err
 	}
 
@@ -300,7 +309,9 @@ func (v *ApplicationValidator) ValidateSingleComponent(ctx context.Context, comp
 	}
 
 	// Validate component parameters
-	return v.ValidateComponentParams(ctx, component.ComponentType, component.ProviderID, component.Params)
+	_, err = ValidateComponentParams(ctx, v.provider, component.ComponentType, component.ProviderID, component.Params)
+
+	return err
 }
 
 // ValidateServiceDeployment validates a single service deployment request.
@@ -398,14 +409,18 @@ func (v *ApplicationValidator) ValidateServices(ctx context.Context, services []
 }
 
 // ValidateConnectorRefs validates the connectors list on a single service against both the
-// catalog YAML (accepts_datasource flag) and the DB connectors table (existence, type, status).
+// catalog YAML (datasource block) and the DB connectors table (existence, type, status, provider).
 //
 // Rules applied per service:
+//   - When the service's catalog YAML declares datasource.required: true, at least one
+//     ConnectorRef of type "datasource" must be provided; otherwise returns 400.
 //   - A ConnectorRef with type "datasource" is only valid when the service's catalog YAML
-//     declares accepts_datasource: true; otherwise returns 400.
+//     declares datasource settings; otherwise returns 400.
 //   - Each ConnectorRef.ID must parse as a valid UUID; otherwise returns 400.
 //   - Each ConnectorRef.ID must reference a row in the connectors table whose type matches
 //     ConnectorRef.Type and whose status is "connected"; otherwise returns 400.
+//   - When datasource.supported_providers is non-empty, the connector's provider must be in the allowlist;
+//     otherwise returns 400.
 //   - The same ID must not appear more than once within a single service's connectors list;
 //     otherwise returns 400.
 //
@@ -417,8 +432,16 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 	catalogService *types.Service,
 	connectorRepo dbrepo.ConnectorRepository,
 ) error {
+	if err := validateRequiredDatasource(service, catalogService); err != nil {
+		return err
+	}
+
 	if len(service.Connectors) == 0 {
 		return nil
+	}
+
+	if err := validateMaxConnectionsAtCreation(service, catalogService); err != nil {
+		return err
 	}
 
 	if connectorRepo == nil {
@@ -436,8 +459,24 @@ func (v *ApplicationValidator) ValidateConnectorRefs(
 	return nil
 }
 
+// validateRequiredDatasource enforces that, when datasource.required is true in the catalog YAML,
+// at least one connector ref of type "datasource" is supplied.
+func validateRequiredDatasource(service apimodels.Service, catalogService *types.Service) error {
+	if catalogService == nil || catalogService.Datasource == nil || !catalogService.Datasource.Required {
+		return nil
+	}
+
+	for _, ref := range service.Connectors {
+		if ref.Type == catalogconstants.ConnectorTypeDatasource {
+			return nil
+		}
+	}
+
+	return BadRequest("service %q requires a datasource connector; include at least one connector ref of type 'datasource'", service.CatalogID)
+}
+
 // validateOneConnectorRef validates a single ConnectorRef entry: deduplication, catalog-level
-// guard, UUID format, and DB-level existence/type/status checks.
+// guard, UUID format, and DB-level existence/type/status/provider checks.
 func (v *ApplicationValidator) validateOneConnectorRef(
 	ctx context.Context,
 	ref apimodels.ConnectorRef,
@@ -447,71 +486,132 @@ func (v *ApplicationValidator) validateOneConnectorRef(
 	connectorRepo dbrepo.ConnectorRepository,
 ) error {
 	if seenIDs[ref.ID] {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("duplicate connector ID %q in service %q connectors list", ref.ID, serviceCatalogID),
-		}
+		return BadRequest("duplicate connector ID %q in service %q connectors list", ref.ID, serviceCatalogID)
 	}
 	seenIDs[ref.ID] = true
 
-	// Catalog-level guard: the service must declare accepts_datasource: true.
-	if ref.Type == catalogconstants.ConnectorTypeDatasource && !catalogService.AcceptsDatasource {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("service %q does not accept datasource connectors (accepts_datasource is not set)", serviceCatalogID),
-		}
+	// Catalog-level guard: the service must declare datasource settings.
+	acceptsDatasource := catalogService != nil && catalogService.Datasource != nil
+	if ref.Type == catalogconstants.ConnectorTypeDatasource && !acceptsDatasource {
+		return BadRequest("service %q does not accept datasource connectors", serviceCatalogID)
 	}
 
 	connectorID, err := uuid.Parse(ref.ID)
 	if err != nil {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("connector ref ID %q is not a valid UUID: %v", ref.ID, err),
-		}
+		return BadRequest("connector ref ID %q is not a valid UUID: %v", ref.ID, err)
 	}
 
-	return validateConnectorInDB(ctx, connectorID, ref, serviceCatalogID, connectorRepo)
+	return validateConnectorInDB(ctx, connectorID, ref, serviceCatalogID, catalogService, connectorRepo)
 }
 
-// validateConnectorInDB performs the DB-level existence, type, and status checks for a
+// validateConnectorInDB performs the DB-level existence, type, status, and supported provider checks for a
 // single connector ref.
 func validateConnectorInDB(
 	ctx context.Context,
 	connectorID uuid.UUID,
 	ref apimodels.ConnectorRef,
 	serviceCatalogID string,
+	catalogService *types.Service,
 	connectorRepo dbrepo.ConnectorRepository,
 ) error {
 	connector, err := connectorRepo.GetByID(ctx, connectorID, false)
 	if err != nil {
 		if errors.Is(err, dbrepo.ErrConnectorNotFound) {
-			return &ValidationError{
-				Code:    http.StatusBadRequest,
-				Message: fmt.Sprintf("connector %q referenced in service %q not found", ref.ID, serviceCatalogID),
-			}
+			return BadRequest("connector %q referenced in service %q not found", ref.ID, serviceCatalogID)
 		}
 
 		return fmt.Errorf("failed to look up connector %q: %w", ref.ID, err)
 	}
 
 	if connector.Type != ref.Type {
-		return &ValidationError{
-			Code: http.StatusBadRequest,
-			Message: fmt.Sprintf(
-				"connector %q has type %q but was referenced as type %q in service %q",
-				ref.ID, connector.Type, ref.Type, serviceCatalogID,
-			),
-		}
+		return BadRequest(
+			"connector %q has type %q but was referenced as type %q in service %q",
+			ref.ID, connector.Type, ref.Type, serviceCatalogID,
+		)
 	}
 
 	if connector.Status != dbmodels.ConnectorStatusConnected {
-		return &ValidationError{
-			Code: http.StatusBadRequest,
-			Message: fmt.Sprintf(
-				"connector %q (type %q) is not connected (status: %q); only connected datasources may be attached",
-				ref.ID, ref.Type, connector.Status,
-			),
+		return BadRequest(
+			"connector %q (type %q) is not connected (status: %q); only connected datasources may be attached",
+			ref.ID, ref.Type, connector.Status,
+		)
+	}
+
+	return ValidateProviderSupported(catalogService, connector.Provider, serviceCatalogID)
+}
+
+// CountDatasourceConnectors returns how many of the given items are datasource connectors,
+// using typeOf to extract each item's connector type. It is the single source of truth for
+// max_connections counting, shared by the creation-time check and the post-creation connect
+// check, so connectors of other types (e.g. remote model connectors) never count against
+// datasource.max_connections.
+func CountDatasourceConnectors[T any](items iter.Seq[T], typeOf func(T) string) int {
+	var count int
+
+	for item := range items {
+		if typeOf(item) == catalogconstants.ConnectorTypeDatasource {
+			count++
 		}
+	}
+
+	return count
+}
+
+// validateMaxConnectionsAtCreation enforces datasource.max_connections at application-creation time.
+// It checks that the number of datasource connector refs supplied for the service does not exceed the limit.
+func validateMaxConnectionsAtCreation(service apimodels.Service, catalogService *types.Service) error {
+	if catalogService == nil || catalogService.Datasource == nil || catalogService.Datasource.MaxConnections == nil {
+		return nil
+	}
+
+	max := *catalogService.Datasource.MaxConnections
+
+	count := CountDatasourceConnectors(slices.Values(service.Connectors), func(ref apimodels.ConnectorRef) string {
+		return ref.Type
+	})
+
+	if count > max {
+		return BadRequest(
+			"service %q allows at most %d datasource(s), but %d were provided",
+			service.CatalogID, max, count,
+		)
+	}
+
+	return nil
+}
+
+// ValidateMaxConnectionsOnConnect enforces datasource.max_connections for a post-creation connect
+// request. existingCount is the number of datasources already attached to the target service.
+// Returns a *ValidationError with 422 when the limit would be exceeded.
+func ValidateMaxConnectionsOnConnect(catalogService *types.Service, serviceCatalogID string, existingCount int) error {
+	if catalogService == nil || catalogService.Datasource == nil || catalogService.Datasource.MaxConnections == nil {
+		return nil
+	}
+
+	max := *catalogService.Datasource.MaxConnections
+	if existingCount >= max {
+		return Unprocessable(
+			"service %q already has the maximum of %d connected datasource(s)",
+			serviceCatalogID, max,
+		)
+	}
+
+	return nil
+}
+
+// ValidateProviderSupported verifies that the datasource provider is allowed by the service's
+// datasource.supported_providers. An empty or absent allowlist permits every provider.
+func ValidateProviderSupported(catalogService *types.Service, provider, serviceCatalogID string) error {
+	if catalogService == nil || catalogService.Datasource == nil {
+		return nil
+	}
+
+	ds := catalogService.Datasource
+	if len(ds.SupportedProviders) > 0 && !slices.Contains(ds.SupportedProviders, provider) {
+		return BadRequest(
+			"provider %s is not supported by service %s; supported providers: %v",
+			provider, serviceCatalogID, ds.SupportedProviders,
+		)
 	}
 
 	return nil
@@ -590,9 +690,19 @@ type ConnectorValidator struct {
 	provider *catalog.CatalogProvider
 }
 
-// datasourceNameRe restricts connector names to letters, digits, hyphens, and underscores.
+// resourceNameRe restricts resource names to letters, digits, hyphens, and underscores.
 // This matches the character set allowed by most cloud resource naming conventions.
-var datasourceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var resourceNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// ValidateResourceName returns a 400 ValidationError when name contains anything other than
+// letters, digits, hyphens, and underscores. label names the resource in the message, e.g. "Model name".
+func ValidateResourceName(label, name string) error {
+	if !resourceNameRe.MatchString(name) {
+		return BadRequest("%s may only contain letters, digits, hyphens (-), and underscores (_)", label)
+	}
+
+	return nil
+}
 
 // NewConnectorValidator creates a new ConnectorValidator backed by the given catalog provider.
 func NewConnectorValidator(provider *catalog.CatalogProvider) *ConnectorValidator {
@@ -606,43 +716,44 @@ func NewConnectorValidator(provider *catalog.CatalogProvider) *ConnectorValidato
 func (v *ConnectorValidator) ValidateCreateDatasourceRequest(ctx context.Context, req apimodels.CreateDatasourceRequest) error {
 	// Name character validation — case-insensitive duplicate detection is handled at
 	// the DB query level via LOWER(name) = LOWER($1).
-	if !datasourceNameRe.MatchString(req.Name) {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: "Datasource name may only contain letters, digits, hyphens (-), and underscores (_)",
-		}
+	if err := ValidateResourceName("Datasource name", req.Name); err != nil {
+		return err
 	}
 
-	if !v.provider.ConnectorExists(catalogconstants.ConnectorTypeDatasource, req.ProviderID) {
-		return &ValidationError{
-			Code:    http.StatusNotFound,
-			Message: fmt.Sprintf("Datasource provider %q not found in catalog", req.ProviderID),
-		}
+	_, err := ValidateConnectorParams(ctx, v.provider, catalogconstants.ConnectorTypeDatasource, req.ProviderID, req.Params)
+
+	return err
+}
+
+// ValidateConnectorParams checks that providerID exists in the catalog under connectorType and
+// that params satisfy the provider's schema.json. It returns the schema's sensitive (format:
+// password) field names. A provider without a schema has no constraints; a provider with one
+// requires params, because ValidateParams skips empty params and required fields would go
+// unchecked.
+func ValidateConnectorParams(ctx context.Context, provider *catalog.CatalogProvider, connectorType, providerID string, params map[string]any) (map[string]bool, error) {
+	if !provider.ConnectorExists(connectorType, providerID) {
+		return nil, NotFound("provider %q not found for connector type %q", providerID, connectorType)
 	}
 
-	rawSchema, err := v.provider.GetConnectorProviderParams(ctx, catalogconstants.ConnectorTypeDatasource, req.ProviderID)
+	rawSchema, err := provider.GetConnectorProviderParams(ctx, connectorType, providerID)
 	if err != nil {
-		return fmt.Errorf("failed to load param schema for provider %q: %w", req.ProviderID, err)
+		return nil, fmt.Errorf("failed to load param schema for provider %q: %w", providerID, err)
 	}
 
 	schema, err := pkgutils.ConvertRawJsontoMap(rawSchema)
 	if err != nil {
-		return fmt.Errorf("failed to decode param schema for provider %q: %w", req.ProviderID, err)
+		return nil, fmt.Errorf("failed to decode param schema for provider %q: %w", providerID, err)
 	}
 
-	if len(schema) == 0 {
-		// No schema defined for this provider — no parameter constraints to enforce.
-		return nil
+	if len(schema) > 0 && len(params) == 0 {
+		return nil, BadRequest("params is required for provider %q", providerID)
 	}
 
-	if len(req.Params) == 0 {
-		return &ValidationError{
-			Code:    http.StatusBadRequest,
-			Message: fmt.Sprintf("Params is required for datasource provider %q", req.ProviderID),
-		}
+	if err := ValidateParams(params, schema, fmt.Sprintf("connector '%s/%s'", connectorType, providerID)); err != nil {
+		return nil, err
 	}
 
-	return ValidateParams(req.Params, schema, fmt.Sprintf("datasource provider %q", req.ProviderID))
+	return utils.SensitiveFieldsFromSchema(schema), nil
 }
 
 // Made with Bob

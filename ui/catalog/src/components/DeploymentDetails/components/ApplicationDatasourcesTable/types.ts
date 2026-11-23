@@ -95,9 +95,7 @@ function ownCases(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         ...setLoading(false),
-        rowsData: [...action.payload.rows].sort((a, b) =>
-          a.name.localeCompare(b.name),
-        ),
+        rowsData: action.payload.rows,
         totalItems: action.payload.total,
         fetchError: null,
       };

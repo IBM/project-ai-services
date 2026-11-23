@@ -35,6 +35,7 @@
 # (e.g. `tilt up -f Tiltfile.rag --port 10351`).
 #
 # See docs/dev-guides/tilt-rag-local-development.md
+# For extract / translate / summarize on their own see hack/tilt/services (docs/dev-guides/tilt-services-local-development.md).
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -99,14 +100,14 @@ rag_similarity_port = int(cfg.get("rag_similarity_port", 7070))
 rag_ui_port = int(cfg.get("rag_ui_port", 3000))
 opensearch_img = str(cfg.get("opensearch_image", "docker.io/opensearchproject/opensearch:3.2.0"))
 opensearch_port = int(cfg.get("opensearch_port", 9200))
-# Local development default only (matches assets/applications/rag-cpu/podman/values.yaml).
+# Local development default only (matches assets/components/vector_db/opensearch/podman/values.yaml).
 opensearch_pass = str(cfg.get("opensearch_password", "AiServices@12345"))
 rag_docs_dir = str(cfg.get("rag_docs_dir", ""))
 digitize_port = int(cfg.get("digitize_port", 4000))
 digitize_ui_port = int(cfg.get("digitize_ui_port", 4001))
-digitize_db_img = str(cfg.get("digitize_db_image", "docker.io/library/postgres:16-alpine"))
+digitize_db_img = str(cfg.get("digitize_db_image", "docker.io/library/postgres:18-alpine"))
 digitize_db_port = int(cfg.get("digitize_db_port", 5433))  # not 5432: the catalog Tiltfile uses it
-# Local development default only (matches assets/applications/rag-cpu/podman/values.yaml).
+# Local development default only (matches assets/services/digitize/podman/values.yaml).
 digitize_db_pass = str(cfg.get("digitize_db_password", "Aiservicesdb@1234"))
 
 if llm_provider == "watsonx" and not (watsonx_url and watsonx_project_id and watsonx_api_key):
@@ -117,7 +118,7 @@ rag_venv = "hack/tilt/.venv"
 model_server_url = "http://localhost:{}".format(model_server_port)
 
 # Environment shared by every process that uses services/common (same variables as the
-# podman pod templates in ai-services/assets/applications/rag-cpu/podman/templates).
+# podman pod templates in ai-services/assets/services/chat/podman/templates).
 rag_env = """
     export PYTHONPATH="$(pwd)/services"
     export LLM_ENDPOINT="{ms}/llm"
@@ -303,7 +304,7 @@ local_resource(
 )
 
 # -----------------------------------------------------------------------------
-# Chatbot UI (Vite dev server; vite.tilt.config.js routes to chatbot/similarity like nginx does)
+# Chatbot UI (Vite dev server; vite.tilt.config.js routes to the chatbot like nginx does)
 # -----------------------------------------------------------------------------
 local_resource(
     name="rag-chatbot-ui",
@@ -315,9 +316,8 @@ local_resource(
             npm install
         fi
         export RAG_CHATBOT_URL="http://localhost:{chatbot}"
-        export RAG_SIMILARITY_URL="http://localhost:{similarity}"
         exec npx vite --config vite.tilt.config.js --host 0.0.0.0 --port {ui}
-    """.format(chatbot=rag_chatbot_port, similarity=rag_similarity_port, ui=rag_ui_port),
+    """.format(chatbot=rag_chatbot_port, ui=rag_ui_port),
     resource_deps=["rag-chatbot"],
     labels=["rag", "frontend"],
     links=[link("http://localhost:{}".format(rag_ui_port), "RAG Chatbot UI")],
@@ -348,6 +348,7 @@ digitize_env = rag_env + """
     mkdir -p "$CACHE_DIR"
 """.format(db_port=digitize_db_port, db_pass=digitize_db_pass)
 
+# postgres 18+ refuses to start if the volume is mounted at /var/lib/postgresql/data; mount /var/lib/postgresql.
 local_resource(
     name="rag-digitize-db",
     serve_cmd="""
@@ -357,7 +358,7 @@ local_resource(
             -e POSTGRES_USER=postgres \
             -e POSTGRES_PASSWORD='{password}' \
             -e POSTGRES_DB=postgres \
-            -v rag-digitize-db-data:/var/lib/postgresql/data \
+            -v rag-digitize-db-data:/var/lib/postgresql \
             {image}
     """.format(port=digitize_db_port, password=digitize_db_pass, image=digitize_db_img),
     labels=["digitize", "database"],

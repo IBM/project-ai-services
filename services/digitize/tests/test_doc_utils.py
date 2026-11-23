@@ -402,7 +402,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            table_count, process_time, failures = process_table(
+            table_count, process_time = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -414,7 +414,6 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "Italian prompt template"
         assert kwargs["max_tokens"] == 1339
-        assert failures == {}
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.merge_consecutive_tables")
@@ -469,7 +468,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            table_count, process_time, failures = process_table(
+            table_count, process_time = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -481,7 +480,6 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "English prompt template"
         assert kwargs["max_tokens"] == 1024
-        assert failures == {}
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.merge_consecutive_tables")
@@ -536,7 +534,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            table_count, process_time, failures = process_table(
+            table_count, process_time = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -548,7 +546,6 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "German prompt template"
         assert kwargs["max_tokens"] == 1536
-        assert failures == {}
 
     @patch("digitize.processing.tables.summarize_and_classify_tables")
     @patch("digitize.processing.tables.merge_consecutive_tables")
@@ -603,7 +600,7 @@ class TestProcessTableLanguageSelection:
         converted_doc.tables = [mock_table]
 
         with patch.object(Path, 'write_text'):
-            table_count, process_time, failures = process_table(
+            table_count, process_time = process_table(
                 converted_doc=converted_doc,
                 doc_path="sample.pdf",
                 out_path=Path("/tmp/out.json"),
@@ -615,7 +612,6 @@ class TestProcessTableLanguageSelection:
         _, kwargs = mock_summarize_and_classify.call_args
         assert kwargs["prompt_template"] == "French prompt template"
         assert kwargs["max_tokens"] == 1260
-        assert failures == {}
 
 
 # Made with Bob
@@ -681,4 +677,90 @@ class TestSplitJapaneseSentences:
         from digitize.processing.orchestrator import _split_japanese_sentences
         result = _split_japanese_sentences("Power10はIBMのプロセッサです。16コアを搭載しています。")
         assert result == ["Power10はIBMのプロセッサです。", "16コアを搭載しています。"]
+
+
+@pytest.mark.unit
+class TestValidateDocumentFile:
+    """Tests for validate_document_file in common.misc_utils."""
+
+    def test_validate_valid_pdf(self):
+        from common.misc_utils import validate_document_file
+        content = b"%PDF-1.4 test content"
+        validate_document_file("sample.pdf", content)
+
+    def test_validate_valid_docx(self):
+        from common.misc_utils import validate_document_file
+        content = b"PK\x03\x04\x14\x00..."
+        validate_document_file("sample.docx", content)
+
+    def test_validate_valid_html(self):
+        from common.misc_utils import validate_document_file
+        content = b"<!DOCTYPE html><html><body><h1>Title</h1></body></html>"
+        validate_document_file("sample.html", content)
+
+    def test_validate_valid_html_with_bom(self):
+        from common.misc_utils import validate_document_file
+        content = b"\xef\xbb\xbf<html><body>Hello</body></html>"
+        validate_document_file("sample.html", content)
+
+    def test_validate_valid_html_with_leading_whitespace(self):
+        from common.misc_utils import validate_document_file
+        content = b"   \n\t<html><body>Hello</body></html>"
+        validate_document_file("sample.html", content)
+
+    def test_validate_valid_md_and_txt(self):
+        from common.misc_utils import validate_document_file
+        validate_document_file("notes.md", b"# Title\n\nSome text")
+        validate_document_file("notes.TXT", b"\xef\xbb\xbfplain text")
+
+    def test_validate_md_txt_invalid_utf8_raises(self):
+        from common.misc_utils import validate_document_file
+        for name in ("notes.md", "notes.txt"):
+            with pytest.raises(ValueError, match="not valid UTF-8"):
+                validate_document_file(name, b"\xff\xfe\x00\x00invalid")
+
+    def test_validate_empty_filename_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="File must have a filename"):
+            validate_document_file("", b"%PDF-1.4")
+
+    def test_validate_exception_content_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="Failed to read file"):
+            validate_document_file("sample.pdf", IOError("disk error"))
+
+    def test_validate_non_bytes_content_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="Invalid file content"):
+            validate_document_file("sample.pdf", "string content")
+
+    def test_validate_empty_bytes_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="File is empty"):
+            validate_document_file("sample.pdf", b"")
+
+    def test_validate_unsupported_extension_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="Only PDF, DOCX, HTML, Markdown, and text files are allowed"):
+            validate_document_file("sample.csv", b"plain text")
+
+    def test_validate_invalid_pdf_signature_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="invalid PDF format"):
+            validate_document_file("sample.pdf", b"NOTAPDF")
+
+    def test_validate_invalid_docx_signature_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="invalid DOCX format"):
+            validate_document_file("sample.docx", b"NOTADOCX")
+
+    def test_validate_html_invalid_utf8_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="not valid UTF-8"):
+            validate_document_file("sample.html", b"\xff\xfe\x00\x00invalid")
+
+    def test_validate_html_not_starting_with_tag_raises(self):
+        from common.misc_utils import validate_document_file
+        with pytest.raises(ValueError, match="invalid HTML format"):
+            validate_document_file("sample.html", b"This is just plain text without brackets")
 

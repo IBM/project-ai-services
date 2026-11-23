@@ -123,6 +123,11 @@ spec:
           value: "{{ .Values.backend.workerGatewayPort }}"
         - name: LOCAL_WORKER
           value: "{{ .Values.backend.localWorker }}"
+        # LiteLLM runs in its own pod; the catalog backend registers model routes through it.
+        - name: LITELLM_ENDPOINT
+          value: "http://{{ .AppName }}--litellm:{{ .Values.litellm.port }}"
+        - name: MODEL_GATEWAY_PUBLIC_ENDPOINT
+          value: "https://model-gateway.{{ .DomainSuffix }}{{ if ne (printf "%v" .Values.caddy.httpsPort) "443" }}:{{ .Values.caddy.httpsPort }}{{ end }}"
       ports:
         - containerPort: 8080
           protocol: TCP
@@ -158,6 +163,10 @@ spec:
         - name: catalog-mtls-encryption-secret
           mountPath: /etc/secret/catalog-mtls-encryption-secret
           readOnly: true
+        # The LiteLLM client reads the master key from /etc/secret/litellm-secret/master-key.
+        - name: litellm-secret
+          mountPath: /etc/secret/litellm-secret
+          readOnly: true
         - name: catalog-bundles
           mountPath: /data/catalog-bundles
       resources:
@@ -185,6 +194,12 @@ spec:
     - name: catalog-mtls-encryption-secret
       secret:
         secretName: catalog-mtls-encryption-secret
+    - name: litellm-secret
+      secret:
+        secretName: litellm-secret
+        items:
+          - key: master-key
+            path: master-key
     - name: catalog-bundles
       persistentVolumeClaim:
         claimName: catalog-bundles

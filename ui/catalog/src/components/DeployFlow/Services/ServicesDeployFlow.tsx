@@ -148,14 +148,6 @@ export const ServicesDeployFlow = ({
 
   const LAST_STEP = steps.length - 1;
 
-  // Get component models loading and error state from store
-  const componentModelsLoading = useServiceDeployStore(
-    (state) => state.componentModelsLoading,
-  );
-  const componentModelsError = useServiceDeployStore(
-    (state) => state.componentModelsError,
-  );
-
   // Get services from store to access service description
   const services = useServiceDeployStore((state) => state.services);
 
@@ -163,41 +155,6 @@ export const ServicesDeployFlow = ({
   const selectedService = services?.find(
     (service) => service.id === state.selectedServiceId,
   );
-
-  // Check if any Step 1 components are still loading or have errored
-  // Step 1 components are only the known selector types (embedding, vector store).
-  // All other types — including custom ones — belong in Step 2.
-  const step1Components = useMemo(() => {
-    if (!deployOptions) return [];
-    return (
-      deployOptions.components?.filter(
-        (c) =>
-          c.type === COMPONENT_TYPES.EMBEDDING ||
-          c.type === COMPONENT_TYPES.VECTOR_STORE,
-      ) || []
-    );
-  }, [deployOptions]);
-
-  const isStep1ComponentsLoading = useMemo(() => {
-    if (!state.selectedServiceId || !step1Components.length) return false;
-    return step1Components.some((component) => {
-      const key = `${state.selectedServiceId}:${component.type}:${runtime}`;
-      return componentModelsLoading[key] === true;
-    });
-  }, [
-    state.selectedServiceId,
-    step1Components,
-    componentModelsLoading,
-    runtime,
-  ]);
-
-  const hasStep1ComponentsError = useMemo(() => {
-    if (!state.selectedServiceId || !step1Components.length) return false;
-    return step1Components.some((component) => {
-      const key = `${state.selectedServiceId}:${component.type}:${runtime}`;
-      return !!componentModelsError[key];
-    });
-  }, [state.selectedServiceId, step1Components, componentModelsError, runtime]);
 
   useEffect(() => {
     if (open && preSelectedServiceId) {
@@ -290,20 +247,13 @@ export const ServicesDeployFlow = ({
       }
     }
 
-    // --- 2. Custom component provider required fields ---
-    // For each non-Step-1, non-LLM, non-reranker component, validate the required
-    // (non-model) fields of the selected provider schema.  Credentials for custom
-    // components are stored in componentConfig.params (not serviceConfig.params).
+    // --- 2. Non-LLM component provider required credential fields ---
+    // Covers embedding, vector store, reranker, and all custom component types.
+    // These all use the isCustomComponent path in the service card, so their
+    // credentials live in componentConfig.params (not serviceConfig.params).
     if (deployOptions) {
-      const isStep1Type = (type: string) =>
-        type === COMPONENT_TYPES.EMBEDDING ||
-        type === COMPONENT_TYPES.VECTOR_STORE;
-      const isKnownInferenceType = (type: string) =>
-        type === COMPONENT_TYPES.LLM || type === COMPONENT_TYPES.RERANKER;
-
       for (const component of deployOptions.components) {
-        if (isStep1Type(component.type) || isKnownInferenceType(component.type))
-          continue;
+        if (component.type === COMPONENT_TYPES.LLM) continue;
 
         const componentConfig = serviceConfig?.components?.[component.type];
         if (!componentConfig?.providerId) continue;
@@ -428,7 +378,6 @@ export const ServicesDeployFlow = ({
   const shellIsLoading =
     onLoadingStep &&
     ((!deployOptions && isLoading) ||
-      isStep1ComponentsLoading ||
       (deployOptions?.schema != null &&
         !serviceSchema &&
         !serviceSchemaError &&
@@ -439,7 +388,6 @@ export const ServicesDeployFlow = ({
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedServiceId) ||
     !!shellError ||
-    (state.currentStep === STEP_ONE && hasStep1ComponentsError) ||
     (isLastStep && !hasDatasourceStep && state.isEditing) ||
     (isLastStep && !hasDatasourceStep && !areAllRequiredFieldsFilled) ||
     (isLastStep &&
