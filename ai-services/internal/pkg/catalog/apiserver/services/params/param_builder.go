@@ -113,10 +113,6 @@ func (b *ParamBuilder) BuildServiceParams(
 func (b *ParamBuilder) buildComponentParams(
 	compReq apimodels.Component,
 ) (*ComponentParams, error) {
-	// A top-level model is folded into params so it is flattened like any other component param
-	// (llm.model -> .Values.llm.model) and wins over a legacy params.model.
-	compReq.Params = compReq.ParamsWithModel()
-
 	// Flatten component params with component_type prefix for service-level argParams
 	// Example: llm.model = "granite-3.3-8b-instruct" -> accessible as .Values.llm.model
 	prefix := compReq.ComponentType
@@ -130,10 +126,11 @@ func (b *ParamBuilder) buildComponentParams(
 	}
 
 	// Load component values from values.yaml with argParams applied, then merge the hardware values
-	// of the model's profile (resources, maxModelLen, ...) on top so params cannot override them.
+	// of the provider's default profile (e.g. standard 4-card profile on Spyre) on top so templates
+	// render with standard profile values in the application deploy flow.
 	// Note: We pass flatParams without prefix since LoadComponentValues expects flat keys
 	componentArgParams := utils.FlattenMapWithValues(compReq.Params, "")
-	values, err := b.catalogProvider.LoadComponentValuesForModel(compReq.ComponentType, compReq.ProviderID, compReq.EffectiveModel(), "", componentArgParams)
+	values, err := b.catalogProvider.LoadComponentValuesForModel(compReq.ComponentType, compReq.ProviderID, "", "", componentArgParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load component values: %w", err)
 	}

@@ -203,15 +203,12 @@ func (p *DeploymentPlanner) processComponent(
 	catalogID string,
 	plan *DeploymentPlan,
 ) (string, error) {
-	// A top-level model counts as a param, so components with different models never share a hash.
-	compParams := comp.ParamsWithModel()
-
 	// Calculate component hash based on type + provider + params
 	// This allows deduplication: same config = same deployment
 	componentHash := utils.CalculateComponentHash(
 		comp.ComponentType,
 		comp.ProviderID,
-		compParams,
+		comp.Params,
 	)
 
 	// Check if this component configuration already exists in the plan
@@ -236,7 +233,7 @@ func (p *DeploymentPlanner) processComponent(
 		ProviderID:     comp.ProviderID,
 		CatalogPath:    path.Join(componentPath, plan.RuntimeType),
 		Version:        comp.Version,
-		Params:         compParams,
+		Params:         comp.Params,
 		UsedByServices: []string{catalogID},
 	}
 

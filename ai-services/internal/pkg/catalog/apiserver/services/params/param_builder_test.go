@@ -21,19 +21,16 @@ func newTestBuilder(t *testing.T) *ParamBuilder {
 	return b
 }
 
-func TestBuildComponentParams_Model(t *testing.T) {
-	const (
-		granite33 = "ibm-granite/granite-3.3-8b-instruct"
-		granite41 = "ibm-granite/granite-4.1-8b-fp8"
-	)
+func TestBuildComponentParams_DefaultProfile(t *testing.T) {
+	const granite33 = "ibm-granite/granite-3.3-8b-instruct"
 
 	b := newTestBuilder(t)
-	llm := func(model string, params map[string]any) apimodels.Component {
-		return apimodels.Component{ComponentType: "llm", ProviderID: "vllm-spyre", Model: model, Params: params}
+	llm := func(params map[string]any) apimodels.Component {
+		return apimodels.Component{ComponentType: "llm", ProviderID: "vllm-spyre", Version: "1.0.0", Params: params}
 	}
 
-	t.Run("top-level model resolves its default profile into values and llm.model", func(t *testing.T) {
-		got, err := b.buildComponentParams(llm(granite33, nil))
+	t.Run("app deploy merges standard 4-card default profile into values", func(t *testing.T) {
+		got, err := b.buildComponentParams(llm(map[string]any{"model": granite33}))
 		require.NoError(t, err)
 
 		assert.Equal(t, granite33, got.Values["model"])
@@ -43,32 +40,15 @@ func TestBuildComponentParams_Model(t *testing.T) {
 		assert.Equal(t, map[string]any{"ibm.com/spyre_pf": 4}, got.Values["resources"].(map[string]any)["accelerators"])
 	})
 
-	t.Run("legacy params.model behaves the same, and the top-level model wins", func(t *testing.T) {
-		legacy, err := b.buildComponentParams(llm("", map[string]any{"model": granite33}))
-		require.NoError(t, err)
-		assert.Equal(t, granite33, legacy.Values["model"])
-		assert.Equal(t, 32768, legacy.Values["maxModelLen"])
-
-		both, err := b.buildComponentParams(llm(granite41, map[string]any{"model": granite33}))
-		require.NoError(t, err)
-		assert.Equal(t, granite41, both.Values["model"])
-		assert.Equal(t, granite41, both.ArgParams["llm.model"])
-	})
-
 	t.Run("params cannot override profile hardware values", func(t *testing.T) {
-		got, err := b.buildComponentParams(llm(granite33, map[string]any{"maxModelLen": 1}))
+		got, err := b.buildComponentParams(llm(map[string]any{"model": granite33, "maxModelLen": 1}))
 		require.NoError(t, err)
 
 		assert.Equal(t, 32768, got.Values["maxModelLen"])
 	})
 
-	t.Run("unknown model is rejected", func(t *testing.T) {
-		_, err := b.buildComponentParams(llm("no/such-model", nil))
-		assert.ErrorIs(t, err, catalog.ErrModelNotSupported)
-	})
-
 	t.Run("component without profiles is unaffected", func(t *testing.T) {
-		got, err := b.buildComponentParams(apimodels.Component{ComponentType: "vector_store", ProviderID: "opensearch"})
+		got, err := b.buildComponentParams(apimodels.Component{ComponentType: "vector_store", ProviderID: "opensearch", Version: "1.0.0"})
 		require.NoError(t, err)
 
 		assert.NotContains(t, got.Values, "maxModelLen")
@@ -76,7 +56,7 @@ func TestBuildComponentParams_Model(t *testing.T) {
 
 	t.Run("request params are not modified", func(t *testing.T) {
 		params := map[string]any{"apiKey": "k"}
-		_, err := b.buildComponentParams(llm(granite33, params))
+		_, err := b.buildComponentParams(llm(params))
 		require.NoError(t, err)
 
 		assert.Equal(t, map[string]any{"apiKey": "k"}, params)

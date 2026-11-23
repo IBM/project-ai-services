@@ -3537,10 +3537,6 @@ const docTemplate = `{
                 "component_type": {
                     "type": "string"
                 },
-                "model": {
-                    "description": "Model is the model ID for llm / embedding / reranker components.",
-                    "type": "string"
-                },
                 "params": {
                     "type": "object",
                     "additionalProperties": {}

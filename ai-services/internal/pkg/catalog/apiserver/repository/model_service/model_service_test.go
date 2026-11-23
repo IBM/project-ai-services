@@ -648,6 +648,12 @@ func TestCreateModel_Local_Rejected(t *testing.T) {
 			wantMsg:  `is not available for local provider "nope"`,
 		},
 		{
+			name:     "unknown profile",
+			mutate:   func(r *apimodels.CreateModelRequest) { r.Profile = "non-existent-profile" },
+			wantCode: http.StatusBadRequest,
+			wantMsg:  "profile is not supported",
+		},
+		{
 			name:     "params not matching schema",
 			mutate:   func(r *apimodels.CreateModelRequest) { r.Params = map[string]any{"bogus": "x"} },
 			wantCode: http.StatusBadRequest,
