@@ -11,7 +11,7 @@ torch
 litellm
 
 # --- RAG services run natively: chatbot + similarity (subset of images/service-base/requirements.txt) ---
-cohere==7.0.3
+cohere==7.3.2
 requests
 httpx
 numpy
