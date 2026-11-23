@@ -19,6 +19,27 @@ func TestInjectServiceAuthValues_Podman(t *testing.T) {
 	assert.Equal(t, "ai-services--catalog", values["authJwksPlaintextHosts"])
 }
 
+func TestInjectServiceAuthValues_Podman_Remote(t *testing.T) {
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
+	t.Setenv("CADDY_HTTPS_PORT", "8443")
+
+	values := map[string]any{}
+	err := InjectServiceAuthValues(context.Background(), "digitize", values, "podman", true)
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://catalog-api.example.com:8443/.well-known/jwks.json", values["authJwksUrl"])
+	assert.Equal(t, "https://catalog-api.example.com:8443", values["authCatalogApiUrl"])
+	assert.Equal(t, "", values["authJwksPlaintextHosts"])
+}
+
+func TestInjectServiceAuthValues_Podman_Remote_NoPublicURL(t *testing.T) {
+	t.Setenv("DOMAIN_SUFFIX", "")
+	t.Setenv("CATALOG_PUBLIC_API_URL", "")
+
+	err := InjectServiceAuthValues(context.Background(), "digitize", map[string]any{}, "podman", true)
+	require.Error(t, err)
+}
+
 func TestInjectServiceAuthValues_OpenShift_CoLocated(t *testing.T) {
 	values := map[string]any{}
 	err := InjectServiceAuthValues(context.Background(), "digitize", values, "openshift", false)

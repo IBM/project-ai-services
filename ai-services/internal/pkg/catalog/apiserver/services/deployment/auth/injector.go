@@ -41,7 +41,7 @@ func InjectServiceAuthValues(
 	case runtimeTypes.RuntimeTypeOpenShift.String():
 		err = injectOpenShiftAuth(ctx, values, existingJwksURL, isRemoteWorker)
 	case runtimeTypes.RuntimeTypePodman.String():
-		injectPodmanAuth(values, existingJwksURL)
+		err = injectPodmanAuth(values, existingJwksURL, isRemoteWorker)
 	}
 	if err != nil {
 		return err
@@ -129,7 +129,13 @@ func injectRemoteOpenShiftAuth(ctx context.Context, values map[string]any, exist
 	return nil
 }
 
-func injectPodmanAuth(values map[string]any, existingJwksURL string) {
+func injectPodmanAuth(values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
+	if isRemoteWorker {
+		// The catalog pod name only resolves on the catalog host's podman network, so a
+		// remote worker must use the catalog's public (HTTPS) API URL instead.
+		return injectRemotePodmanAuth(values, existingJwksURL)
+	}
+
 	// On Podman, local worker accesses catalog API directly on the podman network
 	catalogHost := fmt.Sprintf("%s--catalog", constants.CatalogAppName)
 	catalogPort := "8080"
@@ -142,6 +148,43 @@ func injectPodmanAuth(values map[string]any, existingJwksURL string) {
 	if _, ok := values["authJwksPlaintextHosts"]; !ok || values["authJwksPlaintextHosts"] == "" {
 		values["authJwksPlaintextHosts"] = catalogHost
 	}
+
+	return nil
+}
+
+func injectRemotePodmanAuth(values map[string]any, existingJwksURL string) error {
+	publicURL, err := resolvePodmanPublicCatalogURL()
+	if err != nil {
+		return fmt.Errorf("failed to resolve catalog public URL for remote worker: %w", err)
+	}
+	if existingJwksURL == "" {
+		values["authJwksUrl"] = fmt.Sprintf("%s/.well-known/jwks.json", publicURL)
+	}
+	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
+		values["authCatalogApiUrl"] = publicURL
+	}
+	if _, ok := values["authJwksPlaintextHosts"]; !ok {
+		values["authJwksPlaintextHosts"] = ""
+	}
+
+	return nil
+}
+
+func resolvePodmanPublicCatalogURL() (string, error) {
+	if envURL := utils.GetEnv("CATALOG_PUBLIC_API_URL", ""); envURL != "" {
+		return envURL, nil
+	}
+
+	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
+	if domainSuffix == "" {
+		return "", fmt.Errorf("neither CATALOG_PUBLIC_API_URL nor DOMAIN_SUFFIX is set")
+	}
+	port := utils.GetEnv("CADDY_HTTPS_PORT", "443")
+	if port == "443" || port == "" {
+		return fmt.Sprintf("https://catalog-api.%s", domainSuffix), nil
+	}
+
+	return fmt.Sprintf("https://catalog-api.%s:%s", domainSuffix, port), nil
 }
 
 func resolveOpenShiftPublicCatalogURL(ctx context.Context) (string, error) {
