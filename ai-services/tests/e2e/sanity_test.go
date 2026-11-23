@@ -13,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/tests/e2e/extraction"
 	"github.com/project-ai-services/ai-services/tests/e2e/rag"
 	"github.com/project-ai-services/ai-services/tests/e2e/summarization"
+	"github.com/project-ai-services/ai-services/tests/e2e/translation"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
 	gomega "github.com/onsi/gomega"
@@ -33,7 +34,8 @@ import (
 //	4 Spyre cards: CREATE_PARAMS="reranker.vllm-cpu=true"      5 cards: unset (template default)
 //
 // Flow: bootstrap + catalog -> RAG app -> ps/info/pods -> ingest document + Q&A -> delete RAG app
-// -> extract service -> digitize service -> summarize service -> catalog logout/uninstall.
+// -> extract service -> digitize service -> summarize service -> translate service -> catalog
+// logout/uninstall.
 // The lifecycle steps are the existing specs in e2e_suite_test.go that carry the same label.
 const (
 	sanityLabel = "sanity-0.4"
@@ -75,6 +77,7 @@ func defineSanityContexts() {
 	defineSanityExtract()
 	defineSanityDigitize()
 	defineSanitySummarize()
+	defineSanityTranslate()
 }
 
 // sanityService describes how to locate and health-check a standalone service app.
@@ -448,6 +451,85 @@ func defineSanitySummarize() {
 			}
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(strings.TrimSpace(res.Summary)).NotTo(gomega.BeEmpty())
+		})
+	})
+}
+
+// defineSanityTranslate deploys the translate service and runs happy-path sync translation plus
+// async .txt / .md jobs, reusing the helpers from translation_e2e_test.go.
+func defineSanityTranslate() {
+	ginkgo.Context("Sanity Translate service", ginkgo.Ordered, ginkgo.Label("spyre-dependent", sanityLabel), func() {
+		const germanText = "Der Vertrag tritt am 1. Januar 2025 in Kraft."
+
+		var (
+			svcApp string
+			txtJob translatedJob
+			mdJob  translatedJob
+		)
+
+		ginkgo.BeforeAll(func() {
+			skipUnlessSanityRun()
+			// Set before deploying so AfterAll can clean up a partially created app if deploy fails.
+			svcApp = sanityAppName("translate")
+			// deploySanityService returns only once /health is OK. The shared translation helpers
+			// read the package-level translateBaseURL, which is empty in a sanity run.
+			svcApp, translateBaseURL = deploySanityService(sanityService{
+				template:  "translate",
+				logPrefix: "SANITY-TRANSLATE",
+				urlFrom:   cli.ExtractCatalogTranslateURL,
+				health:    translation.HealthCheck,
+			})
+
+			// Async jobs are translated once and shared by the specs below.
+			txtJob = runJob(translation.GetGermanTXTPath(), "German", "English", translateJobTimeout)
+			mdJob = runJob(translation.GetTestMDPath(), "", "German", translateJobTimeout)
+		})
+
+		ginkgo.AfterAll(func() {
+			if !sanityActive() {
+				return
+			}
+			translateBaseURL = ""
+			deleteSanityApp("SANITY-TRANSLATE", svcApp)
+		})
+
+		ginkgo.It("translates German to English synchronously with an explicit source language", func() {
+			expectTranslation(germanText, "German", "English", "german", "2025", "sanity explicit source")
+		})
+
+		ginkgo.It("translates German to English synchronously with an auto-detected source language", func() {
+			expectTranslation(germanText, "", "English", "german", "2025", "sanity auto source")
+		})
+
+		ginkgo.It("completes an async .txt job with the translation, languages and token usage", func() {
+			gomega.Expect(txtJob.Detail.Status).To(gomega.Equal(common.JobStatusCompleted))
+			gomega.Expect(txtJob.Detail.SourceLanguage).To(gomega.Equal("german"))
+			gomega.Expect(txtJob.Detail.TargetLanguage).To(gomega.Equal("english"))
+
+			data := txtJob.Result.Data
+			gomega.Expect(strings.TrimSpace(data.Translation)).NotTo(gomega.BeEmpty())
+			gomega.Expect(data.Translation).NotTo(gomega.Equal(readFixture(translation.GetGermanTXTPath())))
+			gomega.Expect(data.InputType).To(gomega.Equal("txt"))
+
+			usage := txtJob.Result.Usage
+			gomega.Expect(usage.InputTokens).To(gomega.BeNumerically(">", 0))
+			gomega.Expect(usage.OutputTokens).To(gomega.BeNumerically(">", 0))
+			gomega.Expect(usage.TotalTokens).To(gomega.Equal(usage.InputTokens + usage.OutputTokens))
+		})
+
+		ginkgo.It("completes an async .md job preserving headings and bullet lists", func() {
+			gomega.Expect(mdJob.Detail.Status).To(gomega.Equal(common.JobStatusCompleted))
+
+			original := translation.AnalyzeMarkdown(readFixture(translation.GetTestMDPath()))
+			translated := translation.AnalyzeMarkdown(mdJob.Result.Data.Translation)
+
+			gomega.Expect(original.Headings).To(gomega.BeNumerically(">", 0))
+			gomega.Expect(translated.Headings).To(gomega.Equal(original.Headings))
+			gomega.Expect(translated.Bullets).To(gomega.Equal(original.Bullets))
+		})
+
+		ginkgo.It("downloads the translated .txt result as a text attachment", func() {
+			expectDownload(txtJob, "text/plain", "txt")
 		})
 	})
 }
