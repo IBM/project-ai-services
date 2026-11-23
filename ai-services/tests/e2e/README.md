@@ -515,6 +515,20 @@ Requires the registry and catalog variables listed above (`REGISTRY_*`, `CATALOG
 Podman runtime and the default `rag` template only; do not pass `--app-name`. The sanity-only stages skip
 themselves in any other setup, so they never delete apps during a normal full-suite run.
 
+### Running a single sanity stage (e.g. translate)
+
+To run only one service stage, narrow the sanity label with `--focus`. Keep the catalog setup specs in the
+pattern: the pre-run cleanup removes any running catalog, and the stage needs it up and logged in. Do not
+pass `--template`; the sanity stages require the default `rag` template and deploy their own service app.
+
+```bash
+make test-generate-report APP_RUNTIME=podman \
+  TEST_ARGS='--label-filter=sanity-0.4 --focus="bootstrap configure|catalog service is running|catalog login|Sanity Translate" --timeout=2h'
+```
+
+Replace `Sanity Translate` with `Sanity Extract`, `Sanity Digitize` or `Sanity Summarize` for the other stages.
+The same environment as the full sanity run applies (`REGISTRY_*`, `CATALOG_PASSWORD`, podman runtime, no `--app-name`).
+
 ## Running Failure Tests
 
 ### Overview — why failure tests are excluded by default
