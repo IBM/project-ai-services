@@ -186,7 +186,8 @@ async def create_job(
         #     `skipped` (pointing at this job and that file).
         #   - Same checksum as an earlier file in this submission that itself resolved
         #     to an existing document → silently dropped (that file's record covers it).
-        #   - Otherwise the owner of (hash, operation) in document_checksum is looked up:
+        #   - Otherwise the owner of (hash, operation[:output_format]) in document_checksum
+        #     is looked up (digitization is keyed per output format, ingestion is not):
         #       * owner is completed → `already_exists`;
         #       * owner is still being processed → `skipped`;
         #       * owner failed / was cancelled (or none) → novel; the atomic claim
@@ -249,7 +250,9 @@ async def create_job(
                 continue
 
             owner = await asyncio.to_thread(
-                db_manager.get_file_owner, file_hash, operation.value
+                db_manager.get_file_owner,
+                file_hash,
+                dg_util.dedup_key(operation.value, output_format),
             )
 
             if owner is not None:

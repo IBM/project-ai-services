@@ -59,6 +59,11 @@ const (
 	// MetaKeyBaseDir is the worker metadata key sent during Register and stored in worker.metadata JSON.
 	MetaKeyBaseDir = "baseDir"
 
+	// MetaKeyDomainSuffix is the worker metadata key for the worker's own DOMAIN_SUFFIX.
+	// Sent at Register time so the gateway can embed the worker's dial hostname
+	// (<workerName>.<domainSuffix>) as a SAN in the worker's certificate.
+	MetaKeyDomainSuffix = "domainSuffix"
+
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
 	WorkerGatewayPort = 9191
 

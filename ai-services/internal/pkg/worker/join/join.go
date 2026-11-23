@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -31,10 +32,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workercaddy "github.com/project-ai-services/ai-services/internal/pkg/worker/caddy"
 	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/dispatch"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	workertypes "github.com/project-ai-services/ai-services/internal/pkg/worker/types"
@@ -140,11 +143,18 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 	defer func() { _ = conn.Close() }()
 
 	// 3. Call Register with token + CSR.
+	// The worker reports its own DOMAIN_SUFFIX so the gateway can embed
+	// <workerName>.<domainSuffix> as a SAN in the signed certificate.
+	domainSuffix := os.Getenv(proxy.DomainSuffixEnvVar)
+	if domainSuffix == "" && rt == types.RuntimeTypePodman {
+		logger.WarningfCtx(ctx, "worker join: %s is not set; the worker certificate will have no DNS SAN and private-ingress hostname verification will fail", proxy.DomainSuffixEnvVar)
+	}
 	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
 	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: opts.Token,
 		RuntimeType:    rt.String(),
 		CsrPem:         csrPEM,
+		Metadata:       map[string]string{workerconstants.MetaKeyDomainSuffix: domainSuffix},
 	})
 	if err != nil {
 		return "", fmt.Errorf("worker join: register RPC: %w", err)

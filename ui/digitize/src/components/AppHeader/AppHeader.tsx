@@ -38,7 +38,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
 
   return (
     <>
-      <Header aria-label="IBM AI Services" className={styles.header}>
+      <Header aria-label="IBM Power AI Launchpad" className={styles.header}>
         <HeaderMenuButton
           aria-label="Open menu"
           onClick={(e) => {
@@ -56,7 +56,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
           onClick={handleLogoClick}
           className={styles.headerName}
         >
-          AI Services
+          Power AI Launchpad
         </HeaderName>
 
         <HeaderGlobalBar>
@@ -82,7 +82,7 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
           className={styles.helpModal}
         >
           <div className={styles.helpContent}>
-            <h4>Welcome to Digitize Service</h4>
+            <h4>Welcome to Digitize Document Service</h4>
             <p>
               This application helps you digitize and process documents
               efficiently.
@@ -122,11 +122,11 @@ const AppHeader = ({ isSideNavOpen, setIsSideNavOpen }: AppHeaderProps) => {
             <p>
               For detailed documentation and support, please visit the{" "}
               <a
-                href="https://www.ibm.com/docs/en/aiservices/2025.12.0?topic=services-introduction"
+                href="https://www.ibm.com/docs/en/aiservices/2026.09.0"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                IBM AI Services documentation
+                IBM Power AI Launchpad documentation
               </a>{" "}
               or contact your system administrator.
             </p>

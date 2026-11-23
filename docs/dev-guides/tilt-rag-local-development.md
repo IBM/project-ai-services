@@ -4,6 +4,8 @@
 
 > **Local development only.** The OpenSearch password is a publicly documented default. Never use this setup on a shared environment.
 
+To run the extract, translate or summarize services (PostgreSQL + LLM only, no OpenSearch), see [Extract, Translate and Summarize with Tilt](tilt-services-local-development.md).
+
 ## Why it is different from the container deployment
 
 The RAG images are built for `linux/ppc64le`, so they cannot run on Apple Silicon. `Tiltfile.rag` instead runs the repo's services natively from source and replaces the three vLLM containers with a small local model server.
@@ -61,6 +63,8 @@ In the Tilt UI (http://localhost:10350), wait for the resources to turn green, t
 Stop and clean up with `tilt down -f Tiltfile.rag`. This removes the OpenSearch and digitize PostgreSQL containers, their data volumes and `hack/tilt/.data` (digitize cache), but keeps `hack/tilt/.venv`.
 
 If you run the catalog Tiltfile at the same time, give one of them a different Tilt UI port: `tilt up -f Tiltfile.rag --port 10351`.
+
+`model_server.py` also has an LLM-only mode (`MODEL_SERVER_MODELS=llm`, no torch or embedding/reranker models) that the [extract/translate/summarize Tiltfiles](tilt-services-local-development.md) use. `Tiltfile.rag` keeps the default (`all`).
 
 ## Options
 

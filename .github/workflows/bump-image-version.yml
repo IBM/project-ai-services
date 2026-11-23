@@ -4,17 +4,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - 'services/chatbot/**'
-      - 'services/digitize/**'
-      - 'services/similarity/**'
-      - 'services/summarize/**'
+      - 'services/**'
       - 'images/**'
       - 'ui/**'
       - 'ai-services/**'
       - 'mcp/**'
       - '.github/workflows/bump-image-version.yml'
-      - '.github/scripts/check_make_version_tag.py'
-      - .github/scripts/check_image_names.py
+      - '.github/scripts/check_makefile_version_bump.py'
+      - '.github/scripts/check_image_names.py'
     branches:
       - main
       - 'release-*'

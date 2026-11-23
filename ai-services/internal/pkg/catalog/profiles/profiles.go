@@ -2,32 +2,34 @@
 package profiles
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
+	"maps"
+	"slices"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-// FileName is the profiles file inside a provider's asset directory.
-const FileName = "profiles.yaml"
+// ErrNotSupported means the requested profile is not defined by the provider or not listed for the model.
+var ErrNotSupported = errors.New("profile is not supported")
 
-// Resources is the resource footprint declared inside a profile's params.
-type Resources struct {
-	Memory       int            `yaml:"memory"`       // bytes
-	Accelerators map[string]int `yaml:"accelerators"` // e.g. {"ibm.com/spyre_pf": 4}
-}
+const (
+	// ValuesKeyProfile is the key under which ValuesFor reports the ID of the profile it chose.
+	ValuesKeyProfile = "profile"
 
-// Param holds the hardware parameters of one profile.
-type Param struct {
-	Resources Resources `yaml:"resources"`
-}
+	// FileName is the profiles file inside a provider's asset directory.
+	FileName = "profiles.yaml"
+)
 
 // Profile is one entry in a provider's profiles.yaml.
 type Profile struct {
-	ID          string `yaml:"id"`
-	Default     bool   `yaml:"default"`
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Params      Param  `yaml:"params"`
+	ID          string         `yaml:"id"`
+	Default     bool           `yaml:"default"`
+	Name        string         `yaml:"name"`
+	Description string         `yaml:"description"`
+	Params      map[string]any `yaml:"params"`
 }
 
 // List returns the profiles in dir/profiles.yaml. A missing file means no profiles (nil, nil).
@@ -53,4 +55,60 @@ func IsDefault(modelDefaultID string, p Profile) bool {
 	}
 
 	return p.Default
+}
+
+// Resolve picks the profile to deploy from list (the provider's profiles.yaml): the requested one,
+// else the model's default_profile, else the profile flagged default. model may be nil.
+// A requested profile must be defined in list and, when model is set, listed in model.Profiles
+// (ErrNotSupported otherwise). It returns nil, nil when nothing is requested and nothing is selectable.
+func Resolve(list []Profile, model *types.Model, requested string) (*Profile, error) {
+	byID := ByID(list)
+
+	if requested != "" {
+		if model != nil && !slices.Contains(model.Profiles, requested) {
+			return nil, fmt.Errorf("%w: '%s' is not listed for model '%s'", ErrNotSupported, requested, model.ID)
+		}
+
+		p, ok := byID[requested]
+		if !ok {
+			return nil, fmt.Errorf("%w: '%s' is not defined in %s", ErrNotSupported, requested, FileName)
+		}
+
+		return &p, nil
+	}
+
+	if model != nil {
+		if p, ok := byID[model.DefaultProfile]; ok {
+			return &p, nil
+		}
+	}
+
+	for i := range list {
+		if list[i].Default {
+			return &list[i], nil
+		}
+	}
+
+	return nil, nil
+}
+
+// ValuesFor returns the template values of the profile resolved for model, read from
+// dir/profiles.yaml, plus the chosen profile's ID under ValuesKeyProfile. It returns nil values
+// when the provider has no profiles and none was requested.
+func ValuesFor(fsys fs.FS, dir string, model *types.Model, requested string) (map[string]any, error) {
+	list, err := List(fsys, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	selected, err := Resolve(list, model, requested)
+	if err != nil || selected == nil {
+		return nil, err
+	}
+
+	values := make(map[string]any, len(selected.Params)+1)
+	maps.Copy(values, selected.Params)
+	values[ValuesKeyProfile] = selected.ID
+
+	return values, nil
 }

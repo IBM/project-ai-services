@@ -230,6 +230,28 @@ func TestWorkerHandler_CreateWorker(t *testing.T) {
 				assert.Contains(t, resp["error"], "worker name must be between 3 and 64 characters")
 			},
 		},
+		{
+			name:           "400 bad request - invalid DNS label with wildcard or special chars",
+			body:           `{"worker_name": "*.worker"}`,
+			wantStatusCode: http.StatusBadRequest,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Contains(t, resp["error"], "valid DNS label")
+			},
+		},
+		{
+			name:           "400 bad request - invalid DNS label with dot",
+			body:           `{"worker_name": "worker.one"}`,
+			wantStatusCode: http.StatusBadRequest,
+			checkBody: func(t *testing.T, w *httptest.ResponseRecorder) {
+				var resp map[string]string
+				err := json.Unmarshal(w.Body.Bytes(), &resp)
+				require.NoError(t, err)
+				assert.Contains(t, resp["error"], "valid DNS label")
+			},
+		},
 	}
 
 	for _, tt := range tests {

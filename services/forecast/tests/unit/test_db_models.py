@@ -108,3 +108,13 @@ def test_single_running_index_is_unique_and_partial():
 def test_seq_is_an_always_identity_column():
     seq = TABLES["jobs"].c.seq
     assert isinstance(seq.identity, Identity) and seq.identity.always
+
+
+def test_reprs_name_the_row():
+    import uuid
+
+    cid = uuid.uuid4()
+    assert str(cid) in repr(models.Connector(id=cid, name="n", status="ACCEPTED"))
+    assert "source_table='T'" in repr(models.TrainingConfig(connector_id=cid, source_table="T"))
+    assert "seq=3" in repr(models.Job(seq=3, connector_id=cid, status="QUEUED"))
+    assert "version=7" in repr(models.Forecaster(connector_id=cid, version=7))
