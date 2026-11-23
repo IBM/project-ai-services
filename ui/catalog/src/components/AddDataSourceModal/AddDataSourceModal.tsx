@@ -420,7 +420,6 @@ const AddDataSourceModal = ({
           kind: "secondary",
         },
       ]}
-      className={styles.addDataSourcePanel}
     >
       <div className={styles.panelBody}>
         {/* ── Submit error ─────────────────────────────────────────────────── */}

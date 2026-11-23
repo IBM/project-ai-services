@@ -1,13 +1,17 @@
 import { useState } from "react";
+import type { ModelDeploymentRow } from "@/components/ModelsTable/types";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import { ModelCard, ModelCardSkeleton } from "@/components/ModelCard";
 import { useModels } from "@/hooks/useModels";
-import { ModelsTable } from "@/components";
+import { ModelsTable, ModelDetails } from "@/components";
 import styles from "./Models.module.scss";
 
 const Models = () => {
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
+  const [selectedModel, setSelectedModel] = useState<ModelDeploymentRow | null>(
+    null,
+  );
   const { models, isLoading, error, refetch } = useModels();
 
   const handleTabChange = (evt: { selectedIndex: number }) => {
@@ -17,6 +21,17 @@ const Models = () => {
       refetch();
     }
   };
+
+  if (selectedModel) {
+    return (
+      <ModelDetails
+        key={selectedModel.id}
+        modelId={selectedModel.id}
+        modelName={selectedModel.name}
+        onBack={() => setSelectedModel(null)}
+      />
+    );
+  }
 
   return (
     <div className={styles.modelsContainer}>
@@ -36,7 +51,7 @@ const Models = () => {
         </TabList>
         <TabPanels>
           <TabPanel>
-            <ModelsTable />
+            <ModelsTable onRowClick={setSelectedModel} />
           </TabPanel>
           <TabPanel>
             {isLoading ? (

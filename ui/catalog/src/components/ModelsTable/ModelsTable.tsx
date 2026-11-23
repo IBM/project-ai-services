@@ -44,6 +44,13 @@ import {
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 import styles from "./ModelsTable.module.scss";
 
+// Width class for a column, keyed by header id so hiding columns doesn't shift widths
+const getColumnClassName = (header: string) => {
+  if (header === "messages") return styles.messagesColumn;
+  if (header === "actions") return styles.actionsColumn;
+  return styles.compactColumn;
+};
+
 // ─── Generic cell renderer wrapper ───────────────────────────────────────────
 
 interface RenderCellProps {
@@ -70,7 +77,11 @@ const renderCell = ({
   const CellRenderer = CELL_RENDERERS[header];
 
   return (
-    <TableCell key={cellKey} {...cellProps}>
+    <TableCell
+      key={cellKey}
+      {...cellProps}
+      className={getColumnClassName(header)}
+    >
       {CellRenderer ? (
         <CellRenderer
           value={value}
@@ -131,7 +142,10 @@ const ModelsTable = ({
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
-        const { data: rawData, pagination } = await fetchModelsPage();
+        const { data: rawData, pagination } = await fetchModelsPage(
+          page,
+          pageSize,
+        );
 
         const totalItems = pagination?.total_items ?? rawData.length;
         const totalPages = pagination?.total_pages ?? 1;
@@ -300,7 +314,11 @@ const ModelsTable = ({
                                 header,
                               });
                               return (
-                                <TableHeader key={key} {...rest}>
+                                <TableHeader
+                                  key={key}
+                                  {...rest}
+                                  className={getColumnClassName(header.key)}
+                                >
                                   {header.header}
                                 </TableHeader>
                               );

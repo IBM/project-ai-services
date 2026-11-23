@@ -1,113 +1,8 @@
 import React from "react";
-import { Tag, Link, OverflowMenu, OverflowMenuItem } from "@carbon/react";
-import {
-  CheckmarkFilled,
-  PauseOutline,
-  ErrorFilled,
-  InProgress,
-  Delete,
-} from "@carbon/icons-react";
+import { Link, OverflowMenu, OverflowMenuItem } from "@carbon/react";
+import { ErrorFilled, InProgress, Delete } from "@carbon/icons-react";
+import StatusTag from "@/components/StatusTag";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
-
-export const STATUS_CONFIG = {
-  Initializing: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: sharedStyles.statusTagInfo,
-  },
-  Downloading: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: sharedStyles.statusTagInfo,
-  },
-  Deploying: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: sharedStyles.statusTagInfo,
-  },
-  Deleting: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: sharedStyles.statusTagInfo,
-  },
-  Running: {
-    tagType: "green" as const,
-    icon: CheckmarkFilled,
-    className: sharedStyles.statusTagSuccess,
-  },
-  Stopped: {
-    tagType: "gray" as const,
-    icon: PauseOutline,
-    className: sharedStyles.statusTagSecondary,
-  },
-  Error: {
-    tagType: "red" as const,
-    icon: ErrorFilled,
-    className: sharedStyles.statusTagError,
-  },
-  // ── Data source connector statuses ──────────────────────────────────────────
-  connected: {
-    tagType: "green" as const,
-    icon: CheckmarkFilled,
-    className: sharedStyles.statusTagSuccess,
-  },
-  offline: {
-    tagType: "red" as const,
-    icon: ErrorFilled,
-    className: sharedStyles.statusTagError,
-  },
-  // ── Worker statuses ──────────────────────────────────────────────────────────
-  ready: {
-    tagType: "green" as const,
-    icon: CheckmarkFilled,
-    className: sharedStyles.statusTagSuccess,
-  },
-  pending: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: sharedStyles.statusTagInfo,
-  },
-  disconnected: {
-    tagType: "red" as const,
-    icon: ErrorFilled,
-    className: sharedStyles.statusTagError,
-  },
-  // ── Application datasource statuses ─────────────────────────────────────────
-  "up to date": {
-    tagType: "green" as const,
-    icon: CheckmarkFilled,
-    className: sharedStyles.statusTagSuccess,
-  },
-  "out of sync": {
-    tagType: "red" as const,
-    icon: ErrorFilled,
-    className: sharedStyles.statusTagError,
-  },
-  syncing: {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: sharedStyles.statusTagInfo,
-  },
-  // The backend API filters out "delete pending" rows before they reach the UI.
-  // Kept as a fallback.
-  "delete pending": {
-    tagType: "blue" as const,
-    icon: InProgress,
-    className: sharedStyles.statusTagInfo,
-  },
-  // Service pod was unreachable when the catalog last attempted to fetch sync state
-  unknown: {
-    tagType: "gray" as const,
-    icon: ErrorFilled,
-    className: sharedStyles.statusTagSecondary,
-  },
-} as const;
-
-const DEFAULT_STATUS_CONFIG = {
-  tagType: "gray" as const,
-  icon: PauseOutline,
-  className: sharedStyles.statusTagSecondary,
-} as const;
 
 export interface SharedCellRendererProps {
   value: unknown;
@@ -143,23 +38,9 @@ export interface NameCellProps {
   isLinkEnabled?: boolean;
 }
 
-export const StatusCell = ({ value }: SharedCellRendererProps) => {
-  const status = String(value);
-  const config =
-    STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ??
-    DEFAULT_STATUS_CONFIG;
-
-  return (
-    <Tag
-      type={config.tagType}
-      size="md"
-      renderIcon={config.icon}
-      className={config.className}
-    >
-      {status}
-    </Tag>
-  );
-};
+export const StatusCell = ({ value }: SharedCellRendererProps) => (
+  <StatusTag status={String(value)} />
+);
 
 export interface MessageCellProps extends SharedCellRendererProps {
   /**

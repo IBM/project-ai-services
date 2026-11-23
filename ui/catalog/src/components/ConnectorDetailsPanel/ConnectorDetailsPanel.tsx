@@ -45,8 +45,7 @@ import ConnectorFieldLabel from "@/components/AddDataSourceModal/ConnectorFieldL
 import { normalizePrivateKey } from "@/components/AddDataSourceModal/datasourceTransform";
 import { calculateUptime } from "@/utils/time";
 import styles from "./ConnectorDetailsPanel.module.scss";
-import { STATUS_CONFIG } from "@/components/Table/components/CellRenderers";
-import sharedStyles from "@/components/Table/table.shared.module.scss";
+import StatusTag from "@/components/StatusTag";
 
 export interface ConnectorDetailsPanelProps {
   open: boolean;
@@ -319,11 +318,6 @@ const ConnectorDetailsPanel = ({
       allFields,
     );
     const { status } = state.detail;
-    const statusCfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? {
-      tagType: "gray" as const,
-      icon: undefined,
-      className: sharedStyles.statusTagSecondary,
-    };
 
     return (
       <Section level={3} className={styles.section}>
@@ -341,14 +335,7 @@ const ConnectorDetailsPanel = ({
         )}
         {connectionField &&
           renderReadOnlyField(connectionField.label, connectionField.value)}
-        <Tag
-          type={statusCfg.tagType}
-          size="md"
-          renderIcon={statusCfg.icon}
-          className={`${styles.statusTag} ${statusCfg.className}`}
-        >
-          {status}
-        </Tag>
+        <StatusTag status={status} className={styles.statusTag} />
       </Section>
     );
   };

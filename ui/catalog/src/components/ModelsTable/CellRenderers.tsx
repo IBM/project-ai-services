@@ -26,7 +26,7 @@ type CellRendererComponent = (
   props: CellRendererProps,
 ) => React.ReactElement | null;
 
-// Renders the instance name as a link that opens the model details panel
+// Renders the instance name as a link to the model details; only Running models are clickable
 export const NameCell = ({
   value,
   rowId,
@@ -37,7 +37,9 @@ export const NameCell = ({
     value={value}
     rowId={rowId}
     rowData={rowData}
-    isLinkEnabled={!!onRowClick}
+    isLinkEnabled={
+      !!onRowClick && rowData?.status === DEPLOYMENT_STATUS.RUNNING
+    }
     onNameClick={
       onRowClick && rowData
         ? () => onRowClick(rowData as ModelDeploymentRow)

@@ -620,6 +620,96 @@
   font-style: italic;
 }
 
+// StepZero — service selection
+.selected {
+  border: 2px solid $border-interactive;
+  padding: calc(#{$spacing-05} - 1px);
+}
+
+.serviceSelectionGrid {
+  padding: 0;
+  row-gap: $spacing-05;
+}
+
+.tileColumn {
+  display: flex;
+  flex-direction: column;
+}
+
+.serviceTile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 160px;
+  height: 100%;
+  padding: $spacing-05;
+  border: 1px solid $border-subtle;
+  background-color: $layer-01;
+  transition: border-color $duration-moderate-01 motion(standard, productive);
+  text-decoration: none !important;
+
+  &,
+  &:hover,
+  &:focus,
+  &:active {
+    text-decoration: none !important;
+
+    * {
+      text-decoration: none !important;
+    }
+  }
+
+  &:hover {
+    border-color: $border-strong;
+  }
+}
+
+.selectedIndicator {
+  position: absolute;
+  top: $spacing-05;
+  right: $spacing-05;
+  fill: var(--cds-background-inverse);
+}
+
+.serviceTileContent {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-03;
+}
+
+.serviceTileName {
+  @include type-style("heading-03");
+  margin: 0;
+  padding-right: $spacing-07;
+  color: $text-primary;
+  text-decoration: none;
+}
+
+.certifiedBadge {
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  margin-bottom: 0;
+
+  svg {
+    fill: $support-success;
+  }
+}
+
+.serviceTileDescription {
+  @include type-style("body-compact-01");
+  margin: 0;
+  color: $text-primary;
+}
+
+.serviceTileSkeleton {
+  width: 100%;
+  height: 80px;
+  margin-top: $spacing-03;
+}
+
 // Responsive — Carbon Tearsheet has no built-in responsive behaviour
 @include breakpoint-down(md) {
   :global(.c4p--tearsheet.customTearsheet) {
