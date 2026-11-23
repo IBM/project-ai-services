@@ -34,7 +34,7 @@ from forecast.data_loader import (
 )
 from forecast.data_loader import loader as loader_module
 from forecast.settings import settings
-from forecast.utils.encryption import encrypt_secrets
+from forecast.utils.encryption import EncryptionKeyError, encrypt_secrets
 
 pytestmark = pytest.mark.unit
 
@@ -720,7 +720,6 @@ def test_client_from_config_uses_settings_defaults():
 def test_extract_with_encrypted_details_decrypts_and_closes(encryption_key, tmp_path):
     """Encrypted connector details are decrypted into a client that is closed afterwards."""
     encrypted = encrypt_secrets(
-        "db2_for_i",
         {"host": "h", "port": 8076, "database": "*LOCAL", "username": "u", "password": "secret",
          "ignore_unauthorized": True},
     )
@@ -737,7 +736,7 @@ def test_extract_with_encrypted_details_decrypts_and_closes(encryption_key, tmp_
     with patch.object(loader_module, "_client_from_config", side_effect=build_client):
         result = Db2DataLoader().extract_to_parquet(
             "TEST.ORDERS", ["ID"], tmp_path / "o.parquet", connector_id="c1",
-            connector_type="db2_for_i", encrypted_connection_details=encrypted,
+            encrypted_connection_details=encrypted,
         )
 
     assert captured["password"] == "secret" and captured["ignore_unauthorized"] == "True"
@@ -748,12 +747,12 @@ def test_extract_with_encrypted_details_decrypts_and_closes(encryption_key, tmp_
 def test_extract_with_wrong_key_names_connector_without_secrets(tmp_path):
     """A key that cannot decrypt the details gives a permanent error that leaks nothing."""
     with patch.object(settings.forecast, "db_encryption_key", SecretStr(ENCRYPTION_KEY)):
-        encrypted = encrypt_secrets("db2_for_i", {"host": "h", "username": "u", "password": "topsecret"})
+        encrypted = encrypt_secrets({"host": "h", "username": "u", "password": "topsecret"})
     with patch.object(settings.forecast, "db_encryption_key", SecretStr("f" * 32)):
         with pytest.raises(ConnectorDecryptionError) as excinfo:
             Db2DataLoader().extract_to_parquet(
                 "TEST.ORDERS", ["ID"], tmp_path / "o.parquet", connector_id="conn-42",
-                connector_type="db2_for_i", encrypted_connection_details=encrypted,
+                encrypted_connection_details=encrypted,
             )
     message = str(excinfo.value)
     assert "conn-42" in message
@@ -762,8 +761,29 @@ def test_extract_with_wrong_key_names_connector_without_secrets(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_extract_with_corrupt_ciphertext_names_the_connector(encryption_key, tmp_path):
+    """A secret that is not valid ciphertext is a permanent error that names the connector."""
+    details = {"host": "h", "username": "u", "password": "not-valid-ciphertext!"}
+    with pytest.raises(ConnectorDecryptionError, match="conn-7") as excinfo:
+        Db2DataLoader().extract_to_parquet(
+            "TEST.ORDERS", ["ID"], tmp_path / "o.parquet", connector_id="conn-7",
+            encrypted_connection_details=details,
+        )
+    assert excinfo.value.is_permanent_failure is True
+
+
+def test_extract_with_a_missing_key_is_not_reported_as_a_connector_error(tmp_path):
+    """A missing encryption key is a service setup problem, so it is not blamed on the connector."""
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        with pytest.raises(EncryptionKeyError):
+            Db2DataLoader().extract_to_parquet(
+                "TEST.ORDERS", ["ID"], tmp_path / "o.parquet", connector_id="conn-1",
+                encrypted_connection_details={"host": "h", "password": "x"},
+            )
+
+
 def test_extract_with_encrypted_details_requires_connector_identity(tmp_path):
-    """Connector id and type are required to decrypt connector details."""
+    """The connector id is required to decrypt connector details, so errors can name it."""
     with pytest.raises(ValueError, match="connector_id"):
         Db2DataLoader().extract_to_parquet(
             "TEST.ORDERS", ["ID"], tmp_path / "o.parquet", encrypted_connection_details={"host": "h"}

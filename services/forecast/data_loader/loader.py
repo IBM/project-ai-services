@@ -22,6 +22,7 @@ from forecast.data_loader.parquet_store import (
     build_arrow_schema,
 )
 from forecast.settings import settings
+from forecast.utils.encryption import DecryptionError, decrypt_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,6 @@ class Db2DataLoader:
         batch_size: int = settings.forecast.loader_chunk_rows,
         compression: str = settings.forecast.parquet_compression,
         connector_id: Optional[str] = None,
-        connector_type: Optional[str] = None,
         encrypted_connection_details: Optional[Dict[str, Any]] = None,
     ) -> ExtractResult:
         """Stream table rows from Db2 in batches and write directly to a Parquet file.
@@ -156,8 +156,8 @@ class Db2DataLoader:
             batch_size: Number of rows to fetch per chunk from Db2.
             compression: Parquet compression codec (default from PARQUET_COMPRESSION).
             connector_id: Connector identifier, used in decryption errors.
-            connector_type: Connector type used to select the secret fields to decrypt.
-            encrypted_connection_details: Encrypted connector configuration.
+            encrypted_connection_details: Connector connection details as stored, with the
+                secret fields encrypted (see ``forecast.utils.encryption``).
 
         Returns:
             ExtractResult with extracted row count, duration, and file metadata.
@@ -166,7 +166,7 @@ class Db2DataLoader:
             ConnectorDecryptionError: If connector credentials cannot be decrypted
                 (names the connector without leaking credentials).
             ValueError: If neither a client nor connector details are available, or
-                connector details are given without connector_id and connector_type.
+                connector details are given without connector_id.
             InvalidTableReferenceError: If table is not 'TABLE' or 'SCHEMA.TABLE'.
             DBTableNotFoundError: If table does not exist or user lacks access.
             DBColumnNotFoundError: If any requested column is missing or requested twice.
@@ -175,14 +175,12 @@ class Db2DataLoader:
             ParquetWriteError: If Parquet writing fails.
         """
         if encrypted_connection_details is not None:
-            if not connector_id or not connector_type:
-                raise ValueError("connector_id and connector_type are required with encrypted_connection_details")
-
-            from forecast.utils.encryption import decrypt_secrets
+            if not connector_id:
+                raise ValueError("connector_id is required with encrypted_connection_details")
 
             try:
-                decrypted_config = decrypt_secrets(connector_type, encrypted_connection_details)
-            except Exception as exc:
+                decrypted_config = decrypt_secrets(encrypted_connection_details)
+            except DecryptionError as exc:
                 raise ConnectorDecryptionError(connector_id) from exc
 
             with _client_from_config(decrypted_config) as client:
