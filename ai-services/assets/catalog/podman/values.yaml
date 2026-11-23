@@ -1,10 +1,10 @@
 ui:
   port: ""
-  image: icr.io/ai-services-cicd/catalog-ui:v0.0.122
+  image: icr.io/ai-services-cicd/catalog-ui:v0.0.123
 
 backend:
   port: ""
-  image: icr.io/ai-services-cicd/ai-services:v0.0.503
+  image: icr.io/ai-services-cicd/ai-services:v0.0.508
   runtime: ""
   adminPasswordHash: ""
   # @generate:password length=32, special=false
@@ -32,7 +32,7 @@ db:
       memory: "1Gi"
 
 caddy:
-  image: icr.io/ai-services-cicd/caddy:v2.11.8-1
+  image: icr.io/ai-services-cicd/caddy:v2.11.8-2
   adminPort: ""
   httpsPort: ""
   privateIngressPort: ""

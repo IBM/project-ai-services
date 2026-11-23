@@ -165,6 +165,12 @@
   }
 }
 
+.integrationEndpointCopyValue {
+  display: flex;
+  align-items: center;
+  gap: $spacing-03;
+}
+
 .serviceDetails {
   display: flex;
   flex-direction: column;
