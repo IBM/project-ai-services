@@ -3,10 +3,14 @@ pipeline {
     agent { label 'onprem-ai-services-machine' }
 
     parameters {
-        string(
-            name: 'OPENSEARCH_VERSION',
+        text(
+            name: 'DEPENDENCY_UPDATES',
             defaultValue: '',
-            description: 'OpenSearch version to build (e.g. 3.8.0)'
+            description: '''Optional dependency version updates, patched on the fly at checkout time.
+Format: <target>:<key>=<version>. Separate entries with a comma, space or newline.
+<target> = opensearch | security | opensaml. <key> = key in [versions] of gradle/libs.versions.toml.
+Example: security:guava=33.7.3-jre,opensaml:open_saml=5.2.4
+Leave empty for no dependency changes.'''
         )
         string(
             name: 'BUILD_SCRIPTS_REPO',
@@ -29,8 +33,8 @@ pipeline {
 
     environment {
 
-        // OpenSearch — version comes from params.OPENSEARCH_VERSION;
-        // version-derived values are set in the 'Prepare' stage.
+        // This pipeline builds OpenSearch 3.8.0 only.
+        OPENSEARCH_VERSION = "3.8.0"
         ARCHITECTURE = "ppc64le"
         PLATFORM     = "linux"
 
@@ -43,6 +47,11 @@ pipeline {
         // Workspace
         BUILD_DIR   = "${WORKSPACE}/opensearch-build"
         SCRIPTS_DIR = "${WORKSPACE}/build-scripts"
+
+        // Dependency patch scripts (in build-scripts) and Stage A output.
+        // Stage A (generate) runs on the host, Stage B (apply) runs inside the build container.
+        DEP_SCRIPTS_REL = "o/opensearch-project-opensearch-build/scripts"
+        DEP_PATCHES_DIR = "${WORKSPACE}/dependency-patches"
 
         // IBM Container Registry
         // Pushes <OPENSEARCH_VERSION>-<ARCHITECTURE>-<BUILD_NUMBER> to ai-services-cicd for each build run
@@ -58,7 +67,7 @@ pipeline {
         stage('Prepare') {
             steps {
                 script {
-                    def ver = params.OPENSEARCH_VERSION
+                    def ver = env.OPENSEARCH_VERSION
 
                     env.OPENSEARCH_BUILD_BRANCH = ver
                     env.BUILD_SCRIPTS_REPO   = params.BUILD_SCRIPTS_REPO?.trim() ?: 'https://github.com/ppc64le/build-scripts.git'
@@ -67,13 +76,25 @@ pipeline {
                     if (!(env.BUILD_SCRIPTS_REPO ==~ /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?$/)) {
                         error "BUILD_SCRIPTS_REPO must be an HTTPS GitHub URL, got: ${env.BUILD_SCRIPTS_REPO}"
                     }
+
+                    // DEPENDENCY_UPDATES reaches the shell only as an environment variable
+                    // (never interpolated into a script), but restrict it to the characters
+                    // the entry format needs. generate-dependency-patches.sh validates each entry.
+                    if (!((params.DEPENDENCY_UPDATES ?: '') ==~ /[A-Za-z0-9_.:=+,\s-]*/)) {
+                        error "DEPENDENCY_UPDATES contains invalid characters. Expected <target>:<key>=<version> entries."
+                    }
+
                     env.DOCKERFILE_DIR          = "o/opensearch-project-opensearch-build/Dockerfiles/${ver}_ubi9.7"
                     env.PATCH_FILE              = "${env.DOCKERFILE_DIR}/ppc64le-${ver}-ai-services.patch"
+                    // Hook that applies generated dependency patches per component at checkout time
+                    // (applied after PATCH_FILE; it does nothing unless dependency updates are selected).
+                    env.DEPS_PATCH_FILE         = "${env.DOCKERFILE_DIR}/ppc64le-${ver}-dependency-patches.patch"
                     env.BUILD_ENV_IMAGE         = "opensearch-build-env:${ver}-ppc64le"
                     env.BUILD_ENV_DOCKERFILE    = "${env.DOCKERFILE_DIR}/Dockerfile.build-env"
                     env.IMAGE_TAG               = "${ver}-${env.ARCHITECTURE}-${env.BUILD_NUMBER}"
 
                     echo "OpenSearch version : ${ver}"
+                    echo "Dependency updates  : ${params.DEPENDENCY_UPDATES ?: '(none)'}"
                     echo "Build-scripts repo  : ${env.BUILD_SCRIPTS_REPO}"
                     echo "Build-scripts branch: ${env.BUILD_SCRIPTS_BRANCH}"
                     echo "Dockerfile dir      : ${env.DOCKERFILE_DIR}"
@@ -150,10 +171,30 @@ pipeline {
                         --whitespace=nowarn \
                         ${SCRIPTS_DIR}/${PATCH_FILE}
 
-                    echo "Running OpenSearch build and assemble inside container..."
+                    echo "Applying dependency-patch hook..."
+                    git -C ${BUILD_DIR} apply \
+                        --whitespace=nowarn \
+                        ${SCRIPTS_DIR}/${DEPS_PATCH_FILE}
+
+                    # Stage A — centralized generation on the host. Nothing is applied here;
+                    # Stage B runs inside opensearch-build when each component is checked out.
+                    # opensearch.patch (created by the base patch above) already edits the OpenSearch
+                    # gradle/libs.versions.toml, so it is the baseline the generated patch stacks on.
+                    echo "Stage A: generating dependency patches..."
+                    bash ${SCRIPTS_DIR}/${DEP_SCRIPTS_REL}/generate-dependency-patches.sh \
+                        --manifest   ${BUILD_DIR}/manifests/${OPENSEARCH_VERSION}/opensearch-${OPENSEARCH_VERSION}.yml \
+                        --output-dir ${DEP_PATCHES_DIR} \
+                        --base-patch OpenSearch=${BUILD_DIR}/opensearch.patch
+
+                    echo "Running OpenSearch build and assemble inside container (full manifest)..."
+                    # Scripts and generated patches are mounted read-only.
                     podman run --rm \
                         --ulimit nproc=65536:65536 \
                         -v ${BUILD_DIR}:/opensearch-build:z \
+                        -v ${SCRIPTS_DIR}/${DEP_SCRIPTS_REL}:/ppc-scripts:ro,z \
+                        -v ${DEP_PATCHES_DIR}:/ppc-dependency-patches:ro,z \
+                        -e PPC_DEPENDENCY_PATCHES_DIR=/ppc-dependency-patches \
+                        -e PPC_APPLY_DEPENDENCY_PATCHES=/ppc-scripts/apply-dependency-patches.sh \
                         -w /opensearch-build \
                         --entrypoint '' \
                         ${BUILD_ENV_IMAGE} \
@@ -161,18 +202,7 @@ pipeline {
                             ./build.sh \
                                 manifests/${OPENSEARCH_VERSION}/opensearch-${OPENSEARCH_VERSION}.yml \
                                 --platform ${PLATFORM} \
-                                --architecture ${ARCHITECTURE} \
-                                --component OpenSearch \
-                                    common-utils \
-                                    opensearch-remote-metadata-sdk \
-                                    job-scheduler \
-                                    security \
-                                    custom-codecs \
-                                    k-NN \
-                                    ml-commons \
-                                    neural-search \
-                                    opensearch-observability \
-                                    index-management && \
+                                --architecture ${ARCHITECTURE} && \
                             ./assemble.sh tar/builds/opensearch/manifest.yml'
 
                     echo "Copying assembled tar to host..."
@@ -426,6 +456,12 @@ pipeline {
 
             archiveArtifacts(
                 artifacts: 'opensearch-build/tar/dist/opensearch/**',
+                allowEmptyArchive: true
+            )
+
+            // Generated dependency patches (empty when no updates were selected)
+            archiveArtifacts(
+                artifacts: 'dependency-patches/**',
                 allowEmptyArchive: true
             )
 
