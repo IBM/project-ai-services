@@ -19,9 +19,10 @@ TRITON_UNAVAILABLE = "TRITON_UNAVAILABLE"
 SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
 
-# Exit codes of the training worker (``python -m forecast.training <job_id>``). The API retries
-# the worker after EXIT_FAILURE, a kill or a timeout, and does not retry EXIT_PERMANENT. 2 is
-# left out because argparse uses it for a bad command line.
+# Exit codes of the training worker (``python -m forecast.training <job_id> <data_path> <output_dir>``),
+# which the loader subprocess is meant to follow too. The API retries the attempt after EXIT_FAILURE,
+# a kill or a timeout, and does not retry EXIT_PERMANENT. 2 is left out because argparse uses it for
+# a bad command line.
 EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_PERMANENT = 3

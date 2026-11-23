@@ -637,7 +637,11 @@ def test_worker_requires_a_job_id():
 
 
 @pytest.mark.unit
-def test_worker_parses_the_job_id():
+def test_worker_parses_the_job_id_the_input_and_the_output():
+    from pathlib import Path
+
     from forecast.training.main import parse_args
 
-    assert parse_args(["42"]).job_id == 42
+    args = parse_args(["42", "data.parquet", "out/model"])
+
+    assert (args.job_id, args.data_path, args.output_dir) == (42, Path("data.parquet"), Path("out/model"))

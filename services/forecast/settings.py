@@ -25,7 +25,7 @@ class ForecastConfig(BaseSettings):
 
     scratch_dir: Path = Field(
         default=Path("/var/cache/forecast/scratch"),
-        description="Local training scratch, not shared",
+        description="Local scratch of a run (data file, model directory, AutoGluon files), not shared",
     )
 
     data_dir: Path = Field(
@@ -80,7 +80,7 @@ class ForecastConfig(BaseSettings):
     training_max_attempts: int = Field(
         default=2,
         ge=1,
-        description="Attempts of the worker step per job, the first one included",
+        description="Attempts per job (loader, then worker), the first one included",
     )
 
     training_retry_delay_seconds: int = Field(

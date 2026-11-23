@@ -48,10 +48,10 @@ def setup_worker_role(
 ) -> bool:
     """Create or update the restricted worker role and apply its grants.
 
-    The worker reads the connector (including its encrypted config, which it
-    decrypts itself) and the training configuration. It reads the job's identity
-    and writes only the job's result and message. It has no grant on
-    forecasters, and the API owns every status change.
+    The worker reads the training configuration and the job's identity, and writes
+    only the job's result and message. It has no grant on connectors, because the
+    API reads the source with the connector's credentials before the worker starts,
+    and none on forecasters, because the API owns every status change.
     """
     role = sql.Identifier(worker_user)
     database = sql.Identifier(dbname)
@@ -62,7 +62,6 @@ def setup_worker_role(
         sql.SQL("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {}").format(role),
         sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(database, role),
         sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(role),
-        sql.SQL("GRANT SELECT ON connectors TO {}").format(role),
         sql.SQL("GRANT SELECT ON training_configs TO {}").format(role),
         sql.SQL("GRANT SELECT (seq, connector_id, status) ON jobs TO {}").format(role),
         sql.SQL("GRANT UPDATE (result, message) ON jobs TO {}").format(role),

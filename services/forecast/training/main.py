@@ -1,11 +1,12 @@
 """
-Entry point of the training worker: ``python -m forecast.training <job_id>``.
+Entry point of the training worker: ``python -m forecast.training <job_id> <data_path> <output_dir>``.
 
-Reads the job, loads the data, trains with AutoGluon, exports the model to ONNX and
-publishes the forecaster's directory. The worker never deletes from the repository
-volume and never writes to ``forecasters``: the API loads the forecaster into Triton,
-records it and owns every status change. Its only database writes are jobs.result and
-jobs.message. It removes only its own local scratch directory.
+Trains on the Parquet file that the API's data loader wrote (``data_path``), exports the model to
+ONNX and writes the forecaster's Triton directory to ``output_dir`` on local scratch. The worker
+does not read the source database, has no access to connector credentials, and never touches the
+repository volume: the API publishes the directory, loads it into Triton, records it in
+``forecasters`` and owns every status change. Its only database writes are jobs.result and
+jobs.message (cleared when a run starts). It removes only its own local scratch directory.
 
 jobs.message holds the text of a ``TrainingFailure``, which is written for the user. Any other
 exception is stored as a fixed text with its class name, and its details go to the log only,
@@ -20,17 +21,15 @@ import resource
 import sys
 import tempfile
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 
 from forecast.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure, TrainingFailure
 from common.misc_utils import get_logger
-from forecast.db.jobs import JobStore, TrainingJob, worker_engine
+from forecast.db.jobs import JobStore, worker_engine
 from forecast.settings import settings
+from forecast.training.model_dir import forecaster_name, write_model_dir
 from forecast.training.onnx_export import export
-from forecast.training.publish import forecaster_name, publish
-from forecast.training.source import load_training_data
 from forecast.training.training import train
 
 logger = get_logger("forecast_worker")
@@ -38,35 +37,34 @@ logger = get_logger("forecast_worker")
 _MAX_MESSAGE_CHARS = 1000
 _UNEXPECTED_FAILURE = "Training failed with an unexpected {name}. The details are in the worker log."
 
-Loader = Callable[[TrainingJob, Path], pd.DataFrame]
-
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse the command line of the worker."""
     parser = argparse.ArgumentParser(prog="forecast.training", description="Run one training job.")
     parser.add_argument("job_id", type=int, help="The jobs.seq of the training job to run")
+    parser.add_argument("data_path", type=Path, help="Parquet file with the input columns and the target")
+    parser.add_argument("output_dir", type=Path, help="Empty or new directory for the Triton model directory")
     return parser.parse_args(argv)
 
 
-def run(job_id: int, store: JobStore, loader: Loader = load_training_data) -> Path:
-    """Run the job and return the directory of the published forecaster."""
+def run(job_id: int, store: JobStore, data_path: Path, output_dir: Path) -> Path:
+    """Train on ``data_path``, write the forecaster to ``output_dir`` and return it."""
     config = settings.forecast
     job = store.read(job_id)
+    store.clear_failure(job_id)  # A retry starts without the message of the attempt before it.
     config.scratch_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(dir=config.scratch_dir, prefix=f"job-{job_id}-") as scratch:
-        data = loader(job, Path(scratch) / "data.parquet")
-        rows_read = len(data)
-        store.write_result(job_id, {"rows_read": rows_read})
-        if rows_read == 0:
-            raise PermanentFailure(f"Table {job.source_table} has no rows")
+    data = pd.read_parquet(data_path)
+    rows_read = len(data)
+    store.write_result(job_id, {"rows_read": rows_read})
+    if rows_read == 0:
+        raise PermanentFailure(f"Table {job.source_table} has no rows")
 
+    with tempfile.TemporaryDirectory(dir=config.scratch_dir, prefix=f"job-{job_id}-") as scratch:
         trained = train(data, job, Path(scratch), config.default_time_limit_seconds)
         model = export(trained.predictor, trained.encoding)
 
-    published = publish(
-        config.model_repo_path, job_id, forecaster_name(job.connector_id, job.job_id), model
-    )
+    write_model_dir(output_dir, forecaster_name(job.connector_id, job.job_id), model)
     store.write_result(
         job_id,
         {
@@ -78,7 +76,7 @@ def run(job_id: int, store: JobStore, loader: Loader = load_training_data) -> Pa
             "training_seconds": trained.training_seconds,
         },
     )
-    return published
+    return output_dir
 
 
 def peak_memory_mb() -> dict[str, float]:
@@ -104,7 +102,7 @@ def main(argv: list[str]) -> int:
     os.umask(0o022)  # Directories 0755 and files 0644, so Triton's user can read them.
     store = JobStore(worker_engine())
     try:
-        published = run(args.job_id, store)
+        published = run(args.job_id, store, args.data_path, args.output_dir)
     except PermanentFailure as exc:
         logger.error("Job %s failed permanently: %s", args.job_id, exc, exc_info=exc if exc.__cause__ else False)
         _record_failure(store, args.job_id, exc)
@@ -113,5 +111,5 @@ def main(argv: list[str]) -> int:
         logger.exception("Job %s failed", args.job_id)
         _record_failure(store, args.job_id, exc)
         return EXIT_FAILURE
-    logger.info("Job %s published %s, peak memory MB %s", args.job_id, published.name, peak_memory_mb())
+    logger.info("Job %s wrote %s, peak memory MB %s", args.job_id, published, peak_memory_mb())
     return EXIT_OK

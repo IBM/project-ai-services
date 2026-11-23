@@ -12,7 +12,13 @@ The graph takes one STRING tensor per input column and returns:
 Every input is a STRING, whatever the column's type, because the type of an input column is
 optional in the connector and the Triton client could not otherwise know which datatype to send.
 The graph turns a numeric column into FLOAT with Cast, and a category column into the index of its
-value. A category value that was not seen in training maps to -1.
+value. A category value that was not seen in training, and a NULL, map to -1 (training encodes a
+NULL category as -1 too, see features.py).
+
+Cast cannot read an empty string, "None", "NULL" or "True"/"False", and it fails the whole request on
+them. The graph therefore replaces those texts before the Cast: a NULL becomes "nan", which the
+forecaster was trained to treat as missing, and a boolean becomes 1 or 0 (training turns a boolean
+column into 0 and 1).
 """
 import json
 
@@ -32,6 +38,13 @@ _TRITON_TYPES = {
     TensorProto.STRING: "TYPE_STRING",
 }
 _TREE_FEATURES = "features"
+
+# Texts of a numeric column that Cast cannot parse, and the text that Cast reads instead.
+_NUMERIC_TEXT = {
+    **{text: "nan" for text in ("", "None", "none", "NONE", "NULL", "null", "Null", "NaN", "NAN")},
+    **{text: "1" for text in ("True", "true", "TRUE")},
+    **{text: "0" for text in ("False", "false", "FALSE")},
+}
 
 
 def _convert_lightgbm(booster, n_features: int) -> onnx.ModelProto:
@@ -62,6 +75,30 @@ def _convert_catboost(model, n_features: int) -> onnx.ModelProto:
 # model wraps and the number of features, and returns a graph with one input.
 _CONVERTERS = {"GBM": _convert_lightgbm, "CAT": _convert_catboost}
 EXPORTABLE_HYPERPARAMETERS = {key: {} for key in _CONVERTERS}
+
+
+def _numeric_nodes(name: str, i: int) -> list[onnx.NodeProto]:
+    """Nodes that turn the text input ``name`` into the FLOAT ``_col<i>``, reading a NULL as NaN."""
+    texts = list(_NUMERIC_TEXT)
+    return [
+        # The position of the text in ``texts``, or -1 for any other text, which Cast reads as it is.
+        helper.make_node(
+            "CategoryMapper", [name], [f"_special{i}"], domain="ai.onnx.ml",
+            cats_strings=texts, cats_int64s=list(range(len(texts))), default_int64=-1,
+        ),
+        helper.make_node(
+            "Constant", [], [f"_not_special{i}"], value=helper.make_tensor("v", TensorProto.INT64, [], [-1])
+        ),
+        helper.make_node("Equal", [f"_special{i}", f"_not_special{i}"], [f"_plain{i}"]),
+        # The text that Cast reads instead of a special one.
+        helper.make_node(
+            "CategoryMapper", [f"_special{i}"], [f"_replacement{i}"], domain="ai.onnx.ml",
+            cats_int64s=list(range(len(texts))), cats_strings=[_NUMERIC_TEXT[t] for t in texts],
+            default_string="nan",
+        ),
+        helper.make_node("Where", [f"_plain{i}", name, f"_replacement{i}"], [f"_text{i}"]),
+        helper.make_node("Cast", [f"_text{i}"], [f"_col{i}"], to=TensorProto.FLOAT),
+    ]
 
 
 def _rename(graph: onnx.GraphProto, old: str, new: str) -> None:
@@ -96,7 +133,7 @@ def export(predictor, encoding: Encoding) -> onnx.ModelProto:
             before.append(helper.make_node("Cast", [f"_id{i}"], [f"_col{i}"], to=TensorProto.FLOAT))
             parts.append(f"_col{i}")
         else:
-            before.append(helper.make_node("Cast", [name], [f"_col{i}"], to=TensorProto.FLOAT))
+            before.extend(_numeric_nodes(name, i))
             parts.append(f"_col{i}")
     before.append(helper.make_node("Concat", parts, [tree_input], axis=1))
 

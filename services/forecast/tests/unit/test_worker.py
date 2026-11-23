@@ -1,7 +1,7 @@
 """
 Unit tests of the training worker.
 
-The database and the data loader are replaced by fakes. AutoGluon training and the ONNX
+The database is replaced by a fake and the data loader's output by a Parquet file. AutoGluon training and the ONNX
 export run for real on a small table, so the tests also check that the exported graph
 answers like the AutoGluon model.
 """
@@ -17,20 +17,21 @@ import pytest
 from forecast.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure, TransientFailure
 from forecast.db import jobs
 from forecast.db.jobs import JobStore, TrainingJob
-from forecast.db.models import Connector, Job, TrainingConfig
+from forecast.db.models import Job, TrainingConfig
 from forecast.settings import settings
 from forecast.training import main as worker
 from forecast.training.features import encode
 from forecast.training.onnx_export import triton_config
-from forecast.training.publish import forecaster_name, publish
+from forecast.training.model_dir import forecaster_name, write_model_dir
 from forecast.training.training import _split
 
 pytestmark = pytest.mark.unit
 
+ARGV = ["7", "data.parquet", "output"]
+
 CONNECTOR_ID = UUID("c9e66790-7425-40de-944b-e07fc1f90ae7")
 JOB = TrainingJob(
     Job(seq=7, connector_id=CONNECTOR_ID),
-    Connector(id=CONNECTOR_ID, type="db2_for_i", connection_details={"host": "h", "password": "encrypted"}),
     TrainingConfig(
         connector_id=CONNECTOR_ID,
         source_table="SALES.ORDERS",
@@ -74,25 +75,30 @@ class FakeStore:
     def write_failure(self, job_id, message):
         self.failures.append(message)
 
+    def clear_failure(self, job_id):
+        self.cleared = getattr(self, "cleared", 0) + 1
+
 
 def as_inputs(df: pd.DataFrame, columns: list[str]) -> dict[str, np.ndarray]:
     """The inputs of the Triton model: every column is sent as text, one column per tensor."""
     return {name: df[[name]].astype(str).values.astype(object) for name in columns}
 
 
-def loader_of(df: pd.DataFrame):
-    return lambda job, path: df
+def run_worker(volumes, store, df: pd.DataFrame):
+    """Run the worker on ``df``, which the loader would have written to a Parquet file."""
+    df.to_parquet(volumes.data)
+    return worker.run(JOB.job_id, store, volumes.data, volumes.output)
 
 
 @pytest.fixture
 def volumes(tmp_path, monkeypatch):
-    """Point the repository volume and the scratch directory at temporary directories."""
-    repository, scratch = tmp_path / "models", tmp_path / "scratch"
-    repository.mkdir()
-    monkeypatch.setattr(settings.forecast, "model_repo_path", repository)
+    """Point the scratch directory at a temporary one and name the worker's input and output."""
+    scratch = tmp_path / "scratch"
     monkeypatch.setattr(settings.forecast, "scratch_dir", scratch)
     monkeypatch.setattr(settings.forecast, "default_time_limit_seconds", 30)
-    return SimpleNamespace(repository=repository, scratch=scratch)
+    return SimpleNamespace(
+        scratch=scratch, data=tmp_path / "data.parquet", output=tmp_path / "output" / "model"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -101,16 +107,15 @@ def volumes(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("target", ["classification", "regression"])
-def test_run_publishes_a_complete_forecaster_that_answers_like_autogluon(volumes, target):
+def test_run_writes_a_complete_forecaster_that_answers_like_autogluon(volumes, target):
     df = make_table(target=target)
     store = FakeStore()
 
-    published = worker.run(JOB.job_id, store, loader_of(df))
+    published = run_worker(volumes, store, df)
 
-    assert published == volumes.repository / f"fc_{CONNECTOR_ID}_7"
+    assert published == volumes.output
     assert (published / "config.pbtxt").is_file()
-    assert [p.name for p in volumes.repository.iterdir() if p.name != ".staging"] == [published.name]
-    assert list((volumes.repository / ".staging").iterdir()) == []
+    assert sorted(p.name for p in published.iterdir()) == ["1", "config.pbtxt"]
 
     config = (published / "config.pbtxt").read_text()
     assert f'name: "fc_{CONNECTOR_ID}_7"' in config and 'backend: "onnxruntime"' in config
@@ -135,7 +140,7 @@ def test_run_publishes_a_complete_forecaster_that_answers_like_autogluon(volumes
 
 
 @pytest.mark.parametrize("algorithm", ["GBM", "CAT"])
-def test_exported_graph_matches_autogluon_and_maps_unseen_categories_to_missing(volumes, algorithm):
+def test_exported_graph_matches_autogluon_including_nulls_and_unseen_categories(volumes, algorithm):
     from autogluon.features.generators import IdentityFeatureGenerator
     from autogluon.tabular import TabularPredictor
 
@@ -147,7 +152,8 @@ def test_exported_graph_matches_autogluon_and_maps_unseen_categories_to_missing(
     except (ImportError, OSError) as exc:
         pytest.skip(f"{algorithm} cannot be imported here: {exc}")
 
-    df = make_table()
+    df = make_table(800)
+    df.loc[::7, "REGION"] = None  # NULL categories in the training data
     features, encoding = encode(df, ["REGION", "QUANTITY", "PRICE"])
     features["LATE"] = df.LATE
     predictor = TabularPredictor(label="LATE", path=str(volumes.scratch / "ag"), verbosity=0).fit(
@@ -180,15 +186,80 @@ def test_exported_graph_matches_autogluon_and_maps_unseen_categories_to_missing(
     np.testing.assert_allclose(probabilities, predictor.predict_proba(expected).values, atol=1e-5)
     assert list(labels) == list(predictor.predict(expected))
 
-    unseen = pd.DataFrame({"REGION": [np.nan], "QUANTITY": [10], "PRICE": [50.5]}, dtype="float32")
-    _, unseen_probabilities = run(["MARS"])
-    np.testing.assert_allclose(unseen_probabilities, predictor.predict_proba(unseen).values, atol=1e-5)
+    # A NULL and a value that was not seen in training are both -1, which is what the model was trained on.
+    unseen = pd.DataFrame({"REGION": [-1], "QUANTITY": [10], "PRICE": [50.5]}, dtype="float32")
+    for text in ("MARS", "", "None", "NULL"):
+        _, unseen_probabilities = run([text])
+        np.testing.assert_allclose(unseen_probabilities, predictor.predict_proba(unseen).values, atol=1e-5)
+
+    # The rows of the training data, NULLs included, are answered like AutoGluon answers them.
+    texts = {
+        name: df[name].map(lambda v: "None" if pd.isna(v) else str(v)).values.astype(object).reshape(-1, 1)
+        for name in ["REGION", "QUANTITY", "PRICE"]
+    }
+    _, all_probabilities = session.run(None, texts)
+    np.testing.assert_allclose(
+        all_probabilities, predictor.predict_proba(features.drop(columns="LATE")).values, atol=1e-5
+    )
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [("12", 12.0), ("19.99", 19.99), ("nan", np.nan), ("", np.nan), ("None", np.nan), ("NULL", np.nan),
+     ("True", 1.0), ("false", 0.0), ("1", 1.0), ("0", 0.0)],
+)
+def test_a_numeric_input_reads_null_and_boolean_texts_instead_of_failing(text, expected):
+    from onnx import TensorProto, helper
+
+    from forecast.training import onnx_export
+    from forecast.training.features import Encoding
+
+    def converter(model, n_features):
+        graph = helper.make_graph(
+            [helper.make_node("Identity", ["features"], ["variable"])],
+            "tree",
+            [helper.make_tensor_value_info("features", TensorProto.FLOAT, [None, n_features])],
+            [helper.make_tensor_value_info("variable", TensorProto.FLOAT, [None, 1])],
+        )
+        return helper.make_model(graph)
+
+    predictor = SimpleNamespace(
+        model_best="m",
+        problem_type="regression",
+        _trainer=SimpleNamespace(load_model=lambda name: SimpleNamespace(ag_key="X", model=None)),
+    )
+    onnx_export._CONVERTERS["X"] = converter
+    try:
+        model = onnx_export.export(predictor, Encoding(columns=["N"]))
+    finally:
+        del onnx_export._CONVERTERS["X"]
+
+    (prediction,) = ort.InferenceSession(model.SerializeToString()).run(None, {"N": np.array([[text]], dtype=object)})
+    np.testing.assert_allclose(prediction, [[expected]], equal_nan=True)
+
+
+def test_encode_turns_a_null_category_into_minus_one():
+    df = pd.DataFrame({"A": ["x", None, "y"], "B": [1.0, np.nan, 3.0]})
+
+    features, encoding = encode(df, ["A", "B"])
+
+    assert features["A"].tolist() == [0.0, -1.0, 1.0]
+    assert features["B"].isna().tolist() == [False, True, False]
+    assert encoding.categories == {"A": ["x", "y"]}
+
+
+def test_run_clears_the_message_of_an_earlier_attempt(volumes):
+    store = FakeStore()
+
+    run_worker(volumes, store, make_table(200))
+
+    assert store.cleared == 1
 
 
 def test_run_records_rows_read_then_the_full_result(volumes):
     store = FakeStore()
 
-    worker.run(JOB.job_id, store, loader_of(make_table(300)))
+    run_worker(volumes, store, make_table(300))
 
     assert store.results[0] == {"rows_read": 300}
     final = store.results[-1]
@@ -223,50 +294,54 @@ def test_the_test_split_of_a_regression_target_or_a_single_row_class_is_random()
 
 
 def test_run_removes_its_scratch_directory_only(volumes):
-    worker.run(JOB.job_id, FakeStore(), loader_of(make_table(200)))
+    run_worker(volumes, FakeStore(), make_table(200))
 
     assert list(volumes.scratch.iterdir()) == []
-    assert (volumes.repository / f"fc_{CONNECTOR_ID}_7").is_dir()
+    assert (volumes.output / "1" / "model.onnx").is_file()
+    assert volumes.data.is_file()  # The input belongs to the API.
 
 
 # ---------------------------------------------------------------------------
-# Publishing
+# The model directory
 # ---------------------------------------------------------------------------
 
 
-def test_publish_creates_directories_as_0755_and_files_as_0644(tmp_path, volumes):
-    import os
-
+def identity_model():
     from onnx import TensorProto, helper
 
-    os.umask(0o022)
     graph = helper.make_graph(
         [helper.make_node("Identity", ["x"], ["y"])],
         "g",
         [helper.make_tensor_value_info("x", TensorProto.FLOAT, [None, 1])],
         [helper.make_tensor_value_info("y", TensorProto.FLOAT, [None, 1])],
     )
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    return helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
 
-    published = publish(volumes.repository, 5, "fc_x_5", model)
 
-    modes = {p.relative_to(published): stat.S_IMODE(p.stat().st_mode) for p in [published, *published.rglob("*")]}
+def test_model_dir_has_directories_0755_and_files_0644(tmp_path):
+    import os
+
+    os.umask(0o022)
+
+    written = write_model_dir(tmp_path / "out", "fc_x_5", identity_model())
+
+    modes = {p.relative_to(written): stat.S_IMODE(p.stat().st_mode) for p in [written, *written.rglob("*")]}
     assert modes == {
-        published.relative_to(published): 0o755,
-        published.joinpath("1").relative_to(published): 0o755,
-        published.joinpath("1", "model.onnx").relative_to(published): 0o644,
-        published.joinpath("config.pbtxt").relative_to(published): 0o644,
+        written.relative_to(written): 0o755,
+        written.joinpath("1").relative_to(written): 0o755,
+        written.joinpath("1", "model.onnx").relative_to(written): 0o644,
+        written.joinpath("config.pbtxt").relative_to(written): 0o644,
     }
-    assert stat.S_IMODE((volumes.repository / ".staging").stat().st_mode) == 0o755
+    assert 'name: "fc_x_5"' in (written / "config.pbtxt").read_text()
 
 
-def test_publish_never_replaces_or_deletes_an_existing_forecaster(volumes):
-    existing = volumes.repository / "fc_x_5"
+def test_model_dir_is_never_written_over_the_files_of_an_earlier_attempt(tmp_path):
+    existing = tmp_path / "out"
     existing.mkdir()
     (existing / "keep").write_text("kept")
 
     with pytest.raises(FileExistsError):
-        publish(volumes.repository, 5, "fc_x_5", None)
+        write_model_dir(existing, "fc_x_5", identity_model())
 
     assert (existing / "keep").read_text() == "kept"
 
@@ -282,9 +357,9 @@ def test_forecaster_name_is_connector_and_version():
 
 def test_no_rows_is_a_permanent_failure_and_nothing_is_published(volumes):
     with pytest.raises(PermanentFailure, match="no rows"):
-        worker.run(JOB.job_id, FakeStore(), loader_of(make_table(0)))
+        run_worker(volumes, FakeStore(), make_table(0))
 
-    assert list(volumes.repository.iterdir()) == []
+    assert not volumes.output.exists()
 
 
 def test_a_target_with_one_value_is_a_permanent_failure(volumes):
@@ -292,7 +367,7 @@ def test_a_target_with_one_value_is_a_permanent_failure(volumes):
     df["LATE"] = "N"
 
     with pytest.raises(PermanentFailure, match="at least two different values"):
-        worker.run(JOB.job_id, FakeStore(), loader_of(df))
+        run_worker(volumes, FakeStore(), df)
 
 
 @pytest.mark.parametrize(
@@ -307,7 +382,7 @@ def test_main_maps_failures_to_exit_codes_and_stores_their_message(monkeypatch, 
     monkeypatch.setattr(worker, "worker_engine", lambda: None)
     monkeypatch.setattr(worker, "JobStore", lambda engine: store)
 
-    assert worker.main(["7"]) == code
+    assert worker.main(ARGV) == code
 
     assert store.failures == [str(error)]
 
@@ -318,7 +393,7 @@ def test_main_stores_a_fixed_text_for_an_unexpected_error(monkeypatch):
     monkeypatch.setattr(worker, "worker_engine", lambda: None)
     monkeypatch.setattr(worker, "JobStore", lambda engine: store)
 
-    assert worker.main(["7"]) == EXIT_FAILURE
+    assert worker.main(ARGV) == EXIT_FAILURE
 
     (message,) = store.failures
     assert "RuntimeError" in message and "worker log" in message
@@ -334,7 +409,7 @@ def test_main_logs_the_cause_of_a_permanent_failure_but_does_not_store_it(monkey
     monkeypatch.setattr(worker, "JobStore", lambda engine: store)
 
     with caplog.at_level("ERROR"):
-        assert worker.main(["7"]) == EXIT_PERMANENT
+        assert worker.main(ARGV) == EXIT_PERMANENT
 
     assert store.failures == [str(error)]
     assert "customer 4711" in caplog.text
@@ -345,9 +420,9 @@ def test_main_exits_zero_on_success(monkeypatch, tmp_path):
     published.mkdir()
     monkeypatch.setattr(worker, "worker_engine", lambda: None)
     monkeypatch.setattr(worker, "JobStore", lambda engine: FakeStore())
-    monkeypatch.setattr(worker, "run", lambda job_id, store: published)
+    monkeypatch.setattr(worker, "run", lambda *args: published)
 
-    assert worker.main(["7"]) == EXIT_OK
+    assert worker.main(ARGV) == EXIT_OK
 
 
 def test_main_still_exits_when_the_failure_cannot_be_stored(monkeypatch):
@@ -356,7 +431,7 @@ def test_main_still_exits_when_the_failure_cannot_be_stored(monkeypatch):
     monkeypatch.setattr(worker, "worker_engine", lambda: None)
     monkeypatch.setattr(worker, "JobStore", lambda engine: store)
 
-    assert worker.main(["7"]) == EXIT_FAILURE
+    assert worker.main(ARGV) == EXIT_FAILURE
 
 
 def test_main_stores_a_bounded_message(monkeypatch):
@@ -364,7 +439,7 @@ def test_main_stores_a_bounded_message(monkeypatch):
     monkeypatch.setattr(worker, "worker_engine", lambda: None)
     monkeypatch.setattr(worker, "JobStore", lambda engine: store)
 
-    worker.main(["7"])
+    worker.main(ARGV)
 
     assert len(store.failures[0]) == 1000
 
@@ -375,9 +450,9 @@ def test_a_table_with_too_few_labelled_rows_is_a_permanent_failure(volumes):
     df.loc[5:, "LATE"] = None  # Five rows keep a target value.
 
     with pytest.raises(PermanentFailure, match="Only 5 rows have a value in target column LATE"):
-        worker.run(JOB.job_id, FakeStore(), loader_of(df))
+        run_worker(volumes, FakeStore(), df)
 
-    assert list(volumes.repository.iterdir()) == []
+    assert not volumes.output.exists()
 
 
 def test_the_split_is_random_when_there_are_more_classes_than_test_rows():
@@ -398,7 +473,7 @@ def test_autogluon_failing_on_the_data_is_a_permanent_failure_without_its_messag
     monkeypatch.setattr(TabularPredictor, "fit", fail)
 
     with pytest.raises(PermanentFailure, match=r"could not train on this data \(ValueError\)") as raised:
-        worker.run(JOB.job_id, FakeStore(), loader_of(make_table(100)))
+        run_worker(volumes, FakeStore(), make_table(100))
 
     assert "4711" not in str(raised.value)
     assert isinstance(raised.value.__cause__, ValueError)
@@ -442,8 +517,7 @@ def session(monkeypatch):
 
 def job_row(connector=True, config=True):
     return (
-        Job(seq=7, connector_id=CONNECTOR_ID),
-        Connector(id=CONNECTOR_ID, type="db2_for_i", connection_details={"host": "h"}) if connector else None,
+        Job(seq=7, connector_id=CONNECTOR_ID if connector else None),
         TrainingConfig(
             connector_id=CONNECTOR_ID,
             source_table="SALES.ORDERS",
@@ -455,15 +529,16 @@ def job_row(connector=True, config=True):
     )
 
 
-def test_job_store_reads_the_job_connector_and_training_configuration(session):
+def test_job_store_reads_the_job_and_training_configuration_but_not_the_connector(session):
+    from sqlalchemy.dialects import postgresql
+
     session.row = job_row()
 
     job = JobStore(None).read(7)
 
-    assert job.job_id == 7
-    assert (job.connector_id, job.connector_type, job.connection_details) == (
-        CONNECTOR_ID, "db2_for_i", {"host": "h"}
-    )
+    assert job.job_id == 7 and job.connector_id == CONNECTOR_ID
+    sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
+    assert "connectors" not in sql  # The worker's role has no grant on the credentials.
     assert (job.source_table, job.target_column) == ("SALES.ORDERS", "LATE")
     assert job.input_names == ["REGION"] and job.columns == ["REGION", "LATE"]
 
@@ -502,13 +577,14 @@ def test_job_store_writes_only_jobs_result_and_jobs_message(session):
 
     store.write_result(7, {"rows_read": 1})
     store.write_failure(7, "boom")
+    store.clear_failure(7)
 
     written = [
         {key.rsplit("_", 1)[0] for key in statement.compile(dialect=postgresql.dialect()).params}
         - {"seq"}
         for statement in session.statements
     ]
-    assert written == [{"result"}, {"message"}]
+    assert written == [{"result"}, {"message"}, {"message"}]
     assert all(statement.table.name == "jobs" for statement in session.statements)
 
 

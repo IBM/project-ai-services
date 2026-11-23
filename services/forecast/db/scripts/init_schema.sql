@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS training_configs (
 -- RUNNING job that violates chk_jobs_active_has_connector, so the delete fails.
 -- result is a JSON object. The worker cannot read it, so each worker write replaces
 -- the whole value:
---   rows_read         worker, once when the data load finishes; repeated in the final write
+--   rows_read         worker, once when it has read the data file; repeated in the final write
 --   algorithm         worker, when training finishes
 --   training_seconds  worker, when training finishes
 --   attempts          API, after the worker exits (merge onto COALESCE(result, '{}'))
