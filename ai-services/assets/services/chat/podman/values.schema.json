@@ -12,6 +12,9 @@
     "authCatalogApiUrl": {
       "type": "string"
     },
+    "authCatalogUiUrl": {
+      "type": "string"
+    },
     "authCatalogCaBundle": {
       "type": "string"
     },

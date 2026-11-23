@@ -12,8 +12,9 @@ if [ -z "$AUTH_CATALOG_CA_BUNDLE" ]; then
 fi
 
 export CATALOG_API_URL="${CATALOG_API_URL:-http://localhost:8080}"
+export CATALOG_UI_URL="${CATALOG_UI_URL:-}"
 
-envsubst '$BACKEND_HOST $BACKEND_PORT $CATALOG_API_URL $AUTH_CATALOG_CA_BUNDLE' \
+envsubst '$BACKEND_HOST $BACKEND_PORT $CATALOG_API_URL $CATALOG_UI_URL $AUTH_CATALOG_CA_BUNDLE' \
   < /etc/nginx/nginx.conf.tmpl \
   > /etc/nginx/nginx.conf
 

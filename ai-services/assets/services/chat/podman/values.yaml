@@ -21,6 +21,8 @@ mcp:
 authJwksUrl: ""
 authAudience: "chat"
 authCatalogApiUrl: ""
+# Address of the catalog UI (sign-in page). Set by the catalog at deploy time; empty means the UI infers it.
+authCatalogUiUrl: ""
 authCatalogCaBundle: ""
 authCatalogHostAliases: ""
 authServiceCredential: ""

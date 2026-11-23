@@ -26,6 +26,14 @@ http {
             try_files $uri /index.html;
         }
 
+        # Runtime config for the SPA: where the catalog UI (sign-in page) lives. Empty means the
+        # SPA infers it from its own host name.
+        location = /config.json {
+            default_type application/json;
+            add_header Cache-Control "no-store" always;
+            return 200 '{"catalogUiUrl":"${CATALOG_UI_URL}"}';
+        }
+
         location = /auth/exchange {
             proxy_pass ${CATALOG_API_URL}/api/v1/auth/code/exchange;
             proxy_set_header Host $proxy_host;

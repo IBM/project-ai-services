@@ -52,6 +52,10 @@ spec:
             - name: CATALOG_API_URL
               value: "{{ .Values.authCatalogApiUrl }}"
             {{- end }}
+            {{- if .Values.authCatalogUiUrl }}
+            - name: CATALOG_UI_URL
+              value: "{{ .Values.authCatalogUiUrl }}"
+            {{- end }}
             {{- if .Values.authCatalogCaBundle }}
             - name: AUTH_CATALOG_CA_BUNDLE
               value: "/etc/ssl/certs/catalog-ca-bundle.crt"

@@ -67,6 +67,19 @@ export function getCatalogUiBaseUrl(): string {
   return currentOrigin;
 }
 
+// The catalog UI address set at deploy time (served by the UI's Nginx as /config.json). It is
+// needed when this UI runs on another host than the catalog UI, where inferring it is wrong.
+async function fetchConfiguredCatalogUiUrl(): Promise<string> {
+  try {
+    const res = await fetch("/config.json", { cache: "no-store" });
+    if (!res.ok) return "";
+    const cfg = await res.json();
+    return typeof cfg.catalogUiUrl === "string" ? cfg.catalogUiUrl : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function startLoginFlow(): Promise<void> {
   if (isRedirecting) return;
   if (window.location.pathname === "/auth/callback") return;
@@ -82,7 +95,8 @@ export async function startLoginFlow(): Promise<void> {
   sessionStorage.setItem(SAVED_ROUTE_KEY, currentRoute);
 
   const redirectUri = `${window.location.origin}/auth/callback`;
-  const catalogBase = getCatalogUiBaseUrl();
+  const catalogBase =
+    (await fetchConfiguredCatalogUiUrl()) || getCatalogUiBaseUrl();
   const authorizeUrl = new URL("/authorize", catalogBase);
   authorizeUrl.searchParams.set("service", "digitize");
   authorizeUrl.searchParams.set("redirect_uri", redirectUri);

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
@@ -39,9 +40,9 @@ func InjectServiceAuthValues(
 	var err error
 	switch runtimeType {
 	case runtimeTypes.RuntimeTypeOpenShift.String():
-		err = injectOpenShiftAuth(ctx, values, existingJwksURL, isRemoteWorker)
+		err = injectOpenShiftAuth(ctx, serviceID, values, existingJwksURL, isRemoteWorker)
 	case runtimeTypes.RuntimeTypePodman.String():
-		err = injectPodmanAuth(values, existingJwksURL, isRemoteWorker)
+		err = injectPodmanAuth(serviceID, values, existingJwksURL, isRemoteWorker)
 	}
 	if err != nil {
 		return err
@@ -88,14 +89,14 @@ func InjectServiceCredential(
 	return nil
 }
 
-func injectOpenShiftAuth(ctx context.Context, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
+func injectOpenShiftAuth(ctx context.Context, serviceID string, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
 	if !isRemoteWorker {
 		injectCoLocatedOpenShiftAuth(values, existingJwksURL)
 
 		return nil
 	}
 
-	return injectRemoteOpenShiftAuth(ctx, values, existingJwksURL)
+	return injectRemoteOpenShiftAuth(ctx, serviceID, values, existingJwksURL)
 }
 
 func injectCoLocatedOpenShiftAuth(values map[string]any, existingJwksURL string) {
@@ -111,7 +112,7 @@ func injectCoLocatedOpenShiftAuth(values map[string]any, existingJwksURL string)
 	}
 }
 
-func injectRemoteOpenShiftAuth(ctx context.Context, values map[string]any, existingJwksURL string) error {
+func injectRemoteOpenShiftAuth(ctx context.Context, serviceID string, values map[string]any, existingJwksURL string) error {
 	publicURL, err := resolveOpenShiftPublicCatalogURL(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to resolve catalog public URL for remote worker: %w", err)
@@ -122,6 +123,7 @@ func injectRemoteOpenShiftAuth(ctx context.Context, values map[string]any, exist
 	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
 		values["authCatalogApiUrl"] = publicURL
 	}
+	injectCatalogUIURL(serviceID, values, publicURL)
 	if _, ok := values["authJwksPlaintextHosts"]; !ok {
 		values["authJwksPlaintextHosts"] = ""
 	}
@@ -129,11 +131,11 @@ func injectRemoteOpenShiftAuth(ctx context.Context, values map[string]any, exist
 	return nil
 }
 
-func injectPodmanAuth(values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
+func injectPodmanAuth(serviceID string, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
 	if isRemoteWorker {
 		// The catalog pod name only resolves on the catalog host's podman network, so a
 		// remote worker must use the catalog's public (HTTPS) API URL instead.
-		return injectRemotePodmanAuth(values, existingJwksURL)
+		return injectRemotePodmanAuth(serviceID, values, existingJwksURL)
 	}
 
 	// On Podman, local worker accesses catalog API directly on the podman network
@@ -152,7 +154,7 @@ func injectPodmanAuth(values map[string]any, existingJwksURL string, isRemoteWor
 	return nil
 }
 
-func injectRemotePodmanAuth(values map[string]any, existingJwksURL string) error {
+func injectRemotePodmanAuth(serviceID string, values map[string]any, existingJwksURL string) error {
 	publicURL, err := resolvePodmanPublicCatalogURL()
 	if err != nil {
 		return fmt.Errorf("failed to resolve catalog public URL for remote worker: %w", err)
@@ -163,11 +165,37 @@ func injectRemotePodmanAuth(values map[string]any, existingJwksURL string) error
 	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
 		values["authCatalogApiUrl"] = publicURL
 	}
+	injectCatalogUIURL(serviceID, values, publicURL)
 	if _, ok := values["authJwksPlaintextHosts"]; !ok {
 		values["authJwksPlaintextHosts"] = ""
 	}
 
 	return nil
+}
+
+// servicesWithUI lists the services whose UI redirects the browser to the catalog for sign-in.
+var servicesWithUI = map[string]bool{"chat": true, "digitize": true}
+
+// injectCatalogUIURL sets authCatalogUiUrl, the catalog UI address a service UI sends the
+// browser to for sign-in. A service UI on another host cannot infer it from its own address.
+// CATALOG_PUBLIC_UI_URL wins; otherwise it is derived from the public API URL
+// (catalog-api.<domain> -> catalog-ui.<domain>). If neither works it is left unset and the
+// UI falls back to inferring it from its own host name.
+func injectCatalogUIURL(serviceID string, values map[string]any, publicAPIURL string) {
+	if !servicesWithUI[serviceID] {
+		return
+	}
+	if v, ok := values["authCatalogUiUrl"]; ok && v != "" {
+		return
+	}
+	if envURL := utils.GetEnv("CATALOG_PUBLIC_UI_URL", ""); envURL != "" {
+		values["authCatalogUiUrl"] = envURL
+
+		return
+	}
+	if strings.Contains(publicAPIURL, "://catalog-api.") {
+		values["authCatalogUiUrl"] = strings.Replace(publicAPIURL, "://catalog-api.", "://catalog-ui.", 1)
+	}
 }
 
 func resolvePodmanPublicCatalogURL() (string, error) {

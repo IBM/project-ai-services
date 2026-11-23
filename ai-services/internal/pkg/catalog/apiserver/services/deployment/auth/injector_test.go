@@ -29,7 +29,23 @@ func TestInjectServiceAuthValues_Podman_Remote(t *testing.T) {
 
 	assert.Equal(t, "https://catalog-api.example.com:8443/.well-known/jwks.json", values["authJwksUrl"])
 	assert.Equal(t, "https://catalog-api.example.com:8443", values["authCatalogApiUrl"])
+	assert.Equal(t, "https://catalog-ui.example.com:8443", values["authCatalogUiUrl"])
 	assert.Equal(t, "", values["authJwksPlaintextHosts"])
+}
+
+func TestInjectServiceAuthValues_Podman_Remote_CatalogUIURL(t *testing.T) {
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
+
+	// Services without a UI must not get the value (their schemas reject unknown keys).
+	values := map[string]any{}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "similarity", values, "podman", true))
+	assert.NotContains(t, values, "authCatalogUiUrl")
+
+	// An explicit env override wins over the derived value.
+	t.Setenv("CATALOG_PUBLIC_UI_URL", "https://ui.custom.example.com")
+	values = map[string]any{}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
+	assert.Equal(t, "https://ui.custom.example.com", values["authCatalogUiUrl"])
 }
 
 func TestInjectServiceAuthValues_Podman_Remote_NoPublicURL(t *testing.T) {

@@ -80,6 +80,19 @@ export function getCatalogUiBaseUrl() {
   return currentOrigin;
 }
 
+// The catalog UI address set at deploy time (served by the UI's Nginx as /config.json). It is
+// needed when this UI runs on another host than the catalog UI, where inferring it is wrong.
+async function fetchConfiguredCatalogUiUrl() {
+  try {
+    const res = await fetch('/config.json', { cache: 'no-store' });
+    if (!res.ok) return '';
+    const cfg = await res.json();
+    return typeof cfg.catalogUiUrl === 'string' ? cfg.catalogUiUrl : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function startLoginFlow() {
   if (isRedirecting) return;
   if (window.location.pathname === CALLBACK_PATH) return;
@@ -95,7 +108,8 @@ export async function startLoginFlow() {
   sessionStorage.setItem(SAVED_ROUTE_KEY, currentRoute);
 
   const redirectUri = `${window.location.origin}${CALLBACK_PATH}`;
-  const authorizeUrl = new URL('/authorize', getCatalogUiBaseUrl());
+  const catalogUiUrl = (await fetchConfiguredCatalogUiUrl()) || getCatalogUiBaseUrl();
+  const authorizeUrl = new URL('/authorize', catalogUiUrl);
   authorizeUrl.searchParams.set('service', SERVICE);
   authorizeUrl.searchParams.set('redirect_uri', redirectUri);
   authorizeUrl.searchParams.set('code_challenge', challenge);
