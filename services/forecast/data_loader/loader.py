@@ -15,6 +15,7 @@ from forecast.data_loader.db2_client import ColumnInfo, Db2Client
 from forecast.data_loader.exceptions import (
     ConnectorDecryptionError,
     DBColumnNotFoundError,
+    UnsupportedColumnTypeError,
 )
 from forecast.data_loader.parquet_store import (
     ParquetBatchWriter,
@@ -72,7 +73,27 @@ def _resolve_columns(
         raise DBColumnNotFoundError(
             f"Column(s) {missing} not found in table '{table}'. Available columns: {[c.name for c in available]}"
         )
+
+    names = [col.name for col in resolved]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise DBColumnNotFoundError(f"Column(s) {duplicates} requested more than once from table '{table}'")
     return resolved
+
+
+# Mapepire returns these as a reference to a separate download ({'blob_url': ..., 'size': ...})
+# and not as the value, so they cannot be written to Parquet.
+_BINARY_TYPES = frozenset({"BINARY", "VARBINARY", "VARBIN", "BLOB"})
+
+
+def _reject_binary_columns(columns: Sequence[ColumnInfo], table: str) -> None:
+    """Fail before any query runs if a requested column has a binary type."""
+    binary = [f"{col.name} ({col.type})" for col in columns if col.type.split("(")[0].strip().upper() in _BINARY_TYPES]
+    if binary:
+        raise UnsupportedColumnTypeError(
+            f"Column(s) {binary} of table '{table}' have a binary type, which cannot be read through "
+            "Mapepire. Leave them out of the columns to extract."
+        )
 
 
 def _as_bool(value: Any) -> bool:
@@ -115,7 +136,6 @@ class Db2DataLoader:
         table: str,
         columns: Sequence[str],
         output_path: str | Path,
-        where_clause: Optional[str] = None,
         batch_size: int = settings.forecast.loader_chunk_rows,
         compression: str = settings.forecast.parquet_compression,
         connector_id: Optional[str] = None,
@@ -133,7 +153,6 @@ class Db2DataLoader:
             table: Source table as 'SCHEMA.TABLE' or 'TABLE' (resolved in the current schema).
             columns: List of columns to extract.
             output_path: Destination path for the .parquet file.
-            where_clause: Optional SQL filter condition (e.g., "STATUS = 'ACTIVE'").
             batch_size: Number of rows to fetch per chunk from Db2.
             compression: Parquet compression codec (default from PARQUET_COMPRESSION).
             connector_id: Connector identifier, used in decryption errors.
@@ -150,7 +169,8 @@ class Db2DataLoader:
                 connector details are given without connector_id and connector_type.
             InvalidTableReferenceError: If table is not 'TABLE' or 'SCHEMA.TABLE'.
             DBTableNotFoundError: If table does not exist or user lacks access.
-            DBColumnNotFoundError: If any requested column is missing.
+            DBColumnNotFoundError: If any requested column is missing or requested twice.
+            UnsupportedColumnTypeError: If any requested column has a binary type.
             DBConnectionError: If connection is dropped during extraction.
             ParquetWriteError: If Parquet writing fails.
         """
@@ -170,7 +190,6 @@ class Db2DataLoader:
                     table=table,
                     columns=columns,
                     output_path=output_path,
-                    where_clause=where_clause,
                     batch_size=batch_size,
                     compression=compression,
                 )
@@ -197,6 +216,7 @@ class Db2DataLoader:
         #    catalogue spelling (matching is case-insensitive, quoted queries are not)
         available_cols = self.db2_client.list_columns(table)
         resolved_cols = _resolve_columns(cols_requested, available_cols, table)
+        _reject_binary_columns(resolved_cols, table)
         resolved_names = [col.name for col in resolved_cols]
         resolved_table = available_cols[0].table_ref or table
 
@@ -207,7 +227,6 @@ class Db2DataLoader:
         query = self.db2_client.build_select_query(
             table=resolved_table,
             columns=resolved_names,
-            where_clause=where_clause,
             batch_size=batch_size,
         )
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -49,6 +50,7 @@ _SQL_TO_ARROW_TYPE: dict[str, pa.DataType] = {
     "DATE": pa.date32(),
     "TIME": pa.string(),
     "TIMESTAMP": pa.timestamp("us"),
+    "TIMESTMP": pa.timestamp("us"),  # Db2 for i catalogue spelling
     "TIMESTAMPTZ": pa.timestamp("us", tz="UTC"),
     # Boolean & Binary
     "BOOLEAN": pa.bool_(),
@@ -69,6 +71,28 @@ def map_db_type_to_arrow(db_type: str) -> pa.DataType:
         return pa.string()
     base_type = db_type.split("(")[0].strip().upper()
     return _SQL_TO_ARROW_TYPE.get(base_type, pa.string())
+
+
+def _parse_date(value: Any) -> Any:
+    """Parse an ISO 'YYYY-MM-DD' string; other values (None, date) pass through."""
+    return date.fromisoformat(value.strip()) if isinstance(value, str) else value
+
+
+def _parse_timestamp(value: Any) -> Any:
+    """Parse an ISO 'YYYY-MM-DD HH:MM:SS[.ffffff]' string; other values pass through."""
+    return datetime.fromisoformat(value.strip()) if isinstance(value, str) else value
+
+
+def _value_parser(arrow_type: pa.DataType):
+    """Return the function that converts a Db2 string to the Arrow type, or None if none is needed.
+
+    Mapepire returns DATE and TIMESTAMP values as strings, which Arrow does not convert itself.
+    """
+    if pa.types.is_date32(arrow_type):
+        return _parse_date
+    if pa.types.is_timestamp(arrow_type):
+        return _parse_timestamp
+    return None
 
 
 def build_arrow_schema(
@@ -170,10 +194,10 @@ class ParquetBatchWriter:
                     )
 
             # Transpose row tuples into column arrays for Arrow RecordBatch
-            col_data = {
-                col_name: [row[i] for row in rows]
-                for i, col_name in enumerate(column_names)
-            }
+            col_data = {}
+            for i, field in enumerate(self.schema):
+                parse = _value_parser(field.type)
+                col_data[field.name] = [parse(row[i]) if parse else row[i] for row in rows]
             batch = pa.RecordBatch.from_pydict(col_data, schema=self.schema)
             writer.write_batch(batch)
             batch_count = len(rows)

@@ -16,6 +16,7 @@ from forecast.data_loader.exceptions import (
     DBTableNotFoundError,
     InvalidTableReferenceError,
     ParquetWriteError,
+    UnsupportedColumnTypeError,
 )
 from forecast.data_loader.loader import (
     Db2DataLoader,
@@ -42,6 +43,7 @@ __all__ = [
     "InvalidTableReferenceError",
     "ParquetBatchWriter",
     "ParquetWriteError",
+    "UnsupportedColumnTypeError",
     "build_arrow_schema",
     "map_db_type_to_arrow",
 ]

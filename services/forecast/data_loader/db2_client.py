@@ -7,6 +7,7 @@ and server-side streaming cursor execution.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
 
@@ -20,6 +21,11 @@ from forecast.data_loader.exceptions import (
 from forecast.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Mapepire job options. Db2 for i returns DATE values in the job's date format (for example
+# MM/DD/YY with a two-digit year); ISO gives YYYY-MM-DD, which can be parsed without guessing.
+# TIME is left at its default hh:mm:ss, since ISO time would use dots as separators.
+_JOB_OPTIONS = {"date format": "iso"}
 
 
 @dataclass
@@ -76,6 +82,12 @@ class Db2Client:
         self.ignore_unauthorized = ignore_unauthorized
         self.ca_cert = ca_cert
         self._conn = custom_connection
+        self._server: Optional[Any] = None
+
+    def _limit_reads(self, seconds: float) -> None:
+        """Set how long a single read from the Mapepire websocket may wait for a reply."""
+        if self._server is not None:
+            self._server.recv_timeout_s = seconds
 
     def _get_connection(self) -> Any:
         """Return or establish the database connection via Mapepire."""
@@ -89,16 +101,30 @@ class Db2Client:
 
             # The default websockets limit of 1 MiB causes error 1009 (message too big)
             # when multi-thousand row batches are returned in a single JSON frame.
-            # Patch WebsocketConnection.connect to allow up to 64 MiB frames.
+            # Mapepire also opens the socket with a fixed 10 s timeout and reads every
+            # reply without one, so a hung server would block forever.
+            # Patch WebsocketConnection.connect to allow up to 64 MiB frames and to take
+            # both timeouts from the DaemonServer: ``connect_timeout_s`` for opening the
+            # socket and ``recv_timeout_s`` for each read (None means no limit).
             if not getattr(mapepire_ws.WebsocketConnection, "_max_size_configured", False):
                 def _configured_ws_connect(ws_self):
-                    return ws_sync_connect(
+                    server = ws_self.db2_server
+                    ws = ws_sync_connect(
                         ws_self.uri,
                         additional_headers=ws_self.headers,
-                        open_timeout=10,
-                        ssl=ws_self._create_ssl_context(ws_self.db2_server),
+                        open_timeout=getattr(server, "connect_timeout_s", 10),
+                        ssl=ws_self._create_ssl_context(server),
                         max_size=64 * 1024 * 1024,
                     )
+                    recv = ws.recv
+
+                    def recv_with_timeout(timeout=None, decode=None):
+                        if timeout is None:
+                            timeout = getattr(server, "recv_timeout_s", None)
+                        return recv(timeout=timeout, decode=decode)
+
+                    ws.recv = recv_with_timeout
+                    return ws
 
                 mapepire_ws.WebsocketConnection.connect = _configured_ws_connect
                 mapepire_ws.WebsocketConnection._max_size_configured = True
@@ -123,9 +149,15 @@ class Db2Client:
             ignoreUnauthorized=self.ignore_unauthorized,
             ca=self.ca_cert,
         )
+        # The connect request is answered within the connect timeout; once connected,
+        # reads are limited by the query timeout.
+        server.connect_timeout_s = self.connect_timeout
+        server.recv_timeout_s = self.connect_timeout
 
         try:
-            self._conn = mapepire_python.connect(connection_details=server)
+            self._conn = mapepire_python.connect(connection_details=server, opts=_JOB_OPTIONS)
+            self._server = server
+            self._limit_reads(self.query_timeout)
             return self._conn
         except Exception as exc:
             err_str = str(exc).lower()
@@ -251,13 +283,13 @@ class Db2Client:
         self,
         table: str,
         columns: Sequence[str],
-        where_clause: Optional[str] = None,
         batch_size: int = settings.forecast.loader_chunk_rows,
     ) -> str:
         """Build an optimized, safe SELECT SQL statement for streaming reads.
 
         ``table`` is 'SCHEMA.TABLE' or 'TABLE'; an unqualified table is resolved by Db2
-        against the session's current schema.
+        against the session's current schema. Every identifier is quoted and no caller
+        supplied SQL is accepted.
         """
         schema, name = self.split_table_ref(table)
         quoted_cols = ", ".join(self.quote_identifier(c) for c in columns)
@@ -265,17 +297,8 @@ class Db2Client:
         if schema is not None:
             table_ref = f"{self.quote_identifier(schema)}.{table_ref}"
 
-        sql = f"SELECT {quoted_cols} FROM {table_ref}"
-
-        if where_clause and where_clause.strip():
-            predicate = where_clause.strip()
-            if predicate.upper().startswith("WHERE "):
-                predicate = predicate[6:].strip()
-            sql = f"{sql} WHERE {predicate}"
-
         # Optimization & non-blocking concurrency hints for Db2
-        sql = f"{sql} FOR READ ONLY OPTIMIZE FOR {batch_size} ROWS WITH UR"
-        return sql
+        return f"SELECT {quoted_cols} FROM {table_ref} FOR READ ONLY OPTIMIZE FOR {batch_size} ROWS WITH UR"
 
     def stream_query_batches(
         self,
@@ -287,14 +310,28 @@ class Db2Client:
 
         Fetches in chunks of ``fetch_size`` from the WebSocket transport to avoid
         server-side message spikes, and yields accumulated batches up to ``batch_size``.
+
+        The whole stream, from the execute to the last row, must finish within
+        ``query_timeout`` seconds, otherwise DBConnectionError is raised (a transient
+        failure). After a timeout the connection is in an undefined state and must be closed.
         """
         conn = self._get_connection()
         cursor = conn.cursor()
         ws_chunk = max(1, min(batch_size, fetch_size))
+        deadline = time.monotonic() + self.query_timeout
+
+        def limit_reads_to_deadline() -> None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            self._limit_reads(remaining)
+
         try:
+            limit_reads_to_deadline()
             cursor.execute(query)
             current_batch: List[Sequence[Any]] = []
             while True:
+                limit_reads_to_deadline()
                 rows = cursor.fetchmany(ws_chunk)
                 if not rows:
                     if current_batch:
@@ -305,6 +342,10 @@ class Db2Client:
                 if len(current_batch) >= batch_size:
                     yield current_batch
                     current_batch = []
+        except TimeoutError as exc:
+            raise DBConnectionError(
+                f"Db2 query did not finish within the {self.query_timeout}s query timeout"
+            ) from exc
         except Exception as exc:
             err_str = str(exc).lower()
             if "not found" in err_str or "does not exist" in err_str or "sql0204" in err_str:
@@ -315,7 +356,14 @@ class Db2Client:
                 raise DBAuthError(f"Permission denied during streaming: {exc}") from exc
             raise DBConnectionError(f"Error during Db2 batch streaming: {exc}") from exc
         finally:
-            cursor.close()
+            # Closing the cursor talks to the server, so it gets the connect timeout
+            # instead of what is left of the query timeout.
+            self._limit_reads(self.connect_timeout)
+            try:
+                cursor.close()
+            except Exception as exc:
+                logger.warning("Error closing Db2 cursor: %s", exc)
+            self._limit_reads(self.query_timeout)
 
     def close(self) -> None:
         """Close the active database connection if open."""
@@ -327,6 +375,7 @@ class Db2Client:
                 logger.warning("Error closing Db2 connection: %s", exc)
             finally:
                 self._conn = None
+                self._server = None
 
     def __enter__(self) -> Db2Client:
         return self

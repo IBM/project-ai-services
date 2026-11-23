@@ -95,12 +95,6 @@ class ForecastConfig(BaseSettings):
         description="Queued jobs accepted before POST /v1/connectors returns 429",
     )
 
-    max_training_rows: int = Field(
-        default=10_000_000,
-        ge=1,
-        description="Largest row count a job may train on",
-    )
-
     max_inference_rows: int = Field(
         default=5000,
         ge=1,

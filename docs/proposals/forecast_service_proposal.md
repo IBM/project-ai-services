@@ -12,7 +12,7 @@ When the job succeeds, the user calls the **forecast** endpoint (`POST /v1/forec
 
 > **Scope notes.**
 > - Conversion of an AutoGluon model to ONNX, and running Triton on Power, are treated as working capabilities and are not designed here. This document covers the service around them.
-> - **The connector API is in scope; the connector implementation is not.** The service has `/v1/connectors` and a `connectors` table. It has no scanner and no background sync. The data loader runs inside the worker process and reads the source only when a job runs.
+> - **The connector API is in scope; the connector implementation is not.** The service has `/v1/connectors` and a `connectors` table. It has no scanner and no background sync. The data loader runs in its own subprocess of the API, before the worker starts, and reads the source only when a job runs.
 > - **Time-series forecasting is out of scope.** The forecaster is a tabular model over independent rows.
 > - **Training and inference run on CPU only.** Spyre is not used.
 > - **Resource sizing** (CPU, memory, scratch and volume size) is to be provided by DEV. This document names the knobs but does not set values.
@@ -40,7 +40,7 @@ It also introduces three things that no existing service has:
 | Connector                  | A row in `connectors` managed by `/v1/connectors`: type, connection details, secrets encrypted. No scanner and no sync.                                                                                                                                 |
 | Inputs and target          | `input_columns` (one or more, each with an optional type) and `target_column` (exactly one).                                                                                                                                                          |
 | Scheduling                 | APScheduler in the API process, one job per connector, with its job store in PostgreSQL. A one-off job runs the first training and a cron job runs the later ones.                                                           |
-| Training run               | A **worker subprocess** spawned by the API: data loader → AutoGluon → ONNX export → write to the shared volume.                                                                                                                                         |
+| Training run               | Orchestrated by the API: a **data loader subprocess** writes the table to scratch → a **worker subprocess** runs AutoGluon and the ONNX export on scratch → the API publishes the forecaster's directory to the shared volume and loads it into Triton.                                                                                                                                         |
 | Trained forecaster         | A row in `forecasters` plus a directory `fc_<connector_id>_<version>` on the shared repository volume. The version is the job's `jobs.seq`.                                                                                                             |
 | Forecaster serving         | NVIDIA Triton Inference Server (CPU) in explicit model-control mode. The Forecast API dynamically loads, unloads, and serves each forecaster as an independent model via HTTP.                                                                           |
 | Prediction with confidence | `POST /v1/forecast/{connector_id}` — the API validates rows against the stored input columns, calls Triton (using the newest `ready` forecaster by default, or the version specified in `?version=`), and returns a prediction and a `confidence` per row. |
@@ -55,11 +55,11 @@ It also introduces three things that no existing service has:
 
 **Decision: training runs in a subprocess that the API spawns inside its own pod, one at a time.** It is not a separate pod, a Kubernetes Job or a thread.
 
-- **Same image and code.** `python -m forecast.worker <job_id>` shares the DB models and loader code with the API. No container-runtime access, ServiceAccount or Podman socket is needed, which keeps the Podman and OpenShift deployments identical.
+- **Same image and code.** `python -m forecast.training <job_id> <data_path> <output_dir>` shares the DB models with the API. No container-runtime access, ServiceAccount or Podman socket is needed, which keeps the Podman and OpenShift deployments identical.
 - **Killable.** AutoGluon trains with child processes and large memory use. The API starts the worker in its **own process group** and kills the whole group on timeout, so nothing keeps running.
 - **Crash isolation from the event loop.** A worker that crashes or is killed by the kernel does not take the API's event loop with it, and the API can read the exit status.
 - **Why not threads or a process pool.** AutoGluon and ONNX export are CPU- and memory-heavy, and AutoGluon forks. A subprocess per job gives a clean memory release at exit and a unit that can be killed.
-- **The loader is part of this subprocess.** Reading the source is the first step of the worker, not a separate component, so every job gets a fresh, isolated read, and its result records how many rows it read.
+- **The loader is not part of training.** Reading the source is a step of the API's orchestration. The API runs it in its own subprocess, with its own process group and time limit, before it spawns the worker. A slow or hung source therefore uses none of the training time limit and cannot block the API's event loop. A bad credential, a missing table or an unreachable host fails the job before a training process exists. The loader writes the table to a Parquet file on local scratch and the worker reads that file, so every job still gets a fresh, isolated read, and its result records how many rows it read.
 
 **Trade-off — shared fate.** The API and the training run share one container, so they share its memory limit and its lifecycle. Training memory pressure can hurt the API, and an API redeploy kills a running training job. The worker therefore runs with a memory cap (`WORKER_MEMORY_LIMIT_MB`) and a time limit, and startup recovery fails any job that was queued or running when the container stopped.
 
@@ -69,8 +69,8 @@ It also introduces three things that no existing service has:
 
 - Triton runs in **explicit model-control mode** (`--model-control-mode=explicit`). No model is loaded automatically; the API explicitly issues load requests after successful training and during startup reconciliation.
 - The **database state is authoritative**: Triton serves only forecasters with an active `ready` record in PostgreSQL. Unregistered directories are never loaded.
--- The worker only **creates** a forecaster's directory, by writing a temporary directory on the same volume and renaming it, so the directory appears whole or not at all. The APScheduler tick only **deletes** directories whose row is `retiring`, and the temporary directory of a job that failed.
--- The APScheduler writes the `forecasters` row only after Triton has loaded the forecaster. A row is therefore always `ready`, `retiring` or `deleted`, and the worker has no write grant on `forecasters`.
+- The worker writes the forecaster's Triton directory (`config.pbtxt` and `1/model.onnx`) to **local scratch** and never touches the repository volume. The API **publishes** it: it copies the directory to `.staging/<job_id>/` on the volume and renames it to `fc_<connector_id>_<version>`, so the directory appears whole or not at all. The API also **deletes**: directories whose row is `retiring`, the staging directory of a publish that failed, and leftovers at boot.
+- The APScheduler writes the `forecasters` row only after Triton has loaded the forecaster. A row is therefore always `ready`, `retiring` or `deleted`, and the worker has no write grant on `forecasters`.
 -- Retention is by count, per connector, and runs after each successful load. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired in this order: its row becomes `retiring`, it is unloaded from Triton, its directory is deleted, and its row becomes `deleted`. The row is kept. Forecasters of other connectors are not affected.
 
 ### 2.3 Decision — Single worker, enforced twice
@@ -88,7 +88,7 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 **Decision: the service has a connector CRUD API and a `connectors` table, and nothing more.** A connector holds the connection details of one source database, with secrets encrypted. The training job created with it names it by `connector_id`. The scanner, background sync and sync history that digitize attaches to a connector are not part of this service.
 
 - **Same pattern as digitize.** Create, list, get, partial update and delete, with an allowlist of safe fields. Every other field is encrypted with AES-256-GCM (`DB_ENCRYPTION_KEY`) and never returned.
-- **The worker reads and decrypts.** It runs the loader as its first step, reads the connector row with a `SELECT`-only grant and decrypts it with the key the API passes in. Nothing reads the source database outside a job.
+- **The loader reads and decrypts.** The loader subprocess reads the connector row with the API's database role and decrypts the secret fields with `DB_ENCRYPTION_KEY`. The worker's role has no grant on `connectors`, so the credentials never reach the training process. Nothing reads the source database outside a job.
 - **Rotation is an update.** Each job reads the connector when it runs, so changing a password with `PUT /v1/connectors/{id}` applies to the next job.
 - **Referential safety.** A connector cannot be deleted while a `queued` or `running` job uses it. Finished jobs keep their rows with `connector_id` set to `NULL`.
 
@@ -98,8 +98,8 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 
 - **Same library as digitize.** An `AsyncIOScheduler` with a `SQLAlchemyJobStore` on the service's PostgreSQL database, in a `scheduler` schema that the init container creates. APScheduler is pinned to the version digitize uses. The persistent store keeps the schedules across restarts.
 - **One job per connector.** Creating a connector registers a one-off job that fires at once for the first training and, when a training schedule is set, a cron job for the later ones. The cron runs in UTC. When training schedule is unset, only the first training runs.
-- **What a fired job does.** A cron run spawns the worker and waits for it. On success it loads the forecaster into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `failed` and deletes the temporary directory that the worker left.
-- **Retry of the worker step.** If the worker fails, the job function runs it again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `running` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the temporary directory before the next attempt. The worker exits with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, an unknown table or column, no rows, or more than `MAX_TRAINING_ROWS` rows), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `failed` with the last error, and the number of attempts is recorded in `result`. Only the worker step is retried. The Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
+- **What a fired job does.** A fired job runs the loader subprocess, then spawns the worker with the data file and waits for it. On success it publishes the forecaster's directory to the volume, loads it into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `failed` and deletes the scratch directory of the attempt.
+- **Retry of the attempt.** An attempt is the loader followed by the worker. If either fails, the job function runs the attempt again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `running` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the scratch directory of the attempt (the data file and the model directory) before the next attempt, so a retry reads the source again. The loader and the worker exit with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, authentication fails, an unknown table or column, no rows, a target with fewer than two different values, fewer than 10 rows with a target value, or data that AutoGluon cannot fit), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `failed` with the last error, and the number of attempts is recorded in `result`. Only the attempt is retried. The publish, the Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
 - **Missed runs are skipped.** The jobs use a short misfire grace time, so a late run is skipped instead of run late. A run missed while the API was down, or skipped because the connector still has a `queued` or `running` job, is logged with the reason.
 - **Startup.** The API registers a cron job only for a connector that has none, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that are in `running` state when the API stopped are marked `failed` by the boot recovery.
 - **Startup Recovery for one-off jobs** Startup recovery marks all in-progress jobs as failed, in case of a one-off job getting marked failed in such a way, the job is requeued to ensure at least one training getting completed.
@@ -116,19 +116,22 @@ flowchart TD
 
     ONE --> RUN
     INS --> RUN["job status = running, attempt = 1"]
-    RUN --> SPAWN["spawn worker: python -m forecast.worker job_id<br/>own process group, time and memory limits"]
-    SPAWN --> EXIT{"worker result"}
+    RUN --> READ["spawn loader subprocess:<br/>read the table to scratch (data.parquet)<br/>own process group, time limit"]
+    READ -- "exit 0" --> SPAWN["spawn worker: python -m forecast.training job_id data output<br/>own process group, time and memory limits"]
+    READ -- "any failure" --> EXIT
+    SPAWN --> EXIT{"loader or worker result"}
 
-    EXIT -- "exit 0" --> LOAD["API: load_model fc_connector_version into Triton"]
+    EXIT -- "exit 0" --> PUB["API: publish the model directory<br/>(copy to .staging, rename to fc_connector_version)"]
+    PUB --> LOAD["API: load_model fc_connector_version into Triton"]
     LOAD --> REC["insert forecasters row (ready)<br/>job status = completed"]
     REC --> RET["apply forecaster retention"]
     RET --> PRUNE
 
     EXIT -- "permanent failure code" --> FAIL
     EXIT -- "other non-zero exit, killed or timed out" --> MORE{"attempts left?<br/>TRAINING_MAX_ATTEMPTS"}
-    MORE -- yes --> WAIT["delete temp dir<br/>wait TRAINING_RETRY_DELAY_SECONDS<br/>attempt + 1"]
-    WAIT --> SPAWN
-    MORE -- no --> FAIL["delete temp dir<br/>job status = failed, jobs.error set, attempts added to jobs.result"]
+    MORE -- yes --> WAIT["delete scratch dir<br/>wait TRAINING_RETRY_DELAY_SECONDS<br/>attempt + 1"]
+    WAIT --> READ
+    MORE -- no --> FAIL["delete scratch dir<br/>job status = failed, jobs.message set, attempts added to jobs.result"]
     FAIL --> PRUNE["prune old finished jobs of the connector"]
 ```
 
@@ -136,7 +139,7 @@ flowchart TD
 
 ## 3. Non-Goals
 
-- **Connector scanner and sync:** The connector API stores connection details. There is no scanner, no background sync and no sync history. The data loader inside the worker reads the source when a job runs.
+- **Connector scanner and sync:** The connector API stores connection details. There is no scanner, no background sync and no sync history. The data loader, which the API runs before the worker, reads the source when a job runs.
 - **Horizontal scaling and multi-worker training:** The service is architected for a single API replica and a single concurrent training run. Job ownership, claim columns, heartbeats and fencing are out of scope.
 - **Time series:** Not supported. Rows are independent.
 - **Spyre and accelerators:** Training and inference run on CPU.
@@ -166,7 +169,9 @@ graph LR
             direction LR
             API["REST API<br/>/v1/forecast"]
             SCH["APScheduler<br/>(one job per connector)"]
-            TW["Training Worker"]
+            LD["Data Loader<br/>(subprocess)"]
+            TW["Training Worker<br/>(subprocess)"]
+            API -->|"spawn"| LD
             API -->|"spawn"| TW
             SCH -->|"fire job"| API
             SCH <-->|"job store (scheduler schema)"| PG
@@ -180,8 +185,8 @@ graph LR
     end
 
     CAT -->|"deploys"| DEP
-    TW -->|"read-only query<br/>(connector credentials)"| CONN
-    CONN -->|"rows"| TW
+    LD -->|"read-only query<br/>(connector credentials)"| CONN
+    CONN -->|"rows"| LD
     CONN --- SRC
     CAT -->|"POST /v1/connectors<br/>(connection + training details)"| API
     U -->|"/v1/forecast<br/>/v1/connectors"| FS
@@ -193,8 +198,8 @@ graph LR
 
 **Key interactions:**
 
-- The **API pod** hosts the REST API and **APScheduler**. Each connector has a job that APScheduler fires for the first training and, when training schedule is set, on that schedule. The fired job runs the whole pipeline: it queues the run, spawns the worker, enforces the time limit and detects failure, then loads the forecaster into Triton, records it and applies retention (unload, deletion).
-- The **worker subprocess** owns the training work only. It has no polling loop. It reads its job, loads the data, trains, writes the forecaster's directory to the volume, records its result on the job row, and exits.
+- The **API pod** hosts the REST API and **APScheduler**. Each connector has a job that APScheduler fires for the first training and, when training schedule is set, on that schedule. The fired job runs the whole pipeline: it queues the run, spawns the loader and then the worker, enforces the time limits and detects failure, then publishes the forecaster's directory to the volume, loads it into Triton, records it and applies retention (unload, deletion).
+- The **loader subprocess** reads the source table with the connector's credentials and writes it to scratch. The **worker subprocess** owns the training work only. It has no polling loop and no access to the source or the volume. It reads its job and the data file, trains, writes the forecaster's directory to scratch, records its result on the job row, and exits.
 - The **Triton and API pods** share the model repository volume (`/models`). The Forecast API mounts it read-write to publish and prune model artifacts, while Triton mounts it read-only to serve models safely.
 - The **Postgres pod** holds `connectors`, `training_configs`, `jobs` and `forecasters`, and APScheduler's job store in the `scheduler` schema. The API connects as the DB owner. The worker connects as a restricted role.
 - The service is exposed externally on **port 8500** (configurable). This avoids the ports used by digitize (4000/4001), summarize (6000), similarity (7000), translate (9000) and extract (9500).
@@ -443,7 +448,7 @@ curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f9
 
 A connector stores the connection details of one source database, with its secrets encrypted. The training job created with it refers to it by `connector_id`. The endpoints follow `services/digitize/api/v1/connectors.py`: create, list, get, partial update and delete, with the allowlist encryption of `connectors/encryption.py`.
 
-**What is in scope and what is not.** The scope here is the connector **API and its table**. There is no scanner, no sync and no sync history. Scheduled training is set by the schedule field in connector Create request. Nothing reads the source database until a training job runs, and then the loader inside the worker does it. A connector therefore has no `last_sync_at` and no file counters, which digitize's connectors have.
+**What is in scope and what is not.** The scope here is the connector **API and its table**. There is no scanner, no sync and no sync history. Scheduled training is set by the schedule field in connector Create request. Nothing reads the source database until a training job runs, and then the loader, which the API runs before the worker, does it. A connector therefore has no `last_sync_at` and no file counters, which digitize's connectors have.
 
 **Connector types.** `type` is validated against a fixed list. The first type is `db2_for_i`. Adding a database means adding its type, its required fields and its safe fields to the allowlist, and a driver in the loader.
 
@@ -673,8 +678,8 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `seq`          | Primary key. Identity column (`GENERATED ALWAYS`), so the database assigns it. Its value is the forecaster version.                                                                                                                                    |
 | `connector_id` | Foreign key to `connectors`. Set to `NULL` when the connector is deleted after the job has finished.                                                                                                                                                   |
 | `status`       | `QUEUED`, `RUNNING`, `COMPLETED` or `FAILED`.                                                                                                                                                                                                          |
-| `message`      | Failure reason. Empty unless the job failed.                                                                                                                                                                                                           |
-| `result`       | JSON object. The worker writes `rows_read` (the number of rows available for training) once, when the data load finishes. When training finishes it overwrites the object with `rows_read` repeated plus `algorithm` (the algorithm AutoGluon chose) and `training_seconds`. The API adds `attempts` after the worker exits. A failed job keeps `rows_read` if the failure came after the load, and always has `attempts`. Readers must tolerate missing keys. |
+| `message`      | Failure reason. Empty unless the job failed. It is a message written for the user, such as "Table X has no rows", or a fixed text that names only the class of an unexpected error. The details of an unexpected error go to the worker log, because they can carry hosts, user names or data.                                                                                                                                                                                                           |
+| `result`       | JSON object. The worker writes `rows_read` (the number of rows available for training) once, when it has read the data file that the loader wrote. When training finishes it overwrites the object with `rows_read` repeated plus `algorithm` (the algorithm AutoGluon chose), `validation_metric`, `validation_score` (AutoGluon's score on its own validation rows), `test_score` (the same metric on a held-out 20% of the rows the model never saw) and `training_seconds`. The API adds `attempts` after the worker exits. A failed job keeps `rows_read` if the failure came after the load, and always has `attempts`. Readers must tolerate missing keys. |
 | `created_at`   | UTC time at which the job was queued.                                                                                                                                                                                                                  |
 | `started_at`   | UTC time at which the job started running.                                                                                                                                                                                                             |
 | `finished_at`  | UTC time at which the job completed or failed.                                                                                                                                                                                                         |
@@ -700,7 +705,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 
 ## 8. Data Loader
 
-The loader is **new code that runs inside the worker**, as its first step. There is no separate scanner component and no background sync: the connector API only stores connection details, and the loader reads them when a job runs. It reads from a database table, applies the row selection, and writes a dataset to local scratch.
+The loader is **new code that the API runs in its own subprocess**, before it spawns the worker. There is no separate scanner component and no background sync: the connector API only stores connection details, and the loader reads them when a job runs. It reads from a database table, applies the row selection, and writes a dataset to local scratch, which the worker then reads.
 
 | Provider | `db_type` | Phase | Notes |
 | :-- | :-- | :-- | :-- |
@@ -709,7 +714,7 @@ The loader is **new code that runs inside the worker**, as its first step. There
 
 ### 8.1 Database source
 
-- The worker reads the job's connector row (`jobs.connector_id`) and the connector's `training_configs` row with its read-only grant, decrypts the secret fields with `DB_ENCRYPTION_KEY` and connects with the result. A connector that no longer exists or cannot be decrypted fails the job with an error that names the connector and never contains a secret.
+- The loader reads the job's connector row (`jobs.connector_id`) and the connector's `training_configs` row with the API's database role, decrypts the secret fields with `DB_ENCRYPTION_KEY` and connects with the result. The worker's role cannot read `connectors`. A connector that no longer exists or cannot be decrypted fails the job with an error that names the connector and never contains a secret.
 - The session is opened **read-only** with a statement timeout where the database supports it. Authentication and network failures raise distinct errors so the job error tells the user which one occurred.
 - The raised error messages are stored in the jobs table.
 - The query is built from the validated `table` column's `training` object.
@@ -740,6 +745,7 @@ sequenceDiagram
     participant A as API
     participant P as APScheduler
     participant DB as PostgreSQL
+    participant L as Loader subprocess
     participant W as Worker subprocess
     participant S as Source (Db2 for i)
     participant V as Repository volume
@@ -753,23 +759,27 @@ sequenceDiagram
     P->>A: fire job (connector_id)
     Note over A: wait for the in-process lock, one training at a time
     A->>DB: job status = running
-    A->>W: spawn (own process group, time and memory limits)
-    W->>DB: read job, training config and connector row, decrypt its secrets
-    W->>S: read-only query with the connector's details, stream rows
+    A->>L: spawn loader (own process group, time limit)
+    L->>DB: read training config and connector row, decrypt its secrets
+    L->>S: read-only query with the connector's details, stream rows
+    L-->>A: data.parquet on scratch, exit 0
+    A->>W: spawn worker with the data file (own process group, time and memory limits)
+    W->>DB: read job and training config
     W->>DB: write job result (rows read)
-    W->>W: AutoGluon training, ONNX export
+    W->>W: AutoGluon training, ONNX export, model directory written to scratch
 
     alt worker exits 0
-        W->>V: write model.onnx and config.pbtxt to a temp dir, rename to fc_{connector_id}_{version}
         W->>DB: write job result (validation score, training time, rows read)
         W-->>A: exit 0
+        A->>V: copy the model directory to .staging/{job_id}, rename to fc_{connector_id}_{version}
         A->>T: load_model fc_{connector_id}_{version}
         T-->>A: ready
         A->>DB: insert forecasters row (ready), job status = completed
     else worker fails, is killed or times out
+        L-->>A: or the loader exits non-zero
         W-->>A: non-zero exit, or killed with its process group
-        Note over A: run the worker again after TRAINING_RETRY_DELAY_SECONDS, up to TRAINING_MAX_ATTEMPTS attempts, unless the exit code says the failure would repeat
-        A->>V: delete the temp dir if the worker did not
+        Note over A: run the attempt (loader, then worker) again after TRAINING_RETRY_DELAY_SECONDS, up to TRAINING_MAX_ATTEMPTS attempts, unless the exit code says the failure would repeat
+        A->>A: delete the scratch directory of the attempt
         A->>DB: job status = failed
     end
 
@@ -802,7 +812,7 @@ sequenceDiagram
         A->>A: skip the run, log the reason
     else no active job
         A->>DB: insert job (queued, seq assigned)
-        Note over A,V: same steps as the first training: wait for the lock, spawn the worker, train, write to the volume, load_model
+        Note over A,V: same steps as the first training: wait for the lock, run the loader and the worker, publish to the volume, load_model
         A->>DB: insert forecasters row (ready)
 
         A->>DB: count the connector's ready forecasters
@@ -1009,7 +1019,7 @@ spec:
 
 ```
 /models/                                  volume root = Triton's --model-repository
-├── .staging/<job_id>/                    worker scratch for an atomic publish (same filesystem)
+├── .staging/<job_id>/                    the API's staging for an atomic publish (same filesystem)
 ├── fc_<connector_id>_<version>/          one Triton model per forecaster version
 │   ├── config.pbtxt
 │   └── 1/
@@ -1030,8 +1040,8 @@ The forecaster name format `fc_<connector_id>_<version>` (Section 2.4, Section 7
 
 | Actor | Allowed on the volume | Never |
 |:--|:--|:--|
-| Worker subprocess (runs as the Forecast container's user) | Creates `.staging/<job_id>/`, writes `model.onnx` and `config.pbtxt` there, then **renames** the directory to `fc_<connector_id>_<version>/` | Deletes anything; touches a directory that already has a `ready` row |
-| APScheduler function (same container) | Deletes `fc_<connector_id>_<version>/` for rows that are `retiring`; deletes leftover `.staging/` and directories with no live row at boot (Section 10.4) | Writes model files |
+| Worker subprocess (runs as the Forecast container's user) | Writes `model.onnx` and `config.pbtxt` to its output directory on local scratch | Touches the volume at all |
+| APScheduler function (same container) | Publishes: copies the worker's directory to `.staging/<job_id>/` and **renames** it to `fc_<connector_id>_<version>/`; deletes `fc_<connector_id>_<version>/` for rows that are `retiring`; deletes leftover `.staging/` and directories with no live row at boot (Section 10.4) | Touches a directory that already has a `ready` row; generates model files (the worker does) |
 | Triton | Reads | Writes. The mount is read-only. |
 
 The rename is atomic because `.staging/` and the model directories are on the same volume. Triton can only ever see a complete directory, and in explicit mode it does not look at a directory until it is told to load it.
@@ -1066,19 +1076,25 @@ This is the Triton-facing half of Sections 9.1 and 9.2. Triton is addressed over
 
 During the gap between a Triton restart and step 3, a forecast request returns `503 TRITON_UNAVAILABLE`.
 
-**Boot cleanup (API only).** At startup the API removes `.staging/*` (leftovers of a killed worker) and any `fc_*` directory on the volume that has no corresponding `ready` or `retiring` row in PostgreSQL. This extends the existing boot-time recovery scan; the worker still never deletes.
+**Boot cleanup (API only).** At startup the API removes `.staging/*` (leftovers of an interrupted publish) and any `fc_*` directory on the volume that has no corresponding `ready` or `retiring` row in PostgreSQL. This extends the existing boot-time recovery scan; the worker still never deletes.
 
-**Load failure.** If Triton returns an error on model load, the worker's temporary directory is deleted, the job is marked `failed` (or retried according to `TRAINING_MAX_ATTEMPTS`), and no `ready` row is written to `forecasters`.
+**Load failure.** If Triton returns an error on model load, the directory that the API published is deleted, the job is marked `failed`, and no `ready` row is written to `forecasters`. The load is not retried (Section 2.6).
 
 **`config.pbtxt`.** The worker writes it next to `model.onnx`. It is generated, never hand-edited. Its tensor definitions come from the ONNX export, which is outside this document; the service-owned parts are fixed:
 
 ```
 name: "fc_<connector_id>_<version>"
 backend: "onnxruntime"
-max_batch_size: <TBD>
+max_batch_size: 0
 instance_group [ { kind: KIND_CPU, count: 1 } ]
 # input / output tensor entries: produced by the ONNX export, one per input column in input_schema
 ```
+
+**Model contract between the worker and the Forecast API.**
+
+- **Inputs.** One tensor per input column, named as the column, of datatype `TYPE_STRING` and shape `[-1, 1]`. The API sends every value as text (`BYTES`), whatever the column's type, because the type of an input column is optional. The graph turns a numeric column into a number and looks up a category column in the list of values seen in training. A category value that was not seen in training does not fail the request. It maps to an index below every known category.
+- **Outputs, classification.** `prediction` (`TYPE_STRING`, the class value) and `probabilities` (`TYPE_FP32`, one column per class). The confidence of a row is the largest probability.
+- **Regression is not supported.** The ONNX export can already produce a `prediction` output for a regression target, but the API requires a confidence and a regression model has none.
 
 ### 10.5 OpenShift deployment
 
@@ -1113,13 +1129,12 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 | `TRAINING_MAX_ATTEMPTS`               | Attempts of the worker step per job, the first one included. `1` means no retry. A failure that the worker marks as permanent is not retried.                                           | `2`                              |
 | `TRAINING_RETRY_DELAY_SECONDS`        | Wait between two attempts of the same job. The job keeps the lock during the wait.                                                                                                      | `60`                             |
 | `MAX_QUEUED_JOBS`                     | Queued jobs accepted before `POST /v1/connectors` returns `429`.                                                                                                                        | `10`                             |
-| `MAX_TRAINING_ROWS`                   | Largest row count a job may train on (after the row selection).                                                                                                                         | `10000000`                       |
 | `MAX_INFERENCE_ROWS`                  | Largest row count a forecast may use for inference                        | `5000`                           |
 | `LOADER_CHUNK_ROWS`                   | Rows per chunk when streaming the source to scratch.                                                                                                                                    | `100000`                         |
 | `PARQUET_COMPRESSION`                 | Parquet compression codec for data extracted to scratch.                                                                                                                                | `snappy`                         |
 | `MAPEPIRE_PORT`                       | Mapepire daemon port for Db2 for i connectors that do not set one.                                                                                                                      | `8076`                           |
-| `CONNECTOR_CONNECT_TIMEOUT_S`         | Timeout for opening a connection to the source database.                                                                                                                                | `30`                             |
-| `CONNECTOR_QUERY_TIMEOUT_S`           | Timeout for a streaming extraction query on the source database.                                                                                                                        | `3600`                           |
+| `CONNECTOR_CONNECT_TIMEOUT_S`         | Timeout for opening a connection to the source database and for its reply to the connect request. A timeout is a transient failure.                                                     | `30`                             |
+| `CONNECTOR_QUERY_TIMEOUT_S`           | Time allowed for the whole extraction query, from execute to the last row. A timeout is a transient failure and the attempt is retried.                                                 | `3600`                           |
 | `WORKER_MEMORY_LIMIT_MB`              | Hard memory cap applied to the worker subprocess. Must be below the container limit.                                                                                                    | — (to be set after benchmarking) |
 | `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | Postgres connection for the API (`forecast_metadata`).                                                                                                                                  | —                                |
 | `WORKER_POSTGRES_USER/PASSWORD`       | Credentials of the restricted `forecast_worker` role, passed to the subprocess.                                                                                                         | —                                |
@@ -1132,7 +1147,7 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 These are undecided and need an answer before or during implementation.
 
 1. **Promotion gate.** Whether a forecaster from a scheduled run must beat or match the current one on its validation metric before it becomes `ready`. The design activates every successful training.
-2. **Resource sizing.** CPU, memory, scratch and volume sizes, and expected training duration for the target dataset sizes, are to be provided by DEV. They set `WORKER_MEMORY_LIMIT_MB` and `MAX_TRAINING_ROWS`.
+2. **Resource sizing.** CPU, memory, scratch and volume sizes, and expected training duration for the target dataset sizes, are to be provided by DEV. They set `WORKER_MEMORY_LIMIT_MB`. Training has no row limit, so the memory limit is the only bound on the size of a table.
 3. **Loss of the repository volume.** If the volume is lost while the database survives, `ready` rows have no files. Whether reconciliation should mark them `deleted` and queue a retrain is undecided.
 4. **Connector Deletion** If a DB2 connector already connected to a forecast service is deleted, what should be done to the existing schedule/forecast models.
 
@@ -1191,7 +1206,7 @@ These stories break the design above into units of work. Each one has a descript
 - The service starts on port 8500 and reads its configuration from the environment.
 - Every error response uses the shared envelope, and a `422` uses it too.
 - `GET /health` returns `200` with `checks.postgres` and `checks.triton` when PostgreSQL is reachable, and `503` when it is not. An unreachable Triton does not make the response `503`.
-- The image builds for ppc64le and runs the API and `python -m forecast.worker` from the same code.
+- The image builds for ppc64le and runs the API and `python -m forecast.training` from the same code.
 
 ### 14.2 Story 2 — Database and init container
 
@@ -1203,7 +1218,7 @@ These stories break the design above into units of work. Each one has a descript
 - The constraints exist: the unique partial index `idx_jobs_single_running`, the unique `forecasters.name`, the CHECK constraint that keeps `connector_id` on a `queued` or `running` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
 - `jobs.seq` is an identity column.
 - The `scheduler` schema exists for the APScheduler job store.
-- The restricted `forecast_worker` role has column-level grants: it can read the connector and its training configuration, and can write the job's `result` and `message`. It has no write grant on `forecasters`.
+- The restricted `forecast_worker` role has column-level grants: it can read the training configuration and the job's identity but not the connector, and can write the job's `result` and `message`. It has no write grant on `forecasters`.
 
 ### 14.3 Story 3 — Forecast service and Postgres deployment
 
@@ -1241,36 +1256,37 @@ These stories break the design above into units of work. Each one has a descript
 
 ### 14.5 Story 5 — Data loader
 
-**Description.** Read the training table from Db2 for i through Mapepire, inside the worker.
+**Description.** Read the training table from Db2 for i through Mapepire, in a subprocess that the API runs before the worker.
 
 **Acceptance criteria.**
 
-- The loader reads the connector and its training configuration with the worker's read-only grant, decrypts the secrets with `DB_ENCRYPTION_KEY` and connects.
-- The session is read-only, with a statement timeout where the database supports it. Rows are streamed in chunks of `LOADER_CHUNK_ROWS` to local scratch inside one read-only transaction.
-- Every identifier supplied by the user is quoted through the driver. Raw SQL is not accepted.
+- The loader reads the connector and its training configuration with the API's database role, decrypts the secrets with `DB_ENCRYPTION_KEY` and connects. The data is written to a Parquet file on local scratch.
+- The query is read-only (`FOR READ ONLY` with uncommitted read). Mapepire has no server-side statement timeout, so the loader enforces `CONNECTOR_CONNECT_TIMEOUT_S` and `CONNECTOR_QUERY_TIMEOUT_S` on the client, and a timeout is a transient failure. Rows are streamed in chunks of `LOADER_CHUNK_ROWS` to local scratch.
+- Every identifier supplied by the user is quoted, with embedded quotes doubled. Raw SQL is not accepted: the loader has no filter parameter and builds the only query it runs.
 - A connector that no longer exists or cannot be decrypted fails with an error that names the connector and holds no secret.
 - Authentication and network failures raise distinct errors, and the error message is stored on the job.
-- A table with more than `MAX_TRAINING_ROWS` rows fails the job with a permanent-failure error.
+- Every row of the table is read. There is no limit on the number of rows.
+- `DATE` and `TIMESTAMP` columns are requested from Db2 in ISO format and written as Parquet date and timestamp types. `DECIMAL` columns are written as 64-bit floats and `TIME` columns as strings. A requested `BINARY`, `VARBINARY` or `BLOB` column fails the job with a permanent-failure error that names the column, because Mapepire does not return its value.
 - The loader has been run against a real Db2 for i.
 
 ### 14.6 Story 6 — Training worker
 
-**Description.** Implement `python -m forecast.worker <job_id>`: read the data, train with AutoGluon, export to ONNX and publish the forecaster's directory.
+**Description.** Implement `python -m forecast.training <job_id> <data_path> <output_dir>`: read the data file, train with AutoGluon, export to ONNX and write the forecaster's Triton directory to the output directory on scratch.
 
 **Subtasks.**
 
-- Worker entry point that reads the job, the training configuration and the connector.
+- Worker entry point that reads the job and the training configuration, and the data file.
 - AutoGluon training on the input columns and the target, and ONNX export.
-- Atomic publish: write `model.onnx` and `config.pbtxt` to `.staging/<job_id>/` on the repository volume, then rename the directory to `fc_<connector_id>_<version>`.
+- Write `model.onnx` and `config.pbtxt` to the output directory on local scratch. The API publishes it (Story 7).
 - Write `jobs.result`: the algorithm AutoGluon chose, the validation metric and score, the training time and the rows read.
-- Exit codes, including a dedicated code for a failure that would only repeat.
+- Exit codes, including a dedicated code for a failure that would only repeat. A failure message for the user is stored in `jobs.message`. An unexpected error is stored as a fixed text and its details go to the log.
 - Memory and time measurement on the target image, to set `WORKER_MEMORY_LIMIT_MB`.
 
 **Acceptance criteria.**
 
-- A successful run leaves a complete `fc_<connector_id>_<version>` directory on the volume and exits `0`.
-- The worker never deletes anything and never writes to `forecasters`.
-- The permanent-failure exit code is used when the connector is missing or cannot be decrypted, the table or a column does not exist, the table has no rows, or it has more than `MAX_TRAINING_ROWS` rows.
+- A successful run leaves a complete Triton model directory in the output directory and exits `0`.
+- The worker never touches the repository volume, never reads the connector and never writes to `forecasters`.
+- The permanent-failure exit code is used when the job's connector or training configuration no longer exists, the data file has no rows, the target column has fewer than two different values, fewer than 10 rows have a target value, or AutoGluon cannot fit the data.
 - Directories and files are created as `0755` and `0644`.
 - `WORKER_MEMORY_LIMIT_MB` has a measured value.
 
@@ -1282,17 +1298,18 @@ These stories break the design above into units of work. Each one has a descript
 
 - `AsyncIOScheduler` with a `SQLAlchemyJobStore` in the `scheduler` schema, at the version digitize uses.
 - The one-off job that `POST /v1/connectors` registers.
-- Subprocess launch with its own process group, the time limit and the memory cap.
-- Retry of the worker step.
+- Loader and worker subprocess launch, each with its own process group and time limit, and the memory cap for the worker.
+- Publish: copy the worker's directory to `.staging/<job_id>/` on the volume and rename it to `fc_<connector_id>_<version>`.
+- Retry of the attempt (loader, then worker).
 - Failure handling and cleanup.
 
 **Acceptance criteria.**
 
-- The one-off job fires at once, uses the `queued` row that `POST` inserted, sets it `running` with `started_at`, and spawns the worker.
+- The one-off job fires at once, uses the `queued` row that `POST` inserted, sets it `running` with `started_at`, runs the loader and then spawns the worker.
 - A run is skipped, and the reason is logged, when the connector already has a `queued` or `running` job.
-- On exit `0`, the job function hands the result to Story 10 and then sets the job `completed` with `finished_at`.
-- On any other non-zero exit, a kill or a timeout, the worker is run again after `TRAINING_RETRY_DELAY_SECONDS`, up to `TRAINING_MAX_ATTEMPTS` attempts in total. The permanent-failure exit code is not retried. The process group is killed on a timeout.
-- The temporary directory is deleted before each new attempt and after the last one.
+- On exit `0` of the worker, the job function publishes the directory, hands the result to Story 10 and then sets the job `completed` with `finished_at`.
+- On any other non-zero exit of the loader or the worker, a kill or a timeout, the attempt is run again after `TRAINING_RETRY_DELAY_SECONDS`, up to `TRAINING_MAX_ATTEMPTS` attempts in total. The permanent-failure exit code is not retried. The process group is killed on a timeout.
+- The scratch directory of the attempt (the data file and the model directory) is deleted before each new attempt and after the last one.
 - After the last failed attempt the job is `failed`, `message` holds the last error, and the number of attempts is added to `result`.
 - An unexpected exception in the job function also marks the job `failed`, so a `running` row never blocks later trainings.
 - Database and Triton calls do not block the event loop.

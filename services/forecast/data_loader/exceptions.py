@@ -65,6 +65,12 @@ class DBColumnNotFoundError(DataLoaderError):
     is_permanent_failure: bool = True
 
 
+class UnsupportedColumnTypeError(DataLoaderError):
+    """Raised when a requested column has a type that cannot be extracted."""
+
+    is_permanent_failure: bool = True
+
+
 class ParquetWriteError(DataLoaderError):
     """Raised when an error occurs while writing data to a Parquet file."""
 

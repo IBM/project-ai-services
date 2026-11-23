@@ -284,7 +284,7 @@ def test_settings_defaults(monkeypatch):
         "MODEL_REPO_PATH", "SCRATCH_DIR", "DATA_DIR", "TRITON_URL", "TRITON_STARTUP_WAIT_S",
         "TRITON_LOAD_TIMEOUT_S", "TRITON_INFER_TIMEOUT_S", "FORECASTER_RETENTION_COUNT",
         "DEFAULT_TIME_LIMIT_SECONDS", "TRAINING_MAX_ATTEMPTS",
-        "TRAINING_RETRY_DELAY_SECONDS", "MAX_QUEUED_JOBS", "MAX_TRAINING_ROWS",
+        "TRAINING_RETRY_DELAY_SECONDS", "MAX_QUEUED_JOBS",
         "MAX_INFERENCE_ROWS", "LOADER_CHUNK_ROWS", "WORKER_MEMORY_LIMIT_MB",
         "PARQUET_COMPRESSION", "MAPEPIRE_PORT",
         "CONNECTOR_CONNECT_TIMEOUT_S", "CONNECTOR_QUERY_TIMEOUT_S",
@@ -318,7 +318,6 @@ def test_settings_defaults(monkeypatch):
     assert config.training_max_attempts == 2
     assert config.training_retry_delay_seconds == 60
     assert config.max_queued_jobs == 10
-    assert config.max_training_rows == 10_000_000
     assert config.max_inference_rows == 5000
     assert config.loader_chunk_rows == 100_000
     assert config.parquet_compression == "snappy"
