@@ -59,13 +59,7 @@ func (d *OpenShiftDeployer) Start(ctx context.Context, plan *types.LocalPlan) (t
 		return types.ModelEndpoints{}, fmt.Errorf("failed to get component catalog path: %w", err)
 	}
 
-	instanceSlug := catalogutils.GenerateInstanceSlug(plan.ComponentID.String())
-	if plan.Values == nil {
-		plan.Values = make(map[string]any)
-	}
-	plan.Values[catalogconstants.InstanceSlugKey] = instanceSlug
-
-	isvcName := fmt.Sprintf("%s-%s", componentType, instanceSlug)
+	isvcName := fmt.Sprintf("%s-%s", componentType, plan.Values[catalogconstants.InstanceSlugKey])
 
 	chartPath := path.Join(componentPath, plan.Runtime.Type().String())
 	helm := openshiftutils.NewHelmManager(plan.Runtime, namespace)
