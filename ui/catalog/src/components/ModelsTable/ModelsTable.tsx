@@ -1,4 +1,4 @@
-import { useReducer, useCallback, useRef } from "react";
+import { useReducer, useCallback, useRef, useState, useEffect } from "react";
 import {
   DataTable,
   DataTableSkeleton,
@@ -36,13 +36,17 @@ import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
 import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
 import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
 import { getVisibleHeaders } from "@/components/Table/utils/tableUtils";
+import FilterPanel from "@/components/FilterPanel";
+import type { FilterOption } from "@/components/FilterPanel";
 import {
   fetchModelsPage,
   fetchAllModels,
   transformModelDeploymentToRow,
 } from "@/api/models.api";
-import sharedStyles from "@/components/Table/table.shared.module.scss";
 import styles from "./ModelsTable.module.scss";
+
+const toggleValue = (list: string[], value: string) =>
+  list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
 // Width class for a column, keyed by header id so hiding columns doesn't shift widths
 const getColumnClassName = (header: string) => {
@@ -116,8 +120,17 @@ const ModelsTable = ({
 
   const pageRef = useRef(INITIAL_STATE.page);
   const pageSizeRef = useRef(INITIAL_STATE.pageSize);
+  const selectedProvidersRef = useRef(INITIAL_STATE.selectedProviders);
+  const selectedModelsRef = useRef(INITIAL_STATE.selectedModels);
   pageRef.current = state.page;
   pageSizeRef.current = state.pageSize;
+  selectedProvidersRef.current = state.selectedProviders;
+  selectedModelsRef.current = state.selectedModels;
+
+  // Filter panel — distinct backends and models derived from all models
+  const [backendOptions, setBackendOptions] = useState<FilterOption[]>([]);
+  const [modelOptions, setModelOptions] = useState<FilterOption[]>([]);
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
   // hasTransitionalRow activates the additional 5-second poll whenever any
   // row is in a transitional state.
@@ -131,10 +144,19 @@ const ModelsTable = ({
   const hasTransitionalRowRef = useRef(hasTransitionalRow);
   hasTransitionalRowRef.current = hasTransitionalRow;
 
+  // Flips to true after the first successful fetch. Later loads dim the table
+  // instead of showing the full skeleton.
+  const hasEverLoadedRef = useRef(false);
+
   // ─── Data fetching ──────────────────────────────────────────────────────────
 
   const fetchModels = useCallback(
-    async (page = pageRef.current, pageSize = pageSizeRef.current) => {
+    async (
+      page = pageRef.current,
+      pageSize = pageSizeRef.current,
+      providerIds = selectedProvidersRef.current,
+      models = selectedModelsRef.current,
+    ) => {
       // Skip the skeleton while rows are transitional so polling updates statuses in place
       if (!hasTransitionalRowRef.current) {
         dispatch({ type: "SHARED_SET_LOADING", payload: true });
@@ -142,21 +164,25 @@ const ModelsTable = ({
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
-        const { data: rawData, pagination } = await fetchModelsPage(
+        const { data: rawData, pagination } = await fetchModelsPage({
           page,
           pageSize,
-        );
+          providerIds,
+          models,
+        });
 
         const totalItems = pagination?.total_items ?? rawData.length;
         const totalPages = pagination?.total_pages ?? 1;
 
         // If current page is beyond total_pages, jump back to last valid page
         if (page > totalPages && totalPages >= 1) {
+          pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          fetchModels(totalPages, pageSize);
+          void fetchModels(totalPages, pageSize, providerIds, models);
           return;
         }
 
+        hasEverLoadedRef.current = true;
         dispatch({
           type: ACTION_TYPES.FETCH_MODELS_SUCCESS,
           payload: {
@@ -174,11 +200,45 @@ const ModelsTable = ({
     [],
   );
 
+  // ─── Filters ────────────────────────────────────────────────────────────────
+
+  const loadFilterOptions = useCallback(async () => {
+    try {
+      const allModels = await fetchAllModels();
+      const backends = new Map<string, string>();
+      const models = new Set<string>();
+      allModels.forEach((m) => {
+        backends.set(m.provider.id, m.provider.name);
+        models.add(m.model);
+      });
+      setBackendOptions(
+        [...backends].map(([id, name]) => ({ id, label: name })),
+      );
+      setModelOptions([...models].map((name) => ({ id: name })));
+    } catch {
+      // Filter options are non-critical; leave the lists empty on failure.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFilterOptions();
+  }, [loadFilterOptions]);
+
+  const applyFilters = (providers: string[], models: string[]) => {
+    dispatch({
+      type: ACTION_TYPES.SET_FILTERS,
+      payload: { providers, models },
+    });
+    pageRef.current = 1;
+    void fetchModels(1, pageSizeRef.current, providers, models);
+  };
+
   // ─── Auto-refresh ───────────────────────────────────────────────────────────
 
+  // hasData is always true so auto-refresh keeps running when filters match nothing.
   useAutoRefresh({
     fetchFn: fetchModels,
-    hasData: state.rowsData.length > 0,
+    hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
     refreshTrigger,
     hasTransitionalRow,
@@ -202,7 +262,10 @@ const ModelsTable = ({
     visibleColumns: state.visibleColumns,
     headers: HEADERS,
     fetchAllRows: async () => {
-      const allData = await fetchAllModels();
+      const allData = await fetchAllModels(
+        state.selectedProviders,
+        state.selectedModels,
+      );
       return allData.map(transformModelDeploymentToRow) as unknown as Record<
         string,
         unknown
@@ -213,15 +276,18 @@ const ModelsTable = ({
 
   // ─── Derived state ──────────────────────────────────────────────────────────
 
-  const noModels =
+  const hasActiveFilters =
+    state.selectedProviders.length > 0 || state.selectedModels.length > 0;
+
+  const noRows =
     !state.isLoading && state.rowsData.length === 0 && !state.fetchError;
+  const noModels = noRows && !hasActiveFilters;
+  const noFilterResults = noRows && hasActiveFilters;
 
   const visibleHeaders = getVisibleHeaders(HEADERS, state.visibleColumns);
 
-  // TODO: Add filter options and wire filter functionality.
-  const filterSlot = (
-    <h6 className={sharedStyles.overflowMenuHeading}>Filter</h6>
-  );
+  // Full skeleton only on the very first load
+  const showSkeleton = state.isLoading && !hasEverLoadedRef.current;
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -243,9 +309,40 @@ const ModelsTable = ({
       />
 
       <div className={styles.tableContent}>
-        <Grid fullWidth>
+        {isFilterPanelOpen && (
+          <FilterPanel
+            title="Filters"
+            ariaLabel="Model filters"
+            groups={[
+              {
+                id: "model",
+                title: "Model",
+                options: modelOptions,
+                selected: state.selectedModels,
+                onToggle: (id) =>
+                  applyFilters(
+                    state.selectedProviders,
+                    toggleValue(state.selectedModels, id),
+                  ),
+              },
+              {
+                id: "backend",
+                title: "Backend",
+                options: backendOptions,
+                selected: state.selectedProviders,
+                onToggle: (id) =>
+                  applyFilters(
+                    toggleValue(state.selectedProviders, id),
+                    state.selectedModels,
+                  ),
+              },
+            ]}
+            onReset={() => applyFilters([], [])}
+          />
+        )}
+        <Grid fullWidth className={styles.tableGrid}>
           <Column lg={16} md={8} sm={4} className={styles.tableColumn}>
-            {state.isLoading ? (
+            {showSkeleton ? (
               <DataTableSkeleton
                 headers={HEADERS}
                 rowCount={state.pageSize}
@@ -274,7 +371,10 @@ const ModelsTable = ({
                         onSearchChange={() => {
                           // TODO: Wire server-side search
                         }}
-                        onRefresh={() => fetchModels()}
+                        onRefresh={() => {
+                          void fetchModels();
+                          void loadFilterOptions();
+                        }}
                         onExport={() =>
                           dispatch({ type: "SHARED_OPEN_EXPORT_DIALOG" })
                         }
@@ -290,8 +390,11 @@ const ModelsTable = ({
                             payload: DEFAULT_VISIBLE_COLUMNS,
                           })
                         }
-                        filterSlot={filterSlot}
                         filterLabel="Filter"
+                        onFilterToggle={() =>
+                          setIsFilterPanelOpen((open) => !open)
+                        }
+                        isFilterOpen={isFilterPanelOpen}
                       >
                         <Button
                           kind="primary"
@@ -304,6 +407,9 @@ const ModelsTable = ({
                       </TableToolbarActions>
 
                       <Table
+                        className={
+                          state.isLoading ? styles.loadingTable : undefined
+                        }
                         {...getTableProps()}
                         aria-label="Model deployments"
                       >
@@ -364,16 +470,19 @@ const ModelsTable = ({
                       <TableEmptyStates
                         fetchError={state.fetchError}
                         noData={noModels}
-                        noSearchResults={false}
+                        noSearchResults={noFilterResults}
                         entityName="model deployment"
                         className={styles.noDataContent}
                       />
                     </TableContainer>
 
-                    {!state.isLoading &&
-                      state.totalItems > state.pageSize &&
+                    {state.totalItems > state.pageSize &&
                       state.rowsData.length > 0 && (
                         <Pagination
+                          className={
+                            state.isLoading ? styles.loadingTable : undefined
+                          }
+                          disabled={state.isLoading}
                           page={state.page}
                           pageSize={state.pageSize}
                           pageSizes={[20, 30, 50]}

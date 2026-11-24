@@ -27,6 +27,12 @@ export type { DetailsLayoutProps, DetailsLayoutNavItem } from "./DetailsLayout";
 export { default as StatusTag } from "./StatusTag";
 export { default as InlineEditableTitle } from "./InlineEditableTitle";
 export type { InlineEditableTitleProps } from "./InlineEditableTitle";
+export { default as FilterPanel } from "./FilterPanel";
+export type {
+  FilterOption,
+  FilterGroupConfig,
+  FilterPanelProps,
+} from "./FilterPanel";
 export { DeployFlow } from "./DeployFlow/DigitalAssistant";
 export type {
   DeployFormData,

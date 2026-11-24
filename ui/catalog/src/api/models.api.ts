@@ -2,6 +2,7 @@ import { api } from "@/api/axios";
 import { MODEL_MANAGEMENT_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import type {
   CatalogModel,
+  FetchModelsPageParams,
   GenerateModelKeyResponse,
   ModelDeployment,
   ModelDeploymentDetail,
@@ -49,26 +50,43 @@ export function transformModelDeploymentToRow(
 
 // ─── Data access ──────────────────────────────────────────────────────────────
 
-// Fetches a single page of model deployments
+// Fetches a single page of model deployments (optionally filtered)
 export async function fetchModelsPage(
-  page = 1,
-  pageSize = 20,
+  params: FetchModelsPageParams,
 ): Promise<ModelDeploymentsListResponse> {
+  const queryParams: Record<string, unknown> = {
+    page: params.page,
+    page_size: params.pageSize,
+    ...(params.providerIds?.length ? { provider_id: params.providerIds } : {}),
+    ...(params.models?.length ? { model: params.models } : {}),
+  };
   const response = await api.get<ModelDeploymentsListResponse>(
     MODEL_MANAGEMENT_ENDPOINTS.LIST_MODELS,
-    { params: { page, page_size: pageSize } },
+    {
+      params: queryParams,
+      // `indexes: null` serialises arrays as repeated params
+      paramsSerializer: { indexes: null },
+    },
   );
   return response.data;
 }
 
-// Fetches all model deployments across all pages — used for CSV export
-export async function fetchAllModels(): Promise<ModelDeployment[]> {
+// Fetches all models across all pages — used for CSV export and filter options
+export async function fetchAllModels(
+  providerIds?: string[],
+  models?: string[],
+): Promise<ModelDeployment[]> {
   let currentPage = 1;
   let hasNext = true;
   const allData: ModelDeployment[] = [];
 
   while (hasNext) {
-    const { data, pagination } = await fetchModelsPage(currentPage, 100);
+    const { data, pagination } = await fetchModelsPage({
+      page: currentPage,
+      pageSize: 100,
+      providerIds,
+      models,
+    });
     allData.push(...data);
     hasNext = pagination?.has_next ?? false;
     currentPage++;
