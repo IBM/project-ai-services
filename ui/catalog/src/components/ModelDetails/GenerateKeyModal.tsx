@@ -120,7 +120,6 @@ const GenerateKeyModal = ({
             <InlineNotification
               kind="warning"
               title="Generating a new API key will revoke the existing key."
-              subtitle="Any applications or services currently using the active key will lose access immediately until updated with the new key."
               lowContrast
               hideCloseButton
               className={styles.warning}
