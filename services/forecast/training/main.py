@@ -26,7 +26,7 @@ import pandas as pd
 
 from forecast.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure, TrainingFailure
 from common.misc_utils import get_logger
-from forecast.db.jobs import JobStore, worker_engine
+from forecast.db.jobs import JobStore, TrainingJob, worker_engine
 from forecast.settings import settings
 from forecast.training.model_dir import forecaster_name, write_model_dir
 from forecast.training.onnx_export import export
@@ -47,6 +47,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def in_job_spelling(data: pd.DataFrame, job: TrainingJob) -> pd.DataFrame:
+    """Rename the columns of ``data`` to the spelling of the training configuration.
+
+    The loader matches the requested columns to the table's regardless of case and writes the
+    table's spelling (IBM i upper-cases its names), while the configuration keeps what the user
+    typed, and the forecast endpoint validates rows against that. An exact match wins, as in the
+    loader; otherwise the match must be unique.
+    """
+    rename = {}
+    for name in job.columns:
+        if name in data.columns:
+            continue
+        found = [column for column in data.columns if column.upper() == name.upper()]
+        if len(found) != 1:
+            raise PermanentFailure(f"Column {name} is {'ambiguous' if found else 'missing'} in the data of table {job.source_table}")
+        rename[found[0]] = name
+    return data.rename(columns=rename)
+
+
 def run(job_id: int, store: JobStore, data_path: Path, output_dir: Path) -> Path:
     """Train on ``data_path``, write the forecaster to ``output_dir`` and return it."""
     config = settings.forecast
@@ -54,7 +73,7 @@ def run(job_id: int, store: JobStore, data_path: Path, output_dir: Path) -> Path
     store.clear_failure(job_id)  # A retry starts without the message of the attempt before it.
     config.scratch_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
 
-    data = pd.read_parquet(data_path)
+    data = in_job_spelling(pd.read_parquet(data_path), job)
     rows_read = len(data)
     store.write_result(job_id, {"rows_read": rows_read})
     if rows_read == 0:

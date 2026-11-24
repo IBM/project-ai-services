@@ -362,6 +362,37 @@ def test_no_rows_is_a_permanent_failure_and_nothing_is_published(volumes):
     assert not volumes.output.exists()
 
 
+def test_columns_are_trained_under_the_spelling_of_the_configuration(volumes):
+    # The loader writes the table's spelling (IBM i: upper case); the user may have typed another.
+    job = TrainingJob(
+        JOB.job,
+        TrainingConfig(
+            connector_id=CONNECTOR_ID,
+            source_table="SALES.ORDERS",
+            target_column="late",
+            input_columns=[{"name": "Region"}, {"name": "QUANTITY"}, {"name": "price"}],
+        ),
+    )
+
+    published = run_worker(volumes, FakeStore(job), make_table(200))
+
+    session = ort.InferenceSession(str(published / "1" / "model.onnx"))
+    assert [i.name for i in session.get_inputs()] == ["Region", "QUANTITY", "price"]
+
+
+def test_a_column_that_the_file_lacks_is_a_permanent_failure(volumes):
+    with pytest.raises(PermanentFailure, match="Column PRICE is missing"):
+        run_worker(volumes, FakeStore(), make_table(50).drop(columns="PRICE"))
+
+
+def test_a_column_that_the_file_spells_two_ways_is_a_permanent_failure(volumes):
+    df = make_table(50).rename(columns={"PRICE": "Price"})
+    df["price"] = 1.0
+
+    with pytest.raises(PermanentFailure, match="Column PRICE is ambiguous"):
+        run_worker(volumes, FakeStore(), df)
+
+
 def test_a_target_with_one_value_is_a_permanent_failure(volumes):
     df = make_table(100)
     df["LATE"] = "N"

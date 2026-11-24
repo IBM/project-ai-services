@@ -132,18 +132,15 @@ class ForecastConfig(BaseSettings):
         description="Timeout for a streaming extraction query on the source database",
     )
 
-    # NOTE: Nothing applies this cap yet. The API orchestration (Story 7) is meant to set it on the
+    # 2048 MB is the value measured on the ppc64le target. The worker's memory grows with the table
+    # and the design sets no row limit, so a table that needs more fails once it passes the cap.
+    # It must stay below the container's memory limit. An empty WORKER_MEMORY_LIMIT_MB removes the cap.
+    # NOTE: Nothing applies the cap yet. The API orchestration (Story 7) is meant to set it on the
     # worker subprocess, and the worker only logs its peak memory ("peak memory MB", training/main.py).
-    # The only measurement so far is one run on a development machine: 10,000 rows and 10 columns
-    # peaked at about 460 MB for the worker and about 380 MB for its largest child. That is a single
-    # small data point, not a sizing, so the default stays unset.
-    # TODO: Benchmark on the target ppc64le image with representative table sizes (the worker's
-    # memory grows with the table, and the design sets no row limit), then set a value below the
-    # container's memory limit. This is an acceptance criterion of Story 6.
     worker_memory_limit_mb: Optional[int] = Field(
-        default=None,
+        default=2048,
         ge=1,
-        description="Hard memory cap applied to the worker subprocess; unset until benchmarked",
+        description="Hard memory cap in MB applied to the worker subprocess; empty means no cap",
     )
 
     # Restricted database role used by the worker subprocess

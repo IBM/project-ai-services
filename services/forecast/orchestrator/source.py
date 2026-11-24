@@ -9,11 +9,12 @@ two kinds of failure, so nothing else depends on the loader.
 It runs with the API's database role: the worker's role has no grant on ``connectors``.
 """
 from pathlib import Path
-from typing import Sequence
-
-import pandas as pd
+from typing import TYPE_CHECKING, Sequence
 
 from forecast.errors import PermanentFailure, TransientFailure
+
+if TYPE_CHECKING:
+    from forecast.data_loader import ExtractResult
 
 
 def load_training_data(
@@ -22,14 +23,14 @@ def load_training_data(
     columns: Sequence[str],
     output_path: Path,
     connector_id: str,
-    connector_type: str,
     connection_details: dict,
-) -> pd.DataFrame:
-    """Extract the whole ``table`` to ``output_path`` and return it.
+) -> "ExtractResult":
+    """Extract the whole ``table`` to ``output_path`` and return the loader's summary of it.
 
-    ``columns`` are the input columns, then the target, as named in the training configuration,
-    which is what the forecast endpoint validates rows against. The loader matches them to the
-    table's columns regardless of case and writes the table's own spelling, so they are renamed back.
+    ``columns`` are the input columns, then the target, as named in the training configuration.
+    The loader matches them to the table's columns regardless of case and writes the table's own
+    spelling, so the file may spell them differently: the worker maps them back to the job's
+    spelling. The rows are not read here, so the API process never holds the table.
     ``connection_details`` are the connector's, with the secret fields still encrypted.
 
     Raises:
@@ -40,12 +41,11 @@ def load_training_data(
     from forecast.data_loader import DataLoaderError, Db2DataLoader  # Only the orchestrator needs it.
 
     try:
-        result = Db2DataLoader().extract_to_parquet(
+        return Db2DataLoader().extract_to_parquet(
             table=table,
             columns=list(columns),
             output_path=output_path,
             connector_id=connector_id,
-            connector_type=connector_type,
             encrypted_connection_details=connection_details,
         )
     except DataLoaderError as exc:
@@ -53,4 +53,3 @@ def load_training_data(
             # The loader's messages name the connector or table and hold no secret.
             raise PermanentFailure(str(exc)) from exc
         raise TransientFailure(str(exc)) from exc
-    return pd.read_parquet(output_path).rename(columns=dict(zip(result.columns, columns)))

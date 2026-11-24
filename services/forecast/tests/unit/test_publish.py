@@ -55,6 +55,19 @@ def test_publish_never_replaces_or_deletes_an_existing_forecaster(volume):
     assert (existing / "keep").read_text() == "kept"
 
 
+def test_publish_never_writes_into_or_deletes_a_staging_directory_that_is_already_there(volume):
+    repository, model_dir = volume
+    staging = repository / STAGING / "5"
+    staging.mkdir(parents=True)
+    (staging / "keep").write_text("kept")
+
+    with pytest.raises(FileExistsError):
+        publish(repository, 5, "fc_x_5", model_dir)
+
+    assert [p.name for p in staging.iterdir()] == ["keep"]  # Not merged into, not removed.
+    assert not (repository / "fc_x_5").exists()
+
+
 def test_a_failed_copy_leaves_no_staging_directory(volume, monkeypatch):
     repository, model_dir = volume
 

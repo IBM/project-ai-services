@@ -7,7 +7,7 @@ so Triton and the API see the whole forecaster or nothing. Both paths are on one
 rename is atomic. The API runs this right before it loads the forecaster into Triton, and it
 alone creates, renames and deletes directories on the volume (design, section 10.3).
 
-The API process must run with umask 022, so that Triton's user can read what is published.
+The API sets umask 022 when it starts (app.py), so that Triton's user can read what is published.
 """
 import shutil
 from pathlib import Path

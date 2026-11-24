@@ -5,7 +5,7 @@
 cryptography>=42.0.0
 
 # IBM i / Db2 Data Connector (Mapepire)
-mapepire-python>=0.2.0
+mapepire-python==2.0.0
 
 # Data Extraction & Parquet Storage
 pyarrow>=14.0.0

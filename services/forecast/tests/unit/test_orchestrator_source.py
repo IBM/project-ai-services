@@ -3,8 +3,9 @@ Unit tests of the API's contact with the data loader (orchestrator/source.py).
 
 The data loader is a separate branch, so these tests install a stand-in ``forecast.data_loader``
 with the same contract: ``DataLoaderError`` with an ``is_permanent_failure`` flag, and
-``Db2DataLoader.extract_to_parquet``. The last test checks the real loader's exceptions
-against the same split where the loader is part of the branch.
+``Db2DataLoader.extract_to_parquet``. The last two tests use the real loader: one checks that the
+call fits the real signature, which a stand-in that accepts any arguments cannot, the other its
+exceptions against the same split.
 """
 import sys
 import types
@@ -30,7 +31,6 @@ def load(path, **overrides):
             "columns": JOB.columns,
             "output_path": path,
             "connector_id": str(CONNECTOR_ID),
-            "connector_type": "db2_for_i",
             "connection_details": CONNECTION,
             **overrides,
         }
@@ -82,27 +82,36 @@ def loader(monkeypatch):
 
 
 def test_loader_reads_every_row_with_the_encrypted_connector(loader, tmp_path):
-    data = load(tmp_path / "data.parquet")
+    result = load(tmp_path / "data.parquet")
 
-    assert len(data) == 50
+    assert result.rows_written == 50
     (call,) = loader.calls
     assert call["table"] == "SALES.ORDERS"
     assert call["columns"] == ["REGION", "QUANTITY", "PRICE", "LATE"]
     assert call["output_path"] == tmp_path / "data.parquet"
     assert call["connector_id"] == str(CONNECTOR_ID)
-    assert call["connector_type"] == "db2_for_i"
     assert call["encrypted_connection_details"] == CONNECTION
     # No row limit and no batch size: the loader reads everything with its own settings.
     assert not {"max_rows", "batch_size"} & set(call)
 
 
-def test_columns_come_back_as_named_in_the_training_configuration(loader, tmp_path):
-    # The loader matches columns case-insensitively and writes the catalogue's spelling.
-    loader.table = make_table(20).rename(columns=str.lower)
+def test_the_rows_are_not_read_into_the_api_process(loader, tmp_path, monkeypatch):
+    monkeypatch.setattr(pd, "read_parquet", lambda *a, **k: pytest.fail("the API must not read the table"))
 
-    data = load(tmp_path / "data.parquet")
+    load(tmp_path / "data.parquet")
 
-    assert list(data.columns) == ["REGION", "QUANTITY", "PRICE", "LATE"]
+
+def test_the_call_fits_the_real_loaders_signature(tmp_path):
+    from unittest.mock import patch
+
+    from forecast.data_loader import Db2DataLoader, ExtractResult
+
+    summary = ExtractResult(str(tmp_path / "data.parquet"), 50, JOB.columns, 1, 0.1, "SALES.ORDERS")
+    # autospec rejects arguments that the real method does not take.
+    with patch.object(Db2DataLoader, "extract_to_parquet", autospec=True, return_value=summary) as extract:
+        assert load(tmp_path / "data.parquet") is summary
+
+    assert extract.call_args.kwargs["encrypted_connection_details"] == CONNECTION
 
 
 @pytest.mark.parametrize(

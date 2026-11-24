@@ -332,7 +332,7 @@ def test_settings_defaults(monkeypatch):
     assert config.mapepire_port == 8076
     assert config.connector_connect_timeout_s == 30
     assert config.connector_query_timeout_s == 3600
-    assert config.worker_memory_limit_mb is None
+    assert config.worker_memory_limit_mb == 2048
 
 
 @pytest.mark.unit
@@ -350,7 +350,7 @@ def test_settings_read_the_environment(monkeypatch):
 
 
 @pytest.mark.unit
-def test_blank_memory_limit_means_unset(monkeypatch):
+def test_blank_memory_limit_removes_the_cap(monkeypatch):
     monkeypatch.setenv("WORKER_MEMORY_LIMIT_MB", "  ")
 
     from forecast.settings import ForecastConfig
@@ -533,6 +533,20 @@ def test_startup_continues_when_the_thread_limiter_cannot_be_set(caplog):
 
 
 @pytest.mark.unit
+def test_startup_sets_the_umask_so_that_triton_can_read_what_is_published():
+    import os
+
+    import forecast.app as forecast_app
+
+    before = os.umask(0o077)
+    try:
+        with patch.object(forecast_app, "close_db_connections"):
+            with TestClient(forecast_app.app):
+                assert os.umask(0o022) == 0o022
+    finally:
+        os.umask(before)
+
+
 def test_startup_caps_the_thread_limiter_to_the_database_pool():
     import forecast.app as forecast_app
     from forecast.settings import settings
