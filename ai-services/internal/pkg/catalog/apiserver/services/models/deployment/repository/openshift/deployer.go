@@ -7,8 +7,8 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
-	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 )
 
 // OpenShiftDeployer deploys a local model on an OpenShift runtime, local or remote over the worker
