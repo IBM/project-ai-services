@@ -8,7 +8,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
+	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -18,6 +20,8 @@ import (
 var (
 	// Runtime type flag for bootstrap command.
 	runtimeType string
+	// skipOperatorUpgrade skips the operator upgrade prompt flow.
+	skipOperatorUpgrade bool
 )
 
 // BootstrapCmd represents the bootstrap command.
@@ -37,6 +41,7 @@ func BootstrapCmd() *cobra.Command {
 	// Add runtime flag as required
 	cmdcommon.ConfigurePersistentRuntimeFlag(bootstrapCmd, &runtimeType)
 	bootstrapCmd.Flags().StringSliceVar(&skipChecks, "skip-validation", []string{}, skipCheckDesc)
+	cmdcommon.ConfigureSkipUpgradeFlag(bootstrapCmd, &skipOperatorUpgrade)
 
 	// subcommands
 	bootstrapCmd.AddCommand(validateCmd())
@@ -48,7 +53,16 @@ func BootstrapCmd() *cobra.Command {
 func bootstrapPersistentPreRunE(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 
-	return cmdcommon.InitAndValidateRuntimeFlag(runtimeType)
+	if err := cmdcommon.InitAndValidateRuntimeFlag(runtimeType); err != nil {
+		return err
+	}
+
+	// Validate that --skip-upgrade is only used with the openshift runtime.
+	validator := flagvalidator.NewFlagValidatorBuilder(vars.RuntimeFactory.GetRuntimeType()).
+		AddOpenShiftFlag(constants.SkipUpgradeFlag, nil).
+		Build()
+
+	return validator.Validate(cmd)
 }
 
 func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
@@ -62,7 +76,7 @@ func bootstrapRunE(skipChecks *[]string) func(*cobra.Command, []string) error {
 
 		rt := vars.RuntimeFactory.GetRuntimeType()
 		// Create bootstrap instance based on runtime
-		factory := bootstrap.NewBootstrapFactory(rt)
+		factory := bootstrap.NewBootstrapFactory(rt, bootstrap.WithSkipUpgrade(skipOperatorUpgrade))
 		bootstrapInstance, err := factory.Create()
 		if err != nil {
 			return fmt.Errorf("failed to create bootstrap instance: %w", err)
@@ -105,6 +119,12 @@ func bootstrapExample() string {
 
   # Configure the infrastructure for openshift runtime
   ai-services bootstrap configure --runtime openshift
+
+  # Bootstrap without prompting to upgrade already-installed OCP operators
+  ai-services bootstrap --runtime openshift --skip-upgrade
+
+  # Configure without prompting to upgrade already-installed OCP operators
+  ai-services bootstrap configure --runtime openshift --skip-upgrade
 
   # Get help on a specific subcommand
   ai-services bootstrap validate --help`
