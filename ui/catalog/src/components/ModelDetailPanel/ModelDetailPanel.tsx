@@ -29,7 +29,7 @@ const ModelDetailPanel = ({
   const isLoading = open && !!modelId && !model && !hasFailed;
 
   const error = hasFailed
-    ? "Failed to load model details. Please try again."
+    ? "Failed to load model details. Close and reopen the panel to try again."
     : null;
 
   useEffect(() => {

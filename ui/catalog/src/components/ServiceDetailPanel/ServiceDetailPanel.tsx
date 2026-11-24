@@ -39,7 +39,7 @@ const ServiceDetailPanel = ({
   const isLoading = open && !!serviceId && !service && !hasFailed;
 
   const error = hasFailed
-    ? "Failed to load service details. Please try again."
+    ? "Failed to load service details. Close and reopen the panel to try again."
     : null;
 
   useEffect(() => {
