@@ -118,7 +118,7 @@ func TestWorkerCaddyfile_PrivateIngressUsesWorkerTLSFiles(t *testing.T) {
 		"key         " + filepath.Join(workerconstants.WorkerTLSDir, tlsKeyFile),
 		"secret_file /etc/secret/worker-mtls-encryption-secret/mtls-encryption-key",
 		"trusted_ca_cert_file " + filepath.Join(workerconstants.WorkerTLSDir, caCertFile),
-		"@not_control_plane not vars {http.request.tls.client.subject} *catalog-worker-gateway*",
+		"@not_control_plane not vars_regexp {http.request.tls.client.subject} catalog-worker-gateway",
 	}
 	for _, s := range want {
 		if !strings.Contains(string(raw), s) {

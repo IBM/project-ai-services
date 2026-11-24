@@ -9,7 +9,10 @@ import (
 // LocalPlan is a fully resolved local-model undeploy.
 type LocalPlan struct {
 	ComponentID uuid.UUID
-	Runtime     runtime.Runtime
+	// WorkerName is the worker the model runs on. A remote worker also has private mTLS routes
+	// that are removed with the model.
+	WorkerName string
+	Runtime    runtime.Runtime
 	// Route identifies the model in the gateway: its LiteLLM model ID and the provider and tag
 	// its tokenize passthrough and public key are named after.
 	Route litellm.Route

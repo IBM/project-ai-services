@@ -5,20 +5,32 @@ import (
 	"fmt"
 	texttemplate "text/template"
 
+	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/routes"
 	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// PodmanDeployer deploys model pods on a Podman runtime, local or remote over the worker stream.
-type PodmanDeployer struct{}
+// RouteRegistrar creates the private mTLS routes that connect the control plane to a model on a
+// remote worker. Register returns the control-plane egress address of the model.
+type RouteRegistrar interface {
+	Register(ctx context.Context, rt runtime.Runtime, workerName string, componentID uuid.UUID, upstream string) (string, error)
+}
 
-// NewPodmanDeployer creates a new PodmanDeployer.
-func NewPodmanDeployer() *PodmanDeployer {
-	return &PodmanDeployer{}
+// PodmanDeployer deploys model pods on a Podman runtime, local or remote over the worker stream.
+type PodmanDeployer struct {
+	routes RouteRegistrar
+}
+
+// NewPodmanDeployer creates a new PodmanDeployer. routes registers the private routes of models
+// that run on a remote worker.
+func NewPodmanDeployer(routes RouteRegistrar) *PodmanDeployer {
+	return &PodmanDeployer{routes: routes}
 }
 
 // Check verifies that the worker has the Spyre cards the provider needs. It only discovers free
@@ -69,9 +81,9 @@ func (d *PodmanDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) err
 // Start allocates Spyre cards when the provider needs them, starts the pods and returns the
 // model server's endpoints.
 //
-// TODO(mTLS): Egress is set to the pod's own address, which the control plane can only reach when
-// plan.WorkerName is the local worker. For a remote worker, create the worker mTLS ingress/egress
-// Caddy routes here and return the control-plane private egress as Egress (see types.Deployer).
+// A model on the local worker is reached at the pod's own address. For a remote worker the pod is
+// not reachable from the control plane, so the worker mTLS ingress and control-plane egress routes
+// are created and the control-plane egress is returned as Egress.
 func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (types.ModelEndpoints, error) {
 	metadata, err := plan.Catalog.LoadComponentRuntimeMetadata(plan.Req.ComponentType, plan.Req.ProviderID)
 	if err != nil {
@@ -114,7 +126,23 @@ func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (type
 		return types.ModelEndpoints{}, err
 	}
 
-	return types.ModelEndpoints{Internal: internal, Egress: internal}, nil
+	return d.routeEndpoints(ctx, plan, internal)
+}
+
+// routeEndpoints returns the endpoints of a started model. On the local worker the control plane
+// reaches the pod directly. On a remote worker it cannot, so the private routes are created and
+// the control-plane egress is the address to use.
+func (d *PodmanDeployer) routeEndpoints(ctx context.Context, plan *types.LocalPlan, internal string) (types.ModelEndpoints, error) {
+	if routes.IsLocal(plan.WorkerName) {
+		return types.ModelEndpoints{Internal: internal, Egress: internal}, nil
+	}
+
+	egress, err := d.routes.Register(ctx, plan.Runtime, plan.WorkerName, plan.ComponentID, internal)
+	if err != nil {
+		return types.ModelEndpoints{}, fmt.Errorf("failed to route model %s on worker %q: %w", plan.ComponentID, plan.WorkerName, err)
+	}
+
+	return types.ModelEndpoints{Internal: internal, Egress: egress}, nil
 }
 
 // loadTemplates loads the provider's pod templates from the plan's runtime-scoped catalog.

@@ -52,6 +52,7 @@ func (p *Planner) PlanLocal(ctx context.Context, comp *dbmodels.Component, worke
 
 	return &types.LocalPlan{
 		ComponentID: comp.ID,
+		WorkerName:  workerName,
 		Runtime:     rt,
 		Route: litellm.Route{
 			LiteLLMModelID: liteLLMModelID(comp.Metadata),

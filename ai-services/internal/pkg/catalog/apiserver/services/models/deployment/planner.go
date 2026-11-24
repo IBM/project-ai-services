@@ -13,6 +13,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/routes"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
@@ -50,7 +51,7 @@ func NewModelPlanner(provider *catalog.CatalogProvider, workers worker.Resolver)
 		models:          helpers.New(provider),
 		workers:         workers,
 		deployers: map[runtimeTypes.RuntimeType]types.Deployer{
-			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeployer(),
+			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeployer(routes.NewManager(workers)),
 		},
 	}
 }

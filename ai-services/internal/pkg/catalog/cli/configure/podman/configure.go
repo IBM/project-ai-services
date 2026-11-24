@@ -9,6 +9,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/routes"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -163,6 +164,11 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	routeURLs, err := caddy.RegisterCatalogRoutes(ctx, deployCtx.Runtime, caddyCtx, routeInfos)
 	if err != nil {
 		return fmt.Errorf("route registration failed: %w", err)
+	}
+
+	// Expose LiteLLM on the private mTLS ingress for services on remote workers.
+	if err := routes.RegisterLiteLLMIngress(ctx, caddyCtx, routeInfos); err != nil {
+		return err
 	}
 
 	// Wait for Caddy's TLS layer to be ready for the catalog API before attempting login.

@@ -17,6 +17,17 @@ metadata:
     ai-services.io/ports: "127.0.0.1:{{ .Values.caddy.adminPort }}:2019, {{ .Values.caddy.httpsPort }}:443, {{ .Values.caddy.privateIngressPort }}:9443"
 spec:
   restartPolicy: always
+  # Caddy dials the control plane (LiteLLM egress), so it needs the same host aliases as the worker pod.
+  {{- if .Values.hostAliases }}
+  hostAliases:
+  {{- range .Values.hostAliases }}
+  - ip: "{{ .IP }}"
+    hostnames:
+    {{- range .Hostnames }}
+      - "{{ . }}"
+    {{- end }}
+  {{- end }}
+  {{- end }}
   initContainers:
     - name: generate-caddyfile
       image: "{{ .Values.caddy.image }}"

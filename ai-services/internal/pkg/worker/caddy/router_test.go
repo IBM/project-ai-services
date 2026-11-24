@@ -19,7 +19,7 @@ func TestManageProxyRoute_PrivateRoutes(t *testing.T) {
 
 	if _, err := pr.ManageProxyRoute(ctx, payload.ProxyRouteOpRegisterEgress, payload.Route{
 		ID: "m1-egress", PathPrefix: "/models/m1", Upstream: "10.0.0.2:9443",
-		ClientCertPath: "c", ClientKeyPath: "k", TrustedCACertPath: "ca",
+		ClientCertPath: "c", EncryptedClientKeyPath: "k", SecretFilePath: "s", TrustedCACertPath: "ca",
 	}); err != nil {
 		t.Fatalf("register egress: %v", err)
 	}

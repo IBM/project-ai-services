@@ -112,7 +112,7 @@ func TestRegisterEgressRoute(t *testing.T) {
 
 	err := c.RegisterEgressRoute(context.Background(), EgressRoute{
 		ID: "m1-egress", PathPrefix: "/models/m1", DialUpstream: "10.0.0.2:9443",
-		ClientCertPath: "/data/gateway-pki/server.crt", ClientKeyPath: "/data/gateway-pki/server.key.pem",
+		ClientCertPath: "/data/gateway-pki/server.crt", EncryptedClientKeyPath: "/data/gateway-pki/server.key", SecretFilePath: "/etc/secret/catalog-mtls-encryption-secret/mtls-encryption-key",
 		TrustedCACertPath: "/data/gateway-pki/ca.crt", ServerName: "w1.10.0.0.2.nip.io",
 	})
 	require.NoError(t, err)
@@ -132,9 +132,15 @@ func TestRegisterEgressRoute(t *testing.T) {
 	assert.Equal(t, "reverse_proxy", h["handler"])
 	assert.Equal(t, []any{map[string]any{"dial": "10.0.0.2:9443"}}, h["upstreams"])
 
-	tlsCfg := h["transport"].(map[string]any)["tls"].(map[string]any)
-	assert.Equal(t, "/data/gateway-pki/server.crt", tlsCfg["client_certificate_file"])
-	assert.Equal(t, "/data/gateway-pki/server.key.pem", tlsCfg["client_certificate_key_file"])
+	transport := h["transport"].(map[string]any)
+	assert.Equal(t, "encrypted_mtls", transport["protocol"], "client key stays encrypted: the stock http transport must not be used")
+	assert.Equal(t, "/data/gateway-pki/server.crt", transport["client_cert_file"])
+	assert.Equal(t, "/data/gateway-pki/server.key", transport["encrypted_client_key_file"])
+	assert.Equal(t, "/etc/secret/catalog-mtls-encryption-secret/mtls-encryption-key", transport["secret_file"])
+
+	tlsCfg := transport["tls"].(map[string]any)
+	assert.NotContains(t, tlsCfg, "client_certificate_file", "plaintext client cert fields must not be emitted")
+	assert.NotContains(t, tlsCfg, "client_certificate_key_file", "plaintext client cert fields must not be emitted")
 	assert.Equal(t, "w1.10.0.0.2.nip.io", tlsCfg["server_name"])
 	assert.Equal(t, map[string]any{"provider": "file", "pem_files": []any{"/data/gateway-pki/ca.crt"}}, tlsCfg["ca"])
 }
@@ -144,7 +150,7 @@ func TestRegisterEgressRoute_OmitsServerNameWhenUnset(t *testing.T) {
 
 	require.NoError(t, c.RegisterEgressRoute(context.Background(), EgressRoute{
 		ID: "e", PathPrefix: "/p", DialUpstream: "h:9443",
-		ClientCertPath: "c", ClientKeyPath: "k", TrustedCACertPath: "ca",
+		ClientCertPath: "c", EncryptedClientKeyPath: "k", SecretFilePath: "s", TrustedCACertPath: "ca",
 	}))
 
 	h := f.posted[CaddyEgressServerName][0]["handle"].([]any)[0].(map[string]any)
@@ -157,7 +163,7 @@ func TestRegisterPrivateRoutes_Idempotent(t *testing.T) {
 	ctx := context.Background()
 
 	in := IngressRoute{ID: "i", PathPrefix: "/p", Upstream: "u:1"}
-	eg := EgressRoute{ID: "e", PathPrefix: "/p", DialUpstream: "h:9443", ClientCertPath: "c", ClientKeyPath: "k", TrustedCACertPath: "ca"}
+	eg := EgressRoute{ID: "e", PathPrefix: "/p", DialUpstream: "h:9443", ClientCertPath: "c", EncryptedClientKeyPath: "k", SecretFilePath: "s", TrustedCACertPath: "ca"}
 
 	for range 2 {
 		require.NoError(t, c.RegisterIngressRoute(ctx, in))
@@ -172,7 +178,7 @@ func TestRegisterPrivateRoutes_Validation(t *testing.T) {
 	_, c := newFakeCaddyAdmin(t)
 	ctx := context.Background()
 
-	okEgress := EgressRoute{ID: "e", PathPrefix: "/p", DialUpstream: "h:9443", ClientCertPath: "c", ClientKeyPath: "k", TrustedCACertPath: "ca"}
+	okEgress := EgressRoute{ID: "e", PathPrefix: "/p", DialUpstream: "h:9443", ClientCertPath: "c", EncryptedClientKeyPath: "k", SecretFilePath: "s", TrustedCACertPath: "ca"}
 
 	cases := map[string]error{
 		"ingress without id":         c.RegisterIngressRoute(ctx, IngressRoute{PathPrefix: "/p", Upstream: "u"}),
@@ -182,7 +188,8 @@ func TestRegisterPrivateRoutes_Validation(t *testing.T) {
 		"egress without prefix":      c.RegisterEgressRoute(ctx, withEgress(okEgress, func(r *EgressRoute) { r.PathPrefix = "" })),
 		"egress without upstream":    c.RegisterEgressRoute(ctx, withEgress(okEgress, func(r *EgressRoute) { r.DialUpstream = "" })),
 		"egress without client cert": c.RegisterEgressRoute(ctx, withEgress(okEgress, func(r *EgressRoute) { r.ClientCertPath = "" })),
-		"egress without client key":  c.RegisterEgressRoute(ctx, withEgress(okEgress, func(r *EgressRoute) { r.ClientKeyPath = "" })),
+		"egress without client key":  c.RegisterEgressRoute(ctx, withEgress(okEgress, func(r *EgressRoute) { r.EncryptedClientKeyPath = "" })),
+		"egress without secret file": c.RegisterEgressRoute(ctx, withEgress(okEgress, func(r *EgressRoute) { r.SecretFilePath = "" })),
 		"egress without trusted CA":  c.RegisterEgressRoute(ctx, withEgress(okEgress, func(r *EgressRoute) { r.TrustedCACertPath = "" })),
 	}
 
@@ -216,7 +223,7 @@ func TestCreateRouteIfAbsent_UnexpectedExistenceStatus(t *testing.T) {
 		"egress": func(c *caddyManager) error {
 			return c.RegisterEgressRoute(context.Background(), EgressRoute{
 				ID: "e", PathPrefix: "/p", DialUpstream: "h:9443",
-				ClientCertPath: "c", ClientKeyPath: "k", TrustedCACertPath: "ca",
+				ClientCertPath: "c", EncryptedClientKeyPath: "k", SecretFilePath: "s", TrustedCACertPath: "ca",
 			})
 		},
 		"public": func(c *caddyManager) error {

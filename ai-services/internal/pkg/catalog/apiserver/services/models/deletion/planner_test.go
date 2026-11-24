@@ -209,6 +209,7 @@ func TestPlanLocal(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, id, plan.ComponentID)
 			assert.Equal(t, tt.workers.rt, plan.Runtime)
+			assert.Equal(t, tt.wantWorker, plan.WorkerName, "the worker is kept so its private routes can be removed")
 			assert.Equal(t, "litellm-1", plan.Route.LiteLLMModelID)
 			assert.Equal(t, "ibm/granite-"+id.String(), plan.Route.KeyAlias)
 			assert.Equal(t, id.String(), plan.Route.Tag)
