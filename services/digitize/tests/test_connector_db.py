@@ -847,7 +847,7 @@ class TestPruneAllSyncHistory:
         assert total == 2
         assert session.execute.call_count == 2
 
-    def test_differentiated_retention_conditions_for_failed_and_terminal_jobs(self):
+    def test_differentiated_retention_conditions_for_failed_and_terminal_jobs_and_logs(self):
         session = MagicMock()
         job_res = MagicMock()
         job_res.rowcount = 2
@@ -861,9 +861,14 @@ class TestPruneAllSyncHistory:
             total = DatabaseManager.prune_all_sync_history()
         assert total == 3
         job_delete_stmt = session.execute.call_args_list[0][0][0]
-        compiled = str(job_delete_stmt.compile())
-        assert "jobs.status IN" in compiled or "jobs.status =" in compiled
-        assert "jobs.submitted_at <" in compiled
+        compiled_jobs = str(job_delete_stmt.compile())
+        assert "jobs.status IN" in compiled_jobs or "jobs.status =" in compiled_jobs
+        assert "jobs.submitted_at <" in compiled_jobs
+
+        log_delete_stmt = session.execute.call_args_list[1][0][0]
+        compiled_logs = str(log_delete_stmt.compile())
+        assert "connector_sync_logs.status IN" in compiled_logs or "connector_sync_logs.status =" in compiled_logs
+        assert "connector_sync_logs.started_at <" in compiled_logs
 
 
 # Made with Bob

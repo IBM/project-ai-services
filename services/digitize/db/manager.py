@@ -31,6 +31,11 @@ _NON_FAILED_TERMINAL_JOB_STATUSES = (
     JobStatus.CANCELLED.value,
 )
 
+_NON_FAILED_TERMINAL_SYNC_LOG_STATUSES = (
+    SyncLogStatus.COMPLETED.value,
+    SyncLogStatus.CANCELLED.value,
+)
+
 # Sentinel used by update_connector to distinguish "not supplied" from explicit None.
 _UNSET: object = object()
 
@@ -1371,7 +1376,7 @@ class DatabaseManager:
         Delete terminal connector jobs and sync logs older than retention cutoffs within `session`.
 
         Completed/cancelled jobs and sync logs use `cutoff`.
-        Failed jobs use `failed_cutoff` (defaults to `cutoff` if not specified).
+        Failed jobs and sync logs use `failed_cutoff` (defaults to `cutoff` if not specified).
         Sync logs are limited to `connector_id` when given, otherwise all connectors.
         Returns (jobs_deleted, logs_deleted).
         """
@@ -1396,7 +1401,18 @@ class DatabaseManager:
                 )
             ),
         )
-        log_stmt = delete(ConnectorSyncLog).where(ConnectorSyncLog.started_at < cutoff)
+        log_stmt = delete(ConnectorSyncLog).where(
+            or_(
+                and_(
+                    ConnectorSyncLog.status.in_(_NON_FAILED_TERMINAL_SYNC_LOG_STATUSES),
+                    ConnectorSyncLog.started_at < cutoff,
+                ),
+                and_(
+                    ConnectorSyncLog.status == SyncLogStatus.FAILED.value,
+                    ConnectorSyncLog.started_at < failed_cutoff,
+                ),
+            )
+        )
         if connector_id is not None:
             log_stmt = log_stmt.where(ConnectorSyncLog.connector_id == connector_id)
         log_res = cast(CursorResult, session.execute(log_stmt))
