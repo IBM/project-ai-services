@@ -13,7 +13,7 @@ Tests cover:
 """
 
 import logging
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -443,6 +443,31 @@ def test_startup_logs_no_error_with_a_valid_key(caplog):
         with TestClient(forecast_app.app):
             pass
     assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+@pytest.mark.unit
+def test_shutdown_closes_the_triton_client():
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        forecast_app, "close_client", new_callable=AsyncMock
+    ) as close_client:
+        with TestClient(forecast_app.app):
+            close_client.assert_not_awaited()
+    close_client.assert_awaited_once()
+
+
+@pytest.mark.unit
+def test_shutdown_closes_the_database_when_the_triton_client_fails_to_close(caplog):
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections") as close_db, patch.object(
+        forecast_app, "close_client", new_callable=AsyncMock, side_effect=RuntimeError("boom")
+    ), caplog.at_level("ERROR"):
+        with TestClient(forecast_app.app):
+            pass
+    close_db.assert_called_once()
+    assert "Error closing the Triton client" in caplog.text
 
 
 @pytest.mark.unit

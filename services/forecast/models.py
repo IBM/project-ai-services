@@ -1,10 +1,9 @@
-
 """Request and response models of the Forecast service API."""
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 # SQL identifier patterns: allows letters, numbers, underscores, and common SQL/Db2 special chars ($, #, @).
 # Table can optionally be schema-qualified (e.g. "SCHEMA.TABLE" or just "TABLE").
@@ -66,13 +65,18 @@ class TrainingRequest(BaseModel):
     input_columns: list[TrainingInputColumn] = Field(min_length=1, max_length=1000)
 
     @model_validator(mode="after")
-    def _validate_columns(self):
+    def _validate_columns(self) -> "TrainingRequest":
+        """Reject duplicate input column names and a target that is also an input column."""
         names = [col.name.upper() for col in self.input_columns]
         if len(set(names)) != len(names):
             raise ValueError("input_columns must not contain duplicate column names")
         if self.target_column.upper() in names:
             raise ValueError("target_column must not be present in input_columns")
         return self
+
+
+class ForecastRequest(RootModel[list[dict[str, Any]]]):
+    """Request body of POST /v1/forecast: a JSON array with one object per row to forecast."""
 
 
 class ConnectorCreateRequest(BaseModel):
@@ -203,3 +207,25 @@ class ConnectorMetricsResponse(BaseModel):
     versions: ConnectorVersions
     training: TrainingSummary
     jobs: list[JobItem]
+
+
+class ForecasterItem(BaseModel):
+    """One forecaster in a list response."""
+
+    version: int
+    metrics: Optional[dict[str, Any]] = None
+    created_at: Optional[str] = None
+
+
+class Prediction(BaseModel):
+    """Prediction and confidence for one input row."""
+
+    prediction: Union[str, int, float, bool]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class ForecastResponse(BaseModel):
+    """Forecast answer: the version that responded and one result per row."""
+
+    version: int
+    predictions: list[Prediction]

@@ -5,6 +5,7 @@ Formatting of database rows into response models, translation of database
 errors, and validation of connection_details updates.
 """
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -106,7 +107,7 @@ def sqlstate(exc: Exception) -> Optional[str]:
 
 
 @contextmanager
-def handle_database_errors(operation: str, connector_id: Optional[str] = None):
+def handle_database_errors(operation: str, connector_id: Optional[str] = None) -> Iterator[None]:
     """Turn a database error into DATABASE_ERROR without its message.
 
     The message of a SQLAlchemy error includes the bound parameters, which for a

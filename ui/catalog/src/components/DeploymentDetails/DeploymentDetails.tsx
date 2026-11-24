@@ -11,6 +11,7 @@ import {
   SkeletonText,
   SkeletonPlaceholder,
   ToastNotification,
+  CopyButton,
 } from "@carbon/react";
 import ApplicationDatasourcesTable from "./components/ApplicationDatasourcesTable";
 import { InlineEditableTitle } from "@/components";
@@ -42,6 +43,7 @@ import {
   SERVICE_ENDPOINTS,
   COMPONENT_TYPES,
   WORKER_RUNTIME_LABELS,
+  PAGE_TITLES,
 } from "@/constants";
 
 interface DeploymentDetailsProps {
@@ -79,11 +81,15 @@ const DeploymentDetails = ({
   const [integrationFetchError, setIntegrationFetchError] = useState<
     string | null
   >(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [acceleratorCards, setAcceleratorCards] = useState<
     AcceleratorCardType[]
   >([]);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
   const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
+  const [testAssistantUrl, setTestAssistantUrl] = useState<string | null>(null);
+  const isDigitalAssistant =
+    deploymentSource === PAGE_TITLES.DIGITAL_ASSISTANTS;
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -296,6 +302,11 @@ const DeploymentDetails = ({
             };
           });
 
+        const chatUiEndpoint = deploymentServices
+          .find((s) => s.catalog_id === "chat")
+          ?.endpoints?.find((e) => e.type === "ui");
+        setTestAssistantUrl(chatUiEndpoint?.url || null);
+
         setServiceData(transformedServices);
         setIntegrationEndpoints(transformedEndpoints);
         setCertifiedBy(isDeploymentCertified ? "IBM" : null);
@@ -304,6 +315,7 @@ const DeploymentDetails = ({
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
+        setTestAssistantUrl(null);
         setIntegrationFetchError(
           "Could not retrieve integration endpoints. Please try again.",
         );
@@ -398,9 +410,28 @@ const DeploymentDetails = ({
     });
     onNameUpdate?.(newName);
   };
+  // navigator.clipboard is undefined on non-secure (plain HTTP) pages. Hide the copy button there, since CopyButton would still report "Copied to clipboard".
+  const canCopyToClipboard = Boolean(navigator.clipboard);
+  const handleCopyMcpEndpoint = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyError(null);
+    } catch {
+      setCopyError("Could not copy the MCP endpoint. Please copy it manually.");
+    }
+  };
 
   return (
     <>
+      {copyError && (
+        <ToastNotification
+          kind="error"
+          title="Failed to copy MCP endpoint"
+          subtitle={copyError}
+          onClose={() => setCopyError(null)}
+          className={styles.toastNotification}
+        />
+      )}
       {datasourceSupportError && (
         <ToastNotification
           kind="error"
@@ -433,6 +464,26 @@ const DeploymentDetails = ({
             },
           ]}
           breadcrumbOverflowAriaLabel="Show more breadcrumbs"
+          pageActions={
+            isDigitalAssistant && testAssistantUrl
+              ? [
+                  {
+                    key: "test-assistant",
+                    kind: "tertiary",
+                    label: "Test assistant",
+                    onClick: () => {
+                      window.open(
+                        testAssistantUrl,
+                        "_blank",
+                        "noopener,noreferrer",
+                      );
+                    },
+                  },
+                ]
+              : []
+          }
+          pageActionsOverflowLabel="More actions"
+          fullWidthGrid="xl"
           title={{
             content: (
               <InlineEditableTitle
@@ -876,17 +927,21 @@ const DeploymentDetails = ({
                                 MCP endpoint
                               </span>
                               <span
-                                className={
-                                  styles.integrationEndpointDetailValue
-                                }
+                                className={`${styles.integrationEndpointDetailValue} ${styles.integrationEndpointCopyValue}`}
                               >
-                                <a
-                                  href={integrationEndpointsData.mcpEndpoint}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                >
-                                  {integrationEndpointsData.mcpEndpoint}
-                                </a>
+                                {integrationEndpointsData.mcpEndpoint}
+                                {canCopyToClipboard && (
+                                  <CopyButton
+                                    size="xs"
+                                    feedback="Copied to clipboard"
+                                    iconDescription="Copy MCP endpoint"
+                                    onClick={() =>
+                                      handleCopyMcpEndpoint(
+                                        integrationEndpointsData.mcpEndpoint,
+                                      )
+                                    }
+                                  />
+                                )}
                               </span>
                             </div>
                           )}
