@@ -104,6 +104,10 @@ tags_metadata = [
         "name": "forecast",
         "description": "Tabular forecasting and inference endpoints",
     },
+    {
+        "name": "mcp",
+        "description": "Endpoints exposed to MCP clients",
+    },
 ]
 
 app = FastAPI(
@@ -119,7 +123,7 @@ app = FastAPI(
 
 register_exception_handlers(app)
 app.include_router(connectors.router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False)
-app.include_router(forecast_routes.router, prefix="/v1/forecast", tags=["forecast"])
+app.include_router(forecast_routes.router, prefix="/v1/forecast", tags=["forecast", "mcp"])
 
 
 # ------------------------------------------------------------------ #
