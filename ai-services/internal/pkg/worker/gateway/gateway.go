@@ -216,7 +216,8 @@ func (g *Gateway) CommandStream(stream grpc.BidiStreamingServer[workerpb.Command
 	}
 
 	// goroutine: read results from the worker and dispatch to waiting callers.
-	recvErrCh := make(chan error, 2)
+	const recvErrBufSize = 2
+	recvErrCh := make(chan error, recvErrBufSize)
 	go g.recvLoop(ctx, stream, workerName, recvErrCh)
 
 	// Give the worker a route to LiteLLM on the control plane; needs recvLoop to read the reply.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/deploy"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/routes"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure"
 	configureutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -166,7 +167,7 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	}
 
 	// Expose LiteLLM on the private mTLS ingress for services on remote workers.
-	if err := caddy.RegisterLiteLLMIngress(ctx, caddyCtx, routeInfos); err != nil {
+	if err := routes.RegisterLiteLLMIngress(ctx, caddyCtx, routeInfos); err != nil {
 		return err
 	}
 
