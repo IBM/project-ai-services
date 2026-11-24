@@ -215,6 +215,8 @@ func handleExistingSubscription(ctx context.Context, c *openshift.OpenshiftClien
 	}
 
 	if !isCSVReady(ctx, c, sub) {
+		s.Stop(fmt.Sprintf("%s is not in a ready state, skipping upgrade check", operatorLabel))
+
 		return true, nil
 	}
 

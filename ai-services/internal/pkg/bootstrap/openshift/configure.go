@@ -159,7 +159,7 @@ func fetchSCPSpec(ctx context.Context, client *openshift.OpenshiftClient) (map[s
 	// Find Spyre operator config
 	var spyreOp constants.OperatorConfig
 	for _, op := range constants.RequiredOperators {
-		if op.Name == "spyre-operator" {
+		if op.Name == spyreOperatorPackage {
 			spyreOp = op
 
 			break
@@ -182,7 +182,7 @@ func fetchSCPSpec(ctx context.Context, client *openshift.OpenshiftClient) (map[s
 	}
 
 	for _, ex := range examples {
-		if ex["kind"] != "SpyreClusterPolicy" {
+		if ex["kind"] != spyreKind {
 			continue
 		}
 		if spec, ok := ex["spec"].(map[string]any); ok {
@@ -190,7 +190,7 @@ func fetchSCPSpec(ctx context.Context, client *openshift.OpenshiftClient) (map[s
 		}
 	}
 
-	return nil, fmt.Errorf("SpyreClusterPolicy not found")
+	return nil, fmt.Errorf("%s not found", spyreKind)
 }
 
 // modifySpec remove `externalDeviceReservation` from `experimentalMode`.
@@ -230,12 +230,12 @@ func modifySpec(spec map[string]any, s *spinner.Spinner) error {
 func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec map[string]any, s *spinner.Spinner) error {
 	scp := &unstructured.Unstructured{}
 	c := client.Client
-	scp.SetName("spyreclusterpolicy")
+	scp.SetName(spyreClusterPolicyName)
 	scp.Object = map[string]any{
-		"apiVersion": "spyre.ibm.com/v1alpha1",
-		"kind":       "SpyreClusterPolicy",
+		"apiVersion": fmt.Sprintf("%s/%s", spyreGroup, spyreVersion),
+		"kind":       spyreKind,
 		"metadata": map[string]any{
-			"name": "spyreclusterpolicy",
+			"name": spyreClusterPolicyName,
 		},
 		"spec": spec,
 	}
@@ -243,12 +243,12 @@ func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec 
 	err := c.Create(ctx, scp)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			s.UpdateMessage("SpyreClusterPolicy already exists")
+			s.UpdateMessage(fmt.Sprintf("%s already exists", spyreKind))
 
 			return nil
 		}
 		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("missing required permissions to create SpyreClusterPolicy")
+			return fmt.Errorf("missing required permissions to create %s", spyreKind)
 		}
 	}
 
@@ -258,13 +258,13 @@ func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec 
 func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftClient) error {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "spyre.ibm.com",
-		Version: "v1alpha1",
-		Kind:    "SpyreClusterPolicy",
+		Group:   spyreGroup,
+		Version: spyreVersion,
+		Kind:    spyreKind,
 	})
 
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
-		if err := client.Client.Get(pollCtx, k8stypes.NamespacedName{Name: "spyreclusterpolicy"}, obj); err != nil {
+		if err := client.Client.Get(pollCtx, k8stypes.NamespacedName{Name: spyreClusterPolicyName}, obj); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
 
