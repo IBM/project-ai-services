@@ -90,9 +90,12 @@ export async function fetchModelDeployment(
 // Generates a new public key for a model; any existing key is revoked and the new key is returned only once
 export async function generateModelKey(
   id: string,
+  options?: { signal?: AbortSignal },
 ): Promise<GenerateModelKeyResponse> {
   const response = await api.post<GenerateModelKeyResponse>(
     MODEL_MANAGEMENT_ENDPOINTS.GENERATE_MODEL_KEY(id),
+    undefined,
+    { signal: options?.signal },
   );
   return response.data;
 }

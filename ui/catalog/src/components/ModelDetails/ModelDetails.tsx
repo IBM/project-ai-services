@@ -133,7 +133,12 @@ const ModelDetails = ({ modelId, modelName, onBack }: ModelDetailsProps) => {
                 </span>
               </div>
               <div>
-                <Button kind="tertiary" size="md" onClick={keyGen.generate}>
+                <Button
+                  kind="tertiary"
+                  size="md"
+                  onClick={keyGen.generate}
+                  disabled={keyGen.isGenerating}
+                >
                   Generate API key
                 </Button>
               </div>
