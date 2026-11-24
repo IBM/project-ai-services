@@ -12,29 +12,3 @@
   color: var(--cds-support-success);
   flex-shrink: 0;
 }
-
-.providerList {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-03;
-}
-
-.providerCard {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-02;
-  padding: $spacing-04;
-  background-color: var(--cds-layer-01);
-  border: 1px solid var(--cds-border-subtle-01);
-}
-
-.providerName {
-  @include type-style("body-compact-01");
-  color: var(--cds-text-primary);
-}
-
-.providerMeta {
-  display: flex;
-  align-items: center;
-  gap: $spacing-02;
-}

@@ -650,10 +650,6 @@ export interface CatalogModel {
   providers: CatalogModelProvider[];
 }
 
-export interface SupportedProvider extends CatalogModelProvider {
-  accelerator_type: string | null;
-}
-
 export interface CatalogModelDetails {
   id: string;
   name: string;
@@ -662,7 +658,6 @@ export interface CatalogModelDetails {
   license?: string;
   description: string;
   about?: CatalogAboutSection[];
-  supported_providers: SupportedProvider[];
 }
 
 export interface ModelDeployment {
