@@ -214,24 +214,35 @@ func handleExistingSubscription(ctx context.Context, c *openshift.OpenshiftClien
 		return true, nil
 	}
 
-	csvReady := isCSVReady(ctx, c, sub)
+	if !isCSVReady(ctx, c, sub) {
+		return true, nil
+	}
 
-	if !skipUpgrade && csvReady {
-		// promptAndUpgrade returns true when an upgrade was confirmed —
-		// in that case the caller should NOT skip so waitForOperator picks up the new CSV.
-		applied, err := promptAndUpgrade(sub, object, operatorLabel, s)
-		if err != nil {
+	if skipUpgrade {
+		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
+
+		return true, nil
+	}
+
+	// promptAndUpgrade returns (true, nil) when an upgrade was confirmed —
+	// in that case the caller should NOT skip so waitForOperator picks up the new CSV.
+	applied, err := promptAndUpgrade(sub, object, operatorLabel, s)
+	if err != nil {
+		return false, err
+	}
+	if !applied {
+		return true, nil
+	}
+
+	// Spyre operator does not support in-place auto-upgrade.
+	// Reinstall by tearing down existing SpyreClusterPolicy, CSV, and Subscription.
+	if sub.Spec.Package == spyreOperatorPackage {
+		if err := reinstallSpyreOperator(ctx, c, sub, s); err != nil {
 			return false, err
 		}
-
-		return !applied, nil
 	}
 
-	if csvReady {
-		s.Stop(fmt.Sprintf("%s is already installed and ready", operatorLabel))
-	}
-
-	return true, nil
+	return false, nil
 }
 
 // shouldSkipSubscription checks if a subscription should be skipped because it already exists.
