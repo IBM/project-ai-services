@@ -204,6 +204,73 @@ def summarize_and_classify_tables(table_mds, gen_model, llm_endpoint, doc_path, 
     )
     return summaries, decisions, failures
 
+_MAX_ERROR_DETAIL_CHARS = 500
+
+
+def _find_error_message(body, depth: int = 0) -> str | None:
+    """Dig the human-readable message out of a (possibly nested / JSON-encoded) error body.
+
+    Handles shapes such as the LiteLLM-wrapped watsonx error, where ``error.message`` is itself
+    a JSON string containing ``{"errors": [{"message": "..."}]}``.
+    """
+    if depth > 5:
+        return None
+    if isinstance(body, str):
+        stripped = body.strip()
+        if stripped[:1] in ("{", "["):
+            try:
+                return _find_error_message(json.loads(stripped), depth + 1) or stripped
+            except ValueError:
+                pass
+        return stripped or None
+    if isinstance(body, list):
+        messages = [m for m in (_find_error_message(item, depth + 1) for item in body) if m]
+        return "; ".join(messages) or None
+    if isinstance(body, dict):
+        for key in ("errors", "message", "detail", "error"):
+            if body.get(key):
+                found = _find_error_message(body[key], depth + 1)
+                if found:
+                    return found
+    return None
+
+
+def extract_error_message(response) -> str:
+    """Return the descriptive error message from an upstream HTTP response ("" if none)."""
+    try:
+        try:
+            message = _find_error_message(response.json())
+        except ValueError:
+            message = None
+        if not message:
+            message = (response.text or "").strip()
+        if not isinstance(message, str):
+            return ""
+        return message[:_MAX_ERROR_DETAIL_CHARS]
+    except Exception:
+        return ""
+
+
+def raise_for_status_with_details(response) -> None:
+    """Like ``response.raise_for_status()`` but includes the upstream error message.
+
+    ``requests`` only reports ``400 Client Error: Bad Request for url: ...`` which hides the reason
+    returned in the response body (e.g. LiteLLM/watsonx validation errors). The re-raised
+    ``HTTPError`` keeps the original ``response`` so status-code based handling still works.
+    """
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        detail = extract_error_message(response)
+        if detail and detail not in str(e):
+            raise requests.exceptions.HTTPError(
+                f"{e} - Upstream error: {detail}",
+                response=e.response if e.response is not None else response,
+                request=e.request,
+            ) from e
+        raise
+
+
 def get_vllm_headers(api_key: str | None = None):
     """Get headers for vLLM API calls, including auth if provided.
     
@@ -432,7 +499,7 @@ def query_vllm_non_stream(
     response = misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=False)
     request_time = time.time() - start_time
     perf_stat_dict["inference_time"] = request_time
-    response.raise_for_status()
+    raise_for_status_with_details(response)
     response_json = response.json()
     if 'usage' in response_json:
         perf_stat_dict["completion_tokens"] = response_json['usage'].get('completion_tokens', 0)
@@ -480,6 +547,7 @@ def query_vllm_stream(
         last_token_time = start_time
 
         with misc_utils.SESSION.post(f"{llm_endpoint}/v1/chat/completions", json=payload, headers=headers, stream=True) as r:
+            raise_for_status_with_details(r)
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
@@ -515,7 +583,7 @@ def query_vllm_stream(
 
     except requests.exceptions.RequestException as e:
         error_details = str(e)
-        if e.response is not None:
+        if e.response is not None and "Upstream error:" not in error_details:
             error_details += f", Response Text: {e.response.text}"
         logger.error(f"Error calling vLLM stream API: {error_details}")
         yield f"data: {json.dumps({'error': error_details})}\n\n"
@@ -606,14 +674,14 @@ def query_vllm_summarize_stream(
             headers=headers,
             stream=True,
         ) as r:
-            r.raise_for_status()
+            raise_for_status_with_details(r)
             for raw_line in r.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
                 yield f"{raw_line}\n\n"
     except requests.exceptions.RequestException as e:
         error_details = str(e)
-        if e.response is not None:
+        if e.response is not None and "Upstream error:" not in error_details:
             error_details += f", Response Text: {e.response.text}"
         logger.error(f"Error calling vLLM stream API: {error_details}")
         yield f"data: {json.dumps({'error': error_details})}\n\n"
@@ -648,7 +716,7 @@ def tokenize_with_llm(prompt, emb_endpoint, max_retries=3):
     }
 
     response = misc_utils.SESSION.post(f"{emb_endpoint}/tokenize", json=payload)
-    response.raise_for_status()
+    raise_for_status_with_details(response)
     result = response.json()
     tokens = result.get("tokens", [])
 
