@@ -43,10 +43,17 @@ func (f *fakeProxy) UnregisterRoute(_ context.Context, id string) error {
 
 type fakeDomains struct {
 	suffix string
+	port   string
 	err    error
 }
 
 func (f fakeDomains) DomainSuffix(string) (string, error) { return f.suffix, f.err }
+func (f fakeDomains) PrivateIngressPort(string) string {
+	if f.port != "" {
+		return f.port
+	}
+	return proxy.DefaultPrivateIngressPort
+}
 
 func newTestManager(domains DomainResolver, cp, worker *fakeProxy) *Manager {
 	return &Manager{
@@ -83,6 +90,16 @@ func TestRegister(t *testing.T) {
 	assert.Equal(t, "/etc/secret/catalog-mtls-encryption-secret/mtls-encryption-key", e.SecretFilePath)
 	assert.Equal(t, "/data/gateway-pki/ca.crt", e.TrustedCACertPath)
 	assert.Empty(t, wk.unregistered, "nothing is rolled back on success")
+
+	t.Run("custom worker private ingress port", func(t *testing.T) {
+		customCP, customWK := &fakeProxy{}, &fakeProxy{}
+		customM := newTestManager(fakeDomains{suffix: "example.com", port: "8443"}, customCP, customWK)
+
+		_, err := customM.Register(context.Background(), nil, "w1", id, "model-pod:8000")
+		require.NoError(t, err)
+		require.Len(t, customCP.egress, 1)
+		assert.Equal(t, "w1.example.com:8443", customCP.egress[0].DialUpstream)
+	})
 }
 
 func TestRegister_Failures(t *testing.T) {

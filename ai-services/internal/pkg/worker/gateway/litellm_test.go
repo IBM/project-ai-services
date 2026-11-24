@@ -9,7 +9,6 @@ import (
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type recordingProxy struct {
@@ -28,43 +27,6 @@ func (r *recordingProxy) RegisterEgressRoute(_ context.Context, route proxy.Egre
 	r.errs = r.errs[1:]
 
 	return err
-}
-
-func TestLiteLLMEgressRoute(t *testing.T) {
-	t.Run("targets the control-plane private ingress over mTLS", func(t *testing.T) {
-		t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
-		t.Setenv(proxy.CaddyPrivateIngressPortEnvVar, "9444")
-
-		r, err := liteLLMEgressRoute()
-
-		require.NoError(t, err)
-		assert.Equal(t, workerconstants.LiteLLMEgressRouteID, r.ID)
-		assert.Equal(t, workerconstants.LiteLLMPathPrefix, r.PathPrefix)
-		assert.Equal(t, "catalog-worker-gateway.example.com:9444", r.DialUpstream)
-		assert.Equal(t, "catalog-worker-gateway.example.com", r.ServerName)
-		assert.Equal(t, "/data/worker-tls/tls.crt", r.ClientCertPath)
-		assert.Equal(t, "/data/worker-tls/tls.key", r.EncryptedClientKeyPath)
-		assert.Equal(t, "/data/worker-tls/ca.crt", r.TrustedCACertPath)
-		assert.Equal(t, "/etc/secret/worker-mtls-encryption-secret/mtls-encryption-key", r.SecretFilePath)
-	})
-
-	t.Run("defaults to the standard private ingress port", func(t *testing.T) {
-		t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
-		t.Setenv(proxy.CaddyPrivateIngressPortEnvVar, "")
-
-		r, err := liteLLMEgressRoute()
-
-		require.NoError(t, err)
-		assert.Equal(t, "catalog-worker-gateway.example.com:"+proxy.DefaultPrivateIngressPort, r.DialUpstream)
-	})
-
-	t.Run("fails without a domain suffix", func(t *testing.T) {
-		t.Setenv(proxy.DomainSuffixEnvVar, "")
-
-		_, err := liteLLMEgressRoute()
-
-		assert.Error(t, err)
-	})
 }
 
 func TestLiteLLMEgressEnabled(t *testing.T) {
@@ -91,8 +53,10 @@ func TestRegisterLiteLLMEgress_NoopWhenDisabled(t *testing.T) {
 	proxyFor = func(*Gateway, string) proxy.ProxyManager { return rp }
 	t.Cleanup(func() { proxyFor = orig })
 
+	errCh := make(chan error, 1)
 	g := &Gateway{registry: registry.New(nil), runtimeType: types.RuntimeTypePodman}
-	g.registerLiteLLMEgress(context.Background(), workerconstants.LocalWorkerName)
+	g.registerLiteLLMEgress(context.Background(), workerconstants.LocalWorkerName, errCh)
 
 	assert.Empty(t, rp.egress)
+	assert.Empty(t, errCh)
 }

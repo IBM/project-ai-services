@@ -150,11 +150,15 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 		logger.WarningfCtx(ctx, "worker join: %s is not set; the worker certificate will have no DNS SAN and private-ingress hostname verification will fail", proxy.DomainSuffixEnvVar)
 	}
 	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
+	meta := map[string]string{workerconstants.MetaKeyDomainSuffix: domainSuffix}
+	if port := os.Getenv(proxy.CaddyPrivateIngressPortEnvVar); port != "" {
+		meta[workerconstants.MetaKeyPrivateIngressPort] = port
+	}
 	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: opts.Token,
 		RuntimeType:    rt.String(),
 		CsrPem:         csrPEM,
-		Metadata:       map[string]string{workerconstants.MetaKeyDomainSuffix: domainSuffix},
+		Metadata:       meta,
 	})
 	if err != nil {
 		return "", fmt.Errorf("worker join: register RPC: %w", err)

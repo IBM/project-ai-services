@@ -23,7 +23,10 @@ func (m metaRegistry) WorkerMetadata(name string) (map[string]string, bool) {
 
 func TestDomainSuffix(t *testing.T) {
 	reg := metaRegistry{meta: map[string]map[string]string{
-		"w1": {workerconstants.MetaKeyDomainSuffix: "example.com"},
+		"w1": {
+			workerconstants.MetaKeyDomainSuffix:       "example.com",
+			workerconstants.MetaKeyPrivateIngressPort: "8443",
+		},
 		"w2": {},
 	}}
 
@@ -46,5 +49,16 @@ func TestDomainSuffix(t *testing.T) {
 	t.Run("no registry", func(t *testing.T) {
 		_, err := NewResolver(nil).DomainSuffix("w1")
 		require.Error(t, err)
+	})
+
+	t.Run("returns private ingress port if set", func(t *testing.T) {
+		port := NewResolver(reg).PrivateIngressPort("w1")
+		assert.Equal(t, "8443", port)
+	})
+
+	t.Run("falls back to default port if not set or worker unknown", func(t *testing.T) {
+		assert.Equal(t, "9443", NewResolver(reg).PrivateIngressPort("w2"))
+		assert.Equal(t, "9443", NewResolver(reg).PrivateIngressPort("nope"))
+		assert.Equal(t, "9443", NewResolver(nil).PrivateIngressPort("w1"))
 	})
 }

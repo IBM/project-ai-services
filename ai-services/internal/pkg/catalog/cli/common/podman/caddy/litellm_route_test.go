@@ -1,16 +1,15 @@
-package podman
+package caddy
 
 import (
 	"testing"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common/podman/caddy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLiteLLMUpstream(t *testing.T) {
 	t.Run("returns the pod and port of the model-gateway route", func(t *testing.T) {
-		infos := []caddy.TemplateRouteInfo{
+		infos := []TemplateRouteInfo{
 			{PodName: "ai-services--catalog", RoutesAnnotation: "8081:catalog-ui:ui, 8080:catalog-api:api"},
 			{PodName: "ai-services--litellm", RoutesAnnotation: "4000:model-gateway:api"},
 		}
@@ -22,7 +21,7 @@ func TestLiteLLMUpstream(t *testing.T) {
 	})
 
 	t.Run("fails when there is no model-gateway route", func(t *testing.T) {
-		_, err := liteLLMUpstream([]caddy.TemplateRouteInfo{
+		_, err := liteLLMUpstream([]TemplateRouteInfo{
 			{PodName: "ai-services--catalog", RoutesAnnotation: "8080:catalog-api:api"},
 		})
 
@@ -30,7 +29,7 @@ func TestLiteLLMUpstream(t *testing.T) {
 	})
 
 	t.Run("fails on a malformed annotation", func(t *testing.T) {
-		_, err := liteLLMUpstream([]caddy.TemplateRouteInfo{
+		_, err := liteLLMUpstream([]TemplateRouteInfo{
 			{PodName: "p", RoutesAnnotation: "bogus"},
 		})
 

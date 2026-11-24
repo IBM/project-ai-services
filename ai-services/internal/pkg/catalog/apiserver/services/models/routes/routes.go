@@ -37,9 +37,10 @@ const (
 	cpSecretDir      = "/etc/secret/" + catalogconstants.CatalogMTLSSecretName
 )
 
-// DomainResolver resolves the DOMAIN_SUFFIX a worker reported when it registered.
+// DomainResolver resolves the DOMAIN_SUFFIX and private ingress port a worker reported when it registered.
 type DomainResolver interface {
 	DomainSuffix(name string) (string, error)
+	PrivateIngressPort(name string) string
 }
 
 // Manager registers and removes the routes of one remote model.
@@ -96,6 +97,11 @@ func (m *Manager) Register(ctx context.Context, rt runtime.Runtime, workerName s
 		return "", err
 	}
 
+	workerPort := m.workers.PrivateIngressPort(workerName)
+	if workerPort == "" {
+		workerPort = proxy.DefaultPrivateIngressPort
+	}
+
 	// The worker certificate carries <workerName>.<domainSuffix> as its SAN, so that is both the
 	// name dialed and the name verified.
 	workerHost := workerName + "." + suffix
@@ -129,7 +135,7 @@ func (m *Manager) Register(ctx context.Context, rt runtime.Runtime, workerName s
 	if err := cp.RegisterEgressRoute(ctx, proxy.EgressRoute{
 		ID:                     EgressRouteID(componentID),
 		PathPrefix:             prefix,
-		DialUpstream:           workerHost + ":" + proxy.DefaultPrivateIngressPort,
+		DialUpstream:           workerHost + ":" + workerPort,
 		ClientCertPath:         workerconstants.GatewayPKIDir + "/" + cpClientCertFile,
 		EncryptedClientKeyPath: workerconstants.GatewayPKIDir + "/" + cpClientKeyFile,
 		SecretFilePath:         cpSecretDir + "/" + mtlsSecretKey,

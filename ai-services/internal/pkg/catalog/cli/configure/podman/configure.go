@@ -166,7 +166,7 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 	}
 
 	// Expose LiteLLM on the private mTLS ingress for services on remote workers.
-	if err := registerLiteLLMIngress(ctx, caddyCtx, routeInfos); err != nil {
+	if err := caddy.RegisterLiteLLMIngress(ctx, caddyCtx, routeInfos); err != nil {
 		return err
 	}
 

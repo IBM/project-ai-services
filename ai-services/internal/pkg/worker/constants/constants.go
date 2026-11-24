@@ -61,7 +61,7 @@ const (
 
 	// LiteLLMIngressRouteID is the Caddy @id of the control-plane route that exposes LiteLLM to
 	// remote workers: service -> worker Caddy egress :8080 -> mTLS -> CP Caddy ingress :9443 -> LiteLLM.
-	LiteLLMIngressRouteID = "litellm--mtls"
+	LiteLLMIngressRouteID = "litellm"
 	// LiteLLMEgressRouteID is the Caddy @id of the worker-side route.
 	LiteLLMEgressRouteID = "litellm--egress"
 	// LiteLLMPathPrefix is the URL prefix both LiteLLM routes match. The CP ingress strips it and
@@ -75,6 +75,9 @@ const (
 	// Sent at Register time so the gateway can embed the worker's dial hostname
 	// (<workerName>.<domainSuffix>) as a SAN in the worker's certificate.
 	MetaKeyDomainSuffix = "domainSuffix"
+
+	// MetaKeyPrivateIngressPort is the worker metadata key for the worker's private ingress port.
+	MetaKeyPrivateIngressPort = "privateIngressPort"
 
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
 	WorkerGatewayPort = 9191
