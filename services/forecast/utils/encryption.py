@@ -1,39 +1,35 @@
 """
-Encryption key and credential encryption/decryption for connector secrets.
+Encryption for connector secrets.
 
 The key is read from DB_ENCRYPTION_KEY, as Digitize does, and must be exactly
 32 bytes (AES-256-GCM). The value is used as it is: it is not base64-decoded.
 ``validate_cipher()`` runs in the application lifespan, so a missing or invalid
 key stops the service before it serves requests.
 
-Ciphertext wire format (stored as base64):
-    base64( nonce[12] || tag[16] || ciphertext )
-
-Allowlist design:
-Only safe, non-secret fields (host, port, database, username) are stored in plaintext.
-Every other field (password, tokens, etc.) is encrypted and never leaked in error logs.
+Every field of a connector's connection details that is not in ``SAFE_FIELDS``
+is a secret: it is encrypted before it is stored and never returned.
+Ciphertext wire format (stored as base64): base64(nonce[12] || ciphertext || tag[16]).
 """
-from __future__ import annotations
-
 import base64
 import os
-from typing import Any, Dict
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from forecast.settings import settings
 
-_NONCE_SIZE = 12  # 96-bit nonce for GCM
+# Fields stored in plaintext and returned in responses. db2_for_i is the only
+# connector type; a new type adds its safe fields here.
+SAFE_FIELDS = frozenset({"host", "port", "database", "username"})
 
-# Allowlist of safe fields per connector type
-_SAFE_FIELDS: dict[str, frozenset[str]] = {
-    "db2_for_i": frozenset({"host", "port", "database", "username"}),
-    "db2i": frozenset({"host", "port", "database", "username"}),
-}
+_NONCE_SIZE = 12  # 96-bit nonce recommended for GCM
 
 
 class EncryptionKeyError(RuntimeError):
     """Raised when DB_ENCRYPTION_KEY is missing or is not 32 bytes."""
+
+
+class DecryptionError(RuntimeError):
+    """Raised when a secret token cannot be decrypted (e.g. invalid tag, corrupted data, wrong key)."""
 
 
 def validate_cipher() -> AESGCM:
@@ -52,38 +48,40 @@ def validate_cipher() -> AESGCM:
     return AESGCM(key_bytes)
 
 
-def encrypt_value(cipher: AESGCM, plaintext: str) -> str:
-    """Encrypt a plaintext string; returns base64(nonce || tag || ciphertext)."""
+def _encrypt_value(cipher: AESGCM, plaintext: str) -> str:
+    """Encrypt one secret with a random nonce; return base64 of nonce + ciphertext + tag."""
     nonce = os.urandom(_NONCE_SIZE)
-    ct_and_tag = cipher.encrypt(nonce, plaintext.encode("utf-8"), None)
-    return base64.b64encode(nonce + ct_and_tag).decode("ascii")
+    # AESGCM.encrypt returns ciphertext + tag (tag appended)
+    return base64.b64encode(nonce + cipher.encrypt(nonce, plaintext.encode(), None)).decode()
 
 
-def decrypt_value(cipher: AESGCM, token: str) -> str:
-    """Decrypt a base64(nonce || tag || ciphertext) token; returns plaintext string."""
-    raw = base64.b64decode(token.encode("ascii"))
-    nonce = raw[:_NONCE_SIZE]
-    ct_and_tag = raw[_NONCE_SIZE:]
-    return cipher.decrypt(nonce, ct_and_tag, None).decode("utf-8")
+def _decrypt_value(cipher: AESGCM, token: str) -> str:
+    """Decrypt a token made by _encrypt_value; raise DecryptionError when it is invalid."""
+    try:
+        raw = base64.b64decode(token.encode())
+        return cipher.decrypt(raw[:_NONCE_SIZE], raw[_NONCE_SIZE:], None).decode()
+    except Exception as exc:
+        raise DecryptionError("Failed to decrypt secret token.") from exc
 
 
-def encrypt_secrets(connector_type: str, connection_details: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a copy of connection_details with all non-safe fields encrypted."""
+def encrypt_secrets(connection_details: dict) -> dict:
+    """Return a copy of *connection_details* with every secret field encrypted."""
     cipher = validate_cipher()
-    safe = _SAFE_FIELDS.get(connector_type, frozenset(_SAFE_FIELDS["db2_for_i"]))
-    result = dict(connection_details)
-    for field, value in connection_details.items():
-        if field not in safe and value is not None:
-            result[field] = encrypt_value(cipher, str(value))
-    return result
+    return {
+        field: value if field in SAFE_FIELDS or value is None else _encrypt_value(cipher, str(value))
+        for field, value in connection_details.items()
+    }
 
 
-def decrypt_secrets(connector_type: str, connection_details: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a copy of connection_details with all non-safe fields decrypted."""
+def decrypt_secrets(connection_details: dict) -> dict:
+    """Return a copy of *connection_details* with every secret field decrypted."""
     cipher = validate_cipher()
-    safe = _SAFE_FIELDS.get(connector_type, frozenset(_SAFE_FIELDS["db2_for_i"]))
-    result = dict(connection_details)
-    for field, value in connection_details.items():
-        if field not in safe and value is not None:
-            result[field] = decrypt_value(cipher, str(value))
-    return result
+    return {
+        field: value if field in SAFE_FIELDS or value is None else _decrypt_value(cipher, value)
+        for field, value in connection_details.items()
+    }
+
+
+def safe_connection_details(connection_details: dict) -> dict:
+    """Return only the fields that may be shown in a response."""
+    return {field: value for field, value in connection_details.items() if field in SAFE_FIELDS}

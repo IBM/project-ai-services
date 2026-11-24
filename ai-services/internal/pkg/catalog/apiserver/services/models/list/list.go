@@ -46,6 +46,7 @@ func (l *Lister) List(ctx context.Context, req apimodels.ListModelsRequest) (*ap
 		Providers:      req.ProviderIDs,
 		Models:         req.Models,
 		Status:         req.Status,
+		Search:         req.Search,
 		Limit:          req.PageSize,
 		Offset:         (req.Page - 1) * req.PageSize,
 	}

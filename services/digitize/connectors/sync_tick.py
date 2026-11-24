@@ -286,7 +286,6 @@ async def _wait_for_job(
     """
     _TERMINAL = {
         JobStatus.COMPLETED.value,
-        JobStatus.COMPLETED_WITH_ERRORS.value,
         JobStatus.FAILED.value,
         JobStatus.CANCELLED.value,
     }
@@ -441,7 +440,7 @@ async def _process_new_files(
             await _wait_for_job(job_id, connector_id, sync_seq)
 
             job_stats = get_job_document_stats(job_id)
-            for doc in job_stats["completed_docs"] + job_stats["completed_with_errors_docs"]:
+            for doc in job_stats["completed_docs"]:
                 checksum = doc_id_to_checksum.get(doc["id"])
                 if checksum is not None:
                     add_connector_checksum_entry(connector_id, checksum, doc["id"])

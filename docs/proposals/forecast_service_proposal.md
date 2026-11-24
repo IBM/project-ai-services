@@ -43,8 +43,8 @@ It also introduces three things that no existing service has:
 | Training run               | Orchestrated by the API: a **data loader subprocess** writes the table to scratch → a **worker subprocess** runs AutoGluon and the ONNX export on scratch → the API publishes the forecaster's directory to the shared volume and loads it into Triton.                                                                                                                                         |
 | Trained forecaster         | A row in `forecasters` plus a directory `fc_<connector_id>_<version>` on the shared repository volume. The version is the job's `jobs.seq`.                                                                                                             |
 | Forecaster serving         | NVIDIA Triton Inference Server (CPU) in explicit model-control mode. The Forecast API dynamically loads, unloads, and serves each forecaster as an independent model via HTTP.                                                                           |
-| Prediction with confidence | `POST /v1/forecast/{connector_id}` — the API validates rows against the stored input columns, calls Triton (using the newest `ready` forecaster by default, or the version specified in `?version=`), and returns a prediction and a `confidence` per row. |
-| Retention                  | A new forecaster is loaded into Triton, then recorded as `ready`. When a connector has more than `FORECASTER_RETENTION_COUNT` `ready` forecasters, its oldest is set to `retiring`, unloaded from Triton, deleted from the volume and marked `deleted`. |
+| Prediction with confidence | `POST /v1/forecast/{connector_id}` — the API validates rows against the stored input columns, calls Triton (using the newest forecaster by default, or the version specified in `?version=`), and returns a prediction and a `confidence` per row. |
+| Retention                  | A new forecaster is loaded into Triton, then recorded in `forecasters`. When a connector has more than `FORECASTER_RETENTION_COUNT` forecasters, the row of its oldest is deleted, and the forecaster is unloaded from Triton and deleted from the volume. |
 | Versioning                 | `jobs.seq` (identity column) is the version. API path prefix `/v1/` versions the API itself.                                                                                                                                                            |
 
 ---
@@ -71,7 +71,7 @@ It also introduces three things that no existing service has:
 - The **database state is authoritative**: Triton serves only forecasters with an active `ready` record in PostgreSQL. Unregistered directories are never loaded.
 - The worker writes the forecaster's Triton directory (`config.pbtxt` and `1/model.onnx`) to **local scratch** and never touches the repository volume. The API **publishes** it: it copies the directory to `.staging/<job_id>/` on the volume and renames it to `fc_<connector_id>_<version>`, so the directory appears whole or not at all. The API also **deletes**: directories whose row is `retiring`, the staging directory of a publish that failed, and leftovers at boot.
 - The APScheduler writes the `forecasters` row only after Triton has loaded the forecaster. A row is therefore always `ready`, `retiring` or `deleted`, and the worker has no write grant on `forecasters`.
--- Retention is by count, per connector, and runs after each successful load. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired in this order: its row becomes `retiring`, it is unloaded from Triton, its directory is deleted, and its row becomes `deleted`. The row is kept. Forecasters of other connectors are not affected.
+- Retention is by count, per connector, and runs after each successful load. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired in this order: its row becomes `retiring`, it is unloaded from Triton, its directory is deleted, and its row becomes `deleted`. The row is kept. Forecasters of other connectors are not affected.
 
 ### 2.3 Decision — Single worker, enforced twice
 
@@ -90,7 +90,7 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 - **Same pattern as digitize.** Create, list, get, partial update and delete, with an allowlist of safe fields. Every other field is encrypted with AES-256-GCM (`DB_ENCRYPTION_KEY`) and never returned.
 - **The loader reads and decrypts.** The loader subprocess reads the connector row with the API's database role and decrypts the secret fields with `DB_ENCRYPTION_KEY`. The worker's role has no grant on `connectors`, so the credentials never reach the training process. Nothing reads the source database outside a job.
 - **Rotation is an update.** Each job reads the connector when it runs, so changing a password with `PUT /v1/connectors/{id}` applies to the next job.
-- **Referential safety.** A connector cannot be deleted while a `queued` or `running` job uses it. Finished jobs keep their rows with `connector_id` set to `NULL`.
+- **Referential safety.** A connector cannot be deleted while a `QUEUED` or `RUNNING` job uses it. Finished jobs keep their rows with `connector_id` set to `NULL`.
 
 ### 2.6 Decision — APScheduler starts every training run
 
@@ -98,24 +98,24 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 
 - **Same library as digitize.** An `AsyncIOScheduler` with a `SQLAlchemyJobStore` on the service's PostgreSQL database, in a `scheduler` schema that the init container creates. APScheduler is pinned to the version digitize uses. The persistent store keeps the schedules across restarts.
 - **One job per connector.** Creating a connector registers a one-off job that fires at once for the first training and, when a training schedule is set, a cron job for the later ones. The cron runs in UTC. When training schedule is unset, only the first training runs.
-- **What a fired job does.** A fired job runs the loader subprocess, then spawns the worker with the data file and waits for it. On success it publishes the forecaster's directory to the volume, loads it into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `failed` and deletes the scratch directory of the attempt.
-- **Retry of the attempt.** An attempt is the loader followed by the worker. If either fails, the job function runs the attempt again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `running` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the scratch directory of the attempt (the data file and the model directory) before the next attempt, so a retry reads the source again. The loader and the worker exit with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, authentication fails, an unknown table or column, no rows, a target with fewer than two different values, fewer than 10 rows with a target value, or data that AutoGluon cannot fit), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `failed` with the last error, and the number of attempts is recorded in `result`. Only the attempt is retried. The publish, the Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
-- **Missed runs are skipped.** The jobs use a short misfire grace time, so a late run is skipped instead of run late. A run missed while the API was down, or skipped because the connector still has a `queued` or `running` job, is logged with the reason.
-- **Startup.** The API registers a cron job only for a connector that has none, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that are in `running` state when the API stopped are marked `failed` by the boot recovery.
+- **What a fired job does.** A fired job runs the loader subprocess, then spawns the worker with the data file and waits for it. On success it publishes the forecaster's directory to the volume, loads it into Triton, inserts the `forecasters` row as `ready` and applies retention. When the last attempt fails, it marks the job `FAILED` and deletes the scratch directory of the attempt.
+- **Retry of the attempt.** An attempt is the loader followed by the worker. If either fails, the job function runs the attempt again, up to `TRAINING_MAX_ATTEMPTS` attempts in total, and waits `TRAINING_RETRY_DELAY_SECONDS` between attempts. All attempts belong to one job: the same `jobs` row, the same version and the same lock. The job stays `RUNNING` while it retries, so no other training starts in between. Each attempt gets the full time limit, and the function deletes the scratch directory of the attempt (the data file and the model directory) before the next attempt, so a retry reads the source again. The loader and the worker exit with a dedicated code for a failure that would only repeat (the connector is missing or cannot be decrypted, authentication fails, an unknown table or column, no rows, a target with fewer than two different values, fewer than 10 rows with a target value, or data that AutoGluon cannot fit), and the function does not retry that. Every other non-zero exit, a kill and a timeout are retried. After the last attempt the job is marked `FAILED` with the last error, and the number of attempts is recorded in `result`. Only the attempt is retried. The publish, the Triton load, the `forecasters` insert and retention run once, after a successful attempt. A restart of the API during the retries fails the job like any other interrupted run.
+- **Missed runs are skipped.** The jobs use a short misfire grace time, so a late run is skipped instead of run late. A run missed while the API was down, or skipped because the connector still has a `QUEUED` or `RUNNING` job, is logged with the reason.
+- **Startup.** The API registers a cron job only for a connector that has none, so existing jobs keep their stored next run time. Digitize instead re-registers every job at startup. Jobs that are in `RUNNING` state when the API stopped are marked `FAILED` by the boot recovery.
 - **Startup Recovery for one-off jobs** Startup recovery marks all in-progress jobs as failed, in case of a one-off job getting marked failed in such a way, the job is requeued to ensure at least one training getting completed.
 
 ```mermaid
 flowchart TD
-    POST["POST /v1/connectors<br/>store connector, training config and job (queued)"] --> REG["register APScheduler jobs:<br/>one-off (fires now), cron if schedule is set"]
+    POST["POST /v1/connectors<br/>store connector, training config and job (QUEUED)"] --> REG["register APScheduler jobs:<br/>one-off (fires now), cron if schedule is set"]
     REG --> ONE["one-off job fires"]
     REG -.->|"later, only if schedule is set"| CRON["cron job fires"]
 
     CRON --> ACTIVE{"connector has a<br/>running job?"}
     ACTIVE -- yes --> SKIP["skip the run, log the reason"]
-    ACTIVE -- no --> INS["insert job row (queued)"]
+    ACTIVE -- no --> INS["insert job row (QUEUED)"]
 
     ONE --> RUN
-    INS --> RUN["job status = running, attempt = 1"]
+    INS --> RUN["job status = RUNNING, attempt = 1"]
     RUN --> READ["spawn loader subprocess:<br/>read the table to scratch (data.parquet)<br/>own process group, time limit"]
     READ -- "exit 0" --> SPAWN["spawn worker: python -m forecast.training job_id data output<br/>own process group, time and memory limits"]
     READ -- "any failure" --> EXIT
@@ -123,7 +123,7 @@ flowchart TD
 
     EXIT -- "exit 0" --> PUB["API: publish the model directory<br/>(copy to .staging, rename to fc_connector_version)"]
     PUB --> LOAD["API: load_model fc_connector_version into Triton"]
-    LOAD --> REC["insert forecasters row (ready)<br/>job status = completed"]
+    LOAD --> REC["insert forecasters row (ready)<br/>job status = COMPLETED"]
     REC --> RET["apply forecaster retention"]
     RET --> PRUNE
 
@@ -131,7 +131,7 @@ flowchart TD
     EXIT -- "other non-zero exit, killed or timed out" --> MORE{"attempts left?<br/>TRAINING_MAX_ATTEMPTS"}
     MORE -- yes --> WAIT["delete scratch dir<br/>wait TRAINING_RETRY_DELAY_SECONDS<br/>attempt + 1"]
     WAIT --> READ
-    MORE -- no --> FAIL["delete scratch dir<br/>job status = failed, jobs.message set, attempts added to jobs.result"]
+    MORE -- no --> FAIL["delete scratch dir<br/>job status = FAILED, jobs.message set, attempts added to jobs.result"]
     FAIL --> PRUNE["prune old finished jobs of the connector"]
 ```
 
@@ -211,10 +211,10 @@ graph LR
 
 | Method     | Endpoint                                | Description                                                                                                                                                    |
 |:-----------|:----------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **GET**    | `/v1/forecast`           | List the forecasters of a connector with status, schemas and metrics. **NOTE: This endpoint will be removed once multi-connector support is added.**                                                                                          |
-| **GET**    | `/v1/forecast/{connector_id}`           | List the forecasters of a connector with status, schemas and metrics.                                                                                          |
-| **POST**   | `/v1/forecast`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest `ready` forecaster (or the version specified in `?version=`), and returned with predictions and confidence.**NOTE: This endpoint will be removed once multi-connector support is added.** |
-| **POST**   | `/v1/forecast/{connector_id}`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest `ready` forecaster (or the version specified in `?version=`), and returned with predictions and confidence. |
+| **GET**    | `/v1/forecast`           | List the forecasters of a connector with their version, metrics and creation time. **NOTE: This endpoint will be removed once multi-connector support is added.**                                                                                          |
+| **GET**    | `/v1/forecast/{connector_id}`           | List the forecasters of a connector with their version, metrics and creation time.                                                                                          |
+| **POST**   | `/v1/forecast`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest forecaster (or the version specified in `?version=`), and returned with predictions and confidence.**NOTE: This endpoint will be removed once multi-connector support is added.** |
+| **POST**   | `/v1/forecast/{connector_id}`           | Run a forecast. The rows are validated, sent to Triton for the connector's newest forecaster (or the version specified in `?version=`), and returned with predictions and confidence. |
 | **POST**   | `/v1/connectors`                        | Create a connector (source database connection, secrets encrypted) and queue its training job.                                                                 |
 | **GET**    | `/v1/connectors`                        | List connectors with pagination and a name filter.                                                                                                             |
 | **GET**    | `/v1/connectors/{connector_id}`         | Get a connector. Secrets are never returned.                                                                                                                   |
@@ -246,74 +246,74 @@ The forecast endpoints are keyed by `connector_id`, because each connector is tr
 
 #### GET /v1/forecast/ — List the Forecasters of the default Connector
 
-Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
+**NOTE: This endpoint will be removed once multiple connector support is added.**
 
-| Field in each `data` item | Description                                                                                                                       |
-|:--------------------------|:----------------------------------------------------------------------------------------------------------------------------------|
-| `version`                 | The version number (the `jobs.seq` of the training job).                                                                          |
-| `status`                  | `ready` (loaded and served) or `retiring` (being unloaded).                                                                       |
-| `metrics`                 | The validation metric name and score, and the training time in seconds.                                                           |
-| `created_at`              | UTC timestamp at which the forecaster was loaded.                                                                                 |
-| `message`              | Message from data item (if present).                                                                                 |
+Returns every forecaster of the default connector, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT`. A connector with no forecasters returns an empty list `[]`.
+
+| Field in each item | Type | Description |
+|:---|:---|:---|
+| `version` | integer | The version number (the `jobs.seq` of the training job). |
+| `metrics` | object (nullable) | The validation metric name and score, and the training time in seconds. |
+| `created_at` | string (ISO 8601 UTC) | UTC timestamp at which the forecaster was loaded. |
 
 **Sample response (200):**
 
 ```json
 [
-      {
-          "version": 12,
-          "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
-          "created_at": "2026-10-26T09:12:00Z",
-      },
-      {
-          "version": 11,
-          "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
-          "created_at": "2026-10-25T09:12:00Z",
-      },
-      {
-          "version": 10,
-          "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
-          "created_at": "2026-10-24T09:12:00Z",
-      }
+    {
+        "version": 12,
+        "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
+        "created_at": "2026-10-26T09:12:00Z"
+    },
+    {
+        "version": 11,
+        "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+        "created_at": "2026-10-25T09:12:00Z"
+    },
+    {
+        "version": 10,
+        "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+        "created_at": "2026-10-24T09:12:00Z"
+    }
 ]
 ```
 
 | Status                               | Description                |
 |:-------------------------------------|:---------------------------|
 | 200 OK                               | The list, possibly empty.  |
-| 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
+| 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector found.        |
+| 429 Too Many Requests (`SERVER_BUSY`)| Database connection pool is busy. |
 | 500 Internal Server Error            | Database failure.          |
+
 #### GET /v1/forecast/{connector_id} — List the Forecasters of a Connector
 
-Returns every forecaster of the connector that is not yet `deleted`, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT` plus any forecaster that is `retiring`, so it is not paginated. A connector with no forecaster yet returns an empty `data` array.
+Returns every forecaster of the connector, newest version first. The list is bounded by `FORECASTER_RETENTION_COUNT`. A connector with no forecasters returns an empty list `[]`.
 
-| Field in each `data` item | Description                                                                                                                       |
-|:--------------------------|:----------------------------------------------------------------------------------------------------------------------------------|
-| `version`                 | The version number (the `jobs.seq` of the training job).                                                                          |
-| `status`                  | `ready` (loaded and served) or `retiring` (being unloaded).                                                                       |
-| `metrics`                 | The validation metric name and score, and the training time in seconds.                                                           |
-| `created_at`              | UTC timestamp at which the forecaster was loaded.                                                                                 |
-| `message`              | Message from data item (if present).                                                                                 |
+| Field in each item | Type | Description |
+|:---|:---|:---|
+| `version` | integer | The version number (the `jobs.seq` of the training job). |
+| `metrics` | object (nullable) | The validation metric name and score, and the training time in seconds. |
+| `created_at` | string (ISO 8601 UTC) | UTC timestamp at which the forecaster was loaded. |
 
 **Sample response (200):**
 
 ```json
 [
-      {
-          "version": 12,
-          "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
-          "created_at": "2026-10-26T09:12:00Z",
-      },
-      {
-          "version": 11,
-          "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
-          "created_at": "2026-10-25T09:12:00Z",
-      },
-      {
-          "version": 10,
-          "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
-          "created_at": "2026-10-24T09:12:00Z",
-      }
+    {
+        "version": 12,
+        "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
+        "created_at": "2026-10-26T09:12:00Z"
+    },
+    {
+        "version": 11,
+        "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+        "created_at": "2026-10-25T09:12:00Z"
+    },
+    {
+        "version": 10,
+        "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+        "created_at": "2026-10-24T09:12:00Z"
+    }
 ]
 ```
 
@@ -321,21 +321,22 @@ Returns every forecaster of the connector that is not yet `deleted`, newest vers
 |:-------------------------------------|:---------------------------|
 | 200 OK                               | The list, possibly empty.  |
 | 404 Not Found (`RESOURCE_NOT_FOUND`) | No connector with this ID. |
+| 429 Too Many Requests (`SERVER_BUSY`)| Database connection pool is busy. |
 | 500 Internal Server Error            | Database failure.          |
 
 #### POST /v1/forecast/ — Run a Forecast on the default connector
 **NOTE: This endpoint will be removed once multiple connector support is added.**
-Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest `ready` forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
+Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
 **Query Parameters:**
 
 | Parameter | Type    | Required | Description                                                                                                                                           |
 |:----------|:--------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `version` | integer | No       | Specific retained forecaster version (`jobs.seq`) to run inference against. If omitted, defaults to the newest `ready` forecaster for the connector. |
+| `version` | integer | No       | Specific retained forecaster version (`jobs.seq`) to run inference against. If omitted, defaults to the newest forecaster for the connector. |
 
 **Content-Type:** `application/json`
 
-**Sample request (newest ready version by default):**
+**Sample request (newest version by default):**
 
 ```bash
 curl -X POST http://localhost:8500/v1/forecast \
@@ -374,32 +375,31 @@ curl -X POST "http://localhost:8500/v1/forecast?version=11" \
 | Status                                         | Description                                                                                                                                           |
 |:-----------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 200 OK                                         | One result per row.                                                                                                                                   |
-| 400 Bad Request (`INVALID_REQUEST`)            | A row has a missing/unknown column or wrong type, or `version` query parameter is not a positive integer.                      |
-| 404 Not Found (`RESOURCE_NOT_FOUND`)           | No connector with this ID, the connector has no `ready` forecaster yet, or the specified `version` does not exist or is not `ready` (e.g. `retiring`). |
-| 422 Unprocessable Entity                       | The body is not valid JSON or `instances` is not an array.                                                                                            |
+| 400 Bad Request (`INVALID_REQUEST`)            | An empty row list is provided, a row has a missing/unknown column or invalid value, or `version` query parameter is not a positive integer. |
+| 404 Not Found (`RESOURCE_NOT_FOUND`)           | No default connector found, the connector has no forecaster yet, or the specified `version` does not exist. |
+| 422 Unprocessable Entity                       | The body is not valid JSON or not an array of row objects.                                                                                            |
+| 429 Too Many Requests (`SERVER_BUSY`)          | Database connection pool is busy.                                                                                                                     |
 | 500 Internal Server Error                      | Database failure, or Triton returned an error for the request.                                     |
 | 503 Service Unavailable (`TRITON_UNAVAILABLE`) | Triton cannot be reached. A new error code: the shared `ErrorCode` enum has none for Triton.       |
 
 
 #### POST /v1/forecast/{connector_id} — Run a Forecast on a Connector
 
-Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest `ready` forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
+Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
 **Query Parameters:**
 
 | Parameter | Type    | Required | Description                                                                                                                                           |
 |:----------|:--------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `version` | integer | No       | Specific retained forecaster version (`jobs.seq`) to run inference against. If omitted, defaults to the newest `ready` forecaster for the connector. |
+| `version` | integer | No       | Specific retained forecaster version (`jobs.seq`) to run inference against. If omitted, defaults to the newest forecaster for the connector. |
 
 **Content-Type:** `application/json`
 
 **Request Body:**
 
-| Field       | Type  | Required | Description                                                                                                         |
-|:------------|:------|:---------|:--------------------------------------------------------------------------------------------------------------------|
-| `instances` | array | Yes      | One or more rows. Each row is an object that has a value for every input column of the connector and no other keys. |
+A JSON array of one or more row objects. Each row is an object that has a value for every input column of the connector and no other keys.
 
-**Sample request (newest ready version by default):**
+**Sample request (newest version by default):**
 
 ```bash
 curl -X POST http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f90ae7 \
@@ -438,9 +438,10 @@ curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f9
 | Status                                         | Description                                                                                                                                           |
 |:-----------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 200 OK                                         | One result per row.                                                                                                                                   |
-| 400 Bad Request (`INVALID_REQUEST`)            | A row has a missing/unknown column or wrong type, or `version` query parameter is not a positive integer.                      |
-| 404 Not Found (`RESOURCE_NOT_FOUND`)           | No connector with this ID, the connector has no `ready` forecaster yet, or the specified `version` does not exist or is not `ready` (e.g. `retiring`). |
-| 422 Unprocessable Entity                       | The body is not valid JSON or `instances` is not an array.                                                                                            |
+| 400 Bad Request (`INVALID_REQUEST`)            | An empty row list is provided, a row has a missing/unknown column or invalid value, or `version` query parameter is not a positive integer. |
+| 404 Not Found (`RESOURCE_NOT_FOUND`)           | No connector with this ID, the connector has no forecaster yet, or the specified `version` does not exist. |
+| 422 Unprocessable Entity                       | The body is not valid JSON or not an array of row objects.                                                                                            |
+| 429 Too Many Requests (`SERVER_BUSY`)          | Database connection pool is busy.                                                                                                                     |
 | 500 Internal Server Error                      | Database failure, or Triton returned an error for the request.                                     |
 | 503 Service Unavailable (`TRITON_UNAVAILABLE`) | Triton cannot be reached. A new error code: the shared `ErrorCode` enum has none for Triton.       |
 
@@ -464,7 +465,7 @@ A connector stores the connection details of one source database, with its secre
 
 | Field                | Type   | Required | Description                                                                            |
 |:---------------------|:-------|:---------|:---------------------------------------------------------------------------------------|
-| `id`                 | string | No       | A UUID chosen by the client (for example a catalog). Generated when omitted.           |
+| `id`                 | string | Yes      | Unique connector identifier (UUID).                                                    |
 | `name`               | string | Yes      | Unique, human-readable name, 1–255 characters.                                         |
 | `type`               | string | Yes      | A supported connector type (`db2_for_i`).                                              |
 | `connection_details` | object | Yes      | Fields for the type, as in the connector types table. Unknown fields are rejected.     |
@@ -473,12 +474,11 @@ A connector stores the connection details of one source database, with its secre
 
 **`training` object:**
 
-| Field               | Type   | Required | Description                                                                                                                                                                   |
-|:--------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `table`             | string | Yes      | Table to train on.                                                                                                                                                            |
-| `target_column`     | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
+| Field             | Type   | Required | Description                                                                                                                                                                   |
+|:------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `table`           | string | Yes      | Table to train on.                                                                                                                                                            |
+| `target_column`   | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
 | `input_columns`   | array  | Yes      | The input columns. Each is an object with a `name` and, where AutoGluon needs it, a `type` (`string`, `integer` or `number`). The forecast endpoint checks rows against them. |
-| `validation_metric` | string | No       | The metric AutoGluon validates on. Omitted means AutoGluon's default for the target.                                                                                          |
 
 **Sample request:**
 
@@ -486,7 +486,7 @@ A connector stores the connection details of one source database, with its secre
 curl -X POST http://localhost:8500/v1/connectors \
   -H "Content-Type: application/json" \
   -d '{
-        "id": "c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
         "name": "prod-sales-db",
         "type": "db2_for_i",
         "schedule": "daily",
@@ -513,7 +513,7 @@ curl -X POST http://localhost:8500/v1/connectors \
 
 ```json
 {
-    "id": "c9e6679-7425-40de-944b-e07fc1f90ae7"
+    "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
 }
 ```
 
@@ -549,7 +549,7 @@ The list limits (50 default, 200 maximum) match digitize's connector list. The r
             "type": "db2_for_i",
             "created_at": "2026-10-26T08:55:00Z",
             "last_trained_at": "2026-10-26T08:55:00Z",
-            "status": "training",
+            "status": "TRAINING",
             "table": "prod-sales-db",
             "target_column": "price",
             "message": ""
@@ -565,13 +565,13 @@ Returns the list item plus `connection_details` limited to the safe fields and `
 ```json
 {
     "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-    "table": "prod-sales-db",
+    "name": "prod-sales-db",
     "type": "db2_for_i",
-    "target_column": "price",
     "table": "customers",
-    "schedule": "0 0 * * *",
+    "target_column": "price",
+    "schedule": "daily",
     "connection_details": {"host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro"},
-    "status": "training",
+    "status": "TRAINING",
     "last_trained_at": "2026-10-26T08:55:00Z",
     "message": "Training on {n} rows",
     "created_at": "2026-10-26T08:55:00Z",
@@ -588,24 +588,33 @@ Returns the list item plus `connection_details` limited to the safe fields and `
 | `versions.ready`                 | Versions that are loaded in Triton and served.      |
 | `training.jobs_completed`        | Completed runs among the connector's retained runs. |
 | `training.jobs_failed`           | Failed runs among the connector's retained runs.    |
-| `training.last_job_status`       | `queued`, `running`, `completed` or `failed`.       |
+| `training.last_job_status`       | `QUEUED`, `RUNNING`, `COMPLETED` or `FAILED`.       |
 | `training.last_duration_seconds` | Training time of the last finished job.             |
 | `training.last_completed_at`     | UTC timestamp at which the last job completed.      |
+| `jobs`                           | The retained runs, newest first, with `seq`, `status`, timestamps, `message` and `result`. |
 
 ```json
 {
     "connector_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-    "last_n_jobs"": [{
-        "started_at": "2026-10-26T09:12:00Z",
-        "finished_at": "2026-10-26T09:12:00Z",
-        "status": "completed",
-        "total_rows": 120000
-        "message": ""
-  }, ...],
-    "overall_job_stats": {
-        "total_jobs_completed": 5,
-        "total_jobs_failed": 1,
-    }
+    "versions": {"ready": [12, 11]},
+    "training": {
+        "jobs_completed": 5,
+        "jobs_failed": 1,
+        "last_job_status": "COMPLETED",
+        "last_duration_seconds": 412,
+        "last_completed_at": "2026-10-26T09:12:00Z"
+    },
+    "jobs": [
+        {
+            "seq": 12,
+            "status": "COMPLETED",
+            "created_at": "2026-10-26T09:00:00Z",
+            "started_at": "2026-10-26T09:05:00Z",
+            "finished_at": "2026-10-26T09:12:00Z",
+            "message": "",
+            "result": {"rows_read": 120000, "algorithm": "LightGBM", "training_seconds": 412, "attempts": 1}
+        }
+    ]
 }
 ```
 
@@ -696,12 +705,12 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 
 **Constraints.**
 
-- `idx_jobs_single_running`: a unique partial index that allows at most one `running` job.
-- `forecasters.name` is unique.
-- A CHECK constraint on `jobs` requires a `queued` or `running` job to keep its `connector_id`.
+- `idx_jobs_single_running`: a unique partial index that allows at most one `RUNNING` job.
+- `forecasters` primary key `(connector_id, version)` guarantees uniqueness per connector.
+- A CHECK constraint on `jobs` requires a `QUEUED` or `RUNNING` job to keep its `connector_id`.
 - `forecasters.job_id` is `ON DELETE SET NULL`, so deleting an old job does not delete its forecaster.
 
-**Run history.** The `jobs` table is also the run history. Each finished job keeps its `status`, `error`, timestamps (the time taken is `finished_at - started_at`) and `result` (algorithm, validation metric and score, training time, rows read, attempts). After each run finishes, the API keeps the newest `FORECASTER_RETENTION_COUNT` finished jobs (`completed` or `failed`) of that `connector_id` and deletes the older ones. `queued` and `running` jobs are never deleted. The details a forecaster needs to be served live in its own `metrics`, so they survive the deletion of its job.
+**Run history.** The `jobs` table is also the run history. Each finished job keeps its `status`, `message`, timestamps (the time taken is `finished_at - started_at`) and `result` (algorithm, validation metric and score, training time, rows read, attempts). After each run finishes, the API keeps the newest `FORECASTER_RETENTION_COUNT` finished jobs (`COMPLETED` or `FAILED`) of that `connector_id` and deletes the older ones. `QUEUED` and `RUNNING` jobs are never deleted. The details a forecaster needs to be served live in its own `metrics`, so they survive the deletion of its job.
 
 ## 8. Data Loader
 
@@ -752,13 +761,13 @@ sequenceDiagram
     participant T as Triton
 
     C->>A: POST /v1/connectors (connection + training details)
-    A->>DB: insert connector, training config and job (queued, seq assigned)
+    A->>DB: insert connector, training config and job (QUEUED, seq assigned)
     A->>P: add one-off job (fires now), and a cron job if schedule is set
     A-->>C: 201 connector id
 
     P->>A: fire job (connector_id)
     Note over A: wait for the in-process lock, one training at a time
-    A->>DB: job status = running
+    A->>DB: job status = RUNNING
     A->>L: spawn loader (own process group, time limit)
     L->>DB: read training config and connector row, decrypt its secrets
     L->>S: read-only query with the connector's details, stream rows
@@ -774,17 +783,17 @@ sequenceDiagram
         A->>V: copy the model directory to .staging/{job_id}, rename to fc_{connector_id}_{version}
         A->>T: load_model fc_{connector_id}_{version}
         T-->>A: ready
-        A->>DB: insert forecasters row (ready), job status = completed
+        A->>DB: insert forecasters row, job status = COMPLETED
     else worker fails, is killed or times out
         L-->>A: or the loader exits non-zero
         W-->>A: non-zero exit, or killed with its process group
         Note over A: run the attempt (loader, then worker) again after TRAINING_RETRY_DELAY_SECONDS, up to TRAINING_MAX_ATTEMPTS attempts, unless the exit code says the failure would repeat
         A->>A: delete the scratch directory of the attempt
-        A->>DB: job status = failed
+        A->>DB: job status = FAILED
     end
 
     U->>A: POST /v1/forecast/{connector_id}?version={version} (version is optional)
-    A->>DB: resolve target ready forecaster (newest or requested version), read input columns
+    A->>DB: resolve target forecaster (newest or requested version), read input columns
     A->>A: validate rows against the input columns
     A->>T: forward forecast request to fc_{connector_id}_{version}
     T-->>A: outputs (prediction, class probabilities)
@@ -793,7 +802,7 @@ sequenceDiagram
 
 ### 9.2 Sequence — scheduled training and retention (model unload)
 
-A client never asks for an unload. The API unloads and deletes the oldest forecaster of a connector when retention requires it. The API calls Triton's model-control API, and the client only calls the forecast API.
+A client never asks for an unload. The API deletes the row of the oldest forecaster of a connector when retention requires it, so no request selects it any more, and then unloads it and deletes its directory. The API calls Triton's model-control API, and the client only calls the forecast API.
 
 ```mermaid
 sequenceDiagram
@@ -806,22 +815,21 @@ sequenceDiagram
 
     Note over P: cron job of a connector is due
     P->>A: fire job (connector_id)
-    A->>DB: does the connector have a queued or running job?
+    A->>DB: does the connector have a QUEUED or RUNNING job?
 
-    alt a job is queued or running
+    alt a job is QUEUED or RUNNING
         A->>A: skip the run, log the reason
     else no active job
-        A->>DB: insert job (queued, seq assigned)
+        A->>DB: insert job (QUEUED, seq assigned)
         Note over A,V: same steps as the first training: wait for the lock, run the loader and the worker, publish to the volume, load_model
         A->>DB: insert forecasters row (ready)
 
-        A->>DB: count the connector's ready forecasters
+        A->>DB: count the connector's forecasters
         opt more than FORECASTER_RETENTION_COUNT
-            A->>DB: oldest ready forecaster of that connector: status = retiring
+            A->>DB: delete the row of the oldest forecaster of that connector
             A->>T: unload_model fc_{connector_id}_{oldest version}
             T-->>A: unloaded
             A->>V: delete the oldest forecaster dir
-            A->>DB: forecaster status = deleted
         end
     end
 
@@ -1027,12 +1035,12 @@ spec:
 └── fc_<connector_id>_<version+1>/ ...
 ```
 
-**One Triton model per forecaster version.** The Triton model name is `fc_<connector_id>_<version>` (`forecasters.name`, where `version` is `jobs.seq`), and its single Triton model version directory is always `1`. This follows from how Triton works and from Section 2.2:
+**One Triton model per forecaster version.** The Triton model name is `fc_<connector_id>_<version>` (where `version` is `jobs.seq`), and its single Triton model version directory is always `1`. This follows from how Triton works and from Section 2.2:
 
 - Triton's unload call acts on a **whole model with all its versions**. There is no call to unload one version of a model.
 - The service keeps several versions per connector and retires the oldest while the newest keeps serving.
 - Making each forecaster version its own Triton model turns "load a forecaster", "unload a forecaster" and "delete its directory" into three operations on one directory, with no effect on the other versions.
-- It also makes a version switch safe: the new version is loaded and `ready` **before** the old one is unloaded, so there is no gap.
+- It also makes a version switch safe: the new version is loaded and recorded **before** the old one is retired, so there is no gap.
 
 The forecaster name format `fc_<connector_id>_<version>` (Section 2.4, Section 7) is safe both as a filesystem directory name and as a Triton model identifier.
 
@@ -1061,9 +1069,9 @@ This is the Triton-facing half of Sections 9.1 and 9.2. Triton is addressed over
 
 | Step | Triton call | Notes |
 |:--|:--|:--|
-| Load a new forecaster | `POST /v2/repository/models/<model>/load` | `<model>` is `fc_<connector_id>_<version>`. The API calls this once the worker finishes. Returns when the model has loaded or failed. The API checks `POST /v2/repository/index` for the model's `state` and `reason`. The row is inserted as `ready` only when the state is `READY`. |
-| Run a forecast | `POST /v2/models/<model>/infer` | `<model>` is `fc_<connector_id>_<version>` of the connector's newest `ready` forecaster (or the requested `?version=`). |
-| Unload a retiring forecaster | `POST /v2/repository/models/<model>/unload` | The API unloads the model, waits for `UNAVAILABLE` in the repository index before deleting the directory, and marks the row `deleted`. |
+| Load a new forecaster | `POST /v2/repository/models/<model>/load` | `<model>` is `fc_<connector_id>_<version>`. The API calls this once the worker finishes. Returns when the model has loaded or failed. The API checks `POST /v2/repository/index` for the model's `state` and `reason`. The row is inserted only when the state is `READY`. |
+| Run a forecast | `POST /v2/models/<model>/infer` | `<model>` is `fc_<connector_id>_<version>` of the connector's newest forecaster (or the requested `?version=`). |
+| Unload a retired forecaster | `POST /v2/repository/models/<model>/unload` | The API deletes the row first, then unloads the model, and waits for `UNAVAILABLE` in the repository index before deleting the directory. |
 | Readiness of the server | `GET /v2/health/ready` | Used by `GET /health` (Section 6.3) and boot reconciliation. |
 | State of all models | `POST /v2/repository/index` | Used for load and unload checks and for boot reconciliation. |
 
@@ -1071,14 +1079,13 @@ This is the Triton-facing half of Sections 9.1 and 9.2. Triton is addressed over
 
 1. Wait for `GET /v2/health/ready`, for up to `TRITON_STARTUP_WAIT_S`, with backoff. The Forecast API still starts, answers `/health` and accepts connectors while Triton is down (Section 6.3).
 2. Read `/v2/repository/index` to check currently loaded models in Triton.
-3. For every `ready` row in `forecasters` whose model is not `READY` in Triton, call `POST /v2/repository/models/fc_<connector_id>_<version>/load`.
-4. For every `retiring` row in `forecasters`, call `POST /v2/repository/models/fc_<connector_id>_<version>/unload`, wait for `UNAVAILABLE`, delete the directory, and mark the row `deleted`.
+3. For every row in `forecasters` whose model is not `READY` in Triton, call `POST /v2/repository/models/fc_<connector_id>_<version>/load`.
 
 During the gap between a Triton restart and step 3, a forecast request returns `503 TRITON_UNAVAILABLE`.
 
 **Boot cleanup (API only).** At startup the API removes `.staging/*` (leftovers of an interrupted publish) and any `fc_*` directory on the volume that has no corresponding `ready` or `retiring` row in PostgreSQL. This extends the existing boot-time recovery scan; the worker still never deletes.
 
-**Load failure.** If Triton returns an error on model load, the directory that the API published is deleted, the job is marked `failed`, and no `ready` row is written to `forecasters`. The load is not retried (Section 2.6).
+**Load failure.** If Triton returns an error on model load, the directory that the API published is deleted, the job is marked `FAILED`, and no `ready` row is written to `forecasters`. The load is not retried (Section 2.6).
 
 **`config.pbtxt`.** The worker writes it next to `model.onnx`. It is generated, never hand-edited. Its tensor definitions come from the ONNX export, which is outside this document; the service-owned parts are fixed:
 
@@ -1173,8 +1180,8 @@ These stories break the design above into units of work. Each one has a descript
 
 - ONNX conversion and Triton on Power already work (see the scope notes). No story covers them. The stories cover the service around them.
 - **One connector is attached at a time.** The service enforces it: `POST /v1/connectors` returns `409` while a connector exists.
-- **One training runs at a time, with no lock and no queue.** If the connector already has a `queued` or `running` job, a new run is skipped and logged. The unique `running` index is the database backstop.
-- **Boot recovery marks `queued` and `running` jobs `failed`.**
+- **One training runs at a time, with no lock and no queue.** If the connector already has a `QUEUED` or `RUNNING` job, a new run is skipped and logged. The unique `RUNNING` index is the database backstop.
+- **Boot recovery marks `QUEUED` and `RUNNING` jobs `FAILED`.**
 
 | #  | Story                                    | Depends on |
 |:---|:-----------------------------------------|:-----------|
@@ -1215,7 +1222,7 @@ These stories break the design above into units of work. Each one has a descript
 **Acceptance criteria.**
 
 - The init container creates `connectors`, `training_configs`, `jobs` and `forecasters` with the columns in the Database Tables section, and runs again without error.
-- The constraints exist: the unique partial index `idx_jobs_single_running`, the unique `forecasters.name`, the CHECK constraint that keeps `connector_id` on a `queued` or `running` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
+- The constraints exist: the unique partial index `idx_jobs_single_running`, the primary key `(connector_id, version)` on `forecasters`, the CHECK constraint that keeps `connector_id` on a `QUEUED` or `RUNNING` job, and `forecasters.job_id` as `ON DELETE SET NULL`.
 - `jobs.seq` is an identity column.
 - The `scheduler` schema exists for the APScheduler job store.
 - The restricted `forecast_worker` role has column-level grants: it can read the training configuration and the job's identity but not the connector, and can write the job's `result` and `message`. It has no write grant on `forecasters`.
@@ -1239,7 +1246,7 @@ These stories break the design above into units of work. Each one has a descript
 **Subtasks.**
 
 - Connector type `db2_for_i` with required, optional, safe and encrypted fields; AES-256-GCM encryption with `DB_ENCRYPTION_KEY`.
-- `POST /v1/connectors`: validate the body, store the connector and its `training_configs` row, insert a `queued` job, register the APScheduler jobs (Story 7) and return `201` with the id.
+- `POST /v1/connectors`: validate the body, store the connector and its `training_configs` row, insert a `QUEUED` job, register the APScheduler jobs (Story 7) and return `201` with the id.
 - `GET /v1/connectors` with `limit`, `offset` and the `name` filter.
 - `GET /v1/connectors/{connector_id}`.
 - `PUT /v1/connectors/{connector_id}` with a partial merge of `connection_details`.
@@ -1250,7 +1257,7 @@ These stories break the design above into units of work. Each one has a descript
 - A secret field is never returned, and a field that is not on the allowlist is encrypted.
 - `POST` returns `409` when the `id` or `name` already exists, and `409` when another connector already exists. In both cases nothing is stored: no job and no schedule.
 - `POST` returns `422` for an unknown type, an `id` that is not a UUID, or a missing or unknown field in `connection_details` or `training`.
-- The list and get responses return `status` and `message` from the `connectors` row and, on get, `last_trained_at` from the `jobs` table.
+- The list and get responses return `status`, `message`, and `last_trained_at` from the `connectors` row.
 - `PUT` rejects `type` and `training` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
 - Cleanup of the schedule and the forecasters of a deleted connector is not part of this story.
 
@@ -1305,13 +1312,13 @@ These stories break the design above into units of work. Each one has a descript
 
 **Acceptance criteria.**
 
-- The one-off job fires at once, uses the `queued` row that `POST` inserted, sets it `running` with `started_at`, runs the loader and then spawns the worker.
-- A run is skipped, and the reason is logged, when the connector already has a `queued` or `running` job.
-- On exit `0` of the worker, the job function publishes the directory, hands the result to Story 10 and then sets the job `completed` with `finished_at`.
+- The one-off job fires at once, uses the `QUEUED` row that `POST` inserted, sets it `RUNNING` with `started_at`, runs the loader and then spawns the worker.
+- A run is skipped, and the reason is logged, when the connector already has a `QUEUED` or `RUNNING` job.
+- On exit `0` of the worker, the job function publishes the directory, hands the result to Story 10 and then sets the job `COMPLETED` with `finished_at`.
 - On any other non-zero exit of the loader or the worker, a kill or a timeout, the attempt is run again after `TRAINING_RETRY_DELAY_SECONDS`, up to `TRAINING_MAX_ATTEMPTS` attempts in total. The permanent-failure exit code is not retried. The process group is killed on a timeout.
 - The scratch directory of the attempt (the data file and the model directory) is deleted before each new attempt and after the last one.
-- After the last failed attempt the job is `failed`, `message` holds the last error, and the number of attempts is added to `result`.
-- An unexpected exception in the job function also marks the job `failed`, so a `running` row never blocks later trainings.
+- After the last failed attempt the job is `FAILED`, `message` holds the last error, and the number of attempts is added to `result`.
+- An unexpected exception in the job function also marks the job `FAILED`, so a `RUNNING` row never blocks later trainings.
 - Database and Triton calls do not block the event loop.
 
 ### 14.8 Story 8 — Scheduled training and boot recovery
@@ -1327,11 +1334,11 @@ These stories break the design above into units of work. Each one has a descript
 
 **Acceptance criteria.**
 
-- When schedule is set, a connector has a cron job that inserts its own `queued` job and runs it as in Story 7. When it is unset, only the first training runs.
+- When schedule is set, a connector has a cron job that inserts its own `QUEUED` job and runs it as in Story 7. When it is unset, only the first training runs.
 - The jobs use a short misfire grace time. A run missed while the API was down is skipped and logged with the reason.
 - At startup, the API registers a cron job only for a connector that has none. Existing jobs keep their stored next run time.
-- Boot recovery marks every `queued` and `running` job `failed`, removes `.staging/*` and any `fc_*` directory with no `ready` or `retiring` row, and finishes before the scheduler starts.
-- After each run finishes, the newest `FORECASTER_RETENTION_COUNT` finished jobs of the connector are kept and the older ones are deleted. `queued` and `running` jobs are never deleted.
+- Boot recovery marks every `QUEUED` and `RUNNING` job `FAILED`, removes `.staging/*` and any `fc_*` directory with no `forecasters` row, and finishes before the scheduler starts.
+- After each run finishes, the newest `FORECASTER_RETENTION_COUNT` finished jobs of the connector are kept and the older ones are deleted. `QUEUED` and `RUNNING` jobs are never deleted.
 
 ### 14.9 Story 9 — Triton component and deployment
 
@@ -1367,10 +1374,10 @@ These stories break the design above into units of work. Each one has a descript
 
 **Acceptance criteria.**
 
-- After a successful worker run, the API calls `load` for `fc_<connector_id>_<version>`, reads the repository index, and inserts the `forecasters` row as `ready` only when the state is `READY`.
-- When the load fails, the job is `failed`, no `ready` row is written, and the published directory is removed. The load is not retried.
-- After each load, when the connector has more than `FORECASTER_RETENTION_COUNT` `ready` forecasters, the oldest is retired in this order: row `retiring`, `unload`, wait for `UNAVAILABLE`, delete the directory, row `deleted`. Rows are kept.
-- At boot, the API waits for Triton to be ready for up to `TRITON_STARTUP_WAIT_S`, reads the repository index, loads every `ready` forecaster that is not `READY`, and finishes every `retiring` forecaster. The API starts and answers `/health` while Triton is down.
+- After a successful worker run, the API calls `load` for `fc_<connector_id>_<version>`, reads the repository index, and inserts the `forecasters` row only when the state is `READY`.
+- When the load fails, the job is `FAILED`, no `forecasters` row is written, and the published directory is removed. The load is not retried.
+- After each load, when the connector has more than `FORECASTER_RETENTION_COUNT` forecasters, the oldest is retired in this order: delete its row, `unload`, wait for `UNAVAILABLE`, delete the directory.
+- At boot, the API waits for Triton to be ready for up to `TRITON_STARTUP_WAIT_S`, reads the repository index, loads every forecaster that is not `READY`, and removes every `fc_*` directory that has no row. The API starts and answers `/health` while Triton is down.
 - Calls use `TRITON_LOAD_TIMEOUT_S` and `TRITON_INFER_TIMEOUT_S`.
 - Only the API process talks to Triton.
 
@@ -1380,8 +1387,8 @@ These stories break the design above into units of work. Each one has a descript
 
 **Acceptance criteria.**
 
-- `GET /v1/forecast/{connector_id}` lists the forecasters that are not `deleted`, newest first, with `version`, `status`, `metrics` and `created_at`. A connector with none returns an empty `data` array, and an unknown connector returns `404`.
-- `POST /v1/forecast/{connector_id}` validates `instances` against the connector's input columns, sends them to the newest `ready` forecaster by default (or to the specific version when `?version=` query parameter is supplied), and returns one prediction and a `confidence` per row, in order, with the `version` that answered.
-- It returns `400` for an empty `instances`, an invalid `version` query parameter, or a row with a missing or unknown input column or a value of the wrong type; `404` for an unknown connector, one with no `ready` forecaster, or when the specified `version` does not exist or is not in `ready` state; `422` for a body that is not valid; `500` for a database failure or a Triton error; and `503 TRITON_UNAVAILABLE` when Triton cannot be reached.
+- `GET /v1/forecast/{connector_id}` lists the forecasters of the connector, newest first, with `version`, `metrics` and `created_at`. A connector with none returns an empty array `[]`, and an unknown connector returns `404`.
+- `POST /v1/forecast/{connector_id}` validates the request rows against the connector's input columns, sends them to the newest forecaster by default (or to the specific version when `?version=` query parameter is supplied), and returns one prediction and a `confidence` per row, in order, with the `version` that answered.
+- It returns `400` for an empty rows array, an invalid `version` query parameter, or a row with a missing or unknown input column or an invalid value; `404` for an unknown connector, one with no forecaster, or when the specified `version` does not exist; `422` for a body that is not valid JSON or not an array; `500` for a database failure or a Triton error; and `503 TRITON_UNAVAILABLE` when Triton cannot be reached.
 
 ---

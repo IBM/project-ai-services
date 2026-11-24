@@ -18,8 +18,8 @@ import (
 // RootCmd represents the base command when called without any subcommands.
 var RootCmd = &cobra.Command{
 	Use:     "ai-services",
-	Short:   "AI Services CLI",
-	Long:    `A CLI tool for managing AI Services infrastructure.`,
+	Short:   "AI Launchpad CLI",
+	Long:    `A CLI tool for managing AI Launchpad infrastructure.`,
 	Version: version.GetVersion(),
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true

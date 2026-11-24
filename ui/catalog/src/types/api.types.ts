@@ -632,6 +632,21 @@ export interface ModelComponentType {
   short_name: string;
 }
 
+export interface CatalogModelProvider {
+  id: string;
+  name: string;
+  deployment_type: "local" | "remote";
+}
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  component_type: ModelComponentType;
+  certified_by: string;
+  description: string;
+  providers: CatalogModelProvider[];
+}
+
 export interface ModelDeployment {
   id: string;
   deployment_type: "local" | "remote";

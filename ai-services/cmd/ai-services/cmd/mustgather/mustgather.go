@@ -33,8 +33,8 @@ type gatherer interface {
 func MustGatherCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "must-gather",
-		Short: "Collect debugging information from an AI Services deployment",
-		Long: `Collects comprehensive debugging information from an AI Services deployment
+		Short: "Collect debugging information from an AI Launchpad deployment",
+		Long: `Collects comprehensive debugging information from an AI Launchpad deployment
 for support and troubleshooting purposes.
 
 Gathered data includes pod details, container logs, network and volume

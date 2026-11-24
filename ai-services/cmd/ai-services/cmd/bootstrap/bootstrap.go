@@ -25,7 +25,7 @@ func BootstrapCmd() *cobra.Command {
 	var skipChecks []string
 	bootstrapCmd := &cobra.Command{
 		Use:               "bootstrap",
-		Short:             "Initializes AI Services infrastructure",
+		Short:             "Initializes AI Launchpad infrastructure",
 		Long:              bootstrapDescription(),
 		Example:           bootstrapExample(),
 		Args:              cobra.NoArgs,
@@ -114,7 +114,7 @@ func bootstrapDescription() string {
 	podmanList, openshiftList := generateValidationList()
 
 	return fmt.Sprintf(`The bootstrap command configures and validates the environment needed
-to run AI Services, ensuring prerequisites are met and initial configuration is completed.
+to run AI Launchpad, ensuring prerequisites are met and initial configuration is completed.
 
 Available subcommands:
 
@@ -122,7 +122,7 @@ Configure - Configure performs below actions
 - For Podman:
  - Installs podman on host if not installed
  - Runs servicereport tool to configure required spyre cards
- - Initializes the AI Services infrastructure
+ - Initializes the AI Launchpad infrastructure
 
 - For OpenShift:
  - Applies required machine configs for Spyre operator
