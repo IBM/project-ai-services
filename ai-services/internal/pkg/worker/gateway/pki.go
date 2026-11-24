@@ -186,7 +186,7 @@ func writePKIFiles(pkiDir string, caKeyPEM, caCertDER, srvKeyPEM, srvCertDER []b
 func serverCertDNSNames(ctx context.Context, runtimeType types.RuntimeType) ([]string, error) {
 	switch runtimeType {
 	case types.RuntimeTypeOpenShift:
-		route, err := GatewayRouteHost(ctx)
+		route, err := catalogutils.GatewayRouteHost(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("resolve gateway route host for cert SAN: %w", err)
 		}

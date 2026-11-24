@@ -119,6 +119,14 @@ spec:
               value: "{{ .Values.backend.workerGatewayPort }}"
             - name: LOCAL_WORKER
               value: "{{ .Values.backend.localWorker }}"
+            # LiteLLM runs in its own deployment; the catalog backend registers model routes through it.
+            - name: LITELLM_ENDPOINT
+              value: "http://litellm:{{ .Values.litellm.port }}"
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: litellm-secret
+                  key: master-key
           ports:
             - containerPort: 8080
               protocol: TCP
