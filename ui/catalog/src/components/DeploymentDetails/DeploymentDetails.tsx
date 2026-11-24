@@ -32,6 +32,7 @@ import {
   SERVICE_ENDPOINTS,
   COMPONENT_TYPES,
   WORKER_RUNTIME_LABELS,
+  PAGE_TITLES,
 } from "@/constants";
 
 interface DeploymentDetailsProps {
@@ -75,6 +76,9 @@ const DeploymentDetails = ({
   >([]);
   const [certifiedBy, setCertifiedBy] = useState<string | null>(null);
   const [workerInfo, setWorkerInfo] = useState<ApplicationWorker | null>(null);
+  const [testAssistantUrl, setTestAssistantUrl] = useState<string | null>(null);
+  const isDigitalAssistant =
+    deploymentSource === PAGE_TITLES.DIGITAL_ASSISTANTS;
 
   useEffect(() => {
     const fetchResources = async () => {
@@ -287,6 +291,11 @@ const DeploymentDetails = ({
             };
           });
 
+        const chatUiEndpoint = deploymentServices
+          .find((s) => s.catalog_id === "chat")
+          ?.endpoints?.find((e) => e.type === "ui");
+        setTestAssistantUrl(chatUiEndpoint?.url || null);
+
         setServiceData(transformedServices);
         setIntegrationEndpoints(transformedEndpoints);
         setCertifiedBy(isDeploymentCertified ? "IBM" : null);
@@ -295,6 +304,7 @@ const DeploymentDetails = ({
         console.error("Error fetching service details:", error);
         setServiceData([]);
         setIntegrationEndpoints([]);
+        setTestAssistantUrl(null);
         setIntegrationFetchError(
           "Could not retrieve integration endpoints. Please try again.",
         );
@@ -318,6 +328,7 @@ const DeploymentDetails = ({
     });
     onNameUpdate?.(newName);
   };
+
   // navigator.clipboard is undefined on non-secure (plain HTTP) pages. Hide the copy button there, since CopyButton would still report "Copied to clipboard".
   const canCopyToClipboard = Boolean(navigator.clipboard);
   const handleCopyMcpEndpoint = async (url: string) => {
@@ -382,12 +393,31 @@ const DeploymentDetails = ({
             )}
           </>
         }
+        pageActions={
+          isDigitalAssistant && testAssistantUrl
+            ? [
+                {
+                  key: "test-assistant",
+                  kind: "tertiary",
+                  label: "Test assistant",
+                  onClick: () => {
+                    window.open(
+                      testAssistantUrl,
+                      "_blank",
+                      "noopener,noreferrer",
+                    );
+                  },
+                },
+              ]
+            : []
+        }
+        pageActionsOverflowLabel="More actions"
         navItems={[
           { key: "details", label: "Details" },
           { key: "services", label: "Services" },
           { key: "integration", label: "Integration endpoints" },
           ...(acceptsDatasource
-            ? [{ key: "datasources", label: "Data connectors" }]
+            ? [{ key: "datasources", label: "Data sources" }]
             : []),
         ]}
         activeKey={activeSection}
@@ -403,7 +433,7 @@ const DeploymentDetails = ({
                       {workerInfo.name && (
                         <div className={styles.workerInfoField}>
                           <span className={styles.workerInfoLabel}>
-                            Deployment location
+                            Worker resource
                           </span>
                           <span className={styles.workerInfoValue}>
                             {workerInfo.name}
