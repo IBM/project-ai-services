@@ -21,6 +21,12 @@
    - 6.1 [Credential Isolation & Zero-Leakage](#61-credential-isolation--zero-leakage)
    - 6.2 [Read-Only Query Safety & Timeouts](#62-read-only-query-safety--timeouts)
    - 6.3 [Standardized Error Codes](#63-standardized-error-codes)
+7. [Deploy Options: Declaring Datasource Data API Calls for Service Params](#7-deploy-options-declaring-datasource-data-api-calls-for-service-params)
+   - 7.1 [Approach](#71-approach)
+   - 7.2 [`x-datasource-data` Schema Extension](#72-x-datasource-data-schema-extension)
+   - 7.3 [Forecast Mapping](#73-forecast-mapping)
+   - 7.4 [UI Behaviour](#74-ui-behaviour)
+   - 7.5 [Backend Impact & Scope](#75-backend-impact--scope)
 
 ---
 
@@ -422,3 +428,122 @@ sequenceDiagram
 | `404 Not Found`            | Datasource ID does not exist or table not found.  | `{"error": "Datasource '7c9e6679-...' not found"}`                                          |
 | `422 Unprocessable Entity` | Connection or authentication failed to target DB. | `{"error": "Failed to connect to IBM i Db2: authentication failed for user 'forecast_ro'"}` |
 | `504 Gateway Timeout`      | Remote query exceeded 10-second timeout.          | `{"error": "Datasource query timed out after 10s"}`                                         |
+
+---
+
+## 7. Deploy Options: Declaring Datasource Data API Calls for Service Params
+
+Sections 2–5 define the Datasource Data API and show the UI calling it. This section defines how the Forecast **deploy options (service params)** tell the UI that certain params must be populated by calling that API, instead of the UI hard-coding the knowledge that `table` and `*_column` are datasource-driven.
+
+### 7.1 Approach
+
+The deploy-options response is the contract between the Catalog backend and the UI. For fields whose values come from another API, the response must carry the call to make (a URL template with placeholders) rather than leave the UI to infer it. Forecast's datasource-driven fields are **service params** defined in `values.schema.json`, so the call is declared on the param itself, and the service entry in `GET /api/v1/services/forecast/deploy-options` already points to that schema:
+
+| Aspect                                      | Forecast datasource data                                                                                                                                  |
+| :------------------------------------------ | :-------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Marker that a field is externally populated | `x-datasource-data` on the param property                                                                                                                 |
+| Where the URL is declared                   | `x-datasource-data.url` in the service's `values.schema.json`, served by `GET /api/v1/services/forecast/params`                                           |
+| Datasource picker signal                    | `accepts_datasource` on the service entry of deploy options                                                                                               |
+| Placeholders                                | `{datasource_id}` (datasource picked in the wizard) and `{table}` (sibling param chosen earlier)                                                          |
+| Submitted value                             | Ordinary `params.training.*` on the `services[]` entry of `POST /api/v1/applications` (no new request fields)                                             |
+
+### 7.2 `x-datasource-data` Schema Extension
+
+`x-datasource-data` is a JSON Schema extension keyword (ignored by standard validators) placed on a param property. It declares which Datasource Data API call supplies that param's options:
+
+| Key          | Type      | Required | Description                                                                                                                                                                              |
+| :----------- | :-------- | :------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`        | `string`  | **Yes**  | Relative Catalog API URL template for `GET /api/v1/datasources/{id}/data`. Placeholders: `{datasource_id}` and `{<name>}` for each key in `depends_on`.                                  |
+| `depends_on` | `object`  | Optional | Map of placeholder name → sibling param name in the same object. The UI must not call `url` until all dependencies have a value, and must clear and re-fetch the field when one changes. |
+| `item_key`   | `string`  | Optional | For array params whose items are objects (e.g. `input_columns[].name`): the item property that receives each selected value. Omit for scalar params.                                    |
+| `multiple`   | `boolean` | Optional | Render a multi-select instead of a single-select (used with array params).                                                                                                               |
+
+The UI reads the option list from the `data` array of the unified response envelope (see [2.4](#24-unified-response-envelope)).
+
+### 7.3 Forecast Mapping
+
+| Forecast param                  | Datasource Data API call                                                  | Depends on          |
+| :------------------------------ | :------------------------------------------------------------------------ | :------------------ |
+| `training.table`                | `GET /api/v1/datasources/{datasource_id}/data?type=tables`                | selected datasource |
+| `training.target_column`        | `GET /api/v1/datasources/{datasource_id}/data?type=columns&table={table}` | `training.table`    |
+| `training.input_columns[].name` | `GET /api/v1/datasources/{datasource_id}/data?type=columns&table={table}` | `training.table`    |
+
+Annotated `training` fragment of `ai-services/assets/services/forecast/podman/values.schema.json`:
+
+```json
+"training": {
+  "type": "object",
+  "required": ["table", "target_column", "input_columns"],
+  "properties": {
+    "table": {
+      "type": "string",
+      "title": "Database Table",
+      "x-datasource-data": {
+        "url": "/api/v1/datasources/{datasource_id}/data?type=tables"
+      }
+    },
+    "target_column": {
+      "type": "string",
+      "title": "Target Column (Label)",
+      "x-datasource-data": {
+        "url": "/api/v1/datasources/{datasource_id}/data?type=columns&table={table}",
+        "depends_on": { "table": "table" }
+      }
+    },
+    "input_columns": {
+      "type": "array",
+      "title": "Input Feature Columns",
+      "x-datasource-data": {
+        "url": "/api/v1/datasources/{datasource_id}/data?type=columns&table={table}",
+        "depends_on": { "table": "table" },
+        "item_key": "name",
+        "multiple": true
+      },
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "title": "Column Name" }
+        }
+      }
+    }
+  }
+}
+```
+
+The submitted payload is unchanged: chosen values go into `params.training` of the `services[]` entry in `POST /api/v1/applications`.
+
+### 7.4 UI Behaviour
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User (Deploy Wizard)
+    participant UI as Catalog UI
+    participant CatAPI as Catalog API Server
+
+    UI->>CatAPI: GET /api/v1/services/forecast/deploy-options
+    CatAPI-->>UI: { accepts_datasource: true, schema: "/api/v1/services/forecast/params?runtime=podman" }
+    UI->>CatAPI: GET /api/v1/services/forecast/params?runtime=podman
+    CatAPI-->>UI: values.schema.json (fields carry x-datasource-data)
+    User->>UI: Selects datasource {datasource_id}
+    UI->>CatAPI: GET /api/v1/datasources/{datasource_id}/data?type=tables
+    CatAPI-->>UI: 200 { type: "tables", data: [...] }
+    User->>UI: Selects table "ORDERS"
+    UI->>CatAPI: GET /api/v1/datasources/{datasource_id}/data?type=columns&table=ORDERS
+    CatAPI-->>UI: 200 { type: "columns", data: [...] }
+    User->>UI: Picks target + input columns, clicks Deploy
+    UI->>CatAPI: POST /api/v1/applications (params.training = { table, target_column, input_columns })
+```
+
+1. The datasource picker is shown because the service entry in deploy options has `accepts_datasource`. `{datasource_id}` is bound to the selection.
+2. For a param with `x-datasource-data`, the UI renders a dropdown (or multi-select when `multiple: true`) instead of a free-text input and fetches options from `url`.
+3. A param with `depends_on` stays disabled until its dependencies are set. Changing the datasource or the table clears and re-fetches dependent params.
+
+
+### 7.5 Backend Impact & Scope
+
+- **No backend code change to serve the hint.** `GetServiceParams` ([`deploy_options.go`](../../../ai-services/internal/pkg/catalog/deploy_options.go)) returns `values.schema.json` as an untyped `map[string]any`, so `x-datasource-data` is passed through to `GET /api/v1/services/:id/params` unchanged. The change is the schema asset plus UI support.
+- **Generic by design.** The keyword carries a URL template, not provider logic. Another datasource-aware service can annotate its own schema without any Forecast-specific branches in the UI or API.
+- **Only meaningful for providers that implement the Data API.** Forecast is restricted to `db2_for_i`, which supports `type=tables` and `type=columns`. Providers that return `400` (see [3.2](#32-unsupported-datasource-providers-object_storage-file_system)) cannot populate these params from the API.
+- **Security unchanged.** The browser only handles the opaque `datasource_id`; credentials are decrypted server-side as described in [6.1](#61-credential-isolation--zero-leakage).
