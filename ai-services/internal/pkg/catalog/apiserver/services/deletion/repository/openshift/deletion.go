@@ -67,8 +67,9 @@ func (s *OpenshiftDeletion) PerformDeletion(ctx context.Context, appID uuid.UUID
 	errorMessages = append(errorMessages, componentErr...)
 
 	// Uninstall Serving runtimes
-	servingRuntimeErr := openshiftutils.UninstallServingRuntimes(ctx, s.rt, s.helm)
-	errorMessages = append(errorMessages, servingRuntimeErr...)
+	if err := openshiftutils.UninstallServingRuntimes(ctx, s.rt, s.helm); err != nil {
+		errorMessages = append(errorMessages, err.Error())
+	}
 
 	// Delete namespace of the application
 	if !keepData && len(errorMessages) == 0 {

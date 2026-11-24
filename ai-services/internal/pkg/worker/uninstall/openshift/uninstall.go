@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -92,6 +93,12 @@ func PerformCleanup(ctx context.Context, rt runtime.Runtime, namespace string, s
 			s.Fail("failed to delete worker secret")
 
 			return fmt.Errorf("failed to delete secret %s: %w", workerconstants.WorkerMTLSSecretName, err)
+		}
+
+		if err := openshiftutils.CleanupModelsNamespace(ctx, rt); err != nil {
+			s.Fail("failed to clean up models pre-requisites")
+
+			return err
 		}
 	}
 

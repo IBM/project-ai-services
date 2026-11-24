@@ -208,8 +208,8 @@ func TestPlanLocal(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, []string{catalogutils.ModelNamespace(id)}, tt.workers.namespaces,
-				"the runtime is scoped to the namespace of the model")
+			assert.Equal(t, []string{catalogutils.ModelsNamespace()}, tt.workers.namespaces,
+				"the runtime is scoped to the models namespace")
 			assert.Equal(t, id, plan.ComponentID)
 			assert.Equal(t, tt.workers.rt, plan.Runtime)
 			assert.Equal(t, tt.wantWorker, plan.WorkerName, "the worker is kept so its private routes can be removed")

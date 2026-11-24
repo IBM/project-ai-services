@@ -11,7 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
 
-// PredictorPort is the port the model server listens on. It is the containerPort of the
+// PredictorPort is the port the model server listens on. It is the containerPort of the serving runtime container.
 const PredictorPort = "8000"
 
 // PredictorAddress returns the "host:port" of the predictor Service of the InferenceService

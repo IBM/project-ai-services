@@ -8,13 +8,13 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 )
 
 // OpenShiftDeployer deploys a local model on an OpenShift runtime, local or remote over the worker
-// stream, as a KServe InferenceService installed from the provider's Helm chart. It reuses the
-// helpers of the application deployment (Helm manager, chart install, prerequisites, readiness
-// wait), with one difference: every model gets a namespace of its own, so that it can be removed
-// without touching anything else.
+// stream, as a KServe InferenceService installed from the provider's Helm chart into the shared
+// models namespace. It reuses the helpers of the application deployment (Helm manager, chart install,
+// prerequisites, readiness wait).
 type OpenShiftDeployer struct{}
 
 // NewOpenShiftDeployer creates a new OpenShiftDeployer.
@@ -28,11 +28,11 @@ func (d *OpenShiftDeployer) Check(context.Context, *types.LocalPlan) error {
 	return nil
 }
 
-// Prepare installs the prerequisite charts (the KServe ServingRuntimes) into the model's
+// Prepare installs the prerequisite charts (the KServe ServingRuntimes) into the models
 // namespace. There is nothing to pull or download here: KServe pulls the image and fetches the
 // weights from the chart's storageUri when the predictor starts.
 func (d *OpenShiftDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) error {
-	helm := openshiftutils.NewHelmManager(plan.Runtime, catalogutils.ModelNamespace(plan.ComponentID))
+	helm := openshiftutils.NewHelmManager(plan.Runtime, catalogutils.ModelsNamespace())
 
 	return openshiftutils.DeployPrerequisites(ctx, helm)
 }
@@ -46,7 +46,7 @@ func (d *OpenShiftDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) 
 // types.Deployer).
 func (d *OpenShiftDeployer) Start(ctx context.Context, plan *types.LocalPlan) (types.ModelEndpoints, error) {
 	componentType := plan.Req.ComponentType
-	namespace := catalogutils.ModelNamespace(plan.ComponentID)
+	namespace := catalogutils.ModelsNamespace()
 	componentKey := fmt.Sprintf("%s/%s", componentType, plan.Req.ProviderID)
 
 	fsys, err := plan.Catalog.GetItemFS(componentKey)
@@ -59,20 +59,28 @@ func (d *OpenShiftDeployer) Start(ctx context.Context, plan *types.LocalPlan) (t
 		return types.ModelEndpoints{}, fmt.Errorf("failed to get component catalog path: %w", err)
 	}
 
+	instanceSlug := catalogutils.GenerateInstanceSlug(plan.ComponentID.String())
+	if plan.Values == nil {
+		plan.Values = make(map[string]any)
+	}
+	plan.Values[catalogconstants.InstanceSlugKey] = instanceSlug
+
+	isvcName := fmt.Sprintf("%s-%s", componentType, instanceSlug)
+
 	chartPath := path.Join(componentPath, plan.Runtime.Type().String())
 	helm := openshiftutils.NewHelmManager(plan.Runtime, namespace)
-	release := catalogutils.HelmReleaseName(plan.ComponentID, componentType)
+	release := catalogutils.ModelHelmReleaseName(plan.ComponentID, componentType)
 
 	if err := openshiftutils.InstallChart(ctx, helm, release, chartPath, fsys, plan.Values, plan.ComponentID.String()); err != nil {
 		return types.ModelEndpoints{}, err
 	}
 
-	// The chart names its InferenceService after the component type.
-	if err := openshiftutils.WaitForInferenceServiceReady(ctx, plan.Runtime, fsys, chartPath, componentType); err != nil {
+	// The chart names its InferenceService after the component type and instance slug.
+	if err := openshiftutils.WaitForInferenceServiceReady(ctx, plan.Runtime, fsys, chartPath, isvcName); err != nil {
 		return types.ModelEndpoints{}, err
 	}
 
-	address := openshiftutils.PredictorAddress(componentType, namespace)
+	address := openshiftutils.PredictorAddress(isvcName, namespace)
 
 	return types.ModelEndpoints{Internal: address, Egress: address}, nil
 }

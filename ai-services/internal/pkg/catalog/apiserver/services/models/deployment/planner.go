@@ -70,12 +70,11 @@ func (p *ModelPlanner) WithDeployers(deployers map[runtimeTypes.RuntimeType]type
 //nolint:funlen // one sequence of validation and resolution steps, clearer kept together
 func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelRequest) (*types.LocalPlan, error) {
 	workerName := worker.DefaultName(req.WorkerName)
-	componentID := uuid.New()
 
 	// Resolving the runtime up front means an unreachable worker fails the request (422)
 	// instead of leaving a component row stuck in Deploying. On OpenShift the runtime is scoped
-	// to the model's own namespace; Podman ignores it.
-	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelNamespace(componentID))
+	// to the shared models namespace; Podman ignores it.
+	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelsNamespace())
 	if err != nil {
 		return nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
 	}
@@ -106,10 +105,15 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		return nil, err
 	}
 
+	componentID := uuid.New()
+
 	var workerID *uuid.UUID
 	if id, ok := p.workers.ID(workerName); ok {
 		workerID = &id
 	}
+
+	values := loadLocalValues(provider, req)
+	values[constants.InstanceSlugKey] = catalogutils.GenerateInstanceSlug(componentID.String())
 
 	plan := &types.LocalPlan{
 		ComponentID:  componentID,
@@ -130,7 +134,7 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		},
 		Metadata: localComponentMetadata(req, sensitive),
 		Catalog:  provider,
-		Values:   loadLocalValues(provider, req),
+		Values:   values,
 	}
 
 	// Reject what the worker cannot host (e.g. not enough free Spyre cards) now, instead of after

@@ -33,7 +33,7 @@ func NewPlanner(provider *catalog.CatalogProvider, workers worker.Resolver) *Pla
 func (p *Planner) PlanLocal(ctx context.Context, comp *dbmodels.Component, workerName string) (*types.LocalPlan, error) {
 	workerName = worker.DefaultName(workerName)
 
-	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelNamespace(comp.ID))
+	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelsNamespace())
 	if err != nil {
 		return nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
 	}

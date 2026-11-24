@@ -92,6 +92,8 @@ const (
 const (
 	// CatalogAppName represents the catalog name.
 	CatalogAppName = "ai-services"
+	// CatalogModelsNamespace represents the shared namespace where all local models are deployed on OpenShift.
+	CatalogModelsNamespace = "ai-services-models"
 	// CatalogAppTemplate represents the catalog template name used for loading catalog infrastructure templates.
 	CatalogAppTemplate = "catalog"
 	// CatalogSecretLabel represents the catalog secret name associated with Catalog Pod.
@@ -119,6 +121,9 @@ const (
 	// CatalogComponentValue is the ai-services.io/component label value
 	// stamped on the catalog pod.
 	CatalogComponentValue = "catalog"
+
+	// InstanceSlugKey is the key used for the unique instance slug in template values.
+	InstanceSlugKey = "InstanceSlug"
 )
 
 // Pagination constants.

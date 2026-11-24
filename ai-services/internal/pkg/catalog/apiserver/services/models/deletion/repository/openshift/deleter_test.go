@@ -6,21 +6,36 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
-	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
+	remoteruntime "github.com/project-ai-services/ai-services/internal/pkg/runtime/remote"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
+	"github.com/project-ai-services/ai-services/internal/pkg/worker/stream"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// fakeComponentRepo records the rows it was asked to delete.
+// fakeComponentRepo records the rows it was asked to delete and returns stubbed components.
 type fakeComponentRepo struct {
 	dbrepo.ComponentRepository
+	comp      *dbmodels.Component
+	getErr    error
 	deleted   []uuid.UUID
 	deleteErr error
+}
+
+func (f *fakeComponentRepo) GetByID(_ context.Context, id uuid.UUID) (*dbmodels.Component, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+
+	if f.comp != nil {
+		return f.comp, nil
+	}
+
+	return &dbmodels.Component{ID: id, Type: "llm"}, nil
 }
 
 func (f *fakeComponentRepo) Delete(_ context.Context, id uuid.UUID) error {
@@ -29,81 +44,89 @@ func (f *fakeComponentRepo) Delete(_ context.Context, id uuid.UUID) error {
 	return f.deleteErr
 }
 
-// namespaceRuntime wraps the mock OpenShift runtime to record the namespace it is asked to delete
-// and to fail the calls the deleter makes.
-type namespaceRuntime struct {
-	runtime.Runtime
-	deletedNamespace string
-	listErr          error
-	deleteNsErr      error
+type fakeRegistry struct {
+	stream.WorkerRegistry
+	cmdChan      chan *workerpb.Command
+	uninstallErr string
 }
 
-func (r *namespaceRuntime) ListCRD(context.Context, *unstructured.UnstructuredList, map[string][]string) ([]runtimeTypes.CRDResource, error) {
-	return nil, r.listErr
+func (f *fakeRegistry) WorkerCommandChannel(_ string) (chan *workerpb.Command, bool) {
+	return f.cmdChan, true
 }
 
-func (r *namespaceRuntime) DeleteNamespace(_ context.Context, name string) error {
-	r.deletedNamespace = name
+func (f *fakeRegistry) WaitForResult(_, commandID string) (chan *workerpb.CommandResult, error) {
+	ch := make(chan *workerpb.CommandResult, 1)
+	if f.uninstallErr != "" {
+		ch <- &workerpb.CommandResult{
+			CommandId: commandID,
+			Success:   false,
+			Error:     f.uninstallErr,
+		}
+	} else {
+		ch <- &workerpb.CommandResult{
+			CommandId: commandID,
+			Success:   true,
+		}
+	}
 
-	return r.deleteNsErr
+	return ch, nil
 }
 
 func TestOpenShiftDeleter_Delete(t *testing.T) {
 	id := uuid.New()
+	wantRelease := catalogutils.ModelHelmReleaseName(id, "llm")
 
 	tests := []struct {
-		name        string
-		rt          *namespaceRuntime
-		repoErr     error
-		wantErr     string
-		wantNsDrop  bool // the model's namespace was deleted
-		wantRowGone bool // the component row was deleted
+		name         string
+		getErr       error
+		uninstallErr string
+		deleteErr    error
+		wantErr      string
+		wantRowGone  bool
 	}{
 		{
-			name:        "the namespace and the row are deleted",
-			rt:          &namespaceRuntime{},
-			wantNsDrop:  true,
+			name:        "the release is uninstalled and the component row is removed",
 			wantRowGone: true,
 		},
 		{
-			name:    "a serving runtime that cannot be listed keeps the namespace and the row",
-			rt:      &namespaceRuntime{listErr: errors.New("api down")},
-			wantErr: "failed to list serving runtimes: api down",
+			name:    "a component that cannot be retrieved from DB fails early",
+			getErr:  errors.New("db connection failed"),
+			wantErr: "failed to get component " + id.String() + " from DB: db connection failed",
 		},
 		{
-			name:       "a namespace that cannot be deleted keeps the row",
-			rt:         &namespaceRuntime{deleteNsErr: errors.New("forbidden")},
-			wantErr:    "failed to delete 'ai-services-model-" + id.String()[:8] + "' namespace: forbidden",
-			wantNsDrop: true,
+			name:         "a release that cannot be uninstalled keeps the row",
+			uninstallErr: "helm error",
+			wantErr:      "failed to uninstall model release '" + wantRelease + "'",
 		},
 		{
-			name:        "a row that cannot be deleted is reported",
-			rt:          &namespaceRuntime{},
-			repoErr:     errors.New("db down"),
-			wantErr:     "failed to delete component " + id.String() + " from DB: db down",
-			wantNsDrop:  true,
+			name:        "a row that cannot be deleted from DB reports error",
+			deleteErr:   errors.New("db delete failed"),
+			wantErr:     "failed to delete component " + id.String() + " from DB: db delete failed",
 			wantRowGone: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.rt.Runtime = mock.New(runtimeTypes.RuntimeTypeOpenShift)
-			repo := &fakeComponentRepo{deleteErr: tt.repoErr}
+			reg := &fakeRegistry{
+				cmdChan:      make(chan *workerpb.Command, 10),
+				uninstallErr: tt.uninstallErr,
+			}
+			rt := remoteruntime.New("worker-1", runtimeTypes.RuntimeTypeOpenShift, reg)
+			repo := &fakeComponentRepo{
+				getErr:    tt.getErr,
+				deleteErr: tt.deleteErr,
+			}
 
-			err := NewOpenShiftDeleter(repo).Delete(context.Background(), tt.rt, id)
+			deleter := NewOpenShiftDeleter(repo)
+
+			err := deleter.Delete(context.Background(), rt, id)
 
 			if tt.wantErr == "" {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
-			}
-
-			if tt.wantNsDrop {
-				assert.Equal(t, catalogutils.ModelNamespace(id), tt.rt.deletedNamespace)
-			} else {
-				assert.Empty(t, tt.rt.deletedNamespace)
 			}
 
 			if tt.wantRowGone {

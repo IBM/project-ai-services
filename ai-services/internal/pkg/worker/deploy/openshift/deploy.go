@@ -12,6 +12,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimetypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	helmutils "github.com/project-ai-services/ai-services/internal/pkg/utils/helm"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeropenshift "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/openshift"
@@ -55,7 +57,17 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
-	return deployWorkerHelm(ctx, chartData, values, namespace, rt)
+	if err := deployWorkerHelm(ctx, chartData, values, namespace, rt); err != nil {
+		return err
+	}
+
+	// Deploy model prerequisites to ai-services-models namespace
+	modelsHelm := helm.NewLocalHelmManager(catalogconstants.CatalogModelsNamespace)
+	if err := openshiftutils.DeployPrerequisites(ctx, modelsHelm); err != nil {
+		return fmt.Errorf("failed to deploy model prerequisites to %s: %w", catalogconstants.CatalogModelsNamespace, err)
+	}
+
+	return nil
 }
 
 // prepareValues builds the Helm values map for the worker chart.

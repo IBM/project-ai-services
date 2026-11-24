@@ -12,12 +12,14 @@ import (
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func TestPredictorAddress(t *testing.T) {
-	assert.Equal(t, "llm-predictor.ai-services-model-1234abcd.svc.cluster.local:8000",
-		PredictorAddress("llm", "ai-services-model-1234abcd"))
+	assert.Equal(t, "llm-predictor.ai-services-models.svc.cluster.local:8000",
+		PredictorAddress("llm", "ai-services-models"))
 }
 
 func TestNewHelmManager_LocalRuntime(t *testing.T) {
@@ -65,16 +67,23 @@ func TestUninstallServingRuntimes(t *testing.T) {
 	t.Run("nothing to uninstall", func(t *testing.T) {
 		rt := mock.New(runtimeTypes.RuntimeTypeOpenShift)
 
-		assert.Empty(t, UninstallServingRuntimes(context.Background(), rt, &fakeHelm{}))
+		require.NoError(t, UninstallServingRuntimes(context.Background(), rt, &fakeHelm{}))
 	})
 
-	t.Run("listing the serving runtimes fails", func(t *testing.T) {
+	t.Run("listing the serving runtimes fails with not found (idempotent)", func(t *testing.T) {
+		notFoundErr := k8serrors.NewNotFound(schema.GroupResource{Group: "serving.kserve.io", Resource: "servingruntimes"}, "servingruntimes")
+		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift), listErr: notFoundErr}
+
+		require.NoError(t, UninstallServingRuntimes(context.Background(), rt, &fakeHelm{}))
+	})
+
+	t.Run("listing the serving runtimes fails with unexpected error", func(t *testing.T) {
 		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift), listErr: errors.New("api down")}
 
-		errs := UninstallServingRuntimes(context.Background(), rt, &fakeHelm{})
+		err := UninstallServingRuntimes(context.Background(), rt, &fakeHelm{})
 
-		require.Len(t, errs, 1)
-		assert.Contains(t, errs[0], "failed to list serving runtimes: api down")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to list serving runtimes: api down")
 	})
 
 	t.Run("each release is uninstalled and every failure is reported", func(t *testing.T) {
@@ -88,11 +97,20 @@ func TestUninstallServingRuntimes(t *testing.T) {
 		}
 		helm := &fakeHelm{failOn: "broken"}
 
-		errs := UninstallServingRuntimes(context.Background(), rt, helm)
+		err := UninstallServingRuntimes(context.Background(), rt, helm)
 
 		assert.Equal(t, []string{"serving-runtime-cpu", "serving-runtime-spyre", "broken"}, helm.uninstalled)
-		require.Len(t, errs, 1)
-		assert.Contains(t, errs[0], "serving runtime 'broken': helm uninstall failed")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "serving runtime 'broken': helm uninstall failed")
+	})
+}
+
+func TestCleanupModelsNamespace(t *testing.T) {
+	t.Run("successful cleanup", func(t *testing.T) {
+		rt := mock.New(runtimeTypes.RuntimeTypeOpenShift)
+
+		err := CleanupModelsNamespace(context.Background(), rt)
+		require.NoError(t, err)
 	})
 }
 

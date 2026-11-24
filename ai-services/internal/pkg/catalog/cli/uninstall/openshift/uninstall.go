@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
@@ -94,6 +95,12 @@ func uninstallCatalogResources(ctx context.Context, rt runtime.Runtime, catalog,
 			s.Fail("failed to delete catalog secrets")
 
 			return fmt.Errorf("failed to delete secrets: %w", err)
+		}
+
+		if err := openshiftutils.CleanupModelsNamespace(ctx, rt); err != nil {
+			s.Fail("failed to clean up models")
+
+			return err
 		}
 
 		if err := rt.DeleteNamespace(ctx, namespace); err != nil {

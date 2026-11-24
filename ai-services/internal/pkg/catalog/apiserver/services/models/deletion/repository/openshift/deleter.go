@@ -2,9 +2,7 @@ package openshift
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
@@ -22,25 +20,28 @@ type OpenShiftDeleter struct {
 
 // NewOpenShiftDeleter creates a new OpenShiftDeleter.
 func NewOpenShiftDeleter(componentRepo dbrepo.ComponentRepository) *OpenShiftDeleter {
-	return &OpenShiftDeleter{componentRepo: componentRepo}
+	return &OpenShiftDeleter{
+		componentRepo: componentRepo,
+	}
 }
 
-// Delete follows the application deletion: uninstall the serving-runtime releases, then delete the
-// namespace. The namespace belongs to the model alone, so deleting it also removes the model's
-// InferenceService, its volumes and its Helm release. The component row is deleted last, so it is
-// kept, and the delete can be retried, if anything before it failed.
+// Delete uninstalls the model's Helm release from the shared models namespace.
+// The models namespace is shared across all models and is preserved. The
+// component row is deleted last, so it is kept, and the delete can be retried, if anything before it failed.
 func (d *OpenShiftDeleter) Delete(ctx context.Context, rt runtime.Runtime, componentID uuid.UUID) error {
-	namespace := catalogutils.ModelNamespace(componentID)
-	helm := openshiftutils.NewHelmManager(rt, namespace)
-
-	if errs := openshiftutils.UninstallServingRuntimes(ctx, rt, helm); len(errs) > 0 {
-		return errors.New(strings.Join(errs, "; "))
+	comp, err := d.componentRepo.GetByID(ctx, componentID)
+	if err != nil {
+		return fmt.Errorf("failed to get component %s from DB: %w", componentID, err)
 	}
 
-	logger.InfofCtx(ctx, "Deleting '%s' namespace.", namespace)
+	namespace := catalogutils.ModelsNamespace()
+	helm := openshiftutils.NewHelmManager(rt, namespace)
+	release := catalogutils.ModelHelmReleaseName(componentID, comp.Type)
 
-	if err := rt.DeleteNamespace(ctx, namespace); err != nil {
-		return fmt.Errorf("failed to delete '%s' namespace: %w", namespace, err)
+	logger.InfofCtx(ctx, "Uninstalling '%s' model release in namespace '%s'.", release, namespace)
+
+	if err := helm.Uninstall(ctx, release); err != nil {
+		return fmt.Errorf("failed to uninstall model release '%s': %w", release, err)
 	}
 
 	if err := d.componentRepo.Delete(ctx, componentID); err != nil {
