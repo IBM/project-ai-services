@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	runtimeopenshift "github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
@@ -37,7 +38,7 @@ func ModelGatewayRouteHost(ctx context.Context) (string, error) {
 }
 
 func routeHost(ctx context.Context, routeName string) (string, error) {
-	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogconstants.CatalogAppName)
+	oc, err := runtimeopenshift.NewOpenshiftClientWithNamespace(catalogns.Get())
 	if err != nil {
 		return "", fmt.Errorf("create OpenShift client to look up route %q: %w", routeName, err)
 	}

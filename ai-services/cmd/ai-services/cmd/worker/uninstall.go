@@ -7,11 +7,11 @@ import (
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	workercommon "github.com/project-ai-services/ai-services/internal/pkg/worker/common"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workeruninstall "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall"
 	workerutils "github.com/project-ai-services/ai-services/internal/pkg/worker/uninstall/utils"
 )
@@ -66,7 +66,7 @@ func uninstallRunE(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	rtType := vars.RuntimeFactory.GetRuntimeType()
 
-	rt, err := runtime.CreateRuntime(rtType, workerconstants.WorkerAppName)
+	rt, err := runtime.CreateRuntime(rtType, catalogns.Get())
 	if err != nil {
 		return fmt.Errorf("worker uninstall: init runtime: %w", err)
 	}

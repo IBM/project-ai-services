@@ -107,10 +107,6 @@ const (
 	OpenShiftCatalogPodName = "catalog-backend"
 	CaddyCertSecretName     = "caddy-cert-secret"
 
-	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
-	// auto-generated gateway server certificate for internal cluster communication.
-	OpenShiftGatewayServiceEndpoint = "catalog-api.ai-services.svc.cluster.local"
-
 	// LocalWorkerEnvVar is the environment variable name that enables local-worker mode.
 	LocalWorkerEnvVar = "LOCAL_WORKER"
 

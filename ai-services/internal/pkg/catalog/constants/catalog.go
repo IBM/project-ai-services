@@ -90,7 +90,7 @@ const (
 
 // Catalog name constants.
 const (
-	// CatalogAppName represents the catalog name.
+	// CatalogAppName represents the catalog Helm release name and resource label value.
 	CatalogAppName = "ai-services"
 	// CatalogModelsNamespace represents the shared namespace where all local models are deployed on OpenShift.
 	CatalogModelsNamespace = "ai-services-models"
@@ -110,6 +110,8 @@ const (
 	CatalogConnectorSecretName = "catalog-db-encryption-secret"
 	// CatalogMTLSSecretName represents the catalog mTLS encryption key secret name.
 	CatalogMTLSSecretName = "catalog-mtls-encryption-secret"
+	// CatalogAPIServiceName represents the catalog API Kubernetes service name.
+	CatalogAPIServiceName = "catalog-api"
 	// CatalogDeploymentName represent the catalog deployment name.
 	CatalogDeploymentName = "catalog-backend"
 	// CatalogAdminUser is the default admin username created during catalog configure.
