@@ -670,7 +670,7 @@ export interface ModelEndpoint {
 
 export interface ModelDeploymentDetail extends ModelDeployment {
   endpoints?: ModelEndpoint[];
-  applications: ModelApplication[];
+  applications?: ModelApplication[];
 }
 
 export interface GenerateModelKeyResponse {

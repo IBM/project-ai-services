@@ -144,12 +144,12 @@ const ModelDetails = ({ modelId, modelName, onBack }: ModelDetailsProps) => {
         <Column sm={4} md={8} lg={16}>
           <ProductiveCard title="Services" className={styles.card}>
             <div className={styles.detailRows}>
-              {detail.applications.length === 0 ? (
+              {(detail.applications ?? []).length === 0 ? (
                 <span className={styles.detailValue}>
                   No services are using this model.
                 </span>
               ) : (
-                detail.applications.map((application) => (
+                (detail.applications ?? []).map((application) => (
                   <DetailRow
                     key={application.id}
                     label={application.name}
