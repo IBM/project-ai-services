@@ -143,6 +143,9 @@ const (
 	// encrypt sensitive connector credential fields at rest.
 	DBEncryptionKeyEnv = "DB_ENCRYPTION_KEY"
 
+	// ModelGatewayRouteID is the Caddy route ID (subdomain) of the LiteLLM model gateway.
+	ModelGatewayRouteID = "model-gateway"
+
 	// ModelGatewayPublicEndpointEnv is the environment variable that holds the URL under which the
 	// model gateway is reachable by consumers of a model. It is reported as the model's endpoint.
 	ModelGatewayPublicEndpointEnv = "MODEL_GATEWAY_PUBLIC_ENDPOINT"

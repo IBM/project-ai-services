@@ -56,6 +56,18 @@ const (
 	// AES-256 mTLS encryption key for the worker node.
 	WorkerMTLSSecretName = "worker-mtls-encryption-secret"
 
+	// WorkerMTLSKeyPath is where the worker Caddy pod mounts the AES key that decrypts tls.key.
+	WorkerMTLSKeyPath = "/etc/secret/" + WorkerMTLSSecretName + "/mtls-encryption-key"
+
+	// LiteLLMIngressRouteID is the Caddy @id of the control-plane route that exposes LiteLLM to
+	// remote workers: service -> worker Caddy egress :8080 -> mTLS -> CP Caddy ingress :9443 -> LiteLLM.
+	LiteLLMIngressRouteID = "litellm--mtls"
+	// LiteLLMEgressRouteID is the Caddy @id of the worker-side route.
+	LiteLLMEgressRouteID = "litellm--egress"
+	// LiteLLMPathPrefix is the URL prefix both LiteLLM routes match. The CP ingress strips it and
+	// the worker egress keeps it.
+	LiteLLMPathPrefix = "/litellm"
+
 	// MetaKeyBaseDir is the worker metadata key sent during Register and stored in worker.metadata JSON.
 	MetaKeyBaseDir = "baseDir"
 

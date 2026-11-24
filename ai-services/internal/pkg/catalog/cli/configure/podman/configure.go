@@ -165,6 +165,11 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return fmt.Errorf("route registration failed: %w", err)
 	}
 
+	// Expose LiteLLM on the private mTLS ingress for services on remote workers.
+	if err := registerLiteLLMIngress(ctx, caddyCtx, routeInfos); err != nil {
+		return err
+	}
+
 	// Wait for Caddy's TLS layer to be ready for the catalog API before attempting login.
 	// Route registration triggers a Caddy config reload that briefly interrupts
 	// TLS, causing "tls: internal error" if login is attempted immediately.
