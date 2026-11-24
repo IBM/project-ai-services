@@ -1,0 +1,12 @@
+name: forecast
+version: "1.0.0"
+podTemplateExecutions:
+  - [postgres-secret.yaml.tmpl, forecast-db-encryption-secret.yaml.tmpl]
+  - [postgres.yaml.tmpl]
+  - [forecast-api.yaml.tmpl]
+
+# Resource requirements
+resources:
+  cpu: 0 # to be provided by DEV
+  memory: 0 # to be provided by DEV
+  storage: 0 # to be provided by DEV

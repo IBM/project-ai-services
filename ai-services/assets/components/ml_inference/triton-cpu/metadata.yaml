@@ -1,0 +1,13 @@
+# Component identification
+type: component
+id: triton-cpu
+version: "1.0.0"
+name: "Triton Inference Server (CPU)"
+description: "Serves ONNX forecasters over the KServe v2 protocol on CPU"
+
+# Component type this provider belongs to
+component_type:
+  id: ml_inference
+  name: "Inference server"
+  short_name: "Inference server"
+default: true

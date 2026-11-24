@@ -1,0 +1,9 @@
+image: quay.io/powercloud/tritonserver:latest
+storage: 10Gi
+resources:
+  requests:
+    cpu: "to be provided by DEV"
+    memory: "to be provided by DEV"
+  limits:
+    cpu: "to be provided by DEV"
+    memory: "to be provided by DEV"

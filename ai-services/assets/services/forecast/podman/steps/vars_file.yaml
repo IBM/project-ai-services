@@ -1,0 +1,8 @@
+containers:
+  - name: "forecast-api-{{ .InstanceSlug }}-forecast-api"
+    format: ".Status"
+    alias: API_STATUS
+
+  - name: "forecast-api-{{ .InstanceSlug }}-mcp-sidecar"
+    format: ".Status"
+    alias: MCP_STATUS

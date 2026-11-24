@@ -1,0 +1,16 @@
+containers:
+  - name: "forecast-api"
+    workload: "forecast-api"
+    format: ".Status"
+    alias: API_STATUS
+
+  - name: "mcp-sidecar"
+    workload: "forecast-api"
+    format: ".Status"
+    alias: MCP_STATUS
+
+hosts:
+  - fetch: API_URL
+    type: api
+  - fetch: MCP_URL
+    type: mcp

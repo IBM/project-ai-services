@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "triton-{{ .InstanceSlug }}"
+  labels:
+    ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/volume: "triton-repo-{{ .InstanceSlug }}"
+spec:
+  restartPolicy: always
+  volumes:
+    - name: repository
+      persistentVolumeClaim:
+        claimName: "triton-repo-{{ .InstanceSlug }}"
+  containers:
+    - name: triton
+      image: "{{ .Values.image }}"
+      args:
+        - tritonserver
+        - --model-repository=/models
+        - --model-control-mode=explicit
+        - --strict-readiness=false
+        - --exit-on-error=false
+        - --http-port=8000
+        - --metrics-port=8002
+      ports:
+        - containerPort: 8000     # must be first: the deployer gives this port to consumers
+        - containerPort: 8002
+      livenessProbe:
+        httpGet:
+          path: /v2/health/live
+          port: 8000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 6
+      readinessProbe:
+        httpGet:
+          path: /v2/health/ready
+          port: 8000
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      volumeMounts:
+        - mountPath: /models:z
+          name: repository
+          readOnly: true

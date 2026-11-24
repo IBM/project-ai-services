@@ -1,0 +1,6 @@
+name: triton
+version: "1.0.0"
+resources:
+  cpu: 0 # TBD (DEV)
+  memory: 0 # TBD (DEV), bytes
+  storage: 0 # TBD (DEV), bytes
