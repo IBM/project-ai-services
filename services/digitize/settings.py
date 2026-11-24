@@ -23,7 +23,12 @@ class DigitizeConfig(BaseSettings):
         sync_history_retention_days: int = Field(
             default=1,
             ge=1,
-            description="Retention period in days for connector sync logs and terminal connector jobs",
+            description="Retention period in days for connector sync logs and completed/cancelled connector jobs",
+        )
+        sync_history_failed_retention_days: int = Field(
+            default=7,
+            ge=1,
+            description="Retention period in days for failed connector jobs",
         )
 
         model_config = SettingsConfigDict(env_prefix="CONNECTOR_")

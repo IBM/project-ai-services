@@ -842,10 +842,28 @@ class TestPruneAllSyncHistory:
         session.execute.side_effect = [job_res, log_res]
         from digitize.db.manager import DatabaseManager
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)), \
-             patch("digitize.db.manager.settings.digitize.connector.sync_history_retention_days", 7):
+             patch("digitize.db.manager.settings.digitize.connector.sync_history_retention_days", 3):
             total = DatabaseManager.prune_all_sync_history()
         assert total == 2
         assert session.execute.call_count == 2
+
+    def test_differentiated_retention_conditions_for_failed_and_terminal_jobs(self):
+        session = MagicMock()
+        job_res = MagicMock()
+        job_res.rowcount = 2
+        log_res = MagicMock()
+        log_res.rowcount = 1
+        session.execute.side_effect = [job_res, log_res]
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)), \
+             patch("digitize.db.manager.settings.digitize.connector.sync_history_retention_days", 1), \
+             patch("digitize.db.manager.settings.digitize.connector.sync_history_failed_retention_days", 7):
+            total = DatabaseManager.prune_all_sync_history()
+        assert total == 3
+        job_delete_stmt = session.execute.call_args_list[0][0][0]
+        compiled = str(job_delete_stmt.compile())
+        assert "jobs.status IN" in compiled or "jobs.status =" in compiled
+        assert "jobs.submitted_at <" in compiled
 
 
 # Made with Bob
