@@ -28,7 +28,7 @@ spec:
       - --port=8002
       - --kv-cache-memory-bytes=0
       - --dtype=bfloat16
-      - --max-model-len=1024
+      - --max-model-len={{ .Values.maxModelLen }}
       livenessProbe:
         httpGet:
           path: /health

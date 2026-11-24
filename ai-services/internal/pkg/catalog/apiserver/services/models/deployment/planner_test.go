@@ -64,3 +64,21 @@ func TestRemoteTokenizeURL(t *testing.T) {
 	assert.Equal(t, "http://h:8000/tokenize", remoteTokenizeURL("hosted_vllm", map[string]any{"api_base": "http://h:8000/v1"}))
 	assert.Empty(t, remoteTokenizeURL("hosted_vllm", map[string]any{}), "no api_base means no passthrough")
 }
+
+func TestLoadLocalValues_ParamsCannotOverrideProfileHardware(t *testing.T) {
+	provider := setupTestCatalogProvider(t)
+	podmanProvider, err := provider.WithRuntime("podman")
+	require.NoError(t, err)
+
+	values, err := loadLocalValues(podmanProvider, apimodels.CreateModelRequest{
+		DeploymentType: constants.DeploymentTypeLocal,
+		ComponentType:  "llm",
+		ProviderID:     "vllm-spyre",
+		Name:           "test-model",
+		Model:          "ibm-granite/granite-3.3-8b-instruct",
+		Profile:        "standard",
+		Params:         map[string]any{"maxModelLen": 1},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 32768, values["maxModelLen"], "profile hardware values must not be overridden by params")
+}

@@ -959,8 +959,12 @@ func TestComponentTemplates_ReadHardwareValues(t *testing.T) {
 			assert.Equal(t, "3", pod.Annotations["ai-services.io/reranker--spyre-cards"])
 			assert.Equal(t, "3", envOf(pod.Spec.Containers[0])["AIU_WORLD_SIZE"])
 		}},
-		{"reranker", "vllm-cpu", "BAAI/bge-reranker-v2-m3", 0, nil},
-		{"embedding", "vllm-cpu", "ibm-granite/granite-embedding-278m-multilingual", 0, nil},
+		{"reranker", "vllm-cpu", "BAAI/bge-reranker-v2-m3", 0, func(t *testing.T, pod *models.PodSpec) {
+			assert.Contains(t, pod.Spec.Containers[0].Args, "--max-model-len=1234")
+		}},
+		{"embedding", "vllm-cpu", "ibm-granite/granite-embedding-278m-multilingual", 0, func(t *testing.T, pod *models.PodSpec) {
+			assert.Contains(t, pod.Spec.Containers[0].Args, "--max-model-len=1234")
+		}},
 	}
 
 	for _, tt := range tests {
