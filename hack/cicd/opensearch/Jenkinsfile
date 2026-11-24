@@ -1,6 +1,6 @@
 pipeline {
 
-    agent { label 'odh-jenkins-agent-p10-1' }
+    agent { label 'onprem-ai-services-machine' }
 
     parameters {
         string(
@@ -204,9 +204,20 @@ Leave empty for no dependency changes.'''
                         ${BUILD_ENV_IMAGE} \
                         bash -c 'set -euo pipefail && \
                             ./build.sh \
-                                manifests/${OPENSEARCH_VERSION}/opensearch-${OPENSEARCH_VERSION}.yml \
-                                --platform ${PLATFORM} \
-                                --architecture ${ARCHITECTURE} && \
+                                manifests/'"${OPENSEARCH_VERSION}"'/opensearch-'"${OPENSEARCH_VERSION}"'.yml \
+                                --platform '"${PLATFORM}"' \
+                                --architecture '"${ARCHITECTURE}"' \
+                                --component OpenSearch \
+                                    common-utils \
+                                    opensearch-remote-metadata-sdk \
+                                    job-scheduler \
+                                    security \
+                                    custom-codecs \
+                                    k-NN \
+                                    ml-commons \
+                                    neural-search \
+                                    opensearch-observability \
+                                    index-management && \
                             ./assemble.sh tar/builds/opensearch/manifest.yml'
 
                     echo "Copying assembled tar to host..."
