@@ -123,7 +123,7 @@ Use Ginkgo label filters to run only the part of the suite you need.
 | `summarization-tests` | Asynchronous and synchronous summarization API coverage (requires `--template=summarize`) |
 | `translation-tests` | Translation service lifecycle plus synchronous (`POST /v1/translate`) and asynchronous jobs (`/v1/translate/jobs`) API coverage (requires `--template=translate`) |
 | `app-backup-restore` | Application backup and restore validation for OpenSearch and digitize data |
-| `sanity-0.4` | Quick happy-path release sanity for a patch branch: RAG (ingest + Q&A), extract, digitize, summarize. See [Running Release Sanity Tests](#running-release-sanity-tests) |
+| `sanity-0.4` | Quick happy-path release sanity for a patch branch: RAG (ingest + Q&A), extract, digitize, summarize, translate. See [Running Release Sanity Tests](#running-release-sanity-tests) |
 | `mcp-tests` | **Umbrella label** — all MCP sidecar tests (health checks, tools/list, flows). Podman-only. |
 | `mcp-health` | MCP `/health` endpoint checks for the chat, digitize, similarity, summarize, translate, and extract sidecars |
 | `mcp-tools` | MCP `tools/list` checks — verifies each sidecar loaded its OpenAPI spec and registered tools |
@@ -469,14 +469,15 @@ validate a patch of a release branch. The test code always comes from the curren
 only the `ai-services` binary - and therefore the templates and images embedded in it - comes from
 the patch branch.
 
-What runs, in order (19 specs, all in `e2e_suite_test.go` / `sanity_test.go`):
+What runs, in order (24 specs, all in `e2e_suite_test.go` / `sanity_test.go`):
 
 1. Existing lifecycle specs carrying the label: help, bootstrap configure/validate, catalog configure/info/login, RAG app create, `application ps` / `info` / pod health.
 2. **RAG**: ingest `test_doc.pdf`, then ask fixed questions (same prompts as backup/restore) and assert each answer is non-empty and grounded in the document. The RAG app is then deleted to free its Spyre cards.
 3. **Extract**: deploy the extract service, run one sync and one async extraction.
 4. **Digitize**: deploy the digitize service, digitize a PDF and run an ingestion job.
 5. **Summarize**: deploy the summarize service, run one sync and one PDF (async) summarization.
-6. Catalog logout and uninstall.
+6. **Translate**: deploy the translate service (waits for `/health`), run two sync translations (explicit and auto-detected source language), complete one `.txt` and one `.md` async job (result, token usage, markdown structure preserved) and download the `.txt` result.
+7. Catalog logout and uninstall.
 
 Each service stage deploys and deletes its own app, so the same Spyre cards are reused.
 
@@ -513,6 +514,20 @@ PATCH_BRANCH=release-0.4 ginkgo -r --procs=1 -tags "exclude_graphdriver_btrfs co
 Requires the registry and catalog variables listed above (`REGISTRY_*`, `CATALOG_PASSWORD`).
 Podman runtime and the default `rag` template only; do not pass `--app-name`. The sanity-only stages skip
 themselves in any other setup, so they never delete apps during a normal full-suite run.
+
+### Running a single sanity stage (e.g. translate)
+
+To run only one service stage, narrow the sanity label with `--focus`. Keep the catalog setup specs in the
+pattern: the pre-run cleanup removes any running catalog, and the stage needs it up and logged in. Do not
+pass `--template`; the sanity stages require the default `rag` template and deploy their own service app.
+
+```bash
+make test-generate-report APP_RUNTIME=podman \
+  TEST_ARGS='--label-filter=sanity-0.4 --focus="bootstrap configure|catalog service is running|catalog login|Sanity Translate" --timeout=2h'
+```
+
+Replace `Sanity Translate` with `Sanity Extract`, `Sanity Digitize` or `Sanity Summarize` for the other stages.
+The same environment as the full sanity run applies (`REGISTRY_*`, `CATALOG_PASSWORD`, podman runtime, no `--app-name`).
 
 ## Running Failure Tests
 
