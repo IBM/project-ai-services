@@ -62,11 +62,6 @@ func (p *ModelPlanner) WithDeployers(deployers map[runtimeTypes.RuntimeType]type
 	return p
 }
 
-// ValidateComponentType rejects a component type that has no model providers in the catalog.
-func (p *ModelPlanner) ValidateComponentType(componentType string) error {
-	return p.models.ValidateType(componentType)
-}
-
 // PlanLocal validates a local-model request and resolves where and how it will be deployed.
 //
 //nolint:funlen // one sequence of validation and resolution steps, clearer kept together

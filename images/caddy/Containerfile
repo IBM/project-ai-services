@@ -34,7 +34,8 @@ RUN set -eux; \
     printf 'package main\n\nimport _ "github.com/caddyserver/caddy/v2/modules/encryptedfile"\n' > cmd/caddy/plugins.go; \
     CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/usr/bin/caddy ./cmd/caddy; \
     /out/usr/bin/caddy version; \
-    /out/usr/bin/caddy list-modules | grep -x 'tls.get_certificate.encrypted_file'
+    /out/usr/bin/caddy list-modules | grep -x 'tls.get_certificate.encrypted_file' && \
+    /out/usr/bin/caddy list-modules | grep -x 'http.reverse_proxy.transport.encrypted_mtls'
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8
 

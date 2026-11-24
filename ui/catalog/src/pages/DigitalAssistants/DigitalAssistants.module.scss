@@ -49,6 +49,11 @@
   margin: 0;
 }
 
+.loadingTable {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 // AboutTab styles — DA-specific
 
 .aboutContent {

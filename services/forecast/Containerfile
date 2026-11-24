@@ -1,4 +1,4 @@
-FROM icr.io/ai-services-cicd/service-base:v0.0.48
+FROM icr.io/ai-services-cicd/service-base:v0.0.49
 
 WORKDIR /opt/services/forecast
 
@@ -7,9 +7,12 @@ ENV PYTHONPATH=/opt/services
 COPY common /opt/services/common
 COPY forecast/ .
 
+# Install system dependencies (libgomp for OpenMP support in LightGBM/XGBoost/AutoGluon).
 # The base venv ships without pip; bootstrap it only to install the service deps,
 # then strip it again so the runtime image stays pip-free.
-RUN source /var/venv/bin/activate && \
+RUN microdnf install -y libgomp && \
+    microdnf clean all && \
+    source /var/venv/bin/activate && \
     python -m ensurepip --upgrade && \
     python -m pip install --upgrade pip && \
     python -m pip install -r requirements.txt \

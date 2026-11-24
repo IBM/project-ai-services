@@ -29,7 +29,7 @@ func TestGetModelProviders(t *testing.T) {
 			deploymentType: "remote",
 			want: []types.ProviderInfo{
 				{ID: "hosted_vllm", Name: "VLLM"},
-				{ID: "watsonx", Name: "Watsonx"},
+				{ID: "watsonx", Name: "IBM watsonx.ai on IBM Cloud"},
 			},
 		},
 		{
@@ -38,7 +38,7 @@ func TestGetModelProviders(t *testing.T) {
 				{ID: "hosted_vllm", Name: "VLLM"},
 				{ID: "vllm-cpu", Name: "AI Inference on CPU"},
 				{ID: "vllm-spyre", Name: "Red Hat AI Inference with Spyre"},
-				{ID: "watsonx", Name: "Watsonx"},
+				{ID: "watsonx", Name: "IBM watsonx.ai on IBM Cloud"},
 			},
 		},
 		{

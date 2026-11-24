@@ -12,7 +12,7 @@ import sys
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parse the command line of the worker."""
     parser = argparse.ArgumentParser(prog="forecast.triton_client.worker", description="Run one training job.")
-    parser.add_argument("job_id", help="The jobs.id of the training job to run")
+    parser.add_argument("job_id", type=int, help="The jobs.seq of the training job to run")
     return parser.parse_args(argv)
 
 

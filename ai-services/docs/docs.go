@@ -1630,6 +1630,112 @@ const docTemplate = `{
                 }
             }
         },
+        "/catalog/models": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists every deployable model of the catalog, once per model id, sorted by id, with the providers that serve it. Covers the models of local model components and of remote model connectors.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "List catalog models",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Only models of this role: 'llm', 'embedding' or 'reranker'. Omit for all.",
+                        "name": "component_type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid component_type",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/catalog/models/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns one model of the catalog with the providers that serve it, its license and its about details.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Catalog"
+                ],
+                "summary": "Get a catalog model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "URL-encoded model id, e.g. 'ibm-granite%2Fgranite-3.3-8b-instruct'",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing access token",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Model not found in catalog",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/catalog/models/{id}/deploy-options": {
             "get": {
                 "security": [
@@ -2325,6 +2431,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by status: Downloading, Deploying, Running, Error (local) or connected, offline (remote)",
                         "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring search on model name",
+                        "name": "q",
                         "in": "query"
                     },
                     {
@@ -3866,6 +3978,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelApplication"
                     }
                 },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
                 "connected_services": {
                     "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"
@@ -3934,6 +4049,9 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelListItem": {
             "type": "object",
             "properties": {
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
                 "connected_services": {
                     "description": "ConnectedServices is the number of services using the model.",
                     "type": "integer"
@@ -4029,7 +4147,7 @@ const docTemplate = `{
                     }
                 },
                 "connectors": {
-                    "description": "Connectors lists pre-registered connector records to attach to this service\nafter the application reaches Running status. Each entry is validated against\nthe service's catalog YAML (accepts_datasource) and the connectors table before\ndeployment begins. Omitting this field (or passing an empty list) is valid.",
+                    "description": "Connectors lists pre-registered connector records to attach to this service\nafter the application reaches Running status. Each entry is validated against\nthe service's catalog YAML (datasource block) and the connectors table before\ndeployment begins. Omitting this field (or passing an empty list) is valid.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ConnectorRef"
@@ -4554,6 +4672,24 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings": {
+            "type": "object",
+            "properties": {
+                "max_connections": {
+                    "description": "MaxConnections is the maximum number of datasources that may be attached to the service at any\none time (creation-time and post-creation connections combined). nil means unlimited.\nMust be \u003e= 1 when set.",
+                    "type": "integer"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "supported_providers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DependencyReference": {
             "type": "object",
             "properties": {
@@ -4643,6 +4779,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent"
                     }
                 },
+                "datasource": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -4656,6 +4795,51 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry": {
+            "type": "object",
+            "properties": {
+                "certified_by": {
+                    "type": "string"
+                },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider"
+                    }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider": {
+            "type": "object",
+            "properties": {
+                "deployment_type": {
+                    "description": "\"local\" or \"remote\"",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_constants.DeploymentType"
+                        }
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }
@@ -4728,6 +4912,36 @@ const docTemplate = `{
                 },
                 "schema": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelDetail": {
+            "type": "object",
+            "properties": {
+                "about": {},
+                "certified_by": {
+                    "type": "string"
+                },
+                "component_type": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider"
+                    }
                 }
             }
         },
@@ -4849,6 +5063,9 @@ const docTemplate = `{
                 },
                 "certified_by": {
                     "type": "string"
+                },
+                "datasource": {
+                    "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings"
                 },
                 "dependencies": {
                     "type": "array",
@@ -5175,8 +5392,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "localhost:8080",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
-	Title:            "AI Services Catalog API",
-	Description:      "API server for managing AI Services catalog, applications, and authentication",
+	Title:            "AI Launchpad Catalog API",
+	Description:      "API server for managing AI Launchpad catalog, applications, and authentication",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

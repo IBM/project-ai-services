@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -9,17 +10,29 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 	workerpb "github.com/project-ai-services/ai-services/internal/pkg/worker/proto"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
+	"crypto/tls"
+
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -303,6 +316,96 @@ func TestGateway_CommandStream_MissingWorkerName(t *testing.T) {
 	}
 }
 
+type fakeBidiStream struct {
+	grpc.ServerStream
+	ctx     context.Context
+	recvMsg *workerpb.CommandResult
+}
+
+func (s *fakeBidiStream) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
+
+func (s *fakeBidiStream) Recv() (*workerpb.CommandResult, error) {
+	return s.recvMsg, nil
+}
+
+func (s *fakeBidiStream) Send(*workerpb.Command) error {
+	return nil
+}
+
+// TestGateway_CommandStream_IdentityMismatch verifies that identifyWorker rejects
+// a client whose cert CN does not match the worker_name sent in the first message.
+func TestGateway_CommandStream_IdentityMismatch(t *testing.T) {
+	reg := registry.New(newFakeWorkerRepo())
+	_ = preregister(t, reg, "worker-1")
+	_ = preregister(t, reg, "worker-2")
+
+	gw := &Gateway{registry: reg}
+
+	peerCtx := peer.NewContext(context.Background(), &peer.Peer{
+		AuthInfo: credentials.TLSInfo{
+			State: tls.ConnectionState{
+				VerifiedChains: [][]*x509.Certificate{{
+					{Subject: pkix.Name{CommonName: "worker-1"}},
+				}},
+			},
+		},
+	})
+
+	stream := &fakeBidiStream{
+		ctx:     peerCtx,
+		recvMsg: &workerpb.CommandResult{WorkerName: "worker-2"},
+	}
+
+	_, _, err := gw.identifyWorker(peerCtx, stream)
+	if err == nil {
+		t.Fatal("expected error on CN and worker_name mismatch")
+	}
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("status code = %v, want %v", status.Code(err), codes.PermissionDenied)
+	}
+}
+
+// TestGateway_CommandStream_IdentityMatches verifies that identifyWorker succeeds
+// when the cert CN matches the worker_name in the first message.
+func TestGateway_CommandStream_IdentityMatches(t *testing.T) {
+	reg := registry.New(newFakeWorkerRepo())
+	_ = preregister(t, reg, "worker-1")
+	_, err := reg.Register(context.Background(), "worker-1", "podman", nil)
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	gw := &Gateway{registry: reg}
+
+	peerCtx := peer.NewContext(context.Background(), &peer.Peer{
+		AuthInfo: credentials.TLSInfo{
+			State: tls.ConnectionState{
+				VerifiedChains: [][]*x509.Certificate{{
+					{Subject: pkix.Name{CommonName: "worker-1"}},
+				}},
+			},
+		},
+	})
+
+	stream := &fakeBidiStream{
+		ctx:     peerCtx,
+		recvMsg: &workerpb.CommandResult{WorkerName: "worker-1"},
+	}
+
+	name, entry, err := gw.identifyWorker(peerCtx, stream)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "worker-1" || entry == nil {
+		t.Errorf("name=%s, entry=%v; want worker-1 and non-nil entry", name, entry)
+	}
+}
+
 func TestGateway_CommandStream_CommandDelivered(t *testing.T) {
 	repo := newFakeWorkerRepo()
 	reg := registry.New(repo)
@@ -516,9 +619,217 @@ func TestGenerateAndPersistPKI_PodmanSANs(t *testing.T) {
 		t.Fatalf("ParseCertificate: %v", err)
 	}
 
-	expectedSANs := []string{"catalog-worker-gateway.example.com", workerconstants.PodmanGatewayPodName}
-	if len(leaf.DNSNames) != len(expectedSANs) || leaf.DNSNames[0] != expectedSANs[0] || leaf.DNSNames[1] != expectedSANs[1] {
+	expectedSANs := []string{"catalog-worker-gateway.example.com", workerconstants.PodmanGatewayPodName, "example.com"}
+	if !slices.Equal(leaf.DNSNames, expectedSANs) {
 		t.Errorf("expected SANs %v; got DNSNames=%v", expectedSANs, leaf.DNSNames)
+	}
+}
+
+// TestGenerateAndPersistPKI_NoPlaintextKeyOnDisk checks that the server key is only
+// ever stored encrypted, and that only the server key (not the CA signing key) is
+// made readable for the Caddy user.
+func TestGenerateAndPersistPKI_NoPlaintextKeyOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
+	t.Setenv(workerconstants.MTLSEncryptionKeyEnv, "test-mtls-secret")
+
+	if _, err := loadOrGeneratePKI(t.Context(), dir, "podman"); err != nil {
+		t.Fatalf("loadOrGeneratePKI: %v", err)
+	}
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(data, []byte("PRIVATE KEY")) {
+			t.Errorf("%s holds a plaintext private key; none may be written to disk", filepath.Base(path))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertCaddyReadablePKI(t, dir)
+}
+
+func assertCaddyReadablePKI(t *testing.T, dir string) {
+	t.Helper()
+
+	publicDir := filepath.Join(dir, "public")
+	dirInfo, err := os.Stat(publicDir)
+	if err != nil {
+		t.Fatalf("stat %s: %v", publicDir, err)
+	}
+	if dirInfo.Mode().Perm()&0o055 != 0o055 {
+		t.Errorf("public dir mode %v: must be traversable by the Caddy user", dirInfo.Mode().Perm())
+	}
+
+	srvInfo, err := os.Stat(filepath.Join(publicDir, "server.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if srvInfo.Mode().Perm()&0o044 != 0o044 {
+		t.Errorf("server.key mode %v: the encrypted key must be readable by the Caddy user", srvInfo.Mode().Perm())
+	}
+
+	caInfo, err := os.Stat(filepath.Join(dir, "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caInfo.Mode().Perm()&0o077 != 0 {
+		t.Errorf("ca.key mode %v: the CA signing key must stay private to its owner", caInfo.Mode().Perm())
+	}
+}
+
+func TestGenerateServerCert_ServerAndClientAuth(t *testing.T) {
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("generateCA: %v", err)
+	}
+	_, certDER, err := generateServerCert(caCert, caKey, []string{"cp.example.com"})
+	if err != nil {
+		t.Fatalf("generateServerCert: %v", err)
+	}
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	if leaf.Subject.CommonName != workerconstants.WorkerGatewayName {
+		t.Errorf("CN = %q, want %q", leaf.Subject.CommonName, workerconstants.WorkerGatewayName)
+	}
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageServerAuth, "cp.example.com")
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageClientAuth, "")
+}
+
+func TestSignWorkerCSR_ServerAndClientAuthWithSAN(t *testing.T) {
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("generateCA: %v", err)
+	}
+
+	sans := []string{"w1.example.com"}
+	certPEM, _, _, err := signWorkerCSR(makeTestCSR(t), "w1", sans, caCert, caKey)
+	if err != nil {
+		t.Fatalf("signWorkerCSR: %v", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	if leaf.Subject.CommonName != "w1" {
+		t.Errorf("CN = %q, want w1 (the worker recovers its name from it)", leaf.Subject.CommonName)
+	}
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageServerAuth, "w1.example.com")
+	assertVerifiesFor(t, leaf, caCert, x509.ExtKeyUsageClientAuth, "")
+}
+
+// TestSignWorkerCSR_IgnoresCSRSANs guards the trust boundary: the gateway decides
+// the SANs, so a worker cannot request another node's name in its CSR.
+func TestSignWorkerCSR_IgnoresCSRSANs(t *testing.T) {
+	caKey, caCert, _, err := generateCA()
+	if err != nil {
+		t.Fatalf("generateCA: %v", err)
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject:  pkix.Name{Organization: []string{"system:workers"}},
+		DNSNames: []string{"control-plane.example.com"},
+	}, key)
+	if err != nil {
+		t.Fatalf("CreateCertificateRequest: %v", err)
+	}
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+
+	certPEM, _, _, err := signWorkerCSR(csrPEM, "w1", []string{"w1.example.com"}, caCert, caKey)
+	if err != nil {
+		t.Fatalf("signWorkerCSR: %v", err)
+	}
+	block, _ := pem.Decode(certPEM)
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	if !slices.Equal(leaf.DNSNames, []string{"w1.example.com"}) {
+		t.Errorf("DNSNames = %v, want only the gateway-chosen SAN", leaf.DNSNames)
+	}
+}
+
+func TestWorkerCertDNSNames(t *testing.T) {
+	meta := map[string]string{workerconstants.MetaKeyDomainSuffix: "10.0.0.5.nip.io"}
+
+	tests := []struct {
+		name    string
+		runtime types.RuntimeType
+		meta    map[string]string
+		want    []string
+	}{
+		{"podman with domain suffix", types.RuntimeTypePodman, meta, []string{"w1.10.0.0.5.nip.io"}},
+		{"podman without domain suffix", types.RuntimeTypePodman, map[string]string{}, nil},
+		{"podman nil metadata", types.RuntimeTypePodman, nil, nil},
+		{"openshift is not supported yet", types.RuntimeTypeOpenShift, meta, nil},
+		{"podman with wildcard domain suffix", types.RuntimeTypePodman, map[string]string{workerconstants.MetaKeyDomainSuffix: "*.example.com"}, nil},
+		{"podman with leading dot domain suffix", types.RuntimeTypePodman, map[string]string{workerconstants.MetaKeyDomainSuffix: ".example.com"}, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := workerCertDNSNames("w1", tc.runtime, tc.meta)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("workerCertDNSNames = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// assertVerifiesFor fails unless leaf chains to ca for the given usage and, when
+// host is non-empty, is valid for that hostname.
+func assertVerifiesFor(t *testing.T, leaf, ca *x509.Certificate, usage x509.ExtKeyUsage, host string) {
+	t.Helper()
+
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{usage}, DNSName: host}); err != nil {
+		t.Errorf("cert does not verify for usage %v host %q: %v", usage, host, err)
+	}
+}
+
+// TestCatalogCaddyfile_PrivateIngressUsesGatewayPKI keeps the Caddyfile paths in
+// step with the file names the gateway writes.
+func TestCatalogCaddyfile_PrivateIngressUsesGatewayPKI(t *testing.T) {
+	raw, err := assets.CatalogFS.ReadFile("catalog/podman/Caddyfile.tmpl")
+	if err != nil {
+		t.Fatalf("read catalog Caddyfile: %v", err)
+	}
+
+	want := []string{
+		"get_certificate encrypted_file",
+		"cert        " + filepath.Join(workerconstants.GatewayPKIDir, "server.crt"),
+		"key         " + filepath.Join(workerconstants.GatewayPKIDir, "server.key"),
+		"secret_file /etc/secret/catalog-mtls-encryption-secret/mtls-encryption-key",
+		"trusted_ca_cert_file " + filepath.Join(workerconstants.GatewayPKIDir, "ca.crt"),
+	}
+	for _, s := range want {
+		if !strings.Contains(string(raw), s) {
+			t.Errorf("catalog Caddyfile.tmpl does not reference %q", s)
+		}
+	}
+	if strings.Contains(string(raw), ".pem") {
+		t.Error("catalog Caddyfile.tmpl must not reference a plaintext key file")
 	}
 }
 

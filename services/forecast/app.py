@@ -6,10 +6,10 @@ This file is responsible only for:
   - Middleware (request-ID injection)
   - Exception handler registration
   - The health check
-
-The connector and forecast routers are added by later stories.
+  - Connector and forecasting API routes
 """
 
+import re
 import uuid
 from contextlib import asynccontextmanager
 
@@ -27,10 +27,12 @@ from forecast.settings import settings
 
 set_log_level(settings.common.app.log_level)
 
-from forecast.db.connection import close_db_connections
-from forecast.errors import register_exception_handlers
-from forecast.triton_client.triton import triton_url_check
-from forecast.utils.encryption import validate_cipher
+from forecast.api.v1 import connectors, forecast as forecast_routes  # noqa: E402
+from forecast.db.connection import check_db_configured, close_db_connections  # noqa: E402
+from forecast.errors import register_exception_handlers  # noqa: E402
+from forecast.triton_client.triton import triton_url_check  # noqa: E402
+from forecast.utils.encryption import validate_cipher  # noqa: E402
+from forecast.utils.http_client import close_client  # noqa: E402
 
 logger = get_logger("forecast_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -51,12 +53,27 @@ async def lifespan(app: FastAPI):
     # Fail fast: without a valid key the service cannot store connector secrets, so
     # the error stops startup instead of surfacing on the first connector request.
     validate_cipher()
+    check_db_configured()
+
+    # Cap thread limiter to DB pool max capacity so pool exhaustion queues in AnyIO
+    try:
+        import anyio.to_thread
+
+        anyio.to_thread.current_default_thread_limiter().total_tokens = (
+            settings.database.pool_size + settings.database.max_overflow
+        )
+    except Exception as exc:
+        logger.warning(f"Could not set thread limiter tokens: {exc}")
 
     triton_url_check()
 
     yield
 
     logger.info("Forecast service shutting down...")
+    try:
+        await close_client()
+    except Exception as exc:
+        logger.error(f"Error closing the Triton client: {exc}", exc_info=True)
     try:
         close_db_connections()
     except Exception as exc:
@@ -74,6 +91,14 @@ tags_metadata = [
         "name": "health",
         "description": "Health check and service status",
     },
+    {
+        "name": "connectors",
+        "description": "Source database connectors and training configuration",
+    },
+    {
+        "name": "forecast",
+        "description": "Tabular forecasting and inference endpoints",
+    },
 ]
 
 app = FastAPI(
@@ -88,16 +113,23 @@ app = FastAPI(
 )
 
 register_exception_handlers(app)
+app.include_router(connectors.router, prefix="/v1/connectors", tags=["connectors"], include_in_schema=False)
+app.include_router(forecast_routes.router, prefix="/v1/forecast", tags=["forecast"])
 
 
 # ------------------------------------------------------------------ #
 # Middleware                                                          #
 # ------------------------------------------------------------------ #
 
+_REQUEST_ID_REGEX = re.compile(r"^[\w\-]{1,128}$")
+
+
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     """Extract or generate a request ID, and return it in the X-Request-ID header."""
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id or not _REQUEST_ID_REGEX.fullmatch(request_id):
+        request_id = str(uuid.uuid4())
     set_request_id(request_id)
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id

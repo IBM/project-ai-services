@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -14,11 +15,11 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
-	"github.com/project-ai-services/ai-services/internal/pkg/worker/gateway"
 	"github.com/project-ai-services/ai-services/internal/pkg/worker/registry"
 )
 
@@ -28,6 +29,8 @@ const (
 	// workerNameMaxLen is the maximum allowed length for a worker name after trimming whitespace.
 	workerNameMaxLen = 64
 )
+
+var rfc1123LabelRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?$`)
 
 // WorkerHandler handles worker management endpoints.
 type WorkerHandler struct {
@@ -87,6 +90,11 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 
 		return
 	}
+	if !rfc1123LabelRegex.MatchString(req.WorkerName) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "worker name must be a valid DNS label (alphanumeric and hyphens only, start and end with alphanumeric)"})
+
+		return
+	}
 
 	// "Local" is reserved for the catalog-machine worker registered by the
 	// configure flow. It is only allowed when LOCAL_WORKER=true, meaning this
@@ -135,7 +143,7 @@ func (h *WorkerHandler) CreateWorker(c *gin.Context) {
 
 func (h *WorkerHandler) gatewayAddress(ctx context.Context) (string, error) {
 	if h.runtimeType == types.RuntimeTypeOpenShift {
-		host, err := gateway.GatewayRouteHost(ctx)
+		host, err := catalogutils.GatewayRouteHost(ctx)
 		if err != nil {
 			return "", err
 		}

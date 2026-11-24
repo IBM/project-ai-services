@@ -1,7 +1,7 @@
 ## Web / runtime
 fastapi==0.135.3
 psutil==7.2.2
-pydantic==2.14.1
+pydantic==2.14.4
 pydantic-settings==2.16.1
 python-multipart==0.0.32
 requests==2.34.2
@@ -13,7 +13,7 @@ uvloop==0.22.1
 psycopg2==2.9.11
 
 ## Search / embeddings
-cohere==7.0.3
+cohere==7.3.2
 numpy==2.4.4
 opensearch-py==3.2.0
 tqdm==4.70.1
@@ -24,8 +24,8 @@ sentence-splitter==1.4
 spacy==3.8.7
 # Japanese model only — requires sudachipy (built in prebuilder) + sudachidict-core
 https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl
-SudachiDict-core==20260723
-SudachiPy==0.6.11
+SudachiDict-core==20261015
+SudachiPy==0.7.0
 
 ## Documents
 pypdfium2==5.14.0
