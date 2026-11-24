@@ -1,0 +1,25 @@
+@use "carbonTokens" as *;
+
+.statusTagError {
+  :global(svg) {
+    fill: $support-error;
+  }
+}
+
+.statusTagSuccess {
+  :global(svg) {
+    fill: $support-success;
+  }
+}
+
+.statusTagInfo {
+  :global(svg) {
+    fill: $support-info;
+  }
+}
+
+.statusTagSecondary {
+  :global(svg) {
+    fill: $text-secondary;
+  }
+}

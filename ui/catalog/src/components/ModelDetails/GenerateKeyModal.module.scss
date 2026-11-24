@@ -1,0 +1,23 @@
+@use "carbonTokens" as *;
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-06;
+}
+
+.warning {
+  max-inline-size: 100%;
+}
+
+.keyRow {
+  display: flex;
+  align-items: center;
+  gap: $spacing-05;
+}
+
+.keyField {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
