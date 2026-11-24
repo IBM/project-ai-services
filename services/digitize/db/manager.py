@@ -22,15 +22,12 @@ from digitize.db.models import (
 from digitize.db.connection import get_db_session
 from digitize.models import JobStatus, DocStatus
 from digitize.connectors.models import ConnectorStatus, SyncLogStatus, LAST_SYNC_ERROR_PREFIX
+from digitize.settings import settings
 
 logger = get_logger("db_repository")
 
-# Retention period for sync logs and terminal connector jobs.
-SYNC_HISTORY_RETENTION = timedelta(days=1)
-
 _TERMINAL_JOB_STATUSES = (
     JobStatus.COMPLETED.value,
-    JobStatus.COMPLETED_WITH_ERRORS.value,
     JobStatus.FAILED.value,
     JobStatus.CANCELLED.value,
 )
@@ -1365,6 +1362,30 @@ class DatabaseManager:
             raise
 
     @staticmethod
+    def _evict_sync_history(session, cutoff: datetime, connector_id: Optional[str] = None) -> tuple[int, int]:
+        """
+        Delete terminal connector jobs and sync logs older than `cutoff` within `session`.
+
+        Sync logs are limited to `connector_id` when given, otherwise all connectors.
+        Returns (jobs_deleted, logs_deleted).
+        """
+        job_res = cast(
+            CursorResult,
+            session.execute(
+                delete(Job).where(
+                    Job.source == JobSource.CONNECTOR.value,
+                    Job.status.in_(_TERMINAL_JOB_STATUSES),
+                    Job.submitted_at < cutoff,
+                )
+            ),
+        )
+        log_stmt = delete(ConnectorSyncLog).where(ConnectorSyncLog.started_at < cutoff)
+        if connector_id is not None:
+            log_stmt = log_stmt.where(ConnectorSyncLog.connector_id == connector_id)
+        log_res = cast(CursorResult, session.execute(log_stmt))
+        return (job_res.rowcount or 0), (log_res.rowcount or 0)
+
+    @staticmethod
     def insert_sync_log(
         connector_id: str,
         started_at: Optional[datetime] = None,
@@ -1397,20 +1418,9 @@ class DatabaseManager:
                 logger.debug(f"insert_sync_log: connector={connector_id!r} seq={seq}")
 
                 # Evict sync logs & terminal connector jobs older than retention window together
-                cutoff = (started_at or datetime.now(timezone.utc)) - SYNC_HISTORY_RETENTION
-                session.execute(
-                    delete(Job).where(
-                        Job.source == JobSource.CONNECTOR.value,
-                        Job.status.in_(_TERMINAL_JOB_STATUSES),
-                        Job.submitted_at < cutoff,
-                    )
-                )
-                session.execute(
-                    delete(ConnectorSyncLog).where(
-                        ConnectorSyncLog.connector_id == connector_id,
-                        ConnectorSyncLog.started_at < cutoff,
-                    )
-                )
+                retention = timedelta(days=settings.digitize.connector.sync_history_retention_days)
+                cutoff = (started_at or datetime.now(timezone.utc)) - retention
+                DatabaseManager._evict_sync_history(session, cutoff, connector_id)
                 return seq
         except SQLAlchemyError as e:
             logger.error(f"DB error in insert_sync_log({connector_id}): {e}", exc_info=True)
@@ -1420,34 +1430,16 @@ class DatabaseManager:
     def prune_all_sync_history(cutoff: Optional[datetime] = None) -> int:
         """
         Delete terminal connector jobs and sync logs older than the retention
-        window (1 day) across all connectors. Returns total deleted rows.
+        window across all connectors. Returns total deleted rows.
         """
         try:
             with get_db_session() as session:
-                cutoff = cutoff or (datetime.now(timezone.utc) - SYNC_HISTORY_RETENTION)
-                job_res = cast(
-                    CursorResult,
-                    session.execute(
-                        delete(Job).where(
-                            Job.source == JobSource.CONNECTOR.value,
-                            Job.status.in_(_TERMINAL_JOB_STATUSES),
-                            Job.submitted_at < cutoff,
-                        )
-                    ),
-                )
-                log_res = cast(
-                    CursorResult,
-                    session.execute(
-                        delete(ConnectorSyncLog).where(
-                            ConnectorSyncLog.started_at < cutoff,
-                        )
-                    ),
-                )
-                total = (job_res.rowcount or 0) + (log_res.rowcount or 0)
+                retention = timedelta(days=settings.digitize.connector.sync_history_retention_days)
+                cutoff = cutoff or (datetime.now(timezone.utc) - retention)
+                jobs_deleted, logs_deleted = DatabaseManager._evict_sync_history(session, cutoff)
+                total = jobs_deleted + logs_deleted
                 if total:
-                    logger.info(
-                        f"prune_all_sync_history: evicted {log_res.rowcount} sync log(s) and {job_res.rowcount} job(s)"
-                    )
+                    logger.info(f"prune_all_sync_history: evicted {logs_deleted} sync log(s) and {jobs_deleted} job(s)")
                 return total
         except SQLAlchemyError as e:
             logger.error(f"DB error in prune_all_sync_history: {e}", exc_info=True)

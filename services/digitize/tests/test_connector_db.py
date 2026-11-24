@@ -833,5 +833,19 @@ class TestPruneAllSyncHistory:
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             assert DatabaseManager.prune_all_sync_history() == 0
 
+    def test_respects_custom_retention_setting(self):
+        session = MagicMock()
+        job_res = MagicMock()
+        job_res.rowcount = 1
+        log_res = MagicMock()
+        log_res.rowcount = 1
+        session.execute.side_effect = [job_res, log_res]
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)), \
+             patch("digitize.db.manager.settings.digitize.connector.sync_history_retention_days", 7):
+            total = DatabaseManager.prune_all_sync_history()
+        assert total == 2
+        assert session.execute.call_count == 2
+
 
 # Made with Bob
