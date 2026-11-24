@@ -8,6 +8,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/stretchr/testify/assert"
@@ -23,12 +25,16 @@ func newTestPlan(t *testing.T, componentType, providerID string) *types.LocalPla
 	scoped, err := provider.WithRuntime(runtimeTypes.RuntimeTypeOpenShift.String())
 	require.NoError(t, err)
 
+	id := uuid.New()
+
 	return &types.LocalPlan{
-		ComponentID: uuid.New(),
+		ComponentID: id,
 		Req:         apimodels.CreateModelRequest{ComponentType: componentType, ProviderID: providerID},
 		Runtime:     mock.New(runtimeTypes.RuntimeTypeOpenShift),
 		Catalog:     scoped,
-		Values:      map[string]any{},
+		Values: map[string]any{
+			catalogconstants.InstanceSlugKey: catalogutils.GenerateInstanceSlug(id.String()),
+		},
 	}
 }
 
