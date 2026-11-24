@@ -4,16 +4,27 @@ import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
 import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import { ModelCard, ModelCardSkeleton } from "@/components/ModelCard";
+import { ModelsTable, ModelDetailPanel, ModelDetails } from "@/components";
 import { useModels } from "@/hooks/useModels";
-import { ModelsTable, ModelDetails } from "@/components";
 import styles from "./Models.module.scss";
 
 const Models = () => {
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ModelDeploymentRow | null>(
     null,
   );
   const { models, isLoading, error, refetch } = useModels();
+
+  const handleCardClick = (id: string) => {
+    setSelectedModelId(id);
+    setIsPanelOpen(true);
+  };
+
+  const handleClosePanel = () => {
+    setIsPanelOpen(false);
+  };
 
   const handleTabChange = (evt: { selectedIndex: number }) => {
     setSelectedTabIndex(evt.selectedIndex);
@@ -80,6 +91,7 @@ const Models = () => {
                     certifiedBy={model.certified_by}
                     providers={model.providers}
                     onDeploy={() => {}}
+                    onLearnMore={handleCardClick}
                   />
                 ))}
               </div>
@@ -87,6 +99,12 @@ const Models = () => {
           </TabPanel>
         </TabPanels>
       </Tabs>
+
+      <ModelDetailPanel
+        open={isPanelOpen}
+        onClose={handleClosePanel}
+        modelId={selectedModelId}
+      />
     </div>
   );
 };

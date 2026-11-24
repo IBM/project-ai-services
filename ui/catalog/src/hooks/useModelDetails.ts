@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { fetchCatalogModel, fetchModelDeployment } from "@/api/models.api";
+import {
+  fetchCatalogModelDetails,
+  fetchModelDeployment,
+} from "@/api/models.api";
 import type { ModelDeploymentDetail } from "@/types/api.types";
 
 interface ModelDetailsState {
@@ -23,7 +26,7 @@ export const useModelDetails = (id: string) => {
         setState({ id, detail: data, certifiedBy: null, error: null });
 
         try {
-          const catalogModel = await fetchCatalogModel(data.model);
+          const catalogModel = await fetchCatalogModelDetails(data.model);
           if (!cancelled) {
             setState((prev) =>
               prev?.id === id
