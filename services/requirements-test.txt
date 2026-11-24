@@ -50,13 +50,15 @@ cryptography>=42.0.0
 mapepire-python==2.0.0
 pyarrow>=14.0.0
 
-# Training worker (required by forecast). Keep in step with forecast/requirements.txt.
+# Training worker (required by forecast). Keep in step with forecast/requirements.txt, except for
+# CatBoost: the ppc64le wheels (1.2.6 and 1.2.7) need numpy<2.0, and this file pins numpy 2.x for
+# digitize, so CatBoost cannot be installed here. The tests that need it skip themselves, and the
+# service image (which has no numpy pin) installs it.
 pandas>=2.0.0
 scipy>=1.11.0
 scikit-learn>=1.3.0
 lightgbm>=4.0.0
-catboost==1.2.7
-autogluon.tabular[lightgbm,catboost]>=1.1.0
+autogluon.tabular[lightgbm]>=1.1.0
 onnx>=1.16.0
 onnxmltools>=1.12.0
 onnxruntime>=1.18.0
