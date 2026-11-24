@@ -4,7 +4,7 @@ import styles from "./ServiceCard.module.scss";
 const ServiceCardSkeleton = () => {
   return (
     <div className={styles.cardWrapper}>
-      <Tile className={`${styles.productiveCard} ${styles.skeletonCard}`}>
+      <Tile className={styles.productiveCard}>
         <div className={styles.cardHeader}>
           <div className={styles.headerTitleBlock}>
             <SkeletonText heading width="60%" />
@@ -13,7 +13,7 @@ const ServiceCardSkeleton = () => {
         <div className={styles.description}>
           <SkeletonText paragraph lineCount={2} width="100%" />
         </div>
-        <div className={styles.skeletonActions}>
+        <div>
           <SkeletonPlaceholder style={{ width: "100%", height: "48px" }} />
         </div>
       </Tile>

@@ -623,21 +623,10 @@ export interface ModelWorker {
   runtime_type: string;
 }
 
-export interface ModelProfileParams {
-  resources?: {
-    memory?: number;
-    accelerators?: Record<string, number>;
-  };
-  maxModelLen?: number;
-  maxBatchSize?: number;
-  shmSize?: string;
-}
-
 export interface ModelProfile {
   id: string;
   name: string;
   description: string;
-  params?: ModelProfileParams;
 }
 
 export interface ModelComponentType {
@@ -684,9 +673,8 @@ export interface ModelDeployment {
   provider: ModelProvider;
   worker: ModelWorker | null;
   model: string;
-  profile: ModelProfile | null;
-  api_base?: string;
-  project_id?: string;
+  profile?: ModelProfile | null;
+  params?: Record<string, unknown>;
   status: string;
   message?: string;
   connected_services: number;
@@ -697,4 +685,25 @@ export interface ModelDeployment {
 export interface ModelDeploymentsListResponse {
   data: ModelDeployment[];
   pagination: PaginationMetadata;
+}
+
+export interface ModelApplication {
+  id: string;
+  name: string;
+}
+
+export interface ModelEndpoint {
+  type: string;
+  url: string;
+}
+
+export interface ModelDeploymentDetail extends ModelDeployment {
+  endpoints?: ModelEndpoint[];
+  applications?: ModelApplication[];
+}
+
+export interface GenerateModelKeyResponse {
+  key: string;
+  type: string;
+  model: string;
 }

@@ -41,6 +41,11 @@
   padding: $spacing-07;
 }
 
+.loadingTable {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .tableColumn {
   margin: 0;
 }

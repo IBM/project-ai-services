@@ -5,6 +5,7 @@ import SolutionCard from "@/components/SolutionCard";
 import SolutionDetailPanel from "@/components/SolutionDetailPanel";
 import { useUseCases } from "@/hooks/useUseCases";
 import { normalizeString } from "@/utils/string";
+import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 
 // State type definition
 interface FilterState {
@@ -464,8 +465,8 @@ const UseCaseReferences = () => {
   return (
     <>
       <CatalogBrowseLayout
-        title="Use case references"
-        subtitle="Ready-to-explore use cases based on real-world AI solutions to help you envision how AI can solve common business problems—and accelerate your AI journey."
+        title={PAGE_TITLES.USE_CASE_REFERENCES}
+        subtitle={PAGE_SUBTITLES.USE_CASE_REFERENCES}
         searchValue={searchValue}
         onSearchChange={(value) =>
           dispatch({ type: "SET_SEARCH", payload: value })

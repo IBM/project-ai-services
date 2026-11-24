@@ -44,9 +44,9 @@ import type { ConnectorField } from "@/components/AddDataSourceModal/schemaUtils
 import ConnectorFieldLabel from "@/components/AddDataSourceModal/ConnectorFieldLabel";
 import { normalizePrivateKey } from "@/components/AddDataSourceModal/datasourceTransform";
 import { calculateUptime } from "@/utils/time";
+import { DEPLOYMENT_STATUS } from "@/constants";
 import styles from "./ConnectorDetailsPanel.module.scss";
-import { STATUS_CONFIG } from "@/components/Table/components/CellRenderers";
-import sharedStyles from "@/components/Table/table.shared.module.scss";
+import StatusTag from "@/components/StatusTag";
 
 export interface ConnectorDetailsPanelProps {
   open: boolean;
@@ -319,11 +319,6 @@ const ConnectorDetailsPanel = ({
       allFields,
     );
     const { status } = state.detail;
-    const statusCfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? {
-      tagType: "gray" as const,
-      icon: undefined,
-      className: sharedStyles.statusTagSecondary,
-    };
 
     return (
       <Section level={3} className={styles.section}>
@@ -341,14 +336,7 @@ const ConnectorDetailsPanel = ({
         )}
         {connectionField &&
           renderReadOnlyField(connectionField.label, connectionField.value)}
-        <Tag
-          type={statusCfg.tagType}
-          size="md"
-          renderIcon={statusCfg.icon}
-          className={`${styles.statusTag} ${statusCfg.className}`}
-        >
-          {status}
-        </Tag>
+        <StatusTag status={status} className={styles.statusTag} />
       </Section>
     );
   };
@@ -362,7 +350,7 @@ const ConnectorDetailsPanel = ({
     // for any connector type that does not yet emit a structured prefix.
     const hasAuthError =
       authSectionState.kind === "button" &&
-      state.detail.status !== "connected" &&
+      state.detail.status !== DEPLOYMENT_STATUS.CONNECTED &&
       !!state.detail.message &&
       (errorCheckType === "auth" || errorCheckType === null);
 

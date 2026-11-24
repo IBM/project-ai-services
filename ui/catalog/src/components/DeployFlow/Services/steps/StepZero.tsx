@@ -8,7 +8,7 @@ import {
 } from "@carbon/react";
 import { Badge, CheckmarkFilled } from "@carbon/icons-react";
 import { useServices } from "@/hooks/useServices";
-import styles from "../ServicesDeployFlow.module.scss";
+import styles from "../../Shared/DeployFlow.shared.module.scss";
 
 interface StepZeroProps {
   title: string;
