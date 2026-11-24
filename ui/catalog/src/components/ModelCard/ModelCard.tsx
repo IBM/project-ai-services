@@ -49,6 +49,7 @@ const ModelCard = ({
         secondaryButtonText="Deploy"
         onSecondaryButtonClick={() => onDeploy?.(id)}
         onClick={() => onLearnMore?.(id)}
+        clickZone="two"
         className={styles.productiveCard}
       >
         <div className={styles.cardHeader}>
