@@ -18,7 +18,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
 	bundlesvc "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/bundle"
 	connectorsync "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/connector_sync"
+	modelsync "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/sync"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/sync"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -114,9 +116,14 @@ func startBackgroundServices(
 	connectorSyncJob := newConnectorSyncJob(ctx, connectorRepo, catalogProvider, encryptionKey)
 	connectorSyncJob.Start(ctx)
 
+	modelSyncService := modelsync.New(compRepo, connectorRepo, catalogProvider, catalogclient.NewLiteLLMClient(),
+		modelsync.DefaultModelSyncInterval, modelsync.DefaultMaxConsecutiveFailures)
+	modelSyncService.Start(ctx)
+
 	return func(ctx context.Context) {
 		syncService.Stop(ctx)
 		connectorSyncJob.Stop(ctx)
+		modelSyncService.Stop(ctx)
 	}, nil
 }
 
