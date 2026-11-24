@@ -21,6 +21,8 @@ export const DEPLOYMENT_STATUS = {
   DELETING: "Deleting",
   STOPPED: "Stopped",
   ERROR: "Error",
+  CONNECTED: "connected",
+  OFFLINE: "offline",
 } as const;
 
 export type DeploymentStatus =

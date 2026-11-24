@@ -44,6 +44,7 @@ import type { ConnectorField } from "@/components/AddDataSourceModal/schemaUtils
 import ConnectorFieldLabel from "@/components/AddDataSourceModal/ConnectorFieldLabel";
 import { normalizePrivateKey } from "@/components/AddDataSourceModal/datasourceTransform";
 import { calculateUptime } from "@/utils/time";
+import { DEPLOYMENT_STATUS } from "@/constants";
 import styles from "./ConnectorDetailsPanel.module.scss";
 import StatusTag from "@/components/StatusTag";
 
@@ -349,7 +350,7 @@ const ConnectorDetailsPanel = ({
     // for any connector type that does not yet emit a structured prefix.
     const hasAuthError =
       authSectionState.kind === "button" &&
-      state.detail.status !== "connected" &&
+      state.detail.status !== DEPLOYMENT_STATUS.CONNECTED &&
       !!state.detail.message &&
       (errorCheckType === "auth" || errorCheckType === null);
 
