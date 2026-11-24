@@ -385,23 +385,24 @@ export const ServicesDeployFlow = ({
   const shellError = onLoadingStep ? (error ?? serviceSchemaError) : null;
   const hasLlmError = onLoadingStep ? !!llmError : false;
 
+  // The configure step is always the step just before the optional datasource step.
+  const CONFIGURE_STEP = hasDatasourceStep ? LAST_STEP - 1 : LAST_STEP;
+
   const isPrimaryDisabled =
     (state.currentStep === 0 && !state.selectedServiceId) ||
+    shellIsLoading ||
     !!shellError ||
-    (isLastStep && !hasDatasourceStep && state.isEditing) ||
-    (isLastStep && !hasDatasourceStep && !areAllRequiredFieldsFilled) ||
-    (isLastStep &&
-      !hasDatasourceStep &&
-      (hasStep2SchemaError || hasLlmError)) ||
+    (state.currentStep === CONFIGURE_STEP &&
+      (hasStep2SchemaError ||
+        hasLlmError ||
+        state.isEditing ||
+        !areAllRequiredFieldsFilled)) ||
     (isLastStep && hasDatasourceStep && state.hasDatasourceStepError);
 
   const stepsWithCompletion = [
     { ...steps[0], complete: !!state.selectedServiceId },
     ...steps.slice(1),
   ];
-
-  // The configure step is always the step just before the optional datasource step.
-  const CONFIGURE_STEP = hasDatasourceStep ? LAST_STEP - 1 : LAST_STEP;
 
   const handleWorkerErrorReset = useCallback(
     () =>
