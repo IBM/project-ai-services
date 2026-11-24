@@ -16,9 +16,10 @@ export const useGenerateModelKey = (modelId: string) => {
   }, []);
 
   const open = () => {
-    setIsOpen(true);
     setApiKey(null);
     setError(null);
+    setIsGenerating(false);
+    setIsOpen(true);
   };
 
   const generate = async () => {
@@ -53,9 +54,6 @@ export const useGenerateModelKey = (modelId: string) => {
   const close = () => {
     abortControllerRef.current?.abort();
     setIsOpen(false);
-    setIsGenerating(false);
-    setApiKey(null);
-    setError(null);
   };
 
   return { isOpen, isGenerating, apiKey, error, open, generate, close };

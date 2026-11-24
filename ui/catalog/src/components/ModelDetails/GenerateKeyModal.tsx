@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  ActionableNotification,
   CopyButton,
   InlineNotification,
   Modal,
@@ -66,14 +65,12 @@ const GenerateKeyModal = ({
     >
       <div className={styles.modalBody}>
         {error ? (
-          <ActionableNotification
+          <InlineNotification
             kind="error"
             title="Key generation failed:"
             subtitle={error}
             lowContrast
             hideCloseButton
-            actionButtonLabel="Retry"
-            onActionButtonClick={onRetry}
           />
         ) : isKeyReady && apiKey ? (
           <>
@@ -109,7 +106,7 @@ const GenerateKeyModal = ({
                 <CopyButton
                   align="left"
                   size="xs"
-                  iconDescription="copy"
+                  iconDescription="Copy"
                   feedback="Copied"
                   onClick={() => handleCopy(apiKey)}
                 />
