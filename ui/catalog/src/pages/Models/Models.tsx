@@ -24,9 +24,6 @@ const Models = () => {
 
   const handleClosePanel = () => {
     setIsPanelOpen(false);
-    setTimeout(() => {
-      setSelectedModelId(null);
-    }, 300);
   };
 
   const handleTabChange = (evt: { selectedIndex: number }) => {
