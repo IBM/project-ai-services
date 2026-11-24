@@ -29,11 +29,6 @@ const (
 	nameField                   = "name"
 	colorYellow                 = "3"
 	colorGreen                  = "2"
-	spyreOperatorPackage        = "spyre-operator"
-	spyreClusterPolicyName      = "spyreclusterpolicy"
-	spyreGroup                  = "spyre.ibm.com"
-	spyreVersion                = "v1alpha1"
-	spyreKind                   = "SpyreClusterPolicy"
 )
 
 // upgradeVersions holds the current and available version information for display.
@@ -306,32 +301,32 @@ func reinstallSpyreOperator(ctx context.Context, c *openshift.OpenshiftClient, s
 func deleteSpyreClusterPolicy(ctx context.Context, c *openshift.OpenshiftClient, s *spinner.Spinner) error {
 	scp := &unstructured.Unstructured{}
 	scp.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   spyreGroup,
-		Version: spyreVersion,
-		Kind:    spyreKind,
+		Group:   constants.SpyreGroup,
+		Version: constants.SpyreVersion,
+		Kind:    constants.SpyreKind,
 	})
-	scp.SetName(spyreClusterPolicyName)
+	scp.SetName(constants.SpyreClusterPolicyName)
 
-	s.UpdateMessage("Deleting existing SpyreClusterPolicy...")
+	s.UpdateMessage(fmt.Sprintf("Deleting existing %s...", constants.SpyreKind))
 	if err := c.Client.Delete(ctx, scp); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("missing required permissions to delete SpyreClusterPolicy")
+			return fmt.Errorf("missing required permissions to delete %s", constants.SpyreKind)
 		}
 
-		return fmt.Errorf("failed to delete SpyreClusterPolicy: %w", err)
+		return fmt.Errorf("failed to delete %s: %w", constants.SpyreKind, err)
 	}
 
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
-		err := c.Client.Get(pollCtx, client.ObjectKey{Name: spyreClusterPolicyName}, scp)
+		err := c.Client.Get(pollCtx, client.ObjectKey{Name: constants.SpyreClusterPolicyName}, scp)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
 			if apierrors.IsForbidden(err) {
-				return false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
+				return false, fmt.Errorf("missing required permissions to get %s", constants.SpyreKind)
 			}
 
 			return false, err
@@ -344,6 +339,15 @@ func deleteSpyreClusterPolicy(ctx context.Context, c *openshift.OpenshiftClient,
 func deleteOperatorSubscriptionAndCSV(ctx context.Context, c *openshift.OpenshiftClient, sub *operatorsv1alpha1.Subscription, s *spinner.Spinner) error {
 	s.UpdateMessage(fmt.Sprintf("Removing previous %s installation...", getOperatorLabel(sub.Spec.Package)))
 
+	// Delete Subscription first so OLM does not reconcile/recreate the old CSV in between.
+	if err := c.Client.Delete(ctx, sub); err != nil && !apierrors.IsNotFound(err) {
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("missing required permissions to delete subscription %s", sub.Name)
+		}
+
+		return fmt.Errorf("failed to delete previous subscription %s: %w", sub.Name, err)
+	}
+
 	if sub.Status.InstalledCSV != "" {
 		csv := &operatorsv1alpha1.ClusterServiceVersion{}
 		csv.SetName(sub.Status.InstalledCSV)
@@ -355,14 +359,6 @@ func deleteOperatorSubscriptionAndCSV(ctx context.Context, c *openshift.Openshif
 
 			return fmt.Errorf("failed to delete previous ClusterServiceVersion %s: %w", sub.Status.InstalledCSV, err)
 		}
-	}
-
-	if err := c.Client.Delete(ctx, sub); err != nil && !apierrors.IsNotFound(err) {
-		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("missing required permissions to delete subscription %s", sub.Name)
-		}
-
-		return fmt.Errorf("failed to delete previous subscription %s: %w", sub.Name, err)
 	}
 
 	return nil

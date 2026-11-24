@@ -6,6 +6,7 @@ import (
 
 	semver "github.com/blang/semver/v4"
 	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -291,19 +292,19 @@ func TestReinstallSpyreOperator(t *testing.T) {
 	t.Run("successfully deletes SCP, CSV, and Subscription", func(t *testing.T) {
 		scp := &unstructured.Unstructured{}
 		scp.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   spyreGroup,
-			Version: spyreVersion,
-			Kind:    spyreKind,
+			Group:   constants.SpyreGroup,
+			Version: constants.SpyreVersion,
+			Kind:    constants.SpyreKind,
 		})
-		scp.SetName(spyreClusterPolicyName)
+		scp.SetName(constants.SpyreClusterPolicyName)
 
 		sub := &operatorsv1alpha1.Subscription{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "spyre-operator",
-				Namespace: "spyre-operator",
+				Name:      constants.SpyreOperatorPackage,
+				Namespace: constants.SpyreOperatorPackage,
 			},
 			Spec: &operatorsv1alpha1.SubscriptionSpec{
-				Package: "spyre-operator",
+				Package: constants.SpyreOperatorPackage,
 				Channel: "stable-v1.3",
 			},
 			Status: operatorsv1alpha1.SubscriptionStatus{
@@ -314,7 +315,7 @@ func TestReinstallSpyreOperator(t *testing.T) {
 		csv := &operatorsv1alpha1.ClusterServiceVersion{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "spyre-operator.v1.3.1",
-				Namespace: "spyre-operator",
+				Namespace: constants.SpyreOperatorPackage,
 			},
 		}
 
@@ -338,11 +339,11 @@ func TestReinstallSpyreOperator(t *testing.T) {
 		// Verify SpyreClusterPolicy is deleted
 		checkSCP := &unstructured.Unstructured{}
 		checkSCP.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   spyreGroup,
-			Version: spyreVersion,
-			Kind:    spyreKind,
+			Group:   constants.SpyreGroup,
+			Version: constants.SpyreVersion,
+			Kind:    constants.SpyreKind,
 		})
-		if err := fakeClient.Get(ctx, clientpkgObjectKey(spyreClusterPolicyName, ""), checkSCP); !apierrors.IsNotFound(err) {
+		if err := fakeClient.Get(ctx, clientpkgObjectKey(constants.SpyreClusterPolicyName, ""), checkSCP); !apierrors.IsNotFound(err) {
 			t.Errorf("expected SpyreClusterPolicy to be deleted, got err: %v", err)
 		}
 
@@ -362,11 +363,11 @@ func TestReinstallSpyreOperator(t *testing.T) {
 	t.Run("succeeds when SCP or CSV already absent", func(t *testing.T) {
 		sub := &operatorsv1alpha1.Subscription{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "spyre-operator",
-				Namespace: "spyre-operator",
+				Name:      constants.SpyreOperatorPackage,
+				Namespace: constants.SpyreOperatorPackage,
 			},
 			Spec: &operatorsv1alpha1.SubscriptionSpec{
-				Package: "spyre-operator",
+				Package: constants.SpyreOperatorPackage,
 			},
 		}
 
