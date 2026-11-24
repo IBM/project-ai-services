@@ -412,6 +412,7 @@ const DeploymentDetails = ({
             : []
         }
         pageActionsOverflowLabel="More actions"
+        fullWidthGrid="xl"
         navItems={[
           { key: "details", label: "Details" },
           { key: "services", label: "Services" },

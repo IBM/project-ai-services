@@ -23,6 +23,7 @@ export interface DetailsLayoutProps {
   subtitle?: ReactNode;
   pageActions?: ComponentProps<typeof PageHeader>["pageActions"];
   pageActionsOverflowLabel?: string;
+  fullWidthGrid?: ComponentProps<typeof PageHeader>["fullWidthGrid"];
   navItems: DetailsLayoutNavItem[];
   activeKey: string;
   onNavChange?: (key: string) => void;
@@ -38,6 +39,7 @@ const DetailsLayout = ({
   subtitle,
   pageActions,
   pageActionsOverflowLabel,
+  fullWidthGrid,
   navItems,
   activeKey,
   onNavChange,
@@ -80,6 +82,7 @@ const DetailsLayout = ({
           ]}
           breadcrumbOverflowAriaLabel="Show more breadcrumbs"
           {...pageActionsProps}
+          fullWidthGrid={fullWidthGrid}
           title={{
             content: title,
             asText: titleAsText,
