@@ -89,6 +89,16 @@ type Resources struct {
 	Storage      int            `yaml:"storage,omitempty" json:"storage,omitempty"`           // Storage in bytes
 }
 
+// DatasourceSettings defines compatibility and lifecycle settings for datasources attached to a service.
+type DatasourceSettings struct {
+	Required           bool     `yaml:"required,omitempty" json:"required"`
+	SupportedProviders []string `yaml:"supported_providers,omitempty" json:"supported_providers,omitempty"`
+	// MaxConnections is the maximum number of datasources that may be attached to the service at any
+	// one time (creation-time and post-creation connections combined). nil means unlimited.
+	// Must be >= 1 when set.
+	MaxConnections *int `yaml:"max_connections,omitempty" json:"max_connections,omitempty"`
+}
+
 // Service represents a deployable AI service.
 type Service struct {
 	ID                string                `yaml:"id" json:"id"`
@@ -99,15 +109,25 @@ type Service struct {
 	Architectures     []string              `yaml:"architectures" json:"architectures"`
 	Dependencies      []DependencyReference `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
 	Standalone        bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
-	AcceptsDatasource bool                  `yaml:"accepts_datasource,omitempty" json:"accepts_datasource,omitempty"`
+	AcceptsDatasource bool                  `yaml:"-" json:"accepts_datasource,omitempty"`
+	Datasource        *DatasourceSettings   `yaml:"datasource,omitempty" json:"datasource,omitempty"`
 	About             *yaml.Node            `yaml:"-" json:"-"`
 }
 
-// UnmarshalYAML extracts the 'about' node manually, insulating it from reflection errors.
+// UnmarshalYAML extracts the 'about' node manually, insulating it from reflection errors,
+// and derives AcceptsDatasource from the presence of the datasource block.
 func (s *Service) UnmarshalYAML(value *yaml.Node) error {
 	type Alias Service
 
-	return decodeWithAbout(value, (*Alias)(s), &s.About)
+	if err := decodeWithAbout(value, (*Alias)(s), &s.About); err != nil {
+		return err
+	}
+
+	if s.Datasource != nil {
+		s.AcceptsDatasource = true
+	}
+
+	return nil
 }
 
 // MarshalJSON implements custom JSON marshaling for Service to properly handle yaml.Node.
@@ -309,6 +329,7 @@ type DeployOptionsService struct {
 	Components        []DeployOptionsComponent `json:"components"`
 	Resources         *Resources               `json:"resources,omitempty"`
 	AcceptsDatasource bool                     `json:"accepts_datasource,omitempty"`
+	Datasource        *DatasourceSettings      `json:"datasource,omitempty"`
 }
 
 // ModelDeployProfile is a hardware profile a model can be deployed with.

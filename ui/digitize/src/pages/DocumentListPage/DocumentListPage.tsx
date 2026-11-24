@@ -373,7 +373,6 @@ const getStatusIcon = (status: string) => {
       return <InProgress size={16} className={styles.statusIconProgress} />;
     case DOC_STATUS.ALREADY_EXISTS:
     case DOC_STATUS.SKIPPED:
-    case DOC_STATUS.COMPLETED_WITH_ERRORS:
       return <CheckmarkFilled size={16} className={styles.statusIconWarning} />;
     case DOC_STATUS.CANCELLED:
       return <ErrorFilled size={16} className={styles.statusIconCancelled} />;

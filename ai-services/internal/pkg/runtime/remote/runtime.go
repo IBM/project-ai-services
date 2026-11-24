@@ -424,7 +424,7 @@ func (r *RemoteRuntime) FindFreeSpyreCards(ctx context.Context) ([]string, error
 	return cards, nil
 }
 
-// GetBaseDir returns the AI services base directory configured on the worker host.
+// GetBaseDir returns the AI Launchpad base directory configured on the worker host.
 func (r *RemoteRuntime) GetBaseDir(ctx context.Context) (string, error) {
 	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_BASE_DIR, nil)
 	if err != nil {
