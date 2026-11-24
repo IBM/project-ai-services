@@ -38,7 +38,7 @@ func (r *NodeLabelsRule) Verify(ctx context.Context) error {
 		return fmt.Errorf("failed to create OpenShift client: %w", err)
 	}
 
-	state, found, err := utils.GetSpyreClusterPolicyState(ctx, client)
+	state, stateFound, err := utils.GetSpyreClusterPolicyState(ctx, client)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Spyre not installed; node-label validation does not apply.
@@ -49,9 +49,9 @@ func (r *NodeLabelsRule) Verify(ctx context.Context) error {
 	}
 
 	// Validate node labels only if SpyreClusterPolicy is in ready state.
-	// When status.state is absent (!found) or set to SpyreStateNoSpyreNodes,
+	// When status.state is absent (!stateFound) or set to SpyreStateNoSpyreNodes,
 	// there are no Spyre nodes to validate labels against.
-	if !found || state != utils.SpyreStateReady {
+	if !stateFound || state != utils.SpyreStateReady {
 		return nil
 	}
 

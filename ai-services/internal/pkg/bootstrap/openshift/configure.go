@@ -256,7 +256,7 @@ func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec 
 
 func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftClient) error {
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
-		state, found, err := utils.GetSpyreClusterPolicyState(pollCtx, client)
+		state, stateFound, err := utils.GetSpyreClusterPolicyState(pollCtx, client)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
@@ -264,10 +264,17 @@ func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftC
 				return false, nil
 			}
 
+			// Handle rate limiting and other transient errors as retryable
+			if utils.IsTransientK8sError(err) {
+				logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...")
+
+				return false, nil
+			}
+
 			return false, err
 		}
 
-		if !found {
+		if !stateFound {
 			// CR exists but status.state not set yet.
 			logger.Debugln("SpyreClusterPolicy status.state not populated yet, waiting...")
 

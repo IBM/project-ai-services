@@ -469,7 +469,8 @@ func GetExistingCustomResource(ctx context.Context, client *openshift.OpenshiftC
 }
 
 // GetSpyreClusterPolicyState retrieves the current status.state of the SpyreClusterPolicy CR.
-// It returns the state string, whether it was found, and any error encountered.
+// It returns the state string, whether status.state is set on the CR (the CR itself
+// must exist, otherwise an error is returned), and any error encountered.
 func GetSpyreClusterPolicyState(ctx context.Context, client *openshift.OpenshiftClient) (string, bool, error) {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
@@ -485,23 +486,16 @@ func GetSpyreClusterPolicyState(ctx context.Context, client *openshift.Openshift
 		if apierrors.IsForbidden(err) {
 			return "", false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
 		}
-		if IsTransientK8sError(err) {
-			// Treat rate-limit / timeout errors as "not found yet"; callers
-			// that poll will retry, and one-shot callers will skip validation.
-			logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout)...")
-
-			return "", false, nil
-		}
 
 		return "", false, fmt.Errorf("failed to get SpyreClusterPolicy: %w", err)
 	}
 
-	state, found, err := unstructured.NestedString(obj.Object, "status", "state")
+	state, stateFound, err := unstructured.NestedString(obj.Object, "status", "state")
 	if err != nil {
 		return "", false, fmt.Errorf("failed to parse status.state from SpyreClusterPolicy: %w", err)
 	}
 
-	return state, found, nil
+	return state, stateFound, nil
 }
 
 // FlattenMapToKeys converts a nested map into a flat map with dotted keys

@@ -30,12 +30,16 @@ func (r *SpyrePolicyRule) Verify(ctx context.Context) error {
 		return fmt.Errorf("failed to create openshift client: %w", err)
 	}
 
-	state, found, err := utils.GetSpyreClusterPolicyState(ctx, client)
+	state, stateFound, err := utils.GetSpyreClusterPolicyState(ctx, client)
 	if err != nil {
 		return err
 	}
 
-	if !found || (state != utils.SpyreStateReady && state != utils.SpyreStateNoSpyreNodes) {
+	if !stateFound {
+		return fmt.Errorf("SpyreClusterPolicy not ready (status.state not set)")
+	}
+
+	if state != utils.SpyreStateReady && state != utils.SpyreStateNoSpyreNodes {
 		return fmt.Errorf("SpyreClusterPolicy not ready (status.state: %q)", state)
 	}
 
