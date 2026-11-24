@@ -46,6 +46,10 @@ paramiko==5.0.0
 # Connector secret encryption (required by forecast)
 cryptography>=42.0.0
 
+# Db2 for i data loader (required by forecast)
+mapepire-python==2.0.0
+pyarrow==24.0.0
+
 # Document processing (required by digitize)
 pypdfium2==5.9.0
 pdfplumber==0.11.9
