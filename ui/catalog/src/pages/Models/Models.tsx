@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ModelDeploymentRow } from "@/components/ModelsTable/types";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@carbon/react";
 import { PageHeader, NoDataEmptyState } from "@carbon/ibm-products";
+import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import { ModelCard, ModelCardSkeleton } from "@/components/ModelCard";
 import { useModels } from "@/hooks/useModels";
 import { ModelsTable, ModelDetails } from "@/components";
@@ -36,8 +37,8 @@ const Models = () => {
   return (
     <div className={styles.modelsContainer}>
       <PageHeader
-        title="Models"
-        subtitle="Manage foundation AI models and deployed inference instances across IBM Power worker nodes."
+        title={PAGE_TITLES.MODELS}
+        subtitle={PAGE_SUBTITLES.MODELS}
         className={styles.pageHeader}
       />
       <Tabs selectedIndex={selectedTabIndex} onChange={handleTabChange}>

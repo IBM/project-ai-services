@@ -435,11 +435,15 @@ export function transformDeployedServiceToRow(
 }
 
 // Fetches a single page of deployed services (deployment_type=services)
-export async function fetchDeployedServicesPage(params: {
-  page: number;
-  pageSize: number;
-  catalogId?: string;
-}): Promise<{ data: Application[]; pagination: PaginationMetadata }> {
+export async function fetchDeployedServicesPage(
+  params: {
+    page: number;
+    pageSize: number;
+    catalogId?: string;
+  },
+  search?: string,
+  options?: { signal?: AbortSignal },
+): Promise<{ data: Application[]; pagination: PaginationMetadata }> {
   const response = await api.get<ApplicationListResponse>(
     APPLICATION_ENDPOINTS.GET_APPLICATIONS,
     {
@@ -448,7 +452,9 @@ export async function fetchDeployedServicesPage(params: {
         page: params.page,
         page_size: params.pageSize,
         ...(params.catalogId ? { catalog_id: params.catalogId } : {}),
+        ...(search ? { q: search } : {}),
       },
+      ...options,
     },
   );
   return {
@@ -460,6 +466,7 @@ export async function fetchDeployedServicesPage(params: {
 // Fetches all deployed services across all pages — used for CSV export
 export async function fetchAllDeployedServices(
   catalogId?: string,
+  search?: string,
 ): Promise<Application[]> {
   let currentPage = 1;
   let hasNext = true;
@@ -474,6 +481,7 @@ export async function fetchAllDeployedServices(
           page: currentPage,
           page_size: 100,
           ...(catalogId ? { catalog_id: catalogId } : {}),
+          ...(search ? { q: search } : {}),
         },
       },
     );
