@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
+	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -55,7 +56,38 @@ func InjectServiceAuthValues(
 		}
 	}
 
+	// A remote Podman worker reaches the catalog over HTTPS through Caddy. With "tls internal"
+	// Caddy's certificate is signed by its own local CA, which the worker does not trust.
+	if runtimeType == runtimeTypes.RuntimeTypePodman.String() && isRemoteWorker {
+		injectCaddyRootCA(ctx, values)
+	}
+
 	return nil
+}
+
+// fetchCaddyRootCA reads Caddy's internal root CA. It is a variable so tests can replace it.
+var fetchCaddyRootCA = utils.GetCaddyInternalRootCA
+
+// injectCaddyRootCA sets authCatalogCaBundle to Caddy's internal root CA when no bundle was
+// supplied. It is best effort: on failure the value stays empty, TLS verification stays on,
+// and the service fails closed until the operator supplies a bundle.
+func injectCaddyRootCA(ctx context.Context, values map[string]any) {
+	if v, ok := values["authCatalogCaBundle"]; ok && v != "" {
+		return
+	}
+	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
+	if adminURL == "" {
+		return
+	}
+	root, err := fetchCaddyRootCA(ctx, adminURL)
+	if err != nil {
+		logger.WarningfCtx(ctx, "Could not read the Caddy root CA for a remote service; set AUTH_CATALOG_CA_BUNDLE: %v\n", err)
+
+		return
+	}
+	if root != "" {
+		values["authCatalogCaBundle"] = root
+	}
 }
 
 // CredentialProvisioner creates the per-deployment service credential (DA2) for a service

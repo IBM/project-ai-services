@@ -465,4 +465,33 @@ func GetCaddyCertificates(ctx context.Context, adminURL string) (*CertResponse, 
 	return &result, nil
 }
 
+// GetCaddyInternalRootCA returns the PEM root certificate of Caddy's internal ("tls internal")
+// CA, read from the admin API. It returns an empty string, and no error, when Caddy serves an
+// operator-supplied certificate (load_files), because the internal CA did not sign that one.
+func GetCaddyInternalRootCA(ctx context.Context, adminURL string) (string, error) {
+	certs, err := GetCaddyCertificates(ctx, adminURL)
+	if err != nil {
+		return "", err
+	}
+	if len(certs.LoadFiles) > 0 {
+		return "", nil
+	}
+
+	var result struct {
+		RootCertificate string `json:"root_certificate"`
+	}
+	resp, err := resty.New().SetTimeout(caddyAPITimeout).R().
+		SetContext(ctx).
+		SetResult(&result).
+		Get(adminURL + "/pki/ca/local")
+	if err != nil {
+		return "", fmt.Errorf("failed to query Caddy internal CA: %w", err)
+	}
+	if resp.IsError() {
+		return "", fmt.Errorf("caddy returned error (status %d): %s", resp.StatusCode(), resp.String())
+	}
+
+	return strings.TrimSpace(result.RootCertificate), nil
+}
+
 // Made with Bob

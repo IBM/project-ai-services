@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -79,6 +80,36 @@ func TestInjectServiceAuthValues_OpenShift_Remote_WithDomainSuffix(t *testing.T)
 	assert.Equal(t, "https://catalog-api.apps.cluster.example.com/.well-known/jwks.json", values["authJwksUrl"])
 	assert.Equal(t, "https://catalog-api.apps.cluster.example.com", values["authCatalogApiUrl"])
 	assert.Equal(t, "", values["authJwksPlaintextHosts"])
+}
+
+func TestInjectServiceAuthValues_Podman_Remote_CaddyRootCA(t *testing.T) {
+	t.Setenv("DOMAIN_SUFFIX", "example.com")
+	t.Setenv("CADDY_ADMIN_URL", "http://caddy:2019")
+	orig := fetchCaddyRootCA
+	t.Cleanup(func() { fetchCaddyRootCA = orig })
+
+	fetchCaddyRootCA = func(context.Context, string) (string, error) { return "ROOT-PEM", nil }
+
+	values := map[string]any{}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
+	assert.Equal(t, "ROOT-PEM", values["authCatalogCaBundle"])
+
+	// An explicit bundle is never replaced.
+	values = map[string]any{"authCatalogCaBundle": "OPERATOR-PEM"}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
+	assert.Equal(t, "OPERATOR-PEM", values["authCatalogCaBundle"])
+
+	// A lookup failure does not fail the deployment and leaves the bundle empty.
+	fetchCaddyRootCA = func(context.Context, string) (string, error) { return "", errors.New("boom") }
+	values = map[string]any{}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
+	assert.NotContains(t, values, "authCatalogCaBundle")
+
+	// A local worker shares the catalog's network and never needs it.
+	fetchCaddyRootCA = func(context.Context, string) (string, error) { return "ROOT-PEM", nil }
+	values = map[string]any{}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", false))
+	assert.NotContains(t, values, "authCatalogCaBundle")
 }
 
 func TestInjectServiceAuthValues_PreservesExplicitValues(t *testing.T) {
