@@ -112,7 +112,7 @@ const DeleteConfirmNameModal = ({
 
         <TextInput
           id={inputId}
-          labelText={`Type ${itemName} to confirm`}
+          labelText={`Type "${itemName}" to confirm`}
           value={confirmValue}
           onChange={(e) => onConfirmValueChange(e.target.value)}
           disabled={isDeleting}
