@@ -136,7 +136,7 @@ const ModelDetails = ({ modelId, modelName, onBack }: ModelDetailsProps) => {
                 <Button
                   kind="tertiary"
                   size="md"
-                  onClick={keyGen.generate}
+                  onClick={keyGen.open}
                   disabled={keyGen.isGenerating}
                 >
                   Generate API key
@@ -205,6 +205,7 @@ const ModelDetails = ({ modelId, modelName, onBack }: ModelDetailsProps) => {
         isGenerating={keyGen.isGenerating}
         apiKey={keyGen.apiKey}
         error={keyGen.error}
+        onConfirm={keyGen.generate}
         onRetry={keyGen.generate}
         onClose={keyGen.close}
       />

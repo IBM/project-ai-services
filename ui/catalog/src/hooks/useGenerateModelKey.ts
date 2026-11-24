@@ -15,6 +15,12 @@ export const useGenerateModelKey = (modelId: string) => {
     };
   }, []);
 
+  const open = () => {
+    setIsOpen(true);
+    setApiKey(null);
+    setError(null);
+  };
+
   const generate = async () => {
     // Block re-entry: a second request could revoke the key from the first before it is shown
     if (isGenerating) return;
@@ -52,5 +58,5 @@ export const useGenerateModelKey = (modelId: string) => {
     setError(null);
   };
 
-  return { isOpen, isGenerating, apiKey, error, generate, close };
+  return { isOpen, isGenerating, apiKey, error, open, generate, close };
 };

@@ -14,17 +14,19 @@ export interface GenerateKeyModalProps {
   isGenerating: boolean;
   apiKey: string | null;
   error: string | null;
-  onRetry: () => void;
+  onConfirm: () => void;
+  onRetry?: () => void;
   onClose: () => void;
 }
 
-// Shows a freshly generated model API key once, with a copy action
+// Confirms key revocation before generating, then displays the newly created API key
 const GenerateKeyModal = ({
   isOpen,
   isGenerating,
   apiKey,
   error,
-  onRetry,
+  onConfirm,
+  onRetry = onConfirm,
   onClose,
 }: GenerateKeyModalProps) => {
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -46,12 +48,20 @@ const GenerateKeyModal = ({
     onClose();
   };
 
+  const isKeyReady = Boolean(apiKey);
+
   return (
     <Modal
       open={isOpen}
-      passiveModal
+      passiveModal={isKeyReady}
       size="xs"
-      modalHeading="Generate API key"
+      modalHeading={isKeyReady ? "API key generated" : "Generate API key"}
+      primaryButtonText={
+        isGenerating ? "Generating..." : error ? "Retry" : "Generate key"
+      }
+      secondaryButtonText="Cancel"
+      primaryButtonDisabled={isGenerating}
+      onRequestSubmit={error ? onRetry : onConfirm}
       onRequestClose={handleClose}
     >
       <div className={styles.modalBody}>
@@ -65,7 +75,7 @@ const GenerateKeyModal = ({
             actionButtonLabel="Retry"
             onActionButtonClick={onRetry}
           />
-        ) : (
+        ) : isKeyReady && apiKey ? (
           <>
             <InlineNotification
               kind="warning"
@@ -86,29 +96,41 @@ const GenerateKeyModal = ({
                 className={styles.warning}
               />
             )}
-            {isGenerating || !apiKey ? (
-              <SkeletonText paragraph lineCount={2} />
-            ) : (
-              <div className={styles.keyRow}>
-                <TextArea
-                  id="model-api-key"
-                  labelText="API key"
-                  value={apiKey}
-                  rows={2}
-                  readOnly
-                  className={styles.keyField}
+            <div className={styles.keyRow}>
+              <TextArea
+                id="model-api-key"
+                labelText="API key"
+                value={apiKey}
+                rows={2}
+                readOnly
+                className={styles.keyField}
+              />
+              {canCopyToClipboard && (
+                <CopyButton
+                  align="left"
+                  size="xs"
+                  iconDescription="copy"
+                  feedback="Copied"
+                  onClick={() => handleCopy(apiKey)}
                 />
-                {canCopyToClipboard && (
-                  <CopyButton
-                    align="left"
-                    size="xs"
-                    iconDescription="copy"
-                    feedback="Copied"
-                    onClick={() => handleCopy(apiKey)}
-                  />
-                )}
-              </div>
-            )}
+              )}
+            </div>
+          </>
+        ) : isGenerating ? (
+          <SkeletonText paragraph lineCount={3} />
+        ) : (
+          <>
+            <InlineNotification
+              kind="warning"
+              title="Generating a new API key will revoke the existing key."
+              subtitle="Any applications or services currently using the active key will lose access immediately until updated with the new key."
+              lowContrast
+              hideCloseButton
+              className={styles.warning}
+            />
+            <p>
+              Are you sure you want to generate a new API key for this model?
+            </p>
           </>
         )}
       </div>
