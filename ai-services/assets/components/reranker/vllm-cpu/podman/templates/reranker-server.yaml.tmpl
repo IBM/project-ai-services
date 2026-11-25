@@ -28,7 +28,7 @@ spec:
       - --port=8002
       - --kv-cache-memory-bytes=0
       - --dtype=bfloat16
-      - --max-model-len=1024
+      - --max-model-len={{ .Values.maxModelLen }}
       livenessProbe:
         httpGet:
           path: /health
@@ -39,9 +39,9 @@ spec:
         failureThreshold: 12
       resources:
         requests:
-          memory: "5Gi"
+          memory: "{{ .Values.resources.memory }}"
         limits:
-          memory: "5Gi"
+          memory: "{{ .Values.resources.memory }}"
       ports:
         - containerPort: 8002
       volumeMounts:

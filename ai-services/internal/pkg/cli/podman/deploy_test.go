@@ -38,6 +38,13 @@ func loadLLMPodSpec(t *testing.T, templatePath string) *models.PodSpec {
 			"maxNumBatchedTokens": "8096",
 			"maxModelLen":         "8096",
 			"maxBatchSize":        "32",
+			"shmSize":             "2Gi",
+			"resources": map[string]any{
+				"memory": "161061273600",
+				"accelerators": map[string]any{
+					"ibm.com/spyre_pf": 4,
+				},
+			},
 		},
 		"env": map[string]map[string]string{},
 	}

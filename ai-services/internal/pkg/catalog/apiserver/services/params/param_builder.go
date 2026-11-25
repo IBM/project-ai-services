@@ -125,10 +125,12 @@ func (b *ParamBuilder) buildComponentParams(
 		ArgParams:     flatParams,
 	}
 
-	// Load component values from values.yaml with argParams applied
+	// Load component values from values.yaml with argParams applied, then merge the hardware values
+	// of the provider's default profile (e.g. standard 4-card profile on Spyre) on top so templates
+	// render with standard profile values in the application deploy flow.
 	// Note: We pass flatParams without prefix since LoadComponentValues expects flat keys
 	componentArgParams := utils.FlattenMapWithValues(compReq.Params, "")
-	values, err := b.catalogProvider.LoadComponentValues(compReq.ComponentType, compReq.ProviderID, componentArgParams)
+	values, err := b.catalogProvider.LoadComponentValuesForModel(compReq.ComponentType, compReq.ProviderID, "", "", componentArgParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load component values: %w", err)
 	}
