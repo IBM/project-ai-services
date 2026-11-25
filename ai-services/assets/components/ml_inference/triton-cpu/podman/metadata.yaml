@@ -3,6 +3,6 @@ version: "1.0.0"
 podTemplateExecutions:
   - [triton-server.yaml.tmpl]
 resources:
-  cpu: 0        # TBD (DEV)
-  memory: 0     # TBD (DEV), bytes
-  storage: 0    # TBD (DEV), bytes: size of the repository volume
+  cpu: 1
+  memory: 2147483648   # 2Gi in bytes
+  storage: 5368709120  # 5Gi in bytes: size of the repository volume
