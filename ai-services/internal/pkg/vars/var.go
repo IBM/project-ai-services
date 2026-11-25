@@ -16,6 +16,8 @@ var (
 	// SpyreCardAnnotationRegex -> ai-services.io/<containerName>--spyre-cards.
 	SpyreCardAnnotationRegex = regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--spyre-cards$`)
 	ToolImage                = "icr.io/ai-services-cicd/tools:0.16"
+	// AMDGPUAnnotationRegex -> ai-services.io/<containerName>--amd-gpus.
+	AMDGPUAnnotationRegex = regexp.MustCompile(`^ai-services\.io\/([A-Za-z0-9][-A-Za-z0-9_.]*)--amd-gpus$`)
 )
 
 type Label string
