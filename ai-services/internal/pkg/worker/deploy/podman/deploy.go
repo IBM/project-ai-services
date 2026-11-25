@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -300,7 +301,20 @@ func buildArgParams(opts workertypes.PodmanWorkerOptions) (map[string]string, er
 		workerconstants.ArgParamWorkerGatewayAddr: opts.GatewayAddr,
 		workerconstants.ArgParamWorkerPodmanURI:   strings.TrimPrefix(podmanURI, "unix://"),
 		workerconstants.ArgParamWorkerAuthFile:    authFileBase64,
+
+		// Mount only the accelerator host paths that exist, so the pod starts on any host.
+		workerconstants.ArgParamWorkerHostPathVFIO:        hostPathFlag("/dev/vfio"),
+		workerconstants.ArgParamWorkerHostPathIOMMUGroups: hostPathFlag("/sys/kernel/iommu_groups"),
+		workerconstants.ArgParamWorkerHostPathDRM:         hostPathFlag("/sys/class/drm"),
 	}, nil
+}
+
+// hostPathFlag returns "true" when path exists on the host, otherwise "false". It is used as a
+// template toggle, so hostPath volumes and device requests are only emitted for paths that exist.
+func hostPathFlag(path string) string {
+	_, err := os.Stat(path)
+
+	return strconv.FormatBool(err == nil)
 }
 
 // renderAndDeploy renders a single pod template and deploys it.
