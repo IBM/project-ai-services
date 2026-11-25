@@ -6,11 +6,6 @@ pipeline {
             name: 'VERSION',
             description: 'Version used to get the image tags to generate signatures for (e.g., v0.4.0)'
         )
-        string(
-            name: 'SIGNATURE_ONLY_IMAGES',
-            defaultValue: '',
-            description: 'Space-separated list of additional fully-qualified image references to sign (e.g. icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le). These images are signed only, they are not built or pushed by this pipeline.'
-        )
         text(
             name: 'EXCLUDED_IMAGES',
             defaultValue: '',
@@ -382,7 +377,7 @@ def checkoutRepository() {
 
 
 /**
- * Exposes ICR_USERNAME and ICR_PASSWORD (from the icr-iam-creds credential) as environment
+ * Exposes ICR_USERNAME and ICR_PASSWORD (from the icr-cicd-namespace-creds credential) as environment
  * variables for the given closure, and ensures the password is masked in console logs via
  * withCredentials.
  *
@@ -391,7 +386,7 @@ def checkoutRepository() {
  */
 def withIcrCredentials(Closure body) {
     withCredentials([usernamePassword(
-        credentialsId: 'icr-iam-creds',
+        credentialsId: 'icr-cicd-namespace-creds',
         usernameVariable: 'ICR_USERNAME',
         passwordVariable: 'ICR_PASSWORD'
     )]) {
@@ -552,12 +547,21 @@ def generateImageList() {
         env.ICR_AI_SERVICES_MCP_IMAGE
     ].findAll { it != null }
 
-    // Append any signature-only images supplied via the SIGNATURE_ONLY_IMAGES parameter
-    def signatureOnlyImages = params.SIGNATURE_ONLY_IMAGES?.toString()?.trim()
-    if (signatureOnlyImages) {
-        def extras = signatureOnlyImages.tokenize().findAll { it }
-        images.addAll(extras)
-        echo "Adding ${extras.size()} signature-only image(s) for signing: ${extras}"
+    // Add opensearch image path from values.yaml; the first reference found under ai-services/assets is used
+    def opensearchImage = ''
+    dir(env.REPO_DIR) {
+        opensearchImage = sh(returnStdout: true, script: '''#!/bin/bash
+            set -euo pipefail
+
+            # Registry can be either icr.io/ai-services or icr.io/ai-services-cicd
+            grep -rhoE "icr[.]io/ai-services(-cicd)?/opensearch:[^[:space:]]+" ai-services/assets | sed -n '1p' || true
+        ''').trim()
+    }
+    if (opensearchImage) {
+        images.add(opensearchImage)
+        echo "Adding opensearch image for signing: ${opensearchImage}"
+    } else {
+        echo 'opensearch image not found in ai-services/assets, skipping it'
     }
 
     def imageList = images.join('\n') + '\n'

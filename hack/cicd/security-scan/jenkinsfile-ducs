@@ -67,9 +67,9 @@ pipeline {
 
         stage('Download DUCS') {
             steps {
-                // Artifactory creds: ai-power-jrog-creds
+                // Artifactory creds: jfrog
                 withCredentials([usernamePassword(
-                    credentialsId: 'ai-power-jrog-creds',
+                    credentialsId: 'jfrog',
                     usernameVariable: 'ARTIFACTORY_USER_NAME',
                     passwordVariable: 'ARTIFACTORY_TOKEN'
                 )]) {
@@ -91,11 +91,11 @@ pipeline {
 
         stage('Update Data Feeds') {
             steps {
-                // Artifactory creds: ai-power-jrog-creds
+                // Artifactory creds: jfrog
                 // Encryption key (secret text): ducs-encryption-key
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'ai-power-jrog-creds',
+                        credentialsId: 'jfrog',
                         usernameVariable: 'ARTIFACTORY_ID',
                         passwordVariable: 'ARTIFACTORY_TOKEN'
                     ),
