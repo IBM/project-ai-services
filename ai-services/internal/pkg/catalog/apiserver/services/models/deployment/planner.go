@@ -250,7 +250,7 @@ func remoteTokenizeURL(providerID string, params map[string]any) string {
 		return watsonxTokenizeURL
 	}
 
-	if apiBase, _ := params[litellm.ParamAPIBase].(string); apiBase != "" {
+	if apiBase, _ := params[constants.ParamAPIBase].(string); apiBase != "" {
 		return tokenizeURL(apiBase)
 	}
 

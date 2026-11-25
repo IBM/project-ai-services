@@ -75,7 +75,9 @@ const (
 
 // Common model parameter key constants.
 const (
-	// ParamAPIBase is the parameter key for the model service's base URL.
+	// ParamAPIBase is the parameter key for the model service's base URL (the litellm_params key of
+	// the model endpoint). It is the only provider param the platform interprets itself (to derive
+	// the /tokenize target); every other param is forwarded to LiteLLM untouched.
 	ParamAPIBase = "api_base"
 	// ParamAPIKey is the parameter key for the model service's authentication key.
 	ParamAPIKey = "api_key"

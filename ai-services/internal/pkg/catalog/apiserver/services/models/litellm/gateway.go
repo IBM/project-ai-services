@@ -6,6 +6,7 @@ import (
 	"maps"
 
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -21,7 +22,7 @@ func modelRequest(r Route) catalogclient.LiteLLMModelNewRequest {
 	maps.Copy(params, r.Params)
 
 	if r.APIBase != "" {
-		params[ParamAPIBase] = r.APIBase
+		params[constants.ParamAPIBase] = r.APIBase
 	}
 
 	params[litellmParamModel] = r.UpstreamModel

@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
@@ -28,14 +27,14 @@ type vllmProvider struct{}
 // get the bare server URL, and routeParams get it with /v1, since vLLM serves its OpenAI API
 // under /v1 and LiteLLM appends only the endpoint path (e.g. /chat/completions).
 func (vllmProvider) NormalizeParams(planParams, routeParams map[string]any) {
-	apiBase, _ := planParams[litellm.ParamAPIBase].(string)
+	apiBase, _ := planParams[catalogconstants.ParamAPIBase].(string)
 	if apiBase == "" {
 		return
 	}
 
 	bare := bareAPIBase(apiBase)
-	planParams[litellm.ParamAPIBase] = bare
-	routeParams[litellm.ParamAPIBase] = bare + openAIAPIPath
+	planParams[catalogconstants.ParamAPIBase] = bare
+	routeParams[catalogconstants.ParamAPIBase] = bare + openAIAPIPath
 }
 
 // RequiresRoute is false: vLLM is queried directly, not through the gateway.
