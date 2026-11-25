@@ -985,3 +985,63 @@ func TestComponentTemplates_ReadHardwareValues(t *testing.T) {
 		})
 	}
 }
+
+// TestCollectAMDGPUsFromTemplates tests AMD GPU collection from rendered pod annotations.
+func TestCollectAMDGPUsFromTemplates(t *testing.T) {
+	provider := &CatalogProvider{}
+
+	llm := `apiVersion: v1
+kind: Pod
+metadata:
+  name: llm
+  annotations:
+    ai-services.io/llm--amd-gpus: "{{ index .Values.resources.accelerators "amd.com/gpu" }}"
+spec:
+  containers:
+  - name: llm
+    image: img
+`
+	other := `apiVersion: v1
+kind: Pod
+metadata:
+  name: other
+  annotations:
+    ai-services.io/llm--spyre-cards: "4"
+spec:
+  containers:
+  - name: other
+    image: img
+`
+	templates := map[string]*texttemplate.Template{}
+	for name, content := range map[string]string{"llm": llm, "other": other} {
+		tmpl, err := texttemplate.New(name).Parse(content)
+		require.NoError(t, err)
+		templates[name] = tmpl
+	}
+
+	values := map[string]any{
+		"resources": map[string]any{"accelerators": map[string]any{"amd.com/gpu": 2}},
+	}
+
+	total, err := provider.CollectAMDGPUsFromTemplates(context.Background(), templates, values)
+	require.NoError(t, err)
+	assert.Equal(t, 2, total, "only amd-gpus annotations are counted")
+}
+
+// TestFetchAMDGPUsFromPodAnnotations tests the annotation parsing helper directly.
+func TestFetchAMDGPUsFromPodAnnotations(t *testing.T) {
+	total, err := fetchAMDGPUsFromPodAnnotations(map[string]string{
+		"ai-services.io/llm--amd-gpus":    "2",
+		"ai-services.io/embed--amd-gpus":  "1",
+		"ai-services.io/llm--spyre-cards": "4",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 3, total)
+
+	total, err = fetchAMDGPUsFromPodAnnotations(map[string]string{"some.other/annotation": "x"})
+	require.NoError(t, err)
+	assert.Equal(t, 0, total)
+
+	_, err = fetchAMDGPUsFromPodAnnotations(map[string]string{"ai-services.io/llm--amd-gpus": "abc"})
+	require.Error(t, err)
+}

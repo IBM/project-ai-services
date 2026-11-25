@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
+	modeltypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
@@ -33,7 +34,9 @@ type ComponentPodsParams struct {
 	Templates map[string]*template.Template
 	// SpyrePool must be populated when any of the templates declares spyre-card annotations.
 	SpyrePool *deploymenttypes.SpyreCardPool
-	BaseDir   string
+	// AMDGPUPool must be populated when any of the templates declares amd-gpus annotations.
+	AMDGPUPool *modeltypes.AMDGPUPool
+	BaseDir    string
 }
 
 // DeployComponentPods renders and deploys every pod template of a component, following
@@ -86,7 +89,7 @@ func deployComponentTemplate(ctx context.Context, p ComponentPodsParams, templat
 		return err
 	}
 
-	env, err := GetEnvParams(ctx, podSpec, p.SpyrePool)
+	env, err := GetEnvParams(ctx, podSpec, p.SpyrePool, p.AMDGPUPool)
 	if err != nil {
 		return fmt.Errorf("failed to get env params: %w", err)
 	}
@@ -142,25 +145,45 @@ func recordComponentEndpoint(ctx context.Context, endpoints map[string]any, comp
 }
 
 // GetEnvParams returns the per-container environment parameters for a pod, including the
-// Spyre card PCI addresses allocated from pool for containers that declare spyre-card annotations.
-func GetEnvParams(ctx context.Context, podSpec *podmodels.PodSpec, pool *deploymenttypes.SpyreCardPool) (map[string]map[string]string, error) {
+// Spyre card PCI addresses allocated from spyrePool for containers that declare spyre-card annotations
+// and the AMD GPU device ordinals (ROCR_VISIBLE_DEVICES) allocated from amdPool for containers that
+// declare amd-gpus annotations.
+func GetEnvParams(
+	ctx context.Context,
+	podSpec *podmodels.PodSpec,
+	spyrePool *deploymenttypes.SpyreCardPool,
+	amdPool *modeltypes.AMDGPUPool,
+) (map[string]map[string]string, error) {
 	env := make(map[string]map[string]string)
 
 	for _, container := range podSpec.Spec.Containers {
 		env[container.Name] = make(map[string]string)
 	}
 
-	spyreCards, spyreCardContainerMap, err := FetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
-	if err != nil {
+	if err := allocateSpyreCards(ctx, podSpec, spyrePool, env); err != nil {
 		return env, err
 	}
 
+	if err := allocateAMDGPUs(ctx, podSpec, amdPool, env); err != nil {
+		return env, err
+	}
+
+	return env, nil
+}
+
+// allocateSpyreCards injects the allocated Spyre card PCI addresses into the per-container env map.
+func allocateSpyreCards(ctx context.Context, podSpec *podmodels.PodSpec, pool *deploymenttypes.SpyreCardPool, env map[string]map[string]string) error {
+	spyreCards, spyreCardContainerMap, err := FetchSpyreCardsFromPodAnnotations(podSpec.Annotations)
+	if err != nil {
+		return err
+	}
+
 	if spyreCards == 0 {
-		return env, nil
+		return nil
 	}
 
 	if pool == nil {
-		return env, fmt.Errorf("spyre cards required but pool was not populated")
+		return fmt.Errorf("spyre cards required but pool was not populated")
 	}
 
 	for containerName, spyreCount := range spyreCardContainerMap {
@@ -170,17 +193,62 @@ func GetEnvParams(ctx context.Context, podSpec *podmodels.PodSpec, pool *deploym
 
 		allocatedAddresses, err := pool.Allocate(spyreCount)
 		if err != nil {
-			return env, fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
+			return fmt.Errorf("failed to allocate Spyre cards for container %s: %w", containerName, err)
 		}
 
 		pciAddressStr := JoinPCIAddresses(allocatedAddresses)
-		env[containerName][string(constants.PCIAddressKey)] = pciAddressStr
+		setContainerEnv(env, containerName, string(constants.PCIAddressKey), pciAddressStr)
 
 		logger.DebugfCtx(ctx, "Allocated %d Spyre cards to container '%s' in pod '%s': %s\n",
 			spyreCount, containerName, podSpec.Name, pciAddressStr)
 	}
 
-	return env, nil
+	return nil
+}
+
+// allocateAMDGPUs reads ai-services.io/<container>--amd-gpus annotations from the rendered pod spec,
+// allocates device ordinals from pool and injects them as ROCR_VISIBLE_DEVICES into the per-container env map.
+func allocateAMDGPUs(ctx context.Context, podSpec *podmodels.PodSpec, pool *modeltypes.AMDGPUPool, env map[string]map[string]string) error {
+	totalGPUs, gpuContainerMap, err := FetchAMDGPUsFromPodAnnotations(podSpec.Annotations)
+	if err != nil {
+		return err
+	}
+
+	if totalGPUs == 0 {
+		return nil
+	}
+
+	if pool == nil {
+		return fmt.Errorf("AMD GPU devices required but pool was not populated")
+	}
+
+	for containerName, gpuCount := range gpuContainerMap {
+		if gpuCount == 0 {
+			continue
+		}
+
+		allocated, err := pool.Allocate(gpuCount)
+		if err != nil {
+			return fmt.Errorf("failed to allocate AMD GPU devices for container %s: %w", containerName, err)
+		}
+
+		rocrDevices := strings.Join(allocated, ",")
+		setContainerEnv(env, containerName, string(constants.ROCRVisibleDevicesKey), rocrDevices)
+
+		logger.DebugfCtx(ctx, "Allocated %d AMD GPU devices to container '%s' in pod '%s': %s\n",
+			gpuCount, containerName, podSpec.Name, rocrDevices)
+	}
+
+	return nil
+}
+
+// setContainerEnv sets an env var for a container, creating the container's map when missing.
+func setContainerEnv(env map[string]map[string]string, containerName, key, value string) {
+	if env[containerName] == nil {
+		env[containerName] = make(map[string]string)
+	}
+
+	env[containerName][key] = value
 }
 
 // BaseDirProvider represents any runtime capable of reporting its base directory on the target host
@@ -241,6 +309,40 @@ func NewSpyreCardPool(ctx context.Context, rt runtime.Runtime, required int) (*d
 	}
 
 	return &deploymenttypes.SpyreCardPool{Addresses: pciAddresses}, nil
+}
+
+// AMDGPUDiscoverer represents any runtime capable of discovering free AMD GPU devices
+// (e.g. RemoteRuntime querying over gRPC, or a MockRuntime in tests).
+type AMDGPUDiscoverer interface {
+	FindFreeAMDGPUDevices(ctx context.Context) ([]string, error)
+}
+
+// NewAMDGPUPool discovers the free AMD GPU device ordinals on the target host and returns a pool of them.
+// Discovery is delegated to the runtime when it implements AMDGPUDiscoverer, otherwise falling back to
+// local host discovery. Callers must only call this when required > 0.
+func NewAMDGPUPool(ctx context.Context, rt runtime.Runtime, required int) (*modeltypes.AMDGPUPool, error) {
+	var (
+		devices []string
+		err     error
+	)
+
+	if discoverer, ok := rt.(AMDGPUDiscoverer); ok {
+		devices, err = discoverer.FindFreeAMDGPUDevices(ctx)
+	} else {
+		devices, err = helpers.FindFreeAMDGPUDevices(ctx)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to find free AMD GPU devices: %w", err)
+	}
+
+	available := len(devices)
+	logger.InfofCtx(ctx, "Available AMD GPU devices: %d, required: %d\n", available, required)
+
+	if available < required {
+		return nil, fmt.Errorf("insufficient AMD GPU devices: required %d, available %d", required, available)
+	}
+
+	return &modeltypes.AMDGPUPool{Addresses: devices}, nil
 }
 
 // DeleteComponents deletes the given components (pods, secrets, volumes and DB records) and returns

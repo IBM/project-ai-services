@@ -143,6 +143,30 @@ func FetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[
 	return spyreCards, spyreCardContainerMap, nil
 }
 
+// FetchAMDGPUsFromPodAnnotations extracts AMD GPU requirements from pod annotations.
+// It returns the total GPU count and the per-container counts.
+func FetchAMDGPUsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {
+	total := 0
+	gpuContainerMap := map[string]int{}
+
+	for annotationKey, val := range annotations {
+		matches := vars.AMDGPUAnnotationRegex.FindStringSubmatch(annotationKey)
+		if matches == nil {
+			continue
+		}
+
+		valInt, err := strconv.Atoi(val)
+		if err != nil {
+			return 0, gpuContainerMap, fmt.Errorf("failed to convert AMD GPU annotation value to int: %s is not an int", val)
+		}
+
+		gpuContainerMap[matches[1]] = valInt
+		total += valInt
+	}
+
+	return total, gpuContainerMap, nil
+}
+
 // JoinPCIAddresses formats a slice of PCI addresses into the space-separated string expected by
 // the AIU_PCIE_IDS env var. Addresses discovered on the host may carry trailing whitespace
 // (e.g. a newline from `ls`), which is trimmed so it cannot corrupt the separator.
