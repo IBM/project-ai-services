@@ -1,0 +1,17 @@
+# Component identification
+type: component
+id: vllm-rocm
+version: "1.0.0"
+name: "AI Inference with AMD GPU (ROCm)"
+description: "Deploy instruct models on vLLM inference engine with AMD GPU (ROCm) acceleration"
+
+# Component type this provider belongs to
+component_type:
+  id: llm
+  name: "Large language model (LLM)"
+  short_name: "LLM"
+category: models
+litellm:
+  provider: hosted_vllm
+  model_mode: chat
+  api_base_path: "/v1"

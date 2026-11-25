@@ -1,0 +1,127 @@
+- id: ibm-granite/granite-4.1-8b
+  name: Granite 4.1 8B
+  default: true
+  title: granite-4.1-8b
+  description: |-
+    An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
+
+    **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
+
+    **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+  default_profile: standard
+  profiles:
+    - standard
+    - dual-gpu
+
+- id: ibm-granite/granite-4.1-8b-fp8
+  name: Granite 4.1 8B FP8
+  default: false
+  title: granite-4.1-8b-fp8
+  description: |-
+    An 8b-parameter instruction-tuned LLM used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
+
+    **Model strengths**: Reliable instruction-following, natural conversation, strong reasoning, and enterprise-grade accuracy.
+
+    **Supported Languages**: English (primary), Spanish, French, German, Portuguese, Italian, Japanese, Korean, Chinese, Arabic, and 100+ more.
+  license: Apache-2.0
+  certified_by: IBM
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Natural conversation and dialogue
+            - Strong reasoning and tool calling
+            - Enterprise-grade accuracy
+    - title: "Supported languages"
+      sections:
+        - title: "Languages"
+          values:
+            - English
+            - Spanish
+            - French
+            - German
+            - Portuguese
+            - Italian
+            - Japanese
+            - Korean
+            - Chinese
+            - Arabic
+  default_profile: standard
+  profiles:
+    - standard
+    - dual-gpu
+
+- id: openai/gpt-oss-120b
+  name: gpt-oss 120B
+  default: false
+  title: gpt-oss-120b
+  description: |-
+    An open-weight 120b-parameter mixture-of-experts reasoning model from OpenAI, designed for powerful reasoning, agentic tasks and function calling. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
+
+    **Model strengths**: Strong reasoning with configurable reasoning effort, native tool use and function calling, and long context support.
+  license: Apache-2.0
+  certified_by: OpenAI
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Strong reasoning with configurable reasoning effort
+            - Native function calling and tool use
+            - Agentic workflows
+            - Long context support
+  default_profile: standard
+  profiles:
+    - standard
+    - dual-gpu
+
+- id: mistralai/Mistral-Small-3.2-24B-Instruct-2506
+  name: Mistral Small 3.2 24B Instruct
+  default: false
+  title: mistral-small-3.2-24b-instruct
+  description: |-
+    A 24b-parameter instruction-tuned LLM from Mistral AI used for natural language understanding and generation tasks. In this project, it powers tasks such as prompt-based reasoning, summarization, answer generation, and other LLM-driven functionalities.
+
+    **Model strengths**: Reliable instruction-following, function calling, and multilingual support.
+  license: Apache-2.0
+  certified_by: Mistral AI
+  about:
+    - title: "Model strengths"
+      sections:
+        - title: "Strengths"
+          values:
+            - Reliable instruction-following
+            - Function calling and tool use
+            - Multilingual support
+            - Long context support
+  default_profile: standard
+  profiles:
+    - standard
+    - dual-gpu

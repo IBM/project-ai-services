@@ -1,0 +1,2 @@
+image: icr.io/ppc64le-oss/vllm-rocm:0.28.0-rocm7.14-0
+model: ""

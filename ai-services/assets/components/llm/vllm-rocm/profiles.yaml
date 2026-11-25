@@ -1,0 +1,25 @@
+- id: standard
+  default: true
+  name: "Standard"
+  description: "1 GPU, 150 GiB RAM, 32k context"
+  params:
+    resources:
+      memory: 161061273600 # 150Gi in bytes
+      accelerators:
+        amd.com/gpu: 1
+    maxModelLen: 32768
+    maxBatchSize: 32
+    shmSize: "64Gi"
+
+- id: dual-gpu
+  default: false
+  name: "Dual GPU"
+  description: "2 GPUs, 200 GiB RAM, 32k context"
+  params:
+    resources:
+      memory: 214748364800 # 200Gi in bytes
+      accelerators:
+        amd.com/gpu: 2
+    maxModelLen: 32768
+    maxBatchSize: 32
+    shmSize: "64Gi"
