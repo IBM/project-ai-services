@@ -1,3 +1,4 @@
+from typing import Optional, Dict, Any, List
 import numpy as np
 import hashlib
 from tqdm import tqdm
@@ -557,3 +558,46 @@ class OpensearchVectorStore(VectorStore):
             else:
                 logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
         return deleted_count
+
+
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
+    def get_all_indexed_doc_ids(
+        self,
+        page_size: int = 500,
+        after_key: Optional[dict] = None,
+    ) -> tuple[list[str], Optional[dict]]:
+        """
+        Retrieve distinct doc_ids from the OpenSearch index using composite aggregation.
+
+        Args:
+            page_size: Number of unique document IDs to fetch per page.
+            after_key: Pagination cursor from previous page, if any.
+
+        Returns:
+            Tuple of (list of doc_ids, next after_key or None if no more pages).
+        """
+        if not self.client.indices.exists(index=self.index_name):
+            logger.debug(f"Index {self.index_name} does not exist.")
+            return [], None
+
+        body: dict = {
+            "size": 0,
+            "aggs": {
+                "unique_docs": {
+                    "composite": {
+                        "size": page_size,
+                        "sources": [
+                            {"doc_id": {"terms": {"field": "metadata.doc_id"}}}
+                        ],
+                    }
+                }
+            },
+        }
+        if after_key:
+            body["aggs"]["unique_docs"]["composite"]["after"] = after_key
+
+        response = self.client.search(index=self.index_name, body=body)
+        buckets = response.get("aggregations", {}).get("unique_docs", {}).get("buckets", [])
+        doc_ids = [b["key"]["doc_id"] for b in buckets if b.get("key", {}).get("doc_id")]
+        next_after_key = response.get("aggregations", {}).get("unique_docs", {}).get("after_key")
+        return doc_ids, next_after_key

@@ -101,6 +101,24 @@ class VectorStore(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_all_indexed_doc_ids(
+        self,
+        page_size: int = 500,
+        after_key: Optional[Dict[str, Any]] = None,
+    ) -> tuple[List[str], Optional[Dict[str, Any]]]:
+        """
+        Retrieve distinct doc_ids present in the vector store index using pagination.
+
+        Args:
+            page_size: Number of unique document IDs to fetch per page.
+            after_key: Pagination cursor from previous page, if any.
+
+        Returns:
+            Tuple of (list of doc_ids, next after_key or None if no more pages).
+        """
+        pass
+
 class VectorStoreNotReadyError(Exception):
     """Raised when the database is unreachable or initializing."""
     pass
