@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/amdgpu"
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -35,8 +37,9 @@ func (p *PodmanBootstrap) Configure(ctx context.Context) error {
 		return err
 	}
 
-	// 3. Spyre cards – validate and repair spyre configurations
-	if err := ensureSpyreConfigured(ctx); err != nil {
+	// 3. Spyre cards – validate and repair spyre configurations. Skipped on AMD-only hosts; ROCm
+	// pre-flight checks are handled by the Validate phase (ROCmRegistry rules).
+	if err := ensureSpyreConfiguredIfApplicable(ctx); err != nil {
 		return err
 	}
 
@@ -63,6 +66,16 @@ func (p *PodmanBootstrap) Configure(ctx context.Context) error {
 	logger.Infoln("LPAR configured successfully")
 
 	return nil
+}
+
+// ensureSpyreConfiguredIfApplicable repairs the Spyre configuration, except on
+// hosts that have AMD GPUs but no Spyre cards.
+func ensureSpyreConfiguredIfApplicable(ctx context.Context) error {
+	if amdgpu.IsApplicable() && !spyre.IsApplicable() {
+		return nil
+	}
+
+	return ensureSpyreConfigured(ctx)
 }
 
 // Made with Bob

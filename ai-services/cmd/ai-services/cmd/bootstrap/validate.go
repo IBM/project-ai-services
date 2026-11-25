@@ -97,7 +97,7 @@ func validateExample() string {
 
 // generateValidationList return two validation list: podman and openshift.
 func generateValidationList() (string, string) {
-	podmanRules := validators.PodmanRegistry.Rules()
+	podmanRules := bootstrap.AllPodmanRules()
 	openshiftRules := validators.OpenshiftRegistry.Rules()
 
 	return createRuleList(podmanRules), createRuleList(openshiftRules)
@@ -127,7 +127,7 @@ func createRuleList(rules []validators.Rule) string {
 }
 
 func BuildSkipFlagDescription() string {
-	podmanRules := validators.PodmanRegistry.Rules()
+	podmanRules := bootstrap.AllPodmanRules()
 	openshiftRules := validators.OpenshiftRegistry.Rules()
 
 	podmanRuleNames := make([]string, 0, len(podmanRules))
