@@ -432,7 +432,7 @@ Leave empty for no dependency changes.'''
 
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'icr-iam-creds',
+                        credentialsId: 'iicr-cicd-namespace-creds',
                         usernameVariable: 'ICR_USER',
                         passwordVariable: 'ICR_PASSWORD'
                     )
