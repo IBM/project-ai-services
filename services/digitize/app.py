@@ -38,12 +38,7 @@ import asyncio
 
 from digitize.db.connection import check_db_connection, close_db_connections
 import digitize.utils.jobs as dg_util
-from digitize.utils.recovery import (
-    recover_zombie_jobs,
-    recover_connector_sync_state,
-    recover_conversion_tasks,
-    reconcile_opensearch_orphans,
-)
+from digitize.utils.recovery import recover_zombie_jobs, recover_connector_sync_state, recover_conversion_tasks
 
 logger = get_logger("digitize_server")
 diagnostic_logger, stderr_monitor, signal_handler = setup_comprehensive_crash_handler(logger)
@@ -145,19 +140,6 @@ def _recover_conversion_tasks():
         logger.error(f"Error during conversion task recovery: {exc}", exc_info=True)
 
 
-def _reconcile_opensearch_orphans():
-    """Clean up orphan OpenSearch chunks on startup."""
-    try:
-        res = reconcile_opensearch_orphans(dry_run=False)
-        if res.get("orphan_count", 0) > 0:
-            logger.info(
-                f"Startup reconciliation purged {res['orphan_count']} orphan doc(s) "
-                f"({res['deleted_chunks']} chunks) from OpenSearch"
-            )
-    except Exception as exc:
-        logger.warning(f"Startup OpenSearch orphan reconciliation skipped: {exc}")
-
-
 # ------------------------------------------------------------------ #
 # Connector scheduler                                                 #
 # ------------------------------------------------------------------ #
@@ -229,15 +211,6 @@ async def _connector_scheduler_lifespan():
                 f"Error recovering/re-registering connector jobs: {exc}", exc_info=True
             )
 
-        # Re-register periodic OpenSearch orphan reconciliation job with scheduler on startup/recovery
-        try:
-            await scheduler_module.register_opensearch_reconcile_job()
-            logger.info("✅ Registered periodic OpenSearch orphan reconciliation job with scheduler")
-        except Exception as exc:
-            logger.error(
-                f"Error registering periodic OpenSearch orphan reconciliation: {exc}", exc_info=True
-            )
-
         sched.start()
         logger.info("✅ Connector scheduler started")
 
@@ -276,9 +249,6 @@ async def lifespan(app: FastAPI):
 
     # Stale conversion task recovery on startup.
     _recover_conversion_tasks()
-
-    # OpenSearch orphan chunk cleanup on startup.
-    _reconcile_opensearch_orphans()
 
     # Start conversion dispatcher.
     from digitize.workers.conversion_dispatcher import dispatch_loop

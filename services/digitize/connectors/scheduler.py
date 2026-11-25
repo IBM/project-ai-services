@@ -117,28 +117,3 @@ async def remove_connector_job(connector_id: str) -> None:
             f"Could not remove scheduler job for {connector_id!r} "
             f"(may not have been registered): {exc}"
         )
-
-
-RECONCILE_JOB_ID = "opensearch_orphan_reconcile"
-DEFAULT_RECONCILE_INTERVAL_SECONDS = 1800  # 30 minutes
-
-
-async def register_opensearch_reconcile_job(
-    interval_seconds: int = DEFAULT_RECONCILE_INTERVAL_SECONDS,
-) -> None:
-    """Schedule (or reschedule) the recurring OpenSearch orphan reconciliation job."""
-    from digitize.utils.recovery import reconcile_opensearch_orphans
-
-    sched = _get_scheduler()
-    sched.add_job(
-        func=reconcile_opensearch_orphans,
-        trigger=IntervalTrigger(seconds=interval_seconds),
-        id=RECONCILE_JOB_ID,
-        name="Periodic OpenSearch orphan chunk reconciliation",
-        kwargs={"dry_run": False},
-        replace_existing=True,
-    )
-    logger.info(
-        f"Registered scheduler job for OpenSearch orphan reconciliation "
-        f"(interval={interval_seconds}s)"
-    )

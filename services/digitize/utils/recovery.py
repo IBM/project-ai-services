@@ -304,7 +304,7 @@ def reconcile_opensearch_orphans(dry_run: bool = False, batch_size: int = 500) -
     """
     Scan OpenSearch for document IDs that do not exist in the PostgreSQL documents table
     and remove their orphaned vector chunks.
-    Includes a concurrency gate so simultaneous runs (scheduler, API, post-import) are skipped.
+    Includes a concurrency gate so simultaneous runs (internal API, post-import) are skipped.
 
     Args:
         dry_run: If True, only identify and report orphans without deleting them.

@@ -283,21 +283,13 @@ async def get_conversion_tasks(
 
 
 # ------------------------------------------------------------------ #
-# OpenSearch reconciliation endpoint                                 #
+# OpenSearch reconciliation endpoint (internal)                      #
 # ------------------------------------------------------------------ #
 
 @router.post(
     "/reconcile-opensearch",
     response_model=models.ReconcileOrphansResponse,
-    responses={
-        500: http_error_responses[500],
-    },
-    summary="Reconcile and cleanup orphan chunks in OpenSearch",
-    description=(
-        "Scans OpenSearch for document IDs that do not exist in the PostgreSQL documents table "
-        "and removes orphaned vector chunks to ensure data consistency."
-    ),
-    response_description="Summary of scanned docs, identified orphans, and deleted chunks",
+    include_in_schema=False,  # internal: not exposed in Swagger/OpenAPI
 )
 async def reconcile_opensearch(
     dry_run: bool = Query(

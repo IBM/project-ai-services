@@ -144,3 +144,8 @@ class TestReconcileEndpoint:
         assert data["orphan_doc_ids"] == ["doc-orphan-1"]
         assert data["orphan_count"] == 1
         assert data["deleted_chunks"] == 5
+
+    def test_endpoint_hidden_from_openapi_schema(self):
+        client = TestClient(app)
+        paths = client.get("/openapi.json").json()["paths"]
+        assert not any("reconcile-opensearch" in p for p in paths)
