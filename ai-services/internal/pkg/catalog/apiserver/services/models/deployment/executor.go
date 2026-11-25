@@ -21,6 +21,7 @@ type ModelExecutor struct {
 	componentRepo dbrepo.ComponentRepository
 	connectorRepo dbrepo.ConnectorRepository
 	gateway       litellm.Gateway
+	vllm          catalogclient.VLLMClient
 }
 
 // NewModelExecutor creates a new ModelExecutor instance.
@@ -28,11 +29,13 @@ func NewModelExecutor(
 	componentRepo dbrepo.ComponentRepository,
 	connectorRepo dbrepo.ConnectorRepository,
 	litellmClient catalogclient.LiteLLMClient,
+	vllmClient catalogclient.VLLMClient,
 ) *ModelExecutor {
 	return &ModelExecutor{
 		componentRepo: componentRepo,
 		connectorRepo: connectorRepo,
 		gateway:       litellm.NewGateway(litellmClient),
+		vllm:          vllmClient,
 	}
 }
 
@@ -156,8 +159,10 @@ func updateLocalRoute(plan *types.LocalPlan, egress string) {
 // ExecuteRemote runs a remote plan synchronously: add the LiteLLM route, verify connectivity and
 // persist a connector. Any failure rolls the route back. A connectivity failure is reported as 422.
 func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePlan) error {
-	if plan.Req.ProviderID == catalogconstants.ConnectorProviderHostedVLLM {
-		if err := e.fetchAndSetVllmParams(ctx, plan); err != nil {
+	// A provider that does not need the route is resolved first, so an unusable model is rejected
+	// before anything is registered.
+	if !plan.Provider.RequiresRoute() {
+		if err := e.setMaxModelLen(ctx, plan); err != nil {
 			return err
 		}
 	}
@@ -171,15 +176,15 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 		return err
 	}
 
-	if plan.Req.ProviderID != catalogconstants.ConnectorProviderHostedVLLM {
-		if err := e.fetchAndSetLiteLLMParams(ctx, plan); err != nil {
+	if plan.Provider.RequiresRoute() {
+		if err := e.setMaxModelLen(ctx, plan); err != nil {
 			e.gateway.Deregister(ctx, plan.Route)
 
 			return err
 		}
 	}
 
-	e.setBatchSizeParam(plan)
+	setBatchSizeParam(plan)
 
 	// The route is registered before the connector row is written, so the LiteLLM model ID is
 	// already known here and is stored together with the rest of the metadata.
@@ -201,71 +206,21 @@ func (e *ModelExecutor) ExecuteRemote(ctx context.Context, plan *types.RemotePla
 	return nil
 }
 
-// fetchAndSetVllmParams queries the remote vLLM models endpoint and populates the params metadata.
-func (e *ModelExecutor) fetchAndSetVllmParams(ctx context.Context, plan *types.RemotePlan) error {
-	apiBase, _ := plan.Req.Params[catalogconstants.ParamAPIBase].(string)
-	apiKey, _ := plan.Req.Params[catalogconstants.ParamAPIKey].(string)
-
-	if apiBase == "" {
-		return nil
-	}
-
-	vllmClient := catalogclient.NewVLLMClient(apiBase, apiKey)
-	modelsResp, err := vllmClient.GetModels(ctx)
+// setMaxModelLen resolves the model's maximum length through the plan's provider and records it in
+// the params metadata.
+func (e *ModelExecutor) setMaxModelLen(ctx context.Context, plan *types.RemotePlan) error {
+	maxModelLen, err := plan.Provider.MaxModelLen(ctx, plan, types.RemoteClients{Gateway: e.gateway, VLLM: e.vllm})
 	if err != nil {
-		return validators.Unprocessable("failed to fetch models from vllm: %v", err)
+		return err
 	}
 
-	maxModelLen := -1
-	for _, m := range modelsResp.Data {
-		if m.ID == plan.Req.Model {
-			maxModelLen = m.MaxModelLen
-
-			break
-		}
-	}
-
-	if maxModelLen == -1 {
-		return validators.Unprocessable("could not resolve maximum model length for model %q", plan.Req.Model)
-	}
-
-	e.getOrCreateParams(plan)[catalogconstants.ParamMaxModelLen] = maxModelLen
-
-	return nil
-}
-
-// fetchAndSetLiteLLMParams queries the LiteLLM model/info endpoint and populates the params metadata.
-func (e *ModelExecutor) fetchAndSetLiteLLMParams(ctx context.Context, plan *types.RemotePlan) error {
-	litellmModelID := plan.Route.LiteLLMModelID
-	if litellmModelID == "" {
-		return fmt.Errorf("litellm model ID is empty")
-	}
-
-	infoResp, err := e.gateway.GetModelInfo(ctx, litellmModelID)
-	if err != nil {
-		return fmt.Errorf("failed to get model info from litellm: %w", err)
-	}
-
-	maxInputTokens := -1
-	for _, d := range infoResp.Data {
-		if d.ModelInfo.ID == litellmModelID {
-			maxInputTokens = d.ModelInfo.MaxInputTokens
-
-			break
-		}
-	}
-
-	if maxInputTokens == -1 {
-		return fmt.Errorf("could not resolve maximum input tokens from litellm model info")
-	}
-
-	e.getOrCreateParams(plan)[catalogconstants.ParamMaxModelLen] = maxInputTokens
+	plan.MetadataParams()[catalogconstants.ParamMaxModelLen] = maxModelLen
 
 	return nil
 }
 
 // setBatchSizeParam parses maxBatchSize from the parameter map (defaulting to 32) and populates DB params metadata.
-func (e *ModelExecutor) setBatchSizeParam(plan *types.RemotePlan) {
+func setBatchSizeParam(plan *types.RemotePlan) {
 	maxBatchSize := 32
 	switch v := plan.Req.Params[catalogconstants.ParamMaxBatchSize].(type) {
 	case int:
@@ -274,20 +229,5 @@ func (e *ModelExecutor) setBatchSizeParam(plan *types.RemotePlan) {
 		maxBatchSize = int(v)
 	}
 
-	e.getOrCreateParams(plan)[catalogconstants.ParamMaxBatchSize] = maxBatchSize
-}
-
-// getOrCreateParams returns the params map nested inside the plan's metadata, initializing as necessary.
-func (e *ModelExecutor) getOrCreateParams(plan *types.RemotePlan) map[string]any {
-	if plan.Metadata == nil {
-		plan.Metadata = make(map[string]any)
-	}
-
-	params, ok := plan.Metadata[catalogconstants.MetadataKeyParams].(map[string]any)
-	if !ok {
-		params = make(map[string]any)
-		plan.Metadata[catalogconstants.MetadataKeyParams] = params
-	}
-
-	return params
+	plan.MetadataParams()[catalogconstants.ParamMaxBatchSize] = maxBatchSize
 }

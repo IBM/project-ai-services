@@ -7,6 +7,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
+	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 )
@@ -71,11 +73,57 @@ type LocalPlan struct {
 	Values map[string]any
 }
 
+// RemoteClients are the clients a RemoteProvider reaches the remote model through. They are
+// passed per call, so a provider holds no state and can be selected during planning.
+type RemoteClients struct {
+	// Gateway is the LiteLLM gateway the route is registered on.
+	Gateway litellm.Gateway
+	// VLLM talks to a hosted vLLM server directly.
+	VLLM catalogclient.VLLMClient
+}
+
+// RemoteProvider is the provider-specific behavior of a remote model. The planner selects one
+// per request and the plan carries it, so neither phase branches on the provider ID.
+type RemoteProvider interface {
+	// NormalizeParams adjusts the params of a request that is being planned. planParams (stored
+	// as metadata, used for lookups against the provider and the tokenize target) and routeParams
+	// (forwarded to the gateway as litellm_params) are both owned by the plan, so they are
+	// changed in place.
+	NormalizeParams(planParams, routeParams map[string]any)
+
+	// RequiresRoute reports whether MaxModelLen can only be answered once the route is registered
+	// on the gateway (plan.Route.LiteLLMModelID is set). A provider that does not need it is
+	// resolved first, so an unusable model is rejected before anything is registered.
+	RequiresRoute() bool
+
+	// MaxModelLen returns the model's maximum length, always greater than zero, or an error when
+	// it is not known.
+	MaxModelLen(ctx context.Context, plan *RemotePlan, clients RemoteClients) (int, error)
+}
+
 // RemotePlan is a fully validated remote-model registration.
 type RemotePlan struct {
 	ConnectorID uuid.UUID
 	Req         apimodels.CreateModelRequest
 	Route       litellm.Route
+	// Provider is the provider-specific behavior, selected once by the planner.
+	Provider RemoteProvider
 	// Metadata is what gets persisted: the non-sensitive params only.
 	Metadata map[string]any
+}
+
+// MetadataParams returns the params map nested inside the plan's metadata, creating it (and the
+// metadata itself) when missing.
+func (p *RemotePlan) MetadataParams() map[string]any {
+	if p.Metadata == nil {
+		p.Metadata = make(map[string]any)
+	}
+
+	params, ok := p.Metadata[catalogconstants.MetadataKeyParams].(map[string]any)
+	if !ok {
+		params = make(map[string]any)
+		p.Metadata[catalogconstants.MetadataKeyParams] = params
+	}
+
+	return params
 }

@@ -31,6 +31,8 @@ type LiteLLMClient interface {
 	// GenerateKey creates a virtual key and returns its raw "sk-..." value. The value must never
 	// be logged or stored.
 	GenerateKey(ctx context.Context, req LiteLLMKeyGenerateRequest) (string, error)
+	// GetModelInfo returns the model info LiteLLM holds for the registered model with the given
+	// LiteLLM model ID (not the model name). An empty ID returns the info of every model.
 	GetModelInfo(ctx context.Context, litellmModelID string) (*LiteLLMModelInfoResponse, error)
 }
 
@@ -288,6 +290,8 @@ func (c *litellmClient) HealthProbe(ctx context.Context, modelID string) (*LiteL
 	return &healthResp, nil
 }
 
+// GetModelInfo calls GET /v1/model/info, filtered by litellm_model_id unless it is empty. A non-2xx
+// status is an error.
 func (c *litellmClient) GetModelInfo(ctx context.Context, litellmModelID string) (*LiteLLMModelInfoResponse, error) {
 	path := "/v1/model/info"
 	if litellmModelID != "" {

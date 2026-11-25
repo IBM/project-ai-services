@@ -205,13 +205,19 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 
 	connectorID := uuid.New()
 
+	// req is a copy, but its Params map is the caller's. Work on a clone so the normalization
+	// below never mutates the caller's input (planning has no side effects); the plan carries it.
+	req.Params = maps.Clone(req.Params)
+
 	// The params were validated against the provider's schema.json, so they are forwarded to
-	// LiteLLM as is (apart from the vLLM api_base): a field added to the schema reaches the
-	// gateway without a code change.
+	// LiteLLM as is (apart from the platform-side maxBatchSize, which is kept as metadata only,
+	// and whatever the provider normalizes, e.g. the vLLM api_base): a field added to the schema
+	// reaches the gateway without a code change.
 	routeParams := maps.Clone(req.Params)
-	if req.ProviderID == constants.ConnectorProviderHostedVLLM {
-		normalizeVLLMAPIBase(req.Params, routeParams)
-	}
+	delete(routeParams, constants.ParamMaxBatchSize)
+
+	provider := remoteProviderFor(req.ProviderID)
+	provider.NormalizeParams(req.Params, routeParams)
 
 	r := litellm.Route{
 		Tag:           connectorID.String(),
@@ -233,22 +239,7 @@ func (p *ModelPlanner) PlanRemote(ctx context.Context, req apimodels.CreateModel
 		constants.MetadataKeyParams:        catalogutils.StripSensitiveFields(req.Params, sensitive),
 	}
 
-	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Metadata: metadata}, nil
-}
-
-// normalizeVLLMAPIBase handles the vLLM api_base, which the user may give with or without /v1.
-// planParams (used for the stored metadata, the models lookup and the tokenize target) get the
-// bare server URL, and routeParams get it with /v1, since vLLM serves its OpenAI API under /v1 and
-// LiteLLM appends only the endpoint path (e.g. /chat/completions).
-func normalizeVLLMAPIBase(planParams, routeParams map[string]any) {
-	apiBase, _ := planParams[litellm.ParamAPIBase].(string)
-	if apiBase == "" {
-		return
-	}
-
-	bare := bareAPIBase(apiBase)
-	planParams[litellm.ParamAPIBase] = bare
-	routeParams[litellm.ParamAPIBase] = bare + openAIAPIPath
+	return &types.RemotePlan{ConnectorID: connectorID, Req: req, Route: r, Provider: provider, Metadata: metadata}, nil
 }
 
 // remoteTokenizeURL returns the target of the tokenize passthrough for a remote provider, or ""

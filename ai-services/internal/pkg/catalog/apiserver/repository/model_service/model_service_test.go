@@ -186,6 +186,8 @@ type mockLiteLLMClient struct {
 	probeErr           error
 	deletedKeys        []string
 	generatedKeys      []catalogclient.LiteLLMKeyGenerateRequest
+	// maxInputTokens overrides the max_input_tokens GetModelInfo reports; nil keeps the default.
+	maxInputTokens *int
 }
 
 func (m *mockLiteLLMClient) RegisterModel(_ context.Context, req catalogclient.LiteLLMModelNewRequest) (string, error) {
@@ -247,7 +249,7 @@ func newTestModelService(t *testing.T, comps dbrepo.ComponentRepository, conns d
 	t.Helper()
 
 	svc := NewModelService(comps, conns, nil, nil, workers, setupTestCatalogProvider(t), "")
-	svc.executor = modelsvc.NewModelExecutor(comps, conns, lite)
+	svc.executor = modelsvc.NewModelExecutor(comps, conns, lite, catalogclient.NewVLLMClient())
 
 	return svc
 }
@@ -439,6 +441,17 @@ func TestCreateModel_Remote(t *testing.T) {
 				assert.NotContains(t, conn.Metadata, "api_base", "params are not stored flat")
 				assert.Equal(t, "https://us-south.ml.cloud.ibm.com", params["api_base"])
 				assert.Equal(t, "123e4567-e89b-12d3-a456-426614174000", params["project_id"])
+			},
+		},
+		{
+			name:     "zero max_input_tokens is a 422 and rolls the route back",
+			req:      watsonxRequest("zero-watsonx"),
+			lite:     &mockLiteLLMClient{maxInputTokens: new(int)},
+			wantCode: http.StatusUnprocessableEntity,
+			wantMsg:  "no valid maximum input tokens",
+			check: func(t *testing.T, lite *mockLiteLLMClient, conns *mockConnectorRepo) {
+				assert.Equal(t, []string{"litellm-id-ibm/granite-4-h-small"}, lite.deregisteredModels)
+				assert.Empty(t, conns.connectors, "no connector may be persisted with maxModelLen 0")
 			},
 		},
 		{
@@ -1164,13 +1177,18 @@ func (m *mockLiteLLMClient) GenerateKey(_ context.Context, req catalogclient.Lit
 }
 
 func (m *mockLiteLLMClient) GetModelInfo(_ context.Context, litellmModelID string) (*catalogclient.LiteLLMModelInfoResponse, error) {
+	maxInputTokens := 131072
+	if m.maxInputTokens != nil {
+		maxInputTokens = *m.maxInputTokens
+	}
+
 	return &catalogclient.LiteLLMModelInfoResponse{
 		Data: []catalogclient.LiteLLMModelData{
 			{
 				ModelName: "ibm/granite-4-h-small",
 				ModelInfo: catalogclient.LiteLLMInfoRec{
 					ID:             litellmModelID,
-					MaxInputTokens: 131072,
+					MaxInputTokens: maxInputTokens,
 				},
 			},
 		},
@@ -1287,4 +1305,48 @@ func TestCreateRemoteModel_HostedVllm(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, 4096, params[constants.ParamMaxModelLen])
 	assert.Equal(t, 64, params[constants.ParamMaxBatchSize])
+}
+
+// A vLLM that omits max_model_len (decoded as 0), or does not list the model, must fail the
+// registration with a 422 instead of persisting maxModelLen = 0.
+func TestCreateRemoteModel_HostedVllm_UnusableMaxModelLen(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantMsg string
+	}{
+		{"max_model_len omitted", `{"data":[{"id":"ibm-granite/granite-3.3-8b-instruct"}]}`, "no valid maximum model length"},
+		{"max_model_len zero", `{"data":[{"id":"ibm-granite/granite-3.3-8b-instruct","max_model_len":0}]}`, "no valid maximum model length"},
+		{"model not listed", `{"data":[{"id":"other","max_model_len":4096}]}`, "could not resolve maximum model length"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setControlPlaneRuntime(t, runtimeTypes.RuntimeTypePodman)
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			conns := newMockConnectorRepo()
+			lite := &mockLiteLLMClient{}
+			svc := newTestModelService(t, newMockComponentRepo(), conns, worker.NewResolver(nil), lite)
+
+			resp, err := svc.CreateModel(context.Background(), apimodels.CreateModelRequest{
+				DeploymentType: constants.DeploymentTypeRemote,
+				ComponentType:  "llm",
+				Name:           "hosted-vllm-bad-len",
+				ProviderID:     "hosted_vllm",
+				Model:          "ibm-granite/granite-3.3-8b-instruct",
+				Params:         map[string]any{"api_base": server.URL},
+			})
+
+			assert.Nil(t, resp)
+			requireStatus(t, err, http.StatusUnprocessableEntity, tt.wantMsg)
+			assert.Empty(t, lite.registeredModels, "nothing may be registered before the length is known")
+			assert.Empty(t, conns.connectors)
+		})
+	}
 }
