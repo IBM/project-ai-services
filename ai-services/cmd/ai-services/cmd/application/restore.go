@@ -15,7 +15,6 @@ import (
 )
 
 var (
-	restoreTarget   string
 	restoreFilename string
 	restoreAutoYes  bool
 )
@@ -28,41 +27,26 @@ var restoreCmd = &cobra.Command{
 Arguments:
   [name] : Application name (required)
 
-Supported targets:
-  - opensearch: Restore OpenSearch indices and data (Podman and OpenShift)
-  - digitize:   Restore digitize metadata (jobs and documents) (Podman and OpenShift)
+The backup file is restored onto both:
+  - OpenSearch indices and data (Podman and OpenShift)
+  - Digitize metadata (jobs and documents) (Podman and OpenShift)
+
+Older backup files that contain only one of the two are also accepted;
+in that case only the part present in the file is restored.
 
 Note:
   - WARNING: Restore will overwrite existing data`,
-	Example: `  # Restore OpenSearch data
-  ai-services application restore myapp --target opensearch --filename backup.tar.gz
-
-  # Restore digitize data
-  ai-services application restore myapp --target digitize --filename digitize_backup.tar.gz
+	Example: `  # Restore OpenSearch and digitize data from a backup file
+  ai-services application restore myapp --filename backup.tar.gz
 
   # Restore with automatic confirmation
-  ai-services application restore myapp --target digitize --filename backup.tar.gz --yes`,
+  ai-services application restore myapp --filename backup.tar.gz --yes`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		target := restoreTarget
 		filename := restoreFilename
 
 		// Once precheck passes, silence usage for any later internal errors
 		cmd.SilenceUsage = true
-
-		// Validate target
-		validTargets := []string{"opensearch", "digitize"}
-		isValid := false
-		for _, t := range validTargets {
-			if target == t {
-				isValid = true
-
-				break
-			}
-		}
-		if !isValid {
-			return fmt.Errorf("invalid target '%s'. Valid targets are: %s", target, strings.Join(validTargets, ", "))
-		}
 
 		// Validate filename extension
 		if !strings.HasSuffix(filename, ".tar.gz") {
@@ -118,14 +102,13 @@ Note:
 		// Create restore options
 		opts := appTypes.RestoreOptions{
 			Name:       applicationName,
-			Target:     restoreTarget,
 			BackupFile: absFilename,
 			AutoYes:    restoreAutoYes,
 		}
 
 		// Execute restore using the application interface
 		if err := app.Restore(ctx, opts); err != nil {
-			return fmt.Errorf("failed to restore %s for application %s: %w", restoreTarget, applicationName, err)
+			return fmt.Errorf("failed to restore application %s: %w", applicationName, err)
 		}
 
 		logger.Infof("✓ Restore completed successfully for application %s\n", applicationName)
@@ -135,11 +118,9 @@ Note:
 }
 
 func init() {
-	restoreCmd.Flags().StringVar(&restoreTarget, "target", "", "Target to restore (opensearch, digitize) (required)")
 	restoreCmd.Flags().StringVar(&restoreFilename, "filename", "", "Path to the backup tar.gz file (required)")
 	restoreCmd.Flags().BoolVarP(&restoreAutoYes, "yes", "y", false, "Automatically accept all confirmation prompts (default=false)")
 
-	_ = restoreCmd.MarkFlagRequired("target")
 	_ = restoreCmd.MarkFlagRequired("filename")
 }
 

@@ -8,17 +8,17 @@ import (
 	"github.com/google/uuid"
 	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/openshift/restore"
+	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	catalogUtils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// Restore restores application data from a backup file for OpenShift runtime.
+// Restore restores OpenSearch and digitize data from a backup file for OpenShift runtime.
+// Older single-part archives are supported: only the parts present in the archive are restored.
 func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOptions) error {
 	logger.Infof("Starting restore for application: %s\n", opts.Name)
-	logger.Infof("Target: %s\n", opts.Target)
 	logger.Infof("Backup file: %s\n", opts.BackupFile)
 
 	// Get application details from catalog API
@@ -34,9 +34,18 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
 	}
 
-	// Execute restore based on target
-	switch opts.Target {
-	case "opensearch":
+	rootDir, cleanup, err := podmanrestore.ExtractBackup(absFilename)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	opensearchDir, digitizeDir, err := podmanrestore.LocateBackupParts(rootDir)
+	if err != nil {
+		return err
+	}
+
+	if opensearchDir != "" {
 		// Get component ID (templateID) — used as ai-services.io/template label selector
 		templateID, err := cliUtils.GetComponentID(appDetails, "opensearch")
 		if err != nil {
@@ -52,39 +61,16 @@ func (o *OpenshiftApplication) Restore(ctx context.Context, opts types.RestoreOp
 		namespace := catalogUtils.AppNamespace(appUUID)
 		logger.Infof("Namespace: %s\n", namespace)
 
-		return restore.RestoreOpenSearch(ctx, templateID, namespace, absFilename)
-	case "digitize":
-		return o.restoreDigitize(ctx, appDetails, absFilename)
-	default:
-		return fmt.Errorf("unsupported target: %s", opts.Target)
-	}
-}
-
-// restoreDigitize restores digitize metadata using the Import API for OpenShift.
-func (o *OpenshiftApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
-	logger.Infof("Restoring digitize metadata\n")
-	logger.Infof("Digitize Import (API-based Approach)\n")
-
-	importPayload, err := commonrestore.GetDigitizeData(backupFile)
-	if err != nil {
-		return err
+		if err := restore.RestoreOpenSearch(ctx, templateID, namespace, opensearchDir); err != nil {
+			return fmt.Errorf("opensearch restore failed: %w", err)
+		}
 	}
 
-	// Get digitize service API URL from catalog service endpoints
-	digitizeURL, err := commonrestore.GetDigitizeAPIURL(appDetails)
-	if err != nil {
-		return err
+	if digitizeDir != "" {
+		if err := commonrestore.RestoreDigitize(ctx, appDetails, digitizeDir); err != nil {
+			return fmt.Errorf("digitize restore failed: %w", err)
+		}
 	}
-
-	logger.Infof("Digitize API URL: %s\n", digitizeURL)
-
-	// Create digitize restore client and call Import API
-	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
-	if err := client.CallImportAPI(ctx, importPayload); err != nil {
-		return err
-	}
-
-	logger.Infof("✓ Digitize metadata restore completed successfully\n")
 
 	return nil
 }

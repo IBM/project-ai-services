@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,7 +21,8 @@ const (
 )
 
 // RestoreOpenSearch restores OpenSearch data using podman sidecar approach.
-func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error {
+// backupOSDir is the extracted OpenSearch backup directory.
+func RestoreOpenSearch(ctx context.Context, templateID, backupOSDir string) error {
 	logger.Infof("Restoring OpenSearch data for template: %s\n", templateID)
 	logger.Infoln("OpenSearch Import (Sidecar Container Approach)")
 
@@ -35,19 +35,12 @@ func RestoreOpenSearch(ctx context.Context, templateID, backupFile string) error
 	logger.Infof("Container: %s\n", containerName)
 	logger.Infof("Pod ID: %s\n", podID)
 
-	// Extract and locate backup directory
-	backupDir, cleanup, err := ExtractAndLocateBackup(backupFile)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-
 	// Manage sidecar lifecycle and perform restore
-	return manageSidecarWithGo(ctx, podID, backupDir)
+	return manageSidecarWithGo(ctx, podID, backupOSDir)
 }
 
 // manageSidecarWithGo manages the lifecycle of a podman sidecar container using runtime package.
-func manageSidecarWithGo(ctx context.Context, podID, backupDir string) error {
+func manageSidecarWithGo(ctx context.Context, podID, backupOSDir string) error {
 	sidecarName := fmt.Sprintf("opensearch-restore-sidecar-%d-%d", time.Now().Unix(), os.Getpid())
 
 	// Create podman client to use runtime methods
@@ -64,13 +57,13 @@ func manageSidecarWithGo(ctx context.Context, podID, backupDir string) error {
 		[]string{"sleep", "3600"},
 		func(ctx context.Context, containerID string) error {
 			// Prepare sidecar and perform restore
-			return prepareSidecarAndRestore(ctx, containerID, backupDir)
+			return prepareSidecarAndRestore(ctx, containerID, backupOSDir)
 		},
 	)
 }
 
 // prepareSidecarAndRestore prepares the sidecar container and performs the restore.
-func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string) error {
+func prepareSidecarAndRestore(ctx context.Context, containerID, backupOSDir string) error {
 	// Create podman client once for all operations
 	pc, err := podman.NewPodmanClient()
 	if err != nil {
@@ -80,11 +73,6 @@ func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string
 	osPassword, err := common.GetOpenSearchPasswordFromSecret(ctx, containerID)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenSearch password: %w", err)
-	}
-
-	backupOSDir, containerBackupPath, err := determineBackupPaths(backupDir)
-	if err != nil {
-		return err
 	}
 
 	if err := copyBackupToSidecar(pc, containerID, backupOSDir, containerBackupPath); err != nil {
@@ -98,23 +86,6 @@ func prepareSidecarAndRestore(ctx context.Context, containerID, backupDir string
 	logger.Infoln("OpenSearch import completed!")
 
 	return nil
-}
-
-// determineBackupPaths determines the backup directory paths based on format.
-func determineBackupPaths(backupDir string) (string, string, error) {
-	var backupOSDir string
-
-	if filepath.Base(backupDir) == "opensearch_backup" {
-		backupOSDir = backupDir
-	} else {
-		backupOSDir = filepath.Join(backupDir, "opensearch")
-	}
-
-	if _, err := os.Stat(backupOSDir); os.IsNotExist(err) {
-		return "", "", fmt.Errorf("OpenSearch backup directory not found: %s", backupOSDir)
-	}
-
-	return backupOSDir, containerBackupPath, nil
 }
 
 // copyBackupToSidecar copies backup files to the sidecar container.

@@ -3,9 +3,6 @@ package podman
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
-	"time"
 
 	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
 	commonRestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
@@ -17,33 +14,50 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// Backup creates a backup of application data.
+// Backup creates a single backup archive containing both OpenSearch and digitize data.
 func (p *PodmanApplication) Backup(ctx context.Context, opts types.BackupOptions) error {
 	logger.Infof("Starting backup for application: %s\n", opts.Name)
-	logger.Infof("Target: %s\n", opts.Target)
 
-	// Validate target
-	switch opts.Target {
-	case "opensearch":
-		return p.backupOpenSearch(ctx, opts.Name, opts.BackupFile)
-	case "digitize":
-		return p.backupDigitize(ctx, opts.Name, opts.BackupFile)
-	default:
-		return fmt.Errorf("unsupported backup target: %s", opts.Target)
-	}
-}
-
-// backupOpenSearch performs OpenSearch backup using a sidecar container.
-func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appName, backupFile string) error {
-	logger.Infof("Backing up OpenSearch data for application: %s\n", appName)
-	logger.Infoln("OpenSearch Backup (Sidecar Container Approach)")
-
-	// Get application details from catalog API
-	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, appName)
+	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, opts.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get application details: %w", err)
 	}
 	logger.Infof("Application ID: %s\n", appDetails.ID)
+
+	// Generate backup filename if not provided
+	absBackupFile, err := commonBackup.GetBackupFile(opts.BackupFile, opts.Name)
+	if err != nil {
+		return err
+	}
+
+	// Both parts are staged here and packed into one archive at the end.
+	stageDir, cleanup, err := commonBackup.NewStagingDir()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if err := p.backupOpenSearch(ctx, appDetails, stageDir); err != nil {
+		return err
+	}
+
+	if err := p.backupDigitize(ctx, appDetails, stageDir); err != nil {
+		return err
+	}
+
+	if err := commonBackup.CreateBackupArchive(stageDir, absBackupFile); err != nil {
+		return err
+	}
+
+	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile)
+
+	return nil
+}
+
+// backupOpenSearch performs OpenSearch backup using a sidecar container into stageDir.
+func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appDetails *catalogTypes.Application, stageDir string) error {
+	logger.Infof("Backing up OpenSearch data for application: %s\n", appDetails.Name)
+	logger.Infoln("OpenSearch Backup (Sidecar Container Approach)")
 
 	// Get component ID for opensearch
 	componentID, err := cliUtils.GetComponentID(appDetails, "opensearch")
@@ -51,23 +65,6 @@ func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appName, backu
 		return fmt.Errorf("failed to get component ID: %w", err)
 	}
 	logger.Infof("Component ID: %s\n", componentID)
-
-	// Generate backup filename if not provided
-	if backupFile == "" {
-		timestamp := time.Now().Format("20060102_150405")
-		backupFile = fmt.Sprintf("%s_opensearch_backup_%s.tar.gz", appName, timestamp)
-	}
-
-	// Ensure .tar.gz extension
-	if !strings.HasSuffix(backupFile, ".tar.gz") {
-		backupFile += ".tar.gz"
-	}
-
-	// Get absolute path for backup file
-	absBackupFile, err := filepath.Abs(backupFile)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
-	}
 
 	// Get the Podman context from the runtime client
 	podmanCtx, err := p.getPodmanContext()
@@ -85,30 +82,13 @@ func (p *PodmanApplication) backupOpenSearch(ctx context.Context, appName, backu
 	logger.Infof("Pod ID: %s\n", podID)
 
 	// Perform backup using the backup package
-	if err := backup.BackupOpenSearch(podmanCtx, podID, absBackupFile); err != nil {
-		return err
-	}
-
-	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile)
-
-	return nil
+	return backup.BackupOpenSearch(podmanCtx, podID, stageDir)
 }
 
-func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupFile string) error {
-	logger.Infof("Backing up digitize metadata for application: %s\n", appName)
+// backupDigitize exports digitize metadata via the Export API into stageDir.
+func (p *PodmanApplication) backupDigitize(ctx context.Context, appDetails *catalogTypes.Application, stageDir string) error {
+	logger.Infof("Backing up digitize metadata for application: %s\n", appDetails.Name)
 	logger.Infoln("Digitize Export (API-based Approach)")
-
-	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, appName)
-	if err != nil {
-		return fmt.Errorf("failed to get application details: %w", err)
-	}
-	logger.Infof("Application ID: %s\n", appDetails.ID)
-
-	// Generate backup filename if not provided
-	absBackupFile, err := commonBackup.GetBackupFile(backupFile, appName)
-	if err != nil {
-		return err
-	}
 
 	digitizeURL, err := commonRestore.GetDigitizeAPIURL(appDetails)
 	if err != nil {
@@ -124,12 +104,11 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 		return err
 	}
 
-	if err := commonBackup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
+	if err := commonBackup.WriteDigitizeBackup(stageDir, exportResponse); err != nil {
 		return err
 	}
 
 	logDigitizeBackupSummary(exportResponse)
-	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile)
 
 	return nil
 }
@@ -161,7 +140,5 @@ func logDigitizeBackupSummary(exportResponse *commonBackup.DigitizeExportRespons
 
 	logger.Infof("  Returned records: %d\n", exportResponse.Pagination.ReturnedRecords)
 }
-
-var _ *catalogTypes.Application
 
 // Made with Bob

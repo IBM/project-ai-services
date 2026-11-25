@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/go-resty/resty/v2"
-	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -19,7 +18,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 )
 
-// ConstructMetadataFromCache reads cache files and constructs the Import API payload.
+// constructMetadataFromCache reads cache files and constructs the Import API payload.
 func constructMetadataFromCache(backupDir string) (map[string]interface{}, error) {
 	cacheDir := filepath.Join(backupDir, "cache")
 
@@ -223,20 +222,34 @@ func logImportWarnings(importResponse map[string]interface{}) {
 	logger.Infof("Import completed with %d warning(s)\n", len(warnings))
 }
 
-func GetDigitizeData(backupFile string) (map[string]interface{}, error) {
-	backupDir, cleanup, err := podmanrestore.ExtractAndLocateBackup(backupFile)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
+// RestoreDigitize restores digitize metadata via the Import API from an extracted
+// digitize backup directory (the one containing cache/).
+func RestoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, digitizeDir string) error {
+	logger.Infoln("Restoring digitize metadata")
+	logger.Infoln("Digitize Import (API-based Approach)")
 
-	// Construct metadata from cache files
-	importPayload, err := constructMetadataFromCache(backupDir)
+	importPayload, err := constructMetadataFromCache(digitizeDir)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return importPayload, nil
+	// Get digitize service API URL from catalog service endpoints
+	digitizeURL, err := GetDigitizeAPIURL(appDetails)
+	if err != nil {
+		return err
+	}
+
+	logger.Infof("Digitize API URL: %s\n", digitizeURL)
+
+	// Create digitize restore client and call Import API
+	client := NewDigitizeRestoreClient(digitizeURL)
+	if err := client.CallImportAPI(ctx, importPayload); err != nil {
+		return err
+	}
+
+	logger.Infoln("✓ Digitize metadata restore completed successfully")
+
+	return nil
 }
 
 // GetDigitizeAPIURL extracts the digitize API URL from application details.

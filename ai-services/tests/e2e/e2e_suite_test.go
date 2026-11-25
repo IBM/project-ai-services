@@ -3535,8 +3535,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 			digitizeJobStatus     string
 			preBackupPowerVCResp  string
 			preBackupSpyreGPUResp string
-			opensearchBackupFile  string
-			digitizeBackupFile    string
+			backupFile            string
 		)
 
 		ginkgo.It("backs up and restores application data", func() {
@@ -3609,12 +3608,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				*prompt.response = response
 			}
 
-			opensearchBackupFile = filepath.Join(tempDir, "opensearch-backup-"+runID+".tar.gz")
-			digitizeBackupFile = filepath.Join(tempDir, "digitize-backup-"+runID+".tar.gz")
+			backupFile = filepath.Join(tempDir, "backup-"+runID+".tar.gz")
 
-			_, err = cli.ApplicationBackup(ctx, cfg, appName, "opensearch", opensearchBackupFile, appRuntime)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			_, err = cli.ApplicationBackup(ctx, cfg, appName, "digitize", digitizeBackupFile, appRuntime)
+			_, err = cli.ApplicationBackup(ctx, cfg, appName, backupFile, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			deleteOutput, deleteErr := cli.DeleteApp(ctx, cfg, appName, appRuntime)
@@ -3650,9 +3646,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 
 			catalogLoginWithDiscovery(ctx, true)
 
-			_, err = cli.ApplicationRestore(ctx, cfg, backupAppName, "opensearch", opensearchBackupFile, appRuntime)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			_, err = cli.ApplicationRestore(ctx, cfg, backupAppName, "digitize", digitizeBackupFile, appRuntime)
+			_, err = cli.ApplicationRestore(ctx, cfg, backupAppName, backupFile, appRuntime)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			restoredInfoOutput, err := cli.WaitForApplicationInfoURLs(ctx, cfg, backupAppName, appRuntime, 8*time.Minute, 15*time.Second)
@@ -3726,8 +3720,7 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 				osDigitizeJobStatus     string
 				osPreBackupPowerVCResp  string
 				osPreBackupSpyreGPUResp string
-				osOpensearchBackupFile  string
-				osDigitizeBackupFile    string
+				osBackupFile            string
 			)
 
 			// ------------------------------------------------------------------ //
@@ -3837,17 +3830,12 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 						logger.Infof("[OPENSHIFT-BR] Pre-backup response for %q: %s", p.question, resp)
 					}
 
-					ginkgo.By("backing up opensearch and digitize data")
-					osOpensearchBackupFile = filepath.Join(tempDir, "os-opensearch-backup-"+runID+".tar.gz")
-					osDigitizeBackupFile = filepath.Join(tempDir, "os-digitize-backup-"+runID+".tar.gz")
+					ginkgo.By("backing up opensearch and digitize data into a single archive")
+					osBackupFile = filepath.Join(tempDir, "os-backup-"+runID+".tar.gz")
 
-					_, err = cli.ApplicationBackup(specCtx, cfg, appName, "opensearch", osOpensearchBackupFile, appRuntime)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] opensearch backup failed")
-					logger.Infof("[OPENSHIFT-BR] OpenSearch backup written to %s", osOpensearchBackupFile)
-
-					_, err = cli.ApplicationBackup(specCtx, cfg, appName, "digitize", osDigitizeBackupFile, appRuntime)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] digitize backup failed")
-					logger.Infof("[OPENSHIFT-BR] Digitize backup written to %s", osDigitizeBackupFile)
+					_, err = cli.ApplicationBackup(specCtx, cfg, appName, osBackupFile, appRuntime)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] backup failed")
+					logger.Infof("[OPENSHIFT-BR] Backup written to %s", osBackupFile)
 
 					ginkgo.By("deleting the existing application")
 					deleteOutput, deleteErr := cli.DeleteApp(specCtx, cfg, appName, appRuntime)
@@ -3885,13 +3873,9 @@ var _ = ginkgo.Describe("AI Services End-to-End Tests", ginkgo.Ordered, func() {
 					ginkgo.By("re-logging into catalog and restoring opensearch and digitize")
 					catalogLoginWithDiscovery(specCtx, true)
 
-					_, err = cli.ApplicationRestore(specCtx, cfg, osRestoreAppName, "opensearch", osOpensearchBackupFile, appRuntime)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] opensearch restore failed")
-					logger.Infof("[OPENSHIFT-BR] OpenSearch restore completed")
-
-					_, err = cli.ApplicationRestore(specCtx, cfg, osRestoreAppName, "digitize", osDigitizeBackupFile, appRuntime)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] digitize restore failed")
-					logger.Infof("[OPENSHIFT-BR] Digitize restore completed")
+					_, err = cli.ApplicationRestore(specCtx, cfg, osRestoreAppName, osBackupFile, appRuntime)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "[OPENSHIFT-BR] restore failed")
+					logger.Infof("[OPENSHIFT-BR] OpenSearch and digitize restore completed")
 
 					ginkgo.By("waiting for application info URLs on the restored app")
 					restoredInfoOutput, infoErr := cli.WaitForApplicationInfoURLs(specCtx, cfg, osRestoreAppName, appRuntime, 8*time.Minute, 15*time.Second)

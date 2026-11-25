@@ -9,7 +9,38 @@ import (
 	"github.com/stretchr/testify/require"
 
 	commonbackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
+	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 )
+
+// writeDigitizeArchive writes a digitize-only archive (the older single-part format).
+func writeDigitizeArchive(t *testing.T, archive string, resp *commonbackup.DigitizeExportResponse) error {
+	t.Helper()
+
+	stageDir := t.TempDir()
+	if err := commonbackup.WriteDigitizeBackup(stageDir, resp); err != nil {
+		return err
+	}
+
+	return commonbackup.CreateTarGzArchive(stageDir, archive, []string{"backup"})
+}
+
+// readDigitizePayload extracts archive and builds the digitize import payload from it.
+func readDigitizePayload(t *testing.T, archive string) (map[string]interface{}, error) {
+	t.Helper()
+
+	rootDir, cleanup, err := podmanrestore.ExtractBackup(archive)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	_, digitizeDir, err := podmanrestore.LocateBackupParts(rootDir)
+	if err != nil {
+		return nil, err
+	}
+
+	return constructMetadataFromCache(digitizeDir)
+}
 
 func exportResponse(jobs, docs, checksums []map[string]interface{}) *commonbackup.DigitizeExportResponse {
 	return &commonbackup.DigitizeExportResponse{
@@ -35,7 +66,7 @@ func payloadData(t *testing.T, payload map[string]interface{}) map[string]interf
 func TestDigitizeBackupRestoreRoundTripIncludesDocumentChecksums(t *testing.T) {
 	archive := filepath.Join(t.TempDir(), "digitize.tar.gz")
 
-	err := commonbackup.CreateDigitizeBackupArchive(archive, exportResponse(
+	err := writeDigitizeArchive(t, archive, exportResponse(
 		[]map[string]interface{}{{"job_id": "job-1", "operation": "ingestion"}},
 		[]map[string]interface{}{{"id": "doc-1", "job_id": "job-1", "name": "a.pdf"}},
 		[]map[string]interface{}{
@@ -45,7 +76,7 @@ func TestDigitizeBackupRestoreRoundTripIncludesDocumentChecksums(t *testing.T) {
 	))
 	require.NoError(t, err)
 
-	payload, err := GetDigitizeData(archive)
+	payload, err := readDigitizePayload(t, archive)
 	require.NoError(t, err)
 
 	data := payloadData(t, payload)
@@ -71,11 +102,11 @@ func TestDigitizeBackupRestoreRoundTripIncludesDocumentChecksums(t *testing.T) {
 func TestDigitizeBackupWithoutChecksumsRestoresAsEmptyList(t *testing.T) {
 	archive := filepath.Join(t.TempDir(), "digitize.tar.gz")
 
-	require.NoError(t, commonbackup.CreateDigitizeBackupArchive(archive, exportResponse(
+	require.NoError(t, writeDigitizeArchive(t, archive, exportResponse(
 		[]map[string]interface{}{{"job_id": "job-1"}}, nil, nil,
 	)))
 
-	payload, err := GetDigitizeData(archive)
+	payload, err := readDigitizePayload(t, archive)
 	require.NoError(t, err)
 
 	checksums, ok := payloadData(t, payload)["document_checksums"].([]interface{})
@@ -86,7 +117,7 @@ func TestDigitizeBackupWithoutChecksumsRestoresAsEmptyList(t *testing.T) {
 func TestCreateDigitizeBackupArchiveRejectsChecksumWithoutDocID(t *testing.T) {
 	archive := filepath.Join(t.TempDir(), "digitize.tar.gz")
 
-	err := commonbackup.CreateDigitizeBackupArchive(archive, exportResponse(
+	err := writeDigitizeArchive(t, archive, exportResponse(
 		[]map[string]interface{}{{"job_id": "job-1"}},
 		nil,
 		[]map[string]interface{}{{"checksum": "sum-1", "type": "ingestion"}},
@@ -94,6 +125,61 @@ func TestCreateDigitizeBackupArchiveRejectsChecksumWithoutDocID(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "doc_id")
+}
+
+func TestCombinedBackupArchiveContainsBothParts(t *testing.T) {
+	stageDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(stageDir, "opensearch_backup"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(stageDir, "opensearch_backup", "rag_data.json"), []byte(`{}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(stageDir, "backup_info.json"), []byte(`{}`), 0o644))
+	require.NoError(t, commonbackup.WriteDigitizeBackup(stageDir, exportResponse(
+		[]map[string]interface{}{{"job_id": "job-1"}}, nil, nil,
+	)))
+
+	archive := filepath.Join(t.TempDir(), "combined.tar.gz")
+	require.NoError(t, commonbackup.CreateBackupArchive(stageDir, archive))
+
+	rootDir, cleanup, err := podmanrestore.ExtractBackup(archive)
+	require.NoError(t, err)
+	defer cleanup()
+
+	opensearchDir, digitizeDir, err := podmanrestore.LocateBackupParts(rootDir)
+	require.NoError(t, err)
+	assert.FileExists(t, filepath.Join(opensearchDir, "rag_data.json"))
+
+	payload, err := constructMetadataFromCache(digitizeDir)
+	require.NoError(t, err)
+	assert.Len(t, payloadData(t, payload)["jobs"], 1)
+}
+
+func TestLocateBackupPartsOldSinglePartArchives(t *testing.T) {
+	t.Run("opensearch only", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "opensearch_backup"), 0o755))
+
+		opensearchDir, digitizeDir, err := podmanrestore.LocateBackupParts(root)
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, opensearchDir)
+		assert.Empty(t, digitizeDir)
+	})
+
+	t.Run("digitize only", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "backup", "cache"), 0o755))
+
+		opensearchDir, digitizeDir, err := podmanrestore.LocateBackupParts(root)
+
+		require.NoError(t, err)
+		assert.Empty(t, opensearchDir)
+		assert.NotEmpty(t, digitizeDir)
+	})
+
+	t.Run("neither", func(t *testing.T) {
+		_, _, err := podmanrestore.LocateBackupParts(t.TempDir())
+
+		require.Error(t, err)
+	})
 }
 
 func TestConstructMetadataFromCacheOldBackupLayout(t *testing.T) {
