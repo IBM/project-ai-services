@@ -26,6 +26,9 @@ const yamlDecoderBufSz = 4096
 // openShiftSync implements RuntimeSync for the OpenShift runtime.
 type openShiftSync struct {
 	runtimeClient runtime.Runtime
+	// modelsScope is set when the runtime targets the shared models namespace, where local
+	// models are installed under their own release name instead of the application namespace.
+	modelsScope bool
 }
 
 func newOpenShiftSync() *openShiftSync {
@@ -38,6 +41,20 @@ func (s *openShiftSync) WithRuntime(rt runtime.Runtime) (RuntimeSync, error) {
 	}
 
 	return &openShiftSync{runtimeClient: rt}, nil
+}
+
+// WithModelsNamespace returns a sync backend scoped to the shared models namespace
+// (ai-services-models), where local models are deployed on OpenShift.
+func (s *openShiftSync) WithModelsNamespace() (RuntimeSync, error) {
+	rrt, ok := s.runtimeClient.(*remoteRuntime.RemoteRuntime)
+	if !ok {
+		return nil, fmt.Errorf("models namespace sync requires a remote runtime")
+	}
+
+	return &openShiftSync{
+		runtimeClient: rrt.WithNamespace(catalogutils.ModelsNamespace()),
+		modelsScope:   true,
+	}, nil
 }
 
 // FetchPodStatuses fetches all pods labelled with the given templateID using the OpenShift runtime.
@@ -95,7 +112,7 @@ func (s *openShiftSync) ValidateResources(ctx context.Context, input ResourceVal
 	}
 
 	// Use the deployed release manifest as the source of truth for expected resources.
-	manifest, err := s.getReleaseManifest(ctx, input.AppID, input.CatalogID, input.ItemType)
+	manifest, err := s.getReleaseManifest(ctx, input)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Failed to get Helm release manifest for %s %s: %v", input.ItemType, input.CatalogID, err)
 
@@ -222,15 +239,8 @@ func manifestPVCVolumeName(volumeMap map[string]any) string {
 // getReleaseManifest resolves the namespace and release name, then fetches the deployed manifest.
 // It uses the stored helmManager (local or remote) so the manifest is always read
 // from the correct cluster — either the local kubeconfig or the worker's gRPC stream.
-func (s *openShiftSync) getReleaseManifest(ctx context.Context, appID, catalogID, itemType string) (string, error) {
-	appUUID, err := uuid.Parse(appID)
-	if err != nil {
-		return "", fmt.Errorf("invalid application ID: %w", err)
-	}
-
-	// Releases are installed into the application namespace derived from the app ID.
-	namespace := catalogutils.AppNamespace(appUUID)
-	releaseName, err := s.releaseName(appUUID, catalogID, itemType)
+func (s *openShiftSync) getReleaseManifest(ctx context.Context, input ResourceValidationInput) (string, error) {
+	namespace, releaseName, err := s.releaseLocation(input)
 	if err != nil {
 		return "", err
 	}
@@ -243,6 +253,34 @@ func (s *openShiftSync) getReleaseManifest(ctx context.Context, appID, catalogID
 	}
 
 	return hm.GetReleaseManifest(ctx, releaseName)
+}
+
+// releaseLocation resolves the namespace and Helm release name of the input's deployed release.
+// Releases are installed into the application namespace derived from the app ID, except local
+// models, which live in the shared models namespace under the model release name.
+func (s *openShiftSync) releaseLocation(input ResourceValidationInput) (string, string, error) {
+	if s.modelsScope {
+		componentID, err := uuid.Parse(input.InstanceID)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid model component ID: %w", err)
+		}
+
+		componentType, _, _ := strings.Cut(input.CatalogID, "/")
+
+		return catalogutils.ModelsNamespace(), catalogutils.ModelHelmReleaseName(componentID, componentType), nil
+	}
+
+	appUUID, err := uuid.Parse(input.AppID)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid application ID: %w", err)
+	}
+
+	releaseName, err := s.releaseName(appUUID, input.CatalogID, input.ItemType)
+	if err != nil {
+		return "", "", err
+	}
+
+	return catalogutils.AppNamespace(appUUID), releaseName, nil
 }
 
 // releaseName mirrors the naming used by the OpenShift deployer for services and components.

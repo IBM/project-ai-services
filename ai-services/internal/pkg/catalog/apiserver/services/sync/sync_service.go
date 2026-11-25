@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	catalogpkg "github.com/project-ai-services/ai-services/internal/pkg/catalog"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
@@ -538,6 +539,15 @@ func (s *SyncService) updateServiceStatusIfChanged(ctx context.Context, service 
 func (s *SyncService) syncComponentPod(ctx context.Context, runtimeSync RuntimeSync, appID string, component *models.Component) (models.ComponentStatus, string, error) {
 	componentID := component.ID
 
+	// Local models are deployed outside the application namespace on OpenShift; look them up there.
+	if s.isModelComponentType(component.Type) {
+		modelSync, err := runtimeSync.WithModelsNamespace()
+		if err != nil {
+			return models.ComponentStatusError, "", fmt.Errorf("failed to scope sync to models namespace: %w", err)
+		}
+		runtimeSync = modelSync
+	}
+
 	// Fetch all pods using component ID as template label
 	pods, err := runtimeSync.FetchPodStatuses(ctx, componentID.String())
 	if err != nil {
@@ -579,6 +589,22 @@ func (s *SyncService) syncComponentPod(ctx context.Context, runtimeSync RuntimeS
 	}
 
 	return newStatus, "", nil
+}
+
+// isModelComponentType reports whether componentType is served by model providers, that is, some
+// catalog component of that type declares the models category.
+func (s *SyncService) isModelComponentType(componentType string) bool {
+	if s.catalogProvider == nil {
+		return false
+	}
+
+	for _, c := range s.catalogProvider.ListComponentsByCategory(catalogconstants.ComponentCategoryModels) {
+		if c.ComponentType.ID == componentType {
+			return true
+		}
+	}
+
+	return false
 }
 
 // handleComponentPodFetchError handles the case when pods cannot be fetched for a component.

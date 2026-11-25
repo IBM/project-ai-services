@@ -27,6 +27,11 @@ type RuntimeSync interface {
 	// WithRuntime returns a runtime-bound sync backend instance.
 	WithRuntime(rt runtime.Runtime) (RuntimeSync, error)
 
+	// WithModelsNamespace returns a sync backend that looks up local model components where the
+	// runtime deploys them. Runtimes that deploy models next to the application return the
+	// receiver unchanged.
+	WithModelsNamespace() (RuntimeSync, error)
+
 	// FetchPodStatuses returns the status of all pods associated with the given template ID.
 	// The templateID is the service or component UUID used as the "ai-services.io/template" label value.
 	// Returns an error when no pods are found or when the runtime call fails.

@@ -53,6 +53,11 @@ func (s *podmanSync) WithRuntime(rt runtime.Runtime) (RuntimeSync, error) {
 	}, nil
 }
 
+// WithModelsNamespace returns the receiver: Podman deploys models in the same runtime as the application.
+func (s *podmanSync) WithModelsNamespace() (RuntimeSync, error) {
+	return s, nil
+}
+
 // FetchPodStatuses fetches all pods labelled with the given templateID and returns their statuses.
 // It uses InspectPod and InspectContainer (via common.ProcessPod) to derive state and health.
 func (s *podmanSync) FetchPodStatuses(ctx context.Context, templateID string) ([]*PodStatus, error) {
