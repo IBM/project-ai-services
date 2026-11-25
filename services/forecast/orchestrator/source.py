@@ -1,9 +1,10 @@
 """
-The API's contact with the data loader.
+The loader's contact with the source: extract the table and map the loader's errors.
 
 The loader reads every row of the connector's table with the connector's decrypted
-credentials, in batches, and writes them to a Parquet file. The orchestrator runs it before it
-starts the worker and hands the file to the worker. This module maps the loader's errors to the
+credentials, in batches, and writes them to a Parquet file. The loader subprocess
+(``python -m forecast.data_loader``, see data_loader/main.py) calls this before the orchestrator
+starts the worker, and the worker reads the file. This module maps the loader's errors to the
 two kinds of failure, so nothing else depends on the loader.
 
 It runs with the API's database role: the worker's role has no grant on ``connectors``.
@@ -50,6 +51,6 @@ def load_training_data(
         )
     except DataLoaderError as exc:
         if exc.is_permanent_failure:
-            # The loader's messages name the connector or table and hold no secret.
+            # The loader's messages name the connector, table or columns and hold no secret or driver text.
             raise PermanentFailure(str(exc)) from exc
         raise TransientFailure(str(exc)) from exc

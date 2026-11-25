@@ -165,7 +165,7 @@ class ParquetBatchWriter:
                 )
             except Exception as exc:
                 self._is_aborted = True
-                raise ParquetWriteError(f"Failed to open Parquet writer at {self.temp_path}: {exc}") from exc
+                raise ParquetWriteError("Failed to open the Parquet file for writing.") from exc
         return self._writer
 
     def write_batch(self, rows: Sequence[Sequence[Any]]) -> int:
@@ -207,7 +207,7 @@ class ParquetBatchWriter:
         except Exception as exc:
             self._is_aborted = True
             self.abort()
-            raise ParquetWriteError(f"Failed to write batch to Parquet: {exc}") from exc
+            raise ParquetWriteError("Failed to write a batch of rows to the Parquet file.") from exc
 
     def close(self) -> None:
         """Finalize the Parquet file (writes footer metadata) and atomically rename to destination."""
@@ -222,7 +222,7 @@ class ParquetBatchWriter:
                 self._writer.close()
             except Exception as exc:
                 self.abort()
-                raise ParquetWriteError(f"Failed to finalize Parquet file: {exc}") from exc
+                raise ParquetWriteError("Failed to finish the Parquet file.") from exc
             finally:
                 self._writer = None
 
@@ -232,9 +232,7 @@ class ParquetBatchWriter:
                 self.temp_path.replace(self.output_path)
             except Exception as exc:
                 self.abort()
-                raise ParquetWriteError(
-                    f"Failed to atomically rename {self.temp_path} to {self.output_path}: {exc}"
-                ) from exc
+                raise ParquetWriteError("Failed to move the Parquet file into place.") from exc
 
     def abort(self) -> None:
         """Abort writing, close writer if open, and delete the temporary file."""

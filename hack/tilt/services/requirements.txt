@@ -40,7 +40,12 @@ spacy
 pypdfium2
 
 # --- forecast ---
-# Connector secret encryption (AES-256-GCM). The training stack (autogluon.tabular, lightgbm, xgboost,
-# pandas, pyarrow, tritonclient[http], apscheduler) is not imported by the merged code yet; add it
-# here from services/forecast/requirements.txt when the training worker lands.
+# Connector secret encryption (AES-256-GCM).
 cryptography>=42.0.0
+# The training scheduler (forecast/training/scheduler.py). The API imports and starts it at boot, so the API
+# does not start without it. Same pin as services/forecast/requirements.txt and hack/tilt/requirements.txt.
+apscheduler[sqlalchemy]==3.11.3
+# Not installed here: the training stack (pandas, pyarrow, scikit-learn, autogluon.tabular, lightgbm, catboost,
+# onnx, onnxmltools, onnxruntime, mapepire-python). Only the loader and worker subprocesses that a training run
+# starts import it, and the API does not. To run a training locally, install it from
+# services/forecast/requirements.txt.

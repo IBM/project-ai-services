@@ -8,6 +8,7 @@ resolution, the Parquet output and the error mapping are checked on their own.
 
 import re
 from datetime import date, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -33,6 +34,7 @@ from forecast.data_loader import (
     map_db_type_to_arrow,
 )
 from forecast.data_loader import loader as loader_module
+from forecast.data_loader import parquet_store
 from forecast.settings import settings
 from forecast.utils.encryption import EncryptionKeyError, encrypt_secrets
 
@@ -203,8 +205,9 @@ def test_list_columns_tables_differing_by_case_need_exact_spelling():
         ("TEST", "ORDERS", "ID", "BIGINT", "N"),
     ]
     client = _client(_FakeConnection(catalogue=catalogue))
-    with pytest.raises(InvalidTableReferenceError):
+    with pytest.raises(InvalidTableReferenceError, match="matches 2 tables") as excinfo:
         client.list_columns("test.orders")
+    assert "TEST.Orders" not in str(excinfo.value)  # The names of the other tables are not in the message.
     assert client.list_columns("TEST.Orders")[0].type == "INTEGER"
     assert client.list_columns("TEST.ORDERS")[0].type == "BIGINT"
 
@@ -229,12 +232,13 @@ def test_resolve_columns_prefers_exact_then_case_insensitive():
     assert [c.name for c in resolved] == ["FLAG", "Amount", "ID"]
 
 
-def test_resolve_columns_lists_every_missing_column():
-    """All missing columns are named along with the available ones."""
+def test_resolve_columns_lists_every_missing_column(caplog):
+    """All missing columns are named. The columns of the table are not: they go to the log."""
     with pytest.raises(DBColumnNotFoundError) as excinfo:
         loader_module._resolve_columns(["ID", "NOPE", "ALSO_NOPE"], _columns(), "TEST.ORDERS")
     message = str(excinfo.value)
-    assert "NOPE" in message and "ALSO_NOPE" in message and "REGION" in message
+    assert "NOPE" in message and "ALSO_NOPE" in message and "REGION" not in message
+    assert "REGION" in caplog.text
 
 
 def test_resolve_columns_rejects_a_column_requested_twice():
@@ -316,8 +320,9 @@ def test_parquet_writer_aborts_on_error_and_keeps_previous_file(tmp_path):
 def test_parquet_writer_rejects_rows_with_wrong_width(tmp_path):
     """A row with the wrong number of values is a Parquet write failure."""
     writer = ParquetBatchWriter(tmp_path / "bad.parquet", build_arrow_schema(["A", "B"]))
-    with pytest.raises(ParquetWriteError, match="Row length"):
+    with pytest.raises(ParquetWriteError, match="Failed to write a batch") as raised:
         writer.write_batch([(1,)])
+    assert "Row length (1)" in str(raised.value.__cause__)  # The detail is kept in the cause, for the log.
     assert list(tmp_path.iterdir()) == []
 
 
@@ -553,6 +558,115 @@ def test_get_connection_maps_connect_errors(message, expected):
         with pytest.raises(expected) as excinfo:
             client.list_columns("TEST.ORDERS")
     assert "secret" not in str(excinfo.value)
+
+
+# --- Messages that reach the user (jobs.message) carry no host, user name or driver text
+
+
+LEAKY_HOST, LEAKY_USER, LEAKY_TEXT = "db2-prod.internal.example", "SVC_BATCH", "driver-detail-4711"
+
+
+def _leaky_client(conn=None):
+    return Db2Client(LEAKY_HOST, "db", LEAKY_USER, "secret", port=8076, custom_connection=conn)
+
+
+def _assert_clean(error, cause_has):
+    message = str(error)
+    for token in (LEAKY_HOST, LEAKY_USER, LEAKY_TEXT, "8076", "secret"):
+        assert token not in message
+    assert cause_has in str(error.__cause__)  # The detail stays in the cause, which the loader logs.
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [(f"Password is incorrect {LEAKY_TEXT}", DBAuthError), (f"Connection refused {LEAKY_TEXT}", DBConnectionError)],
+)
+def test_connect_errors_keep_host_user_and_driver_text_out_of_the_message(text, expected):
+    with patch("mapepire_python.connect", side_effect=RuntimeError(text)):
+        with pytest.raises(expected) as excinfo:
+            _leaky_client().list_columns("TEST.ORDERS")
+    _assert_clean(excinfo.value, LEAKY_TEXT)
+
+
+def test_catalogue_and_ping_errors_keep_driver_text_out_of_the_message():
+    with pytest.raises(DBConnectionError) as excinfo:
+        _leaky_client(_FakeConnection(fail_on=("SYSCOLUMNS", LEAKY_TEXT))).list_columns("TEST.ORDERS")
+    _assert_clean(excinfo.value, LEAKY_TEXT)
+    with pytest.raises(DBAuthError) as excinfo:
+        _leaky_client(_FakeConnection(fail_on=("SYSDUMMY1", f"not authorized {LEAKY_TEXT}"))).test_connection()
+    _assert_clean(excinfo.value, LEAKY_TEXT)
+    with pytest.raises(DBConnectionError) as excinfo:
+        _leaky_client(_FakeConnection(fail_on=("SYSDUMMY1", LEAKY_TEXT))).test_connection()
+    _assert_clean(excinfo.value, LEAKY_TEXT)
+
+
+def test_a_missing_table_names_the_table_and_not_the_user():
+    with pytest.raises(DBTableNotFoundError) as excinfo:
+        _leaky_client(_FakeConnection(catalogue=[])).list_columns("TEST.GONE")
+    assert "TEST.GONE" in str(excinfo.value) and LEAKY_USER not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (f"SQL0204 {LEAKY_TEXT} not found", DBTableNotFoundError),
+        (f"SQL0206 {LEAKY_TEXT} column", DBColumnNotFoundError),
+        (f"SQL0551 {LEAKY_TEXT} not authorized", DBAuthError),
+        (f"websocket closed {LEAKY_TEXT}", DBConnectionError),
+    ],
+)
+def test_streaming_errors_keep_driver_text_out_of_the_message(text, expected):
+    with pytest.raises(expected) as excinfo:
+        list(_leaky_client(_FakeConnection(fail_on=("SELECT", text))).stream_query_batches('SELECT "ID" FROM "T"'))
+    _assert_clean(excinfo.value, LEAKY_TEXT)
+
+
+def test_a_value_that_cannot_be_written_stays_out_of_the_parquet_error(tmp_path):
+    writer = ParquetBatchWriter(tmp_path / "v.parquet", build_arrow_schema(["N"], {"N": "INTEGER"}))
+    with pytest.raises(ParquetWriteError) as excinfo:
+        writer.write_batch([("card-4111-1111",)])
+    assert "4111" not in str(excinfo.value)
+    assert "4111" in str(excinfo.value.__cause__)
+
+
+def _leaky(*args, **kwargs):
+    raise RuntimeError(f"/scratch/run-7/data.parquet {LEAKY_TEXT}")
+
+
+def _int_writer(tmp_path):
+    return ParquetBatchWriter(tmp_path / "o.parquet", build_arrow_schema(["N"], {"N": "INTEGER"}))
+
+
+def _assert_parquet_clean(error, message):
+    assert message in str(error)
+    assert LEAKY_TEXT not in str(error) and "/scratch" not in str(error)
+    assert LEAKY_TEXT in str(error.__cause__)  # The detail stays in the cause, which the loader logs.
+
+
+def test_a_parquet_file_that_cannot_be_opened_keeps_path_and_library_text_out_of_the_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(parquet_store.pq, "ParquetWriter", _leaky)
+    with pytest.raises(ParquetWriteError) as excinfo:
+        _int_writer(tmp_path).write_batch([(1,)])
+    _assert_parquet_clean(excinfo.value, "Failed to open the Parquet file")
+
+
+def test_a_parquet_file_that_cannot_be_finished_keeps_library_text_out_of_the_message(tmp_path):
+    writer = _int_writer(tmp_path)
+    writer.write_batch([(1,)])
+    writer._writer = SimpleNamespace(close=_leaky)
+    with pytest.raises(ParquetWriteError) as excinfo:
+        writer.close()
+    _assert_parquet_clean(excinfo.value, "Failed to finish the Parquet file")
+
+
+def test_a_parquet_file_that_cannot_be_moved_keeps_the_paths_out_of_the_message(tmp_path, monkeypatch):
+    writer = _int_writer(tmp_path)
+    writer.write_batch([(1,)])
+    monkeypatch.setattr(Path, "replace", _leaky)
+    with pytest.raises(ParquetWriteError) as excinfo:
+        writer.close()
+    _assert_parquet_clean(excinfo.value, "Failed to move the Parquet file into place")
+    assert str(tmp_path) not in str(excinfo.value)
 
 
 def test_get_connection_passes_connection_settings_to_mapepire():

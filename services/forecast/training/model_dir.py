@@ -12,18 +12,12 @@ Triton model layout:
 Directories are 0755 and files 0644 under the umask 022 that ``main`` sets.
 """
 from pathlib import Path
-from uuid import UUID
 
 import onnx
 
 from forecast.training.onnx_export import triton_config
 
 TRITON_MODEL_VERSION = "1"  # Every forecaster version is its own Triton model.
-
-
-def forecaster_name(connector_id: UUID, version: int) -> str:
-    """Name of a forecaster: its directory on the volume and its model name in Triton."""
-    return f"fc_{connector_id}_{version}"
 
 
 def write_model_dir(output_dir: Path, name: str, model: onnx.ModelProto) -> Path:

@@ -20,9 +20,9 @@ SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
 
 # Exit codes of the training worker (``python -m forecast.training <job_id> <data_path> <output_dir>``),
-# which the loader subprocess is meant to follow too. The API retries the attempt after EXIT_FAILURE,
-# a kill or a timeout, and does not retry EXIT_PERMANENT. 2 is left out because argparse uses it for
-# a bad command line.
+# which the loader subprocess (``python -m forecast.data_loader <job_id> <output_path>``) follows too.
+# The API retries the attempt after EXIT_FAILURE, a kill or a timeout, and does not retry
+# EXIT_PERMANENT. 2 is left out because argparse uses it for a bad command line.
 EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_PERMANENT = 3
@@ -31,8 +31,9 @@ EXIT_PERMANENT = 3
 class TrainingFailure(Exception):
     """A training failure whose message is written for the user and stored in ``jobs.message``.
 
-    The message must name no secret and no data value. Any other exception of the worker is
-    stored as a fixed text, because its message can carry hosts, user names or rows.
+    The message must name no secret, host, user name or data value, and must not repeat the text of
+    a driver or library error. Any other exception of the worker or the loader is stored as a fixed
+    text, because its message can carry such details.
     """
 
 

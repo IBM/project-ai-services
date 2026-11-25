@@ -19,6 +19,7 @@ from forecast.settings import settings
 from forecast.triton_client import triton
 from forecast.utils.api_utils import format_timestamp, handle_database_errors
 from forecast.utils.inference_validation import validate_inference_instances
+from forecast.utils.names import forecaster_name
 
 logger = get_logger("forecast_api")
 
@@ -99,7 +100,7 @@ async def run_forecast(
     validate_inference_instances(
         instances, input_columns, max_rows=settings.forecast.max_inference_rows
     )
-    model_name = f"fc_{cid}_{version}"
+    model_name = forecaster_name(cid, version)
     predictions = await triton.run_inference(
         model_name=model_name, instances=instances, input_columns=input_columns
     )

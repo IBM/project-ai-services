@@ -135,8 +135,9 @@ class ForecastConfig(BaseSettings):
     # 2048 MB is the value measured on the ppc64le target. The worker's memory grows with the table
     # and the design sets no row limit, so a table that needs more fails once it passes the cap.
     # It must stay below the container's memory limit. An empty WORKER_MEMORY_LIMIT_MB removes the cap.
-    # NOTE: Nothing applies the cap yet. The API orchestration (Story 7) is meant to set it on the
-    # worker subprocess, and the worker only logs its peak memory ("peak memory MB", training/main.py).
+    # The API enforces it with a watchdog on the resident memory of the worker's process group
+    # (orchestrator/process.py), because no cgroup can be created inside the container. The worker also
+    # logs its peak memory ("peak memory MB", training/main.py).
     worker_memory_limit_mb: Optional[int] = Field(
         default=2048,
         ge=1,

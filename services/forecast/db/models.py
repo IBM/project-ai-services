@@ -159,7 +159,7 @@ class Forecaster(Base):
         BigInteger, ForeignKey("jobs.seq", ondelete="SET NULL"), nullable=True
     )
     version: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    # algorithm and training_seconds, copied from the job's result.
+    # {metric, validation_score, training_seconds}, copied from the job's result (metric is its validation_metric).
     metrics: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()

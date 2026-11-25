@@ -22,7 +22,8 @@ from forecast.settings import settings
 from forecast.training import main as worker
 from forecast.training.features import encode
 from forecast.training.onnx_export import triton_config
-from forecast.training.model_dir import forecaster_name, write_model_dir
+from forecast.training.model_dir import write_model_dir
+from forecast.utils.names import forecaster_name
 from forecast.training.training import _split
 
 pytestmark = pytest.mark.unit

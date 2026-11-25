@@ -81,3 +81,18 @@ def test_a_failed_copy_leaves_no_staging_directory(volume, monkeypatch):
 
     assert list((repository / STAGING).iterdir()) == []
     assert not (repository / "fc_x_5").exists()
+
+
+def test_a_failed_rename_leaves_no_staging_directory(volume, monkeypatch):
+    repository, model_dir = volume
+
+    def fail(self, target):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr("pathlib.Path.rename", fail)
+
+    with pytest.raises(OSError, match="cross-device link"):
+        publish(repository, 5, "fc_x_5", model_dir)
+
+    assert list((repository / STAGING).iterdir()) == []
+    assert not (repository / "fc_x_5").exists()

@@ -28,9 +28,10 @@ from forecast.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFail
 from common.misc_utils import get_logger
 from forecast.db.jobs import JobStore, TrainingJob, worker_engine
 from forecast.settings import settings
-from forecast.training.model_dir import forecaster_name, write_model_dir
+from forecast.training.model_dir import write_model_dir
 from forecast.training.onnx_export import export
 from forecast.training.training import train
+from forecast.utils.names import forecaster_name
 
 logger = get_logger("forecast_worker")
 

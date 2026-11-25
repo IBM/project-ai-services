@@ -10,6 +10,7 @@ Tests cover:
  - Settings defaults and the blank-means-unset rule
  - Startup checks: DB_ENCRYPTION_KEY validation and the TRITON_URL check
  - The worker command line
+ - The training scheduler's start and stop
 """
 
 import logging
@@ -559,6 +560,48 @@ def test_startup_caps_the_thread_limiter_to_the_database_pool():
     assert current.return_value.total_tokens == (
         settings.database.pool_size + settings.database.max_overflow
     )
+
+
+@pytest.mark.unit
+def test_startup_starts_the_training_scheduler_on_the_database_engine_and_shutdown_stops_it():
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        forecast_app, "start_scheduler"
+    ) as start, patch.object(forecast_app, "stop_scheduler") as stop:
+        with TestClient(forecast_app.app):
+            start.assert_called_once_with(forecast_app.engine)
+            stop.assert_not_called()
+    stop.assert_called_once_with()
+
+
+@pytest.mark.unit
+def test_the_scheduler_starts_after_the_startup_checks():
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections"), patch.object(
+        forecast_app, "triton_url_check", side_effect=RuntimeError("TRITON_URL is not set")
+    ), patch.object(forecast_app, "start_scheduler") as start:
+        with pytest.raises(RuntimeError, match="TRITON_URL"):
+            with TestClient(forecast_app.app):
+                pass
+    start.assert_not_called()
+
+
+@pytest.mark.unit
+def test_shutdown_goes_on_when_the_scheduler_fails_to_stop(caplog):
+    import forecast.app as forecast_app
+
+    with patch.object(forecast_app, "close_db_connections") as close_db, patch.object(
+        forecast_app, "close_client", new_callable=AsyncMock
+    ) as close_client, patch.object(
+        forecast_app, "stop_scheduler", side_effect=RuntimeError("boom")
+    ), caplog.at_level("ERROR"):
+        with TestClient(forecast_app.app):
+            pass
+    assert any("Error stopping the training scheduler" in r.getMessage() for r in caplog.records)
+    close_client.assert_awaited_once()
+    close_db.assert_called_once()
 
 
 @pytest.mark.unit

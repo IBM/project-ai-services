@@ -29,7 +29,6 @@ import forecast.api.v1.connectors as connectors_api
 import forecast.db.connectors as connectors_db
 from forecast.utils.api_utils import format_timestamp
 from forecast.db.connectors import ConnectorListRow, ConnectorRow, JobRow
-from forecast.training.scheduler import register_connector_job
 from forecast.settings import settings
 from forecast.utils.encryption import (
     decrypt_secrets,
@@ -622,11 +621,6 @@ def test_safe_connection_details_drops_everything_else():
     stored = {"host": "h", "port": 1, "database": "d", "username": "u", "password": "cipher", "legacy_token": "x"}
 
     assert safe_connection_details(stored) == {"host": "h", "port": 1, "database": "d", "username": "u"}
-
-
-@pytest.mark.unit
-def test_scheduler_stub_is_a_no_op():
-    assert register_connector_job(CONNECTOR_ID, None) is None
 
 
 @pytest.mark.unit
