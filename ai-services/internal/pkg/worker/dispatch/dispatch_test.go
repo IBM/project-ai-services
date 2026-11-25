@@ -93,7 +93,7 @@ func TestHandleProxyRoute_PrivateRoutes(t *testing.T) {
 	}
 	if err := send(payload.ProxyRoute{
 		Op: payload.ProxyRouteOpRegisterEgress, ID: "e", PathPrefix: "/p", Upstream: "10.0.0.2:9443",
-		ClientCertPath: "c", ClientKeyPath: "k", TrustedCACertPath: "ca", ServerName: "w1.example",
+		ClientCertPath: "c", EncryptedClientKeyPath: "k", SecretFilePath: "s", TrustedCACertPath: "ca", ServerName: "w1.example",
 	}); err != nil {
 		t.Fatalf("register_egress: %v", err)
 	}

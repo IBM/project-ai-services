@@ -46,8 +46,9 @@ const (
 type Gateway struct {
 	workerpb.UnimplementedWorkerGatewayServer
 
-	registry   *registry.Registry
-	grpcServer *grpc.Server
+	registry    *registry.Registry
+	runtimeType types.RuntimeType
+	grpcServer  *grpc.Server
 
 	// PKI material — loaded or generated from pkiDir on first start (see pki.go).
 	caCert     *x509.Certificate
@@ -68,11 +69,12 @@ func New(ctx context.Context, reg *registry.Registry, runtimeType types.RuntimeT
 	}
 
 	return &Gateway{
-		registry:   reg,
-		caCert:     pki.caCert,
-		caKey:      pki.caKey,
-		serverCert: pki.serverCert,
-		caCertPool: pki.caCertPool,
+		registry:    reg,
+		runtimeType: runtimeType,
+		caCert:      pki.caCert,
+		caKey:       pki.caKey,
+		serverCert:  pki.serverCert,
+		caCertPool:  pki.caCertPool,
 	}, nil
 }
 
@@ -214,8 +216,12 @@ func (g *Gateway) CommandStream(stream grpc.BidiStreamingServer[workerpb.Command
 	}
 
 	// goroutine: read results from the worker and dispatch to waiting callers.
-	recvErrCh := make(chan error, 1)
+	const recvErrBufSize = 2
+	recvErrCh := make(chan error, recvErrBufSize)
 	go g.recvLoop(ctx, stream, workerName, recvErrCh)
+
+	// Give the worker a route to LiteLLM on the control plane; needs recvLoop to read the reply.
+	go g.registerLiteLLMEgress(ctx, workerName, recvErrCh)
 
 	// Main loop: pull Commands from the worker's CommandCh and send them downstream.
 	for {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
@@ -25,6 +26,12 @@ type Resolver interface {
 	Validate(ctx context.Context, name string) error
 	// RuntimeType returns the named worker's registered runtime type.
 	RuntimeType(ctx context.Context, name string) (string, error)
+	// DomainSuffix returns the DOMAIN_SUFFIX the named worker reported when it registered. It is
+	// what, with the worker name, forms the hostname the control plane dials for private traffic.
+	DomainSuffix(name string) (string, error)
+	// PrivateIngressPort returns the private ingress port the named worker reported when it registered,
+	// or proxy.DefaultPrivateIngressPort if unset.
+	PrivateIngressPort(name string) string
 	// NewRuntime returns a runtime that forwards every call to the named worker. namespace
 	// scopes namespace-aware operations on OpenShift workers; Podman workers ignore it.
 	NewRuntime(ctx context.Context, name, namespace string) (runtime.Runtime, error)
@@ -100,6 +107,44 @@ func (r *registryResolver) RuntimeType(ctx context.Context, name string) (string
 	}
 
 	return rt, nil
+}
+
+// DomainSuffix returns the DOMAIN_SUFFIX the named worker reported at registration.
+func (r *registryResolver) DomainSuffix(name string) (string, error) {
+	if r.registry == nil {
+		return "", fmt.Errorf("worker registry is not configured on this server")
+	}
+
+	meta, ok := r.registry.WorkerMetadata(name)
+	if !ok {
+		return "", fmt.Errorf("worker %q is not connected", name)
+	}
+
+	suffix := meta[workerconstants.MetaKeyDomainSuffix]
+	if suffix == "" {
+		return "", fmt.Errorf("worker %q did not report a domain suffix; re-join it with DOMAIN_SUFFIX set", name)
+	}
+
+	return suffix, nil
+}
+
+// PrivateIngressPort returns the private ingress port the named worker reported, or proxy.DefaultPrivateIngressPort if unset.
+func (r *registryResolver) PrivateIngressPort(name string) string {
+	if r.registry == nil {
+		return proxy.DefaultPrivateIngressPort
+	}
+
+	meta, ok := r.registry.WorkerMetadata(name)
+	if !ok {
+		return proxy.DefaultPrivateIngressPort
+	}
+
+	port := meta[workerconstants.MetaKeyPrivateIngressPort]
+	if port == "" {
+		return proxy.DefaultPrivateIngressPort
+	}
+
+	return port
 }
 
 // NewRuntime returns a runtime that forwards every call to the named worker over the gRPC

@@ -3,6 +3,8 @@ import { AUTH_ENDPOINTS } from "@/constants/api-endpoints.constants";
 import { useAuthStore } from "@/store/auth.store";
 import { useDeployStore } from "@/store/deploy.store";
 import { useConnectorsStore } from "@/store/connectors.store";
+import { useModelsStore } from "@/store/models.store";
+import { useServiceDetailsStore } from "@/store/serviceDetails.store";
 import { fetchArchitectures } from "@/api/applications.api";
 import type { LoginRequest, LoginResponse, UserInfo } from "@/types/auth";
 import { useServiceDeployStore } from "@/store/serviceDeploy.store";
@@ -49,6 +51,8 @@ export const logout = (): Promise<void> =>
       useDeployStore.getState().clearAll();
       useServiceDeployStore.getState().clearAllCache();
       useConnectorsStore.getState().clearAll();
+      useModelsStore.getState().clearModelDetailsCache();
+      useServiceDetailsStore.getState().clearCache();
     }
   });
 

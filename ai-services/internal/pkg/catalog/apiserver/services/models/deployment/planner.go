@@ -9,10 +9,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/routes"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
@@ -50,7 +52,8 @@ func NewModelPlanner(provider *catalog.CatalogProvider, workers worker.Resolver)
 		models:          helpers.New(provider),
 		workers:         workers,
 		deployers: map[runtimeTypes.RuntimeType]types.Deployer{
-			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeployer(),
+			runtimeTypes.RuntimeTypePodman:    podman.NewPodmanDeployer(routes.NewManager(workers)),
+			runtimeTypes.RuntimeTypeOpenShift: openshift.NewOpenShiftDeployer(),
 		},
 	}
 }
@@ -69,14 +72,11 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 	workerName := worker.DefaultName(req.WorkerName)
 
 	// Resolving the runtime up front means an unreachable worker fails the request (422)
-	// instead of leaving a component row stuck in Deploying.
-	rt, err := p.workers.NewRuntime(ctx, workerName, "")
+	// instead of leaving a component row stuck in Deploying. On OpenShift the runtime is scoped
+	// to the shared models namespace; Podman ignores it.
+	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelsNamespace())
 	if err != nil {
 		return nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
-	}
-
-	if rt.Type() == runtimeTypes.RuntimeTypeOpenShift {
-		return nil, validators.BadRequest("models are unsupported on openshift runtime")
 	}
 
 	deployer, ok := p.deployers[rt.Type()]
@@ -112,6 +112,9 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		workerID = &id
 	}
 
+	values := loadLocalValues(provider, req)
+	values[constants.InstanceSlugKey] = catalogutils.GenerateInstanceSlug(componentID.String())
+
 	plan := &types.LocalPlan{
 		ComponentID:  componentID,
 		Req:          req,
@@ -131,7 +134,7 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 		},
 		Metadata: localComponentMetadata(req, sensitive),
 		Catalog:  provider,
-		Values:   loadLocalValues(provider, req),
+		Values:   values,
 	}
 
 	// Reject what the worker cannot host (e.g. not enough free Spyre cards) now, instead of after

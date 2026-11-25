@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	cliutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/configure/utils"
 	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -15,7 +16,7 @@ import (
 
 func ResetCatalogPassword(ctx context.Context) error {
 	catalog := catalogConstants.CatalogAppName
-	namespace := catalog
+	namespace := catalogns.Get()
 
 	// Create a new Helm client
 	helmClient, err := helm.NewHelm(namespace)

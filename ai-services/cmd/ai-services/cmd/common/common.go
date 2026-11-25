@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/flagvalidator"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -23,7 +24,13 @@ import (
 const (
 	minPort = 1
 	maxPort = 65535
+
+	namespaceFlag = "namespace"
 )
+
+// namespaceValue is a pflag.Value that stores the namespace in the catalogns package,
+// which validates it.
+type namespaceValue struct{}
 
 // ValidatePort validates that a port number is within the valid TCP/UDP range (1-65535).
 func ValidatePort(port int, name string) error {
@@ -70,6 +77,20 @@ func ConfigurePersistentRuntimeFlag(cmd *cobra.Command, runtimeType *string) {
 	_ = cmd.MarkPersistentFlagRequired(constants.RuntimeFlag)
 }
 
+// ConfigureNamespaceFlag registers the hidden, dev-only persistent --namespace flag on cmd.
+// It overrides the OpenShift namespace for the catalog and worker, so multiple catalogs
+// can coexist on one cluster. Use it only on the catalog and worker parent commands.
+func ConfigureNamespaceFlag(cmd *cobra.Command) {
+	cmd.PersistentFlags().Var(namespaceValue{}, namespaceFlag, "OpenShift namespace for the catalog and worker")
+	_ = cmd.PersistentFlags().MarkHidden(namespaceFlag)
+}
+
+func (namespaceValue) String() string { return catalogns.Get() }
+
+func (namespaceValue) Set(s string) error { return catalogns.Set(s) }
+
+func (namespaceValue) Type() string { return "string" }
+
 // ValidateSkipChecksFlag validates the skip-validation flag for the current runtime.
 func ValidateSkipChecksFlag(cmd *cobra.Command) error {
 	skipChecks, err := cmd.Flags().GetStringSlice("skip-validation")
@@ -113,8 +134,8 @@ func ValidateResetFlag(cmd *cobra.Command, flagName string, skipFlags ...string)
 	// Check that no configuration parameters are provided with reset flag
 	var invalidFlags []string
 	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if f.Name == flagName || f.Name == constants.RuntimeFlag {
-			// Skip reset flag and runtime parameter
+		if f.Name == flagName || f.Name == constants.RuntimeFlag || f.Name == namespaceFlag {
+			// Skip reset flag, runtime and namespace (selects the target, not a config parameter)
 			return
 		}
 		for _, skip := range skipFlags {
@@ -199,6 +220,15 @@ func ConfigurePodmanResetFlags(cmd *cobra.Command, resetPodmanAuth, resetCertifi
 			"This will reload the certificates in Caddy without restarting the pod.\n"+
 			"Note: Supported for podman runtime only.\n",
 	)
+}
+
+// ConfigureSkipUpgradeFlag registers the --skip-upgrade flag on cmd.
+// Used by commands that apply OpenShift operator configurations (bootstrap, bootstrap configure).
+func ConfigureSkipUpgradeFlag(cmd *cobra.Command, skipUpgrade *bool) {
+	cmd.Flags().BoolVar(skipUpgrade, constants.SkipUpgradeFlag, false,
+		"Skip the upgrade prompt for already-installed OCP operators.\n"+
+			"By default, the user is prompted to upgrade them to the versions defined in AI Services.\n"+
+			"Note: Supported for openshift runtime only.")
 }
 
 func ValidateResetCertificateFlags(cmd *cobra.Command, flagName, sslCertPath, sslKeyPath, domainName string, skipFlags ...string) error {

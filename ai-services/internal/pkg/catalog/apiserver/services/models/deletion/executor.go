@@ -6,9 +6,11 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deletion/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deletion/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deletion/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/routes"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
@@ -24,12 +26,19 @@ type Deleter interface {
 	Delete(ctx context.Context, rt runtime.Runtime, componentID uuid.UUID) error
 }
 
+// RouteRemover removes the private mTLS routes of a model on a remote worker. It succeeds when
+// the routes are already gone.
+type RouteRemover interface {
+	Unregister(ctx context.Context, rt runtime.Runtime, componentID uuid.UUID) error
+}
+
 // Executor executes already-planned model deletions: it removes the LiteLLM route and the model's
 // pods or connector.
 type Executor struct {
 	componentRepo dbrepo.ComponentRepository
 	connectorRepo dbrepo.ConnectorRepository
 	gateway       litellm.Gateway
+	routes        RouteRemover
 	// deleters maps a runtime type to the deleter that removes local model pods on it.
 	deleters map[runtimeTypes.RuntimeType]Deleter
 }
@@ -44,8 +53,10 @@ func NewExecutor(
 		componentRepo: componentRepo,
 		connectorRepo: connectorRepo,
 		gateway:       litellm.NewGateway(litellmClient),
+		routes:        routes.NewManager(nil),
 		deleters: map[runtimeTypes.RuntimeType]Deleter{
-			runtimeTypes.RuntimeTypePodman: podman.NewPodmanDeleter(componentRepo),
+			runtimeTypes.RuntimeTypePodman:    podman.NewPodmanDeleter(componentRepo),
+			runtimeTypes.RuntimeTypeOpenShift: openshift.NewOpenShiftDeleter(componentRepo),
 		},
 	}
 }
@@ -81,6 +92,15 @@ func (e *Executor) runLocal(ctx context.Context, plan *types.LocalPlan) error {
 	deleter, ok := e.deleters[plan.Runtime.Type()]
 	if !ok {
 		return fmt.Errorf("models are unsupported on %s runtime", plan.Runtime.Type())
+	}
+
+	// A remote model has a worker ingress and a control-plane egress route. They go before the
+	// pods so nothing is routed to a pod that is being removed; an already-removed route is fine,
+	// so a failed delete can be retried.
+	if !routes.IsLocal(plan.WorkerName) {
+		if err := e.routes.Unregister(ctx, plan.Runtime, plan.ComponentID); err != nil {
+			return fmt.Errorf("failed to remove routes of model %s on worker %q: %w", plan.ComponentID, plan.WorkerName, err)
+		}
 	}
 
 	return deleter.Delete(ctx, plan.Runtime, plan.ComponentID)

@@ -103,14 +103,15 @@ func (r *RemoteProxyManager) RegisterIngressRoute(ctx context.Context, route Ing
 // the remote worker's private egress server over the CommandStream.
 func (r *RemoteProxyManager) RegisterEgressRoute(ctx context.Context, route EgressRoute) error {
 	_, err := r.send(ctx, payload.ProxyRoute{
-		Op:                payload.ProxyRouteOpRegisterEgress,
-		ID:                route.ID,
-		PathPrefix:        route.PathPrefix,
-		Upstream:          route.DialUpstream,
-		ClientCertPath:    route.ClientCertPath,
-		ClientKeyPath:     route.ClientKeyPath,
-		TrustedCACertPath: route.TrustedCACertPath,
-		ServerName:        route.ServerName,
+		Op:                     payload.ProxyRouteOpRegisterEgress,
+		ID:                     route.ID,
+		PathPrefix:             route.PathPrefix,
+		Upstream:               route.DialUpstream,
+		ClientCertPath:         route.ClientCertPath,
+		EncryptedClientKeyPath: route.EncryptedClientKeyPath,
+		SecretFilePath:         route.SecretFilePath,
+		TrustedCACertPath:      route.TrustedCACertPath,
+		ServerName:             route.ServerName,
 	})
 
 	return err

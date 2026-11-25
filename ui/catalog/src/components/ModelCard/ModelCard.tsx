@@ -16,6 +16,7 @@ export interface ModelCardProps {
   certifiedBy: string;
   providers: CatalogModelProvider[];
   onDeploy?: (id: string) => void;
+  onLearnMore?: (id: string) => void;
 }
 
 const ModelCard = ({
@@ -26,6 +27,7 @@ const ModelCard = ({
   certifiedBy,
   providers,
   onDeploy,
+  onLearnMore,
 }: ModelCardProps) => {
   const providerTags = [
     ...new Set(providers.map((p) => PROVIDER_TAG_LABELS[p.id] ?? p.id)),
@@ -39,14 +41,15 @@ const ModelCard = ({
             id: "view-details",
             icon: () => <ArrowRight size={16} />,
             iconDescription: "View details",
-            // TODO: Wire up onClick once the model details view/panel is implemented
-            onClick: () => {},
+            onClick: () => onLearnMore?.(id),
           },
         ]}
         actionsPlacement="bottom"
         secondaryButtonIcon={Deploy}
         secondaryButtonText="Deploy"
         onSecondaryButtonClick={() => onDeploy?.(id)}
+        onClick={() => onLearnMore?.(id)}
+        clickZone="two"
         className={styles.productiveCard}
       >
         <div className={styles.cardHeader}>

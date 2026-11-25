@@ -58,10 +58,13 @@ type EgressRoute struct {
 	// DialUpstream is the remote private ingress address (e.g., "10.0.0.2:9443")
 	DialUpstream string
 
-	// ClientCertPath and ClientKeyPath are the client identity presented to the
-	// remote ingress (plaintext PEM key, readable by Caddy).
-	ClientCertPath string
-	ClientKeyPath  string
+	// ClientCertPath, EncryptedClientKeyPath and SecretFilePath are the client
+	// identity presented to the remote ingress. The key is AES-256-GCM encrypted
+	// on disk; Caddy decrypts it in memory with the secret in SecretFilePath (the
+	// encrypted_mtls transport), so no plaintext key is ever written.
+	ClientCertPath         string
+	EncryptedClientKeyPath string
+	SecretFilePath         string
 
 	// TrustedCACertPath is the CA used to verify the remote ingress certificate.
 	TrustedCACertPath string
