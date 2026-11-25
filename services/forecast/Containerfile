@@ -7,10 +7,12 @@ ENV PYTHONPATH=/opt/services
 COPY common /opt/services/common
 COPY forecast/ .
 
-# Install system dependencies (libgomp for OpenMP support in LightGBM/XGBoost/AutoGluon).
+# Install system dependencies (libgomp for OpenMP support in LightGBM/XGBoost/AutoGluon, and libatomic,
+# which the ppc64le pyarrow wheel loads and the base image does not have; without it the data loader and
+# the training worker cannot import pyarrow).
 # The base venv ships without pip; bootstrap it only to install the service deps,
 # then strip it again so the runtime image stays pip-free.
-RUN microdnf install -y libgomp && \
+RUN microdnf install -y libgomp libatomic && \
     microdnf clean all && \
     source /var/venv/bin/activate && \
     python -m ensurepip --upgrade && \
