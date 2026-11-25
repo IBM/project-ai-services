@@ -83,8 +83,40 @@ def lock_connectors(session: Session) -> None:
 
 
 def connector_exists(session: Session) -> bool:
-    """Return True when a connector row exists."""
-    return bool(session.scalar(select(exists().select_from(Connector))))
+    """Return True when a connector that has not FAILED exists."""
+    return bool(
+        session.scalar(select(exists().where(Connector.status != "FAILED")))
+    )
+
+
+def connector_id_exists(session: Session, connector_id: str) -> bool:
+    """Return True when a connector row with this id exists, whatever its status."""
+    return bool(
+        session.scalar(select(exists().where(Connector.id == _as_uuid(connector_id))))
+    )
+
+
+def insert_failed_connector(
+    session: Session,
+    *,
+    connector_id: str,
+    name: str,
+    connector_type: str,
+    config: dict,
+    message: str,
+) -> None:
+    """Store a connector that was not accepted: status FAILED, no training details, no job."""
+    session.add(
+        Connector(
+            id=_as_uuid(connector_id),
+            name=name,
+            type=connector_type,
+            connection_details=config,
+            status="FAILED",
+            message=message,
+        )
+    )
+    session.flush()
 
 
 def count_queued_jobs(session: Session) -> int:
@@ -230,9 +262,10 @@ def list_ready_versions(session: Session, connector_id: str) -> list[int]:
 
 
 def get_default_connector(session: Session) -> Optional[ConnectorRow]:
-    """Return the default (first) connector with training details, or None."""
+    """Return the default (first) connector that has not FAILED, with training details, or None."""
     stmt = (
         _connector_select()
+        .where(Connector.status != "FAILED")
         .order_by(Connector.attached_at.asc(), Connector.id.asc())
         .limit(1)
     )

@@ -70,8 +70,10 @@ def db():
     defaults = {
         "lock_connectors": None,
         "connector_exists": False,
+        "connector_id_exists": False,
         "count_queued_jobs": 0,
         "insert_connector": None,
+        "insert_failed_connector": None,
         "list_connectors": ([], 0),
         "get_connector": None,
         "update_connector": None,
@@ -91,7 +93,6 @@ def _create_body(**overrides):
         "id": CONNECTOR_ID,
         "name": "prod-sales-db",
         "type": "db2_for_i",
-        "schedule": "daily",
         "connection_details": {
             "host": "ibmi.example.com",
             "port": 8471,
@@ -99,14 +100,20 @@ def _create_body(**overrides):
             "username": "forecast_ro",
             "password": "s3cret",
         },
-        "training": {
+        "service_settings": {
             "table": "ORDERS",
             "target_column": "DELIVERY_LATE",
             "input_columns": [{"name": "REGION"}, {"name": "QUANTITY", "type": "integer"}],
+            "schedule": "daily",
         },
     }
     body.update(overrides)
     return body
+
+
+def _settings(**overrides):
+    """service_settings of a create body, with the given fields replaced."""
+    return {**_create_body()["service_settings"], **overrides}
 
 
 def _stored_row(password="s3cret", host="ibmi.example.com", **overrides):
@@ -197,26 +204,107 @@ def test_create_without_an_id_is_422(client, db):
 
 
 @pytest.mark.unit
-def test_create_when_a_connector_exists_is_409(client, db):
+def test_create_without_a_schedule_registers_none(client, db):
+    settings_body = _settings()
+    del settings_body["schedule"]
+
+    response = client.post("/v1/connectors", json=_create_body(service_settings=settings_body))
+
+    assert response.status_code == 201
+    assert db.insert_connector.call_args.kwargs["schedule"] is None
+    db.register.assert_called_once_with(CONNECTOR_ID, None)
+
+
+@pytest.mark.unit
+def test_create_when_a_connector_exists_is_201_and_stored_as_failed(client, db):
     db.connector_exists.return_value = True
 
     response = client.post("/v1/connectors", json=_create_body())
 
-    assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
     db.insert_connector.assert_not_called()
     db.register.assert_not_called()
+    kwargs = db.insert_failed_connector.call_args.kwargs
+    assert kwargs["connector_id"] == CONNECTOR_ID
+    assert kwargs["name"] == "prod-sales-db"
+    assert kwargs["connector_type"] == "db2_for_i"
+    assert kwargs["message"] == "A connector already exists. Only one connector is supported."
+    assert decrypt_secrets(kwargs["config"])["password"] == "s3cret"
 
 
 @pytest.mark.unit
-def test_create_when_the_queue_is_full_is_429(client, db):
+def test_create_when_the_queue_is_full_is_201_and_stored_as_failed(client, db):
     db.count_queued_jobs.return_value = settings.forecast.max_queued_jobs
 
     response = client.post("/v1/connectors", json=_create_body())
 
-    assert response.status_code == 429
-    _assert_envelope(response.json(), "SERVER_BUSY", 429)
+    assert response.status_code == 201
     db.insert_connector.assert_not_called()
+    db.register.assert_not_called()
+    kwargs = db.insert_failed_connector.call_args.kwargs
+    assert kwargs["message"] == "Too many training jobs are queued."
+
+
+@pytest.mark.unit
+def test_create_with_an_existing_id_is_201_and_changes_nothing(client, db):
+    db.connector_id_exists.return_value = True
+    db.connector_exists.return_value = True
+
+    response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
+    db.connector_id_exists.assert_called_once()
+    assert db.connector_id_exists.call_args.args[1] == CONNECTOR_ID
+    db.insert_connector.assert_not_called()
+    db.insert_failed_connector.assert_not_called()
+    db.register.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_rejected_with_a_taken_name_is_201_and_stores_nothing(client, db, caplog):
+    db.connector_exists.return_value = True
+    db.insert_failed_connector.side_effect = IntegrityError(
+        "INSERT", {}, MagicMock(pgcode="23505")
+    )
+
+    with caplog.at_level("WARNING"):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
+    db.register.assert_not_called()
+    assert "duplicate connector name" in caplog.text
+    # Inside a savepoint, so the failed insert does not abort the transaction.
+    db.session.begin_nested.assert_called_once()
+
+
+@pytest.mark.unit
+def test_create_rejected_with_another_integrity_error_is_500(db):
+    failing_client = TestClient(forecast_app.app, raise_server_exceptions=False)
+    db.connector_exists.return_value = True
+    db.insert_failed_connector.side_effect = IntegrityError(
+        "INSERT", {}, MagicMock(pgcode="23514")
+    )
+
+    response = failing_client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "DATABASE_ERROR", 500)
+
+
+@pytest.mark.unit
+def test_rejected_create_is_logged_without_secrets(client, db, caplog):
+    db.connector_exists.return_value = True
+
+    with caplog.at_level("INFO"):
+        client.post("/v1/connectors", json=_create_body())
+
+    assert "A connector already exists" in caplog.text
+    assert CONNECTOR_ID in caplog.text
+    assert "s3cret" not in caplog.text
+    assert "s3cret" not in db.insert_failed_connector.call_args.kwargs["message"]
 
 
 @pytest.mark.unit
@@ -224,22 +312,25 @@ def test_create_when_the_queue_is_full_is_429(client, db):
     "overrides",
     [
         {"type": "oracle"},
-        {"schedule": "hourly-ish"},
         {"id": "not-a-uuid"},
         {"name": ""},
         {"name": "x" * 256},
         {"unknown": "field"},
+        {"schedule": "daily"},
+        {"training": _settings()},
+        {"params": _settings()},
         {"connection_details": {"host": "h", "database": "d", "username": "u", "password": "p", "extra": 1}},
         {"connection_details": {"host": "h", "database": "d", "username": "u"}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "A"}], "validation_metric": "accuracy"}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "A", "type": "blob"}]}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": []}},
-        {"training": {"table": "T; DROP TABLE", "target_column": "C", "input_columns": [{"name": "A"}]}},
-        {"training": {"table": "T", "target_column": "C' OR 1=1", "input_columns": [{"name": "A"}]}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "BAD NAME"}]}},
-        {"training": {"table": "T\n", "target_column": "C", "input_columns": [{"name": "A"}]}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "COL1"}, {"name": "col1"}]}},
-        {"training": {"table": "T", "target_column": "TARGET_COL", "input_columns": [{"name": "target_col"}, {"name": "OTHER"}]}},
+        {"service_settings": _settings(schedule="hourly-ish")},
+        {"service_settings": {**_settings(), "validation_metric": "accuracy"}},
+        {"service_settings": _settings(input_columns=[{"name": "A", "type": "blob"}])},
+        {"service_settings": _settings(input_columns=[])},
+        {"service_settings": _settings(table="T; DROP TABLE")},
+        {"service_settings": _settings(target_column="C' OR 1=1")},
+        {"service_settings": _settings(input_columns=[{"name": "BAD NAME"}])},
+        {"service_settings": _settings(table="T\n")},
+        {"service_settings": _settings(input_columns=[{"name": "COL1"}, {"name": "col1"}])},
+        {"service_settings": _settings(target_column="TARGET_COL", input_columns=[{"name": "target_col"}, {"name": "OTHER"}])},
     ],
 )
 def test_create_rejects_invalid_bodies_with_422(client, db, overrides):
@@ -248,6 +339,18 @@ def test_create_rejects_invalid_bodies_with_422(client, db, overrides):
     assert response.status_code == 422
     _assert_envelope(response.json(), "INVALID_REQUEST", 422)
     db.insert_connector.assert_not_called()
+    db.insert_failed_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_without_service_settings_is_422(client, db):
+    body = _create_body()
+    del body["service_settings"]
+
+    response = client.post("/v1/connectors", json=body)
+
+    assert response.status_code == 422
+    _assert_envelope(response.json(), "INVALID_REQUEST", 422)
 
 
 @pytest.mark.unit
@@ -476,9 +579,9 @@ def test_put_that_breaks_the_merged_details_is_400_and_writes_nothing(client, db
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "body",
-    [{"type": "db2_for_i"}, {"training": {"table": "T", "target_column": "C", "input_columns": []}}],
+    [{"type": "db2_for_i"}, {"service_settings": {"table": "T", "target_column": "C", "input_columns": []}}],
 )
-def test_put_rejects_type_and_training(client, db, body):
+def test_put_rejects_type_and_service_settings(client, db, body):
     db.get_connector.return_value = _stored_row()
 
     response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json=body)
@@ -642,7 +745,7 @@ def test_create_does_not_schedule_when_the_insert_fails(client, db):
 
 @pytest.mark.unit
 def test_create_still_succeeds_when_scheduling_fails(client, db, caplog):
-    """The connector is stored, so the call must not fail; a retry would get a 409."""
+    """The connector is stored, so the call must not fail."""
     db.register.side_effect = RuntimeError("scheduler down")
 
     with caplog.at_level("ERROR"):
@@ -655,7 +758,7 @@ def test_create_still_succeeds_when_scheduling_fails(client, db, caplog):
 
 
 @pytest.mark.unit
-def test_create_with_a_duplicate_id_or_name_is_409(client, db):
+def test_create_with_a_taken_name_is_409(client, db):
     db.insert_connector.side_effect = IntegrityError(
         "INSERT", {}, MagicMock(pgcode="23505")
     )
@@ -683,17 +786,18 @@ def test_create_with_another_integrity_error_is_a_database_error(client, db):
 
 
 @pytest.mark.unit
-def test_create_loses_the_race_for_the_single_connector(client, db):
-    """No connector at the pre-check, one by the time the table lock is held."""
-    db.connector_exists.side_effect = [False, True]
+def test_create_checks_only_after_taking_the_table_lock(client, db):
+    """Two requests cannot both see an empty table: every check is made under the lock."""
+    calls = []
+    db.lock_connectors.side_effect = lambda *_: calls.append("lock")
+    db.connector_id_exists.side_effect = lambda *_: calls.append("id_exists") or False
+    db.connector_exists.side_effect = lambda *_: calls.append("exists") or False
+    db.count_queued_jobs.side_effect = lambda *_: calls.append("queued") or 0
 
     response = client.post("/v1/connectors", json=_create_body())
 
-    assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
-    db.lock_connectors.assert_called_once()
-    db.insert_connector.assert_not_called()
-    db.register.assert_not_called()
+    assert response.status_code == 201
+    assert calls == ["lock", "id_exists", "exists", "queued"]
 
 
 @pytest.mark.unit
@@ -886,18 +990,6 @@ def test_create_logs_the_outcome_without_the_secret(client, db, caplog):
 
     assert response.status_code == 201
     assert f"Connector {CONNECTOR_ID} ('prod-sales-db') created" in caplog.text
-    assert "s3cret" not in caplog.text
-
-
-@pytest.mark.unit
-def test_rejected_create_is_logged(client, db, caplog):
-    db.connector_exists.return_value = True
-
-    with caplog.at_level("WARNING"):
-        response = client.post("/v1/connectors", json=_create_body())
-
-    assert response.status_code == 409
-    assert "a connector already exists" in caplog.text
     assert "s3cret" not in caplog.text
 
 

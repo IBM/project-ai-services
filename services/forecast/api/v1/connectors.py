@@ -2,7 +2,8 @@
 Connector REST API endpoints.
 
 Mounted at /v1/connectors by app.py. Only one connector is supported in this
-release, so POST returns 409 while a connector exists.
+release. POST answers 201 for a valid request even when the connector cannot be
+accepted: it is then stored as FAILED, with the reason in its message.
 
 Endpoints:
   POST   /v1/connectors
@@ -17,6 +18,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import get_logger
@@ -59,79 +61,44 @@ logger = get_logger("forecast_connectors")
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ConnectorCreateResponse,
-    responses={
-        409: http_error_responses[409],
-        429: http_error_responses[429],
-        500: http_error_responses[500],
-    },
     summary="Create the connector and queue its first training",
     description=(
-        "Stores the connector with its encrypted secrets and the training details, and "
-        "queues the first training job. Only one connector is supported in this release."
+        "Stores the connector with its encrypted secrets and the service settings, and "
+        "queues the first training job. Only one connector is supported in this release. "
+        "A connector that cannot be accepted is answered with 201 as well and stored with "
+        "the status FAILED and the reason in its message."
     ),
     response_description="Connector created",
 )
 def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     """Create the single connector and queue its first training job."""
     connector_id = str(body.id)
-
-    # Cheap pre-check, so a request that will be rejected never takes the table lock below.
-    with handle_database_errors("checking existing connector", connector_id), get_db_session() as session:
-        if connectors_db.connector_exists(session):
-            logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                "A connector already exists. Only one connector is supported.",
-            )
-
     encrypted = encrypt_secrets(body.connection_details.model_dump(exclude_none=True))
 
+    accepted = False
     with handle_database_errors("creating", connector_id), get_db_session() as session:
         connectors_db.lock_connectors(session)
-        if connectors_db.connector_exists(session):
-            logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                "A connector already exists. Only one connector is supported.",
-            )
-        if connectors_db.count_queued_jobs(session) >= settings.forecast.max_queued_jobs:
-            logger.warning(f"Create rejected for connector {connector_id}: training queue is full")
-            APIError.raise_error(ErrorCode.SERVER_BUSY, "Too many training jobs are queued.")
+        if connectors_db.connector_id_exists(session, connector_id):
+            # A repeated request: nothing changes, so it cannot queue a second job.
+            logger.info(f"Create of connector {connector_id} ignored: it already exists")
+        else:
+            reason = _rejection_reason(session)
+            if reason is None:
+                _insert_accepted(session, body, connector_id, encrypted)
+                accepted = True
+            else:
+                logger.warning(f"Create of connector {connector_id} not accepted: {reason}")
+                _insert_failed(session, body, connector_id, encrypted, reason)
 
-        try:
-            connectors_db.insert_connector(
-                session,
-                connector_id=connector_id,
-                name=body.name,
-                connector_type=body.type,
-                config=encrypted,
-                source_table=body.training.table,
-                target_column=body.training.target_column,
-                input_columns=[
-                    column.model_dump(exclude_none=True) for column in body.training.input_columns
-                ],
-                schedule=body.schedule,
-            )
-        except IntegrityError as exc:
-            # Only a duplicate id or name is a conflict. Any other integrity error
-            # is a server fault and goes to database_errors.
-            if sqlstate(exc) not in (None, UNIQUE_VIOLATION):
-                raise
-            logger.warning(
-                f"Create rejected for connector {connector_id}: duplicate connector name or ID"
-            )
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                f"A connector with this id or the name {body.name!r} already exists",
-            )
+    if not accepted:
+        return ConnectorCreateResponse(id=connector_id)
 
     # Scheduled only after the transaction has committed, so a failed insert
     # never leaves a scheduler job for a connector that does not exist. The
     # connector and its queued job are stored by now: a failed registration must
-    # not fail the call, or the retry would be rejected as "a connector already
-    # exists". Startup registers the jobs of every connector that has none.
+    # not fail the call. Startup registers the jobs of every connector that has none.
     try:
-        register_connector_job(connector_id, body.schedule)
+        register_connector_job(connector_id, body.service_settings.schedule)
     except Exception:
         logger.error(
             f"Connector {connector_id} is stored, but its training could not be scheduled",
@@ -139,6 +106,65 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
         )
     logger.info(f"Connector {connector_id} ({body.name!r}) created, first training queued")
     return ConnectorCreateResponse(id=connector_id)
+
+
+def _rejection_reason(session: Session) -> Optional[str]:
+    """Return why a new connector cannot be accepted, or None when it can."""
+    if connectors_db.connector_exists(session):
+        return "A connector already exists. Only one connector is supported."
+    if connectors_db.count_queued_jobs(session) >= settings.forecast.max_queued_jobs:
+        return "Too many training jobs are queued."
+    return None
+
+
+def _insert_accepted(
+    session: Session, body: ConnectorCreateRequest, connector_id: str, encrypted: dict
+) -> None:
+    """Store the connector, its service settings and its first training job."""
+    svc = body.service_settings
+    try:
+        connectors_db.insert_connector(
+            session,
+            connector_id=connector_id,
+            name=body.name,
+            connector_type=body.type,
+            config=encrypted,
+            source_table=svc.table,
+            target_column=svc.target_column,
+            input_columns=[column.model_dump(exclude_none=True) for column in svc.input_columns],
+            schedule=svc.schedule,
+        )
+    except IntegrityError as exc:
+        # Only a duplicate name is a conflict, the id was checked above. Any other
+        # integrity error is a server fault and goes to database_errors.
+        if sqlstate(exc) not in (None, UNIQUE_VIOLATION):
+            raise
+        logger.warning(f"Create rejected for connector {connector_id}: duplicate connector name")
+        APIError.raise_error(
+            ErrorCode.RESOURCE_LOCKED,
+            f"A connector with the name {body.name!r} already exists",
+        )
+
+
+def _insert_failed(
+    session: Session, body: ConnectorCreateRequest, connector_id: str, encrypted: dict, reason: str
+) -> None:
+    """Store a connector that was not accepted as FAILED, with the reason as its message."""
+    try:
+        # A savepoint, so a name that is taken does not abort the whole transaction.
+        with session.begin_nested():
+            connectors_db.insert_failed_connector(
+                session,
+                connector_id=connector_id,
+                name=body.name,
+                connector_type=body.type,
+                config=encrypted,
+                message=reason,
+            )
+    except IntegrityError as exc:
+        if sqlstate(exc) not in (None, UNIQUE_VIOLATION):
+            raise
+        logger.warning(f"Rejected connector {connector_id} not stored: duplicate connector name")
 
 
 # ---------------------------------------------------------------------------

@@ -188,7 +188,7 @@ graph LR
     LD -->|"read-only query<br/>(connector credentials)"| CONN
     CONN -->|"rows"| LD
     CONN --- SRC
-    CAT -->|"POST /v1/connectors<br/>(connection + training details)"| API
+    CAT -->|"POST /v1/connectors<br/>(connection details + service settings)"| API
     U -->|"/v1/forecast<br/>/v1/connectors"| FS
     API -->|"forward forecast request<br/>(inference)"| TR
     API -->|"load_model (new forecaster)<br/>unload_model (oldest per connector, retention)"| TR
@@ -449,7 +449,7 @@ curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f9
 
 A connector stores the connection details of one source database, with its secrets encrypted. The training job created with it refers to it by `connector_id`. The endpoints follow `services/digitize/api/v1/connectors.py`: create, list, get, partial update and delete, with the allowlist encryption of `connectors/encryption.py`.
 
-**What is in scope and what is not.** The scope here is the connector **API and its table**. There is no scanner, no sync and no sync history. Scheduled training is set by the schedule field in connector Create request. Nothing reads the source database until a training job runs, and then the loader, which the API runs before the worker, does it. A connector therefore has no `last_sync_at` and no file counters, which digitize's connectors have.
+**What is in scope and what is not.** The scope here is the connector **API and its table**. There is no scanner, no sync and no sync history. Scheduled training is set by `service_settings.schedule` in the connector Create request. Nothing reads the source database until a training job runs, and then the loader, which the API runs before the worker, does it. A connector therefore has no `last_sync_at` and no file counters, which digitize's connectors have.
 
 **Connector types.** `type` is validated against a fixed list. The first type is `db2_for_i`. Adding a database means adding its type, its required fields and its safe fields to the allowlist, and a driver in the loader.
 
@@ -469,16 +469,16 @@ A connector stores the connection details of one source database, with its secre
 | `name`               | string | Yes      | Unique, human-readable name, 1–255 characters.                                         |
 | `type`               | string | Yes      | A supported connector type (`db2_for_i`).                                              |
 | `connection_details` | object | Yes      | Fields for the type, as in the connector types table. Unknown fields are rejected.     |
-| `training`           | object | Yes      | The details of the training job that the call queues. See the `training` object table. |
-| `schedule`               | enum | No      | Training cadence for the data.                                       |
+| `service_settings`   | object | Yes      | The settings chosen when the service was deployed: the training data and the schedule. See the `service_settings` object table. Unknown fields are rejected. |
 
-**`training` object:**
+**`service_settings` object:**
 
 | Field             | Type   | Required | Description                                                                                                                                                                   |
 |:------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `table`           | string | Yes      | Table to train on.                                                                                                                                                            |
 | `target_column`   | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
 | `input_columns`   | array  | Yes      | The input columns. Each is an object with a `name` and, where AutoGluon needs it, a `type` (`string`, `integer` or `number`). The forecast endpoint checks rows against them. |
+| `schedule`        | enum   | No       | Training cadence: `hourly`, `daily`, `weekly`, `monthly` or `yearly`. When it is unset, only the first training runs.                                                         |
 
 **Sample request:**
 
@@ -489,7 +489,6 @@ curl -X POST http://localhost:8500/v1/connectors \
         "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
         "name": "prod-sales-db",
         "type": "db2_for_i",
-        "schedule": "daily",
         "connection_details": {
           "host": "ibmi.example.com",
           "port": 8471,
@@ -497,14 +496,15 @@ curl -X POST http://localhost:8500/v1/connectors \
           "username": "forecast_ro",
           "password": "********"
         },
-        "training": {
+        "service_settings": {
           "table": "ORDERS",
           "target_column": "DELIVERY_LATE",
           "input_columns": [
             {"name": "REGION"},
             {"name": "QUANTITY"},
             {"name": "UNIT_PRICE"}
-          ]
+          ],
+          "schedule": "daily"
         }
       }'
 ```
@@ -517,15 +517,35 @@ curl -X POST http://localhost:8500/v1/connectors \
 }
 ```
 
-Duplicate checks run before the insert: a repeated `id` or `name` returns `409`. The call returns `201` once the connector, its training details and the training job are stored. It also registers the APScheduler jobs: a one-off job that starts the first training at once and, when schedule is set, a cron job for the later ones. Training continues asynchronously.
+The catalog expects a successful answer, so a valid request is answered with `201` whether or not the connector can be accepted. Training continues asynchronously.
 
-| Status                                | Description                                                                                                                                                         |
-|:--------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 201 Created                           | Connector stored, secrets encrypted, training job queued.                                                                                                           |
-| 409 Conflict (`RESOURCE_LOCKED`)      | The `id` or the `name` already exists or a connector already exists.                                                                                                                              |
-| 422 Unprocessable Entity              | Body validation failed: unknown `type`, an `id` that is not a UUID, a missing or unknown field in `connection_details` or `training`. Same envelope as every error. |
-| 429 Too Many Requests (`SERVER_BUSY`) | `MAX_QUEUED_JOBS` training jobs are already queued. The connector is not stored.                                                                                    |
-| 500 Internal Server Error             | Database failure, or `DB_ENCRYPTION_KEY` missing or not 32 bytes.                                                                                                   |
+**Behavior.** The first rows are answered with `201`, whether or not the connector can be accepted. The last rows are failures of the service itself, and they are answered with an error and store nothing.
+
+| Case | Response | `connectors` row | `training_configs` row, job and schedule | Visible in `GET /v1/connectors` |
+|:-----|:---------|:-----------------|:-----------------------------------------|:--------------------------------|
+| New connector: no other connector, queue not full | 201 | Inserted with status `ACCEPTED`. | Row inserted, job `QUEUED`. APScheduler jobs registered: a one-off job that starts the first training at once and, when `schedule` is set, a cron job for the later ones. | Yes, status `ACCEPTED`. |
+| The `id` already exists (a repeated request) | 201 | Not changed. | Not changed. No second job, no second schedule. | The existing connector. |
+| A connector that has not `FAILED` already exists | 201 | Inserted with status `FAILED` and the message "A connector already exists. Only one connector is supported." | None. | Yes, status `FAILED` with the message. |
+| `MAX_QUEUED_JOBS` training jobs are already queued | 201 | Inserted with status `FAILED` and the message "Too many training jobs are queued." | None. | Yes, status `FAILED` with the message. |
+| A `FAILED` connector cannot be stored because its `name` is taken | 201 | Nothing inserted. The conflict is logged. | None. | No. |
+| A new connector has the `name` of an existing connector | 409 `RESOURCE_LOCKED` | Nothing inserted. | None. | No. |
+| The lock on the `connectors` table times out | 409 `RESOURCE_LOCKED` | Nothing inserted. | None. | No. |
+| The database pool is exhausted | 429 `SERVER_BUSY` | Nothing inserted. | None. | No. |
+| A database write or the commit fails | 500 `DATABASE_ERROR` | Rolled back, nothing inserted. | None. | No. |
+| `DB_ENCRYPTION_KEY` is missing or not 32 bytes | 500 `INTERNAL_SERVER_ERROR` | Nothing inserted. | None. | No. |
+
+- **One transaction.** The checks and the insert run in one transaction that holds a lock on the `connectors` table, so two requests cannot both pass the single-connector check. A failed write rolls back the whole transaction. Schedules are registered only after the commit.
+- **`FAILED` connectors.** A `FAILED` connector keeps its encrypted `connection_details`, and `status` and `message` give the reason. It does not count as the single connector, and the forecast endpoint never uses it. It keeps its `name` and its `id`: a later create with the same `name` and a new `id` returns `409` when no other connector exists, and a later create with the same `id` returns `201` without changing the row.
+- **Catalog.** The catalog validates the body before it calls the service, and it treats `201` and `409` as success. The `201` for a connector that is stored as `FAILED`, or not stored at all because its `name` is taken, is therefore seen as success by the catalog. Only the `status` and `message` of `GET /v1/connectors` tell that the connector is not trained.
+- **Secrets.** No secret appears in a `message`, a response or a log.
+
+| Status                                | Description                                                                                                                                                       |
+|:--------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 201 Created                           | The request was valid. The connector is accepted, or handled as in the Behavior table.                                                                             |
+| 409 Conflict (`RESOURCE_LOCKED`)      | A new connector has the `name` of an existing connector, or the lock on the `connectors` table timed out. The catalog treats `409` as success.                      |
+| 422 Unprocessable Entity              | The body cannot be parsed: unknown `type`, an `id` that is not a UUID, a missing or unknown field in `connection_details` or `service_settings`. Same envelope as every error. |
+| 429 Too Many Requests (`SERVER_BUSY`) | The database connection pool is exhausted. Retry shortly. This is not the full training queue, which is answered with `201`.                                        |
+| 500 Internal Server Error             | A database write failed, or `DB_ENCRYPTION_KEY` is missing or not 32 bytes.                                                                                        |
 
 #### GET /v1/connectors — List Connectors
 
@@ -622,7 +642,7 @@ Returns `200`, or `404 RESOURCE_NOT_FOUND` when the connector does not exist.
 
 #### PUT /v1/connectors/{connector_id} — Update a Connector
 
-**Content-Type:** `application/json`. All fields are optional. The request model forbids extra fields, so `type` and `training` cannot be changed and are rejected with `422`. Digitize's update model ignores extra fields instead; this service rejects them.
+**Content-Type:** `application/json`. All fields are optional. The request model forbids extra fields, so `type` and `service_settings` cannot be changed and are rejected with `422`. Digitize's update model ignores extra fields instead; this service rejects them.
 
 | Field                | Type   | Description                                                                                  |
 |:---------------------|:-------|:---------------------------------------------------------------------------------------------|
@@ -726,7 +746,7 @@ The loader is **new code that the API runs in its own subprocess**, before it sp
 - The loader reads the job's connector row (`jobs.connector_id`) and the connector's `training_configs` row with the API's database role, decrypts the secret fields with `DB_ENCRYPTION_KEY` and connects with the result. The worker's role cannot read `connectors`. A connector that no longer exists or cannot be decrypted fails the job with an error that names the connector and never contains a secret.
 - The session is opened **read-only** with a statement timeout where the database supports it. Authentication and network failures raise distinct errors so the job error tells the user which one occurred.
 - The raised error messages are stored in the jobs table.
-- The query is built from the validated `table` column's `training` object.
+- The query is built from the validated `table` of the `service_settings` object.
 - Rows are streamed with a server-side cursor in fixed-size chunks, inside one read-only transaction at the highest isolation level the database offers, so the snapshot is consistent.
 - Every user-supplied identifier is quoted through the driver's identifier API, never concatenated into SQL. Raw SQL is not accepted as a source.
 - The account named in the connector should be read-only. The read-only session is a second control; the account is the stronger one.
@@ -760,7 +780,7 @@ sequenceDiagram
     participant V as Repository volume
     participant T as Triton
 
-    C->>A: POST /v1/connectors (connection + training details)
+    C->>A: POST /v1/connectors (connection details + service settings)
     A->>DB: insert connector, training config and job (QUEUED, seq assigned)
     A->>P: add one-off job (fires now), and a cron job if schedule is set
     A-->>C: 201 connector id
@@ -1179,7 +1199,7 @@ These stories break the design above into units of work. Each one has a descript
 **Assumptions the stories rely on.**
 
 - ONNX conversion and Triton on Power already work (see the scope notes). No story covers them. The stories cover the service around them.
-- **One connector is attached at a time.** The service enforces it: `POST /v1/connectors` returns `409` while a connector exists.
+- **One connector is attached at a time.** The service enforces it: while a connector that has not `FAILED` exists, `POST /v1/connectors` stores a new connector as `FAILED`, with the reason in its message.
 - **One training runs at a time, with no lock and no queue.** If the connector already has a `QUEUED` or `RUNNING` job, a new run is skipped and logged. The unique `RUNNING` index is the database backstop.
 - **Boot recovery marks `QUEUED` and `RUNNING` jobs `FAILED`.**
 
@@ -1241,12 +1261,12 @@ These stories break the design above into units of work. Each one has a descript
 
 ### 14.4 Story 4 — Connectors API
 
-**Description.** Implement the connector endpoints and the training details that `POST /v1/connectors` carries.
+**Description.** Implement the connector endpoints and the service settings that `POST /v1/connectors` carries.
 
 **Subtasks.**
 
 - Connector type `db2_for_i` with required, optional, safe and encrypted fields; AES-256-GCM encryption with `DB_ENCRYPTION_KEY`.
-- `POST /v1/connectors`: validate the body, store the connector and its `training_configs` row, insert a `QUEUED` job, register the APScheduler jobs (Story 7) and return `201` with the id.
+- `POST /v1/connectors`: parse the body, store the connector and its `training_configs` row from `service_settings`, insert a `QUEUED` job, register the APScheduler jobs (Story 7) and return `201` with the id. A connector that cannot be accepted is stored as `FAILED` and also returns `201`.
 - `GET /v1/connectors` with `limit`, `offset` and the `name` filter.
 - `GET /v1/connectors/{connector_id}`.
 - `PUT /v1/connectors/{connector_id}` with a partial merge of `connection_details`.
@@ -1255,10 +1275,13 @@ These stories break the design above into units of work. Each one has a descript
 **Acceptance criteria.**
 
 - A secret field is never returned, and a field that is not on the allowlist is encrypted.
-- `POST` returns `409` when the `id` or `name` already exists, and `409` when another connector already exists. In both cases nothing is stored: no job and no schedule.
-- `POST` returns `422` for an unknown type, an `id` that is not a UUID, or a missing or unknown field in `connection_details` or `training`.
+- `POST` returns `201` when the `id` already exists. Nothing changes: no second job, no schedule.
+- `POST` returns `201` when a connector that has not `FAILED` already exists, and when `MAX_QUEUED_JOBS` jobs are queued. The new connector is stored with status `FAILED` and the reason in `message`, with no `training_configs` row, no job and no schedule. It does not count as the single connector, and the forecast endpoint skips it.
+- A secret never appears in a `message` or in a log.
+- `POST` returns `422` for an unknown type, an `id` that is not a UUID, or a missing or unknown field in `connection_details` or `service_settings`.
+- `POST` returns `409` when a new connector has the `name` of an existing connector.
 - The list and get responses return `status`, `message`, and `last_trained_at` from the `connectors` row.
-- `PUT` rejects `type` and `training` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
+- `PUT` rejects `type` and `service_settings` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
 - Cleanup of the schedule and the forecasters of a deleted connector is not part of this story.
 
 ### 14.5 Story 5 — Data loader

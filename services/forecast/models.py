@@ -55,17 +55,18 @@ class TrainingInputColumn(BaseModel):
     type: Optional[ColumnType] = None
 
 
-class TrainingRequest(BaseModel):
-    """Training configuration for a connector."""
+class ServiceSettings(BaseModel):
+    """Settings chosen when the service is deployed: the training data and the training schedule."""
 
     model_config = ConfigDict(extra="forbid")
 
     table: str = Field(min_length=1, max_length=257, pattern=_SQL_TABLE_PATTERN)
     target_column: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
     input_columns: list[TrainingInputColumn] = Field(min_length=1, max_length=1000)
+    schedule: Optional[Schedule] = None
 
     @model_validator(mode="after")
-    def _validate_columns(self) -> "TrainingRequest":
+    def _validate_columns(self) -> "ServiceSettings":
         """Reject duplicate input column names and a target that is also an input column."""
         names = [col.name.upper() for col in self.input_columns]
         if len(set(names)) != len(names):
@@ -87,9 +88,8 @@ class ConnectorCreateRequest(BaseModel):
     id: UUID
     name: str = Field(min_length=1, max_length=255)
     type: Literal["db2_for_i"]
-    schedule: Optional[Schedule] = None
     connection_details: Db2ForIDetails
-    training: TrainingRequest
+    service_settings: ServiceSettings
 
 
 class ConnectorUpdateRequest(BaseModel):

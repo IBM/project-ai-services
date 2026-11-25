@@ -4,7 +4,8 @@ Unit tests for the connector database helpers in forecast.db.connectors.
 Tests cover:
  - _name_filter: LIKE wildcards and escape characters are properly formatted
  - lock_connectors: timeout and table lock are executed
- - connector_exists & count_queued_jobs: scalar count queries
+ - connector_exists, connector_id_exists & count_queued_jobs: scalar queries
+ - insert_failed_connector: a FAILED connector without training details or job
  - insert_connector: ORM models are instantiated with correct fields and added to session
  - get_connector: with and without for_update row locking
  - list_connectors: pagination, count, and name filtering
@@ -43,6 +44,59 @@ def test_connector_exists_returns_boolean():
 
     session.scalar.return_value = 0
     assert connectors_db.connector_exists(session) is False
+
+
+@pytest.mark.unit
+def test_connector_exists_ignores_failed_connectors():
+    session = MagicMock(name="session")
+    session.scalar.return_value = False
+
+    connectors_db.connector_exists(session)
+
+    stmt_str = str(session.scalar.call_args[0][0])
+    assert "connectors.status != " in stmt_str
+    assert "FAILED" in str(session.scalar.call_args[0][0].compile(compile_kwargs={"literal_binds": True}))
+
+
+@pytest.mark.unit
+def test_connector_id_exists_filters_on_the_id_whatever_the_status():
+    session = MagicMock(name="session")
+    session.scalar.return_value = True
+
+    assert connectors_db.connector_id_exists(session, CONN_ID) is True
+
+    statement = session.scalar.call_args[0][0]
+    stmt_str = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert CONN_ID.replace("-", "") in stmt_str.replace("-", "")
+    assert "status" not in stmt_str
+
+    session.scalar.return_value = False
+    assert connectors_db.connector_id_exists(session, CONN_ID) is False
+
+
+@pytest.mark.unit
+def test_insert_failed_connector_stores_only_the_connector():
+    session = MagicMock(name="session")
+
+    connectors_db.insert_failed_connector(
+        session,
+        connector_id=CONN_ID,
+        name="test-conn",
+        connector_type="db2_for_i",
+        config={"host": "localhost", "password": "enc"},
+        message="A connector already exists. Only one connector is supported.",
+    )
+
+    session.add.assert_called_once()
+    session.add_all.assert_not_called()
+    connector = session.add.call_args[0][0]
+    assert isinstance(connector, Connector)
+    assert connector.id == uuid.UUID(CONN_ID)
+    assert connector.name == "test-conn"
+    assert connector.connection_details == {"host": "localhost", "password": "enc"}
+    assert connector.status == "FAILED"
+    assert connector.message == "A connector already exists. Only one connector is supported."
+    session.flush.assert_called_once()
 
 
 @pytest.mark.unit
@@ -259,7 +313,7 @@ FORECASTER_FIELDS = {"version": 3, "metrics": {"metric": "accuracy"}, "created_a
 
 
 @pytest.mark.unit
-def test_get_default_connector_returns_the_oldest_with_its_input_columns():
+def test_get_default_connector_returns_the_oldest_non_failed_with_its_input_columns():
     session = MagicMock(name="session")
     session.execute.return_value.mappings.return_value.first.return_value = CONNECTOR_FIELDS
 
@@ -270,6 +324,10 @@ def test_get_default_connector_returns_the_oldest_with_its_input_columns():
     stmt_str = str(session.execute.call_args[0][0])
     assert "ORDER BY connectors.attached_at ASC" in stmt_str
     assert "LIMIT" in stmt_str
+    assert "connectors.status != " in stmt_str
+    assert "FAILED" in str(
+        session.execute.call_args[0][0].compile(compile_kwargs={"literal_binds": True})
+    )
 
 
 @pytest.mark.unit
