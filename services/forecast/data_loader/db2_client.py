@@ -7,6 +7,7 @@ and server-side streaming cursor execution.
 from __future__ import annotations
 
 import logging
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
@@ -16,6 +17,7 @@ from forecast.data_loader.exceptions import (
     DBColumnNotFoundError,
     DBConnectionError,
     DBTableNotFoundError,
+    DBTLSConfigError,
     InvalidTableReferenceError,
 )
 from forecast.settings import settings
@@ -68,10 +70,19 @@ class Db2Client:
         port: int = settings.forecast.mapepire_port,
         connect_timeout: int = settings.forecast.connector_connect_timeout_s,
         query_timeout: int = settings.forecast.connector_query_timeout_s,
-        ignore_unauthorized: bool = False,
-        ca_cert: Optional[str | bytes] = None,
+        certificate: Optional[str] = None,
         custom_connection: Optional[Any] = None,
     ) -> None:
+        """Create a client. The connection is always TLS, and ``certificate`` decides how.
+
+        - ``certificate`` set (PEM content from the connector's connection details): the server
+          certificate and host name are verified against the system trust store plus that
+          certificate.
+        - ``certificate`` None or empty: no certificate is used at all. Nothing is loaded, not even
+          the system trust store, and Mapepire's ``ignoreUnauthorized`` is set.
+
+        The server's own certificate is never fetched or trusted by the client.
+        """
         self.host = host
         self.database = database
         self.username = username
@@ -79,10 +90,46 @@ class Db2Client:
         self.port = port
         self.connect_timeout = connect_timeout
         self.query_timeout = query_timeout
-        self.ignore_unauthorized = ignore_unauthorized
-        self.ca_cert = ca_cert
+        self.certificate = certificate or None
         self._conn = custom_connection
         self._server: Optional[Any] = None
+
+    @property
+    def _skip_verification(self) -> bool:
+        """True when there is no certificate to verify the server against."""
+        return self.certificate is None
+
+    def _build_ssl_context(self) -> ssl.SSLContext:
+        """Return the TLS context: the system trust store plus the certificate, or no certificates.
+
+        Without a certificate the context has nothing loaded and does no verification. With one,
+        DBTLSConfigError is raised when it is not valid PEM. The message never shows its content.
+        """
+        if self._skip_verification:
+            logger.warning(
+                "INSECURE Db2 connection to %s:%s: no certificate is used and the server certificate "
+                "is not verified because the connector has no certificate. The traffic is encrypted but "
+                "the server is not authenticated, so it can be impersonated. Add a certificate to "
+                "the connector to verify it",
+                self.host,
+                self.port,
+            )
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)  # loads no certificates at all
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            return context
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)  # system trust store
+        if self.certificate is not None:
+            try:
+                # A blank value loads nothing and would pass silently, so it is refused here.
+                if not self.certificate.strip():
+                    raise ValueError
+                context.load_verify_locations(cadata=self.certificate)
+            except (ssl.SSLError, ValueError):
+                raise DBTLSConfigError(
+                    "The connector's certificate does not contain a valid PEM certificate"
+                ) from None
+        return context
 
     def _limit_reads(self, seconds: float) -> None:
         """Set how long a single read from the Mapepire websocket may wait for a reply."""
@@ -106,6 +153,8 @@ class Db2Client:
             # Patch WebsocketConnection.connect to allow up to 64 MiB frames and to take
             # both timeouts from the DaemonServer: ``connect_timeout_s`` for opening the
             # socket and ``recv_timeout_s`` for each read (None means no limit).
+            # It also takes the TLS context from the DaemonServer (``ssl_context``, built by
+            # ``_build_ssl_context``) instead of Mapepire's own.
             if not getattr(mapepire_ws.WebsocketConnection, "_max_size_configured", False):
                 def _configured_ws_connect(ws_self):
                     server = ws_self.db2_server
@@ -113,7 +162,7 @@ class Db2Client:
                         ws_self.uri,
                         additional_headers=ws_self.headers,
                         open_timeout=getattr(server, "connect_timeout_s", 10),
-                        ssl=ws_self._create_ssl_context(server),
+                        ssl=server.ssl_context,
                         max_size=64 * 1024 * 1024,
                     )
                     recv = ws.recv
@@ -134,6 +183,8 @@ class Db2Client:
                 "pip install mapepire-python"
             ) from exc
 
+        ssl_context = self._build_ssl_context()
+
         logger.debug(
             "Connecting to IBM i Db2 via Mapepire: host=%s port=%s user=%s",
             self.host,
@@ -146,9 +197,11 @@ class Db2Client:
             user=self.username,
             password=self.password,
             port=self.port,
-            ignoreUnauthorized=self.ignore_unauthorized,
-            ca=self.ca_cert,
+            # Mapepire's own switch. The TLS context above is what the patched connect uses; this
+            # keeps the object saying the same thing.
+            ignoreUnauthorized=self._skip_verification,
         )
+        server.ssl_context = ssl_context
         # The connect request is answered within the connect timeout; once connected,
         # reads are limited by the query timeout.
         server.connect_timeout_s = self.connect_timeout

@@ -7,6 +7,7 @@ resolution, the Parquet output and the error mapping are checked on their own.
 """
 
 import re
+import ssl
 from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -25,6 +26,7 @@ from forecast.data_loader import (
     DBColumnNotFoundError,
     DBConnectionError,
     DBTableNotFoundError,
+    DBTLSConfigError,
     InvalidTableReferenceError,
     ParquetBatchWriter,
     ParquetWriteError,
@@ -546,26 +548,190 @@ def test_client_context_manager_closes_connection():
         ("[Errno 111] Connection refused", DBConnectionError),
     ],
 )
+@pytest.mark.usefixtures("no_certificate_probe")
 def test_get_connection_maps_connect_errors(message, expected):
     """Connect failures are split into authentication and connection errors."""
-    client = Db2Client("host", "db", "user", "secret", ignore_unauthorized=False)
+    client = Db2Client("host", "db", "user", "secret")
     with patch("mapepire_python.connect", side_effect=RuntimeError(message)):
         with pytest.raises(expected) as excinfo:
             client.list_columns("TEST.ORDERS")
     assert "secret" not in str(excinfo.value)
 
 
+@pytest.mark.usefixtures("no_certificate_probe")
 def test_get_connection_passes_connection_settings_to_mapepire():
-    """Host, port, credentials and TLS options reach the Mapepire daemon description."""
-    client = Db2Client("host", "db", "user", "secret", port=9999, ignore_unauthorized=True, ca_cert="CA")
+    """Host, port and credentials reach the Mapepire daemon description."""
+    client = Db2Client("host", "db", "user", "secret", port=9999)
     with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect") as connect:
         assert client._get_connection() is connect.return_value
     daemon.assert_called_once_with(
-        host="host", user="user", password="secret", port=9999, ignoreUnauthorized=True, ca="CA"
+        host="host", user="user", password="secret", port=9999, ignoreUnauthorized=True
     )
     connect.assert_called_once_with(connection_details=daemon.return_value, opts={"date format": "iso"})
 
 
+# --- TLS
+
+
+def _make_cert(tmp_path, name="test-ca", san_ip=None):
+    """Write a throw-away self-signed certificate; return (path, key, cert)."""
+    from datetime import timedelta, timezone
+    import ipaddress
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    now = datetime.now(timezone.utc)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(subject).issuer_name(subject).public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+    )
+    if san_ip:
+        builder = builder.add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(san_ip))]), False)
+    cert = builder.sign(key, hashes.SHA256())
+    path = tmp_path / f"{name}.pem"
+    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    return path, key, cert
+
+
+@pytest.fixture
+def ca_pem(tmp_path):
+    """The PEM content of a throw-away self-signed CA, as sent in the connector's certificate."""
+    return _make_cert(tmp_path)[0].read_text()
+
+
+@pytest.fixture
+def no_certificate_probe():
+    """Skip fetching the server certificate: these tests mock Mapepire and have no server to ask."""
+    with patch.object(Db2Client, "_build_ssl_context", return_value=ssl.create_default_context()):
+        yield
+
+
+def _connect_with(client):
+    """Connect through a mocked Mapepire and return the DaemonServer that was used."""
+    with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect"):
+        client._get_connection()
+    return daemon.return_value
+
+
+def test_a_certificate_is_added_to_the_system_trust_store(ca_pem):
+    """The certificate is trusted in addition to the system CAs; verification and host name checks stay on."""
+    system_cas = ssl.create_default_context(ssl.Purpose.SERVER_AUTH).cert_store_stats()["x509_ca"]
+    server = _connect_with(Db2Client("host", "db", "user", "secret", certificate=ca_pem))
+    context = server.ssl_context
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname is True
+    assert context.cert_store_stats()["x509_ca"] == system_cas + 1
+
+
+@pytest.mark.parametrize("content", ["  \n", "not a certificate", "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"])
+def test_invalid_certificate_does_not_expose_its_content(content):
+    """A certificate that is not a PEM certificate gives a permanent error that does not echo it.
+
+    A blank (whitespace) value is invalid too. Only the empty string means "no certificate".
+    """
+    client = Db2Client("host", "db", "user", "secret", certificate=content)
+    with patch("mapepire_python.DaemonServer"), patch("mapepire_python.connect") as connect:
+        with pytest.raises(DBTLSConfigError, match="valid PEM certificate") as excinfo:
+            client._get_connection()
+    connect.assert_not_called()
+    assert excinfo.value.is_permanent_failure is True
+    message = str(excinfo.value)
+    assert "AAAA" not in message and "not a certificate" not in message and "secret" not in message
+
+
+def test_ca_content_is_never_logged(ca_pem, caplog):
+    """Neither the CA content nor the password appears in the logs, at any level."""
+    with caplog.at_level("DEBUG"):
+        _connect_with(Db2Client("host", "db", "user", "secret", certificate=ca_pem))
+    assert "BEGIN CERTIFICATE" not in caplog.text and "secret" not in caplog.text
+
+
+def test_a_certificate_verifies_the_server_and_does_not_set_ignore_unauthorized(ca_pem):
+    """With a certificate Mapepire's skip switch is off and the client context verifies chain and host name."""
+    with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect"):
+        Db2Client("host", "db", "user", "secret", certificate=ca_pem)._get_connection()
+    assert daemon.call_args.kwargs["ignoreUnauthorized"] is False
+    context = daemon.return_value.ssl_context
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname is True
+
+
+@pytest.mark.parametrize("certificate", [None, ""])
+def test_without_a_certificate_ignore_unauthorized_is_set_and_no_certificate_is_used(certificate, caplog):
+    """No certificate: Mapepire's skip switch is on, nothing is loaded (not even the system store), a warning is logged."""
+    client = Db2Client("host", "db", "user", "secret", certificate=certificate)
+    assert client.certificate is None
+    with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect"):
+        with caplog.at_level("WARNING"):
+            client._get_connection()
+    assert daemon.call_args.kwargs["ignoreUnauthorized"] is True
+    context = daemon.return_value.ssl_context
+    assert context.verify_mode == ssl.CERT_NONE and context.check_hostname is False
+    assert context.cert_store_stats() == {"x509": 0, "crl": 0, "x509_ca": 0}
+    assert "INSECURE" in caplog.text and "has no certificate" in caplog.text
+    assert "secret" not in caplog.text
+
+
+def test_the_server_certificate_is_never_fetched_or_trusted(ca_pem):
+    """Whatever the mode, the client never connects just to read the server's own certificate."""
+    assert not hasattr(Db2Client, "_pin_server_certificate")
+    with patch("socket.create_connection") as sock:
+        for certificate in (None, ca_pem):
+            Db2Client("host", "db", "user", "secret", certificate=certificate)._build_ssl_context()
+    sock.assert_not_called()
+
+
+def test_the_flag_is_gone_from_the_client():
+    """There is no allow_insecure_connection or ignore_unauthorized option: the certificate decides."""
+    import inspect
+
+    parameters = inspect.signature(Db2Client.__init__).parameters
+    assert "allow_insecure_connection" not in parameters and "ignore_unauthorized" not in parameters
+
+
+def test_a_stored_flag_is_ignored_by_the_loader(ca_pem):
+    """A connector stored while the flag existed still loads: the certificate alone decides."""
+    insecure = loader_module._client_from_config(
+        {"host": "h", "database": "d", "username": "u", "password": "p", "allow_insecure_connection": True}
+    )
+    verified = loader_module._client_from_config(
+        {"host": "h", "database": "d", "username": "u", "password": "p",
+         "certificate": ca_pem, "allow_insecure_connection": True}
+    )
+    assert insecure.certificate is None and insecure._skip_verification is True
+    assert verified.certificate == ca_pem and verified._skip_verification is False
+
+
+def test_websocket_always_uses_wss_with_the_client_context(monkeypatch):
+    """The socket is opened with the TLS context of the client, not Mapepire's own."""
+    import mapepire_python.client.websocket_client as mapepire_ws
+
+    connection_class = mapepire_ws.WebsocketConnection
+    monkeypatch.setattr(connection_class, "connect", connection_class.connect)
+    monkeypatch.setattr(connection_class, "_max_size_configured", False, raising=False)
+
+    context = ssl.create_default_context()
+    with (
+        patch("websockets.sync.client.connect") as ws_connect,
+        patch("mapepire_python.DaemonServer"),
+        patch("mapepire_python.connect"),
+        patch.object(Db2Client, "_build_ssl_context"),
+    ):
+        Db2Client("host", "db", "user", "secret")._get_connection()
+        server = SimpleNamespace(ssl_context=context)
+        connection_class.connect(MagicMock(db2_server=server, uri="wss://h:8076/db/"))
+
+    assert ws_connect.call_args.args[0] == "wss://h:8076/db/"
+    assert ws_connect.call_args.kwargs["ssl"] is context
+
+
+@pytest.mark.usefixtures("no_certificate_probe")
 def test_websocket_frames_are_allowed_up_to_64_mib(monkeypatch):
     """The Mapepire websocket is patched to accept frames larger than the 1 MiB default."""
     import mapepire_python.client.websocket_client as mapepire_ws
@@ -588,6 +754,7 @@ def test_websocket_frames_are_allowed_up_to_64_mib(monkeypatch):
 # --- Timeouts
 
 
+@pytest.mark.usefixtures("no_certificate_probe")
 def test_get_connection_sets_connect_then_query_timeout_on_the_server():
     """Mapepire gets the connect timeout, and reads switch to the query timeout once connected."""
     seen = {}
@@ -605,6 +772,7 @@ def test_get_connection_sets_connect_then_query_timeout_on_the_server():
     assert daemon.return_value.recv_timeout_s == 99
 
 
+@pytest.mark.usefixtures("no_certificate_probe")
 def test_websocket_uses_the_timeouts_of_the_server(monkeypatch):
     """The socket is opened with the connect timeout and each read gets the current read timeout."""
     import mapepire_python.client.websocket_client as mapepire_ws
@@ -613,7 +781,7 @@ def test_websocket_uses_the_timeouts_of_the_server(monkeypatch):
     monkeypatch.setattr(connection_class, "connect", connection_class.connect)
     monkeypatch.setattr(connection_class, "_max_size_configured", False, raising=False)
 
-    server = SimpleNamespace(connect_timeout_s=4, recv_timeout_s=12.5)
+    server = SimpleNamespace(connect_timeout_s=4, recv_timeout_s=12.5, ssl_context=None)
     ws_self = MagicMock(db2_server=server)
     with (
         patch("websockets.sync.client.connect") as ws_connect,
@@ -688,40 +856,38 @@ def test_stream_query_batches_keeps_the_error_when_the_cursor_cannot_be_closed()
 # --- Connector configuration and decryption
 
 
-@pytest.mark.parametrize("value, expected", [(True, True), ("True", True), (" yes ", True), ("1", True),
-                                             (False, False), ("false", False), ("0", False), ("", False), (None, False)])
-def test_as_bool_reads_decrypted_strings(value, expected):
-    """Decrypted fields are strings, so booleans are parsed from text."""
-    assert loader_module._as_bool(value) is expected
-
-
 def test_client_from_config_converts_string_options():
-    """Decrypted numeric and boolean options become numbers and booleans."""
+    """Decrypted numeric options become numbers."""
     client = loader_module._client_from_config(
         {
             "host": "h", "database": "*LOCAL", "username": "u", "password": "p",
             "port": "8076", "connect_timeout": "5", "query_timeout": "60",
-            "ignore_unauthorized": "True",
         }
     )
     assert (client.port, client.connect_timeout, client.query_timeout) == (8076, 5, 60)
-    assert client.ignore_unauthorized is True
 
 
 def test_client_from_config_uses_settings_defaults():
-    """Missing options fall back to the service settings and TLS verification stays on."""
+    """Missing options fall back to the service settings; no certificate means no verification."""
     client = loader_module._client_from_config({"host": "h", "database": "d", "username": "u", "password": "p"})
     assert client.port == settings.forecast.mapepire_port
     assert client.connect_timeout == settings.forecast.connector_connect_timeout_s
     assert client.query_timeout == settings.forecast.connector_query_timeout_s
-    assert client.ignore_unauthorized is False
+    assert client.certificate is None
+
+
+def test_client_from_config_takes_the_certificate_from_the_connection_details(ca_pem):
+    """The CA content is a connector field, not a service setting."""
+    client = loader_module._client_from_config(
+        {"host": "h", "database": "d", "username": "u", "password": "p", "certificate": ca_pem}
+    )
+    assert client.certificate == ca_pem
 
 
 def test_extract_with_encrypted_details_decrypts_and_closes(encryption_key, tmp_path):
     """Encrypted connector details are decrypted into a client that is closed afterwards."""
     encrypted = encrypt_secrets(
-        {"host": "h", "port": 8076, "database": "*LOCAL", "username": "u", "password": "secret",
-         "ignore_unauthorized": True},
+        {"host": "h", "port": 8076, "database": "*LOCAL", "username": "u", "password": "secret"},
     )
     assert encrypted["host"] == "h" and encrypted["username"] == "u"
     assert "secret" not in str(encrypted)
@@ -739,7 +905,7 @@ def test_extract_with_encrypted_details_decrypts_and_closes(encryption_key, tmp_
             encrypted_connection_details=encrypted,
         )
 
-    assert captured["password"] == "secret" and captured["ignore_unauthorized"] == "True"
+    assert captured["password"] == "secret"
     assert result.rows_written == 10
     assert conn.closed is True
 

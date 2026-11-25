@@ -41,6 +41,15 @@ class DBConnectionError(DataLoaderError):
     is_permanent_failure: bool = False
 
 
+class DBTLSConfigError(DataLoaderError):
+    """Raised when the TLS configuration of the Db2 connection is unusable (e.g. unreadable or invalid CA file).
+
+    The message never contains the certificate content.
+    """
+
+    is_permanent_failure: bool = True
+
+
 class DBAuthError(DataLoaderError):
     """Raised when Db2 credentials or authentication fails."""
 
