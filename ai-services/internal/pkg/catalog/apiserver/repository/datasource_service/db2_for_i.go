@@ -2,6 +2,7 @@ package datasourceservice
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -37,7 +38,8 @@ func NewDb2ForITester() ConnectionTester {
 }
 
 // TestConnection runs three sequential checks against a Mapepire daemon:
-//  1. Network — TCP dial to host:port (port defaults to 8076 when not supplied).
+//  1. Network — TCP dial to host:port (port defaults to 8076 when not supplied) followed by a
+//     TLS handshake that verifies the server certificate.
 //  2. Auth    — Mapepire WebSocket handshake and IBM i authentication.
 //  3. Access  — read-only query confirming the configured database is accessible to the user.
 //
@@ -49,7 +51,7 @@ func (t *db2ForITester) TestConnection(ctx context.Context, params map[string]an
 	password, _ := params["password"].(string)
 	port := db2ForIPort(params["port"])
 
-	if err := checkDb2ForINetwork(ctx, net.JoinHostPort(host, port)); err != nil {
+	if err := checkDb2ForINetwork(ctx, host, port); err != nil {
 		return err
 	}
 
@@ -85,8 +87,13 @@ func db2ForIPort(raw any) string {
 	return db2ForIDefaultPort
 }
 
-// checkDb2ForINetwork verifies TCP reachability of the Mapepire daemon.
-func checkDb2ForINetwork(ctx context.Context, addr string) error {
+// checkDb2ForINetwork verifies TCP reachability of the Mapepire daemon and that its TLS
+// certificate can be verified. The Mapepire SDK flattens connect errors into strings, so a
+// certificate failure there is indistinguishable from a credential failure; checking it here
+// keeps it classified as a network error.
+func checkDb2ForINetwork(ctx context.Context, host, port string) error {
+	addr := net.JoinHostPort(host, port)
+
 	dialCtx, cancel := context.WithTimeout(ctx, db2ForITimeout)
 	defer cancel()
 
@@ -100,7 +107,24 @@ func checkDb2ForINetwork(ctx context.Context, addr string) error {
 		}
 	}
 	// The Mapepire SDK opens its own WebSocket connection.
-	_ = conn.Close()
+	defer func() { _ = conn.Close() }()
+
+	return checkDb2ForITLS(dialCtx, conn, host, addr)
+}
+
+// checkDb2ForITLS performs a TLS handshake over an established TCP connection using the same
+// verification the SDK applies (system trust store and host name check). Only certificate
+// verification failures are reported; other handshake failures are left to the connect step.
+func checkDb2ForITLS(ctx context.Context, conn net.Conn, host, addr string) error {
+	err := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}).HandshakeContext(ctx)
+
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return &ConnectionCheckError{
+			CheckType: ConnectionCheckNetwork,
+			Message:   fmt.Sprintf("TLS handshake with %s failed: %v", addr, err),
+		}
+	}
 
 	return nil
 }
