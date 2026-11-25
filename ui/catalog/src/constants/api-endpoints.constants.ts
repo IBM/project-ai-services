@@ -66,5 +66,6 @@ export const MODEL_MANAGEMENT_ENDPOINTS = {
     `/catalog/models/${encodeURIComponent(id)}`,
   LIST_MODELS: "/models",
   GET_MODEL: (id: string) => `/models/${id}`,
+  DELETE_MODEL: (id: string) => `/models/${id}`,
   GENERATE_MODEL_KEY: (id: string) => `/models/${id}/keys`,
 };

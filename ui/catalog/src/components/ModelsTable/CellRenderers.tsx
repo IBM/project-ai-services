@@ -55,12 +55,12 @@ export const NameCell = ({
   />
 );
 
-export const ActionCell = ({ rowId, rowData }: CellRendererProps) => (
+export const ActionCell = ({ rowId, rowData, dispatch }: CellRendererProps) => (
   <SharedActionCell
     rowId={rowId}
     rowData={rowData}
-    onDelete={() => {
-      // TODO: Wire delete once the DELETE API is integrated.
+    onDelete={(id) => {
+      dispatch({ type: "SHARED_OPEN_DELETE_DIALOG", payload: id });
     }}
     isDeleteEnabled={(status) =>
       status === DEPLOYMENT_STATUS.RUNNING ||

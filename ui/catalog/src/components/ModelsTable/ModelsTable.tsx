@@ -36,10 +36,13 @@ import { useAutoRefresh } from "@/components/Table/hooks/useAutoRefresh";
 import { useCSVExport } from "@/components/Table/hooks/useCSVExport";
 import { useExportToastAutoDismiss } from "@/components/Table/hooks/useExportToastAutoDismiss";
 import { getVisibleHeaders } from "@/components/Table/utils/tableUtils";
+import DeleteConfirmNameModal from "@/components/DeleteConfirmNameModal";
+import CannotDeleteModelModal from "./CannotDeleteModelModal";
 import {
   fetchModelsPage,
   fetchAllModels,
   transformModelDeploymentToRow,
+  deleteModel,
 } from "@/api/models.api";
 import sharedStyles from "@/components/Table/table.shared.module.scss";
 import styles from "./ModelsTable.module.scss";
@@ -174,6 +177,37 @@ const ModelsTable = ({
     [],
   );
 
+  // ─── Delete handler ─────────────────────────────────────────────────────────
+
+  const handleDelete = async () => {
+    if (!state.selectedRowId) {
+      dispatch({
+        type: "SHARED_SHOW_ERROR",
+        payload: { message: "No model selected for deletion" },
+      });
+      return;
+    }
+
+    dispatch({ type: "SHARED_SET_DELETING", payload: true });
+
+    try {
+      await deleteModel(state.selectedRowId);
+      dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" });
+      await fetchModels();
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Failed deleting model deployment";
+      const name =
+        state.rowsData.find((r) => r.id === state.selectedRowId)?.name ?? "";
+      dispatch({
+        type: "SHARED_SHOW_ERROR",
+        payload: { message: msg, rowName: name },
+      });
+    } finally {
+      dispatch({ type: "SHARED_SET_DELETING", payload: false });
+    }
+  };
+
   // ─── Auto-refresh ───────────────────────────────────────────────────────────
 
   useAutoRefresh({
@@ -223,17 +257,30 @@ const ModelsTable = ({
     <h6 className={sharedStyles.overflowMenuHeading}>Filter</h6>
   );
 
+  const selectedRow = state.rowsData.find((r) => r.id === state.selectedRowId);
+  const selectedItemName = selectedRow?.name ?? "";
+  const servicesCount = selectedRow?.servicesCount ?? 0;
+  const isConnectedToServices = servicesCount > 0;
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <>
       <TableToasts
-        toastOpen={false}
-        deleteErrorRowName=""
-        deleteErrorMessage=""
+        toastOpen={state.toastOpen}
+        deleteErrorRowName={state.deleteErrorRowName}
+        deleteErrorMessage={state.deleteErrorMessage}
         entityLabel="model deployment"
-        onDeleteErrorClose={() => {}}
-        onDeleteErrorRetry={async () => {}}
+        onDeleteErrorClose={() => dispatch({ type: "SHARED_HIDE_ERROR" })}
+        onDeleteErrorRetry={async () => {
+          const currentRowId = state.selectedRowId;
+          dispatch({ type: "SHARED_HIDE_ERROR" });
+          dispatch({
+            type: "SHARED_SET_SELECTED_ROW_ID",
+            payload: currentRowId,
+          });
+          await handleDelete();
+        }}
         exportToastOpen={state.exportToastOpen}
         exportToastKind={state.exportToastKind}
         exportToastMessage={state.exportToastMessage}
@@ -396,6 +443,35 @@ const ModelsTable = ({
                   </>
                 )}
               </DataTable>
+            )}
+
+            {isConnectedToServices ? (
+              <CannotDeleteModelModal
+                isOpen={state.isDeleteDialogOpen}
+                modelId={state.selectedRowId}
+                servicesCount={servicesCount}
+                onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
+              />
+            ) : (
+              <DeleteConfirmNameModal
+                isOpen={state.isDeleteDialogOpen}
+                isDeleting={state.isDeleting}
+                itemName={selectedItemName}
+                confirmValue={state.confirmValue}
+                modalLabel="Delete model instance"
+                modalHeading="Delete model"
+                primaryButtonLabel="Delete"
+                primaryButtonLoadingLabel="Deleting..."
+                warningText="Deleting a model instance deletes all associated components including runtime metadata and configurations, and it cannot be undone."
+                onConfirmValueChange={(value) =>
+                  dispatch({
+                    type: "SHARED_SET_CONFIRM_VALUE",
+                    payload: value,
+                  })
+                }
+                onConfirm={handleDelete}
+                onClose={() => dispatch({ type: "SHARED_CLOSE_DELETE_DIALOG" })}
+              />
             )}
 
             <ExportModal
