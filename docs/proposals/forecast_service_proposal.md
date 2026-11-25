@@ -160,7 +160,7 @@ graph LR
     subgraph DEP ["Catalog deployment (Forecast service + Triton installed together)"]
         direction LR
         subgraph TR ["Triton Inference Server (CPU, ONNX Runtime)"]
-            BE["HTTP 8000 / gRPC 8001<br/>one model per forecaster<br/>fc_{connector_id}_{version}<br/>repository API, explicit mode<br/>(load / unload)"]
+            BE["HTTP 8000<br/>one model per forecaster<br/>fc_{connector_id}_{version}<br/>repository API, explicit mode<br/>(load / unload)"]
         end
         subgraph FS ["Forecast Service (port 8500)"]
             direction LR
@@ -869,12 +869,12 @@ version: "1.0.0"
 podTemplateExecutions:
   - [triton-server.yaml.tmpl]
 resources:
-  cpu: 0        # TBD (DEV)
-  memory: 0     # TBD (DEV), bytes
-  storage: 0    # TBD (DEV), bytes: size of the repository volume
+  cpu: 1
+  memory: 2147483648    # 2Gi in bytes
+  storage: 5368709120   # 5Gi in bytes: size of the repository volume
 ```
 
-The three resource values are **to be provided by DEV**, as for the rest of this document (Section 1, Scope notes). The Catalog uses them for its capacity check.
+The three resource values are **reservations**, not limits: the Catalog adds them up for its capacity check, and nothing in them is applied to the pod. The Catalog's metadata validation requires cpu and memory above 0, so `0` placeholders are rejected. The values are an estimate from a measurement of Triton 2.73 on ppc64le (17 MB idle, about 5 MB per loaded model, 61 MB with 10 models under about 4000 requests per second) plus headroom, and are **to be confirmed by DEV** for the target workload (Section 1, Scope notes). No memory limit is set on the pod until DEV provides one.
 
 **`podman/values.yaml`:**
 
@@ -921,6 +921,18 @@ spec:
     - name: repository
       persistentVolumeClaim:
         claimName: "triton-repo-{{ .InstanceSlug }}"
+  initContainers:
+    - name: fix-permissions        # hands /models to the Forecast user, see "Permissions" in Section 10.3
+      image: "{{ .Values.image }}"
+      command:
+        - sh
+        - -c
+        - mkdir -p /models/.staging && chown {{ .Values.repositoryOwner }} /models /models/.staging && chmod 0755 /models /models/.staging
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - mountPath: /models:z
+          name: repository
   containers:
     - name: triton
       image: "{{ .Values.image }}"
@@ -931,11 +943,9 @@ spec:
         - --strict-readiness=false
         - --exit-on-error=false
         - --http-port=8000
-        - --grpc-port=8001
         - --metrics-port=8002
       ports:
         - containerPort: 8000     # must be first: the deployer gives this port to consumers
-        - containerPort: 8001
         - containerPort: 8002
       livenessProbe:
         httpGet:
@@ -965,7 +975,7 @@ Why each flag:
 | `--strict-readiness=false` | With the default, Triton reports not-ready if **any** model failed to load. One bad forecaster would then make the whole server unready. The Forecast API checks per-model state itself. |
 | `--exit-on-error=false` | A failed model load must not take the server down. |
 | No `--load-model` | Reloading after a Triton restart is the Forecast API's job (Section 10.4), driven by the database. |
-| gRPC and metrics ports kept | The Forecast service uses HTTP only. gRPC (8001) and metrics (8002) stay available for later use and are not published. |
+| No `--grpc-port` | The Triton build for ppc64le has no gRPC endpoint. It exits at start with `unrecognized option '--grpc-port'`, so neither the flag nor port 8001 may be set. The Forecast service uses HTTP only. The metrics port (8002) is kept and is not published. |
 
 **What is deliberately absent from the template:**
 
@@ -1045,6 +1055,15 @@ Two requirements, whatever mechanism provides them:
 
 Both depend on how the image's user and rootless Podman interact and must be verified on the ppc64le image before implementation.
 
+**Podman and the volume owner (workaround).** The volume is created root-owned, so an init container (`fix-permissions`, run as root) changes its owner to `repositoryOwner` (`1001:0` by default), and the Forecast user can then create, rename and delete under `/models`.
+
+- **Why the workaround is needed.** Podman gives an **empty** named volume to the user of each container that mounts it. The Triton container runs as root, so when it starts it would take the volume back (`0:0`) and the Forecast user could no longer write to it. This was observed on both Triton images tried, and it happens whether or not the image has a `/models` directory.
+- **What it does.** The init container also creates `/models/.staging`, owned by `repositoryOwner`. A volume that has content keeps its owner, so the chown survives the Triton start and restarts. `.staging` is also the directory in which the Forecast service builds a model directory before it renames it into place, so it is needed anyway.
+- **What it costs.** The Triton chart creates a directory name that belongs to the Forecast service, so the two must change together. Triton lists `.staging` in `POST /v2/repository/index` as a model without a state, so reconciliation (Section 10.4) must ignore it.
+- **What was tested.** Rootful Podman 5.8.5 on ppc64le: the Forecast user (`1001:0`, umask 022) could create, rename and delete under `/models`, and the owner stayed `1001:0` after the Triton start and after a pod restart.
+- **Not tested: rootless Podman.** The user namespace of a rootless pod can map the owner differently, and Podman's behaviour for an empty volume may differ. This must be verified before rootless deployments are supported.
+- **Alternative.** The Forecast pod runs as `1001:0`, so Podman would also give it the empty volume when it starts, and its startup code could create `.staging` itself. That would remove the init container, but Triton can take the volume back if it restarts while the volume is still empty. Revisit when the Forecast pod template is added.
+
 ### 10.4 Model lifecycle against Triton
 
 This is the Triton-facing half of Sections 9.1 and 9.2. Triton is addressed over HTTP at `TRITON_URL`.
@@ -1087,7 +1106,7 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 | Object | Purpose |
 |:--|:--|
 | `Deployment` `triton` | One replica, strategy `Recreate`. Same image, args and probes as Section 10.2. Adds a `readinessProbe` on `/v2/health/ready` (OpenShift honours readiness; with `--strict-readiness=false` it does not depend on any model). Mounts the PVC read-only at `/models`. |
-| `Service` `triton` | ClusterIP, port 8000 (and 8001, 8002). Not exposed through a `Route`. The Forecast chart uses `http://triton:8000`. |
+| `Service` `triton` | ClusterIP, port 8000 (and 8002). Not exposed through a `Route`. The Forecast chart uses `http://triton:8000`. |
 | `PersistentVolumeClaim` `triton-repository` | Owned by the Triton chart, with `helm.sh/resource-policy: keep`, like `digitize-cache`. Mounted read-write by the Forecast Deployment and read-only by Triton. |
 
 - **Access mode.** `ReadWriteMany`, as `digitize-cache` already uses. With `ReadWriteOnce` both pods would have to run on the same node; if the storage class does not offer RWX, that needs a pod affinity from the Forecast Deployment to the Triton pod. The storage class and size are to be provided by DEV.

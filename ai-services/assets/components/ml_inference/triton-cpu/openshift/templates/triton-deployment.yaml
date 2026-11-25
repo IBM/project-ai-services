@@ -33,14 +33,10 @@ spec:
             - --strict-readiness=false
             - --exit-on-error=false
             - --http-port=8000
-            - --grpc-port=8001
             - --metrics-port=8002
           ports:
             - name: http
               containerPort: 8000
-              protocol: TCP
-            - name: grpc
-              containerPort: 8001
               protocol: TCP
             - name: metrics
               containerPort: 8002

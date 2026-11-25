@@ -16,10 +16,22 @@ spec:
         claimName: "triton-repo-{{ .InstanceSlug }}"
   initContainers:
     # The volume root is created root-owned. Hand it to the Forecast user so it can create,
-    # rename and delete under /models. The directory stays 0755, so Triton's user can read it.
+    # rename and delete under /models. The directories stay 0755, so Triton's user can read them.
+    #
+    # WORKAROUND, do not remove the mkdir of .staging: Podman gives an EMPTY named volume to the
+    # user of each container that mounts it. Triton runs as root, so when it starts it would take
+    # the volume back from the Forecast user and the Forecast service could no longer write to it.
+    # A volume that has content keeps its owner, so .staging (which the Forecast service uses to
+    # build a model directory before it renames it into place) is created here.
+    #
+    # Verified only with rootful Podman 5.8.5 on ppc64le. Rootless Podman is UNTESTED: its user
+    # namespace may map the owner differently.
     - name: fix-permissions
       image: "{{ .Values.image }}"
-      command: ["sh", "-c", "chown {{ .Values.repositoryOwner }} /models && chmod 0755 /models"]
+      command:
+        - sh
+        - -c
+        - mkdir -p /models/.staging && chown {{ .Values.repositoryOwner }} /models /models/.staging && chmod 0755 /models /models/.staging
       securityContext:
         runAsUser: 0
       volumeMounts:
@@ -35,11 +47,9 @@ spec:
         - --strict-readiness=false
         - --exit-on-error=false
         - --http-port=8000
-        - --grpc-port=8001
         - --metrics-port=8002
       ports:
         - containerPort: 8000     # must be first: the deployer gives this port to consumers
-        - containerPort: 8001
         - containerPort: 8002
       livenessProbe:
         httpGet:

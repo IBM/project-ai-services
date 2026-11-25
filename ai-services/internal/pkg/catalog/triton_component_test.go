@@ -84,6 +84,15 @@ func TestTritonPodTemplate(t *testing.T) {
 	assert.Contains(t, triton.Args, "--exit-on-error=false")
 	assert.NotContains(t, triton.Args, "--load-model")
 
+	// The ppc64le Triton build has no gRPC endpoint and rejects the flag, so neither the flag nor
+	// the port may be set.
+	for _, arg := range triton.Args {
+		assert.NotContains(t, arg, "grpc")
+	}
+	for _, port := range triton.Ports {
+		assert.NotEqual(t, int32(8001), port.ContainerPort)
+	}
+
 	// The repository volume is cleaned up with the Triton pod only, and Triton mounts it read-only.
 	assert.Equal(t, "triton-repo-test1234ab", podSpec.Labels["ai-services.io/volume"])
 	require.Len(t, triton.VolumeMounts, 1)
@@ -105,10 +114,14 @@ func TestTritonPodTemplate_RepositoryPermissions(t *testing.T) {
 	initContainer := podSpec.Spec.InitContainers[0]
 
 	// The init container hands the volume root to the Forecast user and keeps it world-readable.
+	// It also creates .staging: Podman resets the owner of an empty volume when Triton starts.
 	require.NotNil(t, initContainer.SecurityContext)
 	require.NotNil(t, initContainer.SecurityContext.RunAsUser)
 	assert.EqualValues(t, 0, *initContainer.SecurityContext.RunAsUser)
-	assert.Equal(t, []string{"sh", "-c", "chown 1001:0 /models && chmod 0755 /models"}, initContainer.Command)
+	assert.Equal(t, []string{
+		"sh", "-c",
+		"mkdir -p /models/.staging && chown 1001:0 /models /models/.staging && chmod 0755 /models /models/.staging",
+	}, initContainer.Command)
 
 	require.Len(t, initContainer.VolumeMounts, 1)
 	assert.Equal(t, "/models:z", initContainer.VolumeMounts[0].MountPath)
@@ -214,6 +227,12 @@ func TestTritonOpenShiftChart(t *testing.T) {
 	require.NotNil(t, triton.LivenessProbe)
 	assert.Equal(t, "/v2/health/live", triton.LivenessProbe.HTTPGet.Path)
 	assert.EqualValues(t, 8000, triton.Ports[0].ContainerPort)
+	for _, arg := range triton.Args {
+		assert.NotContains(t, arg, "grpc", "this Triton build has no gRPC endpoint")
+	}
+	for _, port := range triton.Ports {
+		assert.NotEqual(t, int32(8001), port.ContainerPort)
+	}
 
 	require.Len(t, triton.VolumeMounts, 1)
 	assert.Equal(t, "/models", triton.VolumeMounts[0].MountPath)
@@ -227,6 +246,9 @@ func TestTritonOpenShiftChart(t *testing.T) {
 	assert.Equal(t, "triton", svc["metadata"].(map[string]any)["name"])
 	assert.Equal(t, "ClusterIP", svc["spec"].(map[string]any)["type"])
 	assert.EqualValues(t, 8000, svc["spec"].(map[string]any)["ports"].([]any)[0].(map[string]any)["port"])
+	for _, port := range svc["spec"].(map[string]any)["ports"].([]any) {
+		assert.NotEqual(t, "grpc", port.(map[string]any)["name"])
+	}
 }
 
 func TestTritonOpenShiftChart_Resources(t *testing.T) {
