@@ -286,7 +286,7 @@ func (p *CatalogProvider) buildDeployOptionsComponent(ctx context.Context, compo
 func applyModelOptions(provider *types.DeployOptionsProvider, componentType types.ComponentType, service *types.Service) {
 	provider.Models = &types.DeployOptionsLink{
 		Name: componentType.Name,
-		URL:  fmt.Sprintf(constants.CatalogModelsURLFormat, componentType.ID),
+		URL:  fmt.Sprintf(constants.CatalogModelsURLFormat, constants.DeploymentTypeLocal, componentType.ID),
 	}
 	provider.Instances = &types.DeployOptionsLink{
 		Name: "Instances",

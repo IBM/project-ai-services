@@ -1642,6 +1642,12 @@
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "Only models served by providers of this deployment type: 'local' or 'remote'. The providers of each model are narrowed to that type. Omit for all.",
+                        "name": "deployment_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Only models of this role: 'llm', 'embedding' or 'reranker'. Omit for all.",
                         "name": "component_type",
                         "in": "query"
@@ -1658,7 +1664,7 @@
                         }
                     },
                     "400": {
-                        "description": "Invalid component_type",
+                        "description": "Invalid deployment_type or component_type",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }

@@ -2508,6 +2508,12 @@ paths:
         sorted by id, with the providers that serve it. Covers the models of local
         model components and of remote model connectors.
       parameters:
+      - description: 'Only models served by providers of this deployment type: ''local''
+          or ''remote''. The providers of each model are narrowed to that type. Omit
+          for all.'
+        in: query
+        name: deployment_type
+        type: string
       - description: 'Only models of this role: ''llm'', ''embedding'' or ''reranker''.
           Omit for all.'
         in: query
@@ -2523,7 +2529,7 @@ paths:
               $ref: '#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogEntry'
             type: array
         "400":
-          description: Invalid component_type
+          description: Invalid deployment_type or component_type
           schema:
             $ref: '#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse'
         "401":

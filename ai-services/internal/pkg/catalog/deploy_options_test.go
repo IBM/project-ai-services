@@ -43,7 +43,7 @@ func TestGetServiceDeployOptions_ModelProviders(t *testing.T) {
 		pr := findDeployProvider(t, opts.Components, "llm", "vllm-spyre")
 
 		require.NotNil(t, pr.Models)
-		assert.Equal(t, "/api/v1/catalog/models?component_type=llm", pr.Models.URL)
+		assert.Equal(t, "/api/v1/catalog/models?deployment_type=local&component_type=llm", pr.Models.URL)
 		require.NotNil(t, pr.Instances)
 		assert.Equal(t, "Instances", pr.Instances.Name)
 		assert.Equal(t, "/api/v1/models?status=Running&status=connected", pr.Instances.URL)

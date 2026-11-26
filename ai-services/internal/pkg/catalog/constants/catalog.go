@@ -66,8 +66,9 @@ const (
 	ConnectorParamsURLFormat = "/api/v1/connectors/%s/providers/%s/params"
 	// ComponentParamsURLFormat takes component type, provider ID and runtime.
 	ComponentParamsURLFormat = "/api/v1/components/%s/providers/%s/params?runtime=%s"
-	// CatalogModelsURLFormat takes component type; lists the catalog models of that role.
-	CatalogModelsURLFormat = "/api/v1/catalog/models?component_type=%s"
+	// CatalogModelsURLFormat takes deployment type and component type; lists the catalog models of
+	// that role that a provider of that deployment type serves.
+	CatalogModelsURLFormat = "/api/v1/catalog/models?deployment_type=%s&component_type=%s"
 	// ModelInstancesURLFormat takes the local and the remote model instance statuses to list. The UI
 	// appends the provider_id and model query parameters of its selection.
 	ModelInstancesURLFormat = "/api/v1/models?status=%s&status=%s"

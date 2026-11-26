@@ -307,8 +307,9 @@ func fillEntry(entry *types.ModelCatalogEntry, cm *catalogModel, components []ty
 }
 
 // ListModelCatalog lists the deployable models with the providers that serve them, in no particular order.
-// componentType, when set, keeps only the models of that role (llm, embedding, reranker).
-func (p *CatalogProvider) ListModelCatalog(componentType string) ([]types.ModelCatalogEntry, error) {
+// deploymentType, when set, keeps only the models served by a provider of that type and narrows their
+// providers to it. componentType, when set, keeps only the models of that role (llm, embedding, reranker).
+func (p *CatalogProvider) ListModelCatalog(deploymentType constants.DeploymentType, componentType string) ([]types.ModelCatalogEntry, error) {
 	components, err := p.ListComponents()
 	if err != nil {
 		return nil, err
@@ -328,6 +329,16 @@ func (p *CatalogProvider) ListModelCatalog(componentType string) ([]types.ModelC
 
 		entry := cm.model.Entry()
 		fillEntry(&entry, cm, components)
+
+		if deploymentType != "" {
+			entry.Providers = slices.DeleteFunc(entry.Providers, func(pr types.ModelCatalogProvider) bool {
+				return pr.DeploymentType != deploymentType
+			})
+			if len(entry.Providers) == 0 {
+				continue
+			}
+		}
+
 		result = append(result, entry)
 	}
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
@@ -209,7 +210,7 @@ func (s *apiSource) ListCatalogModels(ctx context.Context, componentType string)
 	if err != nil && isConnectivityError(err) {
 		logger.DebugfCtx(ctx, "API ListCatalogModels unreachable, falling back to embedded: %v", err)
 
-		return s.embedded.ListModelCatalog(componentType)
+		return s.embedded.ListModelCatalog("", componentType)
 	}
 
 	return entries, err
@@ -228,7 +229,7 @@ type EmbeddedCatalog interface {
 	ListComponents() ([]types.Component, error)
 	LoadArchitecture(id string) (*types.Architecture, error)
 	LoadService(id string) (*types.Service, error)
-	ListModelCatalog(componentType string) ([]types.ModelCatalogEntry, error)
+	ListModelCatalog(deploymentType constants.DeploymentType, componentType string) ([]types.ModelCatalogEntry, error)
 	WithRuntime(runtimeType string) (*catalog.CatalogProvider, error)
 }
 
@@ -284,7 +285,7 @@ func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, com
 }
 
 func (s *embeddedOnlySource) ListCatalogModels(_ context.Context, componentType string) ([]types.ModelCatalogEntry, error) {
-	return s.embedded.ListModelCatalog(componentType)
+	return s.embedded.ListModelCatalog("", componentType)
 }
 
 // --------------------------------------------------------------------------
