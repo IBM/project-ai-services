@@ -270,12 +270,28 @@ def test_the_test_split_of_a_regression_target_or_a_single_row_class_is_random()
         assert len(test_rows) == 20 and len(train_rows) == 80
 
 
-def test_run_removes_its_scratch_directory_only(volumes):
+def test_the_worker_trains_inside_the_run_directory_and_leaves_nothing_in_scratch(volumes):
+    """A killed worker cannot clean up, so everything it writes must be where the API deletes it."""
     run_worker(volumes, make_table(200))
 
-    assert list(volumes.scratch.iterdir()) == []
+    assert (volumes.report / "autogluon").is_dir()
+    assert not volumes.scratch.exists() or list(volumes.scratch.iterdir()) == []
     assert (volumes.output / "1" / "model.onnx").is_file()
     assert volumes.data.is_file()  # The input belongs to the API.
+
+
+def test_a_failed_training_also_leaves_nothing_in_scratch(volumes, monkeypatch):
+    from autogluon.tabular import TabularPredictor
+
+    def fail(*args, **kwargs):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(TabularPredictor, "fit", fail)
+
+    with pytest.raises(TransientFailure):
+        run_worker(volumes, make_table(100))
+
+    assert not volumes.scratch.exists() or list(volumes.scratch.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------

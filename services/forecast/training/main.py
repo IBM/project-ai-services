@@ -7,7 +7,9 @@ does not read the source database, has no access to connector credentials and no
 database, and never touches the repository volume: the API publishes the directory, loads it into
 Triton, records it in ``forecasters`` and owns every database write. It learns what to train from
 ``job_file`` (``job.json``) and reports back in files next to it, ``result.json`` and
-``failure.json`` (forecast.utils.job_files). It removes only its own local scratch directory.
+``failure.json`` (forecast.utils.job_files). AutoGluon works in a directory next to them, and the
+worker removes nothing: the whole run directory belongs to the API, which deletes it after every
+attempt, also when it had to kill the worker.
 
 The failure message is the text of a ``TrainingFailure``, which is written for the user. Any other
 exception is reported as a fixed text with its class name, and its details go to the log only,
@@ -20,7 +22,6 @@ import argparse
 import os
 import resource
 import sys
-import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -69,10 +70,8 @@ def in_job_spelling(data: pd.DataFrame, job: TrainingJob) -> pd.DataFrame:
 
 def run(job_file: Path, data_path: Path, output_dir: Path) -> Path:
     """Train on ``data_path``, write the forecaster to ``output_dir`` and return it."""
-    config = settings.forecast
     job = read_job(job_file)
     report_dir = job_file.parent
-    config.scratch_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
 
     data = in_job_spelling(pd.read_parquet(data_path), job)
     rows_read = len(data)
@@ -80,9 +79,10 @@ def run(job_file: Path, data_path: Path, output_dir: Path) -> Path:
     if rows_read == 0:
         raise PermanentFailure(f"Table {job.source_table} has no rows")
 
-    with tempfile.TemporaryDirectory(dir=config.scratch_dir, prefix=f"job-{job.job_id}-") as scratch:
-        trained = train(data, job, Path(scratch), config.default_time_limit_seconds)
-        model = export(trained.predictor, trained.encoding)
+    # AutoGluon writes its models under report_dir/autogluon. A worker that is killed cannot clean
+    # up after itself, so this must be a place that the API removes.
+    trained = train(data, job, report_dir, settings.forecast.default_time_limit_seconds)
+    model = export(trained.predictor, trained.encoding)
 
     write_model_dir(output_dir, forecaster_name(job.connector_id, job.job_id), model)
     write_result(

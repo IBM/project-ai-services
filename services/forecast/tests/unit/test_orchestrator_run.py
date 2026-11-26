@@ -6,6 +6,7 @@ test_data_loader_main.py), the database by a recording fake, and Triton by a sta
 publish to the repository volume and the scratch directories are real, on a temporary directory.
 """
 import asyncio
+import inspect
 import json
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +16,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from forecast.db import runs as real_runs
 from forecast.errors import EXIT_FAILURE, EXIT_PERMANENT, PermanentFailure
 from forecast.orchestrator import run as orchestrator
 from forecast.orchestrator.process import ProcessResult
@@ -114,6 +116,7 @@ class Processes:
         self.calls = []
         self.result = {"rows_read": 5}
         self.on_worker = None
+        self.writes_model = True  # False: a worker that exits 0 and leaves no model directory.
 
     async def __call__(self, args, *, name, timeout_s, memory_limit_mb=None, env=None, **_):
         worker = name == "training worker"
@@ -145,7 +148,7 @@ class Processes:
                 self.on_worker(scratch)
         if result.ok and not worker:
             data_file.write_bytes(b"parquet")
-        if result.ok and worker:
+        if result.ok and worker and self.writes_model:
             model = Path(args[-1])
             (model / "1").mkdir(parents=True)
             (model / "1" / "model.onnx").write_bytes(b"onnx")
@@ -225,6 +228,18 @@ def env(tmp_path, monkeypatch):
 
 def run_training():
     asyncio.run(orchestrator.run_training(CONNECTOR_ID))
+
+
+def test_the_fake_database_has_the_signatures_of_the_real_module():
+    """A change to a function of forecast.db.runs must fail here, not only against a real database."""
+    fakes = [name for name, member in vars(FakeRuns).items() if inspect.isfunction(member) and not name.startswith("_")]
+
+    assert fakes
+    for name in fakes:
+        real = getattr(real_runs, name)  # AttributeError: the fake has a function that the module lacks.
+        assert list(inspect.signature(real).parameters) == list(inspect.signature(getattr(FakeRuns, name)).parameters)[1:], name
+    used = {"start_job", "start_attempt", "read_training_job", "read_message", "set_result", "set_message", "mark_completed", "mark_failed"}
+    assert used <= set(fakes)
 
 
 # ---------------------------------------------------------------------------
@@ -728,6 +743,71 @@ def test_a_cancel_during_the_load_unloads_and_removes_the_published_directory(en
     assert env.unloaded == [(NAME, True)]
     assert not (env.repository / NAME).exists()
     assert env.runs.completed is None
+    assert not env.scratch.exists()
+
+
+async def _cancel_while(env, monkeypatch, where):
+    """Cancel run_training while ``where`` ("start_job" or a process name) waits for ever."""
+    reached = asyncio.Event()
+
+    async def wait_for_ever():
+        reached.set()
+        await asyncio.Event().wait()
+
+    if where == "start_job":
+        real_db = orchestrator._db
+
+        async def db(function, *args):
+            if function == env.runs.start_job:
+                await wait_for_ever()
+            return await real_db(function, *args)
+
+        monkeypatch.setattr(orchestrator, "_db", db)
+    else:
+        scripted = env.processes
+
+        async def process(args, *, name, **kwargs):
+            if name == where:
+                await wait_for_ever()
+            return await scripted(args, name=name, **kwargs)
+
+        monkeypatch.setattr(orchestrator, "run_process", process)
+
+    task = asyncio.ensure_future(orchestrator.run_training(CONNECTOR_ID))
+    await reached.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.parametrize("where", ["start_job", "data loader", "training worker"])
+def test_a_cancel_during_a_run_removes_its_scratch_directory_and_releases_the_lock(env, monkeypatch, where):
+    asyncio.run(_cancel_while(env, monkeypatch, where))
+
+    assert not env.scratch.exists()
+    assert env.runs.completed is None
+    assert env.loaded == [] and list(env.repository.iterdir()) == []  # Nothing was published.
+    assert not orchestrator._lock.locked()  # Or no later training could start.
+
+
+def test_a_cancel_during_a_run_is_not_retried(env, monkeypatch):
+    asyncio.run(_cancel_while(env, monkeypatch, "data loader"))
+
+    assert env.sleeps == []
+    assert env.runs.attempt_starts == 1
+
+
+def test_a_worker_that_exits_zero_without_a_model_directory_fails_the_job(env):
+    env.script(loader=[OK], worker=[OK]).writes_model = False
+
+    run_training()
+
+    assert env.runs.failed == (
+        JOB_ID, "The training run failed with an unexpected FileNotFoundError. The details are in the log.", 1
+    )
+    assert env.runs.completed is None
+    assert env.loaded == [] and env.unloaded == []  # Nothing was handed to Triton.
+    assert list(env.repository.iterdir()) == []
     assert not env.scratch.exists()
 
 
