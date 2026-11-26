@@ -11,7 +11,7 @@ import styles from "../DeployFlow.shared.module.scss";
 
 export interface StepDefinition {
   label: string;
-  description: string;
+  description?: string;
   complete?: boolean;
 }
 
@@ -33,6 +33,9 @@ interface DeployTearsheetShellProps {
   onDismissToast: () => void;
   isLoading?: boolean;
   error?: string | null;
+  submitLabel?: string;
+  submittingLabel?: string;
+  errorTitle?: string;
   children: React.ReactNode;
 }
 
@@ -54,6 +57,9 @@ export const DeployTearsheetShell = ({
   onDismissToast,
   isLoading = false,
   error = null,
+  submitLabel = "Deploy",
+  submittingLabel = "Deploying...",
+  errorTitle = "Deployment failed",
   children,
 }: DeployTearsheetShellProps) => {
   const actions = [
@@ -70,7 +76,11 @@ export const DeployTearsheetShell = ({
       disabled: currentStep === 0 || isDeploying,
     },
     {
-      label: isLastStep ? (isDeploying ? "Deploying..." : "Deploy") : "Next",
+      label: isLastStep
+        ? isDeploying
+          ? submittingLabel
+          : submitLabel
+        : "Next",
       kind: "primary" as const,
       onClick: isLastStep ? onSubmit : onNext,
       disabled: isPrimaryDisabled || isDeploying,
@@ -85,7 +95,7 @@ export const DeployTearsheetShell = ({
           aria-label="close notification"
           kind="error"
           closeOnEscape
-          title="Deployment failed"
+          title={errorTitle}
           subtitle={deployError}
           onCloseButtonClick={onDismissToast}
           onActionButtonClick={() => {

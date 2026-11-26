@@ -6,13 +6,13 @@
   "properties": {
     "api_base": {
       "type": "string",
-      "title": "API Endpoint",
+      "title": "API endpoint",
       "description": "Base URL of the VLLM endpoint.",
       "format": "uri"
     },
     "api_key": {
       "type": "string",
-      "title": "VLLM API Key",
+      "title": "VLLM API key",
       "description": "API key to authenticate and connect to the VLLM endpoint.",
       "format": "password",
       "minLength": 1

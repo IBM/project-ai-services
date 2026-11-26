@@ -1,0 +1,37 @@
+@use "carbonTokens" as *;
+
+.componentTypeLabel {
+  @include type-style("label-01");
+  color: $text-secondary;
+}
+
+// Tile height from the design; `a` outranks the shared min-height
+a.modelTile {
+  min-height: 328px;
+}
+
+// Truncates long descriptions like ModelCard
+.tileDescription {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.providerTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-02;
+  margin-top: auto;
+  padding-top: $spacing-05;
+}
+// Matches Carbon's dropdown label spacing
+.fieldLabel {
+  @include type-style("label-01");
+  display: flex;
+  align-items: center;
+  gap: $spacing-02;
+  margin-bottom: $spacing-03;
+  color: $text-secondary;
+}

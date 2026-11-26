@@ -6,10 +6,14 @@ import { PAGE_TITLES, PAGE_SUBTITLES } from "@/constants";
 import { ModelCard, ModelCardSkeleton } from "@/components/ModelCard";
 import { useModels } from "@/hooks/useModels";
 import { ModelsTable, ModelDetails } from "@/components";
+import { ModelsDeployFlow } from "@/components/DeployFlow/Models";
 import styles from "./Models.module.scss";
 
 const Models = () => {
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
+  const [isDeployFlowOpen, setIsDeployFlowOpen] = useState(false);
+  const [deployModelId, setDeployModelId] = useState<string | null>(null);
+  const [tableRefreshTrigger, setTableRefreshTrigger] = useState(0);
   const [selectedModel, setSelectedModel] = useState<ModelDeploymentRow | null>(
     null,
   );
@@ -21,6 +25,22 @@ const Models = () => {
     if (evt.selectedIndex === 1) {
       refetch();
     }
+  };
+
+  // Opens the register flow, pre-selecting a model when launched from a catalog card
+  const handleDeploy = (modelId: string | null) => {
+    setDeployModelId(modelId);
+    setIsDeployFlowOpen(true);
+  };
+
+  const handleCloseDeployFlow = () => {
+    setIsDeployFlowOpen(false);
+  };
+
+  // Switches to the deployments tab and refreshes it after a successful registration
+  const handleDeploySubmit = () => {
+    setSelectedTabIndex(0);
+    setTableRefreshTrigger((count) => count + 1);
   };
 
   if (selectedModel) {
@@ -52,7 +72,11 @@ const Models = () => {
         </TabList>
         <TabPanels>
           <TabPanel>
-            <ModelsTable onRowClick={setSelectedModel} />
+            <ModelsTable
+              onRowClick={setSelectedModel}
+              onDeploy={() => handleDeploy(null)}
+              refreshTrigger={tableRefreshTrigger}
+            />
           </TabPanel>
           <TabPanel>
             {isLoading ? (
@@ -79,7 +103,7 @@ const Models = () => {
                     description={model.description}
                     certifiedBy={model.certified_by}
                     providers={model.providers}
-                    onDeploy={() => {}}
+                    onDeploy={handleDeploy}
                   />
                 ))}
               </div>
@@ -87,6 +111,13 @@ const Models = () => {
           </TabPanel>
         </TabPanels>
       </Tabs>
+
+      <ModelsDeployFlow
+        open={isDeployFlowOpen}
+        onClose={handleCloseDeployFlow}
+        onSubmit={handleDeploySubmit}
+        preSelectedModelId={deployModelId ?? undefined}
+      />
     </div>
   );
 };

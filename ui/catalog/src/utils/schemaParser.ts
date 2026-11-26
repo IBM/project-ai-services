@@ -10,6 +10,7 @@ export interface ParsedField {
   validation?: {
     required: boolean;
     pattern?: string;
+    format?: string;
     minLength?: number;
     maxLength?: number;
     min?: number;
@@ -108,6 +109,9 @@ function parseSchemaProperty(
   if (property.pattern) {
     validation.pattern = property.pattern;
   }
+  if (property.format === "uri") {
+    validation.format = property.format;
+  }
   if (property.minLength !== undefined) {
     validation.minLength = property.minLength;
   }
@@ -144,6 +148,32 @@ function formatLabel(key: string): string {
     .trim();
 }
 
+// Checks for an absolute http(s) URL
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value.trim());
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+// Patterns are written for Go and may not compile in JS; skip the check then and let the server validate
+function matchesPattern(pattern: string, value: string): boolean {
+  try {
+    return new RegExp(pattern).test(value);
+  } catch {
+    return true;
+  }
+}
+
+// Lowercases the first letter mid-sentence, keeping acronyms like "API"
+function lowerFirst(label: string): string {
+  return /^[A-Z][A-Z]/.test(label)
+    ? label
+    : label.charAt(0).toLowerCase() + label.slice(1);
+}
+
 // Validates a value against a parsed field's validation rules, returning an error string or null
 export function validateField(
   value: unknown,
@@ -153,7 +183,7 @@ export function validateField(
     return null;
   }
 
-  const { required, pattern, minLength, maxLength, min, max } =
+  const { required, pattern, format, minLength, maxLength, min, max } =
     field.validation;
 
   // Required check
@@ -163,7 +193,7 @@ export function validateField(
       value === null ||
       (typeof value === "string" && value.trim() === ""))
   ) {
-    return `Provide a valid ${field.label}`;
+    return `Provide a valid ${lowerFirst(field.label)}`;
   }
 
   // Skip other validations if value is empty and not required
@@ -179,8 +209,13 @@ export function validateField(
   const stringValue = String(value);
 
   // Pattern validation
-  if (pattern && !new RegExp(pattern).test(stringValue)) {
-    return `${field.label} format is invalid`;
+  if (pattern && !matchesPattern(pattern, stringValue)) {
+    return `Provide a valid ${lowerFirst(field.label)}`;
+  }
+
+  // URI validation
+  if (format === "uri" && !isHttpUrl(stringValue)) {
+    return `Provide a valid ${lowerFirst(field.label)}`;
   }
 
   // Length validation
@@ -197,11 +232,15 @@ export function validateField(
     if (isNaN(numValue)) {
       return `${field.label} must be a number`;
     }
-    if (min !== undefined && numValue < min) {
-      return `${field.label} must be at least ${min}`;
-    }
-    if (max !== undefined && numValue > max) {
-      return `${field.label} must be at most ${max}`;
+    const belowMin = min !== undefined && numValue < min;
+    const aboveMax = max !== undefined && numValue > max;
+    if (belowMin || aboveMax) {
+      if (min !== undefined && max !== undefined) {
+        return `Provide a value between ${min}-${max}`;
+      }
+      return belowMin
+        ? `Provide a value of at least ${min}`
+        : `Provide a value of at most ${max}`;
     }
   }
 

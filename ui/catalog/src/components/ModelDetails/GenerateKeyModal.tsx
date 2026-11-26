@@ -53,7 +53,7 @@ const GenerateKeyModal = ({
     <Modal
       open={isOpen}
       passiveModal={isKeyReady}
-      size="xs"
+      size="sm"
       modalHeading={isKeyReady ? "API key generated" : "Generate API key"}
       primaryButtonText={
         isGenerating ? "Generating..." : error ? "Retry" : "Generate key"

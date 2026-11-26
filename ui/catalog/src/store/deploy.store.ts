@@ -5,6 +5,7 @@ import type {
   ServiceSummary,
   ArchitectureDetailsResponse,
   DeployOptionsResponse,
+  ModelDeployOptions,
   ProviderSchema,
   LLMOption,
 } from "@/types/api.types";
@@ -21,6 +22,11 @@ export interface ServiceParamsCache {
 
 interface DeployOptionsCache {
   data: DeployOptionsResponse;
+  fetchedAt: number;
+}
+
+interface ModelDeployOptionsCache {
+  data: ModelDeployOptions;
   fetchedAt: number;
 }
 
@@ -51,6 +57,12 @@ interface DeployState {
   deployOptions: Record<string, DeployOptionsCache>;
   deployOptionsLoading: boolean;
   deployOptionsError: string | null;
+
+  // Persisted, 15-min TTL, keyed "modelId:runtime" ("remote" when no runtime)
+  modelDeployOptions: Record<string, ModelDeployOptionsCache>;
+
+  // Persisted, 1-hour TTL, keyed by schema URL
+  modelProviderSchemas: Record<string, ProviderParamsCache>;
 
   // Provider params cache - persisted with 1-hour cache, keyed by "runtime:componentType:providerId"
   providerParams: Record<string, ProviderParamsCache>;
@@ -109,6 +121,16 @@ interface DeployState {
   setDeployOptionsError: (error: string | null) => void;
   clearDeployOptions: () => void;
 
+  // Model deploy options actions
+  setModelDeployOptions: (
+    modelId: string,
+    runtime: string,
+    data: ModelDeployOptions,
+  ) => void;
+
+  // Model provider schema actions
+  setModelProviderSchema: (schemaUrl: string, data: ProviderSchema) => void;
+
   // Provider params actions
   setProviderParams: (
     componentType: string,
@@ -157,6 +179,8 @@ interface DeployState {
   isServiceSummariesStale: () => boolean;
   isArchitectureDetailsStale: () => boolean;
   isDeployOptionsStale: (architectureId: string, runtime: string) => boolean;
+  isModelDeployOptionsStale: (modelId: string, runtime: string) => boolean;
+  isModelProviderSchemaStale: (schemaUrl: string) => boolean;
   isProviderParamsStale: (
     componentType: string,
     providerId: string,
@@ -208,6 +232,10 @@ export const useDeployStore = create<DeployState>()(
       deployOptions: {},
       deployOptionsLoading: false,
       deployOptionsError: null,
+
+      // Model deploy options and provider schemas
+      modelDeployOptions: {},
+      modelProviderSchemas: {},
 
       // Provider params state
       providerParams: {},
@@ -339,6 +367,24 @@ export const useDeployStore = create<DeployState>()(
           deployOptionsError: null,
         }),
 
+      // Model deploy options actions — keyed by "modelId:runtime"
+      setModelDeployOptions: (modelId, runtime, data) =>
+        set((state) => ({
+          modelDeployOptions: {
+            ...state.modelDeployOptions,
+            [`${modelId}:${runtime}`]: { data, fetchedAt: Date.now() },
+          },
+        })),
+
+      // Model provider schema actions — keyed by schema URL
+      setModelProviderSchema: (schemaUrl, data) =>
+        set((state) => ({
+          modelProviderSchemas: {
+            ...state.modelProviderSchemas,
+            [schemaUrl]: { data, fetchedAt: Date.now() },
+          },
+        })),
+
       // Provider params actions — keyed by "runtime:componentType:providerId"
       setProviderParams: (componentType, providerId, runtime, data) => {
         const key = `${runtime}:${componentType}:${providerId}`;
@@ -449,6 +495,18 @@ export const useDeployStore = create<DeployState>()(
         return Date.now() - cached.fetchedAt > DEPLOY_OPTIONS_CACHE_DURATION;
       },
 
+      isModelDeployOptionsStale: (modelId, runtime) => {
+        const cached = get().modelDeployOptions[`${modelId}:${runtime}`];
+        if (!cached || !cached.fetchedAt) return true;
+        return Date.now() - cached.fetchedAt > DEPLOY_OPTIONS_CACHE_DURATION;
+      },
+
+      isModelProviderSchemaStale: (schemaUrl) => {
+        const cached = get().modelProviderSchemas[schemaUrl];
+        if (!cached || !cached.fetchedAt) return true;
+        return Date.now() - cached.fetchedAt > PARAMS_CACHE_DURATION;
+      },
+
       isProviderParamsStale: (componentType, providerId, runtime) => {
         const key = `${runtime}:${componentType}:${providerId}`;
         const cached = get().providerParams[key];
@@ -482,6 +540,8 @@ export const useDeployStore = create<DeployState>()(
           deployOptions: {},
           deployOptionsLoading: false,
           deployOptionsError: null,
+          modelDeployOptions: {},
+          modelProviderSchemas: {},
           providerParams: {},
           providerParamsError: {},
           serviceParams: {},
@@ -517,6 +577,8 @@ export const useDeployStore = create<DeployState>()(
         architectureDetails: state.architectureDetails,
         architectureDetailsFetchedAt: state.architectureDetailsFetchedAt,
         deployOptions: state.deployOptions,
+        modelDeployOptions: state.modelDeployOptions,
+        modelProviderSchemas: state.modelProviderSchemas,
         providerParams: state.providerParams,
         // providerParamsError and serviceParamsError are intentionally not persisted — errors are transient
         serviceParams: state.serviceParams,
@@ -537,6 +599,8 @@ export const useDeployStore = create<DeployState>()(
             architectureDetails: null,
             architectureDetailsFetchedAt: null,
             deployOptions: {},
+            modelDeployOptions: {},
+            modelProviderSchemas: {},
             providerParams: {},
             serviceParams: {},
           };

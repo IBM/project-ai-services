@@ -658,6 +658,50 @@ export interface ModelDeploymentsListResponse {
   pagination: PaginationMetadata;
 }
 
+export interface CreateModelRequest {
+  deployment_type: "local" | "remote";
+  component_type: string;
+  name: string;
+  provider_id: string;
+  model: string;
+  profile?: string;
+  worker_name?: string;
+  params?: Record<string, unknown>;
+}
+
+export interface CreateModelResponse {
+  id: string;
+}
+
+export interface ModelDeployProfile {
+  id: string;
+  name: string;
+  description?: string;
+  default: boolean;
+  resources: {
+    cpu?: number;
+    memory?: number;
+    storage?: number;
+    accelerators?: Record<string, number> | null;
+  };
+}
+
+export interface ModelDeployProvider {
+  id: string;
+  name: string;
+  deployment_type: "local" | "remote";
+  default: boolean;
+  profiles?: ModelDeployProfile[];
+  schema?: string;
+}
+
+export interface ModelDeployOptions {
+  id: string;
+  name: string;
+  component_type: ModelComponentType;
+  providers: ModelDeployProvider[];
+}
+
 export interface ModelApplication {
   id: string;
   name: string;
