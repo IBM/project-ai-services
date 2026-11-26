@@ -2772,6 +2772,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/models/{id}/ps": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieves the runtime process and pod status of a model (local pod details or empty list for remote connectors). Accessing a model created by another user returns 403 Forbidden.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Models"
+                ],
+                "summary": "Get process and pod status for a model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelPSResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid model ID format",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "User does not own the model",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Model not found",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Worker unreachable",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/resources": {
             "get": {
                 "security": [
@@ -4109,6 +4179,47 @@ const docTemplate = `{
                 },
                 "pagination": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelPSResponse": {
+            "type": "object",
+            "properties": {
+                "component_type": {
+                    "type": "string"
+                },
+                "deployment_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "pods": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Pod"
+                    }
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "runtime_type": {
+                    "type": "string"
+                },
+                "worker_name": {
+                    "type": "string"
                 }
             }
         },
