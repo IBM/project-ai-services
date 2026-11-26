@@ -788,10 +788,9 @@ func ApplicationInfo(ctx context.Context, cfg *config.Config, appName string, ap
 }
 
 // ApplicationBackup runs the 'application backup' command.
-func ApplicationBackup(ctx context.Context, cfg *config.Config, appName string, target string, filename string, appRuntime string) (string, error) {
+func ApplicationBackup(ctx context.Context, cfg *config.Config, appName string, filename string, appRuntime string) (string, error) {
 	args := []string{
 		"application", "backup", appName,
-		"--target", target,
 		"--runtime", appRuntime,
 	}
 	if filename != "" {
@@ -802,10 +801,9 @@ func ApplicationBackup(ctx context.Context, cfg *config.Config, appName string, 
 }
 
 // ApplicationRestore runs the 'application restore' command.
-func ApplicationRestore(ctx context.Context, cfg *config.Config, appName string, target string, filename string, appRuntime string) (string, error) {
+func ApplicationRestore(ctx context.Context, cfg *config.Config, appName string, filename string, appRuntime string) (string, error) {
 	args := []string{
 		"application", "restore", appName,
-		"--target", target,
 		"--runtime", appRuntime,
 		"--yes",
 	}

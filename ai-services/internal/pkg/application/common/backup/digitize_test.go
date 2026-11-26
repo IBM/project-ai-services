@@ -41,9 +41,11 @@ func TestWriteDigitizeFilesRejectsMissingOrNonStringID(t *testing.T) {
 	}
 }
 
-func TestCreateDigitizeBackupArchiveEmptyExportStillCreatesLayout(t *testing.T) {
-	archive := filepath.Join(t.TempDir(), "empty.tar.gz")
+func TestWriteDigitizeBackupEmptyExportStillCreatesLayout(t *testing.T) {
+	stageDir := t.TempDir()
 
-	require.NoError(t, CreateDigitizeBackupArchive(archive, &DigitizeExportResponse{}))
-	assert.FileExists(t, archive)
+	require.NoError(t, WriteDigitizeBackup(stageDir, &DigitizeExportResponse{}))
+	assert.DirExists(t, filepath.Join(stageDir, "backup", "cache", "jobs"))
+	assert.DirExists(t, filepath.Join(stageDir, "backup", "cache", "docs"))
+	assert.DirExists(t, filepath.Join(stageDir, "backup", "cache", "checksums"))
 }

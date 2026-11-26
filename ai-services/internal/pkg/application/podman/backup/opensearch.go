@@ -14,7 +14,8 @@ import (
 )
 
 // BackupOpenSearch performs OpenSearch backup using a sidecar container.
-func BackupOpenSearch(ctx context.Context, podID, backupFile string) error {
+// The backup files are copied into stageDir.
+func BackupOpenSearch(ctx context.Context, podID, stageDir string) error {
 	sidecarName := fmt.Sprintf("opensearch-backup-sidecar-%d", time.Now().Unix())
 
 	// Create podman client to use runtime methods
@@ -31,13 +32,13 @@ func BackupOpenSearch(ctx context.Context, podID, backupFile string) error {
 		[]string{"sleep", "3600"},
 		func(ctx context.Context, containerID string) error {
 			// Prepare sidecar and perform backup
-			return prepareSidecarAndBackup(ctx, pc, containerID, backupFile)
+			return prepareSidecarAndBackup(ctx, pc, containerID, stageDir)
 		},
 	)
 }
 
 // prepareSidecarAndBackup prepares the sidecar container and performs the backup.
-func prepareSidecarAndBackup(ctx context.Context, pc *podman.PodmanClient, containerID, backupFile string) error {
+func prepareSidecarAndBackup(ctx context.Context, pc *podman.PodmanClient, containerID, stageDir string) error {
 	// Get OpenSearch password from secret
 	osPassword, err := common.GetOpenSearchPasswordFromSecret(ctx, containerID)
 	if err != nil {
@@ -55,9 +56,9 @@ func prepareSidecarAndBackup(ctx context.Context, pc *podman.PodmanClient, conta
 		return fmt.Errorf("backup failed: %w", err)
 	}
 
-	// Copy backup files from container to host, then create tar archive on host
-	if err := CopyAndTarBackup(ctx, containerID, containerBackupPath, backupFile); err != nil {
-		return fmt.Errorf("failed to copy and archive backup: %w", err)
+	// Copy backup files from container to the host staging directory
+	if err := CopyBackup(ctx, containerID, containerBackupPath, stageDir); err != nil {
+		return fmt.Errorf("failed to copy backup: %w", err)
 	}
 
 	logger.Infoln("OpenSearch backup completed!")

@@ -12,48 +12,26 @@ import (
 	appTypes "github.com/project-ai-services/ai-services/internal/pkg/application/types"
 )
 
-var (
-	backupTarget   string
-	backupFilename string
-)
+var backupFilename string
 
 var backupCmd = &cobra.Command{
 	Use:   "backup [name]",
 	Short: "Backup application data to a file",
-	Long: `Backup application data to a tar.gz backup file.
+	Long: `Backup application data to a single tar.gz backup file.
 
 Arguments:
   [name] : Application name (required)
 
-Supported targets:
-  - opensearch: Backup OpenSearch indices and data (Podman and OpenShift)
-  - digitize:   Backup digitize metadata (jobs and documents) (Podman and OpenShift)`,
-	Example: `  # Backup OpenSearch data
-	 ai-services application backup myapp --target opensearch
+The backup contains both:
+  - OpenSearch indices and data (Podman and OpenShift)
+  - Digitize metadata (jobs and documents) (Podman and OpenShift)`,
+	Example: `  # Backup the application (OpenSearch + digitize) into one archive
+  ai-services application backup myapp
 
-  # Backup digitize data
-  ai-services application backup myapp --target digitize
-
-  # Backup digitize data with custom filename
-  ai-services application backup myapp --target digitize --filename mybackup.tar.gz`,
+  # Backup with custom filename
+  ai-services application backup myapp --filename mybackup.tar.gz`,
 	Args: cobra.ExactArgs(1),
 	PreRunE: func(cmd *cobra.Command, args []string) error {
-		target := backupTarget
-
-		// Validate target
-		validTargets := []string{"opensearch", "digitize"}
-		isValid := false
-		for _, t := range validTargets {
-			if target == t {
-				isValid = true
-
-				break
-			}
-		}
-		if !isValid {
-			return fmt.Errorf("invalid target '%s'. Valid targets are: %s", target, strings.Join(validTargets, ", "))
-		}
-
 		// Validate filename extension if provided
 		if backupFilename != "" && !strings.HasSuffix(backupFilename, ".tar.gz") {
 			return fmt.Errorf("backup file must have .tar.gz extension, got: %s", backupFilename)
@@ -105,7 +83,6 @@ Supported targets:
 		// Create backup options
 		opts := appTypes.BackupOptions{
 			Name:       applicationName,
-			Target:     backupTarget,
 			BackupFile: absFilename, // Can be empty for auto-generation
 		}
 
@@ -115,10 +92,7 @@ Supported targets:
 }
 
 func init() {
-	backupCmd.Flags().StringVar(&backupTarget, "target", "", "Target to backup (opensearch, digitize) (required)")
 	backupCmd.Flags().StringVar(&backupFilename, "filename", "", "Path to save the backup tar.gz file (optional, auto-generated if not specified)")
-
-	_ = backupCmd.MarkFlagRequired("target")
 }
 
 // Made with Bob

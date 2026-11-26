@@ -3,15 +3,12 @@ package restore
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	appcommon "github.com/project-ai-services/ai-services/internal/pkg/application/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/common/opensearch"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/openshift/common"
-	podmanRestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -21,23 +18,10 @@ const (
 
 // RestoreOpenSearch restores OpenSearch data for OpenShift runtime.
 // namespace is derived from the application UUID: "ai-services-<first 8 chars>".
-func RestoreOpenSearch(ctx context.Context, templateID, namespace, backupFile string) error {
+// backupOSDir is the extracted OpenSearch backup directory.
+func RestoreOpenSearch(ctx context.Context, templateID, namespace, backupOSDir string) error {
 	logger.Infof("Restoring OpenSearch data for OpenShift application in namespace: %s\n", namespace)
-	logger.Infof("Backup file: %s\n", backupFile)
 	logger.Infoln("OpenSearch Import (Sidecar Pod Approach)")
-
-	// Get absolute path to backup file
-	absFilename, err := filepath.Abs(backupFile)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
-	}
-
-	// Extract and locate backup directory
-	backupDir, cleanup, err := podmanRestore.ExtractAndLocateBackup(absFilename)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
 
 	// Find OpenSearch pod using component templateID label
 	podName, err := common.FindOpenSearchPod(templateID, namespace)
@@ -55,11 +39,11 @@ func RestoreOpenSearch(ctx context.Context, templateID, namespace, backupFile st
 	}
 
 	// Create sidecar pod and perform restore
-	return manageSidecarPod(ctx, namespace, serviceName, backupDir)
+	return manageSidecarPod(ctx, namespace, serviceName, backupOSDir)
 }
 
 // manageSidecarPod manages the lifecycle of a sidecar pod for restore operations.
-func manageSidecarPod(ctx context.Context, namespace, serviceName, backupDir string) error {
+func manageSidecarPod(ctx context.Context, namespace, serviceName, backupOSDir string) error {
 	sidecarName := common.GenerateSidecarName("opensearch-restore-sidecar")
 
 	// Create sidecar pod
@@ -74,21 +58,15 @@ func manageSidecarPod(ctx context.Context, namespace, serviceName, backupDir str
 	}
 
 	// Perform restore operations
-	return performRestore(ctx, sidecarName, namespace, serviceName, backupDir)
+	return performRestore(ctx, sidecarName, namespace, serviceName, backupOSDir)
 }
 
 // performRestore performs the actual restore operations in the sidecar pod.
-func performRestore(ctx context.Context, podName, namespace, serviceName, backupDir string) error {
+func performRestore(ctx context.Context, podName, namespace, serviceName, backupOSDir string) error {
 	// Get OpenSearch password
 	osPassword, err := common.GetOpenSearchPasswordFromSecret(namespace)
 	if err != nil {
 		return fmt.Errorf("failed to get OpenSearch password: %w", err)
-	}
-
-	// Determine backup paths
-	backupOSDir, containerBackupPath, err := determineBackupPaths(backupDir)
-	if err != nil {
-		return err
 	}
 
 	// Copy backup to sidecar pod
@@ -108,23 +86,6 @@ func performRestore(ctx context.Context, podName, namespace, serviceName, backup
 	logger.Infoln("OpenSearch import completed!")
 
 	return nil
-}
-
-// determineBackupPaths determines the backup directory paths based on format.
-func determineBackupPaths(backupDir string) (string, string, error) {
-	var backupOSDir string
-
-	if filepath.Base(backupDir) == "opensearch_backup" {
-		backupOSDir = backupDir
-	} else {
-		backupOSDir = filepath.Join(backupDir, "opensearch")
-	}
-
-	if _, err := os.Stat(backupOSDir); os.IsNotExist(err) {
-		return "", "", fmt.Errorf("OpenSearch backup directory not found: %s", backupOSDir)
-	}
-
-	return backupOSDir, containerBackupPath, nil
 }
 
 // copyBackupToSidecar copies backup files to the sidecar pod using oc cp.

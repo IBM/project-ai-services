@@ -10,7 +10,6 @@ import (
 
 	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/openshift/common"
-	podmanBackup "github.com/project-ai-services/ai-services/internal/pkg/application/podman/backup"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -20,7 +19,8 @@ const (
 
 // BackupOpenSearch performs OpenSearch backup for OpenShift using a sidecar pod.
 // namespace is derived from the application UUID: "ai-services-<first 8 chars>".
-func BackupOpenSearch(ctx context.Context, templateID, namespace, backupFile string) error {
+// The backup files are copied into stageDir.
+func BackupOpenSearch(ctx context.Context, templateID, namespace, stageDir string) error {
 	logger.Infof("Backing up OpenSearch data for OpenShift application in namespace: %s\n", namespace)
 	logger.Infoln("OpenSearch Backup (Sidecar Pod Approach)")
 
@@ -40,11 +40,11 @@ func BackupOpenSearch(ctx context.Context, templateID, namespace, backupFile str
 	}
 
 	// Create sidecar pod and perform backup
-	return manageSidecarPod(ctx, namespace, serviceName, backupFile)
+	return manageSidecarPod(ctx, namespace, serviceName, stageDir)
 }
 
 // manageSidecarPod manages the lifecycle of a sidecar pod for backup operations.
-func manageSidecarPod(ctx context.Context, namespace, serviceName, backupFile string) error {
+func manageSidecarPod(ctx context.Context, namespace, serviceName, stageDir string) error {
 	sidecarName := common.GenerateSidecarName("opensearch-backup-sidecar")
 
 	// Create sidecar pod
@@ -59,11 +59,11 @@ func manageSidecarPod(ctx context.Context, namespace, serviceName, backupFile st
 	}
 
 	// Perform backup operations
-	return performBackup(ctx, sidecarName, namespace, serviceName, backupFile)
+	return performBackup(ctx, sidecarName, namespace, serviceName, stageDir)
 }
 
 // performBackup performs the actual backup operations in the sidecar pod.
-func performBackup(ctx context.Context, podName, namespace, serviceName, backupFile string) error {
+func performBackup(ctx context.Context, podName, namespace, serviceName, stageDir string) error {
 	// Get OpenSearch password
 	osPassword, err := common.GetOpenSearchPasswordFromSecret(namespace)
 	if err != nil {
@@ -84,9 +84,9 @@ func performBackup(ctx context.Context, podName, namespace, serviceName, backupF
 		return fmt.Errorf("backup failed: %w", err)
 	}
 
-	// Copy backup files from pod to host and create tar archive
-	if err := copyAndTarBackup(ctx, podName, namespace, containerBackupPath, backupFile); err != nil {
-		return fmt.Errorf("failed to copy and archive backup: %w", err)
+	// Copy backup files from pod to the host staging directory
+	if err := copyBackup(ctx, podName, namespace, containerBackupPath, stageDir); err != nil {
+		return fmt.Errorf("failed to copy backup: %w", err)
 	}
 
 	logger.Infoln("OpenSearch backup completed!")
@@ -252,30 +252,19 @@ func createBackupInfo(podName, namespace, backupDir string) error {
 	return common.ExecInPod(podName, namespace, infoScript)
 }
 
-// copyAndTarBackup copies backup files from pod to host and creates tar archive on host.
-func copyAndTarBackup(ctx context.Context, podName, namespace, containerBackupPath, backupFile string) error {
+// copyBackup copies backup files from pod into stageDir (backup_info.json and opensearch_backup/).
+func copyBackup(ctx context.Context, podName, namespace, containerBackupPath, stageDir string) error {
 	logger.Infof("Copying backup files from pod to host...")
 
-	// Create temporary directory on host for backup files
-	tempDir, err := os.MkdirTemp("", "opensearch-backup-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(tempDir); err != nil {
-			logger.Warningf("Failed to remove temp directory: %v\n", err)
-		}
-	}()
-
 	// Copy backup_info.json from pod
-	backupInfoDest := filepath.Join(tempDir, "backup_info.json")
+	backupInfoDest := filepath.Join(stageDir, "backup_info.json")
 	cpInfoCmd := exec.CommandContext(ctx, "oc", "cp", fmt.Sprintf("%s/%s:/tmp/backup_info.json", namespace, podName), backupInfoDest, "-n", namespace)
 	if output, err := cpInfoCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to copy backup_info.json: %w, output: %s", err, string(output))
 	}
 
 	// Copy opensearch_backup directory from pod
-	backupDirDest := filepath.Join(tempDir, "opensearch_backup")
+	backupDirDest := filepath.Join(stageDir, "opensearch_backup")
 
 	const dirPerm = 0o755
 	// Create destination directory
@@ -290,15 +279,6 @@ func copyAndTarBackup(ctx context.Context, podName, namespace, containerBackupPa
 	}
 
 	logger.Infoln("✓ Backup files copied to host")
-
-	// Create tar.gz archive on host using shared function
-	logger.Infoln("Creating tar.gz archive on host...")
-
-	if err := podmanBackup.CreateTarGzArchive(tempDir, backupFile, []string{"backup_info.json", "opensearch_backup"}); err != nil {
-		return err
-	}
-
-	podmanBackup.LogArchiveSize(backupFile)
 
 	return nil
 }

@@ -9,9 +9,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
-// ExtractAndLocateBackup extracts the backup archive and locates the backup directory.
-// This function is shared between digitize and opensearch restore operations.
-func ExtractAndLocateBackup(backupFile string) (string, func(), error) {
+// ExtractBackup extracts the backup archive into a temp directory and returns its path
+// along with a cleanup func. Use LocateBackupParts to find what the archive contains.
+func ExtractBackup(backupFile string) (string, func(), error) {
 	logger.Infoln("Extracting backup archive...")
 
 	tempDir, err := os.MkdirTemp("", "restore-*")
@@ -31,52 +31,42 @@ func ExtractAndLocateBackup(backupFile string) (string, func(), error) {
 		return "", nil, fmt.Errorf("failed to extract backup: %w", err)
 	}
 
-	backupDir, err := locateBackupDirectory(tempDir)
-	if err != nil {
-		cleanup()
-
-		return "", nil, err
-	}
-
-	return backupDir, cleanup, nil
+	return tempDir, cleanup, nil
 }
 
-// locateBackupDirectory determines the backup directory path supporting both formats.
-func locateBackupDirectory(tempDir string) (string, error) {
-	// Support both old format (backup/) and new format (opensearch_backup/)
-	backupDirOld := filepath.Join(tempDir, "backup")
-	backupDirNew := filepath.Join(tempDir, "opensearch_backup")
+// LocateBackupParts returns the OpenSearch and digitize backup directories found in an
+// extracted archive. A part that is absent is returned as "". It supports the combined
+// archive as well as the older single-part archives. An archive with neither part is an error.
+func LocateBackupParts(rootDir string) (opensearchDir, digitizeDir string, err error) {
+	// Combined and OpenSearch-only archives: opensearch_backup/.
+	// Oldest OpenSearch format: backup/opensearch/.
+	for _, dir := range []string{
+		filepath.Join(rootDir, "opensearch_backup"),
+		filepath.Join(rootDir, "backup", "opensearch"),
+	} {
+		if isDir(dir) {
+			opensearchDir = dir
 
-	if _, err := os.Stat(backupDirOld); err == nil {
-		return backupDirOld, nil
-	}
-
-	if _, err := os.Stat(backupDirNew); err == nil {
-		return backupDirNew, nil
-	}
-
-	return "", formatBackupNotFoundError(tempDir)
-}
-
-// formatBackupNotFoundError creates a detailed error message for missing backup directory.
-func formatBackupNotFoundError(tempDir string) error {
-	entries, listErr := os.ReadDir(tempDir)
-	if listErr != nil {
-		return fmt.Errorf("backup directory not found in archive")
-	}
-
-	var extractedDirs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			extractedDirs = append(extractedDirs, entry.Name())
+			break
 		}
 	}
 
-	if len(extractedDirs) > 0 {
-		return fmt.Errorf("backup directory not found in archive")
+	// Combined and digitize-only archives: backup/cache/.
+	if dir := filepath.Join(rootDir, "backup"); isDir(filepath.Join(dir, "cache")) {
+		digitizeDir = dir
 	}
 
-	return fmt.Errorf("backup directory not found in archive")
+	if opensearchDir == "" && digitizeDir == "" {
+		return "", "", fmt.Errorf("no OpenSearch or digitize backup data found in archive")
+	}
+
+	return opensearchDir, digitizeDir, nil
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && info.IsDir()
 }
 
 // Made with Bob

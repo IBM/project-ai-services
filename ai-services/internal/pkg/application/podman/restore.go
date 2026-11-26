@@ -8,15 +8,14 @@ import (
 	commonrestore "github.com/project-ai-services/ai-services/internal/pkg/application/common/restore"
 	podmanrestore "github.com/project-ai-services/ai-services/internal/pkg/application/podman/restore"
 	"github.com/project-ai-services/ai-services/internal/pkg/application/types"
-	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	cliUtils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// Restore restores application data from a backup file for Podman runtime.
+// Restore restores OpenSearch and digitize data from a backup file for Podman runtime.
+// Older single-part archives are supported: only the parts present in the archive are restored.
 func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptions) error {
 	logger.Infof("Starting restore for application: %s\n", opts.Name)
-	logger.Infof("Target: %s\n", opts.Target)
 	logger.Infof("Backup file: %s\n", opts.BackupFile)
 
 	// Get application details from catalog API using existing utility
@@ -32,26 +31,40 @@ func (p *PodmanApplication) Restore(ctx context.Context, opts types.RestoreOptio
 		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
 	}
 
-	// Execute restore based on target
-	switch opts.Target {
-	case "opensearch":
-		// Get component ID for opensearch
-		componentID, err := cliUtils.GetComponentID(appDetails, opts.Target)
+	rootDir, cleanup, err := podmanrestore.ExtractBackup(absFilename)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	opensearchDir, digitizeDir, err := podmanrestore.LocateBackupParts(rootDir)
+	if err != nil {
+		return err
+	}
+
+	if opensearchDir != "" {
+		componentID, err := cliUtils.GetComponentID(appDetails, "opensearch")
 		if err != nil {
 			return fmt.Errorf("failed to get component ID: %w", err)
 		}
 		logger.Infof("Component ID: %s\n", componentID)
 
-		return p.restoreOpenSearch(ctx, componentID, absFilename)
-	case "digitize":
-		return p.restoreDigitize(ctx, appDetails, absFilename)
-	default:
-		return fmt.Errorf("unsupported target: %s", opts.Target)
+		if err := p.restoreOpenSearch(ctx, componentID, opensearchDir); err != nil {
+			return fmt.Errorf("opensearch restore failed: %w", err)
+		}
 	}
+
+	if digitizeDir != "" {
+		if err := commonrestore.RestoreDigitize(ctx, appDetails, digitizeDir); err != nil {
+			return fmt.Errorf("digitize restore failed: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // restoreOpenSearch restores OpenSearch data using podman sidecar approach.
-func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, backupFile string) error {
+func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, backupOSDir string) error {
 	// Get the Podman context from the runtime client
 	podmanCtx, err := p.getPodmanContext()
 	if err != nil {
@@ -59,34 +72,5 @@ func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, b
 	}
 
 	// Call the OpenSearch-specific restore function
-	return podmanrestore.RestoreOpenSearch(podmanCtx, templateID, backupFile)
-}
-
-// restoreDigitize restores digitize metadata using the Import API.
-func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
-	logger.Infoln("Restoring digitize metadata")
-	logger.Infoln("Digitize Import (API-based Approach)")
-
-	importPayload, err := commonrestore.GetDigitizeData(backupFile)
-	if err != nil {
-		return err
-	}
-
-	// Get digitize service API URL from catalog service endpoints
-	digitizeURL, err := commonrestore.GetDigitizeAPIURL(appDetails)
-	if err != nil {
-		return err
-	}
-
-	logger.Infof("Digitize API URL: %s\n", digitizeURL)
-
-	// Create digitize restore client and call Import API
-	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
-	if err := client.CallImportAPI(ctx, importPayload); err != nil {
-		return err
-	}
-
-	logger.Infoln("✓ Digitize metadata restore completed successfully")
-
-	return nil
+	return podmanrestore.RestoreOpenSearch(podmanCtx, templateID, backupOSDir)
 }

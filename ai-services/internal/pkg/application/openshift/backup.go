@@ -3,9 +3,6 @@ package openshift
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	commonBackup "github.com/project-ai-services/ai-services/internal/pkg/application/common/backup"
@@ -18,10 +15,9 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-// Backup creates a backup of application data for OpenShift runtime.
+// Backup creates a single backup archive containing both OpenSearch and digitize data for OpenShift runtime.
 func (o *OpenshiftApplication) Backup(ctx context.Context, opts types.BackupOptions) error {
 	logger.Infof("Starting backup for application: %s\n", opts.Name)
-	logger.Infof("Target: %s\n", opts.Target)
 
 	// Get application details from catalog API
 	appDetails, err := cliUtils.GetAppDetailsWithComponents(ctx, opts.Name)
@@ -30,37 +26,39 @@ func (o *OpenshiftApplication) Backup(ctx context.Context, opts types.BackupOpti
 	}
 	logger.Infof("Application ID: %s\n", appDetails.ID)
 
-	// Execute backup based on target
-	switch opts.Target {
-	case "opensearch":
-		return o.backupOpenSearch(ctx, appDetails, opts.BackupFile)
-	case "digitize":
-		return o.backupDigitize(ctx, appDetails, opts.BackupFile)
-	default:
-		return fmt.Errorf("unsupported target for OpenShift: %s", opts.Target)
+	// Generate backup filename if not provided
+	absBackupFile, err := commonBackup.GetBackupFile(opts.BackupFile, appDetails.Name)
+	if err != nil {
+		return err
 	}
+
+	// Both parts are staged here and packed into one archive at the end.
+	stageDir, cleanup, err := commonBackup.NewStagingDir()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if err := o.backupOpenSearch(ctx, appDetails, stageDir); err != nil {
+		return err
+	}
+
+	if err := o.backupDigitize(ctx, appDetails, stageDir); err != nil {
+		return err
+	}
+
+	if err := commonBackup.CreateBackupArchive(stageDir, absBackupFile); err != nil {
+		return err
+	}
+
+	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile)
+
+	return nil
 }
 
-// backupOpenSearch performs OpenSearch backup using a sidecar pod.
-func (o *OpenshiftApplication) backupOpenSearch(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
+// backupOpenSearch performs OpenSearch backup using a sidecar pod into stageDir.
+func (o *OpenshiftApplication) backupOpenSearch(ctx context.Context, appDetails *catalogTypes.Application, stageDir string) error {
 	logger.Infof("Backing up OpenSearch data for application: %s\n", appDetails.Name)
-
-	// Generate backup filename if not provided
-	if backupFile == "" {
-		timestamp := time.Now().Format("20060102_150405")
-		backupFile = fmt.Sprintf("%s_opensearch_backup_%s.tar.gz", appDetails.Name, timestamp)
-	}
-
-	// Ensure .tar.gz extension
-	if !strings.HasSuffix(backupFile, ".tar.gz") {
-		backupFile += ".tar.gz"
-	}
-
-	// Get absolute path for backup file
-	absBackupFile, err := filepath.Abs(backupFile)
-	if err != nil {
-		return fmt.Errorf("failed to get absolute path for backup file: %w", err)
-	}
 
 	// Get component ID for opensearch (vectordb) — this is the templateID used as pod label
 	templateID, err := cliUtils.GetComponentID(appDetails, "opensearch")
@@ -77,25 +75,13 @@ func (o *OpenshiftApplication) backupOpenSearch(ctx context.Context, appDetails 
 	namespace := catalogUtils.AppNamespace(appUUID)
 	logger.Infof("Namespace: %s\n", namespace)
 
-	if err := backup.BackupOpenSearch(ctx, templateID, namespace, absBackupFile); err != nil {
-		return err
-	}
-
-	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile)
-
-	return nil
+	return backup.BackupOpenSearch(ctx, templateID, namespace, stageDir)
 }
 
-// backupDigitize backs up digitize metadata using the Export API for OpenShift.
-func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
+// backupDigitize exports digitize metadata using the Export API into stageDir for OpenShift.
+func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appDetails *catalogTypes.Application, stageDir string) error {
 	logger.Infof("Backing up digitize metadata\n")
 	logger.Infof("Digitize Export (API-based Approach)\n")
-
-	// Generate backup filename if not provided
-	absBackupFile, err := commonBackup.GetBackupFile(backupFile, appDetails.Name)
-	if err != nil {
-		return err
-	}
 
 	// Get digitize service API URL from catalog service endpoints
 	digitizeURL, err := commonRestore.GetDigitizeAPIURL(appDetails)
@@ -113,14 +99,12 @@ func (o *OpenshiftApplication) backupDigitize(ctx context.Context, appDetails *c
 		return err
 	}
 
-	// Create backup archive using shared function
-	if err := commonBackup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
+	if err := commonBackup.WriteDigitizeBackup(stageDir, exportResponse); err != nil {
 		return err
 	}
 
 	// Log backup summary
 	logDigitizeBackupSummary(exportResponse)
-	logger.Infof("✅ Backup completed successfully: %s\n", absBackupFile)
 
 	return nil
 }

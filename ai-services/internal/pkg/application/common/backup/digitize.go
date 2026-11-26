@@ -125,22 +125,42 @@ func (c *DigitizeBackupClient) CallExportAPI(ctx context.Context) (*DigitizeExpo
 	return &exportResponse, nil
 }
 
-// CreateDigitizeBackupArchive creates a backup archive from the export response.
-func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExportResponse) error {
-	logger.Infoln("Creating digitize backup archive...")
-
-	tempDir, err := os.MkdirTemp("", "digitize-backup-*")
+// NewStagingDir creates a temp directory in which the parts of a backup are collected
+// before being packed into a single archive. The returned func removes the directory.
+func NewStagingDir() (string, func(), error) {
+	stageDir, err := os.MkdirTemp("", "backup-stage-*")
 	if err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
+		return "", nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
-	defer func() {
-		if err := os.RemoveAll(tempDir); err != nil {
+
+	cleanup := func() {
+		if err := os.RemoveAll(stageDir); err != nil {
 			logger.Warningf("Failed to remove temp directory: %v\n", err)
 		}
-	}()
+	}
+
+	return stageDir, cleanup, nil
+}
+
+// CreateBackupArchive packs the OpenSearch and digitize parts staged in stageDir into a single archive.
+func CreateBackupArchive(stageDir, backupFile string) error {
+	logger.Infoln("Creating tar.gz archive on host...")
+
+	if err := CreateTarGzArchive(stageDir, backupFile, []string{"backup_info.json", "opensearch_backup", "backup"}); err != nil {
+		return err
+	}
+
+	LogArchiveSize(backupFile)
+
+	return nil
+}
+
+// WriteDigitizeBackup writes the export response into destDir/backup in the layout the restore expects.
+func WriteDigitizeBackup(destDir string, exportResponse *DigitizeExportResponse) error {
+	logger.Infoln("Writing digitize backup files...")
 
 	// Create backup directory structure to match restore expectations
-	backupDir := filepath.Join(tempDir, "backup")
+	backupDir := filepath.Join(destDir, "backup")
 	cacheDir := filepath.Join(backupDir, "cache")
 
 	// One cache sub-directory per record type; the restore side reads the same layout.
@@ -166,17 +186,7 @@ func CreateDigitizeBackupArchive(backupFile string, exportResponse *DigitizeExpo
 		}
 	}
 
-	if err := writeDigitizeBackupInfo(backupDir); err != nil {
-		return err
-	}
-
-	if err := CreateTarGzArchive(tempDir, backupFile, []string{"backup"}); err != nil {
-		return err
-	}
-
-	LogArchiveSize(backupFile)
-
-	return nil
+	return writeDigitizeBackupInfo(backupDir)
 }
 
 // writeDigitizeFiles writes each record to dir as <record[idKey]><suffix>. kind names the
@@ -332,7 +342,7 @@ func LogArchiveSize(backupFile string) {
 func GetBackupFile(backupFile string, appName string) (string, error) {
 	if backupFile == "" {
 		timestamp := time.Now().Format("20060102_150405")
-		backupFile = fmt.Sprintf("%s_digitize_backup_%s.tar.gz", appName, timestamp)
+		backupFile = fmt.Sprintf("%s_backup_%s.tar.gz", appName, timestamp)
 	}
 
 	// Ensure .tar.gz extension

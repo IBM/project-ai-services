@@ -74,7 +74,6 @@ type LogsOptions struct {
 // RestoreOptions contains parameters for restoring application data.
 type RestoreOptions struct {
 	Name       string
-	Target     string // opensearch, digitize, etc.
 	BackupFile string
 	AutoYes    bool
 }
@@ -82,7 +81,6 @@ type RestoreOptions struct {
 // BackupOptions contains parameters for backing up application data.
 type BackupOptions struct {
 	Name       string
-	Target     string // opensearch, digitize, etc.
 	BackupFile string
 }
 
