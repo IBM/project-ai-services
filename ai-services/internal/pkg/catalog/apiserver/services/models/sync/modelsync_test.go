@@ -5,7 +5,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
@@ -203,8 +202,8 @@ func TestSyncLocalModels_Healthy(t *testing.T) {
 		probeResponse: &catalogclient.LiteLLMHealthResponse{HealthyCount: 1},
 	}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	assert.Equal(t, 1, llmClient.ProbedCount())
 	assert.Equal(t, "litellm-123", llmClient.probedIDs[0])
@@ -231,8 +230,8 @@ func TestSyncLocalModels_Unhealthy_TransitionsToError(t *testing.T) {
 		probeErr: errors.New("connection refused"),
 	}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	require.Len(t, compRepo.updates, 1)
 	assert.Equal(t, compID, compRepo.updates[0].id)
@@ -261,8 +260,8 @@ func TestSyncLocalModels_Recovery_TransitionsToRunning(t *testing.T) {
 		probeResponse: &catalogclient.LiteLLMHealthResponse{HealthyCount: 1},
 	}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	require.Len(t, compRepo.updates, 1)
 	assert.Equal(t, compID, compRepo.updates[0].id)
@@ -321,39 +320,57 @@ func TestSyncLocalModels_SkipNonObservableAndUnmanaged(t *testing.T) {
 	connRepo := &mockConnectorRepo{connectors: map[uuid.UUID]*dbmodels.Connector{}}
 	llmClient := &mockLiteLLMClient{}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	assert.Equal(t, 0, llmClient.ProbedCount())
 	assert.Empty(t, compRepo.updates)
 }
 
-func TestSyncLocalModels_MissingModelID(t *testing.T) {
+func TestSyncLocalModels_WithoutModelID_NotOwned(t *testing.T) {
 	provider := setupTestCatalogProvider(t)
-	compID := uuid.New()
 	compRepo := &mockComponentRepo{
 		components: []dbmodels.Component{
 			{
-				ID:        compID,
-				Name:      "granite-model",
-				Type:      "llm",
+				ID:        uuid.New(),
+				Name:      "app-embedding",
+				Type:      "embedding",
 				CreatedBy: "user1",
 				Status:    dbmodels.ComponentStatusRunning,
-				Metadata:  map[string]any{}, // no litellm section
+				Metadata:  map[string]any{}, // deployed by an application, not registered with LiteLLM
 			},
 		},
 	}
 	connRepo := &mockConnectorRepo{connectors: map[uuid.UUID]*dbmodels.Connector{}}
 	llmClient := &mockLiteLLMClient{}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
+	// Left to the application sync, which checks the pods of such components.
+	assert.False(t, svc.OwnsComponent(&compRepo.components[0]))
 	assert.Equal(t, 0, llmClient.ProbedCount())
-	require.Len(t, compRepo.updates, 1)
-	assert.Equal(t, compID, compRepo.updates[0].id)
-	assert.Equal(t, dbmodels.ComponentStatusError, compRepo.updates[0].status)
-	assert.Contains(t, compRepo.updates[0].message, "missing LiteLLM model ID")
+	assert.Empty(t, compRepo.updates)
+}
+
+func TestOwnsComponent(t *testing.T) {
+	svc := New(&mockComponentRepo{}, &mockConnectorRepo{}, setupTestCatalogProvider(t), &mockLiteLLMClient{})
+
+	tests := []struct {
+		name string
+		comp dbmodels.Component
+		want bool
+	}{
+		{"model type with litellm id", dbmodels.Component{Type: "llm", Metadata: makeModelMetadata("id-1")}, true},
+		{"model type without litellm id", dbmodels.Component{Type: "llm", Metadata: map[string]any{}}, false},
+		{"non-model type with litellm id", dbmodels.Component{Type: "vector_db", Metadata: makeModelMetadata("id-1")}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, svc.OwnsComponent(&tt.comp))
+		})
+	}
 }
 
 func TestSyncRemoteConnectors_Healthy(t *testing.T) {
@@ -377,8 +394,8 @@ func TestSyncRemoteConnectors_Healthy(t *testing.T) {
 		probeResponse: &catalogclient.LiteLLMHealthResponse{HealthyCount: 1},
 	}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	assert.Equal(t, 1, llmClient.ProbedCount())
 	assert.Equal(t, "watsonx-litellm-1", llmClient.probedIDs[0])
@@ -411,8 +428,8 @@ func TestSyncRemoteConnectors_Unhealthy_TransitionsToOffline(t *testing.T) {
 		},
 	}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	require.Len(t, connRepo.updates, 1)
 	assert.Equal(t, connID, connRepo.updates[0].id)
@@ -442,8 +459,8 @@ func TestSyncRemoteConnectors_Recovery_TransitionsToConnected(t *testing.T) {
 		probeResponse: &catalogclient.LiteLLMHealthResponse{HealthyCount: 1},
 	}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	require.Len(t, connRepo.updates, 1)
 	assert.Equal(t, connID, connRepo.updates[0].id)
@@ -470,8 +487,8 @@ func TestSyncRemoteConnectors_IgnoresDatasources(t *testing.T) {
 	}
 	llmClient := &mockLiteLLMClient{}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	assert.Equal(t, 0, llmClient.ProbedCount())
 	assert.Empty(t, connRepo.updates)
@@ -496,8 +513,8 @@ func TestSyncRemoteConnectors_MissingModelID(t *testing.T) {
 	}
 	llmClient := &mockLiteLLMClient{}
 
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-	svc.PerformSync(context.Background())
+	svc := New(compRepo, connRepo, provider, llmClient)
+	svc.Sync(context.Background())
 
 	assert.Equal(t, 0, llmClient.ProbedCount())
 	require.Len(t, connRepo.updates, 1)
@@ -506,7 +523,7 @@ func TestSyncRemoteConnectors_MissingModelID(t *testing.T) {
 	assert.Contains(t, connRepo.updates[0].message, "missing LiteLLM model ID")
 }
 
-func TestSync_Backoff_SuspendsAfterConsecutiveFailures(t *testing.T) {
+func TestSync_KeepsProbingAfterRepeatedFailures_ThenRecovers(t *testing.T) {
 	provider := setupTestCatalogProvider(t)
 	compID := uuid.New()
 	compRepo := &mockComponentRepo{
@@ -526,67 +543,19 @@ func TestSync_Backoff_SuspendsAfterConsecutiveFailures(t *testing.T) {
 		probeErr: errors.New("backend timeout"),
 	}
 
-	maxFailures := 3
-	svc := New(compRepo, connRepo, provider, llmClient, 0, maxFailures)
+	svc := New(compRepo, connRepo, provider, llmClient)
 
-	// Run 1st failure
-	svc.PerformSync(context.Background())
-	assert.Equal(t, 1, llmClient.ProbedCount())
-	assert.Equal(t, dbmodels.ComponentStatusError, compRepo.components[0].Status)
-	assert.Contains(t, compRepo.components[0].Message, "backend timeout")
+	// Probing never pauses, no matter how many consecutive failures.
+	const cycles = 20
+	for i := 1; i <= cycles; i++ {
+		svc.Sync(context.Background())
+		assert.Equal(t, i, llmClient.ProbedCount())
+		assert.Equal(t, dbmodels.ComponentStatusError, compRepo.components[0].Status)
+	}
 
-	// Run 2nd failure
-	svc.PerformSync(context.Background())
-	assert.Equal(t, 2, llmClient.ProbedCount())
-
-	// Run 3rd failure — hits maxFailures limit
-	svc.PerformSync(context.Background())
-	assert.Equal(t, 3, llmClient.ProbedCount())
-	assert.Equal(t, dbmodels.ComponentStatusError, compRepo.components[0].Status)
-	assert.Equal(t, "Health checks suspended after 3 consecutive failures — manual intervention required", compRepo.components[0].Message)
-
-	// Run 4th sync cycle — should be skipped without making a probe call
-	svc.PerformSync(context.Background())
-	assert.Equal(t, 3, llmClient.ProbedCount(), "probe count should not increment when suspended")
-
-	// Manual reset of failures counter
-	svc.ResetFailures(compID)
-
-	// Run 5th sync cycle — should probe again!
-	svc.PerformSync(context.Background())
-	assert.Equal(t, 4, llmClient.ProbedCount(), "probe count should increment after reset")
-}
-
-func TestSync_Start_Stop(t *testing.T) {
-	provider := setupTestCatalogProvider(t)
-	compRepo := &mockComponentRepo{}
-	connRepo := &mockConnectorRepo{connectors: map[uuid.UUID]*dbmodels.Connector{}}
-	llmClient := &mockLiteLLMClient{}
-
-	svc := New(compRepo, connRepo, provider, llmClient, 10*time.Millisecond, 5)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	svc.Start(ctx)
-	// Stop should close gracefully
-	svc.Stop(ctx)
-}
-
-func TestSync_OverlappingSyncPrevented(t *testing.T) {
-	provider := setupTestCatalogProvider(t)
-	compRepo := &mockComponentRepo{}
-	connRepo := &mockConnectorRepo{connectors: map[uuid.UUID]*dbmodels.Connector{}}
-	llmClient := &mockLiteLLMClient{}
-
-	svc := New(compRepo, connRepo, provider, llmClient, 0, 0)
-
-	// Manually lock syncMutex
-	svc.syncMutex.Lock()
-
-	// PerformSync should return immediately without deadlock
-	svc.PerformSync(context.Background())
-
-	assert.Equal(t, 0, llmClient.ProbedCount())
-	svc.syncMutex.Unlock()
+	// Model comes back — the next cycle flips it to Running.
+	llmClient.probeErr = nil
+	svc.Sync(context.Background())
+	assert.Equal(t, cycles+1, llmClient.ProbedCount())
+	assert.Equal(t, dbmodels.ComponentStatusRunning, compRepo.components[0].Status)
 }

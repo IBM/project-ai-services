@@ -104,10 +104,13 @@ func startBackgroundServices(
 	workerReg *workerregistry.Registry,
 	encryptionKey string,
 ) (func(context.Context), error) {
-	// Initialize sync service for background DB-Pod synchronization.
+	// Initialize sync service for background DB-Pod synchronization. Model sync runs inside the
+	// same cycle, so applications and models are reconciled together at the same interval.
 	// workerReg is passed so the sync service can use a RemoteRuntime for apps
 	// deployed on remote workers.
-	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider, workerReg)
+	modelSyncer := modelsync.New(compRepo, connectorRepo, catalogProvider, catalogclient.NewLiteLLMClient())
+
+	syncService, err := sync.NewSyncService(appRepo, svcRepo, compRepo, svcDepRepo, sync.DefaultSyncInterval, catalogProvider, workerReg, modelSyncer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize sync service: %w", err)
 	}
@@ -116,14 +119,9 @@ func startBackgroundServices(
 	connectorSyncJob := newConnectorSyncJob(ctx, connectorRepo, catalogProvider, encryptionKey)
 	connectorSyncJob.Start(ctx)
 
-	modelSyncService := modelsync.New(compRepo, connectorRepo, catalogProvider, catalogclient.NewLiteLLMClient(),
-		modelsync.DefaultModelSyncInterval, modelsync.DefaultMaxConsecutiveFailures)
-	modelSyncService.Start(ctx)
-
 	return func(ctx context.Context) {
 		syncService.Stop(ctx)
 		connectorSyncJob.Stop(ctx)
-		modelSyncService.Stop(ctx)
 	}, nil
 }
 
