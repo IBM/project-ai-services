@@ -10,6 +10,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
 
@@ -47,6 +48,10 @@ func statusesFor(deploymentType constants.DeploymentType) []string {
 // the name, and the component type, model and provider against the catalog's deploy options.
 // Failures are 400s that say what is available.
 func (s *ModelService) validateCreateRequest(ctx context.Context, req apimodels.CreateModelRequest) error {
+	if err := s.ensureNameIsNotCatalogModel(req.Name); err != nil {
+		return err
+	}
+
 	if err := validators.ValidateResourceName("Model name", req.Name); err != nil {
 		return err
 	}
@@ -56,6 +61,22 @@ func (s *ModelService) validateCreateRequest(ctx context.Context, req apimodels.
 	}
 
 	return validators.ValidateModelDeployable(ctx, s.catalogProvider, req.Model, req.ComponentType, req.ProviderID, req.DeploymentType)
+}
+
+// ensureNameIsNotCatalogModel rejects a name equal to the ID of a catalog model, so that a model
+// name given to --model of 'application create' never also names a catalog model. Names are
+// compared without regard to case, as they are when uniqueness is checked.
+func (s *ModelService) ensureNameIsNotCatalogModel(name string) error {
+	catalogModels, err := s.catalogProvider.GetModels()
+	if err != nil {
+		return fmt.Errorf("failed to list catalog models: %w", err)
+	}
+
+	if slices.ContainsFunc(catalogModels, func(m types.Model) bool { return strings.EqualFold(m.ID, name) }) {
+		return validators.BadRequest("Model name %q is the ID of a catalog model; choose another name", name)
+	}
+
+	return nil
 }
 
 // ensureNameAvailable rejects a name already used by a local model (component) or a remote

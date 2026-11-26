@@ -17,10 +17,6 @@ import (
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
-// modelParamKey is the param a model used to be passed in. The model is a top-level field of a
-// component now, chosen with --model.
-const modelParamKey = "model"
-
 // DeployOptionsFetcher is what the request builder needs from the catalog API.
 // *catalogClient.ApplicationClient implements it.
 type DeployOptionsFetcher interface {
@@ -41,16 +37,6 @@ type Options struct {
 	Models []ModelRequest
 }
 
-// Result is a create request with what the user should see before it is sent.
-type Result struct {
-	// Request is the request to send.
-	Request *catalogClient.CreateApplicationRequest
-	// Selections say what each model component type resolved to.
-	Selections []string
-	// Hints are advice about the choices made.
-	Hints []string
-}
-
 // componentTypeProvider identifies a model component type served by a provider.
 type componentTypeProvider struct {
 	componentType, provider string
@@ -69,7 +55,6 @@ type Builder struct {
 	// architecture that share a component type and provider must share the model, or the server rejects the
 	// request; the first service to pick decides.
 	chosen map[componentTypeProvider]string
-	report Result
 }
 
 // NewBuilder returns a Builder that reads deploy options from deploy and resolves models with models.
@@ -84,7 +69,7 @@ func NewBuilder(deploy DeployOptionsFetcher, models *ModelResolver, opts Options
 }
 
 // BuildService builds the request that deploys a standalone service.
-func (b *Builder) BuildService(ctx context.Context, serviceID, appName string) (*Result, error) {
+func (b *Builder) BuildService(ctx context.Context, serviceID, appName string) (*catalogClient.CreateApplicationRequest, error) {
 	options, err := b.deploy.GetServiceDeployOptions(ctx, serviceID, string(b.opts.Runtime))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
@@ -95,19 +80,17 @@ func (b *Builder) BuildService(ctx context.Context, serviceID, appName string) (
 		return nil, err
 	}
 
-	b.report.Request = &catalogClient.CreateApplicationRequest{
+	return &catalogClient.CreateApplicationRequest{
 		CatalogID:  serviceID,
 		Name:       appName,
 		Services:   entries,
 		Version:    entries[0].Version,
 		WorkerName: b.opts.WorkerName,
-	}
-
-	return &b.report, nil
+	}, nil
 }
 
 // BuildArchitecture builds the request that deploys an architecture.
-func (b *Builder) BuildArchitecture(ctx context.Context, arch *catalogTypes.Architecture, appName string) (*Result, error) {
+func (b *Builder) BuildArchitecture(ctx context.Context, arch *catalogTypes.Architecture, appName string) (*catalogClient.CreateApplicationRequest, error) {
 	options, err := b.deploy.GetArchitectureDeployOptions(ctx, arch.ID, string(b.opts.Runtime))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get deploy options: %w", err)
@@ -129,15 +112,13 @@ func (b *Builder) BuildArchitecture(ctx context.Context, arch *catalogTypes.Arch
 		return nil, err
 	}
 
-	b.report.Request = &catalogClient.CreateApplicationRequest{
+	return &catalogClient.CreateApplicationRequest{
 		CatalogID:  arch.ID,
 		Name:       appName,
 		Services:   entries,
 		Version:    arch.Version,
 		WorkerName: b.opts.WorkerName,
-	}
-
-	return &b.report, nil
+	}, nil
 }
 
 // buildServices resolves the --model flags against the services, then builds an entry for each.
@@ -200,10 +181,6 @@ func (b *Builder) resolveModels(ctx context.Context, services []catalogTypes.Dep
 		}
 
 		b.bindings[req.componentType] = binding
-
-		if binding.hint != "" {
-			b.report.Hints = append(b.report.Hints, binding.hint)
-		}
 	}
 
 	return nil
@@ -261,8 +238,6 @@ func (b *Builder) modelEntry(ctx context.Context, serviceID string, c catalogTyp
 			return nil, nil, fmt.Errorf("a provider cannot be chosen for %q: it uses the registered model %q", c.Type, binding.registered.Name)
 		}
 
-		b.report.add(binding.describe())
-
 		if binding.kind == bindConnector {
 			return nil, &catalogClient.CreateApplicationConnector{ID: binding.registered.ID, Type: catalogConstants.ConnectorTypeModels}, nil
 		}
@@ -275,17 +250,10 @@ func (b *Builder) modelEntry(ctx context.Context, serviceID string, c catalogTyp
 		return nil, nil, err
 	}
 
-	if _, ok := userParams[modelParamKey]; ok {
-		return nil, nil, fmt.Errorf("%s.%s.%s is not supported; choose the model with --model %s=<model>",
-			c.Type, provider.ID, modelParamKey, c.Type)
-	}
-
-	model, source, err := b.modelFor(ctx, c.Type, provider, binding, bound)
+	model, err := b.modelFor(ctx, c.Type, provider, binding, bound)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	b.report.add(fmt.Sprintf("%s: deploy new model %q with provider %q (%s)", c.Type, model, provider.ID, source))
 
 	return &catalogClient.CreateApplicationComponent{
 		ComponentType: c.Type,
@@ -297,8 +265,8 @@ func (b *Builder) modelEntry(ctx context.Context, serviceID string, c catalogTyp
 }
 
 // pickModelProvider picks the provider a model component type is deployed through. When --model chose a
-// model, only providers that serve it are candidates, and an explicit provider choice that does not
-// is an error rather than being silently replaced.
+// model and --params chose no provider, the default is picked among the providers that serve it. An
+// explicit provider choice is used as given: the API rejects one that cannot serve the model.
 func (b *Builder) pickModelProvider(
 	c catalogTypes.DeployOptionsComponent,
 	providerParams map[string]map[string]string,
@@ -307,59 +275,44 @@ func (b *Builder) pickModelProvider(
 ) (*catalogTypes.DeployOptionsProvider, map[string]string, error) {
 	candidates := c
 
-	if bound {
-		candidates.Providers = slices.DeleteFunc(slices.Clone(c.Providers), func(p catalogTypes.DeployOptionsProvider) bool {
+	if bound && len(providerParams) == 0 {
+		serving := slices.DeleteFunc(slices.Clone(c.Providers), func(p catalogTypes.DeployOptionsProvider) bool {
 			return !offersLocally(binding.providers, p.ID)
 		})
 
-		for id := range providerParams {
-			if !offersLocally(binding.providers, id) {
-				return nil, nil, checkOfferedLocally(binding.model, binding.providers, id)
-			}
-		}
-
-		if len(candidates.Providers) == 0 {
-			return nil, nil, fmt.Errorf("model %q cannot be deployed for %q: none of the providers of the service serve it", binding.model, c.Type)
+		if len(serving) > 0 {
+			candidates.Providers = serving
 		}
 	}
 
 	return selectProvider(candidates, providerParams)
 }
 
-// modelFor returns the model to deploy for a component type with the provider, and where the choice came from.
+// modelFor returns the model to deploy for a component type with the provider.
 func (b *Builder) modelFor(
 	ctx context.Context,
 	componentType string,
 	provider *catalogTypes.DeployOptionsProvider,
 	binding modelBinding,
 	bound bool,
-) (string, string, error) {
+) (string, error) {
 	if bound {
-		return binding.model, "requested with --model", nil
+		return binding.model, nil
 	}
 
 	key := componentTypeProvider{componentType: componentType, provider: provider.ID}
 	if model, ok := b.chosen[key]; ok {
-		return model, b.chosenSource(provider), nil
+		return model, nil
 	}
 
 	model, err := b.recommendedOrDefault(ctx, componentType, provider)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
 	b.chosen[key] = model
 
-	return model, b.chosenSource(provider), nil
-}
-
-// chosenSource says where a model chosen without --model came from.
-func (b *Builder) chosenSource(provider *catalogTypes.DeployOptionsProvider) string {
-	if len(provider.Recommendations) > 0 {
-		return "recommended by the service"
-	}
-
-	return fmt.Sprintf("default of provider %q", provider.ID)
+	return model, nil
 }
 
 // recommendedOrDefault returns the primary model the service recommends for the provider, or else
@@ -447,11 +400,4 @@ func toNestedParams(userParams map[string]string) map[string]any {
 	}
 
 	return out
-}
-
-// add records a line of the selections, once.
-func (r *Result) add(line string) {
-	if !slices.Contains(r.Selections, line) {
-		r.Selections = append(r.Selections, line)
-	}
 }

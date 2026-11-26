@@ -73,20 +73,6 @@ type modelBinding struct {
 	providers []catalogTypes.ModelCatalogProvider
 	// registered is the model of the caller to attach to. Set for bindInstance and bindConnector.
 	registered *catalogClient.Model
-	// hint is advice to print along with the resolution, if any.
-	hint string
-}
-
-// describe is the one-line summary printed before the application is created.
-func (b modelBinding) describe() string {
-	switch b.kind {
-	case bindInstance:
-		return fmt.Sprintf("%s: reuse running model %q", b.componentType, b.registered.Name)
-	case bindConnector:
-		return fmt.Sprintf("%s: reuse remote model %q", b.componentType, b.registered.Name)
-	default:
-		return fmt.Sprintf("%s: deploy new model %q", b.componentType, b.model)
-	}
 }
 
 // ModelResolver turns the value of a --model flag into a modelBinding.
@@ -104,13 +90,16 @@ func NewModelResolver(api ModelAPI) *ModelResolver {
 //  1. a catalog model ID deploys that model anew;
 //  2. anything else is the name of a registered model, which is reused.
 //
-// Registered model names are unique and cannot contain '/', so they do not clash with catalog
-// IDs such as "ibm-granite/granite-4.1-8b-fp8". Should one match both, the catalog model wins, so
-// reusing a model never happens by accident.
+// The server refuses a registered model name equal to a catalog model ID, so a value never matches
+// both.
 func (r *ModelResolver) resolve(ctx context.Context, req ModelRequest) (modelBinding, error) {
 	entries, err := r.catalogEntries(ctx, req.componentType)
 	if err != nil {
 		return modelBinding{}, err
+	}
+
+	if entry := findCatalogEntry(entries, req.value); entry != nil {
+		return modelBinding{kind: bindNew, componentType: req.componentType, model: entry.ID, providers: entry.Providers}, nil
 	}
 
 	registered, err := r.registeredNamed(ctx, req.value)
@@ -118,22 +107,11 @@ func (r *ModelResolver) resolve(ctx context.Context, req ModelRequest) (modelBin
 		return modelBinding{}, err
 	}
 
-	if entry := findCatalogEntry(entries, req.value); entry != nil {
-		b := modelBinding{kind: bindNew, componentType: req.componentType, model: entry.ID, providers: entry.Providers}
-
-		if registered != nil {
-			b.hint = fmt.Sprintf("%q is both a catalog model and the name of a registered model; the catalog model "+
-				"is deployed. Rename the registered model to reuse it", req.value)
-		}
-
-		return b, nil
-	}
-
 	if registered == nil {
 		return modelBinding{}, r.noMatchError(ctx, req, entries)
 	}
 
-	return registeredBinding(req.componentType, registered)
+	return registeredBinding(req.componentType, registered), nil
 }
 
 // registeredNamed returns the registered model of the caller with the given name, or nil. Names
@@ -184,33 +162,15 @@ func (r *ModelResolver) noMatchError(ctx context.Context, req ModelRequest, entr
 	return fmt.Errorf("%s", sb.String())
 }
 
-// registeredBinding binds a component type to a registered model, after checking the model is of
-// that component type and can be attached now.
-func registeredBinding(componentType string, m *catalogClient.Model) (modelBinding, error) {
-	if m.ComponentType.ID != componentType {
-		return modelBinding{}, fmt.Errorf("model %q is a %q model; it cannot be used as %q", m.Name, m.ComponentType.ID, componentType)
-	}
-
-	if !m.Attachable() {
-		return modelBinding{}, fmt.Errorf("model %q is %q; it must be %q to be used",
-			m.Name, m.Status, attachableStatus(m.DeploymentType))
-	}
-
+// registeredBinding binds a component type to a registered model. Whether the model is of that
+// component type and can be attached is left to the API.
+func registeredBinding(componentType string, m *catalogClient.Model) modelBinding {
 	kind := bindInstance
 	if m.DeploymentType == catalogClient.ModelDeploymentRemote {
 		kind = bindConnector
 	}
 
-	return modelBinding{kind: kind, componentType: componentType, model: m.Model, registered: m}, nil
-}
-
-// attachableStatus is the status a model of the deployment type must have to be attached.
-func attachableStatus(deploymentType string) string {
-	if deploymentType == catalogClient.ModelDeploymentRemote {
-		return catalogClient.ModelStatusConnected
-	}
-
-	return catalogClient.ModelStatusRunning
+	return modelBinding{kind: kind, componentType: componentType, model: m.Model, registered: m}
 }
 
 // defaultModel returns the model a local provider deploys when none is chosen: the one its
@@ -264,21 +224,4 @@ func offersLocally(providers []catalogTypes.ModelCatalogProvider, providerID str
 	return slices.ContainsFunc(providers, func(p catalogTypes.ModelCatalogProvider) bool {
 		return p.ID == providerID && p.DeploymentType == catalogConstants.DeploymentTypeLocal
 	})
-}
-
-// checkOfferedLocally returns the error for a model that the local provider cannot deploy; it
-// lists the providers that do offer it.
-func checkOfferedLocally(model string, providers []catalogTypes.ModelCatalogProvider, providerID string) error {
-	offered := make([]string, 0, len(providers))
-
-	for _, p := range providers {
-		if p.ID == providerID && p.DeploymentType == catalogConstants.DeploymentTypeLocal {
-			return nil
-		}
-
-		offered = append(offered, fmt.Sprintf("%s (%s)", p.ID, p.DeploymentType))
-	}
-
-	return fmt.Errorf("model %q is not available for provider %q; it is offered by: %s",
-		model, providerID, strings.Join(offered, ", "))
 }

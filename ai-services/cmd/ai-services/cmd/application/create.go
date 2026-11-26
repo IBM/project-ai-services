@@ -415,14 +415,12 @@ func createApp(ctx context.Context, appName string) error {
 		return err
 	}
 
-	printSelections(built)
-
 	// 4. Create application via catalog API
 	logger.Infof("Creating application '%s' using template '%s'...\n", appName, templateName)
 	var resp *catalogClient.CreateApplicationResponse
 	err = utils.Retry(ctx, vars.RetryCount, vars.RetryInterval, nil, func() error {
 		var createErr error
-		resp, createErr = appClient.CreateApplication(ctx, built.Request)
+		resp, createErr = appClient.CreateApplication(ctx, built)
 
 		return createErr
 	})
@@ -434,23 +432,6 @@ func createApp(ctx context.Context, appName string) error {
 
 	// 5. Poll for application status
 	return pollApplicationStatus(ctx, appClient, appName, resp.ID)
-}
-
-// printSelections tells the user which models the application will use, before it is created.
-func printSelections(built *appcreate.Result) {
-	for _, hint := range built.Hints {
-		logger.Warningf("%s\n", hint)
-	}
-
-	if len(built.Selections) == 0 {
-		return
-	}
-
-	logger.Infoln("Models:")
-
-	for _, line := range built.Selections {
-		logger.Infof("  %s\n", line)
-	}
 }
 
 // checkApplicationExists checks if an application with the given name already exists.
@@ -470,7 +451,7 @@ func checkApplicationExists(ctx context.Context, appClient *catalogClient.Applic
 // buildCatalogPayload builds the catalog API payload for the given template.
 // It uses CatalogSource so that custom bundle templates (not in the embedded catalog)
 // are resolved via the catalog API.
-func buildCatalogPayload(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) (*appcreate.Result, error) {
+func buildCatalogPayload(ctx context.Context, appClient *catalogClient.ApplicationClient, appName string) (*catalogClient.CreateApplicationRequest, error) {
 	source, err := catalogClient.NewCatalogSource(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialise catalog source: %w", err)

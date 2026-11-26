@@ -48,6 +48,16 @@ func TestValidateCreateRequest(t *testing.T) {
 			"",
 		},
 		{"name bad chars", func(r *apimodels.CreateModelRequest) { r.Name = "a!b" }, "Model name may only contain"},
+		{
+			"name is a catalog model id",
+			func(r *apimodels.CreateModelRequest) { r.Name = "ibm-granite/granite-3.3-8b-instruct" },
+			"is the ID of a catalog model",
+		},
+		{
+			"name is a catalog model id in another case",
+			func(r *apimodels.CreateModelRequest) { r.Name = "IBM-Granite/Granite-3.3-8B-Instruct" },
+			"is the ID of a catalog model",
+		},
 		{"invalid component_type", func(r *apimodels.CreateModelRequest) { r.ComponentType = "database" }, "invalid component_type"},
 		{
 			"unknown provider",
