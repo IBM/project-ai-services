@@ -46,11 +46,12 @@ func passThroughID(r Route) string {
 
 func passThroughRequest(r Route) catalogclient.LiteLLMPassThroughRequest {
 	return catalogclient.LiteLLMPassThroughRequest{
-		ID:      passThroughID(r),
-		Path:    fmt.Sprintf("/tokenize/%s", r.Tag),
-		Target:  r.TokenizeURL,
-		Methods: []string{"POST"},
-		Auth:    false,
+		ID:             passThroughID(r),
+		Path:           fmt.Sprintf("/tokenize/%s", r.Tag),
+		Target:         r.TokenizeURL,
+		Methods:        []string{"POST"},
+		Auth:           false,
+		ForwardHeaders: true,
 	}
 }
 

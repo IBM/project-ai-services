@@ -76,11 +76,12 @@ type LiteLLMModelNewResponse struct {
 
 // LiteLLMPassThroughRequest is the payload for POST /config/pass_through_endpoint.
 type LiteLLMPassThroughRequest struct {
-	ID      string   `json:"id"`
-	Path    string   `json:"path"`
-	Target  string   `json:"target"`
-	Methods []string `json:"methods"`
-	Auth    bool     `json:"auth"`
+	ID             string   `json:"id"`
+	Path           string   `json:"path"`
+	Target         string   `json:"target"`
+	Methods        []string `json:"methods"`
+	Auth           bool     `json:"auth"`
+	ForwardHeaders bool     `json:"forward_headers"`
 }
 
 // LiteLLMHealthEndpoint represents endpoint details in LiteLLM health probe response.
