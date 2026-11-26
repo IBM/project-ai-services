@@ -264,6 +264,11 @@ def subreaper():
     libc.prctl(PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
 
 
+def descendants():
+    """The descendants of this process as (pid, start time), so that a reused pid is a different entry."""
+    return {(child.pid, child.create_time()) for child in psutil.Process().children(recursive=True)}
+
+
 def zombie_children():
     return [child.pid for child in psutil.Process().children(recursive=True) if child.status() == psutil.STATUS_ZOMBIE]
 
@@ -280,8 +285,12 @@ def test_no_zombie_is_left_by_the_grandchildren_of_a_killed_group(subreaper, tmp
         "time.sleep(60)\n" if how == "timeout" else "time.sleep(1)\n"  # Exits while its descendants run.
     )
 
+    # Other tests of the same pytest process may leave children behind (a multiprocessing resource tracker,
+    # for one), and the whole suite runs in one process. Only what this test started counts.
+    before = descendants()
+
     result = run(leader, timeout_s=3 if how == "timeout" else 20)
 
     assert result.timed_out == (how == "timeout")
-    assert zombie_children() == []
-    assert psutil.Process().children(recursive=True) == []
+    assert [pid for pid in zombie_children() if pid not in {p for p, _ in before}] == []
+    assert descendants() - before == set()

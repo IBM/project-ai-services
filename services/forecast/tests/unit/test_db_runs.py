@@ -160,7 +160,9 @@ def test_mark_completed_records_the_forecaster_and_completes_the_job_and_the_con
     (forecaster,) = [c.args[0] for c in session.add.call_args_list]
     assert isinstance(forecaster, Forecaster)
     assert (forecaster.connector_id, forecaster.job_id, forecaster.version) == (CONNECTOR_ID, 7, 7)
-    assert forecaster.metrics == {"metric": "accuracy", "validation_score": 0.9, "training_seconds": 12.5}
+    assert forecaster.metrics == {
+        "metric": "accuracy", "validation_score": 0.9, "test_score": 0.88, "training_seconds": 12.5,
+    }
     assert job.status == "COMPLETED" and job.message is None and job.finished_at is not None
     assert job.result["attempts"] == 2 and job.result["rows_read"] == 400  # What the worker wrote is kept.
     assert connector.status == "TRAINED" and connector.message is None

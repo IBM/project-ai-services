@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS forecasters (
     connector_id  UUID        NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
     job_id        BIGINT      REFERENCES jobs(seq) ON DELETE SET NULL,
     version       BIGINT      NOT NULL,
-    metrics       JSONB,                                   -- algorithm and training_seconds, copied from the job's result
+    metrics       JSONB,                                   -- metric, validation_score, test_score and training_seconds, copied from the job's result
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (connector_id, version)
 );

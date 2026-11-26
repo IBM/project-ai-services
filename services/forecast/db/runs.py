@@ -118,9 +118,14 @@ def mark_completed(session: Session, job_id: int, attempts: int) -> None:
     """
     job = session.get(Job, job_id)
     result = job.result or {}
-    # The shape of the API's samples: the validation metric (the worker calls it validation_metric), its score
-    # and the training time. A key that the result lacks is left out.
-    wanted = {"metric": "validation_metric", "validation_score": "validation_score", "training_seconds": "training_seconds"}
+    # The shape of the API's samples: the validation metric (the worker calls it validation_metric), its score,
+    # the score on the held-out test rows and the training time. A key that the result lacks is left out.
+    wanted = {
+        "metric": "validation_metric",
+        "validation_score": "validation_score",
+        "test_score": "test_score",
+        "training_seconds": "training_seconds",
+    }
     session.add(
         Forecaster(
             connector_id=job.connector_id,

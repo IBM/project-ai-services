@@ -70,7 +70,7 @@ It also introduces three things that no existing service has:
 
 - Triton runs in **explicit model-control mode** (`--model-control-mode=explicit`). No model is loaded automatically; the API explicitly issues load requests after successful training and during startup reconciliation.
 - The **database state is authoritative**: Triton serves only forecasters with an active `ready` record in PostgreSQL. Unregistered directories are never loaded.
-- The worker writes the forecaster's Triton directory (`config.pbtxt` and `1/model.onnx`) to **local scratch** and never touches the repository volume. The API **publishes** it: it copies the directory to `.staging/<job_id>/` on the volume and renames it to `fc_<connector_id>_<version>`, so the directory appears whole or not at all. The API also **deletes**: directories whose row is `retiring`, the staging directory of a publish that failed, and leftovers at boot.
+- The worker writes the forecaster's Triton directory (`config.pbtxt` and `1/model.onnx`) to **local scratch** and never touches the repository volume. The API **publishes** it: it first checks that the directory holds only regular files and directories (a symbolic link or a special file fails the job, because the copy would publish what the link points to), then copies it to `.staging/<job_id>/` on the volume and renames it to `fc_<connector_id>_<version>`, so the directory appears whole or not at all. The API also **deletes**: directories whose row is `retiring`, the staging directory of a publish that failed, and leftovers at boot.
 - The APScheduler writes the `forecasters` row only after Triton has loaded the forecaster. A row is therefore always `ready`, `retiring` or `deleted`, and the worker cannot write to the database at all.
 - Retention is by count, per connector, and runs after each successful load. When the `ready` forecasters of one `connector_id` exceed `FORECASTER_RETENTION_COUNT`, the oldest of that connector is retired in this order: its row becomes `retiring`, it is unloaded from Triton, its directory is deleted, and its row becomes `deleted`. The row is kept. Forecasters of other connectors are not affected.
 
@@ -254,7 +254,7 @@ Returns every forecaster of the default connector, newest version first. The lis
 | Field in each item | Type | Description |
 |:---|:---|:---|
 | `version` | integer | The version number (the `jobs.seq` of the training job). |
-| `metrics` | object (nullable) | The validation metric name and score, and the training time in seconds. |
+| `metrics` | object (nullable) | The validation metric name, its score on the validation rows and on the held-out test rows, and the training time in seconds. |
 | `created_at` | string (ISO 8601 UTC) | UTC timestamp at which the forecaster was loaded. |
 
 **Sample response (200):**
@@ -263,17 +263,17 @@ Returns every forecaster of the default connector, newest version first. The lis
 [
     {
         "version": 12,
-        "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
+        "metrics": {"metric": "accuracy", "validation_score": 0.91, "test_score": 0.89, "training_seconds": 412},
         "created_at": "2026-10-26T09:12:00Z"
     },
     {
         "version": 11,
-        "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+        "metrics": {"metric": "accuracy", "validation_score": 0.90, "test_score": 0.88, "training_seconds": 399},
         "created_at": "2026-10-25T09:12:00Z"
     },
     {
         "version": 10,
-        "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+        "metrics": {"metric": "accuracy", "validation_score": 0.93, "test_score": 0.92, "training_seconds": 400},
         "created_at": "2026-10-24T09:12:00Z"
     }
 ]
@@ -293,7 +293,7 @@ Returns every forecaster of the connector, newest version first. The list is bou
 | Field in each item | Type | Description |
 |:---|:---|:---|
 | `version` | integer | The version number (the `jobs.seq` of the training job). |
-| `metrics` | object (nullable) | The validation metric name and score, and the training time in seconds. |
+| `metrics` | object (nullable) | The validation metric name, its score on the validation rows and on the held-out test rows, and the training time in seconds. |
 | `created_at` | string (ISO 8601 UTC) | UTC timestamp at which the forecaster was loaded. |
 
 **Sample response (200):**
@@ -302,17 +302,17 @@ Returns every forecaster of the connector, newest version first. The list is bou
 [
     {
         "version": 12,
-        "metrics": {"metric": "accuracy", "validation_score": 0.91, "training_seconds": 412},
+        "metrics": {"metric": "accuracy", "validation_score": 0.91, "test_score": 0.89, "training_seconds": 412},
         "created_at": "2026-10-26T09:12:00Z"
     },
     {
         "version": 11,
-        "metrics": {"metric": "accuracy", "validation_score": 0.90, "training_seconds": 399},
+        "metrics": {"metric": "accuracy", "validation_score": 0.90, "test_score": 0.88, "training_seconds": 399},
         "created_at": "2026-10-25T09:12:00Z"
     },
     {
         "version": 10,
-        "metrics": {"metric": "accuracy", "validation_score": 0.93, "training_seconds": 400},
+        "metrics": {"metric": "accuracy", "validation_score": 0.93, "test_score": 0.92, "training_seconds": 400},
         "created_at": "2026-10-24T09:12:00Z"
     }
 ]
@@ -701,7 +701,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `connector_id` | Part of the primary key. Foreign key to `connectors`. `ON DELETE CASCADE`, so the row is removed with the connector. |
 | `job_id`       | Foreign key to `jobs.seq`: the job that trained the forecaster. Set to `NULL` when run history deletes that job.     |
 | `version`      | Part of the primary key. The `seq` of that job.                                                                      |
-| `metrics`      | JSON object `{metric, validation_score, training_seconds}`: the validation metric and its score, and the training time. Copied from the job's `result` (`metric` is its `validation_metric`). |
+| `metrics`      | JSON object `{metric, validation_score, test_score, training_seconds}`: the validation metric, its score on the validation rows and on the held-out test rows, and the training time. Copied from the job's `result` (`metric` is its `validation_metric`). |
 | `created_at`   | UTC time at which the forecaster was loaded and recorded.                                                            |
 
 **Constraints.**
@@ -1308,7 +1308,7 @@ These stories break the design above into units of work. Each one has a descript
 - `AsyncIOScheduler` with a `SQLAlchemyJobStore` in the `scheduler` schema, at the version digitize uses.
 - The one-off job that `POST /v1/connectors` registers.
 - Loader and worker subprocess launch, each with its own process group and time limit, and the memory cap for the worker.
-- Publish: copy the worker's directory to `.staging/<job_id>/` on the volume and rename it to `fc_<connector_id>_<version>`.
+- Publish: refuse a worker directory that holds a symbolic link or any entry that is not a regular file or a directory, then copy it to `.staging/<job_id>/` on the volume and rename it to `fc_<connector_id>_<version>`.
 - Write `job.json` for the worker, and copy `result.json` and `failure.json` to `jobs.result` and `jobs.message` (known keys, size limit, message cut to 1000 characters).
 - Retry of the attempt (loader, then worker).
 - Failure handling and cleanup.
