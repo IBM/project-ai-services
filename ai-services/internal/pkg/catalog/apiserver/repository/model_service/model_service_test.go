@@ -569,7 +569,7 @@ type fakeDeployer struct {
 	steps    []string
 }
 
-func (f *fakeDeployer) Check(context.Context, *types.LocalPlan) error {
+func (f *fakeDeployer) Check(context.Context, runtime.Runtime, []*types.LocalPlan) error {
 	return f.checkErr
 }
 

@@ -12,16 +12,15 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
+	modeltypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/params"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
-	podmanutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/podman"
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	dbmodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
@@ -140,14 +139,9 @@ func (p *DeploymentPlanner) PlanDeployment(
 		}
 	}
 
-	// Calculate and allocate Spyre cards for all Podman deployments.
-	// The FIND_FREE_SPYRE_CARDS command is always sent over gRPC to the worker pod —
-	// even for the local worker — so the API server never probes /dev/vfio directly.
-	// plan.RuntimeType is the worker's effective runtime resolved before PlanDeployment.
-	if plan.RuntimeType == runtimeTypes.RuntimeTypePodman.String() {
-		if err := p.calculateAndAllocateSpyreCards(ctx, plan, workerName); err != nil {
-			return nil, fmt.Errorf("failed to allocate Spyre cards: %w", err)
-		}
+	// The models deploy concurrently, so they must fit on the worker together, not one by one.
+	if err := p.checkModels(ctx, plan); err != nil {
+		return nil, err
 	}
 
 	return plan, nil
@@ -643,74 +637,23 @@ func identityWithProfile(identity map[string]any, profile string) map[string]any
 	return out
 }
 
-// calculateAndAllocateSpyreCards calculates required Spyre cards and creates allocation pool.
-// workerName is used to determine whether to probe locally or over gRPC to a remote worker.
-func (p *DeploymentPlanner) calculateAndAllocateSpyreCards(ctx context.Context, plan *DeploymentPlan, workerName string) error {
-	totalRequired := 0
-
-	// Calculate total required Spyre cards from all components
-	for _, comp := range plan.Components {
-		// A model allocates its own cards when the model service starts it.
-		if comp.IsModel() {
-			continue
-		}
-
-		required, err := p.getRequiredSpyreCardsForComponent(ctx, comp, plan)
-		if err != nil {
-			return fmt.Errorf("failed to get Spyre card requirements for component %s: %w", comp.ComponentType, err)
-		}
-		totalRequired += required
-		if required > 0 {
-			logger.InfofCtx(ctx, "Component %s/%s requires %d Spyre cards\n", comp.ComponentType, comp.ProviderID, required)
-		}
-	}
-
-	if totalRequired == 0 {
-		logger.InfofCtx(ctx, "No Spyre cards required for this deployment\n")
-
+// checkModels hands the models the application deploys, already planned so with their provider and
+// profile, to the model service, which decides whether the worker can host them together. What
+// they need (accelerator cards, whatever the vendor) and what the worker has is its call, not the
+// planner's. An application whose models cannot be hosted is rejected before anything is recorded
+// or started. It does nothing when the application deploys no model.
+func (p *DeploymentPlanner) checkModels(ctx context.Context, plan *DeploymentPlan) error {
+	if p.models == nil {
 		return nil
 	}
 
-	logger.InfofCtx(ctx, "Total Spyre cards required: %d\n", totalRequired)
+	var plans []*modeltypes.LocalPlan
 
-	// Discover free Spyre cards via the worker over gRPC (the API server never touches hardware
-	// directly) and build the allocation pool using the shared podmanutils helper.
-	rt, err := p.workers.NewRuntime(ctx, workerName, "")
-	if err != nil {
-		return err
+	for _, comp := range plan.ModelComponents() {
+		plans = append(plans, comp.Model)
 	}
 
-	pool, err := podmanutils.NewSpyreCardPool(ctx, rt, totalRequired)
-	if err != nil {
-		return err
-	}
-
-	plan.SpyreCardPool = pool
-
-	return nil
-}
-
-// getRequiredSpyreCardsForComponent calculates Spyre cards needed for a component.
-func (p *DeploymentPlanner) getRequiredSpyreCardsForComponent(ctx context.Context, comp *ComponentPlan, plan *DeploymentPlan) (int, error) {
-	scopedProvider, err := p.catalogProvider.WithRuntime(plan.RuntimeType)
-	if err != nil {
-		return 0, fmt.Errorf("failed to scope catalog provider for runtime %q: %w", plan.RuntimeType, err)
-	}
-
-	// Load component templates using catalog provider
-	tmpls, err := scopedProvider.LoadComponentTemplates(comp.ComponentType, comp.ProviderID)
-	if err != nil {
-		return 0, fmt.Errorf("failed to load component templates: %w", err)
-	}
-
-	// Use the catalog provider's CollectSpyreCardsFromTemplates function
-	// Use comp.Values instead of comp.Params to include defaults from values.yaml
-	totalSpyreCards, err := scopedProvider.CollectSpyreCardsFromTemplates(ctx, tmpls, comp.Values)
-	if err != nil {
-		return 0, fmt.Errorf("failed to collect Spyre cards from templates: %w", err)
-	}
-
-	return totalSpyreCards, nil
+	return p.models.CheckLocalModels(ctx, plan.WorkerName, plans)
 }
 
 // Made with Bob

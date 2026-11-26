@@ -25,7 +25,6 @@ type DeploymentPlan struct {
 	IsArchitecture  bool                      // true for architecture, false for standalone service
 	Components      map[string]*ComponentPlan // Key: component hash, Value: component plan
 	Services        map[string]*ServicePlan   // Key: service ID, Value: service plan
-	SpyreCardPool   *SpyreCardPool            // Allocated Spyre card pool (set after allocation)
 	// WorkerName identifies the target worker. Always set by PlanDeployment:
 	// workerconstants.LocalWorkerName for local deployments, or the actual
 	// worker name for remote ones.

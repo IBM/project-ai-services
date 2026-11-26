@@ -101,6 +101,13 @@ func (s *ModelService) PlanLocalModel(ctx context.Context, req apimodels.CreateM
 	return plan, nil
 }
 
+// CheckLocalModels verifies that the worker can host all the models of plans together. What the
+// models need and what the worker has is decided per runtime (e.g. the sum of their accelerator
+// cards against the free ones on Podman, nothing on OpenShift where the scheduler places them).
+func (s *ModelService) CheckLocalModels(ctx context.Context, workerName string, plans []*types.LocalPlan) error {
+	return s.planner.CheckLocal(ctx, workerName, plans)
+}
+
 // DownloadLocalModel pulls the container images and downloads the model on the plan's worker.
 func (s *ModelService) DownloadLocalModel(ctx context.Context, plan *types.LocalPlan) error {
 	return s.executor.Prepare(ctx, plan)

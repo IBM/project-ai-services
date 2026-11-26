@@ -24,11 +24,12 @@ import (
 // Caddy routes and returns the control-plane egress as Egress, keeping the pod's own address as
 // Internal. Those routes are removed when the model is deleted.
 type Deployer interface {
-	// Check verifies, without side effects, that the worker can host the model right now (e.g.
-	// enough free accelerator cards), so an unsatisfiable request is rejected during planning
-	// before anything is written or downloaded. It is a point-in-time check: Start still has to
+	// Check verifies, without side effects, that the worker can host all of plans together right
+	// now (e.g. enough free accelerator cards for the sum of what they need), so an
+	// unsatisfiable request is rejected during planning before anything is written or downloaded.
+	// rt reaches the worker the plans share. It is a point-in-time check: Start still has to
 	// allocate for real and can fail if the resources were taken in between.
-	Check(ctx context.Context, plan *LocalPlan) error
+	Check(ctx context.Context, rt runtime.Runtime, plans []*LocalPlan) error
 	// Prepare makes the worker ready to start the model: it pulls the container images and
 	// downloads the model weights. It starts nothing and is safe to call again.
 	Prepare(ctx context.Context, plan *LocalPlan) error

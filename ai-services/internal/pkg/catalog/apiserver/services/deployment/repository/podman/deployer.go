@@ -36,7 +36,6 @@ type (
 	DeploymentPlan = deploymenttypes.DeploymentPlan
 	ComponentPlan  = deploymenttypes.ComponentPlan
 	ServicePlan    = deploymenttypes.ServicePlan
-	SpyreCardPool  = deploymenttypes.SpyreCardPool
 )
 
 // PodmanDeployer implements deployment execution for Podman runtime.
@@ -315,7 +314,7 @@ func (d *PodmanDeployer) deployComponent(ctx context.Context, hash string, comp 
 
 	logger.InfofCtx(ctx, "Component %s loaded: %s\n", component.ID, component.Name)
 
-	if err := d.deployComponentPods(ctx, comp, metadata, tmpls, plan); err != nil {
+	if err := d.deployComponentPods(ctx, comp, metadata, tmpls); err != nil {
 		return fmt.Errorf("failed to deploy component pods: %w", err)
 	}
 
@@ -359,14 +358,14 @@ func (d *PodmanDeployer) loadComponentResources(comp *ComponentPlan) (*types.Com
 }
 
 // deployComponentPods deploys all pods for a component and extracts endpoint information.
-// The rendering, Spyre env injection and pod creation are shared with the model deployment
-// path via podmanutils.DeployComponentPods.
+// The rendering and pod creation are shared with the model deployment path via
+// podmanutils.DeployComponentPods. Models are the only components that need accelerator cards
+// and they deploy through the models path, so no Spyre pool is passed here.
 func (d *PodmanDeployer) deployComponentPods(
 	ctx context.Context,
 	comp *ComponentPlan,
 	metadata *templates.AppMetadata,
 	tmpls map[string]*template.Template,
-	plan *DeploymentPlan,
 ) error {
 	componentEndpoints, err := podmanutils.DeployComponentPods(ctx, podmanutils.ComponentPodsParams{
 		Runtime:       d.runtime,
@@ -375,7 +374,6 @@ func (d *PodmanDeployer) deployComponentPods(
 		Values:        comp.Values,
 		Metadata:      metadata,
 		Templates:     tmpls,
-		SpyrePool:     plan.SpyreCardPool,
 		BaseDir:       d.getBaseDir(),
 	})
 	if err != nil {

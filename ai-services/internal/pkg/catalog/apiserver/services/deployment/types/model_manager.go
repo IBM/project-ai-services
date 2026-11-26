@@ -35,6 +35,12 @@ type ModelManager interface {
 	// PlanLocalModel validates the request and resolves how to deploy it, without side effects. The
 	// model's name is generated from req.Name, the application's name, and the component ID.
 	PlanLocalModel(ctx context.Context, req apimodels.CreateModelRequest) (*modeltypes.LocalPlan, error)
+	// CheckLocalModels verifies, without side effects, that the worker can host all the models of
+	// plans together: the model service counts what they need (accelerator cards, whatever the
+	// vendor) and compares it with what the worker has free. The models of an application deploy
+	// concurrently, so each plan passing its own check in PlanLocalModel is not enough. A worker
+	// that cannot host them is a 422.
+	CheckLocalModels(ctx context.Context, workerName string, plans []*modeltypes.LocalPlan) error
 	// RecordLocalModel inserts the plan's component row, as Downloading.
 	RecordLocalModel(ctx context.Context, plan *modeltypes.LocalPlan) error
 	// DownloadLocalModel pulls the images and downloads the model on the plan's worker.

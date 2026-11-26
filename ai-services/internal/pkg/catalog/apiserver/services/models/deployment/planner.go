@@ -166,11 +166,34 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 
 	// Reject what the worker cannot host (e.g. not enough free Spyre cards) now, instead of after
 	// the row is written and the images and weights are downloaded.
-	if err := deployer.Check(ctx, plan); err != nil {
+	if err := deployer.Check(ctx, rt, []*types.LocalPlan{plan}); err != nil {
 		return nil, validators.Unprocessable("worker %q cannot host this model: %v", workerName, err)
 	}
 
 	return plan, nil
+}
+
+// CheckLocal verifies that the worker can host all of plans together, which deploy concurrently:
+// each passing its own check in PlanLocal is not enough when they need the same cards. What the
+// models need and what the worker has is the runtime's deployer's call. No plans is trivially
+// hostable.
+func (p *ModelPlanner) CheckLocal(ctx context.Context, workerName string, plans []*types.LocalPlan) error {
+	if len(plans) == 0 {
+		return nil
+	}
+
+	workerName = worker.DefaultName(workerName)
+
+	rt, deployer, err := p.resolveWorkerDeployer(ctx, workerName)
+	if err != nil {
+		return err
+	}
+
+	if err := deployer.Check(ctx, rt, plans); err != nil {
+		return validators.Unprocessable("worker %q cannot host these models: %v", workerName, err)
+	}
+
+	return nil
 }
 
 // localComponentMetadata is what is persisted on the component row: the top-level model and

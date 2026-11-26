@@ -6,6 +6,7 @@ import (
 	texttemplate "text/template"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog"
 	deploymenttypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/deployment/types"
@@ -33,17 +34,36 @@ func NewPodmanDeployer(routes RouteRegistrar) *PodmanDeployer {
 	return &PodmanDeployer{routes: routes}
 }
 
-// Check verifies that the worker has the Spyre cards the provider needs. It only discovers free
-// cards; Start is what allocates them.
-func (d *PodmanDeployer) Check(ctx context.Context, plan *types.LocalPlan) error {
-	tmpls, err := loadTemplates(plan)
+// Check verifies that the worker has the accelerator cards all of plans need together. It only
+// discovers free cards; Start is what allocates them. Support for another accelerator vendor is
+// added where the cards are counted (below) and discovered (podmanutils.FreeAccelerators).
+func (d *PodmanDeployer) Check(ctx context.Context, rt runtime.Runtime, plans []*types.LocalPlan) error {
+	required := accelerator.Counts{}
+
+	for _, plan := range plans {
+		tmpls, err := loadTemplates(plan)
+		if err != nil {
+			return err
+		}
+
+		spyre, err := countSpyreCards(ctx, plan.Catalog, tmpls, plan.Values)
+		if err != nil {
+			return err
+		}
+
+		required.Add(accelerator.Counts{accelerator.Spyre: spyre})
+	}
+
+	if required.IsEmpty() {
+		return nil
+	}
+
+	free, err := podmanutils.FreeAccelerators(ctx, rt)
 	if err != nil {
 		return err
 	}
 
-	_, err = allocateSpyreCards(ctx, plan, tmpls)
-
-	return err
+	return required.Check(free)
 }
 
 // Prepare pulls the container images declared by the provider templates and downloads the model

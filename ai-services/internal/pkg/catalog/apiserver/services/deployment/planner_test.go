@@ -36,9 +36,11 @@ type fakeModelManager struct {
 	connectors  map[uuid.UUID]*dbmodels.Connector
 	connErr     error
 	planErr     error
+	checkErr    error
 
 	gotInstanceID, gotType, gotCreatedBy string
 	gotPlanReq                           *apimodels.CreateModelRequest
+	gotCheckPlans                        []*modeltypes.LocalPlan
 }
 
 func (f *fakeModelManager) GetConnectedModel(_ context.Context, id uuid.UUID, createdBy string) (*dbmodels.Connector, error) {
@@ -55,6 +57,12 @@ func (f *fakeModelManager) GetRunningInstance(_ context.Context, id uuid.UUID, c
 	f.gotInstanceID, f.gotType, f.gotCreatedBy = id.String(), componentType, createdBy
 
 	return f.instance, f.instanceErr
+}
+
+func (f *fakeModelManager) CheckLocalModels(_ context.Context, _ string, plans []*modeltypes.LocalPlan) error {
+	f.gotCheckPlans = plans
+
+	return f.checkErr
 }
 
 func (f *fakeModelManager) PlanLocalModel(_ context.Context, req apimodels.CreateModelRequest) (*modeltypes.LocalPlan, error) {
@@ -641,6 +649,39 @@ func TestCheckModelSources(t *testing.T) {
 		require.NoError(t, check("remote-llm"))
 		require.NoError(t, check("instance-llm", "instance-llm2"))
 		require.NoError(t, check("deployed-llm", "remote-embed"))
+	})
+}
+func TestCheckModels(t *testing.T) {
+	deployed := &modeltypes.LocalPlan{ComponentID: uuid.New()}
+	other := &modeltypes.LocalPlan{ComponentID: uuid.New()}
+	plan := &DeploymentPlan{
+		WorkerName: localWorker,
+		Components: map[string]*ComponentPlan{
+			"b": {Hash: "b", Model: other},
+			"a": {Hash: "a", Model: deployed},
+			"x": {Hash: "x", ComponentType: "vector_store"},
+			"p": {Hash: "p", PreDeployed: true},
+		},
+	}
+
+	t.Run("hands the model service every model to deploy, in hash order, and nothing else", func(t *testing.T) {
+		fake := &fakeModelManager{}
+
+		require.NoError(t, newTestPlanner(t, fake, fakeWorkers{}).checkModels(t.Context(), plan))
+		assert.Equal(t, []*modeltypes.LocalPlan{deployed, other}, fake.gotCheckPlans)
+	})
+
+	t.Run("a worker that cannot host the models fails the plan with the model service's error", func(t *testing.T) {
+		unprocessable := validators.Unprocessable("worker %q cannot host these models", localWorker)
+		fake := &fakeModelManager{checkErr: unprocessable}
+
+		err := newTestPlanner(t, fake, fakeWorkers{}).checkModels(t.Context(), plan)
+
+		assertValidationCode(t, err, http.StatusUnprocessableEntity)
+	})
+
+	t.Run("without model management there is nothing to check", func(t *testing.T) {
+		require.NoError(t, newTestPlanner(t, nil, fakeWorkers{}).checkModels(t.Context(), plan))
 	})
 }
 
