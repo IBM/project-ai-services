@@ -1,0 +1,486 @@
+pipeline {
+
+    agent { label 'onprem-ai-services-machine' }
+
+    parameters {
+        string(
+            name: 'OPENSEARCH_VERSION',
+            defaultValue: '3.8.0',
+            description: 'OpenSearch version as X.Y.Z (e.g. 3.8.0, 3.10.1). Must be a tag in opensearch-project/opensearch-build. Files come from the X.Y.0 folder in build-scripts.'
+        )
+        text(
+            name: 'DEPENDENCY_UPDATES',
+            defaultValue: '',
+            description: '''Optional dependency updates (3.10 and above only), as <target>:<key>=<version> separated by comma, space or newline.
+<target> = opensearch | security | opensaml. <key> = key in [versions] of gradle/libs.versions.toml.
+Example: security:guava=33.7.3-jre,opensaml:open_saml=5.2.4'''
+        )
+        string(
+            name: 'BUILD_SCRIPTS_REPO',
+            defaultValue: 'https://github.com/ppc64le/build-scripts.git',
+            description: 'build-scripts repository to clone (HTTPS GitHub URL). Change only to test a fork, e.g. https://github.com/<user>/build-scripts.git'
+        )
+        string(
+            name: 'BUILD_SCRIPTS_BRANCH',
+            defaultValue: 'master',
+            description: 'Branch of the build-scripts repository to check out.'
+        )
+    }
+
+    options {
+        timestamps()
+        ansiColor('xterm')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+
+    environment {
+
+        OPENSEARCH_VERSION = "${params.OPENSEARCH_VERSION}"
+        ARCHITECTURE = "ppc64le"
+        PLATFORM     = "linux"
+
+        // Host destination for the assembled tar
+        ARTIFACTS_DIR = "/var/jenkins/artifacts/opensearch"
+
+        OPENSEARCH_BUILD_REPO = "https://github.com/opensearch-project/opensearch-build.git"
+
+        BUILD_DIR   = "${WORKSPACE}/opensearch-build"
+        SCRIPTS_DIR = "${WORKSPACE}/build-scripts"
+
+        // Dependency patching (3.10+ only)
+        DEP_SCRIPTS_REL = "o/opensearch-project-opensearch-build/scripts"
+        DEP_PATCHES_DIR = "${WORKSPACE}/dependency-patches"
+
+        ICR_REGISTRY           = "icr.io"
+        IMAGE_NAME             = "icr.io/ai-services-cicd/opensearch"
+    }
+
+    stages {
+
+        // ------------------------------------------------------------------ //
+        //  PREPARE — initialise config, clean workspace, checkout sources     //
+        // ------------------------------------------------------------------ //
+        stage('Prepare') {
+            steps {
+                script {
+                    def ver = env.OPENSEARCH_VERSION
+
+                    if (!(ver ==~ /^\d+\.\d+\.\d+$/)) {
+                        error "OPENSEARCH_VERSION must be in the form X.Y.Z (e.g. 3.8.0), got: ${ver}"
+                    }
+                    def parts = ver.split('\\.')
+                    int major = parts[0].toInteger()
+                    int minor = parts[1].toInteger()
+
+                    // Patch releases reuse the X.Y.0 Dockerfiles and patches
+                    def baseVer = "${major}.${minor}.0"
+                    boolean depPatches = (major * 1000 + minor) >= 3010
+
+                    env.BUILD_SCRIPTS_REPO   = params.BUILD_SCRIPTS_REPO?.trim() ?: 'https://github.com/ppc64le/build-scripts.git'
+                    env.BUILD_SCRIPTS_BRANCH = params.BUILD_SCRIPTS_BRANCH?.trim() ?: 'master'
+
+                    if (!(env.BUILD_SCRIPTS_REPO ==~ /^https:\/\/github\.com\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(\.git)?$/)) {
+                        error "BUILD_SCRIPTS_REPO must be an HTTPS GitHub URL, got: ${env.BUILD_SCRIPTS_REPO}"
+                    }
+
+                    def depUpdates = params.DEPENDENCY_UPDATES ?: ''
+
+                    if (depUpdates.trim() && !depPatches) {
+                        error "DEPENDENCY_UPDATES is supported for OpenSearch 3.10 and above only, got version ${ver}"
+                    }
+
+                    if (!(depUpdates ==~ /[A-Za-z0-9_.:=+,\s-]*/)) {
+                        error "DEPENDENCY_UPDATES contains invalid characters. Expected <target>:<key>=<version> entries."
+                    }
+
+                    env.DOCKERFILE_DIR          = "o/opensearch-project-opensearch-build/Dockerfiles/${baseVer}_ubi9.7"
+                    env.PATCH_FILE              = "${env.DOCKERFILE_DIR}/ppc64le-${baseVer}-ai-services.patch"
+                    env.BUILD_ENV_IMAGE         = "opensearch-build-env:${ver}-ppc64le"
+                    env.BUILD_ENV_DOCKERFILE    = "${env.DOCKERFILE_DIR}/Dockerfile.build-env"
+                    env.IMAGE_TAG               = "${ver}-${env.ARCHITECTURE}-${env.BUILD_NUMBER}"
+
+                    // Below 3.10 only PATCH_FILE is applied
+                    env.DEP_PATCHES_ENABLED = depPatches.toString()
+                    env.DEPS_PATCH_FILE     = "${env.DOCKERFILE_DIR}/ppc64le-${baseVer}-dependency-patches.patch"
+                    env.DEP_PODMAN_ARGS     = depPatches ? [
+                        "-v ${env.SCRIPTS_DIR}/${env.DEP_SCRIPTS_REL}:/ppc-scripts:ro,z",
+                        "-v ${env.DEP_PATCHES_DIR}:/ppc-dependency-patches:ro,z",
+                        "-e PPC_DEPENDENCY_PATCHES_DIR=/ppc-dependency-patches",
+                        "-e PPC_APPLY_DEPENDENCY_PATCHES=/ppc-scripts/apply-dependency-patches.sh"
+                    ].join(' ') : ''
+
+                    echo "OpenSearch version : ${ver}"
+                    echo "Files taken from    : ${baseVer}"
+                    echo "Dependency patching : ${depPatches ? 'enabled' : 'not supported for this version'}"
+                    echo "Dependency updates  : ${depUpdates ?: '(none)'}"
+                    echo "Build-scripts repo  : ${env.BUILD_SCRIPTS_REPO}"
+                    echo "Build-scripts branch: ${env.BUILD_SCRIPTS_BRANCH}"
+                    echo "Dockerfile dir      : ${env.DOCKERFILE_DIR}"
+                    echo "Image tag           : ${env.IMAGE_TAG}"
+                }
+
+                deleteDir()
+
+                echo "Checking out ai-services (this repo)..."
+                checkout scm
+
+                echo "Checking out OpenSearch Build..."
+
+                dir("${env.BUILD_DIR}") {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/tags/${env.OPENSEARCH_VERSION}"]],
+                        extensions: [],
+                        userRemoteConfigs: [[
+                            url: "${OPENSEARCH_BUILD_REPO}",
+                            refspec: '+refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*'
+                        ]]
+                    ])
+                }
+
+                echo "Checking out build-scripts..."
+
+                dir("${env.SCRIPTS_DIR}") {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "${env.BUILD_SCRIPTS_BRANCH}"]],
+                        extensions: [],
+                        userRemoteConfigs: [[
+                            url: "${env.BUILD_SCRIPTS_REPO}",
+                            refspec: '+refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*'
+                        ]]
+                    ])
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  BUILD — build-env image, OpenSearch distribution, extra plugins    //
+        // ------------------------------------------------------------------ //
+        stage('Build') {
+            steps {
+
+                sh """
+                    set -euo pipefail
+
+                    echo "=== Disk space ==="
+                    df -h
+                    echo "=== Memory ==="
+                    free -h
+                    echo "=== Podman disk usage ==="
+                    podman system df || true
+
+                    echo "Building build-environment Podman image..."
+                    podman build \
+                        -t ${BUILD_ENV_IMAGE} \
+                        -f ${SCRIPTS_DIR}/${BUILD_ENV_DOCKERFILE} \
+                        ${BUILD_DIR}
+                """
+
+                sh """
+                    set -euo pipefail
+
+                    echo "Configuring git identity for patch apply..."
+                    git config --global user.name "OpenSearch Build"
+                    git config --global user.email "opensearch-build@example.com"
+
+                    echo "Applying patch..."
+                    git -C ${BUILD_DIR} apply \
+                        --whitespace=nowarn \
+                        ${SCRIPTS_DIR}/${PATCH_FILE}
+                """
+
+                // 3.10+ only
+                script {
+                    if (env.DEP_PATCHES_ENABLED == 'true') {
+                        sh """
+                            set -euo pipefail
+
+                            echo "Applying dependency-patch hook..."
+                            git -C ${BUILD_DIR} apply \
+                                --whitespace=nowarn \
+                                ${SCRIPTS_DIR}/${DEPS_PATCH_FILE}
+
+                            echo "Generating dependency patches..."
+                            bash ${SCRIPTS_DIR}/${DEP_SCRIPTS_REL}/generate-dependency-patches.sh \
+                                --manifest   ${BUILD_DIR}/manifests/${OPENSEARCH_VERSION}/opensearch-${OPENSEARCH_VERSION}.yml \
+                                --output-dir ${DEP_PATCHES_DIR}
+                        """
+                    }
+                }
+
+                sh """
+                    set -euo pipefail
+
+                    echo "Running OpenSearch build and assemble inside container (full manifest)..."
+                    podman run --rm \
+                        --ulimit nproc=65536:65536 \
+                        -v ${BUILD_DIR}:/opensearch-build:z \
+                        ${DEP_PODMAN_ARGS} \
+                        -w /opensearch-build \
+                        --entrypoint '' \
+                        ${BUILD_ENV_IMAGE} \
+                        bash -c 'set -euo pipefail && \
+                            ./build.sh \
+                                manifests/'"${OPENSEARCH_VERSION}"'/opensearch-'"${OPENSEARCH_VERSION}"'.yml \
+                                --platform '"${PLATFORM}"' \
+                                --architecture '"${ARCHITECTURE}"' \
+                                --component OpenSearch \
+                                    common-utils \
+                                    opensearch-remote-metadata-sdk \
+                                    job-scheduler \
+                                    security \
+                                    custom-codecs \
+                                    k-NN \
+                                    ml-commons \
+                                    neural-search \
+                                    opensearch-observability \
+                                    index-management && \
+                            ./assemble.sh tar/builds/opensearch/manifest.yml'
+
+                    echo "Copying assembled tar to host..."
+                    mkdir -p ${ARTIFACTS_DIR}
+                    cp ${BUILD_DIR}/tar/dist/opensearch/opensearch-${OPENSEARCH_VERSION}-linux-${ARCHITECTURE}.tar.gz \
+                        ${ARTIFACTS_DIR}/opensearch-${OPENSEARCH_VERSION}-linux-${ARCHITECTURE}.tar.gz
+                """
+
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  BUILD CONTAINER IMAGE                                              //
+        // ------------------------------------------------------------------ //
+        stage('Build Container Image') {
+
+            steps {
+
+                sh """
+                    set -euo pipefail
+                    rm -rf docker-context
+                    mkdir -p docker-context
+
+                    cp -r ${SCRIPTS_DIR}/${DOCKERFILE_DIR}/* docker-context/
+
+                    # Copy entrypoint scripts and config files from opensearch-build repo
+                    cp ${BUILD_DIR}/docker/release/config/opensearch/opensearch-docker-entrypoint-*.x.sh docker-context/
+                    cp ${BUILD_DIR}/docker/release/config/opensearch/log4j2.properties docker-context/
+                    cp ${BUILD_DIR}/scripts/opensearch-onetime-setup.sh docker-context/
+                    cp ${BUILD_DIR}/config/opensearch.yml docker-context/
+
+                    cp \
+                        ${BUILD_DIR}/tar/dist/opensearch/opensearch-${OPENSEARCH_VERSION}-linux-${ARCHITECTURE}.tar.gz \
+                        docker-context/opensearch-ppc64le.tgz
+
+                    podman build \
+                        --build-arg VERSION=${OPENSEARCH_VERSION} \
+                        --build-arg BUILD_DATE=\$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+                        --build-arg UID=1000 \
+                        --build-arg GID=1000 \
+                        -f docker-context/Dockerfile.ais \
+                        -t ${IMAGE_NAME}:${IMAGE_TAG} \
+                        docker-context
+                """
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  VALIDATE — smoke-test + AI-services compatibility check            //
+        // ------------------------------------------------------------------ //
+        stage('Validate') {
+
+            steps {
+
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+
+                sh """
+                    set -euo pipefail
+
+                    CONTAINER_NAME="opensearch-validate-\${BUILD_NUMBER}"
+                    HTTP_PORT=9201
+
+                    # Always remove the container; dump its logs only on failure.
+                    cleanup() {
+                        rc=\$?
+                        if [ "\${rc}" -ne 0 ]; then
+                            podman logs "\${CONTAINER_NAME}" || true
+                        fi
+                        podman rm -f "\${CONTAINER_NAME}" || true
+                    }
+                    trap cleanup EXIT
+
+                    echo "=== Starting OpenSearch container for smoke-test ==="
+                    podman run -d \
+                        --name "\${CONTAINER_NAME}" \
+                        --ulimit nofile=65536:65536 \
+                        --ulimit nproc=4096:4096 \
+                        -e "discovery.type=single-node" \
+                        -e "DISABLE_SECURITY_PLUGIN=true" \
+                        -p 127.0.0.1:\${HTTP_PORT}:9200 \
+                        ${IMAGE_NAME}:${IMAGE_TAG}
+
+                    echo "=== Waiting for OpenSearch to become healthy (max 120 s) ==="
+                    TIMEOUT=120
+                    ELAPSED=0
+                    until curl -sf -o /dev/null "http://127.0.0.1:\${HTTP_PORT}/_cluster/health"; do
+                        if [ "\${ELAPSED}" -ge "\${TIMEOUT}" ]; then
+                            echo "ERROR: OpenSearch did not become healthy within \${TIMEOUT} seconds."
+                            exit 1
+                        fi
+                        echo "  ... waiting (\${ELAPSED}s elapsed)"
+                        sleep 5
+                        ELAPSED=\$((ELAPSED + 5))
+                    done
+
+                    echo "=== OpenSearch is healthy – running validation checks ==="
+
+                    # 1. Cluster health must be green or yellow
+                    HEALTH=\$(curl -s "http://127.0.0.1:\${HTTP_PORT}/_cluster/health" \
+                        | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+                    echo "Cluster health: \${HEALTH}"
+                    if [ "\${HEALTH}" != "green" ] && [ "\${HEALTH}" != "yellow" ]; then
+                        echo "ERROR: Unexpected cluster health status: \${HEALTH}"
+                        exit 1
+                    fi
+
+                    # 2. Version must match expected build
+                    REPORTED_VERSION=\$(curl -s "http://127.0.0.1:\${HTTP_PORT}/" \
+                        | python3 -c "import sys,json; print(json.load(sys.stdin)['version']['number'])")
+                    echo "Reported OpenSearch version: \${REPORTED_VERSION}"
+                    if [ "\${REPORTED_VERSION}" != "${OPENSEARCH_VERSION}" ]; then
+                        echo "ERROR: Version mismatch – expected ${OPENSEARCH_VERSION}, got \${REPORTED_VERSION}"
+                        exit 1
+                    fi
+
+                    echo "=== Smoke-test passed ==="
+                """
+
+                // Non-fatal: a failure marks the stage unstable but the image is still pushed.
+                sh """
+                    set -euo pipefail
+                    chmod +x test/opensearch/validate.sh
+                    test/opensearch/validate.sh \
+                        --image  ${IMAGE_NAME}:${IMAGE_TAG} \
+                        --version ${OPENSEARCH_VERSION} \
+                        --port    9202 \
+                        --timeout 180
+                """
+
+                } // catchError
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  SECURITY SCAN                                                      //
+        // ------------------------------------------------------------------ //
+        stage('Security Scan') {
+
+            steps {
+
+                sh """
+                    set -euo pipefail
+                    mkdir -p \${WORKSPACE}/trivy-report
+
+                    TRIVY_IMAGE="ghcr.io/aquasecurity/trivy:0.72.0"
+                    REPORT_DIR="\${WORKSPACE}/trivy-report"
+                    IMAGE_ARCHIVE="\${REPORT_DIR}/image.tar"
+                    TRIVY_CACHE="/var/jenkins/trivy-cache"
+                    mkdir -p "\${TRIVY_CACHE}"
+
+                    echo "Exporting ${IMAGE_NAME}:${IMAGE_TAG} to Docker archive for Trivy..."
+                    podman save --format docker-archive -o "\${IMAGE_ARCHIVE}" ${IMAGE_NAME}:${IMAGE_TAG}
+
+                    # scan <format> <output-file>
+                    scan() {
+                        podman run --rm \
+                            -v "\${REPORT_DIR}:/report:z" \
+                            -v "\${TRIVY_CACHE}:/root/.cache/trivy:z" \
+                            \${TRIVY_IMAGE} image \
+                                --input /report/image.tar \
+                                --format "\$1" \
+                                --output "/report/\$2" \
+                                --severity CRITICAL,HIGH \
+                                --ignore-unfixed \
+                                --scanners vuln
+                    }
+
+                    echo "Running Trivy scan on ${IMAGE_NAME}:${IMAGE_TAG}..."
+                    scan json  trivy-results.json
+                    scan table trivy-results.txt
+
+                    echo "=== Trivy Summary ==="
+                    grep -E '"Severity"' \${REPORT_DIR}/trivy-results.json \
+                        | sort | uniq -c | sort -rn || true
+
+                    rm -f "\${IMAGE_ARCHIVE}"
+                """
+            }
+
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'trivy-report/**',
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  PUSH TO ICR                                                        //
+        // ------------------------------------------------------------------ //
+        stage('Push to ICR') {
+
+            steps {
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'icr-cicd-namespace-creds',
+                        usernameVariable: 'ICR_USER',
+                        passwordVariable: 'ICR_PASSWORD'
+                    )
+                ]) {
+
+                    sh """
+                        set -euo pipefail
+
+                        echo "Logging into IBM Container Registry..."
+
+                        set +x
+                        echo "\$ICR_PASSWORD" | podman login \
+                            -u "\$ICR_USER" \
+                            --password-stdin \
+                            ${ICR_REGISTRY}
+                        set -x
+
+                        echo "Pushing versioned image (${IMAGE_NAME}:${IMAGE_TAG})..."
+                        podman push ${IMAGE_NAME}:${IMAGE_TAG}
+
+                        podman logout ${ICR_REGISTRY}
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+
+        always {
+
+            archiveArtifacts(
+                artifacts: 'opensearch-build/artifacts/**, opensearch-build/tar/dist/opensearch/**, dependency-patches/**',
+                allowEmptyArchive: true
+            )
+
+            cleanWs()
+        }
+
+        success {
+            echo "OpenSearch ${OPENSEARCH_VERSION} (${ARCHITECTURE}) image successfully published to ${IMAGE_NAME}:${IMAGE_TAG}"
+        }
+
+        failure {
+            echo "Pipeline failed."
+        }
+    }
+}
