@@ -31,7 +31,8 @@ LOCK_NOT_AVAILABLE = "55P03"
 UNIQUE_VIOLATION = "23505"
 
 # The stored password is only ever used with these values; changing one needs a new password.
-PASSWORD_BOUND_FIELDS = ("host", "port", "database", "username")
+# The certificate is not listed: a supplied certificate always needs a new password (see below).
+PASSWORD_BOUND_FIELDS = ("host", "port", "database", "username", "ignore_secure_connection")
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +155,8 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
     """Validate the stored details merged with the supplied ones; return the supplied fields encrypted.
 
     Raises INVALID_REQUEST when a kept secret cannot be decrypted, the merged details
-    are invalid, or the host, port, database or username changes without a new password.
+    are invalid, or the host, port, database, username or ignore_secure_connection
+    changes, or a certificate is supplied, without a new password.
     Raises INTERNAL_SERVER_ERROR when DB_ENCRYPTION_KEY is missing or invalid, because the
     service starts without it and secrets can then be neither read nor written.
     """
@@ -190,8 +192,15 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
             f"Invalid connection_details: {problems}",
         )
 
-    # Security check: never replay a stored password to a changed target or identity
-    changed = [f for f in PASSWORD_BOUND_FIELDS if getattr(merged, f) != config.get(f)]
+    # Security check: never replay a stored password to a changed target, identity or TLS trust.
+    # A stored connector that predates ignore_secure_connection has it unset, which means false.
+    changed = [
+        f
+        for f in PASSWORD_BOUND_FIELDS
+        if getattr(merged, f) != config.get(f, False if f == "ignore_secure_connection" else None)
+    ]
+    if "certificate" in supplied:
+        changed.append("certificate")
     if changed and "password" not in supplied:
         logger.warning(
             f"Update of connector {cid} rejected: password required when "
@@ -199,7 +208,8 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
         )
         APIError.raise_error(
             ErrorCode.INVALID_REQUEST,
-            "Password must be supplied when host, port, database or username changes.",
+            "Password must be supplied when host, port, database, username, "
+            "ignore_secure_connection or certificate changes.",
         )
 
     # Store the validated values, so "8471" is kept as the integer 8471.

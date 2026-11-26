@@ -20,7 +20,7 @@ from forecast.settings import settings
 
 # Fields stored in plaintext and returned in responses. db2_for_i is the only
 # connector type; a new type adds its safe fields here.
-SAFE_FIELDS = frozenset({"host", "port", "database", "username"})
+SAFE_FIELDS = frozenset({"host", "port", "database", "username", "ignore_secure_connection"})
 
 _NONCE_SIZE = 12  # 96-bit nonce recommended for GCM
 

@@ -3,12 +3,25 @@
 from typing import Annotated, Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    StrictBool,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 # SQL identifier patterns: allows letters, numbers, underscores, and common SQL/Db2 special chars ($, #, @).
 # Table can optionally be schema-qualified (e.g. "SCHEMA.TABLE" or just "TABLE").
 _SQL_IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
 _SQL_TABLE_PATTERN = r"^(?:[A-Za-z_][A-Za-z0-9_$#@]{0,127}\.)?[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
+
+_MAX_CERTIFICATE_LENGTH = 65536
+_PEM_BEGIN = "-----BEGIN CERTIFICATE-----"
+_PEM_END = "-----END CERTIFICATE-----"
 
 Schedule = Literal["hourly", "daily", "weekly", "monthly", "yearly"]
 
@@ -18,7 +31,11 @@ Schedule = Literal["hourly", "daily", "weekly", "monthly", "yearly"]
 
 
 class Db2ForIDetails(BaseModel):
-    """connection_details of a db2_for_i connector. Unknown fields are rejected."""
+    """connection_details of a db2_for_i connector. Unknown fields are rejected.
+
+    certificate is the PEM certificate the server's TLS certificate is verified against.
+    With ignore_secure_connection true the server's certificate is not verified.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -27,6 +44,16 @@ class Db2ForIDetails(BaseModel):
     database: str = Field(min_length=1, max_length=128)
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=1024)
+    ignore_secure_connection: StrictBool = False
+    certificate: Optional[str] = Field(default=None, max_length=_MAX_CERTIFICATE_LENGTH)
+
+    @field_validator("certificate")
+    @classmethod
+    def _certificate_is_pem(cls, value: Optional[str]) -> Optional[str]:
+        """Reject a value that holds no PEM certificate block."""
+        if value is not None and not (_PEM_BEGIN in value and _PEM_END in value):
+            raise ValueError("certificate must be a PEM certificate")
+        return value
 
 
 class Db2ForIDetailsPatch(BaseModel):
@@ -43,6 +70,8 @@ class Db2ForIDetailsPatch(BaseModel):
     database: Any = None
     username: Any = None
     password: Any = None
+    ignore_secure_connection: Any = None
+    certificate: Any = None
 
 
 # The name of an input column. Its type is not given: the forecaster reads every input as text.

@@ -87,6 +87,9 @@ def db():
         yield SimpleNamespace(session=session, register=register, **mocks)
 
 
+CERTIFICATE = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUTEST\n-----END CERTIFICATE-----"
+
+
 def _create_body(**overrides):
     body = {
         "id": CONNECTOR_ID,
@@ -122,17 +125,24 @@ def _service_settings(**overrides):
     return {"forecast": _settings(**overrides)}
 
 
-def _stored_row(password="s3cret", host="ibmi.example.com", **overrides):
-    """A connector as the database returns it, with the password encrypted."""
-    config = encrypt_secrets(
-        {
-            "host": host,
-            "port": 8471,
-            "database": "PRODDB",
-            "username": "forecast_ro",
-            "password": password,
-        }
-    )
+def _stored_row(password="s3cret", host="ibmi.example.com", certificate=None, ignore_secure_connection=None, **overrides):
+    """A connector as the database returns it, with the password and the certificate encrypted.
+
+    A connector stored before the TLS fields existed has neither of them, so they are only
+    set when given.
+    """
+    details = {
+        "host": host,
+        "port": 8471,
+        "database": "PRODDB",
+        "username": "forecast_ro",
+        "password": password,
+    }
+    if certificate is not None:
+        details["certificate"] = certificate
+    if ignore_secure_connection is not None:
+        details["ignore_secure_connection"] = ignore_secure_connection
+    config = encrypt_secrets(details)
     fields = {
         "id": uuid.UUID(CONNECTOR_ID),
         "name": "prod-sales-db",
@@ -191,6 +201,7 @@ def test_create_stores_encrypted_connector_and_queues_training(client, db):
     assert kwargs["config"]["host"] == "ibmi.example.com"
     assert kwargs["config"]["password"] != "s3cret"
     assert decrypt_secrets(kwargs["config"])["password"] == "s3cret"
+    assert kwargs["config"]["ignore_secure_connection"] is False
     assert kwargs["source_table"] == "ORDERS"
     assert kwargs["target_column"] == "DELIVERY_LATE"
     assert kwargs["input_columns"] == ["REGION", "QUANTITY"]
@@ -382,11 +393,27 @@ def test_create_without_a_usable_key_is_201_and_stored_as_failed_without_the_sec
     kwargs = db.insert_failed_connector.call_args.kwargs
     assert message in kwargs["message"]
     # Only the fields that are shown in a response are kept: nothing can be encrypted, and the
-    # password is never stored in plain text.
+    # password and the certificate are never stored in plain text.
     assert kwargs["config"] == {
         "host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro",
+        "ignore_secure_connection": False,
     }
     assert "s3cret" not in caplog.text and "s3cret" not in response.text and "s3cret" not in kwargs["message"]
+
+
+@pytest.mark.unit
+def test_create_without_a_key_drops_the_certificate_and_keeps_the_flag(db):
+    client = TestClient(forecast_app.app)
+    body = _create_body()
+    body["connection_details"].update({"certificate": CERTIFICATE, "ignore_secure_connection": True})
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        response = client.post("/v1/connectors", json=body)
+
+    assert response.status_code == 201
+    config = db.insert_failed_connector.call_args.kwargs["config"]
+    assert config["ignore_secure_connection"] is True
+    assert "certificate" not in config
 
 
 @pytest.mark.unit
@@ -478,8 +505,19 @@ def test_list_name_longer_than_255_returns_422(client, db):
 
 
 @pytest.mark.unit
-def test_get_returns_safe_details_only(client, db):
+def test_get_of_a_connector_stored_before_the_tls_fields_has_no_ignore_secure_connection(client, db):
+    # Absent means false; the response shows the details as stored.
     db.get_connector.return_value = _stored_row()
+
+    response = client.get(f"/v1/connectors/{CONNECTOR_ID}")
+
+    assert response.status_code == 200
+    assert "ignore_secure_connection" not in response.json()["connection_details"]
+
+
+@pytest.mark.unit
+def test_get_returns_safe_details_only(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE, ignore_secure_connection=True)
 
     response = client.get(f"/v1/connectors/{CONNECTOR_ID}")
 
@@ -490,7 +528,10 @@ def test_get_returns_safe_details_only(client, db):
         "port": 8471,
         "database": "PRODDB",
         "username": "forecast_ro",
+        "ignore_secure_connection": True,
     }
+    assert "BEGIN CERTIFICATE" not in response.text
+    assert "certificate" not in response.text
     assert body["table"] == "ORDERS"
     assert body["target_column"] == "DELIVERY_LATE"
     assert body["schedule"] == "daily"
@@ -749,15 +790,19 @@ def test_metrics_failed_newest_job_without_training_seconds_has_no_duration(clie
 
 
 @pytest.mark.unit
-def test_only_the_password_is_encrypted():
-    details = {"host": "h", "port": 1, "database": "d", "username": "u", "password": "p"}
+def test_only_the_secrets_are_encrypted():
+    details = {
+        "host": "h", "port": 1, "database": "d", "username": "u", "password": "p",
+        "ignore_secure_connection": True, "certificate": CERTIFICATE,
+    }
 
     stored = encrypt_secrets(details)
 
-    assert {k: stored[k] for k in ("host", "port", "database", "username")} == {
-        "host": "h", "port": 1, "database": "d", "username": "u",
+    assert {k: stored[k] for k in ("host", "port", "database", "username", "ignore_secure_connection")} == {
+        "host": "h", "port": 1, "database": "d", "username": "u", "ignore_secure_connection": True,
     }
     assert stored["password"] != "p"
+    assert stored["certificate"] != CERTIFICATE
     assert decrypt_secrets(stored) == details
 
 
@@ -771,9 +816,14 @@ def test_encryption_uses_a_fresh_nonce_each_time():
 
 @pytest.mark.unit
 def test_safe_connection_details_drops_everything_else():
-    stored = {"host": "h", "port": 1, "database": "d", "username": "u", "password": "cipher", "legacy_token": "x"}
+    stored = {
+        "host": "h", "port": 1, "database": "d", "username": "u", "ignore_secure_connection": True,
+        "password": "cipher", "certificate": "cipher", "legacy_token": "x",
+    }
 
-    assert safe_connection_details(stored) == {"host": "h", "port": 1, "database": "d", "username": "u"}
+    assert safe_connection_details(stored) == {
+        "host": "h", "port": 1, "database": "d", "username": "u", "ignore_secure_connection": True,
+    }
 
 
 @pytest.mark.unit
@@ -1232,6 +1282,65 @@ def test_create_rejects_oversized_connection_details(client, db, field, value):
     _assert_envelope(response.json(), "INVALID_REQUEST", 422)
 
 
+def _certificate_of_length(length):
+    """A value with both PEM markers and exactly `length` characters."""
+    head, tail = "-----BEGIN CERTIFICATE-----\n", "\n-----END CERTIFICATE-----"
+    return head + "A" * (length - len(head) - len(tail)) + tail
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("certificate", "not a certificate"),
+        ("certificate", ""),
+        ("certificate", "-----BEGIN CERTIFICATE-----\nno end marker"),
+        ("certificate", "no begin marker\n-----END CERTIFICATE-----"),
+        ("certificate", _certificate_of_length(65537)),
+        ("certificate", CERTIFICATE + "a" * 65536),
+        ("certificate", 42),
+        ("ignore_secure_connection", "true"),
+        ("ignore_secure_connection", 1),
+        ("ignore_secure_connection", None),
+    ],
+)
+def test_create_rejects_invalid_tls_details(client, db, field, value):
+    body = _create_body()
+    body["connection_details"][field] = value
+
+    response = client.post("/v1/connectors", json=body)
+
+    assert response.status_code == 422
+    _assert_envelope(response.json(), "INVALID_REQUEST", 422)
+    if isinstance(value, str) and value:
+        # The message names the field and the problem, never the value that was sent.
+        assert value not in response.text
+    db.insert_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_accepts_a_certificate_of_the_maximum_length(client, db):
+    certificate = _certificate_of_length(65536)
+    body = _create_body()
+    body["connection_details"]["certificate"] = certificate
+
+    response = client.post("/v1/connectors", json=body)
+
+    assert response.status_code == 201
+    config = db.insert_connector.call_args.kwargs["config"]
+    assert decrypt_secrets(config)["certificate"] == certificate
+
+
+@pytest.mark.unit
+def test_create_without_tls_details_defaults_to_verifying_the_server(client, db):
+    response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    config = db.insert_connector.call_args.kwargs["config"]
+    assert config["ignore_secure_connection"] is False
+    assert "certificate" not in config
+
+
 @pytest.mark.unit
 def test_decrypt_value_failures_raise_decryption_error():
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -1280,9 +1389,9 @@ def test_put_changing_the_target_without_password_fails_400(client, db, change):
     assert response.status_code == 400
     _assert_envelope(response.json(), "INVALID_REQUEST", 400)
     assert (
-        "Password must be supplied when host, port, database or username changes"
-        in response.json()["error"]["message"]
-    )
+        "Password must be supplied when host, port, database, username, "
+        "ignore_secure_connection or certificate changes"
+    ) in response.json()["error"]["message"]
     db.update_connector.assert_not_called()
 
 
@@ -1297,6 +1406,165 @@ def test_put_changing_host_with_password_succeeds(client, db):
 
     assert response.status_code == 200
     db.update_connector.assert_called_once()
+
+
+@pytest.mark.unit
+def test_put_turning_on_ignore_secure_connection_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"ignore_secure_connection": True}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "ignore_secure_connection" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_turning_on_ignore_secure_connection_with_password_stores_it_in_plain_text(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"ignore_secure_connection": True, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    assert config["ignore_secure_connection"] is True
+    assert decrypt_secrets(config)["password"] == "new-pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stored", [None, False, True], ids=["unset", "false", "true"])
+def test_put_repeating_the_stored_ignore_secure_connection_without_password_succeeds(client, db, stored):
+    # A connector stored before the field existed has it unset, which means false.
+    db.get_connector.return_value = _stored_row(ignore_secure_connection=stored)
+    repeated = bool(stored)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"ignore_secure_connection": repeated}}
+    )
+
+    assert response.status_code == 200
+    assert db.update_connector.call_args.kwargs["config"]["ignore_secure_connection"] is repeated
+
+
+@pytest.mark.unit
+def test_put_turning_off_ignore_secure_connection_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row(ignore_secure_connection=True)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"ignore_secure_connection": False}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "ignore_secure_connection" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_certificate_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"certificate": CERTIFICATE}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "certificate" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_certificate_with_password_encrypts_it(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"certificate": CERTIFICATE, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    assert config["certificate"] != CERTIFICATE
+    assert decrypt_secrets(config)["certificate"] == CERTIFICATE
+    assert CERTIFICATE not in response.text
+
+
+@pytest.mark.unit
+def test_put_keeps_a_stored_certificate_when_other_fields_change(client, db):
+    row = _stored_row(certificate=CERTIFICATE)
+    db.get_connector.return_value = row
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"password": "new-pass"}}
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    assert config["certificate"] == row.config["certificate"]
+    assert decrypt_secrets(config)["certificate"] == CERTIFICATE
+
+
+@pytest.mark.unit
+def test_put_clearing_the_certificate_with_password_stores_null(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"certificate": None, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    # The key stays, with the value null: a null certificate means no certificate.
+    assert "certificate" in config and config["certificate"] is None
+
+
+@pytest.mark.unit
+def test_put_clearing_the_certificate_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"certificate": None}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "certificate" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "change,leaked",
+    [
+        ({"certificate": "not a certificate"}, "not a certificate"),
+        ({"certificate": 42}, "42"),
+        ({"ignore_secure_connection": "yes"}, "yes"),
+        ({"ignore_secure_connection": None}, None),
+    ],
+)
+def test_put_with_an_invalid_tls_value_is_400_and_writes_nothing(client, db, change, leaked):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {**change, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    # The message names the field and the problem, never the value that was sent.
+    assert "new-pass" not in response.text
+    if leaked is not None:
+        assert f"'{leaked}'" not in response.text and f'"{leaked}"' not in response.text
+    db.update_connector.assert_not_called()
 
 
 @pytest.mark.unit

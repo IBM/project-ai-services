@@ -455,9 +455,11 @@ A connector stores the connection details of one source database, with its secre
 
 **Secret handling.** Each type declares **safe fields**, which are stored in plaintext and returned in responses. Every other field is a secret: it is encrypted with AES-256-GCM using `DB_ENCRYPTION_KEY` before it is stored and is never returned. Listing safe fields, instead of listing secret fields, means a credential field that nobody thought of is encrypted by default and is never returned.
 
-| Type        | Required fields (`connection_details`)     | Optional | Safe (plaintext, returned)             | Encrypted, never returned |
-|:------------|:-------------------------------------------|:---------|:---------------------------------------|:--------------------------|
-| `db2_for_i` | `host`, `database`, `username`, `password` | `port`   | `host`, `port`, `database`, `username` | `password`                |
+| Type        | Required fields (`connection_details`)     | Optional                                          | Safe (plaintext, returned)                                                   | Encrypted, never returned |
+|:------------|:-------------------------------------------|:--------------------------------------------------|:-----------------------------------------------------------------------------|:--------------------------|
+| `db2_for_i` | `host`, `database`, `username`, `password` | `port`, `ignore_secure_connection`, `certificate` | `host`, `port`, `database`, `username`, `ignore_secure_connection`           | `password`, `certificate` |
+
+For `db2_for_i`, `certificate` is the PEM certificate that the server's TLS certificate is verified against, and `ignore_secure_connection` (a JSON boolean, `false` by default) turns the verification off. When both are set, `ignore_secure_connection` wins. `ignore_secure_connection` is not a secret, so `GET /v1/connectors` shows whether the verification is off. `certificate` must contain the text `-----BEGIN CERTIFICATE-----` and the text `-----END CERTIFICATE-----` and is at most 65,536 characters. The check is only a first filter: it does not parse the certificate, so a value that holds both markers but is not a valid certificate is stored and fails when the loader uses it.
 
 #### POST /v1/connectors — Create a Connector
 
@@ -468,7 +470,7 @@ A connector stores the connection details of one source database, with its secre
 | `id`                 | string | Yes      | Unique connector identifier (UUID).                                                    |
 | `name`               | string | Yes      | Unique, human-readable name, 1–255 characters.                                         |
 | `type`               | string | Yes      | A supported connector type (`db2_for_i`).                                              |
-| `connection_details` | object | Yes      | Fields for the type, as in the connector types table. Unknown fields are rejected.     |
+| `connection_details` | object | Yes      | Fields for the type, as in the connector types table, `ignore_secure_connection` and `certificate` included. Unknown fields are rejected. |
 | `service_settings`   | object | Yes      | The settings chosen when the service was deployed, grouped by the part of the service they are for. This service reads the `forecast` group. See the `service_settings.forecast` object table. Unknown fields, in any group, are ignored: the catalog forwards every setting of the deployed service. |
 
 **`service_settings.forecast` object** (required; the keys are camelCase):
@@ -494,7 +496,9 @@ curl -X POST http://localhost:8500/v1/connectors \
           "port": 8471,
           "database": "PRODDB",
           "username": "forecast_ro",
-          "password": "********"
+          "password": "********",
+          "ignore_secure_connection": false,
+          "certificate": "-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----"
         },
         "service_settings": {
           "forecast": {
@@ -523,7 +527,7 @@ The first connector is answered with `201` whether or not it can be accepted: wi
 |:-----|:---------|:-----------------|:-----------------------------------------|:--------------------------------|
 | New connector: no other connector exists | 201 | Inserted with status `ACCEPTED`. | Row inserted, job `QUEUED`. APScheduler jobs registered: a one-off job that starts the first training at once and, when `schedule` is set, a cron job for the later ones. | Yes, status `ACCEPTED`. |
 | The `id` already exists (a repeated request) | 201 | Not changed. | Not changed. No second job, no second schedule. | The existing connector. |
-| No other connector exists, and `DB_ENCRYPTION_KEY` is missing or not 32 bytes | 201 | Inserted with status `FAILED` and the message "Connector encryption key not found. Ensure the DB_ENCRYPTION_KEY environment variable is set before starting the service." (or the 32-byte message). Only the safe fields are stored: the secrets cannot be encrypted, and they are never stored in plain text. | None. | Yes, status `FAILED` with the message. |
+| No other connector exists, and `DB_ENCRYPTION_KEY` is missing or not 32 bytes | 201 | Inserted with status `FAILED` and the message "Connector encryption key not found. Ensure the DB_ENCRYPTION_KEY environment variable is set before starting the service." (or the 32-byte message). Only the safe fields are stored: the secrets (the password and the certificate) cannot be encrypted, and they are never stored in plain text. `ignore_secure_connection` is one of the safe fields and is kept. | None. | Yes, status `FAILED` with the message. |
 | A connector already exists, with any status, `FAILED` included, and the `id` is a new one | 409 `RESOURCE_CONFLICT` | Nothing inserted. The existing connector is not changed. The message says "A connector already exists. Only one connector is supported." | None. | No. The existing connector only. |
 | The lock on the `connectors` table times out | 409 `RESOURCE_LOCKED` | Nothing inserted. | None. | No. |
 | The database pool is exhausted | 429 `SERVER_BUSY` | Nothing inserted. | None. | No. |
@@ -540,7 +544,7 @@ The first connector is answered with `201` whether or not it can be accepted: wi
 | 201 Created                           | The request was valid. The connector is accepted, or stored as `FAILED` because `DB_ENCRYPTION_KEY` is unusable, or the `id` already exists.                       |
 | 409 Conflict (`RESOURCE_CONFLICT`)    | A connector already exists, whatever its status, and the `id` is a new one. Nothing is stored. The catalog treats `409` as success.                                |
 | 409 Conflict (`RESOURCE_LOCKED`)      | The lock on the `connectors` table timed out, or a `PUT` renames a connector to a `name` that is taken. The catalog treats `409` as success.                      |
-| 422 Unprocessable Entity              | The body cannot be parsed: unknown `type`, an `id` that is not a UUID, an unknown field in `connection_details`, or a missing or invalid field in `connection_details` or `service_settings.forecast` (a missing `forecast` group included). Unknown fields in `service_settings` are ignored. Same envelope as every error. |
+| 422 Unprocessable Entity              | The body cannot be parsed: unknown `type`, an `id` that is not a UUID, an unknown field in `connection_details`, or a missing or invalid field in `connection_details` (a `certificate` that lacks the PEM markers or is over 65,536 characters, or an `ignore_secure_connection` that is not a boolean, included) or `service_settings.forecast` (a missing `forecast` group included). Unknown fields in `service_settings` are ignored. Same envelope as every error. |
 | 429 Too Many Requests (`SERVER_BUSY`) | The database connection pool is exhausted. Retry shortly.                                        |
 | 500 Internal Server Error             | A database write failed, or a `PUT` that changes `connection_details` finds `DB_ENCRYPTION_KEY` missing or invalid.                                                                                        |
 
@@ -577,7 +581,7 @@ The list limits (50 default, 200 maximum) match digitize's connector list. The r
 
 #### GET /v1/connectors/{connector_id} — Get a Connector
 
-Returns the list item plus `connection_details` limited to the safe fields and `updated_at`. Secrets are omitted, including any field that is stored but not on the allowlist.
+Returns the list item plus `connection_details` limited to the safe fields and `updated_at`. Secrets are omitted, including any field that is stored but not on the allowlist. `ignore_secure_connection` is shown as stored. A connector stored before the field existed has no such key in its details, which means `false`.
 
 ```json
 {
@@ -587,7 +591,7 @@ Returns the list item plus `connection_details` limited to the safe fields and `
     "table": "customers",
     "target_column": "price",
     "schedule": "daily",
-    "connection_details": {"host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro"},
+    "connection_details": {"host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro", "ignore_secure_connection": false},
     "status": "TRAINING",
     "last_trained_at": "2026-10-26T08:55:00Z",
     "message": "Training on {n} rows",
@@ -649,6 +653,7 @@ Returns `200`, or `404 RESOURCE_NOT_FOUND` when the connector does not exist.
 - A successful update returns `200` with an empty body. An empty request body is a no-op and also returns `200`.
 - The merged details are validated against the type before anything is written. The stored secrets are decrypted for that check. A failure returns `400 INVALID_REQUEST`.
 - Supplied secret fields are encrypted again before they are stored.
+- A new `password` is required when `host`, `port`, `database`, `username` or `ignore_secure_connection` changes, and whenever a `certificate` is supplied (`null` clears it: the key stays stored with the value `null`, which the loader must treat as no certificate). Without it the call returns `400`, so the stored password is never replayed to another target or under a weaker TLS check. A connector stored before these fields existed has `ignore_secure_connection` unset, which counts as `false`.
 - A `PUT` on a `FAILED` connector is accepted when it is valid, but it does not change the status and does not queue a job.
 - A `PUT` that changes `connection_details` needs a usable `DB_ENCRYPTION_KEY`, because the stored secrets are decrypted and the supplied ones are encrypted. Without one it returns `500` and writes nothing. A rename does not need the key.
 - A queued job reads the connector when it runs, not when it was created. An update therefore also applies to a job still in the queue and to later scheduled runs.
@@ -1277,9 +1282,9 @@ These stories break the design above into units of work. Each one has a descript
 - `POST` returns `409` when a connector already exists, whatever its status, `FAILED` included, and the `id` is a new one. Nothing is stored.
 - `POST` returns `201` when `DB_ENCRYPTION_KEY` is missing or not 32 bytes. The connector is stored with status `FAILED` and the reason in `message`, with no `training_configs` row, no job and no schedule. A missing or invalid `DB_ENCRYPTION_KEY` does not stop the service from starting: it is logged as an error at startup, and the connector is stored without its secrets.
 - A secret never appears in a `message` or in a log.
-- `POST` returns `422` for an unknown type, an `id` that is not a UUID, an unknown field in `connection_details`, or a missing or invalid field in `connection_details` or `service_settings.forecast` (a missing `forecast` group included). Unknown fields in `service_settings` are ignored.
+- `POST` returns `422` for an unknown type, an `id` that is not a UUID, an unknown field in `connection_details`, or a missing or invalid field in `connection_details` (a `certificate` that lacks the PEM markers or is over 65,536 characters, or an `ignore_secure_connection` that is not a boolean, included) or `service_settings.forecast` (a missing `forecast` group included). Unknown fields in `service_settings` are ignored.
 - The list and get responses return `status`, `message`, and `last_trained_at` from the `connectors` row.
-- `PUT` rejects `type` and `service_settings` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
+- `PUT` rejects `type` and `service_settings` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type, and when `host`, `port`, `database`, `username` or `ignore_secure_connection` changes, or a `certificate` is supplied, without a new `password`.
 - Cleanup of the schedule and the forecasters of a deleted connector is not part of this story.
 
 ### 14.5 Story 5 — Data loader
