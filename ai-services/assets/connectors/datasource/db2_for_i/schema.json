@@ -46,19 +46,22 @@
       "minLength": 1,
       "ui:section": "Authentication"
     },
-    "certificate": {
-      "type": "string",
-      "title": "Certificate",
-      "format": "password",
-      "description": "Optional PEM-encoded certificate for TLS authentication and verification.",
-      "ui:section": "Authentication"
-    },
     "allow_insecure_connection": {
       "type": "boolean",
       "title": "Allow insecure connection",
       "description": "Allow connection without verifying the server TLS certificate.",
       "default": false,
-      "ui:section": "Authentication"
+      "ui:section": "Authentication",
+      "x-ui-controls": "certificate"
+    },
+    "certificate": {
+      "type": "string",
+      "title": "Certificate",
+      "format": "password",
+      "description": "Optional PEM-encoded certificate for TLS authentication and verification.",
+      "ui:section": "Authentication",
+      "x-ui-controlled-by": "allow_insecure_connection",
+      "x-ui-hide-when-checked": true
     }
   }
 }
