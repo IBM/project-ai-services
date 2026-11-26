@@ -195,19 +195,24 @@ func populateUpgradeRows(printer *utils.Printer, v upgradeVersions) {
 	)
 }
 
-func getUpgradePromptDetails(kind upgradeKind, operatorLabel string) upgradePromptDetails {
+func getUpgradePromptDetails(kind upgradeKind, operatorLabel, packageName string) upgradePromptDetails {
+	note := ""
+	if packageName == constants.SpyreOperatorPackage {
+		note = fmt.Sprintf("\nNOTE: This will delete and recreate the existing %s. Any customizations will be lost.", constants.SpyreKind)
+	}
+
 	if kind == kindChannelSwitch {
 		return upgradePromptDetails{
 			actionText:    "channel update",
 			actionTitle:   "Channel update available: " + operatorLabel,
-			confirmPrompt: fmt.Sprintf("\nUpdate channel for %s?", operatorLabel),
+			confirmPrompt: fmt.Sprintf("\nUpdate channel for %s?%s", operatorLabel, note),
 		}
 	}
 
 	return upgradePromptDetails{
 		actionText:    "upgrade",
 		actionTitle:   "Upgrade available: " + operatorLabel,
-		confirmPrompt: fmt.Sprintf("\nUpgrade %s?", operatorLabel),
+		confirmPrompt: fmt.Sprintf("\nUpgrade %s?%s", operatorLabel, note),
 	}
 }
 
@@ -252,7 +257,7 @@ func promptAndUpgrade(sub *operatorsv1alpha1.Subscription, desired *unstructured
 		return false, nil
 
 	case kindUpgrade, kindChannelSwitch:
-		details := getUpgradePromptDetails(kind, operatorLabel)
+		details := getUpgradePromptDetails(kind, operatorLabel, sub.Spec.Package)
 
 		return confirmUpgrade(v, details, operatorLabel, s)
 
@@ -307,16 +312,16 @@ func deleteSpyreClusterPolicy(ctx context.Context, c *openshift.OpenshiftClient,
 	})
 	scp.SetName(constants.SpyreClusterPolicyName)
 
-	s.UpdateMessage(fmt.Sprintf("Deleting existing %s...", constants.SpyreKind))
+	s.UpdateMessage("Deleting existing SpyreClusterPolicy...")
 	if err := c.Client.Delete(ctx, scp); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
 		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("missing required permissions to delete %s", constants.SpyreKind)
+			return fmt.Errorf("missing required permissions to delete SpyreClusterPolicy")
 		}
 
-		return fmt.Errorf("failed to delete %s: %w", constants.SpyreKind, err)
+		return fmt.Errorf("failed to delete SpyreClusterPolicy: %w", err)
 	}
 
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
@@ -326,7 +331,7 @@ func deleteSpyreClusterPolicy(ctx context.Context, c *openshift.OpenshiftClient,
 				return true, nil
 			}
 			if apierrors.IsForbidden(err) {
-				return false, fmt.Errorf("missing required permissions to get %s", constants.SpyreKind)
+				return false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
 			}
 
 			return false, err

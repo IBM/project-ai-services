@@ -12,13 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-const (
-	spyreGroup   = "spyre.ibm.com"
-	spyreVersion = "v1alpha1"
-	spyreKind    = "SpyreClusterPolicy"
-	spyreName    = "spyreclusterpolicy"
-)
-
 type SpyrePolicyRule struct{}
 
 func NewSpyrePolicyRule() *SpyrePolicyRule {
@@ -42,17 +35,17 @@ func (r *SpyrePolicyRule) Verify(ctx context.Context) error {
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   spyreGroup,
-		Version: spyreVersion,
-		Kind:    spyreKind,
+		Group:   constants.SpyreGroup,
+		Version: constants.SpyreVersion,
+		Kind:    constants.SpyreKind,
 	})
 
-	if err := client.Client.Get(ctx, types.NamespacedName{Name: spyreName}, obj); err != nil {
+	if err := client.Client.Get(ctx, types.NamespacedName{Name: constants.SpyreClusterPolicyName}, obj); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("SpyreClusterPolicy %s not found", spyreName)
+			return fmt.Errorf("SpyreClusterPolicy %s not found", constants.SpyreClusterPolicyName)
 		}
 
-		return fmt.Errorf("failed to find %s: %w", spyreName, err)
+		return fmt.Errorf("failed to find %s: %w", constants.SpyreClusterPolicyName, err)
 	}
 
 	state, found, err := unstructured.NestedString(obj.Object, "status", "state")
