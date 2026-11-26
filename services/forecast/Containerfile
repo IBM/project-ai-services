@@ -33,6 +33,8 @@ RUN microdnf install -y libgomp libatomic && \
 # about 1.6 KiB and 16 KiB already works, so 256 KiB leaves room for more libraries).
 # The environment variable is inherited by the training worker subprocess. Importing both libraries
 # in the same order as the worker fails the build if this stops working.
+# TODO: find out why the bundled libgomp copies use up the static TLS reserve on ppc64le, and remove this
+# workaround if a fixed wheel or base image makes it unnecessary.
 ENV GLIBC_TUNABLES=glibc.rtld.optional_static_tls=262144
 
 RUN /var/venv/bin/python -c "import sklearn.model_selection, lightgbm"
