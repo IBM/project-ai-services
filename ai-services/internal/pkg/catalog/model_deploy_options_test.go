@@ -51,7 +51,7 @@ func TestGetModelDeployOptions(t *testing.T) {
 				spyre := opts.Providers[0]
 				assert.Equal(t, constants.DeploymentTypeLocal, spyre.DeploymentType)
 				assert.True(t, spyre.Default)
-				assert.Equal(t, "/api/v1/components/llm/providers/vllm-spyre/params?runtime=podman", spyre.Schema)
+				assert.Empty(t, spyre.Schema, "model providers have no settings to fill in")
 				require.Len(t, spyre.Profiles, 3)
 				assert.Equal(t, "standard", spyre.Profiles[0].ID)
 				assert.True(t, spyre.Profiles[0].Default)
@@ -85,7 +85,7 @@ func TestGetModelDeployOptions(t *testing.T) {
 			wantProviders: []string{},
 		},
 		{
-			// llm/watsonx is a legacy per-app component without profiles, so only the connector is returned.
+			// watsonx is only a remote connector, so only the connector is returned.
 			name:          "remote-only model",
 			modelID:       "ibm/granite-4-h-small",
 			wantName:      "Granite 4 H Small",

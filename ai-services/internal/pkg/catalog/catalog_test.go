@@ -244,7 +244,7 @@ func TestLoadComponentValuesForModel(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, "compact-4k", v["profile"])
-		assert.Equal(t, 4096, v["maxModelLen"])
+		assert.Equal(t, 3072, v["maxModelLen"])
 		assert.Equal(t, map[string]any{"ibm.com/spyre_pf": 1}, v["resources"].(map[string]any)["accelerators"])
 	})
 

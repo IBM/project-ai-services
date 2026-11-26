@@ -21,14 +21,12 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
 
 const (
-	// valuesKeyModel is the template value (.Values.model) that carries the requested model.
-	valuesKeyModel = "model"
-
 	// watsonxTokenizeURL is the tokenize passthrough target for watsonx remote models.
 	watsonxTokenizeURL = "http://localhost:4000/watsonx/ml/v1/text/tokenization"
 
@@ -71,23 +69,34 @@ func (p *ModelPlanner) WithDeployers(deployers map[runtimeTypes.RuntimeType]type
 	return p
 }
 
+// resolveWorkerDeployer resolves the runtime for the named worker and looks up the deployer for
+// that runtime type. Extracted to keep PlanLocal's cyclomatic complexity within the lint limit.
+func (p *ModelPlanner) resolveWorkerDeployer(ctx context.Context, workerName string) (runtime.Runtime, types.Deployer, error) {
+	// Resolving the runtime up front means an unreachable worker fails the request (422)
+	// instead of leaving a component row stuck in Deploying. On OpenShift the runtime is scoped
+	// to the shared models namespace; Podman ignores it.
+	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelsNamespace())
+	if err != nil {
+		return nil, nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
+	}
+
+	deployer, ok := p.deployers[rt.Type()]
+	if !ok {
+		return nil, nil, validators.Unprocessable("models are unsupported on %s runtime", rt.Type())
+	}
+
+	return rt, deployer, nil
+}
+
 // PlanLocal validates a local-model request and resolves where and how it will be deployed.
 //
 //nolint:funlen // one sequence of validation and resolution steps, clearer kept together
 func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelRequest) (*types.LocalPlan, error) {
 	workerName := worker.DefaultName(req.WorkerName)
 
-	// Resolving the runtime up front means an unreachable worker fails the request (422)
-	// instead of leaving a component row stuck in Deploying. On OpenShift the runtime is scoped
-	// to the shared models namespace; Podman ignores it.
-	rt, err := p.workers.NewRuntime(ctx, workerName, catalogutils.ModelsNamespace())
+	rt, deployer, err := p.resolveWorkerDeployer(ctx, workerName)
 	if err != nil {
-		return nil, validators.Unprocessable("cannot reach worker %q: %v", workerName, err)
-	}
-
-	deployer, ok := p.deployers[rt.Type()]
-	if !ok {
-		return nil, validators.Unprocessable("models are unsupported on %s runtime", rt.Type())
+		return nil, err
 	}
 
 	// Scope the catalog to the worker's actual runtime so templates, metadata, and values
@@ -124,6 +133,15 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 	}
 	values[constants.InstanceSlugKey] = catalogutils.GenerateInstanceSlug(componentID.String())
 
+	// Record the profile the model is deployed with, also when the request left it to the default,
+	// so an application that reuses the model knows its hardware.
+	profile, err := provider.ResolveModelProfile(req.ComponentType, req.ProviderID, req.Model, req.Profile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the profile of model '%s': %w", req.Model, err)
+	}
+
+	req.Profile = profile
+
 	plan := &types.LocalPlan{
 		ComponentID:  componentID,
 		Req:          req,
@@ -156,8 +174,9 @@ func (p *ModelPlanner) PlanLocal(ctx context.Context, req apimodels.CreateModelR
 }
 
 // localComponentMetadata is what is persisted on the component row: the top-level model and
-// profile, with the non-sensitive params nested under "params". Credentials only reach the pod
-// through the template values.
+// profile (the one resolved at plan time, absent when the provider has no profiles), with the
+// non-sensitive params nested under "params". Credentials only reach the pod through the
+// template values.
 func localComponentMetadata(req apimodels.CreateModelRequest, sensitive map[string]bool) map[string]any {
 	md := map[string]any{
 		constants.MetadataKeyModel:  req.Model,
@@ -186,7 +205,7 @@ func loadLocalValues(provider *catalog.CatalogProvider, req apimodels.CreateMode
 	}
 
 	// The templates read the model as .Values.model; the top-level request field wins over a param.
-	values[valuesKeyModel] = req.Model
+	values[constants.ParamKeyModel] = req.Model
 
 	return values, nil
 }

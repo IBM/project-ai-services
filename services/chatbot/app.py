@@ -30,7 +30,7 @@ logger = get_logger("chatbot")
 from common.diagnostic_logger import setup_comprehensive_crash_handler
 import common.db_utils as db
 from common.misc_utils import get_embedding_endpoint, get_llm_endpoint, get_reranker_endpoint, set_request_id, create_llm_session, configure_uvicorn_logging
-from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_vllm_models, tokenize_with_llm
+from common.llm_utils import query_vllm_stream, query_vllm_non_stream, query_gateway_key_info, tokenize_with_llm
 from common.perf_utils import perf_registry
 from common.error_utils import APIError, ErrorCode, http_error_responses, http_exception_handler
 from chatbot.backend_utils import search_only, validate_query_length
@@ -62,10 +62,6 @@ NO_DOCUMENTS_FOUND_MESSAGES = {
     "FR": "Aucun document trouvé dans la base de connaissances pour cette requête.",
     "JA": "このクエリに対してナレッジベースにドキュメントが見つかりませんでした。",
 }
-
-# Cache for auth requirement check
-auth_required_cache = {"checked": False, "required": False}
-auth_cache_lock = asyncio.Lock()
 
 concurrency_limiter = BoundedSemaphore(settings.common.llm.max_batch_size)
 
@@ -219,76 +215,55 @@ def get_stop_words_with_special_tokens(request_stop_words):
             stop_words.append(token)
     return stop_words
 
-async def is_auth_required() -> bool:
+async def authenticate_and_authorize(api_key: Optional[str]) -> dict:
+    """Authenticate the caller's API key against the model gateway and authorize it for this instance.
+
+    Authn: the model gateway's /key/info is called with the key the user provided; any error from
+    the gateway (including a 401 for an unknown key) fails the request.
+    Authz: the instance ID in the key's metadata tags must match this service's LLM_INSTANCE_ID
+    (populated by Catalog), otherwise the request fails with 403.
+
+    Returns:
+        The parsed /key/info response.
     """
-    Check if vLLM authentication is required and cache the result.
-    Returns True if auth is required, False otherwise.
-    """
-    global auth_required_cache
+    if not api_key:
+        APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required")
 
-    # Check cache first
-    if auth_required_cache["checked"]:
-        return auth_required_cache["required"]
+    try:
+        key_info = await asyncio.to_thread(query_gateway_key_info, llm_model_dict['llm_endpoint'], api_key)
+    except requests.exceptions.HTTPError as e:
+        logger.debug(f"Model gateway rejected the API key: {e}")
+        APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "Invalid or missing API key")
+    except Exception as e:
+        logger.error(f"Failed to validate the API key with the model gateway: {e!r}")
+        APIError.raise_error(ErrorCode.LLM_UNAVAILABLE, "Unable to validate the API key")
 
-    async with auth_cache_lock:
-        # Double-check after acquiring lock
-        if auth_required_cache["checked"]:
-            return auth_required_cache["required"]
+    tags = ((key_info.get("info") or {}).get("metadata") or {}).get("tags") or []
+    llm_instance_id = settings.common.app.llm_instance_id
+    if not llm_instance_id or llm_instance_id not in tags:
+        logger.debug("API key is not bound to this instance")
+        APIError.raise_error(ErrorCode.FORBIDDEN, "API key is not authorized for this instance")
 
-        try:
-            llm_endpoint = llm_model_dict['llm_endpoint']
-            # Try to access without API key
-            await asyncio.to_thread(query_vllm_models, llm_endpoint, None)
-            # If successful, auth is not required
-            auth_required_cache["checked"] = True
-            auth_required_cache["required"] = False
-            logger.debug("vLLM authentication is NOT required")
-            return False
-        except Exception as e:
-            # Check if it's an authentication error
-            error_str = str(e).lower()
-            if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
-                # Auth is required
-                auth_required_cache["checked"] = True
-                auth_required_cache["required"] = True
-                logger.debug("vLLM authentication IS required")
-                return True
-            # For other errors, allow subsequent calls
-            logger.debug(f"Error checking auth requirement: {e}, assuming auth is required")
-            auth_required_cache["checked"] = True
-            auth_required_cache["required"] = True
-            return False
+    return key_info
 
 
 @app.get(
     "/v1/models",
     response_model=ModelsResponse,
-    responses={401: http_error_responses[401], 500: http_error_responses[500]},
+    responses={401: http_error_responses[401], 403: http_error_responses[403], 503: http_error_responses[503]},
     tags=["models"],
     summary="List LLM models",
-    description="List available models from the configured vLLM endpoint. **Requires API key in Authorization header** (Bearer token) if vLLM authentication is enabled."
+    description="List the models the API key may access, as reported by the model gateway's /key/info. **Requires API key in Authorization header** (Bearer token). Returns 401 if the gateway rejects the key and 403 if the key is not bound to this instance."
 )
 async def list_models(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
-    """List available LLM models. Requires Authorization header with Bearer token if authentication is enabled."""
+    """List the models the API key may access. Requires Authorization header with Bearer token."""
     logger.debug("List models..")
 
-    # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
+    key_info = await authenticate_and_authorize(api_key)
 
-    # Check if auth is required and enforce it
-    if await is_auth_required():
-        if not api_key:
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "API key is required when vLLM authentication is enabled")
-
-    try:
-        llm_endpoint = llm_model_dict['llm_endpoint']
-        return await asyncio.to_thread(query_vllm_models, llm_endpoint, api_key)
-    except Exception as e:
-        # Check if it's an authentication error
-        error_str = str(e).lower()
-        if "401" in error_str or "unauthorized" in error_str or "forbidden" in error_str:
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, "Invalid or missing API key")
-        APIError.raise_error(ErrorCode.INTERNAL_SERVER_ERROR, repr(e))
+    models = (key_info.get("info") or {}).get("models") or []
+    return ModelsResponse(data=[{"id": m} for m in models])
 
 
 @app.get(
@@ -485,6 +460,7 @@ def _stream_error_response(message: str, status_code: int = 200) -> StreamingRes
         },
         400: http_error_responses[400],
         401: http_error_responses[401],
+        403: http_error_responses[403],
         429: http_error_responses[429],
         500: http_error_responses[500],
         503: http_error_responses[503]
@@ -500,13 +476,13 @@ async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False
     # Extract API key from credentials
     api_key = credentials.credentials if credentials else None
 
-    # Check if auth is required and enforce it
-    if await is_auth_required():
-        if not api_key:
-            message = "API key is required when vLLM authentication is enabled"
-            if req.stream:
-                return _stream_error_response(message, status_code=401)
-            APIError.raise_error(ErrorCode.AUTHENTICATION_FAILED, message)
+    # Authenticate against the model gateway and authorize for this instance
+    try:
+        await authenticate_and_authorize(api_key)
+    except HTTPException as e:
+        if req.stream:
+            return _stream_error_response(e.detail["error"]["message"], status_code=e.status_code)
+        raise
 
     if not req.messages:
         APIError.raise_error(ErrorCode.EMPTY_INPUT, "messages can't be empty")
@@ -571,7 +547,7 @@ async def chat_completion(req: ChatCompletionRequest, include_docs: bool = False
                 truncate_history_by_tokens,
                 previous_messages,
                 get_history_token_budget(query_lang, settings.query_rephrasing.history_token_budget),
-                lambda text: tokenize_with_llm(text, llm_endpoint)
+                lambda text: tokenize_with_llm(text, llm_endpoint, api_key)
             )
 
             if truncated_history_for_rephrasing:

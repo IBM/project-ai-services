@@ -6,6 +6,9 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -80,4 +83,41 @@ func TestGetModels(t *testing.T) {
 
 	slices.Sort(ids)
 	assert.Equal(t, ids, slices.Compact(slices.Clone(ids)), "each model is listed once, although several providers serve it")
+}
+
+func TestGetArchitectureModels_ListsModelsOfModelProviders(t *testing.T) {
+	useRuntime(t)
+
+	provider, err := NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	got, err := provider.GetArchitectureModels(t.Context(), "rag")
+	require.NoError(t, err)
+
+	assert.Contains(t, got, "ibm-granite/granite-4.1-8b-fp8")
+	assert.Contains(t, got, "ibm-granite/granite-embedding-278m-multilingual")
+}
+
+func TestGetServiceModels_ExcludesProviders(t *testing.T) {
+	useRuntime(t)
+
+	provider, err := NewCatalogProvider(nil)
+	require.NoError(t, err)
+
+	all, err := provider.GetServiceModels(t.Context(), "chat")
+	require.NoError(t, err)
+	require.NotEmpty(t, all)
+
+	none, err := provider.GetServiceModels(t.Context(), "chat", "vllm-spyre", "vllm-cpu")
+	require.NoError(t, err)
+	assert.Empty(t, none, "models of excluded providers are not listed")
+}
+
+// useRuntime sets the runtime factory the model extraction reads, for the length of the test.
+func useRuntime(t *testing.T) {
+	t.Helper()
+
+	prev := vars.RuntimeFactory
+	vars.RuntimeFactory = runtime.NewRuntimeFactory(runtimeTypes.RuntimeTypePodman)
+	t.Cleanup(func() { vars.RuntimeFactory = prev })
 }

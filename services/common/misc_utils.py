@@ -256,6 +256,7 @@ def get_embedding_endpoint():
             settings.embedding.endpoint,
             settings.embedding.model,
             settings.embedding.max_model_len,
+            settings.embedding.api_key.get_secret_value() or None,
         ),
     }
 

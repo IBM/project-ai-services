@@ -94,7 +94,14 @@ spec:
             - name: PORT
               value: "6000"
             - name: LLM_ENDPOINT
-              value: http://llm-predictor:8000
+              value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}{{ .Values.llm.path }}"
+            - name: LLM_TOKENIZE_ENDPOINT
+              value: "{{ .Values.llm.tokenize_endpoint }}"
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "llm-secret-key"
+                  key: key
             - name: LLM_MODEL
               value: {{ .Values.llm.model | quote }}
             - name: LLM_MAX_MODEL_LEN
@@ -103,13 +110,6 @@ spec:
               value: {{ .Values.llm.maxBatchSize | quote }}
             - name: LOG_LEVEL
               value: "{{ .Values.summarize.log_level }}"
-          {{- if .Values.llm.apiKey }}
-            - name: LLM_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: "vllm-instruct-api-key"
-                  key: apiKey
-          {{- end }}
           ports:
             - containerPort: 6000
               protocol: TCP

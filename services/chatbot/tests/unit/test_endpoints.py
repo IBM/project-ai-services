@@ -33,7 +33,7 @@ class TestModelsEndpoint:
     """Tests for GET /v1/models endpoint"""
     
     def test_successful_model_listing(
-        self, test_client, mock_query_vllm_models
+        self, test_client, mock_query_gateway_key_info
     ):
         """Test successful model listing"""
         response = test_client.get("/v1/models")
@@ -44,7 +44,7 @@ class TestModelsEndpoint:
         assert isinstance(data["data"], list)
     
     def test_response_structure_matches_model(
-        self, test_client, mock_query_vllm_models
+        self, test_client, mock_query_gateway_key_info
     ):
         """Test response structure matches ModelsResponse"""
         response = test_client.get("/v1/models")
@@ -56,25 +56,90 @@ class TestModelsEndpoint:
         assert "data" in data
         assert data["object"] == "list"
     
-    def test_exception_handling_returns_500(self, test_client, monkeypatch):
-        """Test exception handling returns 500"""
-        mock_query = Mock(side_effect=Exception("LLM endpoint error"))
-        monkeypatch.setattr("chatbot.app.query_vllm_models", mock_query)
-        
+    def test_key_info_is_called_with_the_users_key(
+        self, test_client, mock_query_gateway_key_info
+    ):
+        """/key/info is called on the model gateway with the key the user provided"""
         response = test_client.get("/v1/models")
-        
-        assert response.status_code == 500
-    
-    def test_empty_model_list(self, test_client, monkeypatch):
-        """Test with empty model list"""
-        mock_query = Mock(return_value={"object": "list", "data": []})
-        monkeypatch.setattr("chatbot.app.query_vllm_models", mock_query)
-        
-        response = test_client.get("/v1/models")
-        
+
         assert response.status_code == 200
-        data = response.json()
-        assert data["data"] == []
+        args = mock_query_gateway_key_info.call_args.args
+        assert args == ("http://localhost:8002", "sk-test-key")
+
+    def test_missing_key_returns_401(self, test_client, mock_query_gateway_key_info):
+        """No API key fails authn without calling the gateway"""
+        response = test_client.get("/v1/models", headers={"Authorization": ""})
+
+        assert response.status_code == 401
+        mock_query_gateway_key_info.assert_not_called()
+
+    def test_gateway_rejection_returns_401(self, test_client, monkeypatch):
+        """Any HTTP error from the gateway (e.g. 401) fails authn"""
+        import requests
+
+        mock_query = Mock(side_effect=requests.exceptions.HTTPError("401 Unauthorized"))
+        monkeypatch.setattr("chatbot.app.query_gateway_key_info", mock_query)
+
+        response = test_client.get("/v1/models")
+
+        assert response.status_code == 401
+
+    def test_gateway_unreachable_returns_503(self, test_client, monkeypatch):
+        """A non-HTTP failure reaching the gateway is a 503, not a pass"""
+        mock_query = Mock(side_effect=ConnectionError("gateway down"))
+        monkeypatch.setattr("chatbot.app.query_gateway_key_info", mock_query)
+
+        response = test_client.get("/v1/models")
+
+        assert response.status_code == 503
+
+    def test_instance_mismatch_returns_403(self, test_client, monkeypatch):
+        """A key whose metadata tags do not contain this instance fails authz"""
+        mock_query = Mock(return_value={"info": {"models": ["m"], "metadata": {"tags": ["other-instance"]}}})
+        monkeypatch.setattr("chatbot.app.query_gateway_key_info", mock_query)
+
+        response = test_client.get("/v1/models")
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+    def test_key_without_tags_returns_403(self, test_client, monkeypatch):
+        """A key with no metadata tags is not bound to this instance"""
+        mock_query = Mock(return_value={"info": {"models": ["m"], "metadata": {}}})
+        monkeypatch.setattr("chatbot.app.query_gateway_key_info", mock_query)
+
+        response = test_client.get("/v1/models")
+
+        assert response.status_code == 403
+
+    def test_unset_instance_id_returns_403(self, test_client, mock_settings, mock_query_gateway_key_info):
+        """With no LLM_INSTANCE_ID configured, no key is authorized"""
+        mock_settings.common.app.llm_instance_id = ""
+
+        response = test_client.get("/v1/models")
+
+        assert response.status_code == 403
+
+    def test_empty_model_list(self, test_client, monkeypatch):
+        """A key with no models yields an empty list"""
+        mock_query = Mock(return_value={"info": {"models": [], "metadata": {"tags": ["test-llm-instance-id"]}}})
+        monkeypatch.setattr("chatbot.app.query_gateway_key_info", mock_query)
+
+        response = test_client.get("/v1/models")
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+
+    def test_chat_completion_instance_mismatch_returns_403(
+        self, test_client, valid_chat_request, monkeypatch
+    ):
+        """Chat completions enforce the same authz"""
+        mock_query = Mock(return_value={"info": {"metadata": {"tags": ["other-instance"]}}})
+        monkeypatch.setattr("chatbot.app.query_gateway_key_info", mock_query)
+
+        response = test_client.post("/v1/chat/completions", json=valid_chat_request)
+
+        assert response.status_code == 403
 
 
 @pytest.mark.unit
@@ -156,7 +221,7 @@ class TestChatCompletionNonStreaming:
         self, test_client, valid_chat_request,
         mock_search_only, mock_validate_query_length,
         mock_detect_language, mock_query_vllm_non_stream,
-        mock_query_vllm_models
+        mock_query_gateway_key_info
     ):
         """Default response shape is unchanged (no docs field)"""
         response = test_client.post("/v1/chat/completions", json=valid_chat_request)
@@ -168,7 +233,7 @@ class TestChatCompletionNonStreaming:
         self, test_client, valid_chat_request,
         mock_search_only, mock_validate_query_length,
         mock_detect_language, mock_query_vllm_non_stream,
-        mock_query_vllm_models
+        mock_query_gateway_key_info
     ):
         """include_docs=true adds the docs field"""
         response = test_client.post(
@@ -409,7 +474,7 @@ class TestChatCompletionStreaming:
         self, test_client, valid_chat_request_streaming,
         mock_search_only, mock_validate_query_length,
         mock_detect_language, mock_query_vllm_stream,
-        mock_query_vllm_models
+        mock_query_gateway_key_info
     ):
         """Docs chunk is emitted only when include_docs=true"""
         default = test_client.post(

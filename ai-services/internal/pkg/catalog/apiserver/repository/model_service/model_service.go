@@ -15,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/keys"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/list"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -22,6 +23,9 @@ import (
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 )
+
+// publicKeyType is the type reported in the response for a public virtual key.
+const publicKeyType = "public"
 
 // ModelService implements the ModelServiceInterface for model management.
 //
@@ -114,7 +118,7 @@ func (s *ModelService) createLocalModel(ctx context.Context, req apimodels.Creat
 		return nil, err
 	}
 
-	if err := s.insertComponent(ctx, plan); err != nil {
+	if err := s.RecordLocalModel(ctx, plan); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +129,9 @@ func (s *ModelService) createLocalModel(ctx context.Context, req apimodels.Creat
 	return &apimodels.CreateModelResponse{ID: plan.ComponentID.String()}, nil
 }
 
-func (s *ModelService) insertComponent(ctx context.Context, plan *types.LocalPlan) error {
+// RecordLocalModel inserts the plan's component row as Downloading, which is what makes the model
+// visible to GET /api/v1/models while it is being deployed.
+func (s *ModelService) RecordLocalModel(ctx context.Context, plan *types.LocalPlan) error {
 	req := plan.Req
 
 	component := &dbmodels.Component{
@@ -182,8 +188,8 @@ func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy
 	return s.getter.Detail(ctx, row)
 }
 
-// GenerateModelKey generates the public LiteLLM key of the model identified by id. See
-// keys.Manager.Generate.
+// GenerateModelKey generates the public LiteLLM key of the model identified by id, aliased
+// "<modelName>-<id>". See keys.Manager.Generate.
 //
 // As for GetModelByID, a missing model is a 404 and a model created by someone else a 403, and
 // nothing is revoked or generated before the check passes. Errors of type *validators.ValidationError
@@ -194,7 +200,16 @@ func (s *ModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, creat
 		return nil, err
 	}
 
-	return s.keys.Generate(ctx, row)
+	if row.Model == "" {
+		return nil, fmt.Errorf("%s has no model name in its metadata", row.ID)
+	}
+
+	key, err := s.keys.Generate(ctx, keys.Request{Model: row.Model, ID: row.ID, Alias: litellm.PublicKeyAlias(row.Model, row.ID)})
+	if err != nil {
+		return nil, err
+	}
+
+	return &apimodels.GenerateModelKeyResponse{Key: key, Type: publicKeyType, Model: row.Model}, nil
 }
 
 // ownedModel reads a model, local or remote, and checks that createdBy may use it: a missing model

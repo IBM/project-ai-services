@@ -182,22 +182,27 @@ func TestListModels_RejectsUnknownFilters(t *testing.T) {
 			`invalid provider_id "watsonx"`,
 		},
 		{"unknown model", func(r *apimodels.ListModelsRequest) { r.Models = []string{"no/such-model"} }, `invalid model "no/such-model"`},
-		{"unknown status", func(r *apimodels.ListModelsRequest) { r.Status = "Sleeping" }, `invalid status "Sleeping"`},
+		{"unknown status", func(r *apimodels.ListModelsRequest) { r.Statuses = []string{"Sleeping"} }, `invalid status "Sleeping"`},
 		{
 			"remote status asked as local",
 			func(r *apimodels.ListModelsRequest) {
-				r.Status, r.DeploymentType = "connected", constants.DeploymentTypeLocal
+				r.Statuses, r.DeploymentType = []string{"connected"}, constants.DeploymentTypeLocal
 			},
 			`invalid status "connected"`,
 		},
 		{
 			"local status asked as remote",
 			func(r *apimodels.ListModelsRequest) {
-				r.Status, r.DeploymentType = "Running", constants.DeploymentTypeRemote
+				r.Statuses, r.DeploymentType = []string{"Running"}, constants.DeploymentTypeRemote
 			},
 			`invalid status "Running"`,
 		},
-		{"status is case sensitive", func(r *apimodels.ListModelsRequest) { r.Status = "running" }, `invalid status "running"`},
+		{
+			"one unknown status among known ones",
+			func(r *apimodels.ListModelsRequest) { r.Statuses = []string{"Running", "Sleeping"} },
+			`invalid status "Sleeping"`,
+		},
+		{"status is case sensitive", func(r *apimodels.ListModelsRequest) { r.Statuses = []string{"running"} }, `invalid status "running"`},
 	}
 
 	for _, tt := range tests {
@@ -238,13 +243,14 @@ func TestListModels_AcceptsKnownFilters(t *testing.T) {
 			r.ProviderIDs, r.DeploymentType = []string{"hosted_vllm"}, constants.DeploymentTypeRemote
 		}},
 		{"remote-only model", func(r *apimodels.ListModelsRequest) { r.Models = []string{"ibm/granite-4-h-small"} }},
-		{"local status", func(r *apimodels.ListModelsRequest) { r.Status = "Downloading" }},
-		{"remote status", func(r *apimodels.ListModelsRequest) { r.Status = "offline" }},
+		{"local and remote statuses together", func(r *apimodels.ListModelsRequest) { r.Statuses = []string{"Running", "connected"} }},
+		{"local status", func(r *apimodels.ListModelsRequest) { r.Statuses = []string{"Downloading"} }},
+		{"remote status", func(r *apimodels.ListModelsRequest) { r.Statuses = []string{"offline"} }},
 		{"status with matching local type", func(r *apimodels.ListModelsRequest) {
-			r.Status, r.DeploymentType = "Running", constants.DeploymentTypeLocal
+			r.Statuses, r.DeploymentType = []string{"Running"}, constants.DeploymentTypeLocal
 		}},
 		{"status with matching remote type", func(r *apimodels.ListModelsRequest) {
-			r.Status, r.DeploymentType = "connected", constants.DeploymentTypeRemote
+			r.Statuses, r.DeploymentType = []string{"connected"}, constants.DeploymentTypeRemote
 		}},
 	}
 
@@ -327,7 +333,7 @@ func TestCheckDeployOptions(t *testing.T) {
 			req := validRequest()
 			tt.mutate(&req)
 
-			err := checkDeployOptions(req, tt.options)
+			err := validators.CheckModelDeployOptions(tt.options, req.Model, req.ComponentType, req.ProviderID, req.DeploymentType)
 			if tt.wantMsg == "" {
 				require.NoError(t, err)
 

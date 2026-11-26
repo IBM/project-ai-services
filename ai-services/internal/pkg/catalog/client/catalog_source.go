@@ -47,6 +47,9 @@ type CatalogSource interface {
 	// GetComponentProviderParams returns the JSON schema for a component provider's parameters.
 	// runtimeType selects the runtime subdirectory (e.g. "podman" or "openshift").
 	GetComponentProviderParams(ctx context.Context, componentType, providerID, runtimeType string) (map[string]any, error)
+	// ListCatalogModels returns the deployable models of the catalog, optionally only those of one
+	// component type (llm, embedding, reranker), with the providers that serve them.
+	ListCatalogModels(ctx context.Context, componentType string) ([]types.ModelCatalogEntry, error)
 }
 
 // NewCatalogSource builds a CatalogSource that tries the catalog API first and
@@ -201,6 +204,17 @@ func (s *apiSource) GetComponentProviderParams(ctx context.Context, componentTyp
 	return schema, err
 }
 
+func (s *apiSource) ListCatalogModels(ctx context.Context, componentType string) ([]types.ModelCatalogEntry, error) {
+	entries, err := (&ModelClient{client: s.api.client}).ListCatalogModels(ctx, componentType)
+	if err != nil && isConnectivityError(err) {
+		logger.DebugfCtx(ctx, "API ListCatalogModels unreachable, falling back to embedded: %v", err)
+
+		return s.embedded.ListModelCatalog(componentType)
+	}
+
+	return entries, err
+}
+
 // --------------------------------------------------------------------------
 // Embedded-only source (used when the API client cannot be initialised)
 // --------------------------------------------------------------------------
@@ -214,6 +228,7 @@ type EmbeddedCatalog interface {
 	ListComponents() ([]types.Component, error)
 	LoadArchitecture(id string) (*types.Architecture, error)
 	LoadService(id string) (*types.Service, error)
+	ListModelCatalog(componentType string) ([]types.ModelCatalogEntry, error)
 	WithRuntime(runtimeType string) (*catalog.CatalogProvider, error)
 }
 
@@ -266,6 +281,10 @@ func (s *embeddedOnlySource) GetComponentProviderParams(ctx context.Context, com
 	}
 
 	return scopedCatalog.GetComponentProviderParams(ctx, componentType, providerID)
+}
+
+func (s *embeddedOnlySource) ListCatalogModels(_ context.Context, componentType string) ([]types.ModelCatalogEntry, error) {
+	return s.embedded.ListModelCatalog(componentType)
 }
 
 // --------------------------------------------------------------------------

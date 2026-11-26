@@ -1,5 +1,5 @@
-// Package keys manages the LiteLLM virtual keys that give callers outside the platform access to a
-// model.
+// Package keys manages the LiteLLM virtual keys that give callers access to a model: the public
+// keys handed to users, and the internal keys of the applications that use a model.
 package keys
 
 import (
@@ -7,20 +7,12 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
-const (
-	// publicKeyType is the type reported in the response for a public virtual key.
-	publicKeyType = "public"
-)
-
-// Manager generates the public LiteLLM keys of models.
+// Manager generates LiteLLM keys.
 type Manager struct {
 	litellm catalogclient.LiteLLMClient
 }
@@ -30,56 +22,74 @@ func NewManager(litellm catalogclient.LiteLLMClient) *Manager {
 	return &Manager{litellm: litellm}
 }
 
-// Generate generates the public LiteLLM key of a model, local or remote.
+// Request describes the key to generate. The caller decides what kind of key it is by the alias:
+// litellm.PublicKeyAlias for the public key of a model, litellm.InternalKeyAlias for the key an
+// application reaches it with.
+type Request struct {
+	// Model is the name the key may call. It must not be empty.
+	Model string
+	// ID is the component or connector ID: the tag the model's LiteLLM route was registered with.
+	// The key is pinned to it, so it reaches only that deployment and not other deployments of the
+	// same model name.
+	ID uuid.UUID
+	// Alias names the key, and LiteLLM keeps it unique.
+	Alias string
+}
+
+// Generate generates the LiteLLM key described by req and returns it.
 //
-// The model must already be one the caller may use: Generate does not check ownership. The key is
-// aliased "<modelName>-<id>", which LiteLLM keeps unique. Any existing key with that alias is revoked first, so
-// at most one public key exists per ID. The key is returned once and is neither stored nor logged.
+// The caller must already have checked that the requester may use the model: Generate does not
+// check ownership. Any existing key with the alias is revoked first, so at most one key exists per
+// alias and repeating a request does not fail because the alias is taken. The key is returned once
+// and is neither stored nor logged.
 //
-// Concurrent requests for one ID are not serialised: if their revoke and generate calls interleave,
-// LiteLLM rejects the second key because its alias exists, and that request fails with a 502 asking
-// the caller to retry. There is still never more than one key.
+// Concurrent requests for one alias are not serialised: if their revoke and generate calls
+// interleave, LiteLLM rejects the second key because its alias exists, and that request fails with
+// a 502 asking the caller to retry. There is still never more than one key.
 //
 // Errors of type *validators.ValidationError carry the HTTP status to return; any other error is
 // an internal failure.
-func (m *Manager) Generate(ctx context.Context, model *dbrepo.ModelRow) (*apimodels.GenerateModelKeyResponse, error) {
-	if model.Model == "" {
-		return nil, fmt.Errorf("%s has no model name in its metadata", model.ID)
+func (m *Manager) Generate(ctx context.Context, req Request) (string, error) {
+	if req.Model == "" {
+		return "", fmt.Errorf("%s has no model name: cannot generate its key", req.ID)
 	}
 
-	alias := litellm.PublicKeyAlias(model.Model, model.ID)
-
-	key, err := m.rotatePublicKey(ctx, model.ID, alias, model.Model)
-	if err != nil {
-		return nil, err
-	}
-
-	return &apimodels.GenerateModelKeyResponse{Key: key, Type: publicKeyType, Model: model.Model}, nil
-}
-
-// rotatePublicKey revokes the key with the given alias, if any, and generates a new one.
-func (m *Manager) rotatePublicKey(ctx context.Context, id uuid.UUID, alias, model string) (string, error) {
-	// Revoking first is what keeps the number of public keys at one. A "not found" answer is
+	// Revoking first is what keeps the number of keys per alias at one. A "not found" answer is
 	// handled by the client: it only means no key existed yet.
-	if err := m.litellm.DeleteKeysByAlias(ctx, []string{alias}); err != nil {
-		logger.ErrorfCtx(ctx, "failed to revoke public key %q: %v", alias, err)
+	if err := m.litellm.DeleteKeysByAlias(ctx, []string{req.Alias}); err != nil {
+		logger.ErrorfCtx(ctx, "failed to revoke key %q: %v", req.Alias, err)
 
-		return "", validators.BadGateway("LiteLLM gateway rejected or could not process the key revocation; the existing public key was not changed")
+		return "", validators.BadGateway("LiteLLM gateway rejected or could not process the key revocation; the existing key was not changed")
 	}
 
 	key, err := m.litellm.GenerateKey(ctx, catalogclient.LiteLLMKeyGenerateRequest{
-		KeyAlias: alias,
-		Models:   []string{model},
-		// The ID is the tag the model's LiteLLM route was registered with, so the key reaches
-		// only that deployment and not other deployments of the same model name.
-		Metadata: catalogclient.LiteLLMKeyMetadata{Tags: []string{id.String()}},
+		KeyAlias: req.Alias,
+		Models:   []string{req.Model},
+		Metadata: catalogclient.LiteLLMKeyMetadata{Tags: []string{req.ID.String()}},
 	})
 	if err != nil {
-		logger.ErrorfCtx(ctx, "failed to generate public key %q: %v", alias, err)
+		logger.ErrorfCtx(ctx, "failed to generate key %q: %v", req.Alias, err)
 
 		// Any old key was already deleted above, so no key exists now and the caller must retry.
-		return "", validators.BadGateway("LiteLLM gateway failed to generate the key; no public key exists for this model right now: call this endpoint again")
+		return "", validators.BadGateway("LiteLLM gateway failed to generate the key; no key exists for this model right now: retry the request")
 	}
 
 	return key, nil
+}
+
+// Revoke revokes the keys with the given aliases. An alias that has no key is not an error, so
+// revoking twice is safe. A failure is a *validators.ValidationError (502) and leaves the keys
+// that could not be revoked in place.
+func (m *Manager) Revoke(ctx context.Context, aliases []string) error {
+	if len(aliases) == 0 {
+		return nil
+	}
+
+	if err := m.litellm.DeleteKeysByAlias(ctx, aliases); err != nil {
+		logger.ErrorfCtx(ctx, "failed to revoke keys %q: %v", aliases, err)
+
+		return validators.BadGateway("LiteLLM gateway rejected or could not process the key revocation")
+	}
+
+	return nil
 }

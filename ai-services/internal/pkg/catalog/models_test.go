@@ -4,25 +4,21 @@ import (
 	"context"
 	"testing"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
-// TestEmbeddedProviderSchemasIncludeModels verifies that, for every runtime, the
-// merged schema of each embedded model provider exposes its models from models.yaml.
-func TestEmbeddedProviderSchemasIncludeModels(t *testing.T) {
+// TestEmbeddedProviderSchemasAreEmpty verifies that, for every runtime, the schema of each embedded
+// model provider has no properties: models are chosen from models.yaml, not from the schema.
+func TestEmbeddedProviderSchemasAreEmpty(t *testing.T) {
 	tests := []struct {
 		componentType string
 		providerID    string
-		wantDefault   string
-		wantModels    []string
 	}{
-		{"llm", "vllm-spyre", "ibm-granite/granite-4.1-8b-fp8", []string{"ibm-granite/granite-3.3-8b-instruct", "ibm-granite/granite-4.1-8b-fp8"}},
-		{"llm", "vllm-cpu", "ibm-granite/granite-4.1-8b", []string{"ibm-granite/granite-3.3-8b-instruct", "ibm-granite/granite-4.1-8b"}},
-		{"llm", "watsonx", "ibm/granite-4-h-small", []string{"ibm/granite-4-h-small"}},
-		{"reranker", "vllm-spyre", "BAAI/bge-reranker-v2-m3", []string{"BAAI/bge-reranker-v2-m3"}},
-		{"reranker", "vllm-cpu", "BAAI/bge-reranker-v2-m3", []string{"BAAI/bge-reranker-v2-m3"}},
-		{"embedding", "vllm-cpu", "ibm-granite/granite-embedding-278m-multilingual", []string{"ibm-granite/granite-embedding-278m-multilingual"}},
+		{"llm", "vllm-spyre"},
+		{"llm", "vllm-cpu"},
+		{"reranker", "vllm-spyre"},
+		{"reranker", "vllm-cpu"},
+		{"embedding", "vllm-cpu"},
 	}
 
 	base, err := NewCatalogProvider(nil)
@@ -43,20 +39,8 @@ func TestEmbeddedProviderSchemasIncludeModels(t *testing.T) {
 					t.Fatalf("GetComponentProviderParams: %v", err)
 				}
 
-				got := map[string]bool{}
-				models.ExtractFromSchema(schema, got)
-				if len(got) != len(tc.wantModels) {
-					t.Errorf("models = %v, want %v", got, tc.wantModels)
-				}
-				for _, m := range tc.wantModels {
-					if !got[m] {
-						t.Errorf("model %q missing from schema", m)
-					}
-				}
-
-				field := schema["properties"].(map[string]any)["model"].(map[string]any)
-				if field["default"] != tc.wantDefault {
-					t.Errorf("default = %v, want %v", field["default"], tc.wantDefault)
+				if hasNonEmptyProperties(schema) {
+					t.Errorf("schema properties = %v, want none", schema["properties"])
 				}
 			})
 		}

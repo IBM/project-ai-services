@@ -293,7 +293,13 @@ func (v *ApplicationValidator) validateServiceCore(ctx context.Context, service 
 }
 
 // ValidateSingleComponent validates a single component (existence, version, and parameters).
+// A model component is either bound to an existing instance, which the planner resolves against
+// the DB, or deployed anew, in which case its model is checked against the catalog.
 func (v *ApplicationValidator) ValidateSingleComponent(ctx context.Context, component apimodels.Component) error {
+	if bound, err := v.validateComponentFields(ctx, component); err != nil || bound {
+		return err
+	}
+
 	// Verify component provider exists
 	_, err := v.provider.LoadComponent(component.ComponentType, component.ProviderID)
 	if err != nil {
@@ -312,6 +318,29 @@ func (v *ApplicationValidator) ValidateSingleComponent(ctx context.Context, comp
 	_, err = ValidateComponentParams(ctx, v.provider, component.ComponentType, component.ProviderID, component.Params)
 
 	return err
+}
+
+// validateComponentFields checks the fields a component must or must not carry, which depend on
+// whether it is a model. bound reports a model bound to an existing instance, which the planner
+// resolves against the DB and which has nothing else to validate here.
+func (v *ApplicationValidator) validateComponentFields(ctx context.Context, component apimodels.Component) (bound bool, err error) {
+	if !v.provider.IsModelComponentType(component.ComponentType) {
+		return false, validateNonModelComponentFields(component)
+	}
+
+	if err := validateModelComponentFields(component); err != nil {
+		return false, err
+	}
+
+	if component.InstanceID != "" {
+		if _, err := uuid.Parse(component.InstanceID); err != nil {
+			return false, BadRequest("component '%s': instance_id %q is not a valid UUID", component.ComponentType, component.InstanceID)
+		}
+
+		return true, nil
+	}
+
+	return false, ValidateModelDeployable(ctx, v.provider, component.Model, component.ComponentType, component.ProviderID, catalogconstants.DeploymentTypeLocal)
 }
 
 // ValidateServiceDeployment validates a single service deployment request.
@@ -532,12 +561,17 @@ func validateConnectorInDB(
 
 	if connector.Status != dbmodels.ConnectorStatusConnected {
 		return BadRequest(
-			"connector %q (type %q) is not connected (status: %q); only connected datasources may be attached",
+			"connector %q (type %q) is not connected (status: %q); only connected connectors may be attached",
 			ref.ID, ref.Type, connector.Status,
 		)
 	}
 
-	return ValidateProviderSupported(catalogService, connector.Provider, serviceCatalogID)
+	// The provider allowlist is the datasource's; a model connector's provider is not one of them.
+	if ref.Type != catalogconstants.ConnectorTypeDatasource {
+		return nil
+	}
+
+	return ValidateDatasourceProviderSupported(catalogService, connector.Provider, serviceCatalogID)
 }
 
 // CountDatasourceConnectors returns how many of the given items are datasource connectors,
@@ -599,9 +633,9 @@ func ValidateMaxConnectionsOnConnect(catalogService *types.Service, serviceCatal
 	return nil
 }
 
-// ValidateProviderSupported verifies that the datasource provider is allowed by the service's
+// ValidateDatasourceProviderSupported verifies that the datasource provider is allowed by the service's
 // datasource.supported_providers. An empty or absent allowlist permits every provider.
-func ValidateProviderSupported(catalogService *types.Service, provider, serviceCatalogID string) error {
+func ValidateDatasourceProviderSupported(catalogService *types.Service, provider, serviceCatalogID string) error {
 	if catalogService == nil || catalogService.Datasource == nil {
 		return nil
 	}
@@ -630,8 +664,14 @@ type seenComponent struct {
 // It updates seen with first-seen entries in place.
 func checkComponentConsistency(serviceName string, service apimodels.Service, seen map[string]seenComponent) error {
 	for _, component := range service.Components {
+		// An existing instance is a shared deployment by definition: there is nothing to compare.
+		if component.InstanceID != "" {
+			continue
+		}
+
+		params := component.ValueParams()
 		key := fmt.Sprintf("%s/%s", component.ComponentType, component.ProviderID)
-		hash := utils.CalculateComponentHash(component.ComponentType, component.ProviderID, component.Params)
+		hash := utils.CalculateComponentHash(component.ComponentType, component.ProviderID, params)
 
 		if first, exists := seen[key]; exists {
 			if first.hash != hash {
@@ -642,12 +682,12 @@ func checkComponentConsistency(serviceName string, service apimodels.Service, se
 							"Different values given for %s",
 						first.serviceName,
 						serviceName,
-						formatParamKeys(diffParamKeys(first.params, component.Params)),
+						formatParamKeys(diffParamKeys(first.params, params)),
 					),
 				}
 			}
 		} else {
-			seen[key] = seenComponent{hash: hash, params: component.Params, serviceName: serviceName}
+			seen[key] = seenComponent{hash: hash, params: params, serviceName: serviceName}
 		}
 	}
 

@@ -25,9 +25,9 @@ func TestBuildModelWhere(t *testing.T) {
 		},
 		{
 			name:         "no owner still applies the other filters",
-			filters:      ModelFilters{Status: "Running"},
-			expectedSQL:  " WHERE status = $1",
-			expectedArgs: []interface{}{"Running"},
+			filters:      ModelFilters{Statuses: []string{"Running"}},
+			expectedSQL:  " WHERE status = ANY($1)",
+			expectedArgs: []interface{}{[]string{"Running"}},
 		},
 		{
 			name:         "owner only",
@@ -60,10 +60,16 @@ func TestBuildModelWhere(t *testing.T) {
 			expectedArgs: []interface{}{"alice", []string{"ibm-granite/granite"}},
 		},
 		{
+			name:         "several statuses match any of them",
+			filters:      ModelFilters{CreatedBy: "alice", Statuses: []string{"Running", "connected"}},
+			expectedSQL:  " WHERE created_by = $1 AND status = ANY($2)",
+			expectedArgs: []interface{}{"alice", []string{"Running", "connected"}},
+		},
+		{
 			name:         "status",
-			filters:      ModelFilters{CreatedBy: "alice", Status: "Running"},
-			expectedSQL:  " WHERE created_by = $1 AND status = $2",
-			expectedArgs: []interface{}{"alice", "Running"},
+			filters:      ModelFilters{CreatedBy: "alice", Statuses: []string{"Running"}},
+			expectedSQL:  " WHERE created_by = $1 AND status = ANY($2)",
+			expectedArgs: []interface{}{"alice", []string{"Running"}},
 		},
 		{
 			name:         "search uses ILIKE with ESCAPE on the name",
@@ -87,11 +93,11 @@ func TestBuildModelWhere(t *testing.T) {
 			name: "all filters keep a stable order and numbering",
 			filters: ModelFilters{
 				CreatedBy: "alice", DeploymentType: "local", ComponentType: "llm",
-				Providers: []string{"vllm-spyre"}, Models: []string{"ibm-granite/granite"}, Status: "Running",
+				Providers: []string{"vllm-spyre"}, Models: []string{"ibm-granite/granite"}, Statuses: []string{"Running"},
 			},
 			expectedSQL: " WHERE created_by = $1 AND deployment_type = $2 AND component_type = $3" +
-				" AND provider = ANY($4) AND model = ANY($5) AND status = $6",
-			expectedArgs: []interface{}{"alice", "local", "llm", []string{"vllm-spyre"}, []string{"ibm-granite/granite"}, "Running"},
+				" AND provider = ANY($4) AND model = ANY($5) AND status = ANY($6)",
+			expectedArgs: []interface{}{"alice", "local", "llm", []string{"vllm-spyre"}, []string{"ibm-granite/granite"}, []string{"Running"}},
 		},
 		{
 			name:           "nil component types are unrestricted",
@@ -197,26 +203,26 @@ func TestBuildModelListQuery(t *testing.T) {
 		},
 		{
 			name:         "status filter",
-			filters:      ModelFilters{CreatedBy: "alice", Status: "Running"},
-			expectedTail: ") m WHERE created_by = $1 AND status = $2" + modelListOrderBy,
-			expectedArgs: []interface{}{"alice", "Running"},
+			filters:      ModelFilters{CreatedBy: "alice", Statuses: []string{"Running"}},
+			expectedTail: ") m WHERE created_by = $1 AND status = ANY($2)" + modelListOrderBy,
+			expectedArgs: []interface{}{"alice", []string{"Running"}},
 		},
 		{
 			name:         "filters are followed by paging placeholders",
-			filters:      ModelFilters{CreatedBy: "alice", Status: "Running", Providers: []string{"watsonx"}, Limit: 10, Offset: 10},
-			expectedTail: ") m WHERE created_by = $1 AND provider = ANY($2) AND status = $3" + modelListOrderBy + " LIMIT $4 OFFSET $5",
-			expectedArgs: []interface{}{"alice", []string{"watsonx"}, "Running", 10, 10},
+			filters:      ModelFilters{CreatedBy: "alice", Statuses: []string{"Running"}, Providers: []string{"watsonx"}, Limit: 10, Offset: 10},
+			expectedTail: ") m WHERE created_by = $1 AND provider = ANY($2) AND status = ANY($3)" + modelListOrderBy + " LIMIT $4 OFFSET $5",
+			expectedArgs: []interface{}{"alice", []string{"watsonx"}, []string{"Running"}, 10, 10},
 		},
 		{
 			name: "all filters and paging",
 			filters: ModelFilters{
 				CreatedBy: "alice", DeploymentType: "local", ComponentType: "llm",
-				Providers: []string{"vllm-spyre"}, Models: []string{"ibm-granite/granite"}, Status: "Running",
+				Providers: []string{"vllm-spyre"}, Models: []string{"ibm-granite/granite"}, Statuses: []string{"Running"},
 				Limit: 50, Offset: 100,
 			},
 			expectedTail: ") m WHERE created_by = $1 AND deployment_type = $2 AND component_type = $3" +
-				" AND provider = ANY($4) AND model = ANY($5) AND status = $6" + modelListOrderBy + " LIMIT $7 OFFSET $8",
-			expectedArgs: []interface{}{"alice", "local", "llm", []string{"vllm-spyre"}, []string{"ibm-granite/granite"}, "Running", 50, 100},
+				" AND provider = ANY($4) AND model = ANY($5) AND status = ANY($6)" + modelListOrderBy + " LIMIT $7 OFFSET $8",
+			expectedArgs: []interface{}{"alice", "local", "llm", []string{"vllm-spyre"}, []string{"ibm-granite/granite"}, []string{"Running"}, 50, 100},
 		},
 		{
 			name: "several providers and models are one clause each",
@@ -238,11 +244,11 @@ func TestBuildModelListQuery(t *testing.T) {
 		},
 		{
 			name:           "search is numbered after the component types and the other filters",
-			filters:        ModelFilters{CreatedBy: "alice", Status: "Running", Search: "granite", Limit: 10, Offset: 10},
+			filters:        ModelFilters{CreatedBy: "alice", Statuses: []string{"Running"}, Search: "granite", Limit: 10, Offset: 10},
 			componentTypes: []string{"llm"},
-			expectedTail: ") m WHERE created_by = $1 AND component_type = ANY($2) AND status = $3" +
+			expectedTail: ") m WHERE created_by = $1 AND component_type = ANY($2) AND status = ANY($3)" +
 				" AND (name ILIKE $4 ESCAPE '\\')" + modelListOrderBy + " LIMIT $5 OFFSET $6",
-			expectedArgs: []interface{}{"alice", []string{"llm"}, "Running", "%granite%", 10, 10},
+			expectedArgs: []interface{}{"alice", []string{"llm"}, []string{"Running"}, "%granite%", 10, 10},
 		},
 		{
 			name:         "empty multi-value filters are not applied",
@@ -252,10 +258,10 @@ func TestBuildModelListQuery(t *testing.T) {
 		},
 		{
 			name:           "component types are bound before the filters and the paging",
-			filters:        ModelFilters{CreatedBy: "alice", Status: "Running", Limit: 20, Offset: 40},
+			filters:        ModelFilters{CreatedBy: "alice", Statuses: []string{"Running"}, Limit: 20, Offset: 40},
 			componentTypes: []string{"llm", "embedding"},
-			expectedTail:   ") m WHERE created_by = $1 AND component_type = ANY($2) AND status = $3" + modelListOrderBy + " LIMIT $4 OFFSET $5",
-			expectedArgs:   []interface{}{"alice", []string{"llm", "embedding"}, "Running", 20, 40},
+			expectedTail:   ") m WHERE created_by = $1 AND component_type = ANY($2) AND status = ANY($3)" + modelListOrderBy + " LIMIT $4 OFFSET $5",
+			expectedArgs:   []interface{}{"alice", []string{"llm", "embedding"}, []string{"Running"}, 20, 40},
 		},
 		{
 			name:           "empty component types match nothing",
@@ -319,7 +325,7 @@ func TestBuildModelListQuery_InputIsBoundNotInlined(t *testing.T) {
 		{"owner", ModelFilters{CreatedBy: hostile}, nil, hostile},
 		{"deployment type", ModelFilters{DeploymentType: hostile}, nil, hostile},
 		{"component type", ModelFilters{ComponentType: hostile}, nil, hostile},
-		{"status", ModelFilters{Status: hostile}, nil, hostile},
+		{"statuses", ModelFilters{Statuses: []string{hostile}}, nil, []string{hostile}},
 		{"providers", ModelFilters{Providers: []string{hostile}}, nil, []string{hostile}},
 		{"models", ModelFilters{Models: []string{hostile}}, nil, []string{hostile}},
 		{"component types", ModelFilters{}, []string{hostile}, []string{hostile}},
@@ -347,9 +353,9 @@ func TestBuildModelCountQuery_SharesUnionAndFilters(t *testing.T) {
 	}{
 		{
 			name:               "owner and status with paging",
-			filters:            ModelFilters{CreatedBy: "alice", Status: "connected", Limit: 20, Offset: 20},
-			expectedWhere:      " WHERE created_by = $1 AND status = $2",
-			expectedCountArgs:  []interface{}{"alice", "connected"},
+			filters:            ModelFilters{CreatedBy: "alice", Statuses: []string{"connected"}, Limit: 20, Offset: 20},
+			expectedWhere:      " WHERE created_by = $1 AND status = ANY($2)",
+			expectedCountArgs:  []interface{}{"alice", []string{"connected"}},
 			expectedListSuffix: []interface{}{20, 20},
 		},
 		{

@@ -1,6 +1,7 @@
 import json
 import numpy as np
 from common.misc_utils import get_logger
+from common.settings import settings
 import common.misc_utils as misc_utils
 from common.retry_utils import retry_on_transient_error
 
@@ -34,6 +35,9 @@ class Embedding:
             "accept": "application/json",
             "Content-type": "application/json"
         }
+        api_key = settings.embedding.api_key.get_secret_value()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         response = misc_utils.SESSION.post(
             f"{self.emb_endpoint}/v1/embeddings",
             data=json.dumps(payload),

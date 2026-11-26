@@ -1,5 +1,8 @@
 name: similarity
 version: "1.0.0"
+podTemplateExecutions:
+  - [embedding-secret-key.yaml.tmpl, reranker-secret-key.yaml.tmpl]
+  - [similarity-api.yaml.tmpl]
 
 # Resource requirements
 resources:

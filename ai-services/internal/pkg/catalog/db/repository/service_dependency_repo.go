@@ -49,6 +49,11 @@ type ServiceDependencyRepository interface {
 	// dependencyIDs with the given dependencyType, in a single query.
 	// IDs with zero dependents are absent from the returned map.
 	GetServiceCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error)
+	// GetApplicationCountByDependency returns the number of distinct applications that depend on
+	// each ID in dependencyIDs with the given dependencyType, in a single query. Each application
+	// is counted once regardless of how many of its services reference the same dependency.
+	// IDs with zero dependents are absent from the returned map.
+	GetApplicationCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error)
 	// RemoveAllDependenciesForService removes all dependencies for a specific service.
 	RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error
 	// GetLinkedServiceEndpoints traverses service_dependencies → services → applications for
@@ -56,10 +61,10 @@ type ServiceDependencyRepository interface {
 	// linked service. Consumers are responsible for extracting the specific endpoint URL they
 	// need from EndpointsJSON.
 	GetLinkedServiceEndpoints(ctx context.Context, dependencyID uuid.UUID, dependencyType models.DependencyType) ([]LinkedServiceRow, error)
-	// GetConnectorsByAppID returns all distinct connector dependency_ids for all services
-	// belonging to the given application, with no pagination applied.
-	// Pagination is the responsibility of the downstream service.
-	GetConnectorsByAppID(ctx context.Context, appID uuid.UUID) (connectorIDs []uuid.UUID, err error)
+	// GetConnectorsByAppID returns all distinct connector dependency_ids of the given connector
+	// type (e.g. "datasource") for all services belonging to the given application, with no
+	// pagination applied. Pagination is the responsibility of the downstream service.
+	GetConnectorsByAppID(ctx context.Context, appID uuid.UUID, connectorType string) (connectorIDs []uuid.UUID, err error)
 }
 
 // serviceDependencyRepo implements ServiceDependencyRepository using pgx.
@@ -206,6 +211,46 @@ func (r *serviceDependencyRepo) GetServiceCountByDependency(ctx context.Context,
 	return counts, nil
 }
 
+// GetApplicationCountByDependency returns, for each dependency ID in dependencyIDs, the count of
+// distinct applications whose services reference it with the given dependencyType. A single GROUP BY
+// query is issued regardless of how many IDs are supplied. IDs with zero dependents are absent from
+// the map. Returns an empty (non-nil) map when dependencyIDs is empty.
+func (r *serviceDependencyRepo) GetApplicationCountByDependency(ctx context.Context, dependencyIDs []uuid.UUID, dependencyType models.DependencyType) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(dependencyIDs))
+	if len(dependencyIDs) == 0 {
+		return counts, nil
+	}
+
+	query := `
+		SELECT sd.dependency_id, COUNT(DISTINCT s.app_id) AS application_count
+		FROM service_dependencies sd
+		INNER JOIN services s ON s.id = sd.service_id
+		WHERE sd.dependency_id = ANY($1) AND sd.dependency_type = $2
+		GROUP BY sd.dependency_id
+	`
+
+	rows, err := r.pool.Query(ctx, query, dependencyIDs, dependencyType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count applications by dependency: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var depID uuid.UUID
+		var count int
+		if err := rows.Scan(&depID, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan application count: %w", err)
+		}
+		counts[depID] = count
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating application counts: %w", err)
+	}
+
+	return counts, nil
+}
+
 // RemoveAllDependenciesForService removes all dependencies for a specific service.
 // This is useful when deleting a service or resetting its dependencies.
 func (r *serviceDependencyRepo) RemoveAllDependenciesForService(ctx context.Context, serviceID uuid.UUID) error {
@@ -261,20 +306,23 @@ func (r *serviceDependencyRepo) GetLinkedServiceEndpoints(ctx context.Context, d
 	return results, nil
 }
 
-// GetConnectorsByAppID returns all distinct connector dependency_ids attached to services
-// belonging to the given application. No pagination is applied here — pagination is owned
+// GetConnectorsByAppID returns all distinct connector dependency_ids of connectorType attached to
+// services belonging to the given application. The type matters because remote model connectors
+// are linked the same way as datasources. No pagination is applied here — pagination is owned
 // by the downstream service response.
-func (r *serviceDependencyRepo) GetConnectorsByAppID(ctx context.Context, appID uuid.UUID) ([]uuid.UUID, error) {
+func (r *serviceDependencyRepo) GetConnectorsByAppID(ctx context.Context, appID uuid.UUID, connectorType string) ([]uuid.UUID, error) {
 	query := `
 		SELECT DISTINCT sd.dependency_id
 		FROM service_dependencies sd
 		INNER JOIN services s ON s.id = sd.service_id
+		INNER JOIN connectors c ON c.id = sd.dependency_id
 		WHERE s.app_id           = $1
 		  AND sd.dependency_type = $2
+		  AND c.type             = $3
 		ORDER BY sd.dependency_id
 	`
 
-	rows, err := r.pool.Query(ctx, query, appID, models.DependencyTypeConnector)
+	rows, err := r.pool.Query(ctx, query, appID, models.DependencyTypeConnector, connectorType)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query application connectors: %w", err)
 	}

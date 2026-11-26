@@ -9,6 +9,7 @@ type: architecture
 certified_by: "IBM"
 runtimes:
   - podman
+  - openshift
 
 # Global components shared across all services
 # These components are deployed once and reused by all services

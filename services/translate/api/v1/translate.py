@@ -79,7 +79,7 @@ async def sync_translate(body: SyncTranslateRequest) -> SyncTranslateResponse:
     # 4. Tokenize and run sync context guard.
     llm_endpoint = settings.common.llm.endpoint
     input_tokens: int = await asyncio.to_thread(
-        lambda: len(tokenize_with_llm(body.text, llm_endpoint))
+        lambda: len(tokenize_with_llm(body.text, llm_endpoint, settings.common.llm.api_key.get_secret_value()))
     )
 
     max_model_len = get_llm_max_model_len()

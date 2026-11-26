@@ -538,6 +538,15 @@ func (s *SyncService) updateServiceStatusIfChanged(ctx context.Context, service 
 func (s *SyncService) syncComponentPod(ctx context.Context, runtimeSync RuntimeSync, appID string, component *models.Component) (models.ComponentStatus, string, error) {
 	componentID := component.ID
 
+	// Local models are deployed outside the application namespace on OpenShift; look them up there.
+	if s.catalogProvider != nil && s.catalogProvider.IsModelComponentType(component.Type) {
+		modelSync, err := runtimeSync.WithModelsNamespace()
+		if err != nil {
+			return models.ComponentStatusError, "", fmt.Errorf("failed to scope sync to models namespace: %w", err)
+		}
+		runtimeSync = modelSync
+	}
+
 	// Fetch all pods using component ID as template label
 	pods, err := runtimeSync.FetchPodStatuses(ctx, componentID.String())
 	if err != nil {

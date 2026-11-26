@@ -49,6 +49,9 @@ var LoadAppWithOwnership = appservice.LoadAppWithOwnership
 // Both parameters may be nil. When connectorRepo is nil, create requests that carry
 // connector refs are rejected with an error; requests without connector refs are unaffected.
 // When datasourceSvc is nil, post-deploy connector attachment is skipped.
+//
+// models runs every phase (plan, record, download, deploy, fail) of the model components of an
+// application. When it is nil, model components are deployed like any other component.
 func NewApplicationService(
 	appRepo dbrepo.ApplicationRepository,
 	serviceRepo dbrepo.ServiceRepository,
@@ -59,6 +62,7 @@ func NewApplicationService(
 	reg stream.WorkerRegistry,
 	connectorRepo dbrepo.ConnectorRepository,
 	datasourceSvc appservice.DatasourceConnector,
+	models deployment.ModelManager,
 ) ApplicationServiceInterface {
 	if runtimeType != runtimeTypes.RuntimeTypePodman && runtimeType != runtimeTypes.RuntimeTypeOpenShift {
 		panic(fmt.Sprintf("unsupported runtime type %q", runtimeType))
@@ -77,12 +81,13 @@ func NewApplicationService(
 		ComponentRepo:         componentRepo,
 		ServiceDependencyRepo: serviceDependencyRepo,
 		Provider:              provider,
-		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo, workers),
-		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo, workers),
+		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, workers, models),
+		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo, workers, models),
 		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
 		Validator:             validator,
 		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
 		Workers:               workers,
 		DatasourceService:     datasourceSvc,
+		Models:                models,
 	}
 }

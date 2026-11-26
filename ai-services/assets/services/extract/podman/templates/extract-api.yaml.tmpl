@@ -4,6 +4,7 @@ metadata:
   name: "extract-api-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/secret: "llm-{{ .Values.llm.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
   annotations:
     ai-services.io/routes: "9500:extract-api-{{ .InstanceSlug }}:api,9501:extract-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ or .Values.extract.port }}:9500"  # Uncomment to expose ports directly (bypasses Caddy)
@@ -13,11 +14,9 @@ spec:
     - name: extract-db-secret
       secret:
         secretName: "extract-db-secret-{{ .InstanceSlug }}"
-    {{- if .Values.llm.apiKey }}
-    - name: vllm-secret
+    - name: llm-secret-key
       secret:
-        secretName: "vllm-secret-{{ .Values.llm.instanceSlug }}"
-    {{- end }}
+        secretName: "llm-{{ .Values.llm.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
   initContainers:
     - name: extract-db-init
       image: "{{ .Values.extract.image }}"
@@ -50,9 +49,7 @@ spec:
         - |
           export POSTGRES_USER=$(cat /etc/secret/extract-db-secret/username)
           export POSTGRES_PASSWORD=$(cat /etc/secret/extract-db-secret/password)
-          {{- if .Values.llm.apiKey }}
-          export LLM_API_KEY=$(cat /etc/secret/vllm-secret/apiKey)
-          {{- end }}
+          export LLM_API_KEY=$(cat /etc/secret/llm-secret-key/key)
           exec /var/venv/bin/python -m uvicorn extract.app:app \
             --host 0.0.0.0 \
             --port 9500 \
@@ -72,7 +69,9 @@ spec:
         - name: PORT
           value: "9500"
         - name: LLM_ENDPOINT
-          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
+          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}{{ .Values.llm.path }}"
+        - name: LLM_TOKENIZE_ENDPOINT
+          value: "{{ .Values.llm.tokenize_endpoint }}"
         - name: LLM_MODEL
           value: "{{ .Values.llm.model }}"
         - name: LLM_MAX_MODEL_LEN
@@ -101,11 +100,9 @@ spec:
         - mountPath: /etc/secret/extract-db-secret
           name: extract-db-secret
           readOnly: true
-        {{- if .Values.llm.apiKey }}
-        - mountPath: /etc/secret/vllm-secret
-          name: vllm-secret
+        - mountPath: /etc/secret/llm-secret-key
+          name: llm-secret-key
           readOnly: true
-        {{- end }}
     - name: mcp-sidecar
       image: "{{ .Values.mcp.image }}"
       args:

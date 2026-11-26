@@ -7,6 +7,7 @@ from fastapi import UploadFile
 from common.error_utils import APIError, ErrorCode
 from common.llm_utils import tokenize_with_llm
 from common.misc_utils import get_logger
+from common.settings import settings
 
 logger = get_logger("validation")
 
@@ -134,7 +135,12 @@ def validate_query_length(query: str, emb_endpoint: str, max_token_length: int) 
         (is_valid, error_message) tuple
     """
     try:
-        tokens = tokenize_with_llm(query, emb_endpoint)
+        tokens = tokenize_with_llm(
+            query,
+            emb_endpoint,
+            settings.embedding.api_key.get_secret_value(),
+            model_config=settings.embedding,
+        )
         token_count = len(tokens)
 
         if token_count > max_token_length:

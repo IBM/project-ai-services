@@ -401,7 +401,7 @@ func TestListModels(t *testing.T) {
 				assert.Equal(t, constants.DeploymentTypeLocal, req.DeploymentType)
 				assert.Equal(t, []string{"vllm-spyre"}, req.ProviderIDs)
 				assert.Equal(t, []string{"ibm-granite/granite"}, req.Models)
-				assert.Equal(t, "Running", req.Status)
+				assert.Equal(t, []string{"Running"}, req.Statuses)
 				assert.Equal(t, 2, req.Page)
 				assert.Equal(t, 50, req.PageSize)
 				assert.Equal(t, "user-123", req.CreatedBy)
@@ -424,6 +424,15 @@ func TestListModels(t *testing.T) {
 			checkReq: func(t *testing.T, req models.ListModelsRequest) {
 				assert.Equal(t, []string{"vllm-spyre", "watsonx"}, req.ProviderIDs)
 				assert.Equal(t, []string{"ibm/granite-4-h-small", "ibm-granite/granite-3.3-8b-instruct"}, req.Models)
+			},
+		},
+		{
+			name:       "repeated status parameters are all passed",
+			query:      "?status=Running&status=connected",
+			wantCode:   http.StatusOK,
+			wantCalled: true,
+			checkReq: func(t *testing.T, req models.ListModelsRequest) {
+				assert.Equal(t, []string{"Running", "connected"}, req.Statuses)
 			},
 		},
 		{
@@ -593,7 +602,8 @@ func TestListModels_ResponseShape(t *testing.T) {
 	// Per the LLD, worker is present and null for a remote model.
 	assert.Contains(t, item, "worker")
 	assert.Nil(t, item["worker"])
-	assert.NotContains(t, item, "profile", "profile is not part of the list response")
+	assert.Contains(t, item, "profile", "profile is present and null for a remote model")
+	assert.Nil(t, item["profile"])
 	assert.Contains(t, item, "connected_services")
 }
 
@@ -735,7 +745,8 @@ func TestGetModelByID_ResponseShape(t *testing.T) {
 	assert.Contains(t, raw, "worker")
 	assert.Nil(t, raw["worker"])
 	assert.Contains(t, raw, "endpoints")
-	assert.NotContains(t, raw, "profile")
+	assert.Contains(t, raw, "profile")
+	assert.Nil(t, raw["profile"])
 	assert.Len(t, raw["applications"], 1)
 	assert.Contains(t, raw, "connected_services")
 }

@@ -158,6 +158,43 @@ const (
 	SkipAllowConnect ConnectPolicy = false
 )
 
+// ModelRecommendation is a service's recommended model, with the hardware profile to deploy it with.
+// Profile is empty for remote providers, which have no profiles.
+// It is also the shape the deploy-options responses carry under a provider's "recommendations".
+type ModelRecommendation struct {
+	Model   string `yaml:"model" json:"model"`
+	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
+}
+
+// ServiceProviderContract is a service's model recommendations for one provider.
+type ServiceProviderContract struct {
+	ProviderID      string                `yaml:"id" json:"id"`
+	Recommendations []ModelRecommendation `yaml:"recommendations,omitempty" json:"recommendations,omitempty"`
+}
+
+// ServiceModelContract is a service's model recommendations for one component type.
+type ServiceModelContract struct {
+	ComponentType string                    `yaml:"componentType" json:"componentType"`
+	Providers     []ServiceProviderContract `yaml:"providers" json:"providers"`
+}
+
+// recommendedProfile returns the profile recommended for modelID under providerID, or "".
+func (c ServiceModelContract) recommendedProfile(providerID, modelID string) string {
+	for _, p := range c.Providers {
+		if p.ProviderID != providerID {
+			continue
+		}
+
+		for _, r := range p.Recommendations {
+			if r.Model == modelID {
+				return r.Profile
+			}
+		}
+	}
+
+	return ""
+}
+
 // Service represents a deployable AI service.
 type Service struct {
 	ID                string                `yaml:"id" json:"id"`
@@ -170,7 +207,45 @@ type Service struct {
 	Standalone        bool                  `yaml:"standalone,omitempty" json:"standalone,omitempty"`
 	AcceptsDatasource bool                  `yaml:"-" json:"accepts_datasource,omitempty"`
 	Datasource        *DatasourceSettings   `yaml:"datasource,omitempty" json:"datasource,omitempty"`
-	About             *yaml.Node            `yaml:"-" json:"-"`
+	// Models holds the service's optional model recommendations (see service-model-contracts.md).
+	// They only guide which profile a model is deployed with; they never restrict the models offered.
+	Models []ServiceModelContract `yaml:"models,omitempty" json:"-"`
+	About  *yaml.Node             `yaml:"-" json:"-"`
+}
+
+// ModelRecommendations returns the models this service recommends for the given component type and
+// provider, in declared order (the first is the primary), or nil when it declares none.
+func (s *Service) ModelRecommendations(componentType, providerID string) []ModelRecommendation {
+	for _, c := range s.Models {
+		if c.ComponentType != componentType {
+			continue
+		}
+
+		for _, p := range c.Providers {
+			if p.ProviderID == providerID {
+				return p.Recommendations
+			}
+		}
+	}
+
+	return nil
+}
+
+// RecommendedProfile returns the profile this service recommends for modelID of the given component
+// type and provider, or "" when it makes no recommendation. The caller falls back to the model's
+// default profile in that case.
+func (s *Service) RecommendedProfile(componentType, providerID, modelID string) string {
+	for _, c := range s.Models {
+		if c.ComponentType != componentType {
+			continue
+		}
+
+		if profile := c.recommendedProfile(providerID, modelID); profile != "" {
+			return profile
+		}
+	}
+
+	return ""
 }
 
 // UnmarshalYAML extracts the 'about' node manually, insulating it from reflection errors,
@@ -266,6 +341,9 @@ type ModelCatalogProvider struct {
 	ID             string                   `json:"id"`
 	Name           string                   `json:"name"`
 	DeploymentType constants.DeploymentType `json:"deployment_type"` // "local" or "remote"
+	// DefaultModel reports whether the model is the one this provider deploys when none is chosen
+	// (default: true in the provider's models.yaml).
+	DefaultModel bool `json:"default_model"`
 }
 
 // ModelDetail is a model as GET /catalog/models/:id returns it: the list entry plus license and about.
@@ -361,7 +439,14 @@ type RuntimeMetadata struct {
 	Version string `yaml:"version" json:"version"`
 }
 
+// DeployOptionsLink is a named URL the UI calls to populate a selector.
+type DeployOptionsLink struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
 // DeployOptionsProvider represents a provider for a component type.
+// The Models, Instances and Recommendations fields are set for model providers only.
 type DeployOptionsProvider struct {
 	ID          string     `json:"id"`
 	Name        string     `json:"name"`
@@ -370,12 +455,22 @@ type DeployOptionsProvider struct {
 	Default     bool       `json:"default,omitempty"`
 	Schema      string     `json:"schema,omitempty"`
 	Resources   *Resources `json:"resources,omitempty"`
+	// Models is the catalog endpoint listing the models to pick from.
+	Models *DeployOptionsLink `json:"models,omitempty"`
+	// Instances is the models endpoint listing existing instances to attach to; the UI appends
+	// the provider_id and model query parameters of its selection.
+	Instances *DeployOptionsLink `json:"instances,omitempty"`
+	// Recommendations are the service's recommended models for this provider; the first is the primary.
+	Recommendations []ModelRecommendation `json:"recommendations,omitempty"`
 }
 
 // DeployOptionsComponent represents a component type with its providers.
 type DeployOptionsComponent struct {
-	Type      string                  `json:"type"`
-	Name      string                  `json:"name"`
+	Type string `json:"type"`
+	Name string `json:"name"`
+	// Category is the category the component's providers declare in their metadata.yaml (e.g.
+	// "models"); the UI renders a model and instance selector for the "models" category.
+	Category  string                  `json:"category,omitempty"`
 	Providers []DeployOptionsProvider `json:"providers"`
 }
 

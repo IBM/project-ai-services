@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 )
@@ -207,8 +206,8 @@ func (c *ApplicationClient) GetApplicationWithRefresh(ctx context.Context, id st
 
 // CreateApplication creates a new application deployment via catalog API.
 // It accepts a CreateApplicationRequest with catalog ID, name, services, and components configuration.
-func (c *ApplicationClient) CreateApplication(ctx context.Context, req *models.CreateApplicationRequest) (*models.CreateApplicationResponse, error) {
-	var result models.CreateApplicationResponse
+func (c *ApplicationClient) CreateApplication(ctx context.Context, req *CreateApplicationRequest) (*CreateApplicationResponse, error) {
+	var result CreateApplicationResponse
 	resp, err := c.client.HTTPClient().R().
 		SetContext(ctx).
 		SetBody(req).

@@ -209,7 +209,7 @@ async def handle_summarize(
     
     # Get actual token count from the input text
     input_tokens = await asyncio.to_thread(
-        lambda: len(tokenize_with_llm(content_text, llm_endpoint))
+        lambda: len(tokenize_with_llm(content_text, llm_endpoint, settings.common.llm.api_key.get_secret_value()))
     )
     
     # Validate that both parameters are not provided simultaneously
@@ -532,7 +532,7 @@ async def process_summarization_job(job_id: str, level):
         
         # Tokenize input
         input_tokens = await asyncio.to_thread(
-            lambda: len(tokenize_with_llm(content_text, llm_endpoint))
+            lambda: len(tokenize_with_llm(content_text, llm_endpoint, settings.common.llm.api_key.get_secret_value()))
         )
         logger.info(f"Document token count: {input_tokens}")
         
@@ -648,7 +648,8 @@ async def process_summarization_job(job_id: str, level):
                 chunk_tokens = await asyncio.to_thread(
                     tokenize_with_llm,
                     chunk,
-                    llm_endpoint
+                    llm_endpoint,
+                    settings.common.llm.api_key.get_secret_value(),
                 )
                 chunk_input_tokens = len(chunk_tokens)
                 chunk_available_output_tokens = (
@@ -832,7 +833,8 @@ async def process_summarization_job(job_id: str, level):
             merge_tokens = await asyncio.to_thread(
                 tokenize_with_llm,
                 merged_text,
-                llm_endpoint
+                llm_endpoint,
+                settings.common.llm.api_key.get_secret_value(),
             )
             merge_input_tokens = len(merge_tokens)
             merge_available_output_tokens = (

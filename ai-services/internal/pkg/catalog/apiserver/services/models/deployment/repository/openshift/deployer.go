@@ -28,13 +28,11 @@ func (d *OpenShiftDeployer) Check(context.Context, *types.LocalPlan) error {
 	return nil
 }
 
-// Prepare installs the prerequisite charts (the KServe ServingRuntimes) into the models
-// namespace. There is nothing to pull or download here: KServe pulls the image and fetches the
+// Prepare does nothing. The prerequisite charts (the KServe ServingRuntimes) are installed into
+// the models namespace when the worker is configured, and KServe pulls the image and fetches the
 // weights from the chart's storageUri when the predictor starts.
-func (d *OpenShiftDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) error {
-	helm := openshiftutils.NewHelmManager(plan.Runtime, catalogutils.ModelsNamespace())
-
-	return openshiftutils.DeployPrerequisites(ctx, helm)
+func (d *OpenShiftDeployer) Prepare(context.Context, *types.LocalPlan) error {
+	return nil
 }
 
 // Start installs the provider's chart, waits for the InferenceService to be Ready and returns the

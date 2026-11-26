@@ -458,7 +458,7 @@ def validate_examples(
 def _tokenize(text: str, llm_endpoint: str) -> int:
     """Return token count for *text* via the vLLM /tokenize API."""
     from common.llm_utils import tokenize_with_llm
-    tokens = tokenize_with_llm(text, llm_endpoint)
+    tokens = tokenize_with_llm(text, llm_endpoint, settings.common.llm.api_key.get_secret_value())
     return len(tokens)
 
 

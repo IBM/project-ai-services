@@ -4,6 +4,7 @@ metadata:
   name: "chat-bot-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
+    ai-services.io/secret: "llm-{{ .Values.llm.instanceSlug }}-secret-key-{{ .InstanceSlug }},embedding-{{ .Values.embedding.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
   annotations:
     ai-services.io/routes: "3000:chat-bot-ui-{{ .InstanceSlug }}:ui,5000:chat-bot-backend-{{ .InstanceSlug }}:api,5001:chat-bot-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ .Values.ui.port }}:3000,{{ .Values.backend.port }}:5000"  # Uncomment to expose ports directly (bypasses Caddy)
@@ -13,6 +14,12 @@ spec:
     - name: opensearch-secret
       secret:
         secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
+    - name: llm-secret-key
+      secret:
+        secretName: "llm-{{ .Values.llm.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
+    - name: embedding-secret-key
+      secret:
+        secretName: "embedding-{{ .Values.embedding.instanceSlug }}-secret-key-{{ .InstanceSlug }}"
   containers:
     - name: ui
       image: "{{ .Values.ui.image }}"
@@ -46,6 +53,8 @@ spec:
         - |
           export OPENSEARCH_USERNAME=$(cat /etc/secret/opensearch-secret/username)
           export OPENSEARCH_PASSWORD=$(cat /etc/secret/opensearch-secret/password)
+          export LLM_API_KEY=$(cat /etc/secret/llm-secret-key/key)
+          export EMB_API_KEY=$(cat /etc/secret/embedding-secret-key/key)
           exec /var/venv/bin/python -m uvicorn app:app \
             --host 0.0.0.0 \
             --port 5000 \
@@ -53,13 +62,19 @@ spec:
             --http httptools
       env:
         - name: EMB_ENDPOINT
-          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}"
+          value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}{{ .Values.embedding.path }}"
+        - name: EMB_TOKENIZE_ENDPOINT
+          value: "{{ .Values.embedding.tokenize_endpoint }}"
         - name: EMB_MODEL
           value: "{{ .Values.embedding.model }}"
         - name: EMB_MAX_MODEL_LEN
           value: "{{ .Values.embedding.maxModelLen }}"
         - name: LLM_ENDPOINT
-          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}"
+          value: "http://{{ .Values.llm.host }}:{{ .Values.llm.port }}{{ .Values.llm.path }}"
+        - name: LLM_TOKENIZE_ENDPOINT
+          value: "{{ .Values.llm.tokenize_endpoint }}"
+        - name: LLM_INSTANCE_ID
+          value: "{{ .Values.llm.instance_id }}"
         - name: LLM_MODEL
           value: "{{ .Values.llm.model }}"
         - name: LLM_MAX_MODEL_LEN
@@ -111,6 +126,12 @@ spec:
       volumeMounts:
         - mountPath: /etc/secret/opensearch-secret
           name: opensearch-secret
+          readOnly: true
+        - mountPath: /etc/secret/llm-secret-key
+          name: llm-secret-key
+          readOnly: true
+        - mountPath: /etc/secret/embedding-secret-key
+          name: embedding-secret-key
           readOnly: true
     - name: mcp-sidecar
       image: "{{ .Values.mcp.image }}"

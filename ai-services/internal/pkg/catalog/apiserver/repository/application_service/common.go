@@ -2,6 +2,7 @@ package applicationservice
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deployment"
+	modelhelpers "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -114,6 +116,9 @@ type ApplicationServiceBase struct {
 
 	// Workers resolves the worker an application deploys to and the runtime used to reach it.
 	Workers worker.Resolver
+
+	// Models records the model components of an application, which the model service owns.
+	Models deployment.ModelManager
 }
 
 // createRuntime returns the runtime.Runtime appropriate for app.
@@ -573,6 +578,17 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 	}
 
 	for hash, comp := range plan.Components {
+		// A model is recorded by the model service, and one that already runs has its own row.
+		if comp.IsModel() {
+			if err := s.recordModelComponent(ctx, comp); err != nil {
+				return nil, fmt.Errorf("failed to record model component %s: %w", hash, err)
+			}
+
+			componentIDMap[hash] = comp.DatabaseID
+
+			continue
+		}
+
 		instanceUUID := uuid.New()
 
 		// Filter metadata to exclude sensitive data based on schema
@@ -583,6 +599,7 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 
 		component := &models.Component{
 			ID:        instanceUUID,
+			Name:      modelhelpers.ComponentName(plan.ApplicationName, instanceUUID),
 			Type:      comp.ComponentType,
 			Provider:  comp.ProviderID,
 			Status:    models.ComponentStatusInitializing,
@@ -601,6 +618,16 @@ func (s *ApplicationServiceBase) insertComponentRecords(
 	}
 
 	return componentIDMap, nil
+}
+
+// recordModelComponent is the record phase of a model component: the model service inserts the
+// row of a model to deploy, as Downloading. A model that already runs is only referenced.
+func (s *ApplicationServiceBase) recordModelComponent(ctx context.Context, comp *deployment.ComponentPlan) error {
+	if comp.PreDeployed {
+		return nil
+	}
+
+	return s.Models.RecordLocalModel(ctx, comp.Model)
 }
 
 // insertServiceRecords inserts service records and their dependencies.
@@ -624,7 +651,7 @@ func (s *ApplicationServiceBase) insertServiceRecords(
 
 		svc.DatabaseID = service.ID
 
-		if err := s.insertServiceDependencies(ctx, service.ID, svc.ComponentRefs, componentIDMap); err != nil {
+		if err := s.insertServiceDependencies(ctx, service.ID, svc.ComponentRefs, componentIDMap, plan.Components); err != nil {
 			return err
 		}
 	}
@@ -632,12 +659,14 @@ func (s *ApplicationServiceBase) insertServiceRecords(
 	return nil
 }
 
-// insertServiceDependencies inserts dependencies between services and components.
+// insertServiceDependencies inserts dependencies between services and components. A remote model
+// is not a component: its service depends on the connector it was registered as.
 func (s *ApplicationServiceBase) insertServiceDependencies(
 	ctx context.Context,
 	serviceID uuid.UUID,
 	componentRefs []string,
 	componentIDMap map[string]uuid.UUID,
+	components map[string]*deployment.ComponentPlan,
 ) error {
 	for _, compHash := range componentRefs {
 		componentID, exists := componentIDMap[compHash]
@@ -645,10 +674,15 @@ func (s *ApplicationServiceBase) insertServiceDependencies(
 			return fmt.Errorf("component hash %s not found in component map", compHash)
 		}
 
+		dependencyType := models.DependencyTypeComponent
+		if components[compHash].Remote {
+			dependencyType = models.DependencyTypeConnector
+		}
+
 		dependency := &models.ServiceDependency{
 			ServiceID:      serviceID,
 			DependencyID:   componentID,
-			DependencyType: models.DependencyTypeComponent,
+			DependencyType: dependencyType,
 		}
 
 		if err := s.ServiceDependencyRepo.AddDependency(ctx, dependency); err != nil {
@@ -779,6 +813,12 @@ func (s *ApplicationServiceBase) createDeploymentPlan(
 ) (*deployment.DeploymentPlan, error) {
 	plan, err := planner.PlanDeployment(ctx, req)
 	if err != nil {
+		// A validation error carries the HTTP status to return, so it must stay a *ValidationError.
+		var validationErr *ValidationError
+		if errors.As(err, &validationErr) {
+			return nil, validationErr
+		}
+
 		return nil, fmt.Errorf("failed to create deployment plan: %w", err)
 	}
 
@@ -878,8 +918,9 @@ func (s *ApplicationServiceBase) attachConnectorsPostDeploy(ctx context.Context,
 	logConnectErrors(ctx, applicationID, resp)
 }
 
-// collectDatasourceIDs returns a deduplicated slice of connector UUIDs from all service
-// connector refs in the create request. The same connector ID may appear across multiple
+// collectDatasourceIDs returns a deduplicated slice of datasource connector UUIDs from all
+// service connector refs in the create request. Other connector types (e.g. remote models) are
+// linked at deployment and are not datasources. The same connector ID may appear across multiple
 // services; ConnectDatasourcesToApplication resolves eligible services internally, so each
 // unique ID needs to be passed only once.
 func collectDatasourceIDs(ctx context.Context, services []apimodels.Service) []uuid.UUID {
@@ -888,6 +929,10 @@ func collectDatasourceIDs(ctx context.Context, services []apimodels.Service) []u
 
 	for _, svc := range services {
 		for _, ref := range svc.Connectors {
+			if ref.Type != constants.ConnectorTypeDatasource {
+				continue
+			}
+
 			id, err := uuid.Parse(ref.ID)
 			if err != nil {
 				// Should not happen — ValidateConnectorRefs already validated UUIDs.
@@ -1340,6 +1385,11 @@ func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.
 		return nil, fmt.Errorf("failed to get application components: %w", err)
 	}
 
+	dependencyIDs, err := s.collectDependencyIDs(ctx, app.Services)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get application dependencies: %w", err)
+	}
+
 	var requestID string
 	if reqID, ok := ctx.Value(logger.RequestIDKey).(string); ok {
 		requestID = reqID
@@ -1350,7 +1400,7 @@ func (s *ApplicationServiceBase) DeleteApplication(ctx context.Context, id uuid.
 		deletionCtx = context.WithValue(deletionCtx, logger.RequestIDKey, requestID)
 	}
 
-	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, keepData, rt)
+	go s.executeDeletionAsync(deletionCtx, id, app.Services, orphanedComponentIDs, dependencyIDs, keepData, rt)
 
 	return &DeleteApplicationResponse{
 		ID:      id.String(),
@@ -1364,6 +1414,7 @@ func (s *ApplicationServiceBase) executeDeletionAsync(
 	appID uuid.UUID,
 	services []models.Service,
 	orphanedComponentIDs []uuid.UUID,
+	dependencyIDs []uuid.UUID,
 	keepData bool,
 	rt runtime.Runtime,
 ) {
@@ -1387,6 +1438,19 @@ func (s *ApplicationServiceBase) executeDeletionAsync(
 		}
 	}()
 
+	// The keys of the application's models go first, like the gateway entries of a deleted model:
+	// they are not needed once the services are going. Revoking is repeatable, so a failure leaves
+	// the application in Error and the delete can be retried.
+	if err := s.revokeGatewayKeys(ctx, appID, dependencyIDs); err != nil {
+		logger.ErrorfCtx(ctx, "Failed to revoke the model keys of application %s: %v", appID, err)
+
+		if updateErr := catalogutils.UpdateApplicationStatus(ctx, s.AppRepo, appID.String(), models.ApplicationStatusError, fmt.Sprintf("failed to revoke model keys: %v", err)); updateErr != nil {
+			logger.ErrorfCtx(ctx, "Failed to update application status to Error: %v", updateErr)
+		}
+
+		return
+	}
+
 	err := s.DeletionExecutor.Execute(ctx, appID, services, orphanedComponentIDs, keepData, rt)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "Deletion failed for application %s: %v", appID.String(), err)
@@ -1399,6 +1463,40 @@ func (s *ApplicationServiceBase) executeDeletionAsync(
 	}
 
 	logger.InfolnCtx(ctx, fmt.Sprintf("Deletion completed successfully for application id '%s'", appID.String()))
+}
+
+// revokeGatewayKeys revokes the model gateway keys generated for the application at deploy time.
+// It is a no-op without a model manager, as then no application has model keys.
+func (s *ApplicationServiceBase) revokeGatewayKeys(ctx context.Context, appID uuid.UUID, dependencyIDs []uuid.UUID) error {
+	if s.Models == nil {
+		return nil
+	}
+
+	return s.Models.RevokeGatewayKeys(ctx, appID, dependencyIDs)
+}
+
+// collectDependencyIDs returns the IDs of the components and connectors the services depend on,
+// each once.
+func (s *ApplicationServiceBase) collectDependencyIDs(ctx context.Context, services []models.Service) ([]uuid.UUID, error) {
+	seen := make(map[uuid.UUID]bool)
+
+	var ids []uuid.UUID
+
+	for _, svc := range services {
+		deps, err := s.ServiceDependencyRepo.GetDependenciesByServiceID(ctx, svc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get dependencies for service %s: %w", svc.ID, err)
+		}
+
+		for _, dep := range deps {
+			if !seen[dep.DependencyID] {
+				seen[dep.DependencyID] = true
+				ids = append(ids, dep.DependencyID)
+			}
+		}
+	}
+
+	return ids, nil
 }
 
 // identifyOrphanedComponents identifies components that will become orphaned after service deletion.
@@ -1458,8 +1556,21 @@ func (s *ApplicationServiceBase) filterOrphanedComponents(ctx context.Context, c
 	return orphanedComponents
 }
 
-// isComponentOrphaned checks if a component has no remaining dependent services.
+// isComponentOrphaned checks if a component has no remaining dependent services. A model component
+// (catalog category "models") is never orphaned: it is a resource of its own, deleted only through
+// the models API, never as part of an application deletion.
 func (s *ApplicationServiceBase) isComponentOrphaned(ctx context.Context, componentID uuid.UUID, serviceIDs map[uuid.UUID]bool) bool {
+	comp, err := s.ComponentRepo.GetByID(ctx, componentID)
+	if err != nil || comp == nil {
+		logger.ErrorfCtx(ctx, "failed to get component %s to check orphan status: %v", componentID, err)
+
+		return false
+	}
+
+	if s.Provider.IsModelComponentType(comp.Type) {
+		return false
+	}
+
 	dependentServices, err := s.ServiceDependencyRepo.GetServicesByDependency(ctx, componentID, models.DependencyTypeComponent)
 	if err != nil {
 		logger.ErrorfCtx(ctx, "failed to check component %s orphan status: %s", componentID, err)

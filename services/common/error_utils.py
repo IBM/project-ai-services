@@ -97,6 +97,23 @@ class UnauthorizedErrorResponse(BaseModel):
     }
 
 
+class ForbiddenErrorResponse(BaseModel):
+    """403 Forbidden error response."""
+    error: ErrorDetail
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Access to this resource is forbidden",
+                    "status": 403
+                }
+            }
+        }
+    }
+
+
 class NotFoundErrorResponse(BaseModel):
     """404 Not Found error response."""
     error: ErrorDetail
@@ -306,6 +323,7 @@ class ServiceUnavailableErrorResponse(BaseModel):
 http_error_responses: Dict[int | str, Dict[str, Any]] = {
     400: {"description": "Bad Request - Invalid input or validation error", "model": BadRequestErrorResponse},
     401: {"description": "Unauthorized - Authentication failed", "model": UnauthorizedErrorResponse},
+    403: {"description": "Forbidden - Not authorized for this resource", "model": ForbiddenErrorResponse},
     404: {"description": "Not Found - Resource does not exist", "model": NotFoundErrorResponse},
     405: {"description": "Method Not Allowed - Operation not permitted for this resource", "model": MethodNotAllowedErrorResponse},
     409: {"description": "Conflict - Resource is locked or a duplicate exists", "model": ConflictErrorResponse},

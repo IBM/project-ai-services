@@ -138,6 +138,7 @@ func validateRagArchitecture(t *testing.T, body []byte) {
 	assert.Equal(t, "architecture", arch.Type)
 	assert.Equal(t, "IBM", arch.CertifiedBy)
 	assert.Contains(t, arch.Runtimes, "podman")
+	assert.Contains(t, arch.Runtimes, "openshift")
 
 	assert.NotEmpty(t, arch.Services)
 	serviceIDs := make(map[string]bool)

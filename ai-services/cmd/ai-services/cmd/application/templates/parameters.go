@@ -1,14 +1,17 @@
 package templates
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	catalogClient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	catalogConstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogTypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -129,6 +132,12 @@ func displayDeployOptionsParameters(ctx context.Context, source catalogClient.Ca
 
 	// Display parameters for each component provider
 	for _, comp := range deployOpts.Components {
+		// The model is chosen with --model, not a parameter, so model providers get a model section
+		// besides their parameters (if their schema has any).
+		if comp.Category == catalogConstants.ComponentCategoryModels {
+			displayModelComponent(ctx, source, deployOpts.ID, comp, displayedComponents)
+		}
+
 		for _, provider := range comp.Providers {
 			componentKey := fmt.Sprintf("%s.%s", comp.Type, provider.ID)
 
@@ -148,7 +157,104 @@ func displayDeployOptionsParameters(ctx context.Context, source catalogClient.Ca
 	}
 }
 
-// Made with Bob
+// displayModelComponent displays a model component type: what the service recommends for each of its
+// providers (the first is the primary), the models that can be deployed, and how to choose one.
+// The models of a component type are shown once when displayedComponents is tracking duplicates.
+func displayModelComponent(ctx context.Context, source catalogClient.CatalogSource, serviceID string, comp catalogTypes.DeployOptionsComponent, displayedComponents map[string]bool) {
+	if displayedComponents != nil {
+		key := "model." + comp.Type
+		if displayedComponents[key] {
+			return
+		}
+		displayedComponents[key] = true
+	}
+
+	entries, err := source.ListCatalogModels(ctx, comp.Type)
+	if err != nil {
+		logger.Warningf("skipping models for component type '%s': %v", comp.Type, err)
+
+		return
+	}
+
+	for _, line := range modelComponentLines(serviceID, comp, entries) {
+		logger.Infoln(line)
+	}
+}
+
+// modelComponentLines formats the model section of a component type. Only models a local provider of
+// the component can deploy are listed, as only those can be chosen with --model.
+func modelComponentLines(serviceID string, comp catalogTypes.DeployOptionsComponent, entries []catalogTypes.ModelCatalogEntry) []string {
+	lines := []string{fmt.Sprintf("  %s models (choose with --model %s=<model>, the provider with --params %s.<provider>=true):", comp.Type, comp.Type, comp.Type)}
+
+	for _, provider := range comp.Providers {
+		if len(provider.Recommendations) == 0 {
+			continue
+		}
+
+		recommended := make([]string, 0, len(provider.Recommendations))
+		for i, r := range provider.Recommendations {
+			if i == 0 {
+				recommended = append(recommended, r.Model+" (primary)")
+
+				continue
+			}
+			recommended = append(recommended, r.Model)
+		}
+
+		lines = append(lines, fmt.Sprintf("    recommended by '%s' for provider '%s': %s", serviceID, provider.ID, strings.Join(recommended, ", ")))
+	}
+
+	localIDs := make(map[string]bool, len(comp.Providers))
+	for _, provider := range comp.Providers {
+		localIDs[provider.ID] = true
+	}
+
+	available := availableModelLines(entries, localIDs)
+	if len(available) == 0 {
+		return append(lines, "    no deployable models")
+	}
+
+	lines = append(lines, "    available models:")
+
+	return append(lines, available...)
+}
+
+// availableModelLines lists, sorted by model ID, the models deployable by one of the given local providers.
+func availableModelLines(entries []catalogTypes.ModelCatalogEntry, localIDs map[string]bool) []string {
+	var lines []string
+
+	sorted := slices.SortedFunc(slices.Values(entries), func(a, b catalogTypes.ModelCatalogEntry) int { return cmp.Compare(a.ID, b.ID) })
+
+	for _, e := range sorted {
+		offered := offeredProviders(e, localIDs)
+		if len(offered) == 0 {
+			continue
+		}
+
+		lines = append(lines, fmt.Sprintf("      - %s [%s]", e.ID, strings.Join(offered, ", ")))
+	}
+
+	return lines
+}
+
+// offeredProviders returns the local providers of the model that are in localIDs, marking the default one.
+func offeredProviders(e catalogTypes.ModelCatalogEntry, localIDs map[string]bool) []string {
+	var offered []string
+
+	for _, p := range e.Providers {
+		if p.DeploymentType != catalogConstants.DeploymentTypeLocal || !localIDs[p.ID] {
+			continue
+		}
+
+		if p.DefaultModel {
+			offered = append(offered, p.ID+" (default)")
+		} else {
+			offered = append(offered, p.ID)
+		}
+	}
+
+	return offered
+}
 
 // displaySchemaParameters displays parameters from a schema with the given prefix.
 func displaySchemaParameters(schema map[string]any, prefix string) {

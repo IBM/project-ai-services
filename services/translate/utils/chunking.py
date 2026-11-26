@@ -17,6 +17,7 @@ from sentence_splitter import SentenceSplitter
 from common.lang_utils import to_sentence_splitter_lang
 from common.llm_utils import tokenize_with_llm
 from common.misc_utils import get_logger
+from translate.settings import settings
 from translate.models import TranslationChunk
 from translate.utils.llm import get_chunk_token_budget
 
@@ -36,7 +37,7 @@ def _is_table_block(block: str) -> bool:
 
 def _count_tokens_sync(text: str, llm_endpoint: str) -> int:
     """Synchronous token count — wraps tokenize_with_llm (returns a list)."""
-    return len(tokenize_with_llm(text, llm_endpoint))
+    return len(tokenize_with_llm(text, llm_endpoint, settings.common.llm.api_key.get_secret_value()))
 
 
 async def _count_tokens(text: str, llm_endpoint: str) -> int:

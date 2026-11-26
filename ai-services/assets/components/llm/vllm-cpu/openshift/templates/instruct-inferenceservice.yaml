@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: {{ if .Values.InstanceSlug }}"llm-{{ .Values.InstanceSlug }}"{{ else }}"llm"{{ end }}
+  name: "llm-{{ .Values.InstanceSlug }}"
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
@@ -29,13 +29,6 @@ spec:
           value: "auto"
         - name: VLLM_CPU_KVCACHE_SPACE
           value: "32"
-      {{- if .Values.apiKey }}
-        - name: VLLM_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: {{ if .Values.InstanceSlug }}"vllm-instruct-api-key-{{ .Values.InstanceSlug }}"{{ else }}"vllm-instruct-api-key"{{ end }}
-              key: apiKey
-      {{- end }}
       resources:
         requests:
           memory: {{ .Values.resources.requests.memory | quote }}

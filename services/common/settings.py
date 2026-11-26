@@ -51,6 +51,14 @@ class LLMConfig(BaseSettings):
         description="API key for vLLM authentication (optional, read from LLM_API_KEY env var)",
     )
 
+    tokenize_endpoint: str = Field(
+        default="",
+        description=(
+            "URL of the model's /tokenize endpoint on the model gateway (read from LLM_TOKENIZE_ENDPOINT). "
+            "When empty, <endpoint>/tokenize is used."
+        ),
+    )
+
     token_buffer_ratio: float = Field(
         default=0.15,
         ge=0.0,
@@ -86,6 +94,20 @@ class EmbeddingConfig(BaseSettings):
         description="Fallback maximum context length for the configured embedding model",
     )
 
+    api_key: SecretStr = Field(
+        default=SecretStr(""),
+        repr=False,
+        description="API key for the model gateway (optional, read from EMB_API_KEY env var)",
+    )
+
+    tokenize_endpoint: str = Field(
+        default="",
+        description=(
+            "URL of the model's /tokenize endpoint on the model gateway (read from EMB_TOKENIZE_ENDPOINT). "
+            "When empty, <endpoint>/tokenize is used."
+        ),
+    )
+
 
 class RerankerConfig(BaseSettings):
     """Reranker model configuration."""
@@ -100,6 +122,20 @@ class RerankerConfig(BaseSettings):
     model: str = Field(
         default="",
         description="Reranker model name",
+    )
+
+    api_key: SecretStr = Field(
+        default=SecretStr(""),
+        repr=False,
+        description="API key for the model gateway (optional, read from RERANKER_API_KEY env var)",
+    )
+
+    tokenize_endpoint: str = Field(
+        default="",
+        description=(
+            "URL of the model's /tokenize endpoint on the model gateway (read from RERANKER_TOKENIZE_ENDPOINT). "
+            "When empty, <endpoint>/tokenize is used."
+        ),
     )
 
 
@@ -136,6 +172,15 @@ class AppConfig(BaseSettings):
         ge=1,
         le=65535,
         description="Application port number",
+    )
+
+    llm_instance_id: str = Field(
+        default="",
+        description=(
+            "ID of the LLM model instance this application is bound to (read from LLM_INSTANCE_ID env var, "
+            "populated by Catalog). An API key is only accepted when its model gateway metadata tags "
+            "contain this ID."
+        ),
     )
 
     @field_validator('log_level')

@@ -42,13 +42,27 @@ spec:
             - name: PORT
               value: "7000"
             - name: EMB_ENDPOINT
-              value: http://embedding-predictor:8000
+              value: "http://{{ .Values.embedding.host }}:{{ .Values.embedding.port }}{{ .Values.embedding.path }}"
+            - name: EMB_TOKENIZE_ENDPOINT
+              value: "{{ .Values.embedding.tokenize_endpoint }}"
+            - name: EMB_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "embedding-secret-key"
+                  key: key
             - name: EMB_MODEL
               value: {{ .Values.embedding.model | quote }}
             - name: EMB_MAX_MODEL_LEN
               value: {{ .Values.embedding.maxModelLen | quote }}
             - name: RERANKER_ENDPOINT
-              value: http://reranker-predictor:8000
+              value: "http://{{ .Values.reranker.host }}:{{ .Values.reranker.port }}{{ .Values.reranker.path }}"
+            - name: RERANKER_TOKENIZE_ENDPOINT
+              value: "{{ .Values.reranker.tokenize_endpoint }}"
+            - name: RERANKER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "reranker-secret-key"
+                  key: key
             - name: RERANKER_MODEL
               value: {{ .Values.reranker.model | quote }}
             - name: OPENSEARCH_HOST

@@ -20,14 +20,14 @@ var modelSearchColumns = []string{"name"}
 
 // ModelFilters defines the optional filters and the pagination of the model list.
 // Every empty field is not added to the WHERE clause.
-// The values of one multi-value filter (Providers, Models) are OR'd; different filters are AND'd.
+// The values of one multi-value filter (Providers, Models, Statuses) are OR'd; different filters are AND'd.
 type ModelFilters struct {
 	CreatedBy      string                   // Optional: filter by created_by (owner)
 	DeploymentType constants.DeploymentType // Optional: "local" (components) or "remote" (connectors)
 	ComponentType  string                   // Optional: model role, e.g. "llm"
 	Providers      []string                 // Optional: provider ids, e.g. "vllm-spyre"; a model matches any of them
 	Models         []string                 // Optional: model identifiers; a model matches any of them
-	Status         string                   // Optional: component or connector status
+	Statuses       []string                 // Optional: component or connector statuses; a model matches any of them
 	Search         string                   // Optional: case-insensitive substring search on the model name
 	Limit          int                      // Optional: maximum number of records to return
 	Offset         int                      // Optional: number of records to skip
@@ -42,6 +42,7 @@ type ModelRow struct {
 	ComponentType     string
 	Provider          string
 	Model             string
+	Profile           string // hardware profile id; empty for remote models
 	Params            map[string]any
 	Status            string
 	Message           string
@@ -92,6 +93,7 @@ var modelUnionQuery = fmt.Sprintf(`
 	       COALESCE(c.type, '')                        AS component_type,
 	       COALESCE(c.provider, '')                    AS provider,
 	       COALESCE(c.metadata->>'%[3]s', '')          AS model,
+	       COALESCE(c.metadata->>'%[7]s', '')          AS profile,
 	       c.metadata->'%[4]s'                         AS params,
 	       COALESCE(c.status::text, '')                AS status,
 	       c.message                                   AS message,
@@ -110,6 +112,7 @@ var modelUnionQuery = fmt.Sprintf(`
 	       COALESCE(cn.metadata->>'%[5]s', ''),
 	       cn.provider,
 	       COALESCE(cn.metadata->>'%[3]s', ''),
+	       '',
 	       cn.metadata->'%[4]s',
 	       cn.status::text,
 	       cn.message,
@@ -127,9 +130,10 @@ var modelUnionQuery = fmt.Sprintf(`
 	constants.MetadataKeyParams,
 	constants.MetadataKeyComponentType,
 	constants.ConnectorTypeModels,
+	constants.MetadataKeyProfile,
 )
 
-const modelColumns = "id, deployment_type, name, component_type, provider, model, params, " +
+const modelColumns = "id, deployment_type, name, component_type, provider, model, profile, params, " +
 	"status, message, worker_id, worker_name, worker_runtime_type, created_by, created_at, updated_at"
 
 // buildModelWhere builds the WHERE clause applied over the union and its positional arguments.
@@ -170,7 +174,7 @@ func buildModelWhere(f *ModelFilters, componentTypes []string) (string, []interf
 	add("component_type", f.ComponentType)
 	addAny("provider", f.Providers)
 	addAny("model", f.Models)
-	add("status", f.Status)
+	addAny("status", f.Statuses)
 
 	if f.Search != "" {
 		clauses = append(clauses, buildSearchClause(modelSearchColumns, &args, f.Search))
@@ -303,7 +307,7 @@ func scanModelRow(rows pgx.Rows) (ModelRow, error) {
 	)
 
 	if err := rows.Scan(
-		&m.ID, &m.DeploymentType, &name, &m.ComponentType, &m.Provider, &m.Model, &paramsJSON,
+		&m.ID, &m.DeploymentType, &name, &m.ComponentType, &m.Provider, &m.Model, &m.Profile, &paramsJSON,
 		&m.Status, &message, &workerID, &workerName, &workerRuntime, &createdBy, &m.CreatedAt, &m.UpdatedAt,
 	); err != nil {
 		return m, fmt.Errorf("failed to scan model: %w", err)

@@ -11,6 +11,7 @@ import (
 	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogtypes "github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
 // Deployer deploys a planned local model on one kind of runtime in three steps: Check, Prepare
@@ -47,6 +48,21 @@ type ModelEndpoints struct {
 	// api_base and tokenize target are built from. For a remote worker it is the control-plane
 	// private egress, not the pod.
 	Egress string
+}
+
+// ModelAccess identifies the model deployment an application's services reach through the gateway.
+type ModelAccess struct {
+	// ComponentID is the model's component ID: the tag of its route on the gateway.
+	ComponentID uuid.UUID
+	// Model is the name the services call the model by.
+	Model string
+	// ApplicationID is the application the services belong to; the services' key is its own.
+	ApplicationID uuid.UUID
+	// Runtime is the runtime the application runs on, which decides how it reaches the gateway.
+	Runtime runtimeTypes.RuntimeType
+	// WorkerName is the worker the application runs on. A remote worker's services reach the
+	// gateway through their worker's Caddy egress instead of the gateway pod.
+	WorkerName string
 }
 
 // LocalPlan is a fully resolved local-model deployment.

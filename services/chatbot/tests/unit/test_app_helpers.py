@@ -112,9 +112,9 @@ class TestQueryRephrasingIntegration:
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Response"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
         
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
+        # Mock authenticate_and_authorize to pass
+        mock_is_auth = AsyncMock(return_value={})
+        monkeypatch.setattr("chatbot.app.authenticate_and_authorize", mock_is_auth)
         
         # Mock settings
         mock_settings = Mock()
@@ -185,9 +185,9 @@ class TestQueryRephrasingIntegration:
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Antwort"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
         
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
+        # Mock authenticate_and_authorize to pass
+        mock_is_auth = AsyncMock(return_value={})
+        monkeypatch.setattr("chatbot.app.authenticate_and_authorize", mock_is_auth)
         
         # Mock settings
         mock_settings = Mock()
@@ -255,9 +255,9 @@ class TestQueryRephrasingIntegration:
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Response"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
         
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
+        # Mock authenticate_and_authorize to pass
+        mock_is_auth = AsyncMock(return_value={})
+        monkeypatch.setattr("chatbot.app.authenticate_and_authorize", mock_is_auth)
         
         # Mock settings
         mock_settings = Mock()
@@ -314,9 +314,9 @@ class TestQueryRephrasingIntegration:
         mock_vllm = Mock(return_value={"choices": [{"message": {"content": "Response"}}]})
         monkeypatch.setattr("chatbot.app.query_vllm_non_stream", mock_vllm)
         
-        # Mock is_auth_required to return False
-        mock_is_auth = AsyncMock(return_value=False)
-        monkeypatch.setattr("chatbot.app.is_auth_required", mock_is_auth)
+        # Mock authenticate_and_authorize to pass
+        mock_is_auth = AsyncMock(return_value={})
+        monkeypatch.setattr("chatbot.app.authenticate_and_authorize", mock_is_auth)
         
         # Mock settings
         mock_settings = Mock()

@@ -44,17 +44,23 @@ func NewModelExecutor(
 // gateway, then mark it Running. Any failure moves the component to Error. The component row has
 // already been written (as Downloading) by the caller, and ExecuteLocal never panics.
 //
-// A caller that needs the steps separately (e.g. to download ahead of starting) can call
-// plan.Deployer.Prepare and plan.Deployer.Start itself and manage status on its own.
+// A caller that needs the phases separately, as the application flow does, calls Prepare, Start
+// and Fail itself; ExecuteLocal is just those three in order.
 func (e *ModelExecutor) ExecuteLocal(ctx context.Context, plan *types.LocalPlan) {
 	defer func() {
 		if r := recover(); r != nil {
-			e.failLocal(ctx, plan, fmt.Errorf("panic: %v", r))
+			e.Fail(ctx, plan, fmt.Errorf("panic: %v", r))
 		}
 	}()
 
-	if err := e.runLocal(ctx, plan); err != nil {
-		e.failLocal(ctx, plan, err)
+	if err := e.Prepare(ctx, plan); err != nil {
+		e.Fail(ctx, plan, err)
+
+		return
+	}
+
+	if _, err := e.Start(ctx, plan); err != nil {
+		e.Fail(ctx, plan, err)
 
 		return
 	}
@@ -62,25 +68,32 @@ func (e *ModelExecutor) ExecuteLocal(ctx context.Context, plan *types.LocalPlan)
 	logger.InfofCtx(ctx, "Local model %s (%s) deployed successfully", plan.Req.Name, plan.ComponentID)
 }
 
-func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) error {
-	// The row is inserted as Downloading, so the pull and download run under that status.
-	if err := plan.Deployer.Prepare(ctx, plan); err != nil {
-		return err
-	}
+// Prepare is the download phase: it pulls the images and downloads the model weights on the
+// worker. The component row is Downloading while it runs (it is inserted that way) and stays so;
+// Start moves it on. It does not change status itself, so a failure is for the caller to report
+// with Fail.
+func (e *ModelExecutor) Prepare(ctx context.Context, plan *types.LocalPlan) error {
+	return plan.Deployer.Prepare(ctx, plan)
+}
 
+// Start is the deploy phase: it marks the component Deploying, starts the pods, exposes them
+// through the gateway and marks the component Running. It returns the endpoints the model server
+// is reachable at. It expects Prepare to have succeeded; a failure is for the caller to report
+// with Fail.
+func (e *ModelExecutor) Start(ctx context.Context, plan *types.LocalPlan) (types.ModelEndpoints, error) {
 	if err := e.componentRepo.UpdateStatus(ctx, plan.ComponentID, dbmodels.ComponentStatusDeploying, ""); err != nil {
-		return fmt.Errorf("failed to mark component deploying: %w", err)
+		return types.ModelEndpoints{}, fmt.Errorf("failed to mark component deploying: %w", err)
 	}
 
 	eps, err := plan.Deployer.Start(ctx, plan)
 	if err != nil {
-		return err
+		return types.ModelEndpoints{}, err
 	}
 
 	// LiteLLM is given the egress address the control plane can reach; the DB records the pod's own.
 	updateLocalRoute(plan, eps.Egress)
 	if err := e.gateway.Register(ctx, &plan.Route); err != nil {
-		return err
+		return types.ModelEndpoints{}, err
 	}
 
 	// Persist the LiteLLM model ID so the route can be found (and removed) later. If it cannot be
@@ -88,19 +101,19 @@ func (e *ModelExecutor) runLocal(ctx context.Context, plan *types.LocalPlan) err
 	if err := e.saveLiteLLMModelID(ctx, plan); err != nil {
 		e.gateway.Deregister(ctx, plan.Route)
 
-		return err
+		return types.ModelEndpoints{}, err
 	}
 
 	endpoints := []map[string]any{{"type": "internal", "url": "http://" + eps.Internal}}
 	if err := e.componentRepo.UpdateEndpoints(ctx, plan.ComponentID, endpoints); err != nil {
-		return fmt.Errorf("failed to save endpoints: %w", err)
+		return types.ModelEndpoints{}, fmt.Errorf("failed to save endpoints: %w", err)
 	}
 
 	if err := e.componentRepo.UpdateStatus(ctx, plan.ComponentID, dbmodels.ComponentStatusRunning, ""); err != nil {
-		return fmt.Errorf("failed to mark component running: %w", err)
+		return types.ModelEndpoints{}, fmt.Errorf("failed to mark component running: %w", err)
 	}
 
-	return nil
+	return eps, nil
 }
 
 // saveLiteLLMModelID adds {"litellm": {"model_id": <id>}} to the component's stored metadata. The
@@ -138,7 +151,9 @@ func liteLLMMetadata(metadata map[string]any, modelID string) map[string]any {
 	return metadata
 }
 
-func (e *ModelExecutor) failLocal(ctx context.Context, plan *types.LocalPlan, cause error) {
+// Fail records that a local plan failed: the component moves to Error with the cause as its
+// message.
+func (e *ModelExecutor) Fail(ctx context.Context, plan *types.LocalPlan, cause error) {
 	logger.ErrorfCtx(ctx, "Model deployment failed for %s: %v", plan.ComponentID, cause)
 
 	// Use a fresh context: ctx may already be expired (timeout) and the status must still be saved.

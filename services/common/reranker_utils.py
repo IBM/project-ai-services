@@ -5,6 +5,7 @@ from cohere import ClientV2
 from cohere.core import RequestOptions
 
 from common.misc_utils import get_logger
+from common.settings import settings
 from common.retry_utils import retry_on_transient_error
 
 logger = get_logger("reranker")
@@ -41,7 +42,7 @@ def rerank_documents(query: str, documents: List[dict], model: str, endpoint: st
     Returns:
         List of (document, score) sorted by descending score.
     """
-    co2 = ClientV2(api_key="sk-fake-key", base_url=endpoint)
+    co2 = ClientV2(api_key=settings.reranker.api_key.get_secret_value() or "sk-fake-key", base_url=endpoint)
     reranked: List[Tuple[dict, float]] = []
 
     with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(documents)))) as executor:

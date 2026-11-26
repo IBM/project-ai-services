@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -285,3 +287,46 @@ func findSubstring(s, substr string) int {
 }
 
 // Made with Bob
+
+func TestService_RecommendedProfile(t *testing.T) {
+	var svc Service
+
+	require.NoError(t, yaml.Unmarshal([]byte(`
+id: extract
+models:
+  - componentType: llm
+    providers:
+      - id: vllm-spyre
+        recommendations:
+          - model: ibm/primary
+            profile: compact-4k
+          - model: ibm/other
+            profile: balanced
+      - id: watsonx
+        recommendations:
+          - model: ibm/remote
+`), &svc))
+
+	tests := []struct {
+		name                           string
+		componentType, provider, model string
+		want                           string
+	}{
+		{"primary entry", "llm", "vllm-spyre", "ibm/primary", "compact-4k"},
+		{"per-model override", "llm", "vllm-spyre", "ibm/other", "balanced"},
+		{"model without a recommendation", "llm", "vllm-spyre", "ibm/unlisted", ""},
+		{"other provider", "llm", "vllm-cpu", "ibm/primary", ""},
+		{"other component type", "embedding", "vllm-spyre", "ibm/primary", ""},
+		{"remote entry has no profile", "llm", "watsonx", "ibm/remote", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, svc.RecommendedProfile(tt.componentType, tt.provider, tt.model))
+		})
+	}
+
+	t.Run("a service without models recommends nothing", func(t *testing.T) {
+		assert.Empty(t, (&Service{}).RecommendedProfile("llm", "vllm-spyre", "ibm/primary"))
+	})
+}

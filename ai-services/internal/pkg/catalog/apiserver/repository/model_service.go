@@ -35,7 +35,9 @@ func modelGatewayPublicEndpoint() string {
 	return os.Getenv(constants.ModelGatewayPublicEndpointEnv)
 }
 
-// NewModelService creates a new ModelServiceInterface instance.
+// NewModelService creates a new model service. The concrete type is returned so that it can be
+// used both as a ModelServiceInterface (the models API) and as a deployment.ModelManager (the
+// application create flow).
 // The model gateway public endpoint is resolved once here, at startup (see modelGatewayPublicEndpoint).
 func NewModelService(
 	componentRepo dbrepo.ComponentRepository,
@@ -44,7 +46,7 @@ func NewModelService(
 	svcDepRepo dbrepo.ServiceDependencyRepository,
 	workerRegistry stream.WorkerRegistry,
 	catalogProvider *catalog.CatalogProvider,
-) ModelServiceInterface {
+) *modelservice.ModelService {
 	return modelservice.NewModelService(
 		componentRepo,
 		connectorRepo,

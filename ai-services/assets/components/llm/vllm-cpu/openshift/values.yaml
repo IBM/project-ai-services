@@ -1,5 +1,4 @@
 model: ""
-apiKey: ""
 maxModelLen: 8096
 maxBatchSize: 32
 resources:

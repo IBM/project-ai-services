@@ -2428,8 +2428,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "Filter by status: Downloading, Deploying, Running, Error (local) or connected, offline (remote)",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "Filter by status: Downloading, Deploying, Running, Error (local) or connected, offline (remote); repeat the parameter to match any of several",
                         "name": "status",
                         "in": "query"
                     },
@@ -3529,12 +3533,18 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.Component": {
             "type": "object",
             "required": [
-                "component_type",
-                "provider_id",
-                "version"
+                "component_type"
             ],
             "properties": {
                 "component_type": {
+                    "type": "string"
+                },
+                "instance_id": {
+                    "description": "InstanceID is the ID of an existing, running model instance (components.id) to attach to\ninstead of deploying a new one.",
+                    "type": "string"
+                },
+                "model": {
+                    "description": "Model is the catalog model to deploy, for components of a model provider. It is a top-level\nfield, not a param.",
                     "type": "string"
                 },
                 "params": {
@@ -3982,7 +3992,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
                 },
                 "connected_services": {
-                    "description": "ConnectedServices is the number of services using the model.",
+                    "description": "ConnectedServices is the number of distinct applications using the model.",
                     "type": "integer"
                 },
                 "created_at": {
@@ -4014,6 +4024,14 @@ const docTemplate = `{
                     "description": "Params are the non-sensitive provider params the model was created with.",
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "profile": {
+                    "description": "Profile is the hardware profile of a local model; null for remote models.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelProfile"
+                        }
+                    ]
                 },
                 "provider": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo"
@@ -4053,7 +4071,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ComponentType"
                 },
                 "connected_services": {
-                    "description": "ConnectedServices is the number of services using the model.",
+                    "description": "ConnectedServices is the number of distinct applications using the model.",
                     "type": "integer"
                 },
                 "created_at": {
@@ -4078,6 +4096,14 @@ const docTemplate = `{
                     "description": "Params are the non-sensitive provider params the model was created with.",
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "profile": {
+                    "description": "Profile is the hardware profile of a local model; null for remote models.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelProfile"
+                        }
+                    ]
                 },
                 "provider": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ProviderInfo"
@@ -4109,6 +4135,20 @@ const docTemplate = `{
                 },
                 "pagination": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.PaginationMetadata"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_apiserver_models.ModelProfile": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
                 }
             }
         },
@@ -4737,6 +4777,10 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsComponent": {
             "type": "object",
             "properties": {
+                "category": {
+                    "description": "Category is the category the component's providers declare in their metadata.yaml (e.g.\n\"models\"); the UI renders a model and instance selector for the \"models\" category.",
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -4747,6 +4791,17 @@ const docTemplate = `{
                     }
                 },
                 "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsLink": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }
@@ -4763,8 +4818,31 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "instances": {
+                    "description": "Instances is the models endpoint listing existing instances to attach to; the UI appends\nthe provider_id and model query parameters of its selection.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsLink"
+                        }
+                    ]
+                },
+                "models": {
+                    "description": "Models is the catalog endpoint listing the models to pick from.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DeployOptionsLink"
+                        }
+                    ]
+                },
                 "name": {
                     "type": "string"
+                },
+                "recommendations": {
+                    "description": "Recommendations are the service's recommended models for this provider; the first is the primary.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelRecommendation"
+                    }
                 },
                 "resources": {
                     "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.Resources"
@@ -4838,6 +4916,10 @@ const docTemplate = `{
         "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider": {
             "type": "object",
             "properties": {
+                "default_model": {
+                    "description": "DefaultModel reports whether the model is the one this provider deploys when none is chosen\n(default: true in the provider's models.yaml).",
+                    "type": "boolean"
+                },
                 "deployment_type": {
                     "description": "\"local\" or \"remote\"",
                     "allOf": [
@@ -4952,6 +5034,17 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelCatalogProvider"
                     }
+                }
+            }
+        },
+        "github_com_project-ai-services_ai-services_internal_pkg_catalog_types.ModelRecommendation": {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string"
+                },
+                "profile": {
+                    "type": "string"
                 }
             }
         },

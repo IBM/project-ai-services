@@ -8,9 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/litellm"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
-	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/validators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,10 +76,6 @@ func newKeyManager(lite *keyLiteLLM) *Manager {
 	return NewManager(lite)
 }
 
-func modelRow(deploymentType catalogconstants.DeploymentType) *dbrepo.ModelRow {
-	return &dbrepo.ModelRow{ID: uuid.New(), DeploymentType: deploymentType, Model: keyTestModel, CreatedBy: "u"}
-}
-
 func requireBadGateway(t *testing.T, err error) *validators.ValidationError {
 	t.Helper()
 
@@ -92,36 +87,33 @@ func requireBadGateway(t *testing.T, err error) *validators.ValidationError {
 }
 
 func TestGenerate(t *testing.T) {
-	local := modelRow(catalogconstants.DeploymentTypeLocal)
-	remote := modelRow(catalogconstants.DeploymentTypeRemote)
+	id := uuid.New()
+	publicAlias := litellm.PublicKeyAlias(keyTestModel, id)
+	internalAlias := litellm.InternalKeyAlias(keyTestModel, id, "slug")
 
-	t.Run("key is aliased by model name and id", func(t *testing.T) {
+	t.Run("generates the key under the alias the caller chose, pinned to the deployment", func(t *testing.T) {
 		lite := &keyLiteLLM{}
 		mgr := newKeyManager(lite)
 
-		for _, row := range []*dbrepo.ModelRow{local, remote} {
-			resp, err := mgr.Generate(context.Background(), row)
+		for _, alias := range []string{publicAlias, internalAlias} {
+			key, err := mgr.Generate(context.Background(), Request{Model: keyTestModel, ID: id, Alias: alias})
 			require.NoError(t, err)
 
-			alias := keyTestModel + "-" + row.ID.String()
-			assert.Equal(t, "public", resp.Type)
-			assert.Equal(t, keyTestModel, resp.Model)
-			assert.Equal(t, lite.keys[alias], resp.Key)
-
+			assert.Equal(t, lite.keys[alias], key)
 			assert.Equal(t, alias, lite.genReq.KeyAlias)
 			assert.Equal(t, []string{keyTestModel}, lite.genReq.Models)
-			assert.Equal(t, catalogclient.LiteLLMKeyMetadata{Tags: []string{row.ID.String()}}, lite.genReq.Metadata,
+			assert.Equal(t, catalogclient.LiteLLMKeyMetadata{Tags: []string{id.String()}}, lite.genReq.Metadata,
 				"the key is pinned to its own deployment by tag")
 			assert.Equal(t, alias, lite.deleted[len(lite.deleted)-1], "the old key is revoked by the same alias")
 		}
 
-		assert.Len(t, lite.keys, 2, "each id has its own key")
+		assert.Len(t, lite.keys, 2, "the public and the internal key of one model coexist")
 	})
 
 	t.Run("revoke comes before generate", func(t *testing.T) {
 		lite := &keyLiteLLM{}
 
-		_, err := newKeyManager(lite).Generate(context.Background(), local)
+		_, err := newKeyManager(lite).Generate(context.Background(), Request{Model: keyTestModel, ID: id, Alias: publicAlias})
 		require.NoError(t, err)
 		assert.Equal(t, []string{"delete", "generate"}, lite.calls)
 	})
@@ -129,23 +121,22 @@ func TestGenerate(t *testing.T) {
 	t.Run("regenerating replaces the key, so only one exists", func(t *testing.T) {
 		lite := &keyLiteLLM{}
 		mgr := newKeyManager(lite)
+		req := Request{Model: keyTestModel, ID: id, Alias: internalAlias}
 
-		first, err := mgr.Generate(context.Background(), local)
+		first, err := mgr.Generate(context.Background(), req)
 		require.NoError(t, err)
-		second, err := mgr.Generate(context.Background(), local)
+		second, err := mgr.Generate(context.Background(), req)
 		require.NoError(t, err)
 
-		assert.NotEqual(t, first.Key, second.Key)
+		assert.NotEqual(t, first, second)
 		assert.Len(t, lite.keys, 1)
-		assert.Equal(t, second.Key, lite.keys[keyTestModel+"-"+local.ID.String()])
+		assert.Equal(t, second, lite.keys[internalAlias])
 	})
 
 	t.Run("a model without a name is an internal error and calls nothing", func(t *testing.T) {
 		lite := &keyLiteLLM{}
-		row := modelRow(catalogconstants.DeploymentTypeLocal)
-		row.Model = ""
 
-		_, err := newKeyManager(lite).Generate(context.Background(), row)
+		_, err := newKeyManager(lite).Generate(context.Background(), Request{ID: id, Alias: publicAlias})
 
 		require.Error(t, err)
 		var valErr *validators.ValidationError
@@ -156,7 +147,7 @@ func TestGenerate(t *testing.T) {
 	t.Run("revoke failure is 502 and generates nothing", func(t *testing.T) {
 		lite := &keyLiteLLM{deleteErr: errors.New("boom")}
 
-		_, err := newKeyManager(lite).Generate(context.Background(), local)
+		_, err := newKeyManager(lite).Generate(context.Background(), Request{Model: keyTestModel, ID: id, Alias: publicAlias})
 
 		requireBadGateway(t, err)
 		assert.Equal(t, []string{"delete"}, lite.calls)
@@ -165,9 +156,36 @@ func TestGenerate(t *testing.T) {
 	t.Run("generate failure is 502 and tells the caller to retry", func(t *testing.T) {
 		lite := &keyLiteLLM{genErr: errors.New("boom")}
 
-		_, err := newKeyManager(lite).Generate(context.Background(), local)
+		_, err := newKeyManager(lite).Generate(context.Background(), Request{Model: keyTestModel, ID: id, Alias: publicAlias})
 
 		valErr := requireBadGateway(t, err)
-		assert.Contains(t, valErr.Message, "call this endpoint again")
+		assert.Contains(t, valErr.Message, "retry")
+	})
+}
+
+func TestRevoke(t *testing.T) {
+	aliases := []string{"a-app-x", "b-app-x"}
+
+	t.Run("revokes every alias in one call", func(t *testing.T) {
+		lite := &keyLiteLLM{}
+
+		require.NoError(t, newKeyManager(lite).Revoke(context.Background(), aliases))
+
+		assert.Equal(t, aliases, lite.deleted)
+		assert.Equal(t, []string{"delete"}, lite.calls)
+	})
+
+	t.Run("no aliases calls nothing", func(t *testing.T) {
+		lite := &keyLiteLLM{}
+
+		require.NoError(t, newKeyManager(lite).Revoke(context.Background(), nil))
+
+		assert.Empty(t, lite.calls)
+	})
+
+	t.Run("a gateway failure is 502", func(t *testing.T) {
+		lite := &keyLiteLLM{deleteErr: errors.New("boom")}
+
+		requireBadGateway(t, newKeyManager(lite).Revoke(context.Background(), aliases))
 	})
 }

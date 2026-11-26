@@ -518,6 +518,18 @@ func (p *CatalogProvider) ListComponents() ([]types.Component, error) {
 	return components, nil
 }
 
+// IsModelComponentType reports whether componentType is served by model providers, that is, some
+// provider of that type declares `category: models` in its metadata.yaml.
+func (p *CatalogProvider) IsModelComponentType(componentType string) bool {
+	for _, c := range p.ListComponentsByCategory(constants.ComponentCategoryModels) {
+		if c.ComponentType.ID == componentType {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ListComponentsByCategory lists all components whose metadata declares the given category.
 func (p *CatalogProvider) ListComponentsByCategory(category string) []types.Component {
 	snapshot := p.allItems()
@@ -910,7 +922,7 @@ func (p *CatalogProvider) LoadComponentValuesForModel(componentType, providerID,
 		if m == nil {
 			return nil, fmt.Errorf("%w: '%s' is not listed for '%s'", ErrModelNotSupported, model, key)
 		}
-		values["model"] = model
+		values[constants.ParamKeyModel] = model
 	}
 
 	profileValues, err := profiles.ValuesFor(item.itemFS, item.Path, m, profile)
@@ -923,9 +935,59 @@ func (p *CatalogProvider) LoadComponentValuesForModel(componentType, providerID,
 	return values, nil
 }
 
+// ResolveModelProfile returns the ID of the profile a model is deployed with: requested when set,
+// else the model's default profile, else the provider's default. It returns "" when the provider
+// has no profiles. An unknown model or profile wraps ErrModelNotSupported / profiles.ErrNotSupported.
+func (p *CatalogProvider) ResolveModelProfile(componentType, providerID, model, requested string) (string, error) {
+	key := fmt.Sprintf("%s/%s", componentType, providerID)
+
+	item, ok := p.getItem(key)
+	if !ok {
+		return "", fmt.Errorf("component '%s' not found", key)
+	}
+
+	m, err := models.Find(item.itemFS, item.Path, model)
+	if err != nil {
+		return "", err
+	}
+
+	if m == nil {
+		return "", fmt.Errorf("%w: '%s' is not listed for '%s'", ErrModelNotSupported, model, key)
+	}
+
+	list, err := profiles.List(item.itemFS, item.Path)
+	if err != nil {
+		return "", err
+	}
+
+	selected, err := profiles.Resolve(list, m, requested)
+	if err != nil || selected == nil {
+		return "", err
+	}
+
+	return selected.ID, nil
+}
+
+// ProviderProfiles returns the hardware profiles a provider defines in its profiles.yaml, by id.
+func (p *CatalogProvider) ProviderProfiles(componentType, providerID string) (map[string]profiles.Profile, error) {
+	key := fmt.Sprintf("%s/%s", componentType, providerID)
+
+	item, ok := p.getItem(key)
+	if !ok {
+		return nil, fmt.Errorf("component '%s' not found", key)
+	}
+
+	list, err := profiles.List(item.itemFS, item.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	return profiles.ByID(list), nil
+}
+
 func mergeProfileValues(values, profileValues map[string]any) {
 	for k, v := range profileValues {
-		if k == "model" {
+		if k == constants.ParamKeyModel {
 			continue
 		}
 
