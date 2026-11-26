@@ -1,110 +1,106 @@
 # OpenSearch (ppc64le) Image Pipeline
 
-This Jenkins pipeline builds OpenSearch from source for `ppc64le`, packages it as a container image, tests it, scans it, and pushes it to IBM Container Registry (ICR).
+The [`Jenkinsfile`](./Jenkinsfile) in this directory builds OpenSearch from source for `ppc64le`, packages it as a container image, validates and scans it, and pushes it to IBM Container Registry (ICR).
 
-The pipeline definition is the [`Jenkinsfile`](./Jenkinsfile) in this directory.
+## Prerequisites
 
-## Before you start
+- Access to the [Jenkins server](https://sys-powercloud-team-jenkins.swg-devops.com/) and permission to run the OpenSearch job (`ai-services` folder).
+- A version in the form `X.Y.Z` (for example `3.8.0`, `3.10.1`) that is a **git tag** in [opensearch-build](https://github.com/opensearch-project/opensearch-build/tags).
+- The matching `X.Y.0` files in [ppc64le/build-scripts](https://github.com/ppc64le/build-scripts) (see below).
 
-Check that you have all of the following:
+## Files used per version
 
-- Access to the Jenkins server (`https://sys-powercloud-team-jenkins.swg-devops.com/`). If you can't log in or can't see the `ai-services` folder, ask your team administrator for access.
-- Permission to run builds on the OpenSearch job. Look for the **Build with Parameters** link on the job page.
-- The OpenSearch version you want to build, for example `3.8.0`. The version must meet both conditions:
-  - It is a **git tag** in [opensearch-project/opensearch-build](https://github.com/opensearch-project/opensearch-build/tags).
-  - A matching Dockerfile folder and patch file exist in the build-scripts repo:
-    - `o/opensearch-project-opensearch-build/Dockerfiles/<version>_ubi9.7/`
-    - `o/opensearch-project-opensearch-build/Dockerfiles/<version>_ubi9.7/ppc64le-<version>-ai-services.patch`
+Dockerfiles and patches always come from the `X.Y.0` folder, so a patch release such as `3.10.1` reuses the `3.10.0` files. Folders are under `o/opensearch-project-opensearch-build/Dockerfiles/<X.Y.0>_ubi9.7/` in build-scripts.
 
-If the folder or patch doesn't exist for your version, the build fails in the **Build** stage. Add them to build-scripts first.
+| Version | Patches applied, in order | `DEPENDENCY_UPDATES` |
+| --- | --- | --- |
+| 3.8.x | `ppc64le-<X.Y.0>-ai-services.patch` | Not supported |
+| 3.10.x and above | `ppc64le-<X.Y.0>-ai-services.patch`, `ppc64le-<X.Y.0>-dependency-patches.patch` | Supported |
+
+- `ai-services.patch`: the `ppc64le` fixes (component build scripts, `opensearch-build` Python code). For 3.8 it also carries the dependency bumps.
+- `dependency-patches.patch`: a hook in `builder_from_source.py` that applies the patches generated from `DEPENDENCY_UPDATES` after each component checkout. It does nothing when no updates are set.
+
+### Generate a patch
+
+1. Clone `opensearch-build` at the version tag and create a branch:
+
+   ```bash
+   git clone --branch <version> https://github.com/opensearch-project/opensearch-build.git
+   cd opensearch-build && git checkout -b ppc64le-<version>
+   ```
+
+2. Apply the previous release's patch and fix the hunks that fail:
+
+   ```bash
+   git apply --3way <build-scripts>/o/opensearch-project-opensearch-build/Dockerfiles/<previous X.Y.0>_ubi9.7/ppc64le-<previous X.Y.0>-ai-services.patch
+   ```
+
+3. Make any further `ppc64le` changes and confirm the build works.
+4. Export the patch and check it applies to a clean checkout of the tag:
+
+   ```bash
+   git add -A
+   git diff --cached --binary <version> > ppc64le-<X.Y.0>-ai-services.patch
+   git -C <clean-checkout> apply --check ppc64le-<X.Y.0>-ai-services.patch
+   ```
+
+5. Copy it to the `X.Y.0` folder in build-scripts. For 3.10 and above, also add the dependency hook patch (see `scripts/README.md` in build-scripts).
+
+A patch release (`X.Y.Z`) needs a new patch only if the `X.Y.0` patch no longer applies to its tag (`git apply` error in **Build**).
+
+### Test a patch from a fork
+
+Push the patch to a branch in your build-scripts fork and run the pipeline with `BUILD_SCRIPTS_REPO` and `BUILD_SCRIPTS_BRANCH` pointing to it.
 
 ## Run the pipeline
 
-1. Open the OpenSearch job in Jenkins (under the `ai-services` folder).
-2. Click **Build with Parameters**.
-3. Fill in the parameters (see the table below). At minimum, set `OPENSEARCH_VERSION`.
-4. Click **Build**.
-5. Click the new build number under **Build History**, then **Console Output**, to watch progress.
+1. In Jenkins, open the OpenSearch job and click **Build with Parameters**.
+2. Set the parameters below and click **Build**.
+3. Watch progress under **Build History** > build number > **Console Output**.
 
-The **Build** stage (compiling OpenSearch and its plugins) is the longest part. Expect the whole run to take a long time, and check the previous builds on the job page for the real duration.
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `OPENSEARCH_VERSION` | `3.8.0` | Version to build, `X.Y.Z`. Must be a tag in `opensearch-build`. |
+| `DEPENDENCY_UPDATES` | empty | 3.10 and above only. `<target>:<key>=<version>` entries separated by comma, space or newline. `<target>` is `opensearch`, `security` or `opensaml`. Example: `security:guava=33.7.3-jre,opensaml:open_saml=5.2.4`. The build fails if set for an older version. |
+| `BUILD_SCRIPTS_REPO` | `https://github.com/ppc64le/build-scripts.git` | HTTPS GitHub URL of the build-scripts repo. Change only to test a fork. |
+| `BUILD_SCRIPTS_BRANCH` | `master` | Branch of that repo. |
 
-### Parameters
+Every successful build pushes an image, including builds from a fork. The build number in the tag tells them apart.
 
-| Parameter | Required | Default | What it does |
-| --- | --- | --- | --- |
-| `OPENSEARCH_VERSION` | Yes | empty | The OpenSearch version to build, for example `3.8.0`. Must be a tag in `opensearch-build`. |
-| `BUILD_SCRIPTS_REPO` | No | `https://github.com/ppc64le/build-scripts.git` | The build-scripts repository to clone. Keep the default for normal builds. Change it only to test your own fork, for example `https://github.com/<user>/build-scripts.git`. Must be an HTTPS GitHub URL. |
-| `BUILD_SCRIPTS_BRANCH` | No | `master` | The branch of that repository to check out. |
+## Stages
 
-### Which options should I choose?
+The pipeline runs on the `onprem-ai-services-machine` agent, one build at a time.
 
-| I want to... | `OPENSEARCH_VERSION` | `BUILD_SCRIPTS_REPO` | `BUILD_SCRIPTS_BRANCH` |
-| --- | --- | --- | --- |
-| Build a released version | `3.8.0` | default | default |
-| Test my changes to the Dockerfile or patch | `3.8.0` | your fork URL | `my-branch` |
+| Stage | What happens | Fails the build? |
+| --- | --- | --- |
+| **Prepare** | Validates parameters. Checks out this repo, `opensearch-build` (version tag) and `build-scripts`. | Yes |
+| **Build** | Builds the build-env image, applies the patches, builds OpenSearch and its plugins in Podman, assembles the tarball. For 3.10 and above, also generates the dependency patches. | Yes |
+| **Build Container Image** | Builds the container image from the tarball. | Yes |
+| **Validate** | Smoke-tests the image (cluster health, version), then runs [`test/opensearch/validate.sh`](../../../test/opensearch/validate.sh). | No. A failure marks the stage unstable and the push still happens. |
+| **Security Scan** | Trivy scan for CRITICAL and HIGH vulnerabilities (unfixed ignored). | Yes, if the scan can't run |
+| **Push to ICR** | Pushes the image. | Yes |
 
-Every successful build pushes an image, including builds from a fork. Use the build number in the tag to tell them apart.
+Plugins built: `common-utils`, `opensearch-remote-metadata-sdk`, `job-scheduler`, `security`, `custom-codecs`, `k-NN`, `ml-commons`, `neural-search`, `opensearch-observability`, `index-management`.
 
-## What the pipeline does
+## Output
 
-The pipeline runs on the Jenkins agent labelled `onprem-ai-services-machine`. Only one build can run at a time (`disableConcurrentBuilds`). If you start a second build, it waits in the queue.
+- Image: `icr.io/ai-services-cicd/opensearch:<version>-ppc64le-<build number>`
+- Build artifacts: `trivy-report/trivy-results.{txt,json}`, `opensearch-build/tar/dist/opensearch/*` (also copied to `/var/jenkins/artifacts/opensearch/` on the agent), and `dependency-patches/*` (3.10 and above with `DEPENDENCY_UPDATES` set).
 
-| # | Stage | What happens | Fails the build? |
-| --- | --- | --- | --- |
-| 1 | **Prepare** | Cleans the workspace. Checks out this repo, `opensearch-build` (at the version tag), and `build-scripts`. | Yes |
-| 2 | **Build** | Builds the build-environment image. Applies the ppc64le patch. Builds OpenSearch and its plugins inside a Podman container and assembles the tarball. | Yes |
-| 3 | **Build Container Image** | Builds the final OpenSearch container image from the tarball. | Yes |
-| 4 | **Validate** | Starts the image, checks the cluster is healthy, checks the version, and runs [`test/opensearch/validate.sh`](../../../test/opensearch/validate.sh) (the AI Services RAG usage test). | **No.** A failure marks the stage unstable (yellow) and the push still happens. |
-| 5 | **Security Scan** | Runs Trivy for CRITICAL and HIGH vulnerabilities (unfixed ones are ignored). Saves a JSON and a text report. | Yes, if the scan can't run |
-| 6 | **Push to ICR** | Pushes the image to ICR. | Yes |
-
-Plugins built with OpenSearch: `common-utils`, `opensearch-remote-metadata-sdk`, `job-scheduler`, `security`, `custom-codecs`, `k-NN`, `ml-commons`, `neural-search`, `opensearch-observability`, `index-management`.
-
-## What you get
-
-### Container image
-
-One image is pushed per successful build:
-
-`icr.io/ai-services-cicd/opensearch:<version>-ppc64le-<build number>`
-
-Example: `icr.io/ai-services-cicd/opensearch:3.8.0-ppc64le-12`
-
-### Files on the Jenkins build page
-
-Under **Build Artifacts**:
-
-- `trivy-report/trivy-results.txt` - human-readable vulnerability report.
-- `trivy-report/trivy-results.json` - the same report in JSON.
-- `opensearch-build/tar/dist/opensearch/*` - the assembled OpenSearch tarball.
-
-The tarball is also copied to `/var/jenkins/artifacts/opensearch/` on the Jenkins agent.
-
-## Check that the build worked
-
-1. The build is **blue or green** (success) or **yellow** (unstable). Red means failed.
-2. The last line of the console output reads `OpenSearch <version> (ppc64le) image successfully published to ...`.
-3. If the build is yellow, open the **Validate** stage log. The image was still pushed, but review the failure before using it.
-4. Open `trivy-report/trivy-results.txt` and review the CRITICAL and HIGH findings.
+To check a build: success is green or blue, unstable is yellow, and failed is red. The last console line reads `OpenSearch <version> (ppc64le) image successfully published to ...`. For a yellow build, read the **Validate** log. For all builds, review `trivy-results.txt`.
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-| --- | --- | --- |
-| Fails in **Prepare** with `couldn't find remote ref refs/tags/<version>` | The version isn't a tag in `opensearch-build`. | Check the version spelling at the [tags page](https://github.com/opensearch-project/opensearch-build/tags). |
-| Fails in **Prepare** with `BUILD_SCRIPTS_REPO must be an HTTPS GitHub URL` | The repository URL isn't in the form `https://github.com/<user>/<repo>.git`. | Fix the URL. |
-| Fails in **Prepare** while checking out `build-scripts` | The `BUILD_SCRIPTS_BRANCH` doesn't exist in `BUILD_SCRIPTS_REPO`, or the repo is private. | Fix the branch name or the repo URL. |
-| Fails in **Build** with `No such file or directory` for the Dockerfile or patch | No `<version>_ubi9.7` folder or patch file in build-scripts. | Add them to build-scripts, then rebuild. |
-| Fails in **Build** with `git apply` errors | The patch doesn't apply to this version. | Regenerate the patch for this version. |
-| **Validate** is yellow | The smoke test or `validate.sh` failed. | Read the stage log. The image was still pushed. |
-| Fails in **Push to ICR** with an authentication error | The ICR credentials in Jenkins are expired or missing. | Ask the Jenkins administrator to refresh `icr-iam-creds`. |
-| Build sits in the queue | Another OpenSearch build is running, or the agent is offline. | Wait, or ask the Jenkins administrator to check the `onprem-ai-services-machine` agent. |
-| Disk or memory errors in **Build** | The agent is low on resources. | The **Build** stage prints `df -h` and `free -h` at the top. Ask the administrator to clean the agent. |
-
-## Jenkins credentials used
-
-You don't need to enter these. They're stored in Jenkins.
-
-| Credential ID | Used for |
+| Symptom | Cause and fix |
 | --- | --- |
-| `icr-iam-creds` | Pushing the image to ICR. |
+| **Prepare**: `OPENSEARCH_VERSION must be in the form X.Y.Z` | Use `X.Y.Z`, for example `3.8.0` (not `v3.8.0` or `3.8`). |
+| **Prepare**: `DEPENDENCY_UPDATES is supported for OpenSearch 3.10 and above only` | Clear `DEPENDENCY_UPDATES` or build 3.10 or above. |
+| **Prepare**: `couldn't find remote ref refs/tags/<version>` | The version isn't a tag in `opensearch-build`. Check the spelling. |
+| **Prepare**: `BUILD_SCRIPTS_REPO must be an HTTPS GitHub URL` | Use `https://github.com/<user>/<repo>.git`. |
+| **Prepare**: checkout of `build-scripts` fails | The branch doesn't exist in `BUILD_SCRIPTS_REPO`, or the repo is private. |
+| **Build**: `No such file or directory` for a Dockerfile or patch | The `X.Y.0` folder or a patch is missing in build-scripts. Add it and rebuild. |
+| **Build**: `git apply` errors | The patch doesn't apply to this tag. Regenerate it. |
+| **Validate** is yellow | Smoke test or `validate.sh` failed. The image was still pushed. |
+| **Push to ICR**: authentication error | ICR credentials in Jenkins are expired or missing. Ask the Jenkins administrator. |
+| Build stays queued | Another build is running or the agent is offline. |
+| Disk or memory errors in **Build** | The stage prints `df -h` and `free -h` at the top. Ask the administrator to clean the agent. |
