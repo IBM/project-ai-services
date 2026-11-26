@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import null, select, update
+from sqlalchemy import insert, null, select, update
 from sqlalchemy.orm import Session
 
 from forecast.db.models import Connector, Forecaster, Job, TrainingConfig
@@ -22,35 +22,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def find_queued_job(session: Session, connector_id: UUID | str) -> Optional[int]:
-    """Return the ``seq`` of the oldest QUEUED job of the connector, or None."""
-    return session.scalar(
-        select(Job.seq).where(Job.connector_id == connector_id, Job.status == "QUEUED").order_by(Job.seq).limit(1)
-    )
+def start_job(session: Session, connector_id: UUID | str) -> int:
+    """Insert a RUNNING job for the connector, set the connector TRAINING and return the job's ``seq``.
 
-
-def has_running_job(session: Session, connector_id: UUID | str) -> bool:
-    """Whether the connector already has a RUNNING job."""
-    running = select(Job.seq).where(Job.connector_id == connector_id, Job.status == "RUNNING").limit(1)
-    return session.scalar(running) is not None
-
-
-def mark_running(session: Session, job_id: int) -> bool:
-    """Set a QUEUED job RUNNING and its connector TRAINING. Return False when the job is not QUEUED.
+    A job exists only from the moment it runs: there is no QUEUED state. The unique index on RUNNING
+    jobs is what keeps two trainings from running at once.
 
     Raises:
-        sqlalchemy.exc.IntegrityError: another job is RUNNING (idx_jobs_single_running).
+        sqlalchemy.exc.IntegrityError: another job is RUNNING (idx_jobs_single_running), or the connector
+            does not exist.
     """
-    connector_id = session.execute(
-        update(Job)
-        .where(Job.seq == job_id, Job.status == "QUEUED")
-        .values(status="RUNNING", started_at=_now(), message=None)
-        .returning(Job.connector_id)
-    ).scalar_one_or_none()
-    if connector_id is None:
-        return False
+    job_id = session.execute(
+        insert(Job).values(connector_id=connector_id, status="RUNNING", started_at=_now()).returning(Job.seq)
+    ).scalar_one()
     session.execute(update(Connector).where(Connector.id == connector_id).values(status="TRAINING", message=None))
-    return True
+    return job_id
 
 
 def read_training_job(session: Session, job_id: int) -> TrainingJob:

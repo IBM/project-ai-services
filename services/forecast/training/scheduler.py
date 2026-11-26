@@ -4,8 +4,9 @@ Scheduling of connector training jobs.
 APScheduler starts every training run, inside the API process. The job store is the service's
 PostgreSQL database, in the ``scheduler`` schema that the init container creates, so scheduled jobs
 survive a restart. ``POST /v1/connectors`` registers a one-off job that fires at once and runs the
-connector's QUEUED job (orchestrator/run.py). The cron job of a connector with a schedule, and the
-recovery after a restart, are Story 8.
+connector's first training (orchestrator/run.py), which inserts its own RUNNING job. The cron job of a
+connector with a schedule calls the same function, and the recovery after a restart (which starts the
+first training again for a connector that is still ACCEPTED) is Story 8.
 """
 from datetime import datetime, timezone
 from typing import Optional

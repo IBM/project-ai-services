@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 from forecast.db import runs
 from forecast.db.models import Connector, Forecaster, Job, TrainingConfig
@@ -31,47 +32,28 @@ def make_session(job=None, connector=None):
     return session
 
 
-def test_find_queued_job_takes_the_oldest_queued_job_of_the_connector():
+def test_start_job_inserts_a_running_job_and_sets_the_connector_training():
     session = MagicMock()
-    session.scalar.return_value = 7
+    session.execute.return_value.scalar_one.return_value = 7
 
-    assert runs.find_queued_job(session, CONNECTOR_ID) == 7
+    assert runs.start_job(session, CONNECTOR_ID) == 7
 
-    query = sql(session.scalar.call_args.args[0])
-    assert "jobs.status = 'QUEUED'" in query and str(CONNECTOR_ID) in query
-    assert "ORDER BY jobs.seq" in query and "LIMIT 1" in query
-
-
-@pytest.mark.parametrize("found, expected", [(7, True), (None, False)])
-def test_has_running_job(found, expected):
-    session = MagicMock()
-    session.scalar.return_value = found
-
-    assert runs.has_running_job(session, CONNECTOR_ID) is expected
-    assert "jobs.status = 'RUNNING'" in sql(session.scalar.call_args.args[0])
-
-
-def test_mark_running_sets_the_job_running_and_the_connector_training():
-    session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = CONNECTOR_ID
-
-    assert runs.mark_running(session, 7) is True
-
-    job_update, connector_update = (sql(call.args[0]) for call in session.execute.call_args_list)
-    assert "UPDATE jobs SET status='RUNNING', message=NULL, started_at=" in job_update
-    assert "jobs.seq = 7 AND jobs.status = 'QUEUED'" in job_update  # Only a job that is still QUEUED.
-    assert "RETURNING jobs.connector_id" in job_update
+    job_insert, connector_update = (sql(call.args[0]) for call in session.execute.call_args_list)
+    assert job_insert.startswith("INSERT INTO jobs (connector_id, status, started_at)")
+    assert str(CONNECTOR_ID) in job_insert and "'RUNNING'" in job_insert and "'QUEUED'" not in job_insert
+    assert "RETURNING jobs.seq" in job_insert
     assert "UPDATE connectors SET status='TRAINING', message=NULL" in connector_update
     assert str(CONNECTOR_ID) in connector_update
 
 
-def test_mark_running_leaves_a_job_that_is_no_longer_queued_alone():
+def test_start_job_does_not_touch_the_connector_when_the_insert_fails():
     session = MagicMock()
-    session.execute.return_value.scalar_one_or_none.return_value = None
+    session.execute.side_effect = IntegrityError("insert", {}, Exception("idx_jobs_single_running"))
 
-    assert runs.mark_running(session, 7) is False
+    with pytest.raises(IntegrityError):
+        runs.start_job(session, CONNECTOR_ID)
 
-    assert session.execute.call_count == 1  # The connector is not touched.
+    assert session.execute.call_count == 1
 
 
 def test_the_message_is_read_and_replaced():

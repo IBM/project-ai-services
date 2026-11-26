@@ -1,8 +1,9 @@
 """
 One training run, from the APScheduler job to the forecaster in Triton.
 
-``run_training`` is the function that APScheduler fires for a connector. Under an in-process lock,
-so that only one training runs at a time, it takes the connector's QUEUED job, sets it RUNNING and
+``run_training`` is the function that APScheduler fires for a connector, for the first training and for
+the scheduled ones. Under an in-process lock, so that only one training runs at a time (a run that fires
+meanwhile is skipped), it inserts the connector's job as RUNNING and
 runs an *attempt*: the data loader subprocess, then the training worker subprocess, each in its own
 process group with a time limit (the worker also with a memory limit). A failed attempt is run again
 after TRAINING_RETRY_DELAY_SECONDS, up to TRAINING_MAX_ATTEMPTS in total, unless the process exited
@@ -63,6 +64,7 @@ _sleep = asyncio.sleep
 
 # One training at a time. The unique index on RUNNING jobs enforces it in the database as well.
 _lock = asyncio.Lock()
+_SINGLE_RUNNING_INDEX = "idx_jobs_single_running"
 
 
 @dataclass(frozen=True)
@@ -81,21 +83,6 @@ async def _db(function: Callable[..., Any], *args) -> Any:
             return function(session, *args)
 
     return await asyncio.to_thread(call)
-
-
-def _claim(session, connector_id: str) -> Optional[int]:
-    """Set the connector's QUEUED job RUNNING and return it, or return None and log why not."""
-    if runs.has_running_job(session, connector_id):
-        logger.warning("Training of connector %s skipped: it already has a RUNNING job", connector_id)
-        return None
-    job_id = runs.find_queued_job(session, connector_id)
-    if job_id is None:
-        logger.warning("Training of connector %s skipped: it has no QUEUED job", connector_id)
-        return None
-    if not runs.mark_running(session, job_id):
-        logger.warning("Training of connector %s skipped: job %s is no longer QUEUED", connector_id, job_id)
-        return None
-    return job_id
 
 
 def _worker_env() -> dict[str, str]:
@@ -241,18 +228,27 @@ async def _fail(job_id: int, message: str, attempts: int) -> None:
 
 
 async def run_training(connector_id: str) -> None:
-    """Run the QUEUED training job of the connector. This is the function that APScheduler fires."""
+    """Train the connector: insert a RUNNING job for it and run it. This is the function that APScheduler fires.
+
+    A run that fires while another training is running is skipped, not held back.
+    """
+    # No await between this check and the acquire, so no other run can take the lock in between.
+    if _lock.locked():
+        logger.warning("Training of connector %s skipped: a training is already running", connector_id)
+        return
     async with _lock:
         try:
-            job_id = await _db(_claim, connector_id)
-        except IntegrityError:
-            logger.warning("Training of connector %s skipped: another job is RUNNING", connector_id)
+            job_id = await _db(runs.start_job, connector_id)
+        except IntegrityError as exc:
+            if _SINGLE_RUNNING_INDEX in str(exc.orig):
+                logger.warning("Training of connector %s skipped: another job is RUNNING", connector_id)
+            else:  # For example, the connector no longer exists.
+                logger.exception("Training of connector %s skipped: its job could not be started", connector_id)
             return
         except Exception:
-            # The job is still QUEUED, so nothing was started. Boot recovery (Story 8) requeues it.
-            logger.exception("Training of connector %s skipped: its job could not be claimed", connector_id)
-            return
-        if job_id is None:
+            # No job was inserted, so nothing was started. The connector keeps its status. Boot recovery
+            # (Story 8) starts the first training again for a connector that is still ACCEPTED.
+            logger.exception("Training of connector %s skipped: its job could not be started", connector_id)
             return
 
         attempts = 0

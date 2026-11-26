@@ -104,7 +104,7 @@ def insert_connector(
     input_columns: list[dict],
     schedule: Optional[str],
 ) -> None:
-    """Store the connector, its training details and the first training job."""
+    """Store the connector and its training details. Its first training inserts its own job when it runs."""
     cid_uuid = _as_uuid(connector_id)
     connector = Connector(
         id=cid_uuid,
@@ -120,11 +120,7 @@ def insert_connector(
         input_columns=input_columns,
         schedule=schedule,
     )
-    job = Job(
-        connector_id=cid_uuid,
-        status="QUEUED",
-    )
-    session.add_all([connector, training_config, job])
+    session.add_all([connector, training_config])
     session.flush()
 
 

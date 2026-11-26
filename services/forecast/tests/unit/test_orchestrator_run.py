@@ -49,8 +49,7 @@ TRAINING_JOB = TrainingJob(
 class FakeRuns:
     """Stands in for forecast.db.runs. Records the writes, and returns what the test sets."""
 
-    def __init__(self, running=False, queued=JOB_ID, claimed=True):
-        self.running, self.queued, self.claimed = running, queued, claimed
+    def __init__(self):
         self.message = None  # jobs.message
         self.result = None  # jobs.result
         self.written_messages = []
@@ -60,19 +59,15 @@ class FakeRuns:
         self.job_error = None
         self.completed = None
         self.failed = None
-        self.claim_error = None
+        self.start_error = None
+        self.started = []  # The connectors whose job was started.
         self.complete_error = None
 
-    def has_running_job(self, session, connector_id):
-        return self.running
-
-    def find_queued_job(self, session, connector_id):
-        return self.queued
-
-    def mark_running(self, session, job_id):
-        if self.claim_error:
-            raise self.claim_error
-        return self.claimed
+    def start_job(self, session, connector_id):
+        if self.start_error:
+            raise self.start_error
+        self.started.append(connector_id)
+        return JOB_ID
 
     def start_attempt(self, session, job_id):
         self.attempt_starts += 1
@@ -478,64 +473,54 @@ def test_a_job_or_connector_that_is_gone_fails_the_job_without_running_the_worke
 # ---------------------------------------------------------------------------
 
 
-def test_a_connector_with_a_running_job_is_skipped_and_the_reason_logged(env, caplog):
-    env.runs.running = True
+def test_a_run_inserts_the_running_job_of_the_connector(env):
+    run_training()
+
+    assert env.runs.started == [CONNECTOR_ID]
+    assert env.runs.completed == (JOB_ID, 1)
+
+
+def test_a_second_running_job_in_the_database_is_skipped(env, caplog):
+    env.runs.start_error = IntegrityError("insert", {}, Exception("duplicate key: idx_jobs_single_running"))
 
     with caplog.at_level("WARNING"):
         run_training()
 
     assert env.processes.calls == []
     assert env.runs.completed is None and env.runs.failed is None
-    assert "already has a RUNNING job" in caplog.text
-
-
-def test_a_connector_without_a_queued_job_is_skipped(env, caplog):
-    env.runs.queued = None
-
-    with caplog.at_level("WARNING"):
-        run_training()
-
-    assert env.processes.calls == []
-    assert "no QUEUED job" in caplog.text
-
-
-def test_a_job_that_another_run_took_first_is_skipped(env):
-    env.runs.claimed = False
-
-    run_training()
-
-    assert env.processes.calls == []
-
-
-def test_a_second_running_job_in_the_database_is_skipped(env, caplog):
-    env.runs.claim_error = IntegrityError("insert", {}, Exception("idx_jobs_single_running"))
-
-    with caplog.at_level("WARNING"):
-        run_training()
-
-    assert env.processes.calls == []
     assert "another job is RUNNING" in caplog.text
 
 
-def test_a_database_error_while_claiming_skips_the_run_and_logs_it(env, caplog):
-    env.runs.claim_error = RuntimeError("connection pool timeout")
+def test_an_integrity_error_that_is_not_the_single_running_index_is_logged_as_an_error(env, caplog):
+    env.runs.start_error = IntegrityError("insert", {}, Exception("violates foreign key constraint"))
+
+    with caplog.at_level("WARNING"):
+        run_training()
+
+    assert env.processes.calls == []
+    assert "its job could not be started" in caplog.text
+    assert "another job is RUNNING" not in caplog.text
+
+
+def test_a_database_error_while_starting_the_job_skips_the_run_and_logs_it(env, caplog):
+    env.runs.start_error = RuntimeError("connection pool timeout")
 
     with caplog.at_level("ERROR"):
         run_training()  # Does not raise, so APScheduler gets no error.
 
     assert env.processes.calls == []
     assert env.runs.failed is None
-    assert "its job could not be claimed" in caplog.text
+    assert "its job could not be started" in caplog.text
 
 
-def test_two_runs_do_not_overlap(env, monkeypatch):
+def test_a_run_that_fires_during_a_training_is_skipped_not_held_back(env, monkeypatch, caplog):
     active, most_active = 0, 0
 
     async def slow_process(args, *, name, **_):
         nonlocal active, most_active
         active += 1
         most_active = max(most_active, active)
-        await asyncio.sleep(0.01)  # Another run would start here if the lock did not hold it back.
+        await asyncio.sleep(0.01)  # The second run fires here, while the first one holds the lock.
         active -= 1
         return FAILS_FOR_GOOD
 
@@ -545,9 +530,12 @@ def test_two_runs_do_not_overlap(env, monkeypatch):
     async def both():
         await asyncio.gather(orchestrator.run_training(CONNECTOR_ID), orchestrator.run_training(CONNECTOR_ID))
 
-    asyncio.run(both())
+    with caplog.at_level("WARNING"):
+        asyncio.run(both())
 
     assert most_active == 1
+    assert env.runs.started == [CONNECTOR_ID]  # Only the first run inserted a job.
+    assert "a training is already running" in caplog.text
 
 
 # ---------------------------------------------------------------------------
