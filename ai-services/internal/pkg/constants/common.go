@@ -149,6 +149,7 @@ const (
 	SkipLocalWorkerFlag    = "skip-local-worker"
 	WorkerGatewayPortFlag  = "workergateway-port"
 	TimeoutFlag            = "timeout"
+	SkipUpgradeFlag        = "skip-upgrade"
 
 	ResetPasswordFlag   = "reset-password"
 	ResetPodmanAuthFlag = "reset-podman-auth"

@@ -9,15 +9,36 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 )
 
+// Option defines a functional option for configuring bootstrap.
+type Option func(*options)
+
+type options struct {
+	skipUpgrade bool
+}
+
+// WithSkipUpgrade configures whether to skip the operator upgrade prompt flow.
+func WithSkipUpgrade(skip bool) Option {
+	return func(o *options) {
+		o.skipUpgrade = skip
+	}
+}
+
 // BootstrapFactory creates bootstrap instances based on configuration.
 type BootstrapFactory struct {
 	runtimeType types.RuntimeType
+	opts        options
 }
 
-// NewBootstrapFactory creates a new bootstrap factory with the specified runtime type.
-func NewBootstrapFactory(runtimeType types.RuntimeType) *BootstrapFactory {
+// NewBootstrapFactory creates a new bootstrap factory with the specified runtime type and options.
+func NewBootstrapFactory(runtimeType types.RuntimeType, opts ...Option) *BootstrapFactory {
+	var opt options
+	for _, o := range opts {
+		o(&opt)
+	}
+
 	return &BootstrapFactory{
 		runtimeType: runtimeType,
+		opts:        opt,
 	}
 }
 
@@ -32,11 +53,9 @@ func (f *BootstrapFactory) Create() (Bootstrap, error) {
 	case types.RuntimeTypeOpenShift:
 		logger.Debugf("Initializing OpenShift bootstrap\n")
 
-		return openshift.NewOpenshiftBootstrap(), nil
+		return openshift.NewOpenshiftBootstrap(openshift.WithSkipUpgrade(f.opts.skipUpgrade)), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported runtime type: %s", f.runtimeType)
 	}
 }
-
-// Made with Bob

@@ -39,7 +39,7 @@ func (o *OpenshiftBootstrap) Configure(ctx context.Context) error {
 	s := spinner.New("Applying the configurations")
 	s.Start(ctx)
 
-	if err := applyYamlsFromFolder(ctx, client, machineConfigFolder); err != nil {
+	if err := applyYamlsFromFolder(ctx, client, machineConfigFolder, o.skipUpgrade); err != nil {
 		s.Fail("failed to apply the configurations")
 
 		return fmt.Errorf("error occurred while applying the configurations: %w", err)
@@ -47,7 +47,7 @@ func (o *OpenshiftBootstrap) Configure(ctx context.Context) error {
 	s.Stop("Configurations applied successfully")
 
 	// 2. Apply operators (namespaces, operatorgroups, subscriptions)
-	if err := applyYamlsFromFolder(ctx, client, operatorFolder); err != nil {
+	if err := applyYamlsFromFolder(ctx, client, operatorFolder, o.skipUpgrade); err != nil {
 		return fmt.Errorf("error occurred while applying operator configurations: %w", err)
 	}
 
@@ -61,7 +61,7 @@ func (o *OpenshiftBootstrap) Configure(ctx context.Context) error {
 		return fmt.Errorf("error occurred while configuring spyre cluster policy: %w", err)
 	}
 
-	if err := applyYamlsFromFolder(ctx, client, operandFolder); err != nil {
+	if err := applyYamlsFromFolder(ctx, client, operandFolder, o.skipUpgrade); err != nil {
 		s.Fail("failed to apply operand configurations")
 
 		return fmt.Errorf("error occurred while applying operand configurations: %w", err)
@@ -118,7 +118,7 @@ func waitForAllCRs(ctx context.Context, client *openshift.OpenshiftClient) error
 	return nil
 }
 
-func applyYamlsFromFolder(ctx context.Context, client *openshift.OpenshiftClient, folder string) error {
+func applyYamlsFromFolder(ctx context.Context, client *openshift.OpenshiftClient, folder string, skipUpgrade bool) error {
 	tp := templates.NewEmbedTemplateProvider(&assets.BootstrapFS)
 
 	yamls, err := tp.LoadYamls(folder)
@@ -127,7 +127,7 @@ func applyYamlsFromFolder(ctx context.Context, client *openshift.OpenshiftClient
 	}
 
 	for _, yaml := range yamls {
-		if err := applyYaml(ctx, client, yaml); err != nil {
+		if err := applyYaml(ctx, client, yaml, skipUpgrade); err != nil {
 			return fmt.Errorf("failed to apply YAML from %s: %w", folder, err)
 		}
 	}

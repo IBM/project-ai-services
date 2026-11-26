@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"fmt"
 
+	cmdcommon "github.com/project-ai-services/ai-services/cmd/ai-services/cmd/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
@@ -22,8 +23,9 @@ func configureCmd() *cobra.Command {
 
 			logger.Infoln("Running bootstrap configuration...")
 
+			rt := vars.RuntimeFactory.GetRuntimeType()
 			// Create bootstrap instance based on runtime
-			factory := bootstrap.NewBootstrapFactory(vars.RuntimeFactory.GetRuntimeType())
+			factory := bootstrap.NewBootstrapFactory(rt, bootstrap.WithSkipUpgrade(skipOperatorUpgrade))
 			bootstrapInstance, err := factory.Create()
 			if err != nil {
 				return fmt.Errorf("failed to create bootstrap instance: %w", err)
@@ -38,6 +40,8 @@ func configureCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmdcommon.ConfigureSkipUpgradeFlag(cmd, &skipOperatorUpgrade)
 
 	return cmd
 }

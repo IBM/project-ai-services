@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/project-ai-services/ai-services/assets"
+	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
 	"github.com/project-ai-services/ai-services/internal/pkg/helm"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -33,7 +36,7 @@ const (
 // provided gateway address and authentication token, and installs or upgrades the Helm
 // release in the worker namespace.
 func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) error {
-	namespace := workerconstants.WorkerAppName
+	namespace := catalogns.Get()
 	logger.Infof("Deploying worker grpc stream to OpenShift in namespace '%s'\n", namespace)
 
 	tp := templates.NewEmbedTemplateProvider(&assets.WorkerFS, "")
@@ -55,7 +58,17 @@ func DeployWorker(ctx context.Context, opts workertypes.OpenshiftWorkerOptions) 
 		return fmt.Errorf("failed to init runtime: %w", err)
 	}
 
-	return deployWorkerHelm(ctx, chartData, values, namespace, rt)
+	if err := deployWorkerHelm(ctx, chartData, values, namespace, rt); err != nil {
+		return err
+	}
+
+	// Deploy model prerequisites to ai-services-models namespace
+	modelsHelm := helm.NewLocalHelmManager(catalogconstants.CatalogModelsNamespace)
+	if err := openshiftutils.DeployPrerequisites(ctx, modelsHelm); err != nil {
+		return fmt.Errorf("failed to deploy model prerequisites to %s: %w", catalogconstants.CatalogModelsNamespace, err)
+	}
+
+	return nil
 }
 
 // prepareValues builds the Helm values map for the worker chart.

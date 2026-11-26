@@ -147,7 +147,7 @@ func (e *ModelExecutor) failLocal(ctx context.Context, plan *types.LocalPlan, ca
 
 // updateLocalRoute completes plan.Route for a deployed pod by setting the endpoint-derived fields
 // the planner could not know. egress is the Deployer's ModelEndpoints.Egress, used as is; making
-// it reachable from the control plane is the Deployer's job (see the TODO(mTLS) on types.Deployer).
+// it reachable from the control plane is the Deployer's job (see types.Deployer).
 func updateLocalRoute(plan *types.LocalPlan, egress string) {
 	plan.Route.APIBase = fmt.Sprintf("http://%s%s", egress, plan.RootMetadata.LiteLLM.APIBasePath)
 	plan.Route.TokenizeURL = fmt.Sprintf("http://%s/tokenize", egress)

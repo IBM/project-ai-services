@@ -98,17 +98,18 @@ const (
 // Upstream and Terminal; register_egress uses ID, PathPrefix, Upstream and the
 // TLS fields; unregister/get use only ID; health_check uses none).
 type ProxyRoute struct {
-	Op                ProxyRouteOp `json:"op"`
-	ID                string       `json:"id,omitempty"`
-	Domain            string       `json:"domain,omitempty"`
-	PathPrefix        string       `json:"path_prefix,omitempty"`
-	Upstream          string       `json:"upstream,omitempty"`
-	Terminal          bool         `json:"terminal,omitempty"`
-	Type              string       `json:"type,omitempty"`
-	ClientCertPath    string       `json:"client_cert_path,omitempty"`
-	ClientKeyPath     string       `json:"client_key_path,omitempty"`
-	TrustedCACertPath string       `json:"trusted_ca_cert_path,omitempty"`
-	ServerName        string       `json:"server_name,omitempty"`
+	Op                     ProxyRouteOp `json:"op"`
+	ID                     string       `json:"id,omitempty"`
+	Domain                 string       `json:"domain,omitempty"`
+	PathPrefix             string       `json:"path_prefix,omitempty"`
+	Upstream               string       `json:"upstream,omitempty"`
+	Terminal               bool         `json:"terminal,omitempty"`
+	Type                   string       `json:"type,omitempty"`
+	ClientCertPath         string       `json:"client_cert_path,omitempty"`
+	EncryptedClientKeyPath string       `json:"encrypted_client_key_path,omitempty"`
+	SecretFilePath         string       `json:"secret_file_path,omitempty"`
+	TrustedCACertPath      string       `json:"trusted_ca_cert_path,omitempty"`
+	ServerName             string       `json:"server_name,omitempty"`
 }
 
 // Route represents a Caddy reverse-proxy route on a worker node.
@@ -120,11 +121,12 @@ type Route struct {
 	Type        string // endpoint type label (e.g. "ui", "api")
 	ExternalURL string // fully-qualified HTTPS URL built by the worker from its own env
 
-	PathPrefix        string // URL path prefix to match for private ingress/egress routes
-	ClientCertPath    string // egress: client certificate presented to the upstream
-	ClientKeyPath     string // egress: client private key (plaintext PEM)
-	TrustedCACertPath string // egress: CA used to verify the upstream
-	ServerName        string // egress: TLS server name to verify the upstream against
+	PathPrefix             string // URL path prefix to match for private ingress/egress routes
+	ClientCertPath         string // egress: client certificate presented to the upstream
+	EncryptedClientKeyPath string // egress: AES-GCM encrypted client private key
+	SecretFilePath         string // egress: file holding the secret that decrypts the key
+	TrustedCACertPath      string // egress: CA used to verify the upstream
+	ServerName             string // egress: TLS server name to verify the upstream against
 }
 
 // ─── HTTP proxy ───────────────────────────────────────────────────────────────

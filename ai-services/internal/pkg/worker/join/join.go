@@ -143,18 +143,13 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 	defer func() { _ = conn.Close() }()
 
 	// 3. Call Register with token + CSR.
-	// The worker reports its own DOMAIN_SUFFIX so the gateway can embed
-	// <workerName>.<domainSuffix> as a SAN in the signed certificate.
-	domainSuffix := os.Getenv(proxy.DomainSuffixEnvVar)
-	if domainSuffix == "" && rt == types.RuntimeTypePodman {
-		logger.WarningfCtx(ctx, "worker join: %s is not set; the worker certificate will have no DNS SAN and private-ingress hostname verification will fail", proxy.DomainSuffixEnvVar)
-	}
+	// The worker reports its own DOMAIN_SUFFIX and private ingress port in metadata.
 	logger.InfolnCtx(ctx, "worker join: registering with catalog control plane...")
 	resp, err := workerpb.NewWorkerGatewayClient(conn).Register(ctx, &workerpb.RegisterRequest{
 		PreSharedToken: opts.Token,
 		RuntimeType:    rt.String(),
 		CsrPem:         csrPEM,
-		Metadata:       map[string]string{workerconstants.MetaKeyDomainSuffix: domainSuffix},
+		Metadata:       registerMetadata(ctx, rt),
 	})
 	if err != nil {
 		return "", fmt.Errorf("worker join: register RPC: %w", err)
@@ -172,6 +167,21 @@ func register(ctx context.Context, opts workertypes.GrpcStreamOptions, rt types.
 	// Recover the worker name from the signed cert — the gateway embeds the
 	// token-bound worker name as the cert CN, so no separate response field is needed.
 	return workercommon.WorkerNameFromCert(tlsDir)
+}
+
+// registerMetadata collects metadata sent during worker registration.
+func registerMetadata(ctx context.Context, rt types.RuntimeType) map[string]string {
+	domainSuffix := os.Getenv(proxy.DomainSuffixEnvVar)
+	if domainSuffix == "" && rt == types.RuntimeTypePodman {
+		logger.WarningfCtx(ctx, "worker join: %s is not set; the worker certificate will have no DNS SAN and private-ingress hostname verification will fail", proxy.DomainSuffixEnvVar)
+	}
+
+	meta := map[string]string{workerconstants.MetaKeyDomainSuffix: domainSuffix}
+	if port := os.Getenv(proxy.CaddyPrivateIngressPortEnvVar); port != "" {
+		meta[workerconstants.MetaKeyPrivateIngressPort] = port
+	}
+
+	return meta
 }
 
 // ─── command-stream loop ──────────────────────────────────────────────────────

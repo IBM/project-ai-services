@@ -297,71 +297,23 @@ func setControlPlaneRuntime(t *testing.T, rt runtimeTypes.RuntimeType) {
 	t.Cleanup(func() { vars.RuntimeFactory = prev })
 }
 
-func TestCreateModel_OpenShift_Unsupported(t *testing.T) {
-	const ocpWorker = "ocp-worker"
+// openshiftRuntime reports the OpenShift runtime type; every other method would panic if called.
+type openshiftRuntime struct{ runtime.Runtime }
 
-	tests := []struct {
-		name         string
-		controlPlane runtimeTypes.RuntimeType
-		deployment   constants.DeploymentType
-		selector     string
-		// registryRuntimes is the live registry content (worker name -> runtime type).
-		registryRuntimes map[string]string
-	}{
-		{
-			name:         "local model, openshift control plane",
-			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
-			deployment:   constants.DeploymentTypeLocal,
-		},
-		{
-			name:         "remote model, openshift control plane",
-			controlPlane: runtimeTypes.RuntimeTypeOpenShift,
-			deployment:   constants.DeploymentTypeRemote,
-		},
-		{
-			name:             "default worker is openshift",
-			controlPlane:     runtimeTypes.RuntimeTypePodman,
-			deployment:       constants.DeploymentTypeLocal,
-			registryRuntimes: map[string]string{"Local": string(runtimeTypes.RuntimeTypeOpenShift)},
-		},
-		{
-			name:             "selected remote worker is openshift",
-			controlPlane:     runtimeTypes.RuntimeTypePodman,
-			deployment:       constants.DeploymentTypeLocal,
-			selector:         ocpWorker,
-			registryRuntimes: map[string]string{ocpWorker: string(runtimeTypes.RuntimeTypeOpenShift)},
-		},
-	}
+func (openshiftRuntime) Type() runtimeTypes.RuntimeType { return runtimeTypes.RuntimeTypeOpenShift }
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setControlPlaneRuntime(t, tt.controlPlane)
+// A worker running OpenShift is planned with the deployer registered for that runtime.
+func TestCreateModel_Local_OpenShift(t *testing.T) {
+	d := &fakeDeployer{called: make(chan struct{}), endpoint: "llm-predictor.ns.svc.cluster.local:8080"}
 
-			compRepo := newMockComponentRepo()
-			connRepo := newMockConnectorRepo()
+	svc, repo := newLocalServiceWith(t, d, &mockLiteLLMClient{}, &fakeWorkers{rt: openshiftRuntime{}})
+	svc.planner.WithDeployers(map[runtimeTypes.RuntimeType]types.Deployer{runtimeTypes.RuntimeTypeOpenShift: d})
 
-			var registry stream.WorkerRegistry
-			if tt.registryRuntimes != nil {
-				registry = &mockWorkerRegistry{runtimes: tt.registryRuntimes}
-			}
+	resp, err := svc.CreateModel(context.Background(), localRequest())
+	require.NoError(t, err)
 
-			svc := newTestModelService(t, compRepo, connRepo, worker.NewResolver(registry), &mockLiteLLMClient{})
-
-			req := validRequest()
-			req.DeploymentType = tt.deployment
-			req.WorkerName = tt.selector
-
-			resp, err := svc.CreateModel(context.Background(), req)
-			assert.Nil(t, resp)
-
-			var valErr *validators.ValidationError
-			require.ErrorAs(t, err, &valErr)
-			assert.Equal(t, http.StatusBadRequest, valErr.Code)
-			assert.Contains(t, valErr.Message, "models are unsupported on openshift runtime")
-			assert.Empty(t, compRepo.components, "no component row must be written")
-			assert.Empty(t, connRepo.connectors, "no connector must be written")
-		})
-	}
+	awaitStatus(t, repo, resp.ID, dbmodels.ComponentStatusRunning)
+	assert.Equal(t, []string{"prepare", "start"}, d.steps)
 }
 
 // Request validation itself is covered by TestValidateCreateRequest; this checks that CreateModel
@@ -551,7 +503,7 @@ func TestCreateModel_Local_InitialRow(t *testing.T) {
 		wantProfile any
 	}{
 		{name: "minimal request", mutate: func(*apimodels.CreateModelRequest) {}},
-		{name: "request with a profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "small" }, wantProfile: "small"},
+		{name: "request with a profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "standard" }, wantProfile: "standard"},
 	}
 
 	for _, tt := range tests {
@@ -694,6 +646,12 @@ func TestCreateModel_Local_Rejected(t *testing.T) {
 			mutate:   func(r *apimodels.CreateModelRequest) { r.ProviderID = "nope" },
 			wantCode: http.StatusBadRequest,
 			wantMsg:  `is not available for local provider "nope"`,
+		},
+		{
+			name:     "unknown profile",
+			mutate:   func(r *apimodels.CreateModelRequest) { r.Profile = "non-existent-profile" },
+			wantCode: http.StatusBadRequest,
+			wantMsg:  "profile is not supported",
 		},
 		{
 			name:     "params not matching schema",
@@ -943,14 +901,24 @@ func TestPlanLocal(t *testing.T) {
 			// The component row keeps the non-sensitive params; credentials only reach the pod via the values.
 			name: "component metadata keeps the profile and strips sensitive params",
 			mutate: func(r *apimodels.CreateModelRequest) {
-				r.Profile = "small"
+				r.Profile = "standard"
 				r.Params = map[string]any{"apiKey": "k"}
 			},
 			check: func(t *testing.T, req apimodels.CreateModelRequest, plan *types.LocalPlan) {
 				assert.NotContains(t, plan.Metadata, "apiKey", "params are not stored flat")
 				assert.Empty(t, plan.Metadata["params"], "credentials must never be persisted")
 				assert.Equal(t, req.Model, plan.Metadata["model"])
-				assert.Equal(t, "small", plan.Metadata["profile"])
+				assert.Equal(t, "standard", plan.Metadata["profile"])
+			},
+		},
+		{
+			// The templates read hardware from the profile; without a requested profile the default applies.
+			name:   "profile values reach the template values",
+			mutate: func(*apimodels.CreateModelRequest) {},
+			check: func(t *testing.T, _ apimodels.CreateModelRequest, plan *types.LocalPlan) {
+				assert.Equal(t, "standard", plan.Values["profile"])
+				assert.Equal(t, 8096, plan.Values["maxModelLen"])
+				assert.Contains(t, plan.Values, "resources")
 			},
 		},
 	}
@@ -966,6 +934,32 @@ func TestPlanLocal(t *testing.T) {
 			require.NoError(t, err)
 
 			tt.check(t, req, plan)
+		})
+	}
+}
+
+// A model or profile the provider does not define is a client error, not a failed deployment.
+func TestPlanLocal_RejectsUnknownModelOrProfile(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*apimodels.CreateModelRequest)
+	}{
+		{name: "unknown profile", mutate: func(r *apimodels.CreateModelRequest) { r.Profile = "no-such-profile" }},
+		{name: "unknown model", mutate: func(r *apimodels.CreateModelRequest) { r.Model = "no/such-model" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _ := newLocalService(t, &fakeDeployer{called: make(chan struct{})}, &mockLiteLLMClient{})
+
+			req := localRequest()
+			tt.mutate(&req)
+
+			_, err := svc.planner.PlanLocal(context.Background(), req)
+
+			var valErr *validators.ValidationError
+			require.ErrorAs(t, err, &valErr)
+			assert.Equal(t, http.StatusBadRequest, valErr.Code)
 		})
 	}
 }

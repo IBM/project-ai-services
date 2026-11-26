@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: llm
+  name: {{ if .Values.InstanceSlug }}"llm-{{ .Values.InstanceSlug }}"{{ else }}"llm"{{ end }}
   annotations:
     security.opendatahub.io/enable-auth: "false"
     serving.kserve.io/deploymentMode: RawDeployment
@@ -32,7 +32,7 @@ spec:
         - name: VLLM_API_KEY
           valueFrom:
             secretKeyRef:
-              name: vllm-instruct-api-key
+              name: {{ if .Values.InstanceSlug }}"vllm-instruct-api-key-{{ .Values.InstanceSlug }}"{{ else }}"vllm-instruct-api-key"{{ end }}
               key: apiKey
       {{- end }}
       resources:

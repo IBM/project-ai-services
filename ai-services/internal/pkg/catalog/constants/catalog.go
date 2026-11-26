@@ -90,8 +90,10 @@ const (
 
 // Catalog name constants.
 const (
-	// CatalogAppName represents the catalog name.
+	// CatalogAppName represents the catalog Helm release name and resource label value.
 	CatalogAppName = "ai-services"
+	// CatalogModelsNamespace represents the shared namespace where all local models are deployed on OpenShift.
+	CatalogModelsNamespace = "ai-services-models"
 	// CatalogAppTemplate represents the catalog template name used for loading catalog infrastructure templates.
 	CatalogAppTemplate = "catalog"
 	// CatalogSecretLabel represents the catalog secret name associated with Catalog Pod.
@@ -108,6 +110,8 @@ const (
 	CatalogConnectorSecretName = "catalog-db-encryption-secret"
 	// CatalogMTLSSecretName represents the catalog mTLS encryption key secret name.
 	CatalogMTLSSecretName = "catalog-mtls-encryption-secret"
+	// CatalogAPIServiceName represents the catalog API Kubernetes service name.
+	CatalogAPIServiceName = "catalog-api"
 	// CatalogDeploymentName represent the catalog deployment name.
 	CatalogDeploymentName = "catalog-backend"
 	// CatalogAdminUser is the default admin username created during catalog configure.
@@ -119,6 +123,9 @@ const (
 	// CatalogComponentValue is the ai-services.io/component label value
 	// stamped on the catalog pod.
 	CatalogComponentValue = "catalog"
+
+	// InstanceSlugKey is the key used for the unique instance slug in template values.
+	InstanceSlugKey = "InstanceSlug"
 )
 
 // Pagination constants.
@@ -142,6 +149,9 @@ const (
 	// DBEncryptionKeyEnv is the environment variable that holds the AES-256 key used to
 	// encrypt sensitive connector credential fields at rest.
 	DBEncryptionKeyEnv = "DB_ENCRYPTION_KEY"
+
+	// ModelGatewayRouteID is the Caddy route ID (subdomain) of the LiteLLM model gateway.
+	ModelGatewayRouteID = "model-gateway"
 
 	// ModelGatewayPublicEndpointEnv is the environment variable that holds the URL under which the
 	// model gateway is reachable by consumers of a model. It is reported as the model's endpoint.
