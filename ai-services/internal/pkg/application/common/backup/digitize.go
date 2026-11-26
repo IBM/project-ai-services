@@ -39,6 +39,9 @@ const (
 	digitizeServiceName = "digitize"
 )
 
+// serviceTokenFn obtains the token sent to the digitize service; overridden in tests.
+var serviceTokenFn = catalogclient.ServiceTokenForLoggedInUser
+
 // ErrContentNotFound is returned when the digitize service has no content file for a document.
 var ErrContentNotFound = errors.New("digitized content not found")
 
@@ -132,7 +135,7 @@ func (c *DigitizeBackupClient) CallExportAPI(ctx context.Context) (*DigitizeExpo
 	logger.Infoln("Calling digitize Export API...")
 
 	// The service enforces authentication: send a token issued to the logged-in catalog user.
-	token, err := catalogclient.ServiceTokenForLoggedInUser(ctx, digitizeServiceName)
+	token, err := serviceTokenFn(ctx, digitizeServiceName)
 	if err != nil {
 		return nil, err
 	}

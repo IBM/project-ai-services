@@ -179,6 +179,11 @@ func TestWriteDigitizedContentFiles_RejectsPathTraversalID(t *testing.T) {
 }
 
 func TestCallExportAPI_ExportsAllRecordsWithContent(t *testing.T) {
+	origTokenFn := serviceTokenFn
+	serviceTokenFn = func(context.Context, string) (string, error) { return "test-token", nil }
+
+	defer func() { serviceTokenFn = origTokenFn }()
+
 	var gotQuery url.Values
 
 	var contentRequested bool
