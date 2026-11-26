@@ -438,6 +438,7 @@ The backup and restore tests validate that application data survives a backup/re
 
 - digitize jobs are restored
 - digitize documents are restored
+- digitized output of the digitization document (json/md/txt) is restored
 - RAG responses for known prompts match before and after restore
 
 When `--app-name` is provided, the suite restores into a fresh sibling application name instead of immediately reusing the original name.
