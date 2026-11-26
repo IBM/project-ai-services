@@ -76,6 +76,10 @@ ENV PG_MAJOR 18
 ENV PATH $PATH:/usr/pgsql-$PG_MAJOR/bin
 
 # Install PostgreSQL from official PostgreSQL RPM repository
+# Pin to RHEL 9.8 to match the base image; the -latest repo RPM auto-detects
+# the running OS minor version which may resolve to a different (non-existent)
+# path on the PGDG mirrors.
+ARG RHEL_MINOR=9.8
 RUN set -ex; \
 	arch="$(uname -m)"; \
 	case "$arch" in \
@@ -85,15 +89,15 @@ RUN set -ex; \
 		s390x) repoArch='s390x' ;; \
 		*) echo >&2 "error: unsupported architecture: $arch"; exit 1 ;; \
 	esac; \
-	microdnf install ${DNF_FLAGS} -y rpm wget; \
-	wget "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-$repoArch/pgdg-redhat-repo-latest.noarch.rpm"; \
-	rpm -ivh pgdg-redhat-repo-latest.noarch.rpm; \
-	rm -f pgdg-redhat-repo-latest.noarch.rpm; \
+	microdnf install ${DNF_FLAGS} -y rpm; \
+	mkdir -p /etc/yum.repos.d; \
+	printf '[pgdg18]\nname=PostgreSQL 18 for RHEL/CentOS 9 - %s\nbaseurl=https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-%s-%s\nenabled=1\ngpgcheck=0\n' \
+		"$arch" "${RHEL_MINOR}" "$arch" > /etc/yum.repos.d/pgdg18.repo; \
 	microdnf install ${DNF_FLAGS} --enablerepo=pgdg18 -y \
 		postgresql18-server \
 		postgresql18-contrib \
 	; \
-	microdnf remove ${DNF_FLAGS} -y wget; \
+	rm -f /etc/yum.repos.d/pgdg18.repo; \
 	microdnf clean all; \
 	postgres --version
 
