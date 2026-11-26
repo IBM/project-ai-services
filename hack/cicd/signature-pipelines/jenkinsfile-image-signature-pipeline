@@ -411,25 +411,33 @@ def buildAndPublishImage(String imagePath, String imageName) {
         return null
     }
 
-    def tag = sh(script: "make --no-print-directory -C ${makeFilePath} image-tag SERVICE=${serviceName}", returnStdout: true).trim()
-    def icrImage = "${env.ICR_REGISTRY}/${imageName}:${tag}"
+    try {
+        def tag = sh(script: "make --no-print-directory -C ${makeFilePath} image-tag SERVICE=${serviceName}", returnStdout: true).trim()
+        def icrImage = "${env.ICR_REGISTRY}/${imageName}:${tag}"
 
-    println "Image path: ${icrImage}"
+        println "Image path: ${icrImage}"
 
-    // Run the Makefile build and push targets to publish the image to ICR
-    withIcrCredentials {
-        sh """
-            make --no-print-directory -C ${makeFilePath} build SERVICE=${serviceName} REGISTRY=${env.ICR_REGISTRY} \\
-                REGISTRY_USER=\$ICR_USERNAME \\
-                REGISTRY_PASSWORD=\$ICR_PASSWORD
-            make --no-print-directory -C ${makeFilePath} push SERVICE=${serviceName} REGISTRY=${env.ICR_REGISTRY} \\
-                REGISTRY_USER=\$ICR_USERNAME \\
-                REGISTRY_PASSWORD=\$ICR_PASSWORD
-        """
+        // Run the Makefile build and push targets to publish the image to ICR
+        withIcrCredentials {
+            sh """
+                make --no-print-directory -C ${makeFilePath} build SERVICE=${serviceName} REGISTRY=${env.ICR_REGISTRY} \\
+                    REGISTRY_USER=\$ICR_USERNAME \\
+                    REGISTRY_PASSWORD=\$ICR_PASSWORD
+                make --no-print-directory -C ${makeFilePath} push SERVICE=${serviceName} REGISTRY=${env.ICR_REGISTRY} \\
+                    REGISTRY_USER=\$ICR_USERNAME \\
+                    REGISTRY_PASSWORD=\$ICR_PASSWORD
+            """
+        }
+
+        echo "✓ Successfully built and pushed: ${icrImage}"
+        return icrImage
+    } catch (err) {
+        // Do not fail the stage; mark the build UNSTABLE and let the pipeline proceed.
+        // A null return value is filtered out of the image list in generateImageList().
+        echo "✗ Failed to build and publish ${imageName}: ${err}"
+        unstable("Build/publish failed for ${imageName}")
+        return null
     }
-
-    echo "✓ Successfully built and pushed: ${icrImage}"
-    return icrImage
 }
 
 def buildToolArmImage(String imagePath, String imageName) {
@@ -545,7 +553,7 @@ def generateImageList() {
         env.ICR_TOOL_IMAGE,
         env.ICR_AI_SERVICES_IMAGE,
         env.ICR_AI_SERVICES_MCP_IMAGE
-    ].findAll { it != null }
+    ].findAll { it && it != 'null' }
 
     // Add opensearch image path from values.yaml; the first reference found under ai-services/assets is used
     def opensearchImage = ''
@@ -563,9 +571,9 @@ def generateImageList() {
     } else {
         echo 'opensearch image not found in ai-services/assets, skipping it'
     }
+    
 
     def imageList = images.join('\n') + '\n'
-
 
     dir("${CERT_DIR}") {
         writeFile file: 'images.txt', text: imageList
