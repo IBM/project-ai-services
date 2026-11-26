@@ -15,9 +15,3 @@ spec:
       port: 8500
       targetPort: 8500
       protocol: TCP
-    {{- if .Values.mcp.enabled }}
-    - name: mcp
-      port: {{ .Values.mcp.port }}
-      targetPort: {{ .Values.mcp.port }}
-      protocol: TCP
-    {{- end }}
