@@ -49,8 +49,34 @@ class Db2ForIDetailsPatch(BaseModel):
 InputColumn = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)]
 
 
+class ForecastSettings(BaseModel):
+    """The `forecast` settings of the service: the training data and the training schedule.
+
+    Unknown fields are ignored. The keys are camelCase, as the catalog sends them.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    table: str = Field(min_length=1, max_length=257, pattern=_SQL_TABLE_PATTERN)
+    target_column: str = Field(
+        alias="targetColumn", min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN
+    )
+    input_columns: list[InputColumn] = Field(alias="inputColumns", min_length=1, max_length=1000)
+    schedule: Optional[Schedule] = None
+
+    @model_validator(mode="after")
+    def _validate_columns(self) -> "ForecastSettings":
+        """Reject duplicate input column names and a target that is also an input column."""
+        names = [name.upper() for name in self.input_columns]
+        if len(set(names)) != len(names):
+            raise ValueError("inputColumns must not contain duplicate column names")
+        if self.target_column.upper() in names:
+            raise ValueError("targetColumn must not be present in inputColumns")
+        return self
+
+
 class ServiceSettings(BaseModel):
-    """Settings chosen when the service is deployed: the training data and the training schedule.
+    """Settings chosen when the service is deployed, grouped by the part of the service they are for.
 
     Unknown fields are ignored: the catalog forwards every setting of the deployed service,
     and the service cannot tell which of them are meant for the connector.
@@ -58,20 +84,7 @@ class ServiceSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    table: str = Field(min_length=1, max_length=257, pattern=_SQL_TABLE_PATTERN)
-    target_column: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
-    input_columns: list[InputColumn] = Field(min_length=1, max_length=1000)
-    schedule: Optional[Schedule] = None
-
-    @model_validator(mode="after")
-    def _validate_columns(self) -> "ServiceSettings":
-        """Reject duplicate input column names and a target that is also an input column."""
-        names = [name.upper() for name in self.input_columns]
-        if len(set(names)) != len(names):
-            raise ValueError("input_columns must not contain duplicate column names")
-        if self.target_column.upper() in names:
-            raise ValueError("target_column must not be present in input_columns")
-        return self
+    forecast: ForecastSettings
 
 
 class ForecastRequest(RootModel[list[dict[str, Any]]]):

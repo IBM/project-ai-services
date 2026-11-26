@@ -2,9 +2,10 @@
 Connector REST API endpoints.
 
 Mounted at /v1/connectors by app.py. Only one connector is supported in this
-release, and a connector that exists blocks a new one whatever its status. POST
-answers 201 for a valid request even when the connector cannot be accepted: it is
-then stored as FAILED, with the reason in its message.
+release, and a connector that exists blocks a new one whatever its status: POST
+answers 409 and stores nothing. A new connector whose secrets cannot be encrypted
+(no usable DB_ENCRYPTION_KEY) is answered with 201 and stored as FAILED, with the
+reason in its message.
 
 Endpoints:
   POST   /v1/connectors
@@ -49,6 +50,7 @@ from forecast.utils.api_utils import (
 from forecast.utils.encryption import EncryptionKeyError, encrypt_secrets, safe_connection_details
 
 router = APIRouter()
+CONNECTOR_EXISTS_MESSAGE = "A connector already exists. Only one connector is supported."
 logger = get_logger("forecast_connectors")
 
 
@@ -64,9 +66,10 @@ logger = get_logger("forecast_connectors")
     summary="Create the connector and queue its first training",
     description=(
         "Stores the connector with its encrypted secrets and the service settings, and "
-        "queues the first training job. Only one connector is supported in this release. "
-        "A connector that cannot be accepted is answered with 201 as well and stored with "
-        "the status FAILED and the reason in its message."
+        "queues the first training job. Only one connector is supported in this release: "
+        "when a connector exists, whatever its status, the call is answered with 409. "
+        "Without a usable DB_ENCRYPTION_KEY the call is answered with 201 and the connector "
+        "is stored with the status FAILED and the reason in its message."
     ),
     response_description="Connector created",
 )
@@ -75,7 +78,8 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     connector_id = str(body.id)
     details = body.connection_details.model_dump(exclude_none=True)
     # Without a usable key the secrets cannot be stored. The request is still answered with 201: the
-    # connector is stored as FAILED, without its secrets, and the message tells why.
+    # connector is stored as FAILED, without its secrets, and the message tells why. A connector
+    # that already exists is checked first, so it is answered with 409 whatever the key.
     try:
         encrypted: Optional[dict] = encrypt_secrets(details)
         key_error = None
@@ -89,15 +93,22 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
         if connectors_db.connector_id_exists(session, connector_id):
             # A repeated request: nothing changes, so it cannot queue a second job.
             logger.info(f"Create of connector {connector_id} ignored: it already exists")
+        elif connectors_db.connector_exists(session):
+            logger.warning(f"Create of connector {connector_id} rejected: a connector already exists")
+            APIError.raise_error(ErrorCode.RESOURCE_CONFLICT, CONNECTOR_EXISTS_MESSAGE)
+        elif key_error is not None:
+            logger.warning(f"Create of connector {connector_id} not accepted: {key_error}")
+            connectors_db.insert_failed_connector(
+                session,
+                connector_id=connector_id,
+                name=body.name,
+                connector_type=body.type,
+                config=safe_connection_details(details),
+                message=key_error,
+            )
         else:
-            reason = _rejection_reason(session, key_error)
-            if reason is None:
-                _insert_accepted(session, body, connector_id, encrypted)
-                accepted = True
-            else:
-                logger.warning(f"Create of connector {connector_id} not accepted: {reason}")
-                stored = encrypted if encrypted is not None else safe_connection_details(details)
-                _insert_failed(session, body, connector_id, stored, reason)
+            _insert_accepted(session, body, connector_id, encrypted)
+            accepted = True
 
     if not accepted:
         return ConnectorCreateResponse(id=connector_id)
@@ -107,7 +118,7 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     # connector and its queued job are stored by now: a failed registration must
     # not fail the call. Startup registers the jobs of every connector that has none.
     try:
-        register_connector_job(connector_id, body.service_settings.schedule)
+        register_connector_job(connector_id, body.service_settings.forecast.schedule)
     except Exception:
         logger.error(
             f"Connector {connector_id} is stored, but its training could not be scheduled",
@@ -117,23 +128,11 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     return ConnectorCreateResponse(id=connector_id)
 
 
-def _rejection_reason(session: Session, key_error: Optional[str]) -> Optional[str]:
-    """Return why a new connector cannot be accepted, or None when it can.
-
-    A connector that is already there blocks a new one whatever its status, FAILED included.
-    """
-    if connectors_db.connector_exists(session):
-        return "A connector already exists. Only one connector is supported."
-    if key_error is not None:
-        return key_error
-    return None
-
-
 def _insert_accepted(
     session: Session, body: ConnectorCreateRequest, connector_id: str, encrypted: dict
 ) -> None:
     """Store the connector, its service settings and its first training job."""
-    svc = body.service_settings
+    svc = body.service_settings.forecast
     connectors_db.insert_connector(
         session,
         connector_id=connector_id,
@@ -145,31 +144,6 @@ def _insert_accepted(
         input_columns=svc.input_columns,
         schedule=svc.schedule,
     )
-
-
-def _insert_failed(
-    session: Session, body: ConnectorCreateRequest, connector_id: str, encrypted: dict, reason: str
-) -> None:
-    """Store a connector that was not accepted as FAILED, with the reason as its message.
-
-    ``encrypted`` holds the connection details with the secrets encrypted, or only the safe fields when
-    the secrets could not be encrypted.
-    """
-    try:
-        # A savepoint, so a name that is taken does not abort the whole transaction.
-        with session.begin_nested():
-            connectors_db.insert_failed_connector(
-                session,
-                connector_id=connector_id,
-                name=body.name,
-                connector_type=body.type,
-                config=encrypted,
-                message=reason,
-            )
-    except IntegrityError as exc:
-        if sqlstate(exc) not in (None, UNIQUE_VIOLATION):
-            raise
-        logger.warning(f"Rejected connector {connector_id} not stored: duplicate connector name")
 
 
 # ---------------------------------------------------------------------------
