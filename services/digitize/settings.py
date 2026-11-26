@@ -20,6 +20,16 @@ class DigitizeConfig(BaseSettings):
             ge=1,
             description="Sync interval in seconds applied to all connectors at attach time",
         )
+        sync_history_retention_days: int = Field(
+            default=1,
+            ge=1,
+            description="Retention period in days for completed/cancelled connector sync logs and connector jobs",
+        )
+        sync_history_failed_retention_days: int = Field(
+            default=7,
+            ge=1,
+            description="Retention period in days for failed connector sync logs and connector jobs",
+        )
 
         model_config = SettingsConfigDict(env_prefix="CONNECTOR_")
 

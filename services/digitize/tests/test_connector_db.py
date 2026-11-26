@@ -461,31 +461,49 @@ class TestInsertSyncLog:
     def test_returns_generated_seq(self):
         """init_sync_log_and_update_connector must return the auto-generated seq value."""
         session = MagicMock()
-        # First execute: INSERT … RETURNING seq → scalar_one() returns 3
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 3
-        # Second execute: UPDATE connectors SET status='syncing'
         update_result = MagicMock()
-        session.execute.side_effect = [insert_result, update_result]
+        session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), update_result]
 
         from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             seq = init_sync_log_and_update_connector(CONNECTOR_ID)
         assert seq == 3
-        assert session.execute.call_count == 2
+        assert session.execute.call_count == 4
 
     def test_sets_connector_status_syncing(self):
-        """Both the INSERT and the connectors UPDATE must happen in the same session."""
         session = MagicMock()
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 1
-        session.execute.side_effect = [insert_result, MagicMock()]
+        session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), MagicMock()]
 
         from digitize.utils.db import init_sync_log_and_update_connector
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             init_sync_log_and_update_connector(CONNECTOR_ID)
-        # Two DB calls: INSERT log row + UPDATE connector status
-        assert session.execute.call_count == 2
+        assert session.execute.call_count == 4
+
+    def test_evicts_old_sync_logs_and_jobs_beyond_retention(self):
+        """After inserting, terminal jobs and sync logs older than retention window must be evicted."""
+        session = MagicMock()
+        insert_result = MagicMock()
+        insert_result.scalar_one.return_value = 9
+        session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), MagicMock()]
+
+        from digitize.utils.db import init_sync_log_and_update_connector
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            init_sync_log_and_update_connector(CONNECTOR_ID)
+
+        delete_jobs_stmt = session.execute.call_args_list[1][0][0]
+        compiled_jobs = str(delete_jobs_stmt.compile())
+        assert compiled_jobs.startswith("DELETE FROM jobs")
+        assert "jobs.source" in compiled_jobs
+        assert "jobs.submitted_at <" in compiled_jobs
+
+        delete_logs_stmt = session.execute.call_args_list[2][0][0]
+        compiled_logs = str(delete_logs_stmt.compile())
+        assert compiled_logs.startswith("DELETE FROM connector_sync_logs")
+        assert "connector_sync_logs.started_at <" in compiled_logs
 
     def test_preserves_message_on_open_sync(self):
         """Opening a sync log must NOT touch the message on the connector row,
@@ -494,15 +512,15 @@ class TestInsertSyncLog:
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 1
         update_result = MagicMock()
-        session.execute.side_effect = [insert_result, update_result]
+        session.execute.side_effect = [insert_result, MagicMock(), MagicMock(), update_result]
 
         from digitize.utils.db import init_sync_log_and_update_connector
 
         with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
             init_sync_log_and_update_connector(CONNECTOR_ID)
 
-        # Inspect the UPDATE statement sent to the connector row (second execute call)
-        update_call_args = session.execute.call_args_list[1]
+        # Inspect the UPDATE statement sent to the connector row (fourth execute call)
+        update_call_args = session.execute.call_args_list[3]
         stmt = update_call_args[0][0]  # first positional arg
         assert "message" not in stmt.compile().params
         assert "message" not in str(stmt.compile()).lower().split(" where ")[0]
@@ -779,5 +797,78 @@ class TestGetConnectorSyncStatus:
         session.execute.side_effect = SQLAlchemyError("timeout")
         result = self._call(session)
         assert result is None
+
+
+# ===========================================================================
+# prune_all_sync_history — time-based retention (> 1 day) for jobs and logs
+# ===========================================================================
+
+class TestPruneAllSyncHistory:
+    def test_prunes_both_jobs_and_sync_logs(self):
+        session = MagicMock()
+        job_res = MagicMock()
+        job_res.rowcount = 3
+        log_res = MagicMock()
+        log_res.rowcount = 2
+        session.execute.side_effect = [job_res, log_res]
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            total = DatabaseManager.prune_all_sync_history()
+        assert total == 5
+        assert session.execute.call_count == 2
+
+        job_delete = str(session.execute.call_args_list[0][0][0].compile())
+        assert job_delete.startswith("DELETE FROM jobs")
+        assert "jobs.source" in job_delete
+        assert "jobs.submitted_at <" in job_delete
+
+        log_delete = str(session.execute.call_args_list[1][0][0].compile())
+        assert log_delete.startswith("DELETE FROM connector_sync_logs")
+        assert "connector_sync_logs.started_at <" in log_delete
+
+    def test_db_error_returns_zero(self):
+        session = MagicMock()
+        session.execute.side_effect = SQLAlchemyError("boom")
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)):
+            assert DatabaseManager.prune_all_sync_history() == 0
+
+    def test_respects_custom_retention_setting(self):
+        session = MagicMock()
+        job_res = MagicMock()
+        job_res.rowcount = 1
+        log_res = MagicMock()
+        log_res.rowcount = 1
+        session.execute.side_effect = [job_res, log_res]
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)), \
+             patch("digitize.db.manager.settings.digitize.connector.sync_history_retention_days", 3):
+            total = DatabaseManager.prune_all_sync_history()
+        assert total == 2
+        assert session.execute.call_count == 2
+
+    def test_differentiated_retention_conditions_for_failed_and_terminal_jobs_and_logs(self):
+        session = MagicMock()
+        job_res = MagicMock()
+        job_res.rowcount = 2
+        log_res = MagicMock()
+        log_res.rowcount = 1
+        session.execute.side_effect = [job_res, log_res]
+        from digitize.db.manager import DatabaseManager
+        with patch("digitize.db.manager.get_db_session", return_value=_make_session_cm(session)), \
+             patch("digitize.db.manager.settings.digitize.connector.sync_history_retention_days", 1), \
+             patch("digitize.db.manager.settings.digitize.connector.sync_history_failed_retention_days", 7):
+            total = DatabaseManager.prune_all_sync_history()
+        assert total == 3
+        job_delete_stmt = session.execute.call_args_list[0][0][0]
+        compiled_jobs = str(job_delete_stmt.compile())
+        assert "jobs.status IN" in compiled_jobs or "jobs.status =" in compiled_jobs
+        assert "jobs.submitted_at <" in compiled_jobs
+
+        log_delete_stmt = session.execute.call_args_list[1][0][0]
+        compiled_logs = str(log_delete_stmt.compile())
+        assert "connector_sync_logs.status IN" in compiled_logs or "connector_sync_logs.status =" in compiled_logs
+        assert "connector_sync_logs.started_at <" in compiled_logs
+
 
 # Made with Bob
