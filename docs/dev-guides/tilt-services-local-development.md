@@ -28,7 +28,7 @@ The three services only call an LLM (chat completions plus `/tokenize`) and stor
 | `python-env` | Creates `hack/tilt/services/.venv` from [`requirements.txt`](../../hack/tilt/services/requirements.txt), shared by every service. Needs Python 3.12 or newer; created once. |
 | `postgres` | PostgreSQL in Podman, one database per service (`extract_metadata`, `translate_metadata`, `summarize_metadata`, `forecast_metadata`). |
 | `model-server` | Extract / translate / summarize only. [`hack/tilt/model_server.py`](../../hack/tilt/model_server.py) with `MODEL_SERVER_MODELS=llm`: serves `/llm` only (chat completions through Ollama or watsonx.ai, plus a local `/tokenize`). |
-| `<service>-db-init` | Creates the service database and schema (idempotent). For forecast it also creates the restricted `forecast_worker` role. |
+| `<service>-db-init` | Creates the service database and schema (idempotent). |
 | `<service>-api` | The service's FastAPI app from [`services/`](../../services), run with `uvicorn --reload` (edits to the service or `services/common` reload it). |
 | `triton` | Forecast only. See [Forecast](#forecast). |
 | `quick-links` | URLs of the APIs. |
@@ -124,7 +124,7 @@ Default ports avoid 5432 (catalog Tiltfile), 5433/8100/9200/3000/4000/4001/5050/
 | Resource | What it does |
 |----------|--------------|
 | `triton` | Triton in Podman with `--model-control-mode=explicit`, reading `.tilt/services/forecast/models` read-only. `forecast-api` waits for it. |
-| `forecast-db-init` | Runs `services/forecast/db/scripts/init_db.py`: database, schema and the restricted `forecast_worker` role. |
+| `forecast-db-init` | Runs `services/forecast/db/scripts/init_db.py`: database and schema. |
 
 Swagger UI is at http://localhost:8500/docs (the connector routes are hidden from the schema in the current code, but are served under `/v1/connectors`).
 
@@ -138,7 +138,6 @@ Forecast-only options:
 
 | Option | Default |
 |--------|---------|
-| `worker_postgres_user` / `worker_postgres_password` | `forecast_worker` / `ForecastWorker@1234` |
 | `triton_image` / `triton_platform` / `triton_port` | `nvcr.io/nvidia/tritonserver:26.06-py3` / unset (native) / `8000` |
 
 ## Limitations

@@ -14,7 +14,6 @@
 #   model-server   : hack/tilt/model_server.py in LLM-only mode (Ollama or watsonx.ai + /tokenize)
 #
 # forecast only (no LLM, so no model-server):
-#   forecast-db-init also creates the restricted forecast_worker role
 #   triton         : Triton Inference Server in Podman (explicit model control) on the model repository
 #
 # Usage:
@@ -66,8 +65,6 @@ def setup():
     config.define_string("postgres_port", args=False)
     config.define_string("postgres_password", args=False)
     # forecast only
-    config.define_string("worker_postgres_user", args=False)
-    config.define_string("worker_postgres_password", args=False)
     config.define_string("triton_image", args=False)
     config.define_string("triton_platform", args=False)
     config.define_string("triton_port", args=False)
@@ -130,8 +127,6 @@ def setup():
 
     if profile == "forecast":
         ctx.update({
-            "worker_postgres_user": _flag(cfg, "worker_postgres_user", "forecast_worker"),
-            "worker_postgres_password": _flag(cfg, "worker_postgres_password", "ForecastWorker@1234"),
             # AES-256-GCM key: must be exactly 32 bytes, used as-is (not base64). Override with the
             # DB_ENCRYPTION_KEY environment variable; changing it makes stored connector secrets unreadable.
             "db_encryption_key": os.getenv("DB_ENCRYPTION_KEY", "forecast-local-dev-key-012345678"),
@@ -200,17 +195,13 @@ def _llm_env(ctx):
 
 def _forecast_env(ctx):
     """Forecast settings (same variables as the proposal's Configuration table)."""
-    return """    export WORKER_POSTGRES_USER="{wuser}"
-    export WORKER_POSTGRES_PASSWORD='{wpass}'
-    export DB_ENCRYPTION_KEY='{key}'
+    return """    export DB_ENCRYPTION_KEY='{key}'
     export TRITON_URL="{triton_url}"
     export MODEL_REPO_PATH="{models}"
     export SCRATCH_DIR="{scratch}"
     export DATA_DIR="{data}"
     mkdir -p "$MODEL_REPO_PATH" "$SCRATCH_DIR" "$DATA_DIR"
 """.format(
-        wuser=ctx["worker_postgres_user"],
-        wpass=ctx["worker_postgres_password"],
         key=ctx["db_encryption_key"],
         triton_url=ctx["triton_url"],
         models=ctx["model_repo"],
@@ -375,8 +366,7 @@ def add_service(ctx, name):
     title = SERVICES[name]["title"]
     env = _service_env(ctx, name)
 
-    # Creates the <svc>_metadata database and its schema (idempotent). For forecast the same script
-    # also creates the restricted worker role.
+    # Creates the <svc>_metadata database and its schema (idempotent).
     local_resource(
         name=name + "-db-init",
         dir=REPO_ROOT,

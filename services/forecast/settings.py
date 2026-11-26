@@ -144,18 +144,6 @@ class ForecastConfig(BaseSettings):
         description="Hard memory cap in MB applied to the worker subprocess; empty means no cap",
     )
 
-    # Restricted database role used by the worker subprocess
-    worker_postgres_user: str = Field(
-        default="",
-        description="User of the restricted forecast_worker role",
-    )
-
-    worker_postgres_password: SecretStr = Field(
-        default=SecretStr(""),
-        repr=False,
-        description="Password of the restricted forecast_worker role",
-    )
-
     @field_validator("worker_memory_limit_mb", mode="before")
     @classmethod
     def blank_means_unset(cls, value):

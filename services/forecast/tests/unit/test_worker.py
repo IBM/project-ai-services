@@ -1,9 +1,9 @@
 """
 Unit tests of the training worker.
 
-The database is replaced by a fake and the data loader's output by a Parquet file. AutoGluon training and the ONNX
-export run for real on a small table, so the tests also check that the exported graph
-answers like the AutoGluon model.
+The worker has no database: the job file and the Parquet file of the data loader are its input, and
+result.json and failure.json its report. AutoGluon training and the ONNX export run for real on a
+small table, so the tests also check that the exported graph answers like the AutoGluon model.
 """
 import stat
 from types import SimpleNamespace
@@ -15,30 +15,25 @@ import pandas as pd
 import pytest
 
 from forecast.errors import EXIT_FAILURE, EXIT_OK, EXIT_PERMANENT, PermanentFailure, TransientFailure
-from forecast.db import jobs
-from forecast.db.jobs import JobStore, TrainingJob
-from forecast.db.models import Job, TrainingConfig
 from forecast.settings import settings
 from forecast.training import main as worker
 from forecast.training.features import encode
 from forecast.training.onnx_export import triton_config
 from forecast.training.model_dir import write_model_dir
+from forecast.utils import job_files
+from forecast.utils.job_files import TrainingJob
 from forecast.utils.names import forecaster_name
 from forecast.training.training import _split
 
 pytestmark = pytest.mark.unit
 
-ARGV = ["7", "data.parquet", "output"]
-
 CONNECTOR_ID = UUID("c9e66790-7425-40de-944b-e07fc1f90ae7")
 JOB = TrainingJob(
-    Job(seq=7, connector_id=CONNECTOR_ID),
-    TrainingConfig(
-        connector_id=CONNECTOR_ID,
-        source_table="SALES.ORDERS",
-        target_column="LATE",
-        input_columns=[{"name": "REGION"}, {"name": "QUANTITY"}, {"name": "PRICE"}],
-    ),
+    job_id=7,
+    connector_id=CONNECTOR_ID,
+    source_table="SALES.ORDERS",
+    target_column="LATE",
+    input_names=["REGION", "QUANTITY", "PRICE"],
 )
 
 
@@ -57,48 +52,28 @@ def make_table(rows: int = 400, target: str = "classification") -> pd.DataFrame:
     return df
 
 
-class FakeStore:
-    """Stands in for JobStore and records the writes."""
-
-    def __init__(self, job: TrainingJob = JOB):
-        self.job = job
-        self.results: list[dict] = []
-        self.failures: list[str] = []
-
-    def read(self, job_id):
-        if isinstance(self.job, Exception):
-            raise self.job
-        return self.job
-
-    def write_result(self, job_id, result):
-        self.results.append(result)
-
-    def write_failure(self, job_id, message):
-        self.failures.append(message)
-
-    def clear_failure(self, job_id):
-        self.cleared = getattr(self, "cleared", 0) + 1
-
-
 def as_inputs(df: pd.DataFrame, columns: list[str]) -> dict[str, np.ndarray]:
     """The inputs of the Triton model: every column is sent as text, one column per tensor."""
     return {name: df[[name]].astype(str).values.astype(object) for name in columns}
 
 
-def run_worker(volumes, store, df: pd.DataFrame):
+def run_worker(volumes, df: pd.DataFrame, job: TrainingJob = JOB):
     """Run the worker on ``df``, which the loader would have written to a Parquet file."""
     df.to_parquet(volumes.data)
-    return worker.run(JOB.job_id, store, volumes.data, volumes.output)
+    job_file = job_files.write_job(volumes.report, job)
+    return worker.run(job_file, volumes.data, volumes.output)
 
 
 @pytest.fixture
 def volumes(tmp_path, monkeypatch):
-    """Point the scratch directory at a temporary one and name the worker's input and output."""
+    """Point the scratch directory at a temporary one and name the worker's input, output and report directory."""
     scratch = tmp_path / "scratch"
     monkeypatch.setattr(settings.forecast, "scratch_dir", scratch)
     monkeypatch.setattr(settings.forecast, "default_time_limit_seconds", 30)
+    report = tmp_path / "run-7"
+    report.mkdir()
     return SimpleNamespace(
-        scratch=scratch, data=tmp_path / "data.parquet", output=tmp_path / "output" / "model"
+        scratch=scratch, data=tmp_path / "data.parquet", output=tmp_path / "output" / "model", report=report
     )
 
 
@@ -110,9 +85,8 @@ def volumes(tmp_path, monkeypatch):
 @pytest.mark.parametrize("target", ["classification", "regression"])
 def test_run_writes_a_complete_forecaster_that_answers_like_autogluon(volumes, target):
     df = make_table(target=target)
-    store = FakeStore()
 
-    published = run_worker(volumes, store, df)
+    published = run_worker(volumes, df)
 
     assert published == volumes.output
     assert (published / "config.pbtxt").is_file()
@@ -249,29 +223,31 @@ def test_encode_turns_a_null_category_into_minus_one():
     assert encoding.categories == {"A": ["x", "y"]}
 
 
-def test_run_clears_the_message_of_an_earlier_attempt(volumes):
-    store = FakeStore()
+def test_run_writes_rows_read_first_and_then_the_full_result(volumes, monkeypatch):
+    written = []
+    original = job_files.write_result
+    monkeypatch.setattr(worker, "write_result", lambda directory, result: (written.append(dict(result)), original(directory, result)))
 
-    run_worker(volumes, store, make_table(200))
+    run_worker(volumes, make_table(300))
 
-    assert store.cleared == 1
-
-
-def test_run_records_rows_read_then_the_full_result(volumes):
-    store = FakeStore()
-
-    run_worker(volumes, store, make_table(300))
-
-    assert store.results[0] == {"rows_read": 300}
-    final = store.results[-1]
+    assert written[0] == {"rows_read": 300}
+    final = job_files.read_result(volumes.report)
     assert set(final) == {
         "rows_read", "algorithm", "validation_metric", "validation_score", "test_score", "training_seconds"
     }
+    assert written[-1] == final
     assert final["rows_read"] == 300
     assert final["algorithm"] in {"LightGBM", "CatBoost"}
     assert final["validation_metric"] == "accuracy"
     assert 0 <= final["validation_score"] <= 1
     assert 0 <= final["test_score"] <= 1
+
+
+def test_the_rows_read_are_reported_before_a_run_without_rows_fails(volumes):
+    with pytest.raises(PermanentFailure, match="no rows"):
+        run_worker(volumes, make_table(0))
+
+    assert job_files.read_result(volumes.report) == {"rows_read": 0}
 
 
 def test_the_test_split_is_held_out_and_keeps_the_class_ratio():
@@ -295,7 +271,7 @@ def test_the_test_split_of_a_regression_target_or_a_single_row_class_is_random()
 
 
 def test_run_removes_its_scratch_directory_only(volumes):
-    run_worker(volumes, FakeStore(), make_table(200))
+    run_worker(volumes, make_table(200))
 
     assert list(volumes.scratch.iterdir()) == []
     assert (volumes.output / "1" / "model.onnx").is_file()
@@ -358,7 +334,7 @@ def test_forecaster_name_is_connector_and_version():
 
 def test_no_rows_is_a_permanent_failure_and_nothing_is_published(volumes):
     with pytest.raises(PermanentFailure, match="no rows"):
-        run_worker(volumes, FakeStore(), make_table(0))
+        run_worker(volumes, make_table(0))
 
     assert not volumes.output.exists()
 
@@ -366,16 +342,14 @@ def test_no_rows_is_a_permanent_failure_and_nothing_is_published(volumes):
 def test_columns_are_trained_under_the_spelling_of_the_configuration(volumes):
     # The loader writes the table's spelling (IBM i: upper case); the user may have typed another.
     job = TrainingJob(
-        JOB.job,
-        TrainingConfig(
-            connector_id=CONNECTOR_ID,
-            source_table="SALES.ORDERS",
-            target_column="late",
-            input_columns=[{"name": "Region"}, {"name": "QUANTITY"}, {"name": "price"}],
-        ),
+        job_id=7,
+        connector_id=CONNECTOR_ID,
+        source_table="SALES.ORDERS",
+        target_column="late",
+        input_names=["Region", "QUANTITY", "price"],
     )
 
-    published = run_worker(volumes, FakeStore(job), make_table(200))
+    published = run_worker(volumes, make_table(200), job)
 
     session = ort.InferenceSession(str(published / "1" / "model.onnx"))
     assert [i.name for i in session.get_inputs()] == ["Region", "QUANTITY", "price"]
@@ -383,7 +357,7 @@ def test_columns_are_trained_under_the_spelling_of_the_configuration(volumes):
 
 def test_a_column_that_the_file_lacks_is_a_permanent_failure(volumes):
     with pytest.raises(PermanentFailure, match="Column PRICE is missing"):
-        run_worker(volumes, FakeStore(), make_table(50).drop(columns="PRICE"))
+        run_worker(volumes, make_table(50).drop(columns="PRICE"))
 
 
 def test_a_column_that_the_file_spells_two_ways_is_a_permanent_failure(volumes):
@@ -391,7 +365,7 @@ def test_a_column_that_the_file_spells_two_ways_is_a_permanent_failure(volumes):
     df["price"] = 1.0
 
     with pytest.raises(PermanentFailure, match="Column PRICE is ambiguous"):
-        run_worker(volumes, FakeStore(), df)
+        run_worker(volumes, df)
 
 
 def test_a_target_with_one_value_is_a_permanent_failure(volumes):
@@ -399,7 +373,26 @@ def test_a_target_with_one_value_is_a_permanent_failure(volumes):
     df["LATE"] = "N"
 
     with pytest.raises(PermanentFailure, match="at least two different values"):
-        run_worker(volumes, FakeStore(), df)
+        run_worker(volumes, df)
+
+
+@pytest.fixture
+def report(tmp_path):
+    """The directory of the run: the job file is in it, and the worker reports next to it."""
+    directory = tmp_path / "run-7"
+    directory.mkdir()
+    return directory
+
+
+def argv(report):
+    return [str(report / "job.json"), "data.parquet", "output"]
+
+
+def failing_run(monkeypatch, error):
+    def run(*args):
+        raise error
+
+    monkeypatch.setattr(worker, "run", run)
 
 
 @pytest.mark.parametrize(
@@ -409,71 +402,89 @@ def test_a_target_with_one_value_is_a_permanent_failure(volumes):
         (TransientFailure("Connection to the source database was lost"), EXIT_FAILURE),
     ],
 )
-def test_main_maps_failures_to_exit_codes_and_stores_their_message(monkeypatch, error, code):
-    store = FakeStore(error)
-    monkeypatch.setattr(worker, "worker_engine", lambda: None)
-    monkeypatch.setattr(worker, "JobStore", lambda engine: store)
+def test_main_maps_failures_to_exit_codes_and_reports_their_message(monkeypatch, report, error, code):
+    failing_run(monkeypatch, error)
 
-    assert worker.main(ARGV) == code
+    assert worker.main(argv(report)) == code
 
-    assert store.failures == [str(error)]
+    assert job_files.read_failure(report) == str(error)
 
 
-def test_main_stores_a_fixed_text_for_an_unexpected_error(monkeypatch):
+def test_main_reports_a_fixed_text_for_an_unexpected_error(monkeypatch, report):
     secret = "host ibmi.internal.example user forecast_ro password hunter2"
-    store = FakeStore(RuntimeError(secret))
-    monkeypatch.setattr(worker, "worker_engine", lambda: None)
-    monkeypatch.setattr(worker, "JobStore", lambda engine: store)
+    failing_run(monkeypatch, RuntimeError(secret))
 
-    assert worker.main(ARGV) == EXIT_FAILURE
+    assert worker.main(argv(report)) == EXIT_FAILURE
 
-    (message,) = store.failures
+    message = job_files.read_failure(report)
     assert "RuntimeError" in message and "worker log" in message
     assert "hunter2" not in message
 
 
-def test_main_logs_the_cause_of_a_permanent_failure_but_does_not_store_it(monkeypatch, caplog):
+def test_main_logs_the_cause_of_a_permanent_failure_but_does_not_report_it(monkeypatch, report, caplog):
     cause = ValueError("row with customer 4711")
     error = PermanentFailure("AutoGluon could not train on this data (ValueError).")
     error.__cause__ = cause
-    store = FakeStore(error)
-    monkeypatch.setattr(worker, "worker_engine", lambda: None)
-    monkeypatch.setattr(worker, "JobStore", lambda engine: store)
+    failing_run(monkeypatch, error)
 
     with caplog.at_level("ERROR"):
-        assert worker.main(ARGV) == EXIT_PERMANENT
+        assert worker.main(argv(report)) == EXIT_PERMANENT
 
-    assert store.failures == [str(error)]
+    assert job_files.read_failure(report) == str(error)
     assert "customer 4711" in caplog.text
 
 
-def test_main_exits_zero_on_success(monkeypatch, tmp_path):
+def test_main_exits_zero_on_success_and_reports_no_failure(monkeypatch, tmp_path, report):
     published = tmp_path / "fc_x_7"
     published.mkdir()
-    monkeypatch.setattr(worker, "worker_engine", lambda: None)
-    monkeypatch.setattr(worker, "JobStore", lambda engine: FakeStore())
     monkeypatch.setattr(worker, "run", lambda *args: published)
 
-    assert worker.main(ARGV) == EXIT_OK
+    assert worker.main(argv(report)) == EXIT_OK
+
+    assert not (report / "failure.json").exists()
 
 
-def test_main_still_exits_when_the_failure_cannot_be_stored(monkeypatch):
-    store = FakeStore(RuntimeError("boom"))
-    store.write_failure = lambda *_: (_ for _ in ()).throw(RuntimeError("database down"))
-    monkeypatch.setattr(worker, "worker_engine", lambda: None)
-    monkeypatch.setattr(worker, "JobStore", lambda engine: store)
+def test_main_still_exits_when_the_failure_cannot_be_written(monkeypatch, report):
+    failing_run(monkeypatch, RuntimeError("boom"))
 
-    assert worker.main(ARGV) == EXIT_FAILURE
+    def cannot_write(*args):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(worker, "write_failure", cannot_write)
+
+    assert worker.main(argv(report)) == EXIT_FAILURE
 
 
-def test_main_stores_a_bounded_message(monkeypatch):
-    store = FakeStore(TransientFailure("x" * 5000))
-    monkeypatch.setattr(worker, "worker_engine", lambda: None)
-    monkeypatch.setattr(worker, "JobStore", lambda engine: store)
+def test_main_reports_a_bounded_message(monkeypatch, report):
+    failing_run(monkeypatch, TransientFailure("x" * 5000))
 
-    worker.main(ARGV)
+    worker.main(argv(report))
 
-    assert len(store.failures[0]) == 1000
+    assert len(job_files.read_failure(report)) == 1000
+
+
+def test_a_missing_job_file_is_a_permanent_failure_that_is_reported(report):
+    assert worker.main(argv(report)) == EXIT_PERMANENT
+
+    assert "job file" in job_files.read_failure(report)
+
+
+def test_an_invalid_job_file_is_a_permanent_failure(volumes):
+    (volumes.report / "job.json").write_text('{"job_id": "7"}')
+
+    with pytest.raises(PermanentFailure, match="job file"):
+        worker.run(volumes.report / "job.json", volumes.data, volumes.output)
+
+
+def test_the_worker_needs_no_database(monkeypatch, volumes):
+    """It imports and runs with no database setting, and has no code that would use one."""
+    for name in ("POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD", "DB_ENCRYPTION_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    run_worker(volumes, make_table(200))
+
+    assert not hasattr(worker, "JobStore") and not hasattr(worker, "worker_engine")
+    assert "sqlalchemy" not in open(worker.__file__).read()
 
 
 def test_a_table_with_too_few_labelled_rows_is_a_permanent_failure(volumes):
@@ -482,7 +493,7 @@ def test_a_table_with_too_few_labelled_rows_is_a_permanent_failure(volumes):
     df.loc[5:, "LATE"] = None  # Five rows keep a target value.
 
     with pytest.raises(PermanentFailure, match="Only 5 rows have a value in target column LATE"):
-        run_worker(volumes, FakeStore(), df)
+        run_worker(volumes, df)
 
     assert not volumes.output.exists()
 
@@ -505,120 +516,11 @@ def test_autogluon_failing_on_the_data_is_a_retryable_failure_without_its_messag
     monkeypatch.setattr(TabularPredictor, "fit", fail)
 
     with pytest.raises(TransientFailure, match=r"could not train on this data \(ValueError\)") as raised:
-        run_worker(volumes, FakeStore(), make_table(100))
+        run_worker(volumes, make_table(100))
 
     assert not isinstance(raised.value, PermanentFailure)
     assert "4711" not in str(raised.value)
     assert isinstance(raised.value.__cause__, ValueError)
-
-
-# ---------------------------------------------------------------------------
-# Database access
-# ---------------------------------------------------------------------------
-
-
-class FakeSession:
-    """Stands in for a SQLAlchemy Session: returns one row and records the statements."""
-
-    def __init__(self, row=None):
-        self.row = row
-        self.statements = []
-
-    def __call__(self, engine):
-        return self
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def begin(self):
-        return self
-
-    def execute(self, statement, **kwargs):
-        self.statements.append(statement)
-        return SimpleNamespace(first=lambda: self.row)
-
-
-@pytest.fixture
-def session(monkeypatch):
-    fake = FakeSession()
-    monkeypatch.setattr(jobs, "Session", fake)
-    return fake
-
-
-def job_row(connector=True, config=True):
-    return (
-        Job(seq=7, connector_id=CONNECTOR_ID if connector else None),
-        TrainingConfig(
-            connector_id=CONNECTOR_ID,
-            source_table="SALES.ORDERS",
-            target_column="LATE",
-            input_columns=[{"name": "REGION"}],
-        )
-        if config
-        else None,
-    )
-
-
-def test_job_store_reads_the_job_and_training_configuration_but_not_the_connector(session):
-    from sqlalchemy.dialects import postgresql
-
-    session.row = job_row()
-
-    job = JobStore(None).read(7)
-
-    assert job.job_id == 7 and job.connector_id == CONNECTOR_ID
-    sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
-    assert "connectors" not in sql  # The worker's role has no grant on the credentials.
-    assert (job.source_table, job.target_column) == ("SALES.ORDERS", "LATE")
-    assert job.input_names == ["REGION"] and job.columns == ["REGION", "LATE"]
-
-
-def test_job_store_reads_only_the_columns_of_jobs_that_the_worker_role_may_read(session):
-    from sqlalchemy.dialects import postgresql
-
-    session.row = job_row()
-    JobStore(None).read(7)
-
-    sql = str(session.statements[0].compile(dialect=postgresql.dialect()))
-    selected = sql.split("FROM")[0]
-    assert "jobs.seq" in selected and "jobs.connector_id" in selected
-    assert not {"jobs.result", "jobs.message", "jobs.status", "jobs.created_at"} & set(selected.split())
-
-
-@pytest.mark.parametrize(
-    "row, message",
-    [
-        (None, "Job 7 does not exist"),
-        (job_row(connector=False, config=False), "connector of job 7 does not exist"),
-        (job_row(config=False), "has no training configuration"),
-    ],
-)
-def test_job_store_reports_a_missing_job_connector_or_configuration_as_permanent(session, row, message):
-    session.row = row
-
-    with pytest.raises(PermanentFailure, match=message):
-        JobStore(None).read(7)
-
-
-def test_job_store_writes_only_jobs_result_and_jobs_message(session):
-    from sqlalchemy.dialects import postgresql
-
-    store = JobStore(None)
-
-    store.write_result(7, {"rows_read": 1})
-    store.write_failure(7, "boom")
-    store.clear_failure(7)
-
-    written = [
-        {key.rsplit("_", 1)[0] for key in statement.compile(dialect=postgresql.dialect()).params}
-        - {"seq"}
-        for statement in session.statements
-    ]
-    assert written == [{"result"}, {"message"}, {"message"}]
-    assert all(statement.table.name == "jobs" for statement in session.statements)
 
 
 def test_triton_config_lists_every_tensor_of_the_graph():
@@ -637,31 +539,6 @@ def test_triton_config_lists_every_tensor_of_the_graph():
     assert 'name: "label"' in config and "max_batch_size: 0" in config
     assert "KIND_CPU" in config
 
-
-def test_worker_engine_connects_as_the_worker_role_without_a_pool(monkeypatch):
-    from pydantic import SecretStr
-    from sqlalchemy.pool import NullPool
-
-    monkeypatch.setattr(settings.forecast, "worker_postgres_user", "forecast_worker")
-    monkeypatch.setattr(settings.forecast, "worker_postgres_password", SecretStr("worker-pw"))
-    monkeypatch.setenv("POSTGRES_HOST", "db.internal")
-    monkeypatch.setenv("POSTGRES_PORT", "6543")
-    monkeypatch.setenv("POSTGRES_DB", "forecast_metadata")
-
-    engine = jobs.worker_engine()
-
-    url = engine.url
-    assert (url.username, url.password, url.host, url.port, url.database) == (
-        "forecast_worker", "worker-pw", "db.internal", 6543, "forecast_metadata"
-    )
-    assert isinstance(engine.pool, NullPool)
-
-
-def test_worker_engine_uses_the_default_port(monkeypatch):
-    monkeypatch.setenv("POSTGRES_HOST", "db.internal")
-    monkeypatch.delenv("POSTGRES_PORT", raising=False)
-
-    assert jobs.worker_engine().url.port == 5432
 
 
 # ---------------------------------------------------------------------------
@@ -708,7 +585,7 @@ def test_the_module_entry_point_exits_with_the_code_of_main(monkeypatch):
     import sys
 
     monkeypatch.setattr(worker, "main", lambda argv: EXIT_PERMANENT)
-    monkeypatch.setattr(sys, "argv", ["forecast.training", "7"])
+    monkeypatch.setattr(sys, "argv", ["forecast.training", "job.json"])
 
     with pytest.raises(SystemExit) as exited:
         runpy.run_module("forecast.training", run_name="__main__")

@@ -300,10 +300,7 @@ def test_settings_defaults(monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
 
-    for name in (
-        "DB_ENCRYPTION_KEY", "WORKER_POSTGRES_USER", "WORKER_POSTGRES_PASSWORD",
-        "DB_POOL_SIZE", "DB_MAX_OVERFLOW",
-    ):
+    for name in ("DB_ENCRYPTION_KEY", "DB_POOL_SIZE", "DB_MAX_OVERFLOW"):
         monkeypatch.delenv(name, raising=False)
 
     from forecast.settings import DatabaseConfig, ForecastConfig
@@ -314,8 +311,6 @@ def test_settings_defaults(monkeypatch):
     config = ForecastConfig()
     assert config.triton_url == ""
     assert config.db_encryption_key.get_secret_value() == ""
-    assert config.worker_postgres_user == ""
-    assert config.worker_postgres_password.get_secret_value() == ""
     assert str(config.model_repo_path) == "/models"
     assert str(config.scratch_dir) == "/var/cache/forecast/scratch"
     assert str(config.data_dir) == "/data"
@@ -363,13 +358,11 @@ def test_blank_memory_limit_removes_the_cap(monkeypatch):
 @pytest.mark.unit
 def test_secrets_are_not_printed(monkeypatch):
     monkeypatch.setenv("DB_ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
-    monkeypatch.setenv("WORKER_POSTGRES_PASSWORD", "hunter2")
 
     from forecast.settings import ForecastConfig
 
     config = ForecastConfig()
     assert "0123456789abcdef" not in repr(config)
-    assert "hunter2" not in repr(config)
     assert config.db_encryption_key.get_secret_value() == "0123456789abcdef0123456789abcdef"
 
 
@@ -694,11 +687,13 @@ def test_worker_requires_a_job_id():
 
 
 @pytest.mark.unit
-def test_worker_parses_the_job_id_the_input_and_the_output():
+def test_worker_parses_the_job_file_the_input_and_the_output():
     from pathlib import Path
 
     from forecast.training.main import parse_args
 
-    args = parse_args(["42", "data.parquet", "out/model"])
+    args = parse_args(["run/job.json", "data.parquet", "out/model"])
 
-    assert (args.job_id, args.data_path, args.output_dir) == (42, Path("data.parquet"), Path("out/model"))
+    assert (args.job_file, args.data_path, args.output_dir) == (
+        Path("run/job.json"), Path("data.parquet"), Path("out/model")
+    )

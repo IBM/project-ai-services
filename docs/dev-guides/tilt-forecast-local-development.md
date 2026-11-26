@@ -1,6 +1,6 @@
 # Forecast on macOS with Tilt
 
-[`hack/tilt/services/Tiltfile`](../../hack/tilt/services/Tiltfile) runs the **forecast** service locally with `--service=forecast`. It is the same Tiltfile as for [extract / translate / summarize](tilt-services-local-development.md), but forecast has no LLM (so no model server) and needs a restricted worker database role and Triton. Design: [forecast service proposal](../proposals/forecast_service_proposal.md).
+[`hack/tilt/services/Tiltfile`](../../hack/tilt/services/Tiltfile) runs the **forecast** service locally with `--service=forecast`. It is the same Tiltfile as for [extract / translate / summarize](tilt-services-local-development.md), but forecast has no LLM (so no model server) and needs Triton. Design: [forecast service proposal](../proposals/forecast_service_proposal.md).
 
 > **Local development only.** The PostgreSQL password, worker password and `DB_ENCRYPTION_KEY` below are publicly documented defaults.
 
@@ -17,7 +17,7 @@ Swagger UI: http://localhost:8500/docs (the connector routes are hidden from the
 |----------|--------------|
 | `python-env` | Creates `hack/tilt/services/.venv` (shared by all services) from [`requirements.txt`](../../hack/tilt/services/requirements.txt). Python 3.12+. |
 | `postgres` | PostgreSQL in Podman, port `5437`, database `forecast_metadata`. |
-| `forecast-db-init` | Runs `services/forecast/db/scripts/init_db.py`: database, schema and the restricted `forecast_worker` role (idempotent). |
+| `forecast-db-init` | Runs `services/forecast/db/scripts/init_db.py`: database and schema (idempotent). |
 | `triton` | Triton in Podman with `--model-control-mode=explicit`, reading `.tilt/services/forecast/models` read-only. |
 | `forecast-api` | `uvicorn forecast.app:app --reload` from source (edits to `forecast` or `common` reload it). |
 
@@ -39,7 +39,6 @@ The Tiltfile follows what is merged: API, connectors, database/init, encryption 
 | `service` | required; `forecast` |
 | `forecast_port` | `8500` |
 | `postgres_port` / `postgres_image` / `postgres_password` | `5437` / `docker.io/library/postgres:18-alpine` / `Aiservicesdb@1234` |
-| `worker_postgres_user` / `worker_postgres_password` | `forecast_worker` / `ForecastWorker@1234` |
 | `triton_image` / `triton_platform` / `triton_port` | `nvcr.io/nvidia/tritonserver:26.06-py3` / unset (native) / `8000` |
 | `python_bin` | first of `python3.12`, `python3.13`, `python3.14`, `python3` (first that is >= 3.12) |
 

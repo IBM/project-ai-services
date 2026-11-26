@@ -7,7 +7,7 @@ credentials, in batches, and writes them to a Parquet file. The loader subproces
 starts the worker, and the worker reads the file. This module maps the loader's errors to the
 two kinds of failure, so nothing else depends on the loader.
 
-It runs with the API's database role: the worker's role has no grant on ``connectors``.
+It runs with the API's database role. The worker has no database access, so it cannot read ``connectors``.
 """
 from pathlib import Path
 from typing import TYPE_CHECKING, Sequence

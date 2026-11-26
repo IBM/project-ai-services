@@ -14,10 +14,12 @@ load it into Triton and record it in ``forecasters``. These steps run once and a
 job ends COMPLETED or FAILED, and an unexpected error ends it FAILED too, so a RUNNING row never
 blocks later trainings.
 
-The subprocesses write their own failure message to jobs.message. A process that was killed, or that
-died before it could write, leaves none, so the API writes one. The processes inherit the API's
-environment, except the secrets that they must not hold: the worker gets no database credentials of
-the API and no encryption key, only the restricted role (WORKER_POSTGRES_USER/PASSWORD).
+The data loader writes its own failure message to jobs.message. The training worker has no database
+access: the API tells it what to train in ``job.json`` and, after it ends, copies what it reported in
+``result.json`` and ``failure.json`` to jobs.result and jobs.message (forecast.utils.job_files). A
+process that was killed, or that died before it could report, leaves no message, so the API writes
+one. The loader inherits the API's environment. The worker inherits it without the database settings
+and the encryption key.
 """
 import asyncio
 import os
@@ -25,18 +27,19 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from sqlalchemy.exc import IntegrityError
 
 from common.misc_utils import get_logger
 from forecast.db import runs
 from forecast.db.connection import get_db_session
-from forecast.errors import EXIT_PERMANENT
+from forecast.errors import EXIT_PERMANENT, PermanentFailure
 from forecast.orchestrator.process import ProcessResult, run_process
 from forecast.orchestrator.publish import publish
 from forecast.settings import settings
 from forecast.triton_client.triton import TritonLoadError, load_model, unload_model
+from forecast.utils import job_files
 from forecast.utils.names import forecaster_name
 
 logger = get_logger("forecast_orchestrator")
@@ -48,10 +51,11 @@ LOADER_GRACE_S = 60
 # come on top of it.
 WORKER_GRACE_S = 300
 
-# The worker must not hold what the loader needs: the API's database login and the encryption key.
-_NOT_FOR_THE_WORKER = ("POSTGRES_USER", "POSTGRES_PASSWORD", "DB_ENCRYPTION_KEY")
+# The worker has no use for the database and must not hold what the loader needs: the settings of the API's
+# database (POSTGRES_*, DB_*) and the encryption key (DB_ENCRYPTION_KEY).
+_NOT_FOR_THE_WORKER = ("POSTGRES_", "DB_")
 
-_MAX_MESSAGE_CHARS = 1000
+_MAX_MESSAGE_CHARS = job_files.MAX_MESSAGE_CHARS
 _UNEXPECTED_FAILURE = "The training run failed with an unexpected {name}. The details are in the log."
 
 # Named here so that a test can replace the wait between attempts without touching asyncio.
@@ -95,7 +99,7 @@ def _claim(session, connector_id: str) -> Optional[int]:
 
 
 def _worker_env() -> dict[str, str]:
-    return {key: value for key, value in os.environ.items() if key not in _NOT_FOR_THE_WORKER}
+    return {key: value for key, value in os.environ.items() if not key.startswith(_NOT_FOR_THE_WORKER)}
 
 
 def _scratch(job_id: int) -> Path:
@@ -114,16 +118,24 @@ def _describe(who: str, result: ProcessResult, limit_s: int, memory_limit_mb: Op
 
 
 async def _failed(
-    job_id: int, who: str, result: ProcessResult, limit_s: int, memory_limit_mb: Optional[int] = None
+    job_id: int,
+    who: str,
+    result: ProcessResult,
+    limit_s: int,
+    reported: Callable[[], Awaitable[Optional[str]]],
+    memory_limit_mb: Optional[int] = None,
 ) -> AttemptFailure:
-    """Turn the end of a failed process into an AttemptFailure, and store a message if it left none."""
+    """Turn the end of a failed process into an AttemptFailure, and store its message in jobs.message.
+
+    ``reported`` returns the message that the process left, or None: the loader leaves it in jobs.message,
+    the worker in failure.json. A process that was stopped could not have left one that is trustworthy,
+    and one that left none gets a message from the API.
+    """
     stopped = _describe(who, result, limit_s, memory_limit_mb)
     permanent = result.exit_code == EXIT_PERMANENT and stopped is None
-    # A process that was stopped could not have written the message that is stored.
-    stored = None if stopped else await _db(runs.read_message, job_id)
-    message = stopped or stored or f"The {who} exited with code {result.exit_code}."
-    if not stored:
-        await _db(runs.set_message, job_id, message)
+    left = None if stopped else await reported()
+    message = stopped or left or f"The {who} exited with code {result.exit_code}."
+    await _db(runs.set_message, job_id, message)
     return AttemptFailure(message, permanent)
 
 
@@ -133,7 +145,7 @@ async def _attempt(job_id: int) -> Optional[AttemptFailure]:
     scratch = _scratch(job_id)
     shutil.rmtree(scratch, ignore_errors=True)
     scratch.mkdir(mode=0o755, parents=True)
-    await _db(runs.set_message, job_id, None)  # The message of the attempt before must not outlive it.
+    await _db(runs.start_attempt, job_id)  # The message and the result of the attempt before must not outlive it.
 
     data, model = scratch / "data.parquet", scratch / "model"
     loader_limit = config.connector_connect_timeout_s + config.connector_query_timeout_s + LOADER_GRACE_S
@@ -143,18 +155,36 @@ async def _attempt(job_id: int) -> Optional[AttemptFailure]:
         timeout_s=loader_limit,
     )
     if not loader.ok:
-        return await _failed(job_id, "data loader", loader, loader_limit)
+        return await _failed(job_id, "data loader", loader, loader_limit, lambda: _db(runs.read_message, job_id))
+
+    try:
+        job = await _db(runs.read_training_job, job_id)  # The job or its connector may be gone by now.
+    except PermanentFailure as exc:
+        await _db(runs.set_message, job_id, str(exc))
+        return AttemptFailure(str(exc), permanent=True)
+    job_file = await asyncio.to_thread(job_files.write_job, scratch, job)
 
     worker_limit = config.default_time_limit_seconds + WORKER_GRACE_S
     worker = await run_process(
-        [sys.executable, "-m", "forecast.training", str(job_id), str(data), str(model)],
+        [sys.executable, "-m", "forecast.training", str(job_file), str(data), str(model)],
         name="training worker",
         timeout_s=worker_limit,
         memory_limit_mb=config.worker_memory_limit_mb,
         env=_worker_env(),
     )
+    # What the worker reported is kept whether it succeeded or not: a failed job shows the rows it read.
+    # The files are read once the process is gone, so nothing is written to them any more.
+    result = await asyncio.to_thread(job_files.read_result, scratch)
+    if result:
+        await _db(runs.set_result, job_id, result)
+    elif worker.ok:
+        # The job still completes, but without metrics: say so, because nothing else shows it.
+        logger.warning("Job %s: the training worker exited 0 but left no usable %s", job_id, job_files.RESULT_FILE)
     if not worker.ok:
-        return await _failed(job_id, "training worker", worker, worker_limit, config.worker_memory_limit_mb)
+        return await _failed(
+            job_id, "training worker", worker, worker_limit,
+            lambda: asyncio.to_thread(job_files.read_failure, scratch), config.worker_memory_limit_mb,
+        )
     return None
 
 

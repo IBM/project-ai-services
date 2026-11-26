@@ -1,18 +1,21 @@
 """
-The API's database writes for a training run, made with the API's role.
+The API's database access for a training run, with the API's role.
 
-The worker's role may write only jobs.result and jobs.message (db/jobs.py). Everything else about a
-run belongs to the API: the status of the job and of the connector, the timestamps, the number of
+The training worker has no database access at all. Everything about a run belongs to the API: the
+status of the job and of the connector, the timestamps, ``jobs.result`` and ``jobs.message`` (which
+the API copies from the files that the worker wrote, see forecast.utils.job_files), the number of
 attempts and the ``forecasters`` row.
 """
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import null, select, update
 from sqlalchemy.orm import Session
 
-from forecast.db.models import Connector, Forecaster, Job
+from forecast.db.models import Connector, Forecaster, Job, TrainingConfig
+from forecast.errors import PermanentFailure
+from forecast.utils.job_files import TrainingJob
 
 
 def _now() -> datetime:
@@ -50,6 +53,44 @@ def mark_running(session: Session, job_id: int) -> bool:
     return True
 
 
+def read_training_job(session: Session, job_id: int) -> TrainingJob:
+    """Read what the worker needs to know about the job. The connector's credentials are not read.
+
+    Raises:
+        PermanentFailure: the job, its connector or its training configuration does not exist.
+    """
+    row = session.execute(
+        select(Job.connector_id, TrainingConfig)
+        .select_from(Job)
+        .outerjoin(TrainingConfig, TrainingConfig.connector_id == Job.connector_id)
+        .where(Job.seq == job_id)
+    ).first()
+    if row is None:
+        raise PermanentFailure(f"Job {job_id} does not exist")
+    connector_id, config = row
+    if connector_id is None:  # The connector was deleted after the job was queued.
+        raise PermanentFailure(f"The connector of job {job_id} does not exist")
+    if config is None:
+        raise PermanentFailure(f"Connector {connector_id} has no training configuration")
+    return TrainingJob(
+        job_id=job_id,
+        connector_id=connector_id,
+        source_table=config.source_table,
+        target_column=config.target_column,
+        input_names=[column["name"] for column in config.input_columns],
+    )
+
+
+def start_attempt(session: Session, job_id: int) -> None:
+    """Empty jobs.message and jobs.result, so that an attempt does not keep what the one before it left."""
+    session.execute(update(Job).where(Job.seq == job_id).values(message=None, result=null()))
+
+
+def set_result(session: Session, job_id: int, result: dict) -> None:
+    """Replace jobs.result with what the worker reported. ``attempts`` is added when the job ends."""
+    session.execute(update(Job).where(Job.seq == job_id).values(result=result))
+
+
 def read_message(session: Session, job_id: int) -> Optional[str]:
     """Return jobs.message, which the loader or the worker wrote when an attempt failed."""
     return session.scalar(select(Job.message).where(Job.seq == job_id))
@@ -61,7 +102,7 @@ def set_message(session: Session, job_id: int, message: Optional[str]) -> None:
 
 
 def _finish(session: Session, job: Job, status: str, message: Optional[str], attempts: int) -> Optional[Connector]:
-    # The worker wrote the rest of result. Readers tolerate missing keys.
+    # The API copied the worker's result into jobs.result. Readers tolerate missing keys.
     job.result = {**(job.result or {}), "attempts": attempts}
     job.status = status
     job.message = message

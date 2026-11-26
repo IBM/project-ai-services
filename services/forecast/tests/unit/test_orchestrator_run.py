@@ -6,6 +6,7 @@ test_data_loader_main.py), the database by a recording fake, and Triton by a sta
 publish to the repository volume and the scratch directories are real, on a temporary directory.
 """
 import asyncio
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,11 +15,13 @@ from uuid import UUID
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from forecast.errors import EXIT_FAILURE, EXIT_PERMANENT
+from forecast.errors import EXIT_FAILURE, EXIT_PERMANENT, PermanentFailure
 from forecast.orchestrator import run as orchestrator
 from forecast.orchestrator.process import ProcessResult
 from forecast.settings import settings
 from forecast.triton_client.triton import TritonLoadError
+from forecast.utils import job_files
+from forecast.utils.job_files import TrainingJob
 
 pytestmark = pytest.mark.unit
 
@@ -34,6 +37,14 @@ TIMED_OUT = ProcessResult(exit_code=-9, timed_out=True)
 OUT_OF_MEMORY = ProcessResult(exit_code=-9, memory_exceeded=True)
 KILLED = ProcessResult(exit_code=-9)
 
+TRAINING_JOB = TrainingJob(
+    job_id=JOB_ID,
+    connector_id=UUID(CONNECTOR_ID),
+    source_table="SALES.ORDERS",
+    target_column="LATE",
+    input_names=["REGION", "QUANTITY"],
+)
+
 
 class FakeRuns:
     """Stands in for forecast.db.runs. Records the writes, and returns what the test sets."""
@@ -41,7 +52,12 @@ class FakeRuns:
     def __init__(self, running=False, queued=JOB_ID, claimed=True):
         self.running, self.queued, self.claimed = running, queued, claimed
         self.message = None  # jobs.message
+        self.result = None  # jobs.result
         self.written_messages = []
+        self.written_results = []
+        self.attempt_starts = 0
+        self.job = TRAINING_JOB
+        self.job_error = None
         self.completed = None
         self.failed = None
         self.claim_error = None
@@ -58,8 +74,22 @@ class FakeRuns:
             raise self.claim_error
         return self.claimed
 
+    def start_attempt(self, session, job_id):
+        self.attempt_starts += 1
+        self.message = None
+        self.result = None
+
+    def read_training_job(self, session, job_id):
+        if self.job_error:
+            raise self.job_error
+        return self.job
+
     def read_message(self, session, job_id):
         return self.message
+
+    def set_result(self, session, job_id, result):
+        self.result = result
+        self.written_results.append(result)
 
     def set_message(self, session, job_id, message):
         self.message = message
@@ -77,17 +107,24 @@ class FakeRuns:
 class Processes:
     """Stands in for run_process. ``loader`` and ``worker`` are the outcomes of the successive attempts.
 
-    An outcome is a ProcessResult, or ``(ProcessResult, message)`` when the process wrote jobs.message
-    before it ended. A process that ends well leaves its output where the real one would.
+    An outcome is a ProcessResult, or ``(ProcessResult, message)`` when the process reported a failure
+    before it ended: the loader in jobs.message, the worker in failure.json. A process that ends well
+    leaves its output where the real one would. Every worker, whatever its outcome, writes ``result``
+    to result.json (nothing when it is None), and then calls ``on_worker(scratch_directory)``.
     """
 
     def __init__(self, fake_runs, loader=(OK,), worker=(OK,)):
         self.runs = fake_runs
         self.script = {"data loader": list(loader), "training worker": list(worker)}
         self.calls = []
+        self.result = {"rows_read": 5}
+        self.on_worker = None
 
     async def __call__(self, args, *, name, timeout_s, memory_limit_mb=None, env=None, **_):
-        data_file = Path(args[-1]) if name == "data loader" else Path(args[-2])
+        worker = name == "training worker"
+        data_file = Path(args[-2]) if worker else Path(args[-1])
+        scratch = data_file.parent
+        job_file = Path(args[-3]) if worker else None
         self.calls.append(
             SimpleNamespace(
                 name=name,
@@ -95,17 +132,25 @@ class Processes:
                 timeout_s=timeout_s,
                 memory_limit_mb=memory_limit_mb,
                 env=env,
-                scratch=sorted(p.name for p in data_file.parent.iterdir()),  # What the attempt starts with.
+                scratch=sorted(p.name for p in scratch.iterdir()),  # What the attempt starts with.
                 message=self.runs.message,
+                job=json.loads(job_file.read_text()) if worker else None,
             )
         )
         outcome = self.script[name].pop(0)
         result, message = outcome if isinstance(outcome, tuple) else (outcome, None)
-        if message:
+        if message and worker:
+            job_files.write_failure(scratch, message)
+        elif message:
             self.runs.message = message
-        if result.ok and name == "data loader":
+        if worker:
+            if self.result is not None:
+                job_files.write_result(scratch, self.result)
+            if self.on_worker:
+                self.on_worker(scratch)
+        if result.ok and not worker:
             data_file.write_bytes(b"parquet")
-        if result.ok and name == "training worker":
+        if result.ok and worker:
             model = Path(args[-1])
             (model / "1").mkdir(parents=True)
             (model / "1" / "model.onnx").write_bytes(b"onnx")
@@ -211,7 +256,11 @@ def test_the_loader_runs_before_the_worker_on_the_same_data_file(env):
     assert (loader.name, worker.name) == ("data loader", "training worker")
     assert loader.args[1:] == ["-m", "forecast.data_loader", str(JOB_ID), str(env.scratch / "data.parquet")]
     assert worker.args[1:] == [
-        "-m", "forecast.training", str(JOB_ID), str(env.scratch / "data.parquet"), str(env.scratch / "model")
+        "-m",
+        "forecast.training",
+        str(env.scratch / "job.json"),
+        str(env.scratch / "data.parquet"),
+        str(env.scratch / "model"),
     ]
 
 
@@ -227,10 +276,10 @@ def test_the_worker_has_a_memory_limit_and_a_time_limit_and_the_loader_a_time_li
     assert worker.memory_limit_mb == 2048
 
 
-def test_the_worker_gets_no_database_login_of_the_api_and_no_encryption_key(env, monkeypatch):
+def test_the_worker_gets_no_database_settings_and_no_encryption_key(env, monkeypatch):
     for name, value in {
-        "POSTGRES_USER": "api", "POSTGRES_PASSWORD": "api-secret", "DB_ENCRYPTION_KEY": "key",
-        "POSTGRES_HOST": "db", "WORKER_POSTGRES_USER": "forecast_worker", "WORKER_POSTGRES_PASSWORD": "w",
+        "POSTGRES_USER": "api", "POSTGRES_PASSWORD": "api-secret", "POSTGRES_HOST": "db", "POSTGRES_PORT": "5432",
+        "POSTGRES_DB": "forecast_metadata", "DB_ENCRYPTION_KEY": "key", "SCRATCH_DIR": "/var/cache/forecast/scratch",
     }.items():
         monkeypatch.setenv(name, value)
 
@@ -238,8 +287,22 @@ def test_the_worker_gets_no_database_login_of_the_api_and_no_encryption_key(env,
 
     loader, worker = env.processes.calls
     assert loader.env is None  # The loader reads the connector, so it inherits everything.
-    assert not {"POSTGRES_USER", "POSTGRES_PASSWORD", "DB_ENCRYPTION_KEY"} & set(worker.env)
-    assert {"POSTGRES_HOST", "WORKER_POSTGRES_USER", "WORKER_POSTGRES_PASSWORD"} <= set(worker.env)
+    assert not [name for name in worker.env if name.startswith(("POSTGRES_", "DB_"))]
+    assert worker.env["SCRATCH_DIR"] == "/var/cache/forecast/scratch"
+    assert "PATH" in worker.env
+
+
+def test_the_job_file_tells_the_worker_what_to_train(env):
+    run_training()
+
+    (worker,) = env.processes.of("training worker")
+    assert worker.job == {
+        "job_id": JOB_ID,
+        "connector_id": CONNECTOR_ID,
+        "source_table": "SALES.ORDERS",
+        "target_column": "LATE",
+        "input_names": ["REGION", "QUANTITY"],
+    }
 
 
 def test_the_scratch_directory_is_removed_after_a_successful_run(env):
@@ -248,12 +311,166 @@ def test_the_scratch_directory_is_removed_after_a_successful_run(env):
     assert not env.scratch.exists()
 
 
-def test_the_message_of_an_earlier_attempt_is_cleared_when_a_run_starts(env):
+def test_the_message_and_result_of_an_earlier_attempt_are_cleared_when_a_run_starts(env):
     env.runs.message = "left over"
+    env.runs.result = {"rows_read": 99}
 
     run_training()
 
     assert env.processes.calls[0].message is None
+    assert env.runs.written_results == [{"rows_read": 5}]
+
+
+def test_every_attempt_starts_by_clearing_the_database_row_once(env):
+    env.script(loader=[(FAILS, "lost"), OK], worker=[OK])
+
+    run_training()
+
+    assert env.runs.attempt_starts == 2
+
+
+# ---------------------------------------------------------------------------
+# What the worker reports in files
+# ---------------------------------------------------------------------------
+
+
+def test_what_the_worker_reported_is_stored_in_jobs_result(env):
+    env.processes.result = {
+        "rows_read": 300, "algorithm": "LightGBM", "validation_metric": "accuracy",
+        "validation_score": 0.9, "test_score": 0.8, "training_seconds": 12.5,
+    }
+
+    run_training()
+
+    assert env.runs.result == env.processes.result
+    assert env.runs.completed == (JOB_ID, 1)
+
+
+def test_the_result_of_a_failed_worker_is_kept_too(env):
+    env.script(worker=[(FAILS_FOR_GOOD, "Table SALES.ORDERS has no rows")])
+    env.processes.result = {"rows_read": 0}
+
+    run_training()
+
+    assert env.runs.result == {"rows_read": 0}
+    assert env.runs.failed == (JOB_ID, "Table SALES.ORDERS has no rows", 1)
+
+
+def test_only_the_keys_that_the_api_knows_are_stored(env):
+    env.processes.result = {"rows_read": 3, "evil": "x", "algorithm": ["not", "text"]}
+
+    run_training()
+
+    assert env.runs.result == {"rows_read": 3}
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        pytest.param(lambda scratch: (scratch / "result.json").write_text("{not json"), id="corrupt"),
+        pytest.param(
+            lambda scratch: (scratch / "result.json").write_text('{"rows_read": 1, "pad": "' + "x" * 70000 + '"}'),
+            id="oversized",
+        ),
+        pytest.param(lambda scratch: (scratch / "result.json").write_text("[1, 2]"), id="not an object"),
+        pytest.param(lambda scratch: None, id="missing"),
+    ],
+)
+def test_a_result_file_that_cannot_be_used_is_ignored_and_the_job_still_completes_with_a_warning(env, write, caplog):
+    env.processes.result = None
+    env.processes.on_worker = write
+
+    with caplog.at_level("WARNING"):
+        run_training()
+
+    assert env.runs.written_results == []
+    assert env.runs.completed == (JOB_ID, 1)
+    assert "Job 7: the training worker exited 0 but left no usable result.json" in caplog.text
+
+
+def test_there_is_no_warning_about_the_result_when_the_worker_reported_one(env, caplog):
+    with caplog.at_level("WARNING"):
+        run_training()
+
+    assert "left no usable" not in caplog.text
+
+
+def test_a_failed_worker_without_a_result_gets_no_warning_about_it(env, caplog):
+    env.script(worker=[(FAILS_FOR_GOOD, "Table SALES.ORDERS has no rows")])
+    env.processes.result = None
+
+    with caplog.at_level("WARNING"):
+        run_training()
+
+    assert "left no usable" not in caplog.text  # The failure message says what went wrong.
+
+
+def test_a_failure_the_worker_reported_becomes_the_message_of_the_job(env):
+    env.script(worker=[(FAILS_FOR_GOOD, "Column PRICE is missing in the data of table SALES.ORDERS")])
+
+    run_training()
+
+    assert env.runs.failed == (JOB_ID, "Column PRICE is missing in the data of table SALES.ORDERS", 1)
+    assert env.runs.message == "Column PRICE is missing in the data of table SALES.ORDERS"
+    assert len(env.processes.of("training worker")) == 1  # Exit code 3 is not retried.
+
+
+def test_a_long_message_of_the_worker_is_cut(env):
+    env.script(worker=[(FAILS_FOR_GOOD, "x" * 5000)])
+
+    run_training()
+
+    assert len(env.runs.failed[1]) == 1000
+    assert len(env.runs.message) == 1000
+
+
+@pytest.mark.parametrize("content", ['{"message": ""}', '{"message": 5}', "{not json", "[]"])
+def test_a_failure_file_without_a_usable_message_gives_the_api_text(env, content):
+    env.script(worker=[FAILS_FOR_GOOD])
+    env.processes.on_worker = lambda scratch: (scratch / "failure.json").write_text(content)
+
+    run_training()
+
+    assert env.runs.failed == (JOB_ID, f"The training worker exited with code {EXIT_PERMANENT}.", 1)
+
+
+def test_a_stopped_worker_is_not_believed_when_it_left_a_failure_file(env):
+    env.script(loader=[OK, OK], worker=[(TIMED_OUT, "Everything is fine"), (TIMED_OUT, "Everything is fine")])
+
+    run_training()
+
+    assert env.runs.failed[1].startswith("The training worker was stopped after the time limit")
+    assert "Everything is fine" not in env.runs.written_messages
+
+
+def test_a_worker_that_left_no_failure_file_gets_a_message_from_the_api(env):
+    env.script(loader=[OK, OK], worker=[FAILS, FAILS])
+
+    run_training()
+
+    assert env.runs.failed == (JOB_ID, "The training worker exited with code 1.", 2)
+
+
+def test_a_failure_file_of_an_earlier_attempt_does_not_outlive_it(env):
+    env.script(loader=[OK, OK], worker=[(FAILS, "first attempt failed"), FAILS])
+
+    run_training()
+
+    first, second = env.processes.of("training worker")
+    assert second.scratch == ["data.parquet", "job.json"]  # No failure.json, no model of the first attempt.
+    assert env.runs.failed == (JOB_ID, "The training worker exited with code 1.", 2)
+
+
+def test_a_job_or_connector_that_is_gone_fails_the_job_without_running_the_worker(env):
+    env.runs.job_error = PermanentFailure("The connector of job 7 does not exist")
+
+    run_training()
+
+    assert env.runs.failed == (JOB_ID, "The connector of job 7 does not exist", 1)
+    assert env.processes.of("training worker") == []
+    assert len(env.processes.of("data loader")) == 1
+    assert env.sleeps == []
+    assert env.runs.message == "The connector of job 7 does not exist"
 
 
 # ---------------------------------------------------------------------------

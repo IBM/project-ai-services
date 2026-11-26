@@ -1,5 +1,5 @@
 """
-Unit tests of the API's database writes for a training run (db/runs.py).
+Unit tests of the API's database access for a training run (db/runs.py).
 
 The session is a mock, so the tests check what is written and the SQL that is sent. They do not
 run the statements: the claim, and its conflict on idx_jobs_single_running, are not tested against
@@ -12,7 +12,8 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from forecast.db import runs
-from forecast.db.models import Connector, Forecaster, Job
+from forecast.db.models import Connector, Forecaster, Job, TrainingConfig
+from forecast.errors import PermanentFailure
 
 pytestmark = pytest.mark.unit
 
@@ -83,6 +84,63 @@ def test_the_message_is_read_and_replaced():
     assert "message=NULL" in sql(session.execute.call_args.args[0])
 
 
+def test_an_attempt_starts_without_the_message_and_the_result_of_the_one_before():
+    session = MagicMock()
+
+    runs.start_attempt(session, 7)
+
+    update = sql(session.execute.call_args.args[0])
+    assert "UPDATE jobs SET message=NULL, result=NULL WHERE jobs.seq = 7" in update  # SQL NULL, not JSON null.
+
+
+def test_the_result_that_the_worker_reported_replaces_jobs_result():
+    session = MagicMock()
+
+    runs.set_result(session, 7, {"rows_read": 400})
+
+    compiled = session.execute.call_args.args[0].compile(dialect=postgresql.dialect())
+    assert str(compiled).startswith("UPDATE jobs SET result=")
+    assert compiled.params["result"] == {"rows_read": 400} and compiled.params["seq_1"] == 7
+
+
+def job_row(connector=True, config=True):
+    training_config = TrainingConfig(
+        connector_id=CONNECTOR_ID,
+        source_table="SALES.ORDERS",
+        target_column="LATE",
+        input_columns=[{"name": "REGION"}, {"name": "QUANTITY", "type": "number"}],
+    )
+    return (CONNECTOR_ID if connector else None, training_config if config else None)
+
+
+def test_the_training_job_has_what_the_worker_needs_and_not_the_connector():
+    session = MagicMock()
+    session.execute.return_value.first.return_value = job_row()
+
+    job = runs.read_training_job(session, 7)
+
+    assert (job.job_id, job.connector_id, job.source_table, job.target_column) == (7, CONNECTOR_ID, "SALES.ORDERS", "LATE")
+    assert job.input_names == ["REGION", "QUANTITY"] and job.columns == ["REGION", "QUANTITY", "LATE"]
+    query = sql(session.execute.call_args.args[0])
+    assert "connectors" not in query  # The credentials stay with the loader.
+
+
+@pytest.mark.parametrize(
+    "row, message",
+    [
+        (None, "Job 7 does not exist"),
+        (job_row(connector=False, config=False), "connector of job 7 does not exist"),
+        (job_row(config=False), "has no training configuration"),
+    ],
+)
+def test_a_missing_job_connector_or_configuration_is_a_permanent_failure(row, message):
+    session = MagicMock()
+    session.execute.return_value.first.return_value = row
+
+    with pytest.raises(PermanentFailure, match=message):
+        runs.read_training_job(session, 7)
+
+
 def test_mark_completed_records_the_forecaster_and_completes_the_job_and_the_connector():
     job = Job(
         seq=7,
@@ -119,7 +177,7 @@ def test_mark_completed_tolerates_a_result_with_missing_keys():
     assert job.result == {"attempts": 1}
 
 
-def test_mark_failed_keeps_what_the_worker_wrote_and_fails_the_connector():
+def test_mark_failed_keeps_what_the_worker_reported_and_fails_the_connector():
     job = Job(seq=7, connector_id=CONNECTOR_ID, status="RUNNING", result={"rows_read": 400})
     connector = Connector(id=CONNECTOR_ID, status="TRAINING", message=None)
     session = make_session(job, connector)

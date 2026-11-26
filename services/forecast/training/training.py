@@ -8,9 +8,9 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from forecast.errors import PermanentFailure, TransientFailure
-from forecast.db.jobs import TrainingJob
 from forecast.training.features import Encoding, encode
 from forecast.training.onnx_export import EXPORTABLE_HYPERPARAMETERS
+from forecast.utils.job_files import TrainingJob
 
 # AutoGluon gets part of the job's time limit. Loading the data and exporting the model
 # take the rest, and the API kills the worker at the limit.
@@ -28,7 +28,7 @@ MIN_LABELLED_ROWS = 10
 
 @dataclass(frozen=True)
 class Trained:
-    """A trained AutoGluon predictor and what jobs.result records about it."""
+    """A trained AutoGluon predictor and what the worker reports in result.json about it."""
 
     predictor: object  # autogluon.tabular.TabularPredictor
     encoding: Encoding
