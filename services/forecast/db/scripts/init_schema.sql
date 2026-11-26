@@ -44,10 +44,13 @@ CREATE TABLE IF NOT EXISTS training_configs (
 -- RUNNING job that violates chk_jobs_active_has_connector, so the delete fails.
 -- result is a JSON object. The worker cannot read it, so each worker write replaces
 -- the whole value:
---   rows_read         worker, once when the data load finishes; repeated in the final write
---   algorithm         worker, when training finishes
---   training_seconds  worker, when training finishes
---   attempts          API, after the worker exits (merge onto COALESCE(result, '{}'))
+--   rows_read          worker, once when it has read the data file; repeated in the final write
+--   algorithm          worker, when training finishes: the algorithm AutoGluon chose
+--   validation_metric  worker, when training finishes: the metric AutoGluon validated on
+--   validation_score   worker, when training finishes: AutoGluon's score on its own validation rows
+--   test_score         worker, when training finishes: the same metric on a held-out 20% of the rows
+--   training_seconds   worker, when training finishes
+--   attempts           API, after the worker exits (merge onto COALESCE(result, '{}'))
 -- Keys can be missing while a job runs or after it fails.
 CREATE TABLE IF NOT EXISTS jobs (
     seq           BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

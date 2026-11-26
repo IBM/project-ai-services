@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	clicommon "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/common"
 	utils "github.com/project-ai-services/ai-services/internal/pkg/catalog/cli/uninstall/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
@@ -24,7 +26,7 @@ import (
 // UninstallCatalog removes the catalog helm release and optionally cleans up PVCs and catalog namespace.
 func UninstallCatalog(ctx context.Context, opts utils.UninstallOptions) error {
 	catalog := catalogConstants.CatalogAppName
-	namespace := catalog
+	namespace := catalogns.Get()
 
 	rt, err := openshiftruntime.NewOpenshiftClientWithNamespace(namespace)
 	if err != nil {
@@ -94,6 +96,12 @@ func uninstallCatalogResources(ctx context.Context, rt runtime.Runtime, catalog,
 			s.Fail("failed to delete catalog secrets")
 
 			return fmt.Errorf("failed to delete secrets: %w", err)
+		}
+
+		if err := openshiftutils.CleanupModelsNamespace(ctx, rt); err != nil {
+			s.Fail("failed to clean up models")
+
+			return err
 		}
 
 		if err := rt.DeleteNamespace(ctx, namespace); err != nil {

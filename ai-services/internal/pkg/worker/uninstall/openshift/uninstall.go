@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	openshiftutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/utils/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/config"
 	clituils "github.com/project-ai-services/ai-services/internal/pkg/cli/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
@@ -17,7 +19,7 @@ import (
 
 // Uninstall removes all worker components deployed by `worker join`.
 func Uninstall(ctx context.Context, opts workerutils.UninstallOptions) error {
-	namespace := workerconstants.WorkerAppName
+	namespace := catalogns.Get()
 
 	rt, err := runtime.CreateRuntime(opts.RuntimeType, namespace)
 	if err != nil {
@@ -92,6 +94,12 @@ func PerformCleanup(ctx context.Context, rt runtime.Runtime, namespace string, s
 			s.Fail("failed to delete worker secret")
 
 			return fmt.Errorf("failed to delete secret %s: %w", workerconstants.WorkerMTLSSecretName, err)
+		}
+
+		if err := openshiftutils.CleanupModelsNamespace(ctx, rt); err != nil {
+			s.Fail("failed to clean up models pre-requisites")
+
+			return err
 		}
 	}
 

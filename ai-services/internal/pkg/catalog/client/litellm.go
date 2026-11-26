@@ -31,6 +31,26 @@ type LiteLLMClient interface {
 	// GenerateKey creates a virtual key and returns its raw "sk-..." value. The value must never
 	// be logged or stored.
 	GenerateKey(ctx context.Context, req LiteLLMKeyGenerateRequest) (string, error)
+	// GetModelInfo returns the model info LiteLLM holds for the registered model with the given
+	// LiteLLM model ID (not the model name). An empty ID returns the info of every model.
+	GetModelInfo(ctx context.Context, litellmModelID string) (*LiteLLMModelInfoResponse, error)
+}
+
+// LiteLLMInfoRec represents the model_info details.
+type LiteLLMInfoRec struct {
+	ID             string `json:"id"`
+	MaxInputTokens int    `json:"max_input_tokens"`
+}
+
+// LiteLLMModelData represents one model item in the info list.
+type LiteLLMModelData struct {
+	ModelName string         `json:"model_name"`
+	ModelInfo LiteLLMInfoRec `json:"model_info"`
+}
+
+// LiteLLMModelInfoResponse is the response format for LiteLLM GET /v1/model/info.
+type LiteLLMModelInfoResponse struct {
+	Data []LiteLLMModelData `json:"data"`
 }
 
 // LiteLLMKeyGenerateRequest is the payload for POST /key/generate. No duration is sent, so the
@@ -76,11 +96,12 @@ type LiteLLMModelNewResponse struct {
 
 // LiteLLMPassThroughRequest is the payload for POST /config/pass_through_endpoint.
 type LiteLLMPassThroughRequest struct {
-	ID      string   `json:"id"`
-	Path    string   `json:"path"`
-	Target  string   `json:"target"`
-	Methods []string `json:"methods"`
-	Auth    bool     `json:"auth"`
+	ID             string   `json:"id"`
+	Path           string   `json:"path"`
+	Target         string   `json:"target"`
+	Methods        []string `json:"methods"`
+	Auth           bool     `json:"auth"`
+	ForwardHeaders bool     `json:"forward_headers"`
 }
 
 // LiteLLMHealthEndpoint represents endpoint details in LiteLLM health probe response.
@@ -267,4 +288,27 @@ func (c *litellmClient) HealthProbe(ctx context.Context, modelID string) (*LiteL
 	}
 
 	return &healthResp, nil
+}
+
+// GetModelInfo calls GET /v1/model/info, filtered by litellm_model_id unless it is empty. A non-2xx
+// status is an error.
+func (c *litellmClient) GetModelInfo(ctx context.Context, litellmModelID string) (*LiteLLMModelInfoResponse, error) {
+	path := "/v1/model/info"
+	if litellmModelID != "" {
+		path = fmt.Sprintf("/v1/model/info?litellm_model_id=%s", url.QueryEscape(litellmModelID))
+	}
+	respBytes, statusCode, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get model info from litellm: %w", err)
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		return nil, fmt.Errorf("litellm GET %s returned status %d: %s", path, statusCode, string(respBytes))
+	}
+
+	var infoResp LiteLLMModelInfoResponse
+	if err := json.Unmarshal(respBytes, &infoResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal litellm model info response: %w", err)
+	}
+
+	return &infoResp, nil
 }

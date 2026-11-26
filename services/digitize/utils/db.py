@@ -100,7 +100,7 @@ async def acquire_import_export_lock() -> bool:
         import os
 
         pid = os.getpid()
-        logger.info(f"[PID {pid}] Attempting to acquire import/export lock...")
+        logger.debug(f"[PID {pid}] Attempting to acquire import/export lock")
 
         if not engine:
             logger.error(f"[PID {pid}] Database engine not initialized")
@@ -120,12 +120,12 @@ async def acquire_import_export_lock() -> bool:
             if result:
                 # Lock acquired - store connection to keep it alive
                 _import_export_lock_connection = conn
-                logger.warning(f"[PID {pid}] ✅ Import/export lock ACQUIRED successfully")
+                logger.debug(f"[PID {pid}] Import/export lock acquired")
                 return True
             else:
                 # Lock not acquired - close connection
                 conn.close()
-                logger.warning(f"[PID {pid}] ❌ Import/export lock ALREADY HELD by another process")
+                logger.warning(f"[PID {pid}] Import/export lock is held by another process")
                 return False
         except Exception as e:
             logger.error(f"[PID {pid}] Failed to acquire import/export lock: {e}", exc_info=True)
@@ -148,7 +148,7 @@ async def release_import_export_lock():
         import os
 
         pid = os.getpid()
-        logger.info(f"[PID {pid}] Releasing import/export lock...")
+        logger.debug(f"[PID {pid}] Releasing import/export lock")
 
         try:
             if _import_export_lock_connection:
@@ -156,7 +156,7 @@ async def release_import_export_lock():
                 _import_export_lock_connection.execute(text("SELECT pg_advisory_unlock(123456789)"))
                 _import_export_lock_connection.close()
                 _import_export_lock_connection = None
-                logger.warning(f"[PID {pid}] ✅ Import/export lock RELEASED successfully")
+                logger.debug(f"[PID {pid}] Import/export lock released")
             else:
                 logger.warning(f"[PID {pid}] No lock connection to release")
         except Exception as e:
@@ -628,7 +628,7 @@ def get_all_job_ids() -> list[str]:
                 break
 
         job_ids = [job.job_id for job in all_jobs]
-        logger.info(f"Found {len(job_ids)} job IDs in database")
+        logger.debug(f"Found {len(job_ids)} job IDs in database")
         return job_ids
     except Exception as e:
         logger.error(f"Failed to read job IDs from database: {e}", exc_info=True)
@@ -660,7 +660,7 @@ def get_all_document_ids() -> list[str]:
                 break
 
         doc_ids = [doc.doc_id for doc in all_documents]
-        logger.info(f"Found {len(doc_ids)} document IDs in database")
+        logger.debug(f"Found {len(doc_ids)} document IDs in database")
         return doc_ids
     except Exception as e:
         logger.error(f"Failed to read document IDs from database: {e}", exc_info=True)

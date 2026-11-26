@@ -115,7 +115,8 @@ class Job(Base):
     )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # rows_read, algorithm, training_seconds, attempts. Keys can be missing.
+    # rows_read, algorithm, validation_metric, validation_score, test_score, training_seconds
+    # (written by the worker) and attempts (written by the API). Keys can be missing.
     result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()

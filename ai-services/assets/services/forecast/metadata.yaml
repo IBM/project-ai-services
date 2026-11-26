@@ -1,0 +1,59 @@
+# Service identification
+id: forecast
+version: "1.0.0"
+name: "Forecast"
+description: "Trains and serves automated time-series forecasters on tabular datasets using Triton Inference Server."
+type: service
+
+# Certification and support
+certified_by: "IBM"
+
+# Dependencies on other components
+dependencies:
+  - id: ml_inference
+
+standalone: true
+
+# About field containing detailed service information
+about:
+  - title: "Service details"
+    sections:
+      - title: "Version"
+        value: "1.0.0"
+      - title: "Inference server"
+        values:
+          - "Triton Inference Server (CPU)"
+
+  - title: "Inputs and outputs"
+    sections:
+      - title: "Inputs"
+        values:
+          - "Connector configuration and training parameters"
+          - "Time-series input data for forecasting"
+      - title: "Outputs"
+        values:
+          - "Trained forecasting models"
+          - "Time-series forecast predictions"
+
+  - title: "Dependencies and integration"
+    sections:
+      - title: "External dependencies"
+        values:
+          - "Triton Inference Server with KServe v2 protocol support"
+
+  - title: "Expected resource consumption"
+    sections:
+      - title: "per deployment"
+        values:
+          - title: "Compute"
+            value: "to be provided by DEV"
+          - title: "Memory"
+            value: "to be provided by DEV"
+          - title: "Storage"
+            value: "to be provided by DEV"
+
+  - title: "Assets"
+    sections:
+      - title: "Source code"
+        ctaLabel: "View source code"
+        url: "https://github.com/IBM/project-ai-services"

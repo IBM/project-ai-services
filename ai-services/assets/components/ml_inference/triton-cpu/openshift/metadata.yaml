@@ -1,0 +1,6 @@
+name: triton
+version: "1.0.0"
+resources:
+  cpu: 1
+  memory: 2147483648   # 2Gi in bytes
+  storage: 5368709120  # 5Gi in bytes: size of the repository volume

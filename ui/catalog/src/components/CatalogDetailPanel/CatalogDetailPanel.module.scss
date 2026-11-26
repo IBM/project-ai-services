@@ -40,9 +40,62 @@
   flex-shrink: 0;
 }
 
+.licenseTag {
+  @include type-style("label-01");
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-02;
+  color: var(--cds-text-secondary);
+}
+
 .divider {
   border: 1px solid var(--cds-border-subtle-01);
   margin: $spacing-06 0;
+}
+
+.skeletonContainer {
+  display: flex;
+  flex-direction: column;
+}
+
+.skeletonDescription {
+  margin-bottom: $spacing-06;
+}
+
+.skeletonTags {
+  display: flex;
+  gap: $spacing-04;
+  margin-bottom: $spacing-01;
+}
+
+.skeletonTag {
+  width: 80px;
+  height: 24px;
+  border-radius: 12px;
+}
+
+.skeletonSection {
+  margin-bottom: $spacing-02;
+}
+
+.skeletonSectionTitle {
+  margin-bottom: $spacing-05;
+}
+
+.skeletonGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-05 $spacing-06;
+  margin-bottom: $spacing-05;
+}
+
+.errorMessage {
+  @include type-style("body-01");
+  color: var(--cds-text-error);
+  padding: $spacing-05;
+  background-color: var(--cds-notification-background-error);
+  border-left: 3px solid var(--cds-support-error);
+  margin-bottom: $spacing-05;
 }
 
 .section {
@@ -82,10 +135,6 @@
   color: var(--cds-text-primary);
 }
 
-.fieldmodel {
-  @include type-style("label-01");
-}
-
 .twoColumns {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -109,12 +158,6 @@
   margin-bottom: $spacing-03;
 }
 
-.subLabel {
-  @include type-style("label-01");
-  color: var(--cds-text-secondary);
-  margin-top: $spacing-04;
-  margin-bottom: $spacing-02;
-}
 .bulletList {
   margin: 0;
   padding: 0;
@@ -163,12 +206,6 @@
     }
   }
 }
-.assetsGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: $spacing-06;
-  margin-bottom: $spacing-05;
-}
 
 .assetField {
   display: flex;
@@ -176,65 +213,9 @@
   gap: $spacing-02;
 }
 
-.assetTag {
-  @include type-style("label-01");
-  display: inline-flex;
-  align-items: center;
-  padding: $spacing-02 $spacing-03;
-  background-color: var(--cds-border-subtle-01);
-  border-radius: 15px;
-  color: var(--cds-text-primary);
-  width: fit-content;
-}
-
 .sourceButton {
   align-self: flex-start;
   margin-top: $spacing-02;
-}
-
-.skeletonContainer {
-  display: flex;
-  flex-direction: column;
-}
-
-.skeletonDescription {
-  margin-bottom: $spacing-06;
-}
-
-.skeletonTags {
-  display: flex;
-  gap: $spacing-04;
-  margin-bottom: $spacing-01;
-}
-
-.skeletonTag {
-  width: 80px;
-  height: 24px;
-  border-radius: 12px;
-}
-
-.skeletonSection {
-  margin-bottom: $spacing-02;
-}
-
-.skeletonSectionTitle {
-  margin-bottom: $spacing-05;
-}
-
-.skeletonGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: $spacing-05 $spacing-06;
-  margin-bottom: $spacing-05;
-}
-
-.errorMessage {
-  @include type-style("body-01");
-  color: var(--cds-text-error);
-  padding: $spacing-05;
-  background-color: var(--cds-notification-background-error);
-  border-left: 3px solid var(--cds-support-error);
-  margin-bottom: $spacing-05;
 }
 
 .infoLink {

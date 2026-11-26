@@ -56,6 +56,18 @@ const (
 	// AES-256 mTLS encryption key for the worker node.
 	WorkerMTLSSecretName = "worker-mtls-encryption-secret"
 
+	// WorkerMTLSKeyPath is where the worker Caddy pod mounts the AES key that decrypts tls.key.
+	WorkerMTLSKeyPath = "/etc/secret/" + WorkerMTLSSecretName + "/mtls-encryption-key"
+
+	// LiteLLMIngressRouteID is the Caddy @id of the control-plane route that exposes LiteLLM to
+	// remote workers: service -> worker Caddy egress :8080 -> mTLS -> CP Caddy ingress :9443 -> LiteLLM.
+	LiteLLMIngressRouteID = "litellm"
+	// LiteLLMEgressRouteID is the Caddy @id of the worker-side route.
+	LiteLLMEgressRouteID = "litellm--egress"
+	// LiteLLMPathPrefix is the URL prefix both LiteLLM routes match. The CP ingress strips it and
+	// the worker egress keeps it.
+	LiteLLMPathPrefix = "/litellm"
+
 	// MetaKeyBaseDir is the worker metadata key sent during Register and stored in worker.metadata JSON.
 	MetaKeyBaseDir = "baseDir"
 
@@ -63,6 +75,9 @@ const (
 	// Sent at Register time so the gateway can embed the worker's dial hostname
 	// (<workerName>.<domainSuffix>) as a SAN in the worker's certificate.
 	MetaKeyDomainSuffix = "domainSuffix"
+
+	// MetaKeyPrivateIngressPort is the worker metadata key for the worker's private ingress port.
+	MetaKeyPrivateIngressPort = "privateIngressPort"
 
 	// WorkerGatewayPort is the default port used by the catalog gRPC worker gateway.
 	WorkerGatewayPort = 9191
@@ -91,10 +106,6 @@ const (
 	// Deployment on OpenShift.
 	OpenShiftCatalogPodName = "catalog-backend"
 	CaddyCertSecretName     = "caddy-cert-secret"
-
-	// OpenShiftGatewayServiceEndpoint is the OpenShift service DNS name embedded in the
-	// auto-generated gateway server certificate for internal cluster communication.
-	OpenShiftGatewayServiceEndpoint = "catalog-api.ai-services.svc.cluster.local"
 
 	// LocalWorkerEnvVar is the environment variable name that enables local-worker mode.
 	LocalWorkerEnvVar = "LOCAL_WORKER"

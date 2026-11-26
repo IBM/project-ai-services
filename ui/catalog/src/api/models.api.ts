@@ -4,6 +4,7 @@ import type {
   CatalogModel,
   CreateModelRequest,
   CreateModelResponse,
+  CatalogModelDetails,
   GenerateModelKeyResponse,
   ModelDeployOptions,
   ModelDeployment,
@@ -21,11 +22,11 @@ export async function fetchCatalogModels(): Promise<CatalogModel[]> {
 }
 
 // Fetches a single catalog model by its model identifier (e.g. ibm-granite/granite-3.3-8b-instruct)
-export async function fetchCatalogModel(
-  modelId: string,
-): Promise<CatalogModel> {
-  const response = await api.get<CatalogModel>(
-    MODEL_MANAGEMENT_ENDPOINTS.GET_CATALOG_MODEL(modelId),
+export async function fetchCatalogModelDetails(
+  id: string,
+): Promise<CatalogModelDetails> {
+  const response = await api.get<CatalogModelDetails>(
+    MODEL_MANAGEMENT_ENDPOINTS.GET_CATALOG_MODEL_DETAILS(id),
   );
   return response.data;
 }

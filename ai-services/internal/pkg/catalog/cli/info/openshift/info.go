@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/project-ai-services/ai-services/assets"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/catalogns"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/cli/templates"
@@ -17,7 +18,7 @@ import (
 // DisplayCatalogInfo displays detailed information about the catalog service on OpenShift.
 func DisplayCatalogInfo(ctx context.Context) error {
 	// Initialize OpenShift client scoped to the catalog namespace
-	runtime, err := oc.NewOpenshiftClientWithNamespace(constants.CatalogAppName)
+	runtime, err := oc.NewOpenshiftClientWithNamespace(catalogns.Get())
 	if err != nil {
 		return fmt.Errorf("failed to initialize openshift client: %w", err)
 	}
