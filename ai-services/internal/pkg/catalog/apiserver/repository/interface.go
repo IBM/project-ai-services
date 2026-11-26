@@ -28,6 +28,9 @@ type ModelServiceInterface interface {
 	// returning and the response is nil. A missing model is a *validators.ValidationError with 404,
 	// another user's model one with 403, and a model in use (or already being deleted) one with 409.
 	DeleteModel(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.DeleteModelResponse, error)
+	// GetModelPS returns the process and pod status for a model, local or remote, owned by createdBy.
+	// A missing model is a *validators.ValidationError with 404, and another user's model one with 403.
+	GetModelPS(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelPSResponse, error)
 }
 
 // DatasourceServiceInterface defines the contract for datasource connector business logic.

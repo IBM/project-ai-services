@@ -1350,3 +1350,54 @@ func TestCreateRemoteModel_HostedVllm_UnusableMaxModelLen(t *testing.T) {
 		})
 	}
 }
+
+func TestGetModelPS_NotFound(t *testing.T) {
+	modelRepo := &mockModelRepo{}
+	svc := NewModelService(newMockComponentRepo(), newMockConnectorRepo(), modelRepo, nil, &fakeWorkers{}, setupTestCatalogProvider(t), "")
+
+	_, err := svc.GetModelPS(context.Background(), uuid.New(), "user-1")
+	requireStatus(t, err, http.StatusNotFound, "not found")
+}
+
+func TestGetModelPS_Forbidden(t *testing.T) {
+	modelID := uuid.New()
+	modelRepo := &mockModelRepo{
+		rows: []dbrepo.ModelRow{
+			{
+				ID:        modelID,
+				CreatedBy: "other-user",
+			},
+		},
+	}
+	svc := NewModelService(newMockComponentRepo(), newMockConnectorRepo(), modelRepo, nil, &fakeWorkers{}, setupTestCatalogProvider(t), "")
+
+	_, err := svc.GetModelPS(context.Background(), modelID, "user-1")
+	requireStatus(t, err, http.StatusForbidden, "user does not own this model")
+}
+
+func TestGetModelPS_Success(t *testing.T) {
+	modelID := uuid.New()
+	modelRepo := &mockModelRepo{
+		rows: []dbrepo.ModelRow{
+			{
+				ID:             modelID,
+				Name:           "my-remote-model",
+				DeploymentType: constants.DeploymentTypeRemote,
+				ComponentType:  "llm",
+				Provider:       "watsonx",
+				Model:          "ibm/granite-4-h-small",
+				Status:         "connected",
+				CreatedBy:      "user-1",
+			},
+		},
+	}
+	svc := NewModelService(newMockComponentRepo(), newMockConnectorRepo(), modelRepo, nil, &fakeWorkers{}, setupTestCatalogProvider(t), "")
+
+	resp, err := svc.GetModelPS(context.Background(), modelID, "user-1")
+	require.NoError(t, err)
+	assert.Equal(t, modelID.String(), resp.ID)
+	assert.Equal(t, "my-remote-model", resp.Name)
+	assert.Equal(t, "remote", resp.DeploymentType)
+	assert.Equal(t, "connected", resp.Status)
+	assert.Empty(t, resp.Pods)
+}

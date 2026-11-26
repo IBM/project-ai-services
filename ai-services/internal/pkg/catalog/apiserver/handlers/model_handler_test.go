@@ -31,6 +31,15 @@ type mockModelService struct {
 	deleteModelFunc func(ctx context.Context, id uuid.UUID, createdBy string) (*models.DeleteModelResponse, error)
 
 	generateModelKeyFunc func(ctx context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error)
+	getModelPSFunc       func(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelPSResponse, error)
+}
+
+func (m *mockModelService) GetModelPS(ctx context.Context, id uuid.UUID, createdBy string) (*models.ModelPSResponse, error) {
+	if m.getModelPSFunc != nil {
+		return m.getModelPSFunc(ctx, id, createdBy)
+	}
+
+	return &models.ModelPSResponse{ID: id.String(), Pods: []types.Pod{}}, nil
 }
 
 func (m *mockModelService) GenerateModelKey(ctx context.Context, id uuid.UUID, createdBy string) (*models.GenerateModelKeyResponse, error) {

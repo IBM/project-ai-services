@@ -15,6 +15,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/helpers"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/keys"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/list"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/models/ps"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/worker"
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
@@ -51,6 +52,7 @@ type ModelService struct {
 	lister           *list.Lister
 	getter           *get.Getter
 	keys             *keys.Manager
+	psGetter         *ps.StatusGetter
 	deletionPlanner  *deletion.Planner
 	deletionExecutor *deletion.Executor
 }
@@ -81,6 +83,7 @@ func NewModelService(
 		lister:           list.New(modelRepo, svcDepRepo, catalogProvider),
 		getter:           get.New(svcDepRepo, catalogProvider, gatewayPublicEndpoint),
 		keys:             keys.NewManager(litellmClient),
+		psGetter:         ps.New(workers),
 		deletionPlanner:  deletion.NewPlanner(catalogProvider, workers),
 		deletionExecutor: deletion.NewExecutor(componentRepo, connectorRepo, litellmClient),
 	}
@@ -180,6 +183,16 @@ func (s *ModelService) GetModelByID(ctx context.Context, id uuid.UUID, createdBy
 	}
 
 	return s.getter.Detail(ctx, row)
+}
+
+// GetModelPS returns the process and pod status for a model, local or remote.
+func (s *ModelService) GetModelPS(ctx context.Context, id uuid.UUID, createdBy string) (*apimodels.ModelPSResponse, error) {
+	row, err := s.ownedModel(ctx, id, createdBy)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.psGetter.GetPS(ctx, row)
 }
 
 // GenerateModelKey generates the public LiteLLM key of the model identified by id. See

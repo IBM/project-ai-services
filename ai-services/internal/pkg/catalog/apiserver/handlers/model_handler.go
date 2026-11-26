@@ -183,6 +183,50 @@ func (h *ModelHandler) GetModelByID(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// ModelPS godoc
+//
+//	@Summary		Get process and pod status for a model
+//	@Description	Retrieves the runtime process and pod status of a model (local pod details or empty list for remote connectors). Accessing a model created by another user returns 403 Forbidden.
+//	@Tags			Models
+//	@Produce		json
+//	@Security		BearerAuth
+//	@Param			id	path		string	true	"Model ID"
+//	@Success		200	{object}	models.ModelPSResponse
+//	@Failure		400	{object}	ErrorResponse	"Invalid model ID format"
+//	@Failure		401	{object}	ErrorResponse	"Unauthorized"
+//	@Failure		403	{object}	ErrorResponse	"User does not own the model"
+//	@Failure		404	{object}	ErrorResponse	"Model not found"
+//	@Failure		422	{object}	ErrorResponse	"Worker unreachable"
+//	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
+//	@Router			/models/{id}/ps [get]
+func (h *ModelHandler) ModelPS(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid model ID format"})
+
+		return
+	}
+
+	resp, err := h.modelService.GetModelPS(ctx, id, c.GetString(middleware.CtxUserIDKey))
+	if err != nil {
+		var valErr *validators.ValidationError
+		if errors.As(err, &valErr) {
+			c.JSON(valErr.Code, ErrorResponse{Error: valErr.Message})
+
+			return
+		}
+
+		logger.ErrorfCtx(ctx, "failed to get model ps for %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to get model process status"})
+
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // GenerateModelKey godoc
 //
 //	@Summary		Generate a public key for a model

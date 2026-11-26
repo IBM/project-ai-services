@@ -114,3 +114,6 @@ type GenerateModelKeyResponse struct {
 	Type  string `json:"type"`
 	Model string `json:"model"`
 }
+
+// ModelPSResponse represents the response for process and pod status of a model.
+type ModelPSResponse = types.ModelPSResponse
