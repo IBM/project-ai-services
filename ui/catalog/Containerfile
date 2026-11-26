@@ -14,7 +14,11 @@ RUN npm run build
 FROM registry.access.redhat.com/ubi9/nginx-126:9.8
 
 USER root
-RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && dnf clean all
+RUN dnf update -y --disablerepo='*' --enablerepo='ubi-9-*' && \
+    dnf clean all && \
+    chown -R 1001:0 /var/log/nginx /etc/nginx && \
+    chmod -R g+rwX /var/log/nginx /etc/nginx && \
+    chmod 0770 /var/log/nginx
 USER 1001
 
 COPY nginx.conf.tmpl /etc/nginx/nginx.conf.tmpl
