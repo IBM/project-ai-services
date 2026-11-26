@@ -7,10 +7,12 @@ ENV PYTHONPATH=/opt/services
 COPY common /opt/services/common
 COPY forecast/ .
 
-# Install system dependencies (libgomp for OpenMP support in LightGBM/XGBoost/AutoGluon).
+# Install system dependencies (libgomp for OpenMP support in LightGBM/XGBoost/AutoGluon, and libatomic,
+# which the ppc64le pyarrow wheel loads and the base image does not have; without it the data loader and
+# the training worker cannot import pyarrow).
 # The base venv ships without pip; bootstrap it only to install the service deps,
 # then strip it again so the runtime image stays pip-free.
-RUN microdnf install -y libgomp && \
+RUN microdnf install -y libgomp libatomic && \
     microdnf clean all && \
     source /var/venv/bin/activate && \
     python -m ensurepip --upgrade && \
@@ -22,6 +24,20 @@ RUN microdnf install -y libgomp && \
     rm -rf /var/venv/lib/python3.12/site-packages/pip \
            /var/venv/lib/python3.12/site-packages/pip-*.dist-info \
            /var/venv/bin/pip /var/venv/bin/pip3 /var/venv/bin/pip3.12
+
+# scikit-learn and scipy each bundle a renamed copy of libgomp, and LightGBM loads the system one.
+# Together on ppc64le they use up glibc's small reserve of static TLS, and importing LightGBM after
+# scikit-learn fails with "cannot allocate memory in static TLS block". AutoGluon then drops LightGBM
+# without an error and trains CatBoost only. Preloading one libgomp does not help, because the
+# bundled copies have other sonames. A larger reserve does (glibc 2.30 and later; the default is
+# about 1.6 KiB and 16 KiB already works, so 256 KiB leaves room for more libraries).
+# The environment variable is inherited by the training worker subprocess. Importing both libraries
+# in the same order as the worker fails the build if this stops working.
+# TODO: find out why the bundled libgomp copies use up the static TLS reserve on ppc64le, and remove this
+# workaround if a fixed wheel or base image makes it unnecessary.
+ENV GLIBC_TUNABLES=glibc.rtld.optional_static_tls=262144
+
+RUN /var/venv/bin/python -c "import sklearn.model_selection, lightgbm"
 
 CMD ["/var/venv/bin/python", "-m", "uvicorn", "app:app", \
      "--host", "0.0.0.0", "--port", "8500", \

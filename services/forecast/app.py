@@ -9,6 +9,7 @@ This file is responsible only for:
   - Connector and forecasting API routes
 """
 
+import os
 import re
 import uuid
 from contextlib import asynccontextmanager
@@ -49,6 +50,10 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan events (startup and shutdown)."""
     configure_uvicorn_logging(settings.common.app.log_level, ["/health"])
     logger.info("Forecast service starting up...")
+
+    # What the API publishes to the model repository (orchestrator/publish.py) must be readable by
+    # Triton's user, which is not the API's: directories 0755 and files 0644.
+    os.umask(0o022)
 
     # Fail fast: without a valid key the service cannot store connector secrets, so
     # the error stops startup instead of surfacing on the first connector request.
