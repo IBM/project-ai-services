@@ -8,6 +8,37 @@ import (
 const (
 	// BatchSize is the batch size for bulk indexing documents.
 	BatchSize = 1000
+
+	// upgradeMappingFilter is a jq filter applied to an index mapping from a backup.
+	// The index layout version is stored in the mapping under "_meta.schema_version":
+	//   1 - legacy: metadata fields nested under a "metadata" object (no _meta marker)
+	//   2 - current: metadata fields flattened to the top level
+	// A legacy (v1) mapping is rewritten to the current (v2) layout, keeping the
+	// backed-up embedding definition. Mappings that are already current pass through untouched.
+	upgradeMappingFilter = `if ((._meta.schema_version // null) == null and ((.properties // {}) | has("metadata"))) then
+	{
+		_meta: {schema_version: 2},
+		properties: {
+			chunk_id: {type: "long", doc_values: true},
+			embedding: .properties.embedding,
+			text: {type: "text", analyzer: "standard", store: true},
+			filename: {type: "keyword"},
+			doc_id: {type: "keyword"},
+			type: {type: "keyword"},
+			source: {type: "keyword"},
+			language: {type: "keyword"},
+			page_number: {type: "integer"},
+			chunk_index: {type: "integer"},
+			total_chunks: {type: "integer"},
+			created_at: {type: "date"}
+		}
+	}
+else . end`
+
+	// flattenSourceFilter is a jq filter that moves every key of a legacy "metadata"
+	// object to the top level of the document. Documents without it are unchanged.
+	// It is embedded in a double-quoted shell string, so it must not contain double quotes.
+	flattenSourceFilter = `del(.metadata) + ((.metadata | objects) // {})`
 )
 
 // GenerateDeleteIndexScript generates a shell script to delete an existing OpenSearch index.
@@ -28,9 +59,10 @@ fi
 }
 
 // GenerateCreateIndexScript generates a shell script to create an OpenSearch index with mappings and settings.
+// A legacy (schema v1) mapping from an older backup is upgraded to the current schema (v2).
 func GenerateCreateIndexScript(osHost, backupDir, indexName string) string {
 	return fmt.Sprintf(`
-MAPPING=$(cat %s/%s_mapping.json | jq -c '."%s".mappings')
+MAPPING=$(cat %s/%s_mapping.json | jq -c '."%s".mappings | `+upgradeMappingFilter+`')
 SETTINGS=$(cat %s/%s_settings.json | jq -c '."%s".settings.index | del(.creation_date, .uuid, .version, .provided_name)')
 BODY=$(jq -n --argjson settings "{\"index\": $SETTINGS}" --argjson mappings "$MAPPING" '{settings: $settings, mappings: $mappings}')
 RESPONSE=$(curl -k -u "admin:${OS_PASSWORD}" "https://%s/%s" -X PUT -H "Content-Type: application/json" -d "$BODY" -s -w "\n%%{http_code}")
@@ -49,6 +81,7 @@ fi
 }
 
 // GenerateBulkIndexScript generates a shell script to bulk index documents in batches.
+// Documents from a legacy (schema v1) backup are flattened to the current schema (v2).
 func GenerateBulkIndexScript(osHost, backupDir, indexName string) string {
 	return fmt.Sprintf(`
 # Batch size for bulk indexing
@@ -72,7 +105,7 @@ while [ $BATCH_NUM -lt $BATCHES ]; do
 	echo "Processing batch $(( $BATCH_NUM + 1 ))/$BATCHES (starting at document $START_IDX)..."
 	
 	# Extract batch and format for bulk API
-	BATCH_DATA=$(jq -c ".[$START_IDX:$START_IDX+$BATCH_SIZE] | .[] | {\"index\": {\"_index\": \"$INDEX_NAME\", \"_id\": ._id}}, ._source" "$DATA_FILE")
+	BATCH_DATA=$(jq -c ".[$START_IDX:$START_IDX+$BATCH_SIZE] | .[] | {\"index\": {\"_index\": \"$INDEX_NAME\", \"_id\": ._id}}, (._source | `+flattenSourceFilter+`)" "$DATA_FILE")
 	
 	# Send batch to OpenSearch
 	RESPONSE=$(echo "$BATCH_DATA" | curl -k -u "admin:${OS_PASSWORD}" "https://$OS_HOST/_bulk" -X POST -H "Content-Type: application/x-ndjson" --data-binary @- -s -w "\n%%{http_code}")
