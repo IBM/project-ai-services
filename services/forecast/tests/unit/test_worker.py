@@ -495,7 +495,7 @@ def test_the_split_is_random_when_there_are_more_classes_than_test_rows():
     assert len(test_rows) == 6 and len(train_rows) == 24
 
 
-def test_autogluon_failing_on_the_data_is_a_permanent_failure_without_its_message(volumes, monkeypatch):
+def test_autogluon_failing_on_the_data_is_a_retryable_failure_without_its_message(volumes, monkeypatch):
     from autogluon.tabular import TabularPredictor
 
     def fail(*args, **kwargs):
@@ -503,9 +503,10 @@ def test_autogluon_failing_on_the_data_is_a_permanent_failure_without_its_messag
 
     monkeypatch.setattr(TabularPredictor, "fit", fail)
 
-    with pytest.raises(PermanentFailure, match=r"could not train on this data \(ValueError\)") as raised:
+    with pytest.raises(TransientFailure, match=r"could not train on this data \(ValueError\)") as raised:
         run_worker(volumes, FakeStore(), make_table(100))
 
+    assert not isinstance(raised.value, PermanentFailure)
     assert "4711" not in str(raised.value)
     assert isinstance(raised.value.__cause__, ValueError)
 

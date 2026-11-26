@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from forecast.errors import PermanentFailure
+from forecast.errors import PermanentFailure, TransientFailure
 from forecast.db.jobs import TrainingJob
 from forecast.training.features import Encoding, encode
 from forecast.training.onnx_export import EXPORTABLE_HYPERPARAMETERS
@@ -105,8 +105,9 @@ def train(data: pd.DataFrame, job: TrainingJob, workdir: Path, time_limit_second
         test_score = float(predictor.evaluate(test_rows, silent=True)[metric])
     except (ValueError, RuntimeError) as exc:
         # AutoGluon and scikit-learn raise these for data they cannot fit, such as a very rare
-        # class. The same data fails again. Their messages can quote values, so they are not stored.
-        raise PermanentFailure(
+        # class, but also for other causes. The error does not tell which, and a retry reads the
+        # table again, so the attempt is retried. Their messages can quote values, so they are not stored.
+        raise TransientFailure(
             f"AutoGluon could not train on this data ({type(exc).__name__}). "
             "A very small table or a very rare class in the target is the usual cause."
         ) from exc
