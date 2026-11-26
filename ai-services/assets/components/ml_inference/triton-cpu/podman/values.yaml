@@ -1,1 +1,1 @@
-image: quay.io/powercloud/tritonserver:latest
+image: quay.io/powercloud/tritonserver:2.70.0-0
