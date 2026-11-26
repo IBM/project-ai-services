@@ -7,7 +7,7 @@
     "api_base": {
       "type": "string",
       "title": "API Endpoint",
-      "description": "Base URL of the VLLM endpoint.",
+      "description": "Base URL of the VLLM endpoint (e.g. http://host:8000). A trailing /v1 is optional.",
       "format": "uri"
     },
     "api_key": {
@@ -16,6 +16,13 @@
       "description": "API key to authenticate and connect to the VLLM endpoint.",
       "format": "password",
       "minLength": 1
+    },
+    "maxBatchSize": {
+      "type": "integer",
+      "title": "Maximum Batch Size",
+      "description": "Maximum batch size for requests.",
+      "default": 32,
+      "minimum": 1
     }
   }
 }

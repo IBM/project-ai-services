@@ -6,6 +6,7 @@ import (
 	"maps"
 
 	catalogclient "github.com/project-ai-services/ai-services/internal/pkg/catalog/client"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 )
 
@@ -21,7 +22,7 @@ func modelRequest(r Route) catalogclient.LiteLLMModelNewRequest {
 	maps.Copy(params, r.Params)
 
 	if r.APIBase != "" {
-		params[ParamAPIBase] = r.APIBase
+		params[constants.ParamAPIBase] = r.APIBase
 	}
 
 	params[litellmParamModel] = r.UpstreamModel
@@ -157,4 +158,9 @@ func (g Gateway) probe(ctx context.Context, litellmModelID string) error {
 	}
 
 	return &ProbeError{reason: "endpoint is unhealthy"}
+}
+
+// GetModelInfo returns the model information from LiteLLM.
+func (g Gateway) GetModelInfo(ctx context.Context, litellmModelID string) (*catalogclient.LiteLLMModelInfoResponse, error) {
+	return g.client.GetModelInfo(ctx, litellmModelID)
 }

@@ -217,3 +217,7 @@ func TestGateway_Remove(t *testing.T) {
 func (f *fakeLiteLLMClient) GenerateKey(_ context.Context, _ catalogclient.LiteLLMKeyGenerateRequest) (string, error) {
 	return "", nil
 }
+
+func (f *fakeLiteLLMClient) GetModelInfo(_ context.Context, _ string) (*catalogclient.LiteLLMModelInfoResponse, error) {
+	return &catalogclient.LiteLLMModelInfoResponse{}, nil
+}

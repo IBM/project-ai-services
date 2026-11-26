@@ -77,7 +77,7 @@ func NewModelService(
 		modelRepo:        modelRepo,
 		catalogProvider:  catalogProvider,
 		planner:          modelsvc.NewModelPlanner(catalogProvider, workers),
-		executor:         modelsvc.NewModelExecutor(componentRepo, connectorRepo, litellmClient),
+		executor:         modelsvc.NewModelExecutor(componentRepo, connectorRepo, litellmClient, catalogclient.NewVLLMClient()),
 		lister:           list.New(modelRepo, svcDepRepo, catalogProvider),
 		getter:           get.New(svcDepRepo, catalogProvider, gatewayPublicEndpoint),
 		keys:             keys.NewManager(litellmClient),
