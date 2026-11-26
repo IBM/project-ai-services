@@ -97,7 +97,16 @@ func DownloadModelContainer(ctx context.Context, model, targetDir string) error 
 	stdin := true
 	s.Terminal = &terminal
 	s.Stdin = &stdin
-	s.Command = []string{"hf", "download", model, "--local-dir", fmt.Sprintf("/models/%s", model)}
+	// If the online download fails (for example no route to the Hub in an air-gapped environment),
+	// retry once with HF_HUB_OFFLINE=1 so hf uses the files already in the model directory.
+	// The model name is passed as $0 so it is never interpreted by the shell.
+	s.Command = []string{
+		"sh", "-c",
+		`hf download "$0" --local-dir "/models/$0" || ` +
+			`{ echo "hf download failed, retrying in offline mode" >&2; ` +
+			`HF_HUB_OFFLINE=1 hf download "$0" --local-dir "/models/$0"; }`,
+		model,
+	}
 	rm := true
 	s.Remove = &rm
 
