@@ -45,7 +45,7 @@ The Tiltfile follows what is merged: API, connectors, database/init, encryption 
 
 `DB_ENCRYPTION_KEY` is read from the environment (exactly 32 bytes, used as is); default `forecast-local-dev-key-012345678`. Changing it makes stored connector secrets unreadable.
 
-The connection to a Db2 for i source is always TLS. A connector whose `connection_details` has no `certificate` connects without verifying the server, so a local IBM i with Mapepire's own self-signed certificate works with no setup (the service logs an `INSECURE Db2 connection` warning on every connection). To verify the server, send its certificate as PEM text in `connection_details.certificate`. See [Section 11.1 of the proposal](../proposals/forecast_service_proposal.md#111-tls-to-the-db2-for-i-source).
+The connection to a Db2 for i source is always TLS. A connector must send either `connection_details.certificate` (PEM text, the server is verified against it) or `"ignore_secure_connection": true` with no certificate (the server is not verified, so a local IBM i with Mapepire's own self-signed certificate works with no setup, and the service logs an `INSECURE Db2 connection` warning on every connection). Sending both, or neither, is rejected. See [Section 11.1 of the proposal](../proposals/forecast_service_proposal.md#111-tls-to-the-db2-for-i-source).
 
 Runtime data (model repository, scratch, CSV data dir) is under `.tilt/services/forecast`; `tilt down` removes it, the containers and the volume, and keeps the venv.
 

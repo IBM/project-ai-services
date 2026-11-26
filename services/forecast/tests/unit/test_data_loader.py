@@ -561,7 +561,7 @@ def test_get_connection_maps_connect_errors(message, expected):
 @pytest.mark.usefixtures("no_certificate_probe")
 def test_get_connection_passes_connection_settings_to_mapepire():
     """Host, port and credentials reach the Mapepire daemon description."""
-    client = Db2Client("host", "db", "user", "secret", port=9999)
+    client = Db2Client("host", "db", "user", "secret", port=9999, ignore_secure_connection=True)
     with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect") as connect:
         assert client._get_connection() is connect.return_value
     daemon.assert_called_once_with(
@@ -663,9 +663,10 @@ def test_a_certificate_verifies_the_server_and_does_not_set_ignore_unauthorized(
 
 
 @pytest.mark.parametrize("certificate", [None, ""])
-def test_without_a_certificate_ignore_unauthorized_is_set_and_no_certificate_is_used(certificate, caplog):
-    """No certificate: Mapepire's skip switch is on, nothing is loaded (not even the system store), a warning is logged."""
-    client = Db2Client("host", "db", "user", "secret", certificate=certificate)
+def test_ignore_secure_connection_sets_ignore_unauthorized_and_uses_no_certificate(certificate, caplog):
+    """ignore_secure_connection without a certificate: Mapepire's skip switch is on, nothing is loaded
+    (not even the system store), and a warning is logged."""
+    client = Db2Client("host", "db", "user", "secret", certificate=certificate, ignore_secure_connection=True)
     assert client.certificate is None
     with patch("mapepire_python.DaemonServer") as daemon, patch("mapepire_python.connect"):
         with caplog.at_level("WARNING"):
@@ -674,38 +675,69 @@ def test_without_a_certificate_ignore_unauthorized_is_set_and_no_certificate_is_
     context = daemon.return_value.ssl_context
     assert context.verify_mode == ssl.CERT_NONE and context.check_hostname is False
     assert context.cert_store_stats() == {"x509": 0, "crl": 0, "x509_ca": 0}
-    assert "INSECURE" in caplog.text and "has no certificate" in caplog.text
+    assert "INSECURE" in caplog.text and "ignore_secure_connection" in caplog.text
     assert "secret" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "certificate, ignore, message",
+    [
+        (None, False, "no certificate and ignore_secure_connection is not set"),
+        ("", False, "no certificate and ignore_secure_connection is not set"),
+        ("PEM", True, "sets ignore_secure_connection and also has a certificate"),
+    ],
+)
+def test_an_invalid_combination_is_refused_and_never_connects(certificate, ignore, message, ca_pem):
+    """Neither mode (or both) is a permanent configuration error: nothing silently falls back."""
+    certificate = ca_pem if certificate == "PEM" else certificate
+    client = Db2Client("host", "db", "user", "secret", certificate=certificate, ignore_secure_connection=ignore)
+    with patch("mapepire_python.DaemonServer"), patch("mapepire_python.connect") as connect:
+        with pytest.raises(DBTLSConfigError, match=message) as excinfo:
+            client._get_connection()
+    connect.assert_not_called()
+    assert excinfo.value.is_permanent_failure is True
+    assert "BEGIN CERTIFICATE" not in str(excinfo.value) and "secret" not in str(excinfo.value)
 
 
 def test_the_server_certificate_is_never_fetched_or_trusted(ca_pem):
     """Whatever the mode, the client never connects just to read the server's own certificate."""
     assert not hasattr(Db2Client, "_pin_server_certificate")
     with patch("socket.create_connection") as sock:
-        for certificate in (None, ca_pem):
-            Db2Client("host", "db", "user", "secret", certificate=certificate)._build_ssl_context()
+        Db2Client("host", "db", "user", "secret", ignore_secure_connection=True)._build_ssl_context()
+        Db2Client("host", "db", "user", "secret", certificate=ca_pem)._build_ssl_context()
     sock.assert_not_called()
 
 
-def test_the_flag_is_gone_from_the_client():
-    """There is no allow_insecure_connection or ignore_unauthorized option: the certificate decides."""
+def test_the_old_flags_are_not_client_options():
+    """allow_insecure_connection and ignore_unauthorized do not exist: ignore_secure_connection replaces them."""
     import inspect
 
     parameters = inspect.signature(Db2Client.__init__).parameters
     assert "allow_insecure_connection" not in parameters and "ignore_unauthorized" not in parameters
+    assert "ignore_secure_connection" in parameters
 
 
-def test_a_stored_flag_is_ignored_by_the_loader(ca_pem):
-    """A connector stored while the flag existed still loads: the certificate alone decides."""
-    insecure = loader_module._client_from_config(
-        {"host": "h", "database": "d", "username": "u", "password": "p", "allow_insecure_connection": True}
-    )
+def test_the_loader_passes_the_certificate_and_the_flag_to_the_client(ca_pem):
+    """The decrypted connection details decide the TLS mode; a stored string flag is parsed."""
+    base = {"host": "h", "database": "d", "username": "u", "password": "p"}
+    insecure = loader_module._client_from_config({**base, "ignore_secure_connection": True})
+    insecure_str = loader_module._client_from_config({**base, "ignore_secure_connection": "true"})
     verified = loader_module._client_from_config(
-        {"host": "h", "database": "d", "username": "u", "password": "p",
-         "certificate": ca_pem, "allow_insecure_connection": True}
+        {**base, "certificate": ca_pem, "ignore_secure_connection": False}
     )
     assert insecure.certificate is None and insecure._skip_verification is True
+    assert insecure_str._skip_verification is True
     assert verified.certificate == ca_pem and verified._skip_verification is False
+
+
+def test_an_old_connector_without_the_flag_does_not_connect_unverified():
+    """A stored connector without the flag defaults to false, so without a certificate it is refused."""
+    client = loader_module._client_from_config({"host": "h", "database": "d", "username": "u", "password": "p"})
+    assert client._skip_verification is False
+    with patch("mapepire_python.DaemonServer"), patch("mapepire_python.connect") as connect:
+        with pytest.raises(DBTLSConfigError):
+            client._get_connection()
+    connect.assert_not_called()
 
 
 def test_websocket_always_uses_wss_with_the_client_context(monkeypatch):

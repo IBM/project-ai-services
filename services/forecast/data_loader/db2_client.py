@@ -71,15 +71,18 @@ class Db2Client:
         connect_timeout: int = settings.forecast.connector_connect_timeout_s,
         query_timeout: int = settings.forecast.connector_query_timeout_s,
         certificate: Optional[str] = None,
+        ignore_secure_connection: bool = False,
         custom_connection: Optional[Any] = None,
     ) -> None:
-        """Create a client. The connection is always TLS, and ``certificate`` decides how.
+        """Create a client. The connection is always TLS; the arguments decide how it is checked.
 
-        - ``certificate`` set (PEM content from the connector's connection details): the server
-          certificate and host name are verified against the system trust store plus that
-          certificate.
-        - ``certificate`` None or empty: no certificate is used at all. Nothing is loaded, not even
-          the system trust store, and Mapepire's ``ignoreUnauthorized`` is set.
+        - ``certificate`` set and ``ignore_secure_connection`` false: the server certificate and
+          host name are verified against the system trust store plus that certificate (PEM content
+          from the connector's connection details).
+        - ``certificate`` empty and ``ignore_secure_connection`` true: no certificate is used at
+          all. Nothing is loaded, not even the system trust store, and Mapepire's
+          ``ignoreUnauthorized`` is set.
+        - Any other combination is a configuration error (DBTLSConfigError, raised on connect).
 
         The server's own certificate is never fetched or trusted by the client.
         """
@@ -91,26 +94,36 @@ class Db2Client:
         self.connect_timeout = connect_timeout
         self.query_timeout = query_timeout
         self.certificate = certificate or None
+        self.ignore_secure_connection = bool(ignore_secure_connection)
         self._conn = custom_connection
         self._server: Optional[Any] = None
 
     @property
     def _skip_verification(self) -> bool:
-        """True when there is no certificate to verify the server against."""
-        return self.certificate is None
+        """True when the connector asked not to verify the server."""
+        return self.ignore_secure_connection
 
     def _build_ssl_context(self) -> ssl.SSLContext:
         """Return the TLS context: the system trust store plus the certificate, or no certificates.
 
-        Without a certificate the context has nothing loaded and does no verification. With one,
-        DBTLSConfigError is raised when it is not valid PEM. The message never shows its content.
+        With ignore_secure_connection the context has nothing loaded and does no verification.
+        With a certificate, DBTLSConfigError is raised when it is not valid PEM. The message
+        never shows its content. Both set, or neither, is a DBTLSConfigError too.
         """
+        if self.ignore_secure_connection and self.certificate is not None:
+            raise DBTLSConfigError(
+                "The connector sets ignore_secure_connection and also has a certificate; use only one"
+            )
+        if not self.ignore_secure_connection and self.certificate is None:
+            raise DBTLSConfigError(
+                "The connector has no certificate and ignore_secure_connection is not set"
+            )
         if self._skip_verification:
             logger.warning(
                 "INSECURE Db2 connection to %s:%s: no certificate is used and the server certificate "
-                "is not verified because the connector has no certificate. The traffic is encrypted but "
-                "the server is not authenticated, so it can be impersonated. Add a certificate to "
-                "the connector to verify it",
+                "is not verified because the connector sets ignore_secure_connection. The traffic is "
+                "encrypted but the server is not authenticated, so it can be impersonated. Add a "
+                "certificate to the connector to verify it",
                 self.host,
                 self.port,
             )
@@ -119,16 +132,15 @@ class Db2Client:
             context.verify_mode = ssl.CERT_NONE
             return context
         context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)  # system trust store
-        if self.certificate is not None:
-            try:
-                # A blank value loads nothing and would pass silently, so it is refused here.
-                if not self.certificate.strip():
-                    raise ValueError
-                context.load_verify_locations(cadata=self.certificate)
-            except (ssl.SSLError, ValueError):
-                raise DBTLSConfigError(
-                    "The connector's certificate does not contain a valid PEM certificate"
-                ) from None
+        try:
+            # A blank value loads nothing and would pass silently, so it is refused here.
+            if not self.certificate.strip():
+                raise ValueError
+            context.load_verify_locations(cadata=self.certificate)
+        except (ssl.SSLError, ValueError):
+            raise DBTLSConfigError(
+                "The connector's certificate does not contain a valid PEM certificate"
+            ) from None
         return context
 
     def _limit_reads(self, seconds: float) -> None:

@@ -97,10 +97,17 @@ def _reject_binary_columns(columns: Sequence[ColumnInfo], table: str) -> None:
         )
 
 
+def _as_bool(value: Any) -> bool:
+    """Parse a bool that may have been stored as a string."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
 def _client_from_config(connection_config: Dict[str, Any]) -> Db2Client:
     """Build a Db2Client from a connection config dictionary.
 
-    Decrypted connector fields are strings, so numeric options are converted here.
+    Decrypted connector fields may be strings, so numeric and boolean options are converted here.
     """
     return Db2Client(
         host=connection_config["host"],
@@ -115,6 +122,7 @@ def _client_from_config(connection_config: Dict[str, Any]) -> Db2Client:
             connection_config.get("query_timeout", settings.forecast.connector_query_timeout_s)
         ),
         certificate=connection_config.get("certificate"),
+        ignore_secure_connection=_as_bool(connection_config.get("ignore_secure_connection", False)),
     )
 
 
