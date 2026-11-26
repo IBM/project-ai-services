@@ -897,7 +897,7 @@ The three resource values are **to be provided by DEV**, as for the rest of this
 **`podman/values.yaml`:**
 
 ```yaml
-image: quay.io/powercloud/tritonserver:latest
+image: quay.io/powercloud/tritonserver:2.70.0-0
 ```
 
 **Wiring in the Forecast service's `metadata.yaml`:**
