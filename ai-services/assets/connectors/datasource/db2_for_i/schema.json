@@ -49,6 +49,7 @@
     "certificate": {
       "type": "string",
       "title": "Certificate",
+      "format": "password",
       "description": "Optional PEM-encoded certificate for TLS authentication and verification.",
       "ui:section": "Authentication"
     },
