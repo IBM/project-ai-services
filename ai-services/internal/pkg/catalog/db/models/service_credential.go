@@ -14,7 +14,9 @@ type ServiceCredential struct {
 	Caller       string
 	DeploymentID string
 	SecretHash   string
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	RevokedAt    *time.Time
+	// Grants is what the credential may obtain, fixed at issue time: audience -> roles.
+	Grants    map[string][]string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	RevokedAt *time.Time
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/project-ai-services/ai-services/assets"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/credentialspec"
 	dbrepo "github.com/project-ai-services/ai-services/internal/pkg/catalog/db/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/profiles"
@@ -831,6 +832,50 @@ func (p *CatalogProvider) LoadServiceValues(serviceID string, argParams map[stri
 	}
 
 	return values, nil
+}
+
+// LoadServiceCredentialSpecs returns the @credential annotations of a service's values.yaml for
+// the provider's runtime. It reads the raw file, because LoadServiceValues drops comments.
+//
+// Only a built-in service may declare a credential. A service that came from a bundle is an
+// error if it carries the annotation: a bundle could otherwise ask the catalog to mint a
+// credential for any grant. Bundle validation rejects the annotation at upload; this is the
+// second check, at the point of use.
+func (p *CatalogProvider) LoadServiceCredentialSpecs(serviceID string) ([]credentialspec.Spec, error) {
+	runtimePath, err := p.resolveRuntimeType("")
+	if err != nil {
+		return nil, err
+	}
+
+	servicePath, err := p.GetCatalogItemPath(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service path: %w", err)
+	}
+
+	itemFS, err := p.GetItemFS(serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get item filesystem: %w", err)
+	}
+
+	valuesPath := filepath.Join(servicePath, runtimePath, "values.yaml")
+	data, err := fs.ReadFile(itemFS, valuesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read values.yaml at %s: %w", valuesPath, err)
+	}
+
+	if !credentialspec.Has(data) {
+		return nil, nil
+	}
+	if itemFS != fs.FS(&assets.CatalogFS) {
+		return nil, fmt.Errorf("service %q: %s is only allowed in built-in services", serviceID, credentialspec.Marker)
+	}
+
+	specs, err := credentialspec.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("service %q: %w", serviceID, err)
+	}
+
+	return specs, nil
 }
 
 // LoadComponentValues loads the values.yaml for a component with optional parameter overrides.

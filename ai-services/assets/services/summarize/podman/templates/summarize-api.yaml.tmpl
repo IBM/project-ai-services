@@ -4,33 +4,15 @@ metadata:
   name: "summarize-api-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
-    {{- if .Values.authCatalogCaBundle }}
-    ai-services.io/secret: "summarize-ca-bundle-{{ .InstanceSlug }}"
-    {{- end }}
   annotations:
     ai-services.io/routes: "6000:summarize-api-{{ .InstanceSlug }}:api,6001:summarize-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ or .Values.summarize.port }}:6000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   restartPolicy: always
-  {{- if .Values.authCatalogHostAliases }}
-  hostAliases:
-  {{- range .Values.authCatalogHostAliases }}
-  - ip: "{{ or .IP .ip }}"
-    hostnames:
-    {{- range or .Hostnames .hostnames }}
-      - "{{ . }}"
-    {{- end }}
-  {{- end }}
-  {{- end }}
   volumes:
     - name: summarize-db-secret
       secret:
         secretName: "summarize-db-secret-{{ .InstanceSlug }}"
-    {{- if .Values.authCatalogCaBundle }}
-    - name: ca-bundle
-      secret:
-        secretName: "summarize-ca-bundle-{{ .InstanceSlug }}"
-    {{- end }}
     {{- if .Values.llm.apiKey }}
     - name: vllm-secret
       secret:
@@ -107,10 +89,6 @@ spec:
         - name: AUTH_JWKS_PLAINTEXT_HOSTS
           value: "{{ .Values.authJwksPlaintextHosts }}"
         {{- end }}
-        {{- if .Values.authCatalogCaBundle }}
-        - name: AUTH_CATALOG_CA_BUNDLE
-          value: "/etc/ssl/certs/catalog-ca-bundle.crt"
-        {{- end }}
       resources:
         requests:
           memory: "512Mi"
@@ -142,12 +120,6 @@ spec:
         {{- if .Values.llm.apiKey }}
         - mountPath: /etc/secret/vllm-secret
           name: vllm-secret
-          readOnly: true
-        {{- end }}
-        {{- if .Values.authCatalogCaBundle }}
-        - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
-          subPath: ca-bundle.crt
-          name: ca-bundle
           readOnly: true
         {{- end }}
     - name: mcp-sidecar

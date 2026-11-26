@@ -4,33 +4,15 @@ metadata:
   name: "similarity-api-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
-    {{- if .Values.authCatalogCaBundle }}
-    ai-services.io/secret: "similarity-ca-bundle-{{ .InstanceSlug }}"
-    {{- end }}
   annotations:
     ai-services.io/routes: "7000:similarity-api-{{ .InstanceSlug }}:api,7001:similarity-mcp-{{ .InstanceSlug }}:mcp"
     # ai-services.io/ports: "{{ or .Values.similarity.port }}:7000"  # Uncomment to expose ports directly (bypasses Caddy)
 spec:
   restartPolicy: always
-  {{- if .Values.authCatalogHostAliases }}
-  hostAliases:
-  {{- range .Values.authCatalogHostAliases }}
-  - ip: "{{ or .IP .ip }}"
-    hostnames:
-    {{- range or .Hostnames .hostnames }}
-      - "{{ . }}"
-    {{- end }}
-  {{- end }}
-  {{- end }}
   volumes:
     - name: opensearch-secret
       secret:
         secretName: "opensearch-secret-{{ .Values.vector_store.instanceSlug }}"
-    {{- if .Values.authCatalogCaBundle }}
-    - name: ca-bundle
-      secret:
-        secretName: "similarity-ca-bundle-{{ .InstanceSlug }}"
-    {{- end }}
   containers:
     - name: similarity-api
       image: "{{ .Values.similarity.image }}"
@@ -77,10 +59,6 @@ spec:
         - name: AUTH_JWKS_PLAINTEXT_HOSTS
           value: "{{ .Values.authJwksPlaintextHosts }}"
         {{- end }}
-        {{- if .Values.authCatalogCaBundle }}
-        - name: AUTH_CATALOG_CA_BUNDLE
-          value: "/etc/ssl/certs/catalog-ca-bundle.crt"
-        {{- end }}
       resources:
         requests:
           memory: "512Mi"
@@ -109,12 +87,6 @@ spec:
         - mountPath: /etc/secret/opensearch-secret
           name: opensearch-secret
           readOnly: true
-        {{- if .Values.authCatalogCaBundle }}
-        - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
-          subPath: ca-bundle.crt
-          name: ca-bundle
-          readOnly: true
-        {{- end }}
     - name: mcp-sidecar
       image: "{{ .Values.mcp.image }}"
       args:

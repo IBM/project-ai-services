@@ -56,6 +56,10 @@ func (f *credRepo) GetValid(_ context.Context, id uuid.UUID) (*dbmodels.ServiceC
 	return &cp, nil
 }
 
+func (f *credRepo) RevokeByDeployment(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 func newCredentialEngine(t *testing.T, withCreds bool) (*gin.Engine, *auth.CredentialService, *credRepo) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -101,7 +105,7 @@ func credBody(t *testing.T, credential, service string) string {
 
 func TestCredentialToken_Success(t *testing.T) {
 	r, cs, _ := newCredentialEngine(t, true)
-	cred, err := cs.Provision(context.Background(), "chat", "dep-1")
+	cred, err := cs.ProvisionWithGrants(context.Background(), "chat", "dep-1", map[string][]string{"similarity": {auth.RoleRead}})
 	require.NoError(t, err)
 
 	w := postCredential(r, credBody(t, cred, "similarity"))
@@ -119,7 +123,7 @@ func TestCredentialToken_Success(t *testing.T) {
 
 func TestCredentialToken_EveryFailureIs401WithTheSameBody(t *testing.T) {
 	r, cs, _ := newCredentialEngine(t, true)
-	cred, err := cs.Provision(context.Background(), "chat", "dep-1")
+	cred, err := cs.ProvisionWithGrants(context.Background(), "chat", "dep-1", map[string][]string{"similarity": {auth.RoleRead}})
 	require.NoError(t, err)
 	idText, _, _ := strings.Cut(cred, ".")
 
@@ -147,7 +151,7 @@ func TestCredentialToken_EveryFailureIs401WithTheSameBody(t *testing.T) {
 
 func TestCredentialToken_StorageErrorIsGeneric500(t *testing.T) {
 	r, cs, repo := newCredentialEngine(t, true)
-	cred, err := cs.Provision(context.Background(), "chat", "dep-1")
+	cred, err := cs.ProvisionWithGrants(context.Background(), "chat", "dep-1", map[string][]string{"similarity": {auth.RoleRead}})
 	require.NoError(t, err)
 	repo.err = errors.New("pq: connection refused to 10.0.0.5")
 

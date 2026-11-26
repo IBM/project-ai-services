@@ -541,6 +541,16 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		return nil, rt.DeleteNamespace(ctx, req.Name)
 
+	case workerpb.CommandType_COMMAND_TYPE_CREATE_SECRET:
+		var req payload.CreateSecret
+		if err := json.Unmarshal(p, &req); err != nil {
+			return nil, fmt.Errorf("create_secret: decode payload: %w", err)
+		}
+
+		nrt := rtInNamespace(rt, req.Namespace)
+
+		return nil, nrt.CreateSecret(ctx, req.Name, req.Data, req.Labels)
+
 	case workerpb.CommandType_COMMAND_TYPE_UPDATE_SECRET:
 		var req payload.UpdateSecret
 		if err := json.Unmarshal(p, &req); err != nil {

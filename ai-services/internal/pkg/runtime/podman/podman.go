@@ -1,6 +1,7 @@
 package podman
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -28,7 +29,10 @@ import (
 	"go.podman.io/podman/v6/pkg/bindings/volumes"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/specgen"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -617,6 +621,35 @@ func (pc *PodmanClient) SecretExists(ctx context.Context, nameOrID string) (bool
 	defer cancel()
 
 	return secrets.Exists(podCtx, nameOrID)
+}
+
+// CreateSecret stores a Kubernetes Secret document as a Podman secret, replacing any secret of
+// the same name. `kube play` only reads secrets in that form (see kube.VolumeFromSecret), so a
+// pod can mount or reference it exactly like a Secret created by a template.
+func (pc *PodmanClient) CreateSecret(ctx context.Context, name string, data map[string][]byte, labels map[string]string) error {
+	doc, err := yaml.Marshal(&corev1.Secret{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       data,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to encode secret %q: %w", name, err)
+	}
+
+	podCtx, cancel := pc.podmanCtx(ctx)
+	defer cancel()
+
+	replace := true
+	if _, err := secrets.Create(podCtx, bytes.NewReader(doc), &secrets.CreateOptions{
+		Name:    &name,
+		Labels:  labels,
+		Replace: &replace,
+	}); err != nil {
+		return fmt.Errorf("failed to create secret %q: %w", name, err)
+	}
+
+	return nil
 }
 
 func (pc *PodmanClient) UpdateSecret(_ context.Context, _, _ string, _ map[string][]byte) error {

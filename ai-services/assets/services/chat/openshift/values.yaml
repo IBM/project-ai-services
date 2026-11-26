@@ -43,8 +43,9 @@ mcp:
 
 # Inbound auth: chat verifies catalog tokens whose audience is authAudience. The catalog sets
 # authJwksUrl and authCatalogApiUrl at deploy time.
-# Outbound auth: chat trades authServiceCredential (set by the catalog at deploy time, never
-# write it here) for a short-lived similarity token.
+# Outbound auth: chat trades a service credential for a short-lived similarity token. The
+# catalog creates the credential and its Secret at deploy time and sets authServiceCredentialSecret
+# to the Secret's name; the credential itself never passes through values. Never set it here.
 authJwksUrl: ""
 authAudience: "chat"
 authCatalogApiUrl: ""
@@ -52,6 +53,7 @@ authCatalogApiUrl: ""
 authCatalogUiUrl: ""
 authCatalogCaBundle: ""
 authCatalogHostAliases: ""
-authServiceCredential: ""
+# @credential:service grants=similarity:read
+authServiceCredentialSecret: ""
 # Comma-separated hosts allowed to be reached over plain HTTP. Empty (HTTPS only) by default.
 authJwksPlaintextHosts: ""

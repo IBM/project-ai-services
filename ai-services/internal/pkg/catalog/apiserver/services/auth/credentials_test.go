@@ -53,6 +53,21 @@ func (f *fakeCredRepo) GetValid(_ context.Context, id uuid.UUID) (*dbmodels.Serv
 	return &cp, nil
 }
 
+func (f *fakeCredRepo) RevokeByDeployment(_ context.Context, deploymentID string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int64
+	now := time.Now()
+	for _, c := range f.items {
+		if c.DeploymentID == deploymentID && c.RevokedAt == nil {
+			c.RevokedAt = &now
+			n++
+		}
+	}
+
+	return n, nil
+}
+
 type credFixture struct {
 	*fixture
 	creds *auth.CredentialService
@@ -70,6 +85,13 @@ func newCredFixture(t *testing.T, ttl time.Duration) *credFixture {
 }
 
 // verifyFor parses a token against the signer's JWKS for the given audience.
+// chatGrants are the grants of the chat asset's @credential annotation.
+var chatGrants = map[string][]string{"similarity": {auth.RoleRead}}
+
+func (f *credFixture) provision(ctx context.Context, caller, deploymentID string) (string, error) {
+	return f.creds.ProvisionWithGrants(ctx, caller, deploymentID, chatGrants)
+}
+
 func (f *credFixture) verifyFor(t *testing.T, raw, aud string) *auth.ServiceClaims {
 	t.Helper()
 	set, err := f.signer.JWKS(context.Background())
@@ -94,7 +116,7 @@ func (f *credFixture) verifyFor(t *testing.T, raw, aud string) *auth.ServiceClai
 
 func TestCredential_ChatTradesForSimilarityReadToken(t *testing.T) {
 	f := newCredFixture(t, time.Hour)
-	cred, err := f.creds.Provision(context.Background(), "chat", "dep-1")
+	cred, err := f.provision(context.Background(), "chat", "dep-1")
 	require.NoError(t, err)
 
 	raw, exp, err := f.creds.Exchange(context.Background(), cred, "similarity")
@@ -112,7 +134,7 @@ func TestCredential_ChatTradesForSimilarityReadToken(t *testing.T) {
 
 func TestCredential_OnlyTheHashIsStored(t *testing.T) {
 	f := newCredFixture(t, time.Hour)
-	cred, err := f.creds.Provision(context.Background(), "chat", "dep-1")
+	cred, err := f.provision(context.Background(), "chat", "dep-1")
 	require.NoError(t, err)
 
 	idText, secret, ok := strings.Cut(cred, ".")
@@ -132,14 +154,14 @@ func TestCredential_OnlyTheHashIsStored(t *testing.T) {
 func TestCredential_EveryFailureIsTheSameError(t *testing.T) {
 	f := newCredFixture(t, time.Hour)
 	ctx := context.Background()
-	cred, err := f.creds.Provision(ctx, "chat", "dep-1")
+	cred, err := f.provision(ctx, "chat", "dep-1")
 	require.NoError(t, err)
 	idText, _, _ := strings.Cut(cred, ".")
 
 	// expired and revoked credentials
-	expired, err := f.creds.Provision(ctx, "chat", "dep-2")
+	expired, err := f.provision(ctx, "chat", "dep-2")
 	require.NoError(t, err)
-	revoked, err := f.creds.Provision(ctx, "chat", "dep-3")
+	revoked, err := f.provision(ctx, "chat", "dep-3")
 	require.NoError(t, err)
 	expID, _, _ := strings.Cut(expired, ".")
 	revID, _, _ := strings.Cut(revoked, ".")
@@ -169,9 +191,9 @@ func TestCredential_EveryFailureIsTheSameError(t *testing.T) {
 func TestCredential_TwoActiveCredentialsBothWork(t *testing.T) {
 	f := newCredFixture(t, time.Hour)
 	ctx := context.Background()
-	oldCred, err := f.creds.Provision(ctx, "chat", "dep-1")
+	oldCred, err := f.provision(ctx, "chat", "dep-1")
 	require.NoError(t, err)
-	newCred, err := f.creds.Provision(ctx, "chat", "dep-1")
+	newCred, err := f.provision(ctx, "chat", "dep-1")
 	require.NoError(t, err)
 	assert.NotEqual(t, oldCred, newCred)
 
@@ -181,49 +203,78 @@ func TestCredential_TwoActiveCredentialsBothWork(t *testing.T) {
 	}
 }
 
-func TestCredential_AdminIsNeverGranted(t *testing.T) {
-	f := newCredFixture(t, time.Hour)
-	ctx := context.Background()
-	for _, svc := range []string{"chat", "similarity", "summarize", "digitize"} {
-		cred, err := f.creds.Provision(ctx, svc, "dep")
-		if !auth.CanHoldCredential(svc) {
-			assert.Error(t, err, svc)
-
-			continue
-		}
-		require.NoError(t, err)
-		for _, aud := range []string{"chat", "similarity", "summarize", "digitize"} {
-			raw, _, err := f.creds.Exchange(ctx, cred, aud)
-			if err != nil {
-				continue
-			}
-			claims := f.verifyFor(t, raw, aud)
-			assert.NotContains(t, claims.Scope, "admin", "%s -> %s", svc, aud)
-		}
-	}
-}
-
-func TestCredential_ProvisionIfNeeded(t *testing.T) {
+func TestCredential_GrantsAreStoredAndEnforcedFromTheRow(t *testing.T) {
 	f := newCredFixture(t, time.Hour)
 	ctx := context.Background()
 
-	for _, svc := range []string{"similarity", "summarize", "digitize", "nope", ""} {
-		got, err := f.creds.ProvisionIfNeeded(ctx, svc, "dep")
-		require.NoError(t, err, svc)
-		assert.Empty(t, got, svc)
-	}
-	assert.Empty(t, f.repo.items, "nothing is stored for a service that cannot hold a credential")
-
-	got, err := f.creds.ProvisionIfNeeded(ctx, "chat", "dep")
+	cred, err := f.provision(ctx, "chat", "dep-1")
 	require.NoError(t, err)
-	assert.NotEmpty(t, got)
-	assert.Len(t, f.repo.items, 1)
+	idText, _, _ := strings.Cut(cred, ".")
+	stored := f.repo.items[uuid.MustParse(idText)]
+	assert.Equal(t, map[string][]string{"similarity": {auth.RoleRead}}, stored.Grants)
+
+	// Exchange follows the row, not the code table: removing the grant from the row denies it,
+	// and a grant that only the row has is honoured.
+	stored.Grants = map[string][]string{"summarize": {auth.RoleRead}}
+	_, _, err = f.creds.Exchange(ctx, cred, "similarity")
+	assert.ErrorIs(t, err, auth.ErrInvalidCredential)
+	raw, _, err := f.creds.Exchange(ctx, cred, "summarize")
+	require.NoError(t, err)
+	assert.Equal(t, "summarize:read", f.verifyFor(t, raw, "summarize").Scope)
 }
 
-func TestCredential_ProvisionRefusesServicesThatCannotHoldOne(t *testing.T) {
+func TestCredential_ProvisionWithGrantsRejectsBadGrants(t *testing.T) {
 	f := newCredFixture(t, time.Hour)
-	_, err := f.creds.Provision(context.Background(), "digitize", "dep")
-	assert.Error(t, err)
+	ctx := context.Background()
+
+	cases := map[string]map[string][]string{
+		"nil":              nil,
+		"empty":            {},
+		"admin":            {"similarity": {auth.RoleAdmin}},
+		"admin among many": {"similarity": {auth.RoleRead, auth.RoleAdmin}},
+		"unknown audience": {"nope": {auth.RoleRead}},
+		"no roles":         {"similarity": {}},
+	}
+	for name, grants := range cases {
+		_, err := f.creds.ProvisionWithGrants(ctx, "chat", "dep", grants)
+		assert.Error(t, err, name)
+	}
+	assert.Empty(t, f.repo.items, "nothing is stored for rejected grants")
+
+	_, err := f.creds.ProvisionWithGrants(ctx, "chat", "dep", map[string][]string{"similarity": {auth.RoleRead}})
+	assert.NoError(t, err)
+}
+
+func TestCredential_ExchangeRefusesAdminEvenIfARowHoldsIt(t *testing.T) {
+	f := newCredFixture(t, time.Hour)
+	ctx := context.Background()
+	cred, err := f.provision(ctx, "chat", "dep-1")
+	require.NoError(t, err)
+	idText, _, _ := strings.Cut(cred, ".")
+	f.repo.items[uuid.MustParse(idText)].Grants = map[string][]string{"similarity": {auth.RoleRead, auth.RoleAdmin}}
+
+	_, _, err = f.creds.Exchange(ctx, cred, "similarity")
+	assert.ErrorIs(t, err, auth.ErrInvalidCredential)
+}
+
+func TestCredential_RevokeForDeploymentRevokesOnlyThatDeployment(t *testing.T) {
+	f := newCredFixture(t, time.Hour)
+	ctx := context.Background()
+	first, err := f.provision(ctx, "chat", "dep-1")
+	require.NoError(t, err)
+	second, err := f.provision(ctx, "chat", "dep-1")
+	require.NoError(t, err)
+	other, err := f.provision(ctx, "chat", "dep-2")
+	require.NoError(t, err)
+
+	require.NoError(t, f.creds.RevokeForDeployment(ctx, "dep-1"))
+
+	for _, c := range []string{first, second} {
+		_, _, err = f.creds.Exchange(ctx, c, "similarity")
+		assert.ErrorIs(t, err, auth.ErrInvalidCredential)
+	}
+	_, _, err = f.creds.Exchange(ctx, other, "similarity")
+	assert.NoError(t, err)
 }
 
 func TestNewCredentialService_RejectsBadTTL(t *testing.T) {

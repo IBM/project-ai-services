@@ -66,6 +66,35 @@ func TestLiteLLMEgressRoute(t *testing.T) {
 	})
 }
 
+func TestCatalogAuthEgressRoute(t *testing.T) {
+	t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
+	t.Setenv(proxy.CaddyPrivateIngressPortEnvVar, "")
+
+	r, err := CatalogAuthEgressRoute()
+
+	require.NoError(t, err)
+	assert.Equal(t, workerconstants.CatalogAuthEgressRouteID, r.ID)
+	assert.Equal(t, workerconstants.CatalogAuthPathPrefix, r.PathPrefix)
+	assert.Equal(t, "catalog-worker-gateway.example.com:"+proxy.DefaultPrivateIngressPort, r.DialUpstream)
+	assert.Equal(t, "catalog-worker-gateway.example.com", r.ServerName)
+	assert.Equal(t, "/data/worker-tls/tls.crt", r.ClientCertPath)
+
+	t.Setenv(proxy.DomainSuffixEnvVar, "")
+	_, err = CatalogAuthEgressRoute()
+	assert.Error(t, err)
+}
+
+func TestRegisterControlPlaneEgress(t *testing.T) {
+	t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
+
+	rp := &recordingProxy{}
+	require.NoError(t, RegisterControlPlaneEgress(context.Background(), rp, "w1"))
+
+	require.Len(t, rp.egress, 2)
+	assert.Equal(t, workerconstants.LiteLLMEgressRouteID, rp.egress[0].ID)
+	assert.Equal(t, workerconstants.CatalogAuthEgressRouteID, rp.egress[1].ID)
+}
+
 func TestRegisterLiteLLMEgress(t *testing.T) {
 	t.Setenv(proxy.DomainSuffixEnvVar, "example.com")
 

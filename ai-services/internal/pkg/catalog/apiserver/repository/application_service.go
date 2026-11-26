@@ -81,7 +81,7 @@ func NewApplicationService(
 		Provider:              provider,
 		DeploymentPlanner:     deployment.NewDeploymentPlanner(provider, componentRepo, workers),
 		DeploymentExecutor:    deployment.NewDeploymentExecutor(provider, appRepo, serviceRepo, componentRepo, workers).WithCredentialProvisioner(credentials),
-		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo),
+		DeletionExecutor:      deletion.NewDeletionExecutor(appRepo, serviceRepo, componentRepo, serviceDependencyRepo).WithCredentialRevoker(credentials),
 		Validator:             validator,
 		DeploymentRegistry:    appservice.NewDeploymentRegistry(),
 		Workers:               workers,

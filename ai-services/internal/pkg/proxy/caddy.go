@@ -248,20 +248,29 @@ func (c *caddyManager) RegisterEgressRoute(ctx context.Context, route EgressRout
 
 	prefix := strings.TrimRight(route.PathPrefix, "/")
 
+	proxyHandler := map[string]any{
+		"handler": "reverse_proxy",
+		"transport": map[string]any{
+			"protocol":                  "encrypted_mtls",
+			"client_cert_file":          route.ClientCertPath,
+			"encrypted_client_key_file": route.EncryptedClientKeyPath,
+			"secret_file":               route.SecretFilePath,
+			"tls":                       tlsConfig,
+		},
+		"upstreams": []map[string]any{{"dial": route.DialUpstream}},
+	}
+	if route.ServerName != "" {
+		// A server that verifies client certificates rejects (HTTP 421) a request whose Host
+		// differs from the TLS server name, so send the server name as Host.
+		proxyHandler["headers"] = map[string]any{
+			"request": map[string]any{"set": map[string][]string{"Host": {route.ServerName}}},
+		}
+	}
+
 	routeConfig := map[string]any{
-		"@id":   route.ID,
-		"match": []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
-		"handle": []map[string]any{{
-			"handler": "reverse_proxy",
-			"transport": map[string]any{
-				"protocol":                  "encrypted_mtls",
-				"client_cert_file":          route.ClientCertPath,
-				"encrypted_client_key_file": route.EncryptedClientKeyPath,
-				"secret_file":               route.SecretFilePath,
-				"tls":                       tlsConfig,
-			},
-			"upstreams": []map[string]any{{"dial": route.DialUpstream}},
-		}},
+		"@id":    route.ID,
+		"match":  []map[string]any{{"path": []string{prefix, prefix + "/*"}}},
+		"handle": []map[string]any{proxyHandler},
 	}
 
 	return c.createRouteIfAbsent(ctx, CaddyEgressServerName, route.ID, routeConfig)

@@ -277,3 +277,22 @@ func TestHelmReleaseCreatesPodByTemplateID(t *testing.T) {
 		t.Error("release still recorded after uninstall")
 	}
 }
+
+func TestCreateSecretStoresAndReplaces(t *testing.T) {
+	ctx := context.Background()
+	c := New(types.RuntimeTypePodman)
+
+	if err := c.CreateSecret(ctx, "chat-cred", map[string][]byte{"credential": []byte("a")}, nil); err != nil {
+		t.Fatalf("CreateSecret: %v", err)
+	}
+	if ok, _ := c.SecretExists(ctx, "chat-cred"); !ok {
+		t.Fatal("secret was not stored")
+	}
+
+	if err := c.CreateSecret(ctx, "chat-cred", map[string][]byte{"credential": []byte("b")}, nil); err != nil {
+		t.Fatalf("CreateSecret replace: %v", err)
+	}
+	if got := c.secrets["chat-cred"]["credential"]; got != "b" {
+		t.Fatalf("credential = %q, want it replaced with %q", got, "b")
+	}
+}

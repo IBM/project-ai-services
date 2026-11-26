@@ -24,6 +24,7 @@ type OpenshiftDeletion struct {
 	serviceRepo           dbrepo.ServiceRepository
 	componentRepo         dbrepo.ComponentRepository
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository
+	credentials           common.CredentialRevoker
 }
 
 // NewOpenshiftDeletion creates a deletion service for the OpenShift runtime.
@@ -44,6 +45,13 @@ func NewOpenshiftDeletion(
 		componentRepo:         componentRepo,
 		serviceDependencyRepo: serviceDependencyRepo,
 	}
+}
+
+// WithCredentialRevoker sets the revoker used to invalidate a deleted service's credentials.
+func (s *OpenshiftDeletion) WithCredentialRevoker(r common.CredentialRevoker) *OpenshiftDeletion {
+	s.credentials = r
+
+	return s
 }
 
 // PerformDeletion executes the deletion in four ordered phases:
@@ -114,10 +122,18 @@ func (s *OpenshiftDeletion) deleteServices(ctx context.Context, appID uuid.UUID,
 			continue
 		}
 
+		// The service credential Secret is created by the catalog, not by the chart, so the
+		// uninstall does not remove it. It carries the service's template label.
+		if errMsg := s.deleteCredentialSecrets(ctx, svc.ID.String()); errMsg != "" {
+			errorMessages = append(errorMessages, errMsg)
+		}
+
 		if err := s.serviceRepo.Delete(ctx, svc.ID); err != nil {
 			errMsg := fmt.Sprintf("service %s: DB deletion failed: %v", svc.ID, err)
 			errorMessages = append(errorMessages, errMsg)
 			_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError, fmt.Sprintf("DB deletion failed: %v", err))
+		} else {
+			common.RevokeServiceCredentials(ctx, s.credentials, svc.ID)
 		}
 
 		if !keepData && len(errorMessages) == 0 {
@@ -170,6 +186,21 @@ func (s *OpenshiftDeletion) deleteComponents(ctx context.Context, appID uuid.UUI
 	}
 
 	return errorMessages
+}
+
+// deleteCredentialSecrets deletes the Secrets the catalog created for a service, found by the
+// service's template label. It does nothing when the service has none.
+func (s *OpenshiftDeletion) deleteCredentialSecrets(ctx context.Context, serviceID string) string {
+	templateLabel := fmt.Sprintf("%s=%s", constants.ApplicationTemplateKey, serviceID)
+
+	if err := s.rt.DeleteSecrets(ctx, templateLabel); err != nil {
+		errMsg := fmt.Sprintf("service %s: failed to delete secrets with label '%s': %s", serviceID, templateLabel, err.Error())
+		logger.ErrorlnCtx(ctx, errMsg)
+
+		return errMsg
+	}
+
+	return ""
 }
 
 // deleteVolume deletes PVCs associated with the given resource ID when keepData is false.

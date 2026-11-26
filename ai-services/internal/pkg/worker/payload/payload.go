@@ -209,6 +209,15 @@ type DeleteNamespace struct {
 	Name string `json:"name"`
 }
 
+// CreateSecret is the wire payload for COMMAND_TYPE_CREATE_SECRET. Data holds secret
+// values, so the payload must never be logged.
+type CreateSecret struct {
+	Namespace string            `json:"namespace"`
+	Name      string            `json:"name"`
+	Data      map[string][]byte `json:"data"`
+	Labels    map[string]string `json:"labels,omitempty"`
+}
+
 // UpdateSecret is the wire payload for COMMAND_TYPE_UPDATE_SECRET.
 type UpdateSecret struct {
 	Namespace      string            `json:"namespace"`

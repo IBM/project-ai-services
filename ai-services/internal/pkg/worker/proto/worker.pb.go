@@ -10,12 +10,11 @@
 package proto
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -64,12 +63,21 @@ const (
 	CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS CommandType = 28
 	CommandType_COMMAND_TYPE_GET_BASE_DIR          CommandType = 29
 	// Helm chart install-or-upgrade on an OpenShift worker.
+	// The control plane serialises the chart files and values and sends them
+	// over the stream; the worker runs `helm install|upgrade` against the cluster
+	// it has access to.
 	CommandType_COMMAND_TYPE_HELM_INSTALL CommandType = 30
 	// Helm release uninstall on an OpenShift worker.
+	// The control plane sends the release name and namespace; the worker runs
+	// `helm uninstall` against the cluster it has access to.
 	CommandType_COMMAND_TYPE_HELM_UNINSTALL CommandType = 31
 	// Fetch the deployed Helm release manifest from an OpenShift worker.
+	// The control plane sends the release name and namespace; the worker returns
+	// the raw multi-document YAML manifest stored by Helm.
 	CommandType_COMMAND_TYPE_HELM_GET_MANIFEST CommandType = 32
 	// List CRD resources on an OpenShift worker.
+	// The control plane sends the GVK, namespace, and label filters; the worker
+	// queries the cluster and returns the matching resource names and labels.
 	CommandType_COMMAND_TYPE_LIST_CRD CommandType = 34
 	// Delete a namespace on an OpenShift worker.
 	CommandType_COMMAND_TYPE_DELETE_NAMESPACE CommandType = 35
@@ -82,6 +90,10 @@ const (
 	CommandType_COMMAND_TYPE_CANCEL CommandType = 37
 	// Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
 	CommandType_COMMAND_TYPE_DELETE_SECRETS CommandType = 38
+	// Create (or replace) a secret on the worker's runtime: a Kubernetes Secret on an
+	// OpenShift worker, a Podman secret holding a Kubernetes Secret document on a Podman worker.
+	// The payload carries the secret value, so it must never be logged.
+	CommandType_COMMAND_TYPE_CREATE_SECRET CommandType = 39
 )
 
 // Enum value maps for CommandType.
@@ -125,6 +137,7 @@ var (
 		36: "COMMAND_TYPE_UPDATE_SECRET",
 		37: "COMMAND_TYPE_CANCEL",
 		38: "COMMAND_TYPE_DELETE_SECRETS",
+		39: "COMMAND_TYPE_CREATE_SECRET",
 	}
 	CommandType_value = map[string]int32{
 		"COMMAND_TYPE_UNSPECIFIED":           0,
@@ -165,6 +178,7 @@ var (
 		"COMMAND_TYPE_UPDATE_SECRET":         36,
 		"COMMAND_TYPE_CANCEL":                37,
 		"COMMAND_TYPE_DELETE_SECRETS":        38,
+		"COMMAND_TYPE_CREATE_SECRET":         39,
 	}
 )
 
@@ -505,7 +519,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12!\n" +
 	"\fis_heartbeat\x18\x05 \x01(\bR\visHeartbeat\x12\x1f\n" +
 	"\vworker_name\x18\x06 \x01(\tR\n" +
-	"workerName*\xb4\t\n" +
+	"workerName*\xd4\t\n" +
 	"\vCommandType\x12\x1c\n" +
 	"\x18COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18COMMAND_TYPE_LIST_IMAGES\x10\x01\x12\x1b\n" +
@@ -545,7 +559,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x1dCOMMAND_TYPE_DELETE_NAMESPACE\x10#\x12\x1e\n" +
 	"\x1aCOMMAND_TYPE_UPDATE_SECRET\x10$\x12\x17\n" +
 	"\x13COMMAND_TYPE_CANCEL\x10%\x12\x1f\n" +
-	"\x1bCOMMAND_TYPE_DELETE_SECRETS\x10&2\x97\x01\n" +
+	"\x1bCOMMAND_TYPE_DELETE_SECRETS\x10&\x12\x1e\n" +
+	"\x1aCOMMAND_TYPE_CREATE_SECRET\x10'2\x97\x01\n" +
 	"\rWorkerGateway\x12C\n" +
 	"\bRegister\x12\x1a.worker.v1.RegisterRequest\x1a\x1b.worker.v1.RegisterResponse\x12A\n" +
 	"\rCommandStream\x12\x18.worker.v1.CommandResult\x1a\x12.worker.v1.Command(\x010\x01BFZDgithub.com/project-ai-services/ai-services/internal/pkg/worker/protob\x06proto3"

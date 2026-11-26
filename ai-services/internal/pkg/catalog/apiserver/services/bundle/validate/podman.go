@@ -53,6 +53,10 @@ func (v *PodmanBundleValidator) Validate(archiveBytes []byte, topDir, rootVersio
 		return err
 	}
 
+	if err := rejectCredentialAnnotation(found.valuesBytes, "podman/values.yaml"); err != nil {
+		return err
+	}
+
 	if err := validateValuesSchema(found.schemaBytes, "podman/values.schema.json"); err != nil {
 		return err
 	}
@@ -72,6 +76,7 @@ type podmanPaths struct {
 	runtimeDirSeen bool // set on the first entry under podman/
 	hasMetadata    bool
 	hasValues      bool
+	valuesBytes    []byte            // raw content of podman/values.yaml
 	metadataBytes  []byte            // raw content of podman/metadata.yaml
 	schemaBytes    []byte            // raw content of podman/values.schema.json; non-nil means present
 	templFiles     map[string][]byte // name → raw content of each templates/*.yaml.tmpl; non-empty means present
@@ -110,6 +115,7 @@ func (found *podmanPaths) recordEntry(sub string, hdr *tar.Header, content []byt
 		found.metadataBytes = content
 	case sub == "values.yaml":
 		found.hasValues = true
+		found.valuesBytes = content
 	case sub == "values.schema.json":
 		found.schemaBytes = content
 	case strings.HasPrefix(sub, "templates/") && strings.HasSuffix(sub, ".yaml.tmpl"):

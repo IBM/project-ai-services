@@ -208,9 +208,28 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtime.Type().String(), isRemote); err != nil {
 		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
 	}
-	if err := deploymentauth.InjectServiceCredential(ctx, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials); err != nil {
+
+	// Provision the service credential, if the asset declares one, and hand the chart only the
+	// name of the Secret that holds it, so the credential never reaches the Helm release.
+	// Roll it back if the install fails.
+	scopedProvider, err := d.catalogProvider.WithRuntime(d.runtime.Type().String())
+	if err != nil {
+		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtime.Type(), err)
+	}
+	credSpecs, err := scopedProvider.LoadServiceCredentialSpecs(svc.CatalogID)
+	if err != nil {
 		return err
 	}
+	credSecrets, err := deploymentauth.ProvisionCredentialSecrets(ctx, credSpecs, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials, d.runtime)
+	if err != nil {
+		return err
+	}
+	deployed := false
+	defer func() {
+		if !deployed {
+			credSecrets.Rollback(ctx)
+		}
+	}()
 
 	fsys, err := d.catalogProvider.GetItemFS(svc.CatalogID)
 	if err != nil {
@@ -220,6 +239,8 @@ func (d *OpenShiftDeployer) deployService(ctx context.Context, plan *DeploymentP
 	if err := openshiftutils.InstallChart(ctx, d.helm, releaseName, svc.CatalogPath, fsys, svc.Values, svc.DatabaseID.String()); err != nil {
 		return err
 	}
+
+	deployed = true
 
 	if err := d.registerServiceEndpoints(ctx, plan, releaseName, svc); err != nil {
 		// Non-fatal: log and continue — deployment itself succeeded.

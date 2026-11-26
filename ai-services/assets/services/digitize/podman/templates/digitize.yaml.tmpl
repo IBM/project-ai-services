@@ -4,7 +4,7 @@ metadata:
   name: "digitize-{{ .InstanceSlug }}"
   labels:
     ai-services.io/template: "{{ .TemplateID }}"
-    ai-services.io/secret: "digitize-db-encryption-secret-{{ .InstanceSlug }}{{ if .Values.authCatalogCaBundle }},digitize-ca-bundle-{{ .InstanceSlug }}{{ end }}"
+    ai-services.io/secret: "digitize-db-encryption-secret-{{ .InstanceSlug }}"
     ai-services.io/secret-skip-cleanup: "true"
     ai-services.io/volume: "digitize-cache-{{ .InstanceSlug }},digitize-db-encryption-secret-{{ .InstanceSlug }}"
   annotations:
@@ -12,16 +12,6 @@ metadata:
     # ai-services.io/ports: "{{ .Values.digitizeUi.port }}:4001, {{ .Values.digitize.port }}:4000"  # Uncomment to expose ports directly (bypasses Caddy)
     io.podman.annotations.pids-limit/backend-server: "4096"
 spec:
-  {{- if .Values.authCatalogHostAliases }}
-  hostAliases:
-  {{- range .Values.authCatalogHostAliases }}
-  - ip: "{{ or .IP .ip }}"
-    hostnames:
-    {{- range or .Hostnames .hostnames }}
-      - "{{ . }}"
-    {{- end }}
-  {{- end }}
-  {{- end }}
   initContainers:
     - name: digitize-db-init
       image: "{{ .Values.digitize.image }}"
@@ -65,10 +55,6 @@ spec:
         - name: CATALOG_UI_URL
           value: "{{ .Values.authCatalogUiUrl }}"
         {{- end }}
-        {{- if .Values.authCatalogCaBundle }}
-        - name: AUTH_CATALOG_CA_BUNDLE
-          value: "/etc/ssl/certs/catalog-ca-bundle.crt"
-        {{- end }}
       ports:
         - containerPort: 4001
           protocol: TCP
@@ -80,13 +66,6 @@ spec:
         periodSeconds: 30
         timeoutSeconds: 5
         failureThreshold: 3
-      {{- if .Values.authCatalogCaBundle }}
-      volumeMounts:
-        - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
-          subPath: ca-bundle.crt
-          name: ca-bundle
-          readOnly: true
-      {{- end }}
     - name: backend-server
       image: "{{ .Values.digitize.image }}"
       command:
@@ -176,19 +155,9 @@ spec:
         - name: AUTH_JWKS_PLAINTEXT_HOSTS
           value: "{{ .Values.authJwksPlaintextHosts }}"
         {{- end }}
-        {{- if .Values.authCatalogCaBundle }}
-        - name: AUTH_CATALOG_CA_BUNDLE
-          value: "/etc/ssl/certs/catalog-ca-bundle.crt"
-        {{- end }}
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache
-        {{- if .Values.authCatalogCaBundle }}
-        - mountPath: /etc/ssl/certs/catalog-ca-bundle.crt
-          subPath: ca-bundle.crt
-          name: ca-bundle
-          readOnly: true
-        {{- end }}
         - mountPath: /etc/secret/digitize-db-secret
           name: digitize-db-secret
           readOnly: true
@@ -250,9 +219,4 @@ spec:
     - name: vllm-secret
       secret:
         secretName: "vllm-secret-{{ .Values.llm.instanceSlug }}"
-    {{- end }}
-    {{- if .Values.authCatalogCaBundle }}
-    - name: ca-bundle
-      secret:
-        secretName: "digitize-ca-bundle-{{ .InstanceSlug }}"
     {{- end }}

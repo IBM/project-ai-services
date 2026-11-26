@@ -220,8 +220,9 @@ func (g *Gateway) CommandStream(stream grpc.BidiStreamingServer[workerpb.Command
 	recvErrCh := make(chan error, recvErrBufSize)
 	go g.recvLoop(ctx, stream, workerName, recvErrCh)
 
-	// Give the worker a route to LiteLLM on the control plane; needs recvLoop to read the reply.
-	go g.registerLiteLLMEgress(ctx, workerName, recvErrCh)
+	// Give the worker routes to LiteLLM and the catalog's service-auth endpoints on the control
+	// plane; needs recvLoop to read the reply.
+	go g.registerControlPlaneEgress(ctx, workerName, recvErrCh)
 
 	// Main loop: pull Commands from the worker's CommandCh and send them downstream.
 	for {

@@ -171,6 +171,11 @@ func handlePostDeployment(ctx context.Context, caddyCtx *caddy.Context, deployCt
 		return err
 	}
 
+	// Expose the catalog's service-auth endpoints on the same ingress for those services.
+	if err := routes.RegisterCatalogAuthIngress(ctx, caddyCtx, routeInfos); err != nil {
+		return err
+	}
+
 	// Wait for Caddy's TLS layer to be ready for the catalog API before attempting login.
 	// Route registration triggers a Caddy config reload that briefly interrupts
 	// TLS, causing "tls: internal error" if login is attempted immediately.

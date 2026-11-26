@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,41 +19,56 @@ func TestInjectServiceAuthValues_Podman(t *testing.T) {
 	assert.Equal(t, "ai-services--catalog", values["authJwksPlaintextHosts"])
 }
 
+// A service on a remote Podman worker reaches the catalog through its worker's Caddy egress
+// (plain HTTP in, mTLS out), so it needs no public catalog-api address and no CA bundle.
 func TestInjectServiceAuthValues_Podman_Remote(t *testing.T) {
 	t.Setenv("DOMAIN_SUFFIX", "example.com")
 	t.Setenv("CADDY_HTTPS_PORT", "8443")
 
-	values := map[string]any{}
+	// A service with a UI declares authCatalogUiUrl in its values.yaml.
+	values := map[string]any{"authCatalogUiUrl": ""}
 	err := InjectServiceAuthValues(context.Background(), "digitize", values, "podman", true)
 	require.NoError(t, err)
 
-	assert.Equal(t, "https://catalog-api.example.com:8443/.well-known/jwks.json", values["authJwksUrl"])
-	assert.Equal(t, "https://catalog-api.example.com:8443", values["authCatalogApiUrl"])
+	assert.Equal(t, "http://ai-services--caddy:8080/catalog-auth/.well-known/jwks.json", values["authJwksUrl"])
+	assert.Equal(t, "http://ai-services--caddy:8080/catalog-auth", values["authCatalogApiUrl"])
+	assert.Equal(t, "ai-services--caddy", values["authJwksPlaintextHosts"])
 	assert.Equal(t, "https://catalog-ui.example.com:8443", values["authCatalogUiUrl"])
-	assert.Equal(t, "", values["authJwksPlaintextHosts"])
+	assert.NotContains(t, values, "authCatalogCaBundle")
+}
+
+func TestInjectServiceAuthValues_Podman_Remote_NeedsNoPublicCatalogAPI(t *testing.T) {
+	t.Setenv("DOMAIN_SUFFIX", "")
+	t.Setenv("CATALOG_PUBLIC_API_URL", "")
+	t.Setenv("CATALOG_PUBLIC_UI_URL", "")
+
+	values := map[string]any{"authCatalogUiUrl": ""}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "digitize", values, "podman", true))
+
+	assert.Equal(t, "http://ai-services--caddy:8080/catalog-auth", values["authCatalogApiUrl"])
+	// Without a domain the UI falls back to inferring the sign-in address from its own host.
+	assert.Equal(t, "", values["authCatalogUiUrl"])
 }
 
 func TestInjectServiceAuthValues_Podman_Remote_CatalogUIURL(t *testing.T) {
 	t.Setenv("DOMAIN_SUFFIX", "example.com")
+	t.Setenv("CADDY_HTTPS_PORT", "443")
 
-	// Services without a UI must not get the value (their schemas reject unknown keys).
+	// Services that do not declare authCatalogUiUrl must not get it (their schemas reject unknown keys).
 	values := map[string]any{}
 	require.NoError(t, InjectServiceAuthValues(context.Background(), "similarity", values, "podman", true))
 	assert.NotContains(t, values, "authCatalogUiUrl")
 
+	// The default HTTPS port is omitted from the address.
+	values = map[string]any{"authCatalogUiUrl": ""}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
+	assert.Equal(t, "https://catalog-ui.example.com", values["authCatalogUiUrl"])
+
 	// An explicit env override wins over the derived value.
 	t.Setenv("CATALOG_PUBLIC_UI_URL", "https://ui.custom.example.com")
-	values = map[string]any{}
+	values = map[string]any{"authCatalogUiUrl": ""}
 	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
 	assert.Equal(t, "https://ui.custom.example.com", values["authCatalogUiUrl"])
-}
-
-func TestInjectServiceAuthValues_Podman_Remote_NoPublicURL(t *testing.T) {
-	t.Setenv("DOMAIN_SUFFIX", "")
-	t.Setenv("CATALOG_PUBLIC_API_URL", "")
-
-	err := InjectServiceAuthValues(context.Background(), "digitize", map[string]any{}, "podman", true)
-	require.Error(t, err)
 }
 
 func TestInjectServiceAuthValues_OpenShift_CoLocated(t *testing.T) {
@@ -82,63 +96,49 @@ func TestInjectServiceAuthValues_OpenShift_Remote_WithDomainSuffix(t *testing.T)
 	assert.Equal(t, "", values["authJwksPlaintextHosts"])
 }
 
-func TestInjectServiceAuthValues_Podman_Remote_CaddyRootCA(t *testing.T) {
-	t.Setenv("DOMAIN_SUFFIX", "example.com")
-	t.Setenv("CADDY_ADMIN_URL", "http://caddy:2019")
-	orig := fetchCaddyRootCA
-	t.Cleanup(func() { fetchCaddyRootCA = orig })
+func TestInjectServiceAuthValues_Podman_NeverInjectsCABundle(t *testing.T) {
+	// Even with a bundle in the environment, a Podman service gets none: it never verifies a
+	// catalog certificate.
+	t.Setenv("AUTH_CATALOG_CA_BUNDLE", "CERT_PEM_CONTENT")
 
-	fetchCaddyRootCA = func(context.Context, string) (string, error) { return "ROOT-PEM", nil }
-
-	values := map[string]any{}
-	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
-	assert.Equal(t, "ROOT-PEM", values["authCatalogCaBundle"])
-
-	// An explicit bundle is never replaced.
-	values = map[string]any{"authCatalogCaBundle": "OPERATOR-PEM"}
-	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
-	assert.Equal(t, "OPERATOR-PEM", values["authCatalogCaBundle"])
-
-	// A lookup failure does not fail the deployment and leaves the bundle empty.
-	fetchCaddyRootCA = func(context.Context, string) (string, error) { return "", errors.New("boom") }
-	values = map[string]any{}
-	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", true))
-	assert.NotContains(t, values, "authCatalogCaBundle")
-
-	// A local worker shares the catalog's network and never needs it.
-	fetchCaddyRootCA = func(context.Context, string) (string, error) { return "ROOT-PEM", nil }
-	values = map[string]any{}
-	require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", false))
-	assert.NotContains(t, values, "authCatalogCaBundle")
+	for _, remote := range []bool{false, true} {
+		values := map[string]any{}
+		require.NoError(t, InjectServiceAuthValues(context.Background(), "chat", values, "podman", remote))
+		assert.NotContains(t, values, "authCatalogCaBundle", "remote=%v", remote)
+	}
 }
 
 func TestInjectServiceAuthValues_PreservesExplicitValues(t *testing.T) {
-	values := map[string]any{
-		"authJwksUrl":            "https://custom-auth.example.com/jwks",
-		"authCatalogApiUrl":     "https://custom-auth.example.com",
-		"authAudience":          "custom-aud",
-		"authJwksPlaintextHosts": "custom-host",
-		"authCatalogCaBundle":    "---PEM---",
+	for _, remote := range []bool{false, true} {
+		values := map[string]any{
+			"authJwksUrl":            "https://custom-auth.example.com/jwks",
+			"authCatalogApiUrl":      "https://custom-auth.example.com",
+			"authAudience":           "custom-aud",
+			"authJwksPlaintextHosts": "custom-host",
+		}
+
+		err := InjectServiceAuthValues(context.Background(), "digitize", values, "podman", remote)
+		require.NoError(t, err)
+
+		assert.Equal(t, "custom-aud", values["authAudience"])
+		assert.Equal(t, "https://custom-auth.example.com/jwks", values["authJwksUrl"])
+		assert.Equal(t, "https://custom-auth.example.com", values["authCatalogApiUrl"])
+		assert.Equal(t, "custom-host", values["authJwksPlaintextHosts"])
 	}
-
-	err := InjectServiceAuthValues(context.Background(), "digitize", values, "podman", false)
-	require.NoError(t, err)
-
-	assert.Equal(t, "custom-aud", values["authAudience"])
-	assert.Equal(t, "https://custom-auth.example.com/jwks", values["authJwksUrl"])
-	assert.Equal(t, "https://custom-auth.example.com", values["authCatalogApiUrl"])
-	assert.Equal(t, "custom-host", values["authJwksPlaintextHosts"])
-	assert.Equal(t, "---PEM---", values["authCatalogCaBundle"])
 }
 
-func TestInjectServiceAuthValues_CABundleFromEnv(t *testing.T) {
+func TestInjectServiceAuthValues_OpenShift_CABundleFromEnv(t *testing.T) {
 	t.Setenv("AUTH_CATALOG_CA_BUNDLE", "CERT_PEM_CONTENT")
 
 	values := map[string]any{}
-	err := InjectServiceAuthValues(context.Background(), "digitize", values, "podman", false)
+	err := InjectServiceAuthValues(context.Background(), "digitize", values, "openshift", false)
 	require.NoError(t, err)
-
 	assert.Equal(t, "CERT_PEM_CONTENT", values["authCatalogCaBundle"])
+
+	// An explicit bundle is never replaced.
+	values = map[string]any{"authCatalogCaBundle": "---PEM---"}
+	require.NoError(t, InjectServiceAuthValues(context.Background(), "digitize", values, "openshift", false))
+	assert.Equal(t, "---PEM---", values["authCatalogCaBundle"])
 }
 
 // The injector is generic: the audience is the catalog ID of whichever service is deployed.
@@ -164,4 +164,3 @@ func TestInjectServiceAuthValues_DigitalAssistantServices(t *testing.T) {
 		})
 	}
 }
-

@@ -108,7 +108,7 @@ spec:
             - name: AUTH_CATALOG_CA_BUNDLE
               value: "/etc/ssl/certs/catalog-ca-bundle.crt"
           {{- end }}
-          {{- if .Values.authServiceCredential }}
+          {{- if .Values.authServiceCredentialSecret }}
             # Credential to obtain a similarity token from the catalog. Mounted from a Secret, never a literal value.
             - name: AUTH_SERVICE_CREDENTIAL_FILE
               value: "/etc/secret/service-credential/credential"
@@ -148,9 +148,9 @@ spec:
             limits:
               cpu: {{ .Values.backend.resources.limits.cpu | quote }}
               memory: {{ .Values.backend.resources.limits.memory | quote }}
-          {{- if or .Values.authServiceCredential .Values.authCatalogCaBundle }}
+          {{- if or .Values.authServiceCredentialSecret .Values.authCatalogCaBundle }}
           volumeMounts:
-          {{- if .Values.authServiceCredential }}
+          {{- if .Values.authServiceCredentialSecret }}
             - mountPath: /etc/secret/service-credential
               name: service-credential
               readOnly: true
@@ -197,12 +197,12 @@ spec:
               cpu: {{ .Values.mcp.resources.limits.cpu | quote }}
               memory: {{ .Values.mcp.resources.limits.memory | quote }}
         {{- end }}
-      {{- if or .Values.authServiceCredential .Values.authCatalogCaBundle }}
+      {{- if or .Values.authServiceCredentialSecret .Values.authCatalogCaBundle }}
       volumes:
-      {{- if .Values.authServiceCredential }}
+      {{- if .Values.authServiceCredentialSecret }}
         - name: service-credential
           secret:
-            secretName: "chat-service-credential"
+            secretName: {{ .Values.authServiceCredentialSecret | quote }}
       {{- end }}
       {{- if .Values.authCatalogCaBundle }}
         - name: ca-bundle

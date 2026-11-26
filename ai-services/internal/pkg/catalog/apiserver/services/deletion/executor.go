@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/common"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/openshift"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/deletion/repository/podman"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/db/models"
@@ -19,6 +20,7 @@ type DeletionExecutor struct {
 	serviceRepo           repository.ServiceRepository
 	componentRepo         repository.ComponentRepository
 	serviceDependencyRepo repository.ServiceDependencyRepository
+	credentials           common.CredentialRevoker
 }
 
 // NewDeletionExecutor creates a new DeletionExecutor instance.
@@ -34,6 +36,14 @@ func NewDeletionExecutor(
 		componentRepo:         componentRepo,
 		serviceDependencyRepo: serviceDependencyRepo,
 	}
+}
+
+// WithCredentialRevoker sets the revoker used to invalidate the service credentials of
+// deleted services.
+func (e *DeletionExecutor) WithCredentialRevoker(r common.CredentialRevoker) *DeletionExecutor {
+	e.credentials = r
+
+	return e
 }
 
 // Execute carries out the deletion using the already-resolved runtime.
@@ -72,7 +82,7 @@ func (e *DeletionExecutor) executePodmanDeletion(
 		e.serviceRepo,
 		e.componentRepo,
 		e.serviceDependencyRepo,
-	).PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
+	).WithCredentialRevoker(e.credentials).PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 
 	return nil
 }
@@ -92,7 +102,7 @@ func (e *DeletionExecutor) executeOpenShiftDeletion(
 		e.serviceRepo,
 		e.componentRepo,
 		e.serviceDependencyRepo,
-	).PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
+	).WithCredentialRevoker(e.credentials).PerformDeletion(ctx, appID, services, orphanedComponentIDs, keepData)
 
 	return nil
 }

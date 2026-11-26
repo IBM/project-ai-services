@@ -23,6 +23,7 @@ type PodmanDeletion struct {
 	serviceRepo           dbrepo.ServiceRepository
 	componentRepo         dbrepo.ComponentRepository
 	serviceDependencyRepo dbrepo.ServiceDependencyRepository
+	credentials           common.CredentialRevoker
 }
 
 // NewPodmanDeletion creates a new deletion service instance.
@@ -40,6 +41,13 @@ func NewPodmanDeletion(
 		componentRepo:         componentRepo,
 		serviceDependencyRepo: serviceDependencyRepo,
 	}
+}
+
+// WithCredentialRevoker sets the revoker used to invalidate a deleted service's credentials.
+func (s *PodmanDeletion) WithCredentialRevoker(r common.CredentialRevoker) *PodmanDeletion {
+	s.credentials = r
+
+	return s
 }
 
 // PerformDeletion carries out the async cascade deletion for an application.
@@ -172,7 +180,11 @@ func (s *PodmanDeletion) deleteServices(ctx context.Context, services []models.S
 			errMsg := fmt.Sprintf("service %s: failed to delete from DB: %s", svc.ID, err)
 			errorMessages = append(errorMessages, errMsg)
 			_ = catalogutils.UpdateServiceStatus(ctx, s.serviceRepo, svc.ID, models.ServiceStatusError, fmt.Sprintf("failed to delete from DB: %s", err))
+
+			continue
 		}
+
+		common.RevokeServiceCredentials(ctx, s.credentials, svc.ID)
 	}
 
 	return errorMessages

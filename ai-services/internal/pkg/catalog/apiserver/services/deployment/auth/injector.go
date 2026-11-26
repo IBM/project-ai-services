@@ -7,9 +7,10 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
+	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // InjectServiceAuthValues populates auth-related values in a service's Values map if not already explicitly set.
@@ -18,7 +19,11 @@ import (
 // - authCatalogApiUrl: base URL for the catalog API (used by UI exchange proxy)
 // - authJwksPlaintextHosts: hosts allowed to serve JWKS over plain HTTP
 // - authAudience: default audience if missing
-// - authCatalogCaBundle: CA bundle PEM if present in the catalog environment or already set.
+// - authCatalogCaBundle (OpenShift only): CA bundle PEM if present in the catalog environment or already set.
+//
+// A Podman service never needs a CA bundle: a service on the catalog host reaches the catalog over
+// the pod network, and a service on a remote worker reaches it through its worker's Caddy, which
+// carries the request to the catalog over mTLS.
 func InjectServiceAuthValues(
 	ctx context.Context,
 	serviceID string,
@@ -38,97 +43,43 @@ func InjectServiceAuthValues(
 	// If authJwksUrl is already explicitly set by caller/operator, keep it
 	existingJwksURL, _ := values["authJwksUrl"].(string)
 
-	var err error
 	switch runtimeType {
 	case runtimeTypes.RuntimeTypeOpenShift.String():
-		err = injectOpenShiftAuth(ctx, serviceID, values, existingJwksURL, isRemoteWorker)
-	case runtimeTypes.RuntimeTypePodman.String():
-		err = injectPodmanAuth(serviceID, values, existingJwksURL, isRemoteWorker)
-	}
-	if err != nil {
-		return err
-	}
-
-	// Propagate CA bundle from environment if not set in values
-	if _, ok := values["authCatalogCaBundle"]; !ok || values["authCatalogCaBundle"] == "" {
-		if envCA := utils.GetEnv("AUTH_CATALOG_CA_BUNDLE", ""); envCA != "" {
-			values["authCatalogCaBundle"] = envCA
+		if err := injectOpenShiftAuth(ctx, values, existingJwksURL, isRemoteWorker); err != nil {
+			return err
 		}
-	}
 
-	// A remote Podman worker reaches the catalog over HTTPS through Caddy. With "tls internal"
-	// Caddy's certificate is signed by its own local CA, which the worker does not trust.
-	if runtimeType == runtimeTypes.RuntimeTypePodman.String() && isRemoteWorker {
-		injectCaddyRootCA(ctx, values)
+		// Propagate CA bundle from environment if not set in values
+		if _, ok := values["authCatalogCaBundle"]; !ok || values["authCatalogCaBundle"] == "" {
+			if envCA := utils.GetEnv("AUTH_CATALOG_CA_BUNDLE", ""); envCA != "" {
+				values["authCatalogCaBundle"] = envCA
+			}
+		}
+	case runtimeTypes.RuntimeTypePodman.String():
+		injectPodmanAuth(values, existingJwksURL, isRemoteWorker)
 	}
 
 	return nil
 }
 
-// fetchCaddyRootCA reads Caddy's internal root CA. It is a variable so tests can replace it.
-var fetchCaddyRootCA = utils.GetCaddyInternalRootCA
-
-// injectCaddyRootCA sets authCatalogCaBundle to Caddy's internal root CA when no bundle was
-// supplied. It is best effort: on failure the value stays empty, TLS verification stays on,
-// and the service fails closed until the operator supplies a bundle.
-func injectCaddyRootCA(ctx context.Context, values map[string]any) {
-	if v, ok := values["authCatalogCaBundle"]; ok && v != "" {
-		return
-	}
-	adminURL := utils.GetEnv("CADDY_ADMIN_URL", "")
-	if adminURL == "" {
-		return
-	}
-	root, err := fetchCaddyRootCA(ctx, adminURL)
-	if err != nil {
-		logger.WarningfCtx(ctx, "Could not read the Caddy root CA for a remote service; set AUTH_CATALOG_CA_BUNDLE: %v\n", err)
-
-		return
-	}
-	if root != "" {
-		values["authCatalogCaBundle"] = root
-	}
-}
-
-// CredentialProvisioner creates the per-deployment service credential (DA2) for a service
-// that needs one. It returns an empty string, and no error, for a service that needs none.
+// CredentialProvisioner creates and revokes the per-deployment service credentials (DA2).
 type CredentialProvisioner interface {
-	ProvisionIfNeeded(ctx context.Context, serviceID, deploymentID string) (string, error)
+	// ProvisionWithGrants creates a credential for caller in a deployment with exactly the
+	// given grants (audience -> roles) and returns it. It is returned once and never logged.
+	ProvisionWithGrants(ctx context.Context, caller, deploymentID string, grants map[string][]string) (string, error)
+	// RevokeForDeployment revokes every credential of a deployment, for a deployment that
+	// failed or a service that was deleted.
+	RevokeForDeployment(ctx context.Context, deploymentID string) error
 }
 
-// InjectServiceCredential puts a fresh service credential into values as authServiceCredential
-// for a service that needs one (today only chat). The templates deliver it to the pod as a
-// secret. A nil provisioner leaves values unchanged, so a deployment without credential
-// support behaves as before. The value must never be logged.
-func InjectServiceCredential(
-	ctx context.Context,
-	serviceID, deploymentID string,
-	values map[string]any,
-	p CredentialProvisioner,
-) error {
-	if values == nil || p == nil {
-		return nil
-	}
-
-	credential, err := p.ProvisionIfNeeded(ctx, serviceID, deploymentID)
-	if err != nil {
-		return fmt.Errorf("failed to provision service credential for %s: %w", serviceID, err)
-	}
-	if credential != "" {
-		values["authServiceCredential"] = credential
-	}
-
-	return nil
-}
-
-func injectOpenShiftAuth(ctx context.Context, serviceID string, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
+func injectOpenShiftAuth(ctx context.Context, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
 	if !isRemoteWorker {
 		injectCoLocatedOpenShiftAuth(values, existingJwksURL)
 
 		return nil
 	}
 
-	return injectRemoteOpenShiftAuth(ctx, serviceID, values, existingJwksURL)
+	return injectRemoteOpenShiftAuth(ctx, values, existingJwksURL)
 }
 
 func injectCoLocatedOpenShiftAuth(values map[string]any, existingJwksURL string) {
@@ -144,7 +95,7 @@ func injectCoLocatedOpenShiftAuth(values map[string]any, existingJwksURL string)
 	}
 }
 
-func injectRemoteOpenShiftAuth(ctx context.Context, serviceID string, values map[string]any, existingJwksURL string) error {
+func injectRemoteOpenShiftAuth(ctx context.Context, values map[string]any, existingJwksURL string) error {
 	publicURL, err := resolveOpenShiftPublicCatalogURL(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to resolve catalog public URL for remote worker: %w", err)
@@ -155,7 +106,7 @@ func injectRemoteOpenShiftAuth(ctx context.Context, serviceID string, values map
 	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
 		values["authCatalogApiUrl"] = publicURL
 	}
-	injectCatalogUIURL(serviceID, values, publicURL)
+	injectCatalogUIURL(values, catalogUIURLFromAPIURL(publicURL))
 	if _, ok := values["authJwksPlaintextHosts"]; !ok {
 		values["authJwksPlaintextHosts"] = ""
 	}
@@ -163,11 +114,13 @@ func injectRemoteOpenShiftAuth(ctx context.Context, serviceID string, values map
 	return nil
 }
 
-func injectPodmanAuth(serviceID string, values map[string]any, existingJwksURL string, isRemoteWorker bool) error {
+func injectPodmanAuth(values map[string]any, existingJwksURL string, isRemoteWorker bool) {
 	if isRemoteWorker {
-		// The catalog pod name only resolves on the catalog host's podman network, so a
-		// remote worker must use the catalog's public (HTTPS) API URL instead.
-		return injectRemotePodmanAuth(serviceID, values, existingJwksURL)
+		// The catalog pod name only resolves on the catalog host's podman network, so a remote
+		// worker reaches the catalog through its own Caddy (plain HTTP in, mTLS out).
+		injectRemotePodmanAuth(values, existingJwksURL)
+
+		return
 	}
 
 	// On Podman, local worker accesses catalog API directly on the podman network
@@ -182,42 +135,43 @@ func injectPodmanAuth(serviceID string, values map[string]any, existingJwksURL s
 	if _, ok := values["authJwksPlaintextHosts"]; !ok || values["authJwksPlaintextHosts"] == "" {
 		values["authJwksPlaintextHosts"] = catalogHost
 	}
-
-	return nil
 }
 
-func injectRemotePodmanAuth(serviceID string, values map[string]any, existingJwksURL string) error {
-	publicURL, err := resolvePodmanPublicCatalogURL()
-	if err != nil {
-		return fmt.Errorf("failed to resolve catalog public URL for remote worker: %w", err)
-	}
+// injectRemotePodmanAuth points a service on a remote Podman worker at the catalog through the
+// worker's own Caddy egress server. The worker gateway registers that route (catalog-auth) when the
+// worker connects; Caddy forwards the request over mTLS to the catalog's private ingress, which
+// exposes only the service-auth endpoints. The service-to-Caddy hop is plain HTTP inside the worker
+// host, so the Caddy host is also listed as a plaintext host.
+func injectRemotePodmanAuth(values map[string]any, existingJwksURL string) {
+	caddyHost := workerconstants.WorkerCaddyPodName
+	baseURL := fmt.Sprintf("http://%s:%s%s", caddyHost, proxy.PrivateEgressPort, workerconstants.CatalogAuthPathPrefix)
+
 	if existingJwksURL == "" {
-		values["authJwksUrl"] = fmt.Sprintf("%s/.well-known/jwks.json", publicURL)
+		values["authJwksUrl"] = baseURL + "/.well-known/jwks.json"
 	}
 	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
-		values["authCatalogApiUrl"] = publicURL
+		values["authCatalogApiUrl"] = baseURL
 	}
-	injectCatalogUIURL(serviceID, values, publicURL)
-	if _, ok := values["authJwksPlaintextHosts"]; !ok {
-		values["authJwksPlaintextHosts"] = ""
+	if _, ok := values["authJwksPlaintextHosts"]; !ok || values["authJwksPlaintextHosts"] == "" {
+		values["authJwksPlaintextHosts"] = caddyHost
 	}
 
-	return nil
+	// The browser cannot use the internal route, so the sign-in page keeps its public address.
+	injectCatalogUIURL(values, podmanCatalogUIURL())
 }
-
-// servicesWithUI lists the services whose UI redirects the browser to the catalog for sign-in.
-var servicesWithUI = map[string]bool{"chat": true, "digitize": true}
 
 // injectCatalogUIURL sets authCatalogUiUrl, the catalog UI address a service UI sends the
 // browser to for sign-in. A service UI on another host cannot infer it from its own address.
-// CATALOG_PUBLIC_UI_URL wins; otherwise it is derived from the public API URL
-// (catalog-api.<domain> -> catalog-ui.<domain>). If neither works it is left unset and the
-// UI falls back to inferring it from its own host name.
-func injectCatalogUIURL(serviceID string, values map[string]any, publicAPIURL string) {
-	if !servicesWithUI[serviceID] {
+// Only a service whose values.yaml declares authCatalogUiUrl (it has a UI) gets the value;
+// the other services' schemas reject unknown keys. CATALOG_PUBLIC_UI_URL wins; otherwise
+// derivedURL is used. If neither is set it is left unset and the UI falls back to inferring
+// it from its own host name.
+func injectCatalogUIURL(values map[string]any, derivedURL string) {
+	current, declared := values["authCatalogUiUrl"]
+	if !declared {
 		return
 	}
-	if v, ok := values["authCatalogUiUrl"]; ok && v != "" {
+	if current != "" {
 		return
 	}
 	if envURL := utils.GetEnv("CATALOG_PUBLIC_UI_URL", ""); envURL != "" {
@@ -225,26 +179,36 @@ func injectCatalogUIURL(serviceID string, values map[string]any, publicAPIURL st
 
 		return
 	}
-	if strings.Contains(publicAPIURL, "://catalog-api.") {
-		values["authCatalogUiUrl"] = strings.Replace(publicAPIURL, "://catalog-api.", "://catalog-ui.", 1)
+	if derivedURL != "" {
+		values["authCatalogUiUrl"] = derivedURL
 	}
 }
 
-func resolvePodmanPublicCatalogURL() (string, error) {
-	if envURL := utils.GetEnv("CATALOG_PUBLIC_API_URL", ""); envURL != "" {
-		return envURL, nil
+// catalogUIURLFromAPIURL derives the catalog UI address from the public catalog API address
+// (catalog-api.<domain> -> catalog-ui.<domain>). It returns "" when the API address does not
+// have that shape.
+func catalogUIURLFromAPIURL(publicAPIURL string) string {
+	if !strings.Contains(publicAPIURL, "://catalog-api.") {
+		return ""
 	}
 
+	return strings.Replace(publicAPIURL, "://catalog-api.", "://catalog-ui.", 1)
+}
+
+// podmanCatalogUIURL returns the public catalog UI address on a Podman catalog host
+// (catalog-ui.<DOMAIN_SUFFIX>[:<CADDY_HTTPS_PORT>]), or "" when DOMAIN_SUFFIX is not set.
+func podmanCatalogUIURL() string {
 	domainSuffix := utils.GetEnv("DOMAIN_SUFFIX", "")
 	if domainSuffix == "" {
-		return "", fmt.Errorf("neither CATALOG_PUBLIC_API_URL nor DOMAIN_SUFFIX is set")
-	}
-	port := utils.GetEnv("CADDY_HTTPS_PORT", "443")
-	if port == "443" || port == "" {
-		return fmt.Sprintf("https://catalog-api.%s", domainSuffix), nil
+		return ""
 	}
 
-	return fmt.Sprintf("https://catalog-api.%s:%s", domainSuffix, port), nil
+	port := utils.GetEnv("CADDY_HTTPS_PORT", "443")
+	if port == "443" || port == "" {
+		return fmt.Sprintf("https://catalog-ui.%s", domainSuffix)
+	}
+
+	return fmt.Sprintf("https://catalog-ui.%s:%s", domainSuffix, port)
 }
 
 func resolveOpenShiftPublicCatalogURL(ctx context.Context) (string, error) {

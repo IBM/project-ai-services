@@ -583,9 +583,6 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	if err := deploymentauth.InjectServiceAuthValues(ctx, svc.CatalogID, svc.Values, d.runtimeType, isRemote); err != nil {
 		return fmt.Errorf("failed to inject auth values for service %s: %w", svc.CatalogID, err)
 	}
-	if err := deploymentauth.InjectServiceCredential(ctx, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials); err != nil {
-		return err
-	}
 
 	// Load service from catalog
 	service, err := d.catalogProvider.LoadService(svc.CatalogID)
@@ -598,6 +595,23 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	if err != nil {
 		return fmt.Errorf("failed to scope catalog provider for runtime %q: %w", d.runtimeType, err)
 	}
+
+	// Provision the service credential, if the asset declares one, and hand the pod only the
+	// name of the Secret that holds it. Roll it back if anything below fails.
+	credSpecs, err := scopedProvider.LoadServiceCredentialSpecs(svc.CatalogID)
+	if err != nil {
+		return err
+	}
+	credSecrets, err := deploymentauth.ProvisionCredentialSecrets(ctx, credSpecs, svc.CatalogID, svc.DatabaseID.String(), svc.Values, d.credentials, d.runtime)
+	if err != nil {
+		return err
+	}
+	deployed := false
+	defer func() {
+		if !deployed {
+			credSecrets.Rollback(ctx)
+		}
+	}()
 
 	// Load runtime-specific metadata (contains PodTemplateExecutions)
 	serviceAppMetadata, err := scopedProvider.LoadServiceRuntimeMetadata(svc.CatalogID)
@@ -615,6 +629,8 @@ func (d *PodmanDeployer) deployService(ctx context.Context, plan *DeploymentPlan
 	if err := d.deployServicePods(ctx, plan.ApplicationID, svc, serviceAppMetadata, tmpls); err != nil {
 		return fmt.Errorf("failed to deploy service pods: %w", err)
 	}
+
+	deployed = true
 
 	logger.InfofCtx(ctx, "Service %s deployed successfully\n", serviceID)
 

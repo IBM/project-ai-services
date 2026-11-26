@@ -118,6 +118,7 @@ func TestRegisterIngressRoute_ExactAllowList(t *testing.T) {
 		AllowedRules: []RouteRule{
 			{Method: "GET", Path: "/.well-known/jwks.json"},
 			{Method: "POST", Path: "/api/v1/auth/code/exchange"},
+			{Method: "POST", Path: "/api/v1/auth/service-credential/token"},
 		},
 	})
 	require.NoError(t, err)
@@ -130,16 +131,20 @@ func TestRegisterIngressRoute_ExactAllowList(t *testing.T) {
 
 	rawMatches, ok := r["match"].([]any)
 	require.True(t, ok)
-	require.Len(t, rawMatches, 2)
+	require.Len(t, rawMatches, 3)
 
 	m0 := rawMatches[0].(map[string]any)
 	m1 := rawMatches[1].(map[string]any)
+	m2 := rawMatches[2].(map[string]any)
 
 	assert.Equal(t, []any{"/catalog-auth/.well-known/jwks.json"}, m0["path"])
 	assert.Equal(t, []any{"GET"}, m0["method"])
 
 	assert.Equal(t, []any{"/catalog-auth/api/v1/auth/code/exchange"}, m1["path"])
 	assert.Equal(t, []any{"POST"}, m1["method"])
+
+	assert.Equal(t, []any{"/catalog-auth/api/v1/auth/service-credential/token"}, m2["path"])
+	assert.Equal(t, []any{"POST"}, m2["method"])
 
 	// Negative matcher tests: verify that unallowed paths/methods do not match the rule set
 	isAllowed := func(method, path string) bool {
@@ -171,10 +176,12 @@ func TestRegisterIngressRoute_ExactAllowList(t *testing.T) {
 	// Positive cases: exactly allowed
 	assert.True(t, isAllowed("GET", "/catalog-auth/.well-known/jwks.json"))
 	assert.True(t, isAllowed("POST", "/catalog-auth/api/v1/auth/code/exchange"))
+	assert.True(t, isAllowed("POST", "/catalog-auth/api/v1/auth/service-credential/token"))
 
 	// Negative cases: must return false (Caddy 404 / no match)
 	assert.False(t, isAllowed("GET", "/catalog-auth/api/v1/auth/code/exchange"), "GET on exchange must not match")
 	assert.False(t, isAllowed("POST", "/catalog-auth/.well-known/jwks.json"), "POST on jwks must not match")
+	assert.False(t, isAllowed("GET", "/catalog-auth/api/v1/auth/service-credential/token"), "GET on credential token must not match")
 	assert.False(t, isAllowed("POST", "/catalog-auth/api/v1/auth/login"), "login must not match")
 	assert.False(t, isAllowed("POST", "/catalog-auth/api/v1/auth/service-token"), "service-token must not match")
 	assert.False(t, isAllowed("POST", "/catalog-auth/api/v1/auth/authorize"), "authorize must not match")
@@ -219,6 +226,10 @@ func TestRegisterEgressRoute(t *testing.T) {
 	assert.NotContains(t, tlsCfg, "client_certificate_key_file", "plaintext client cert fields must not be emitted")
 	assert.Equal(t, "w1.10.0.0.2.nip.io", tlsCfg["server_name"])
 	assert.Equal(t, map[string]any{"provider": "file", "pem_files": []any{"/data/gateway-pki/ca.crt"}}, tlsCfg["ca"])
+
+	// Host must equal the TLS server name or the remote ingress answers HTTP 421.
+	headers := h["headers"].(map[string]any)["request"].(map[string]any)["set"].(map[string]any)
+	assert.Equal(t, []any{"w1.10.0.0.2.nip.io"}, headers["Host"])
 }
 
 func TestRegisterEgressRoute_OmitsServerNameWhenUnset(t *testing.T) {

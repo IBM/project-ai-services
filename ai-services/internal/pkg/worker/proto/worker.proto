@@ -137,4 +137,9 @@ enum CommandType {
 
   // Delete all Kubernetes secrets matching a label selector on an OpenShift worker.
   COMMAND_TYPE_DELETE_SECRETS            = 38;
+
+  // Create (or replace) a secret on the worker's runtime: a Kubernetes Secret on an
+  // OpenShift worker, a Podman secret holding a Kubernetes Secret document on a Podman worker.
+  // The payload carries the secret value, so it must never be logged.
+  COMMAND_TYPE_CREATE_SECRET             = 39;
 }
