@@ -38,7 +38,7 @@ It also introduces three things that no existing service has:
 |:---------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Source of training data    | A table read through the stored connector (`connector_id`), named in the `POST /v1/connectors` call that created the job.                                                                                                                               |
 | Connector                  | A row in `connectors` managed by `/v1/connectors`: type, connection details, secrets encrypted. No scanner and no sync.                                                                                                                                 |
-| Inputs and target          | `input_columns` (one or more, each with an optional type) and `target_column` (exactly one).                                                                                                                                                          |
+| Inputs and target          | `input_columns` (one or more column names) and `target_column` (exactly one).                                                                                                                                                          |
 | Scheduling                 | APScheduler in the API process, one job per connector, with its job store in PostgreSQL. A one-off job runs the first training and a cron job runs the later ones.                                                           |
 | Training run               | Orchestrated by the API: a **data loader subprocess** writes the table to scratch → a **worker subprocess** runs AutoGluon and the ONNX export on scratch → the API publishes the forecaster's directory to the shared volume and loads it into Triton.                                                                                                                                         |
 | Trained forecaster         | A row in `forecasters` plus a directory `fc_<connector_id>_<version>` on the shared repository volume. The version is the job's `jobs.seq`.                                                                                                             |
@@ -87,7 +87,7 @@ An identity column on `jobs` provides the version. The worker never picks a vers
 
 **Decision: the service has a connector CRUD API and a `connectors` table, and nothing more.** A connector holds the connection details of one source database, with secrets encrypted. The training job created with it names it by `connector_id`. The scanner, background sync and sync history that digitize attaches to a connector are not part of this service.
 
-- **Same pattern as digitize.** Create, list, get, partial update and delete, with an allowlist of safe fields. Every other field is encrypted with AES-256-GCM (`DB_ENCRYPTION_KEY`) and never returned.
+- **Same pattern as digitize.** Create, list, get and partial update (delete is not part of this release), with an allowlist of safe fields. Every other field is encrypted with AES-256-GCM (`DB_ENCRYPTION_KEY`) and never returned.
 - **The loader reads and decrypts.** The loader subprocess reads the connector row with the API's database role and decrypts the secret fields with `DB_ENCRYPTION_KEY`. The worker's role has no grant on `connectors`, so the credentials never reach the training process. Nothing reads the source database outside a job.
 - **Rotation is an update.** Each job reads the connector when it runs, so changing a password with `PUT /v1/connectors/{id}` applies to the next job.
 - **Referential safety.** A connector cannot be deleted while a `QUEUED` or `RUNNING` job uses it. Finished jobs keep their rows with `connector_id` set to `NULL`.
@@ -326,7 +326,7 @@ Returns every forecaster of the connector, newest version first. The list is bou
 
 #### POST /v1/forecast/ — Run a Forecast on the default connector
 **NOTE: This endpoint will be removed once multiple connector support is added.**
-Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
+Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`: it checks the column names, and rejects a `null` and a JSON object, array or boolean as a value), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
 **Query Parameters:**
 
@@ -375,7 +375,7 @@ curl -X POST "http://localhost:8500/v1/forecast?version=11" \
 | Status                                         | Description                                                                                                                                           |
 |:-----------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 200 OK                                         | One result per row.                                                                                                                                   |
-| 400 Bad Request (`INVALID_REQUEST`)            | An empty row list is provided, a row has a missing/unknown column or invalid value, or `version` query parameter is not a positive integer. |
+| 400 Bad Request (`INVALID_REQUEST`)            | An empty row list is provided, a row has a missing or unknown column, a `null`, or a JSON object, array or boolean as a value, or `version` query parameter is not a positive integer. |
 | 404 Not Found (`RESOURCE_NOT_FOUND`)           | No default connector found, the connector has no forecaster yet, or the specified `version` does not exist. |
 | 422 Unprocessable Entity                       | The body is not valid JSON or not an array of row objects.                                                                                            |
 | 429 Too Many Requests (`SERVER_BUSY`)          | Database connection pool is busy.                                                                                                                     |
@@ -385,7 +385,7 @@ curl -X POST "http://localhost:8500/v1/forecast?version=11" \
 
 #### POST /v1/forecast/{connector_id} — Run a Forecast on a Connector
 
-Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
+Runs a forecast against a connector's trained forecaster on the rows in the request. By default, the service selects the connector's newest forecaster. If the `version` query parameter is provided, it targets that specific retained version. The service validates the rows against the connector's input columns (`input_columns`: it checks the column names, and rejects a `null` and a JSON object, array or boolean as a value), forwards them to Triton, and returns one result per row in the same order. The call is synchronous.
 
 **Query Parameters:**
 
@@ -438,7 +438,7 @@ curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f9
 | Status                                         | Description                                                                                                                                           |
 |:-----------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 200 OK                                         | One result per row.                                                                                                                                   |
-| 400 Bad Request (`INVALID_REQUEST`)            | An empty row list is provided, a row has a missing/unknown column or invalid value, or `version` query parameter is not a positive integer. |
+| 400 Bad Request (`INVALID_REQUEST`)            | An empty row list is provided, a row has a missing or unknown column, a `null`, or a JSON object, array or boolean as a value, or `version` query parameter is not a positive integer. |
 | 404 Not Found (`RESOURCE_NOT_FOUND`)           | No connector with this ID, the connector has no forecaster yet, or the specified `version` does not exist. |
 | 422 Unprocessable Entity                       | The body is not valid JSON or not an array of row objects.                                                                                            |
 | 429 Too Many Requests (`SERVER_BUSY`)          | Database connection pool is busy.                                                                                                                     |
@@ -447,7 +447,7 @@ curl -X POST "http://localhost:8500/v1/forecast/7c9e6679-7425-40de-944b-e07fc1f9
 
 ### 6.2 Connectors
 
-A connector stores the connection details of one source database, with its secrets encrypted. The training job created with it refers to it by `connector_id`. The endpoints follow `services/digitize/api/v1/connectors.py`: create, list, get, partial update and delete, with the allowlist encryption of `connectors/encryption.py`.
+A connector stores the connection details of one source database, with its secrets encrypted. The training job created with it refers to it by `connector_id`. The endpoints follow `services/digitize/api/v1/connectors.py`: create, list, get and partial update (delete is not part of this release), with the allowlist encryption of `connectors/encryption.py`.
 
 **What is in scope and what is not.** The scope here is the connector **API and its table**. There is no scanner, no sync and no sync history. Scheduled training is set by `service_settings.schedule` in the connector Create request. Nothing reads the source database until a training job runs, and then the loader, which the API runs before the worker, does it. A connector therefore has no `last_sync_at` and no file counters, which digitize's connectors have.
 
@@ -469,7 +469,7 @@ A connector stores the connection details of one source database, with its secre
 | `name`               | string | Yes      | Unique, human-readable name, 1–255 characters.                                         |
 | `type`               | string | Yes      | A supported connector type (`db2_for_i`).                                              |
 | `connection_details` | object | Yes      | Fields for the type, as in the connector types table. Unknown fields are rejected.     |
-| `service_settings`   | object | Yes      | The settings chosen when the service was deployed: the training data and the schedule. See the `service_settings` object table. Unknown fields are rejected. |
+| `service_settings`   | object | Yes      | The settings chosen when the service was deployed: the training data and the schedule. See the `service_settings` object table. Unknown fields are ignored: the catalog forwards every setting of the deployed service. |
 
 **`service_settings` object:**
 
@@ -477,7 +477,7 @@ A connector stores the connection details of one source database, with its secre
 |:------------------|:-------|:---------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `table`           | string | Yes      | Table to train on.                                                                                                                                                            |
 | `target_column`   | string | Yes      | The column to predict. Exactly one.                                                                                                                                           |
-| `input_columns`   | array  | Yes      | The input columns. Each is an object with a `name` and, where AutoGluon needs it, a `type` (`string`, `integer` or `number`). The forecast endpoint checks rows against them. |
+| `input_columns`   | array  | Yes      | The names of the input columns, an array of strings. The forecast endpoint checks the names of the columns of each row against them. |
 | `schedule`        | enum   | No       | Training cadence: `hourly`, `daily`, `weekly`, `monthly` or `yearly`. When it is unset, only the first training runs.                                                         |
 
 **Sample request:**
@@ -499,11 +499,7 @@ curl -X POST http://localhost:8500/v1/connectors \
         "service_settings": {
           "table": "ORDERS",
           "target_column": "DELIVERY_LATE",
-          "input_columns": [
-            {"name": "REGION"},
-            {"name": "QUANTITY"},
-            {"name": "UNIT_PRICE"}
-          ],
+          "input_columns": ["REGION", "QUANTITY", "UNIT_PRICE"],
           "schedule": "daily"
         }
       }'
@@ -523,29 +519,28 @@ The catalog expects a successful answer, so a valid request is answered with `20
 
 | Case | Response | `connectors` row | `training_configs` row, job and schedule | Visible in `GET /v1/connectors` |
 |:-----|:---------|:-----------------|:-----------------------------------------|:--------------------------------|
-| New connector: no other connector, queue not full | 201 | Inserted with status `ACCEPTED`. | Row inserted, job `QUEUED`. APScheduler jobs registered: a one-off job that starts the first training at once and, when `schedule` is set, a cron job for the later ones. | Yes, status `ACCEPTED`. |
+| New connector: no other connector exists | 201 | Inserted with status `ACCEPTED`. | Row inserted, job `QUEUED`. APScheduler jobs registered: a one-off job that starts the first training at once and, when `schedule` is set, a cron job for the later ones. | Yes, status `ACCEPTED`. |
 | The `id` already exists (a repeated request) | 201 | Not changed. | Not changed. No second job, no second schedule. | The existing connector. |
-| A connector that has not `FAILED` already exists | 201 | Inserted with status `FAILED` and the message "A connector already exists. Only one connector is supported." | None. | Yes, status `FAILED` with the message. |
-| `MAX_QUEUED_JOBS` training jobs are already queued | 201 | Inserted with status `FAILED` and the message "Too many training jobs are queued." | None. | Yes, status `FAILED` with the message. |
+| A connector already exists, with any status, `FAILED` included | 201 | Inserted with status `FAILED` and the message "A connector already exists. Only one connector is supported." | None. | Yes, status `FAILED` with the message. |
+| No other connector exists, and `DB_ENCRYPTION_KEY` is missing or not 32 bytes | 201 | Inserted with status `FAILED` and the message "Connector encryption key not found. Ensure the DB_ENCRYPTION_KEY environment variable is set before starting the service." (or the 32-byte message). Only the safe fields are stored: the secrets cannot be encrypted, and they are never stored in plain text. | None. | Yes, status `FAILED` with the message. |
 | A `FAILED` connector cannot be stored because its `name` is taken | 201 | Nothing inserted. The conflict is logged. | None. | No. |
-| A new connector has the `name` of an existing connector | 409 `RESOURCE_LOCKED` | Nothing inserted. | None. | No. |
 | The lock on the `connectors` table times out | 409 `RESOURCE_LOCKED` | Nothing inserted. | None. | No. |
 | The database pool is exhausted | 429 `SERVER_BUSY` | Nothing inserted. | None. | No. |
 | A database write or the commit fails | 500 `DATABASE_ERROR` | Rolled back, nothing inserted. | None. | No. |
-| `DB_ENCRYPTION_KEY` is missing or not 32 bytes | 500 `INTERNAL_SERVER_ERROR` | Nothing inserted. | None. | No. |
 
+- **Which reason wins.** An existing connector is checked first, then the encryption key. A repeated `id` is answered before either of them.
 - **One transaction.** The checks and the insert run in one transaction that holds a lock on the `connectors` table, so two requests cannot both pass the single-connector check. A failed write rolls back the whole transaction. Schedules are registered only after the commit.
-- **`FAILED` connectors.** A `FAILED` connector keeps its encrypted `connection_details`, and `status` and `message` give the reason. It does not count as the single connector, and the forecast endpoint never uses it. It keeps its `name` and its `id`: a later create with the same `name` and a new `id` returns `409` when no other connector exists, and a later create with the same `id` returns `201` without changing the row.
+- **`FAILED` connectors.** A `FAILED` connector keeps its `connection_details` (with the secrets encrypted, or only the safe fields when `DB_ENCRYPTION_KEY` was unusable), and `status` and `message` give the reason. It counts as a connector: while it exists, every later create is stored as `FAILED` too. It has no `training_configs` row and no forecaster, so `POST /v1/forecast` answers `404` for it, and the list endpoints return an empty array. It keeps its `id`: a later create with the same `id` returns `201` without changing the row.
 - **Catalog.** The catalog validates the body before it calls the service, and it treats `201` and `409` as success. The `201` for a connector that is stored as `FAILED`, or not stored at all because its `name` is taken, is therefore seen as success by the catalog. Only the `status` and `message` of `GET /v1/connectors` tell that the connector is not trained.
 - **Secrets.** No secret appears in a `message`, a response or a log.
 
 | Status                                | Description                                                                                                                                                       |
 |:--------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 201 Created                           | The request was valid. The connector is accepted, or handled as in the Behavior table.                                                                             |
-| 409 Conflict (`RESOURCE_LOCKED`)      | A new connector has the `name` of an existing connector, or the lock on the `connectors` table timed out. The catalog treats `409` as success.                      |
-| 422 Unprocessable Entity              | The body cannot be parsed: unknown `type`, an `id` that is not a UUID, a missing or unknown field in `connection_details` or `service_settings`. Same envelope as every error. |
-| 429 Too Many Requests (`SERVER_BUSY`) | The database connection pool is exhausted. Retry shortly. This is not the full training queue, which is answered with `201`.                                        |
-| 500 Internal Server Error             | A database write failed, or `DB_ENCRYPTION_KEY` is missing or not 32 bytes.                                                                                        |
+| 409 Conflict (`RESOURCE_LOCKED`)      | The lock on the `connectors` table timed out, or a `PUT` renames a connector to a `name` that is taken. The catalog treats `409` as success.                      |
+| 422 Unprocessable Entity              | The body cannot be parsed: unknown `type`, an `id` that is not a UUID, an unknown field in `connection_details`, or a missing or invalid field in `connection_details` or `service_settings`. Unknown fields in `service_settings` are ignored. Same envelope as every error. |
+| 429 Too Many Requests (`SERVER_BUSY`) | The database connection pool is exhausted. Retry shortly.                                        |
+| 500 Internal Server Error             | A database write failed, or a `PUT` that changes `connection_details` finds `DB_ENCRYPTION_KEY` missing or invalid.                                                                                        |
 
 #### GET /v1/connectors — List Connectors
 
@@ -652,6 +647,8 @@ Returns `200`, or `404 RESOURCE_NOT_FOUND` when the connector does not exist.
 - A successful update returns `200` with an empty body. An empty request body is a no-op and also returns `200`.
 - The merged details are validated against the type before anything is written. The stored secrets are decrypted for that check. A failure returns `400 INVALID_REQUEST`.
 - Supplied secret fields are encrypted again before they are stored.
+- A `PUT` on a `FAILED` connector is accepted when it is valid, but it does not change the status and does not queue a job.
+- A `PUT` that changes `connection_details` needs a usable `DB_ENCRYPTION_KEY`, because the stored secrets are decrypted and the supplied ones are encrypted. Without one it returns `500` and writes nothing. A rename does not need the key.
 - A queued job reads the connector when it runs, not when it was created. An update therefore also applies to a job still in the queue and to later scheduled runs.
 
 ### 6.3 GET /health
@@ -697,7 +694,7 @@ The Postgres database `forecast_metadata` has four tables. Only the main columns
 | `connector_id`  | Primary key. Foreign key to `connectors`. `ON DELETE CASCADE`, so the row is removed with the connector.                                                 |
 | `source_table`  | Table to train on.                                                                                                                                       |
 | `target_column` | The column to predict.                                                                                                                                   |
-| `input_columns` | JSON array of the input columns, each with a `name` and, where AutoGluon needs it, a `type`.                                                             |
+| `input_columns` | JSON array of the names of the input columns, such as `["REGION", "QUANTITY"]`.                                                                         |
 | `schedule`      | `hourly`, `daily`, `weekly`, `monthly` or `yearly` (compared in lower case). `NULL`: only the first training runs.                                       |
 
 **`jobs`**
@@ -1114,12 +1111,12 @@ name: "fc_<connector_id>_<version>"
 backend: "onnxruntime"
 max_batch_size: 0
 instance_group [ { kind: KIND_CPU, count: 1 } ]
-# input / output tensor entries: produced by the ONNX export, one per input column in input_schema
+# input / output tensor entries: produced by the ONNX export, one per input column in input_columns
 ```
 
 **Model contract between the worker and the Forecast API.**
 
-- **Inputs.** One tensor per input column, named as the column, of datatype `TYPE_STRING` and shape `[-1, 1]`. The API sends every value as text (`BYTES`), whatever the column's type, because the type of an input column is optional. The graph turns a numeric column into a number and looks up a category column in the list of values seen in training. A category value that was not seen in training does not fail the request. It maps to an index below every known category.
+- **Inputs.** One tensor per input column, named as the column, of datatype `TYPE_STRING` and shape `[-1, 1]`. The API sends every value as text (`BYTES`), whatever the column's type, because an input column has no declared type. The API does not check that a value fits its column: a value that the graph cannot parse (text in a numeric column, for example) is rejected by Triton, and the API answers `500`. The graph turns a numeric column into a number and looks up a category column in the list of values seen in training. A category value that was not seen in training does not fail the request. It maps to an index below every known category.
 - **Outputs, classification.** `prediction` (`TYPE_STRING`, the class value) and `probabilities` (`TYPE_FP32`, one column per class). The confidence of a row is the largest probability.
 - **Regression is not supported.** The ONNX export can already produce a `prediction` output for a regression target, but the API requires a confidence and a regression model has none.
 
@@ -1146,7 +1143,7 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 | `MODEL_REPO_PATH`                     | Root of the shared repository volume (Triton model repository).                                                                                                                         | `/models`                        |
 | `SCRATCH_DIR`                         | Local training scratch, not shared.                                                                                                                                                     | `/var/cache/forecast/scratch`    |
 | `DATA_DIR`                            | Read-only root of CSV training files. CSV paths in jobs are relative to it.                                                                                                             | `/data`                          |
-| `DB_ENCRYPTION_KEY`                   | 32-byte AES-256-GCM key for connector secrets. Required by the API and passed to the worker.                                                                                            | —                                |
+| `DB_ENCRYPTION_KEY`                   | 32-byte AES-256-GCM key for connector secrets. Used by the API (create and update) and by the loader subprocess (decrypt); the worker does not get it. Without a valid key the API still starts and logs an error, and `POST /v1/connectors` stores the connector as `FAILED`.                                                                                            | —                                |
 | `TRITON_URL`                          | Triton endpoint used for model control and inference.                                                                                                                                   | —                                |
 | `TRITON_STARTUP_WAIT_S`               | How long the API waits for Triton to report ready at boot and on reconciliation before continuing without it.                  | `120`                            |
 | `TRITON_LOAD_TIMEOUT_S`               | Timeout for one `load` or `unload` call and for the wait on the model's state.                                                 | `120`                            |
@@ -1155,7 +1152,6 @@ The OpenShift path uses plain Kubernetes objects, in the way `opensearch` and th
 | `DEFAULT_TIME_LIMIT_SECONDS`          | Time limit applied to each training job.                                                                                                                                                | `1800`                           |
 | `TRAINING_MAX_ATTEMPTS`               | Attempts of the worker step per job, the first one included. `1` means no retry. A failure that the worker marks as permanent is not retried.                                           | `2`                              |
 | `TRAINING_RETRY_DELAY_SECONDS`        | Wait between two attempts of the same job. The job keeps the lock during the wait.                                                                                                      | `60`                             |
-| `MAX_QUEUED_JOBS`                     | Queued jobs accepted before `POST /v1/connectors` returns `429`.                                                                                                                        | `10`                             |
 | `MAX_INFERENCE_ROWS`                  | Largest row count a forecast may use for inference                        | `5000`                           |
 | `LOADER_CHUNK_ROWS`                   | Rows per chunk when streaming the source to scratch.                                                                                                                                    | `100000`                         |
 | `PARQUET_COMPRESSION`                 | Parquet compression codec for data extracted to scratch.                                                                                                                                | `snappy`                         |
@@ -1199,7 +1195,7 @@ These stories break the design above into units of work. Each one has a descript
 **Assumptions the stories rely on.**
 
 - ONNX conversion and Triton on Power already work (see the scope notes). No story covers them. The stories cover the service around them.
-- **One connector is attached at a time.** The service enforces it: while a connector that has not `FAILED` exists, `POST /v1/connectors` stores a new connector as `FAILED`, with the reason in its message.
+- **One connector is attached at a time.** The service enforces it: while any connector exists, whatever its status (`FAILED` included), `POST /v1/connectors` stores a new connector as `FAILED`, with the reason in its message. A connector in an error state therefore blocks a new one until it is removed from the database.
 - **One training runs at a time, with no lock and no queue.** If the connector already has a `QUEUED` or `RUNNING` job, a new run is skipped and logged. The unique `RUNNING` index is the database backstop.
 - **Boot recovery marks `QUEUED` and `RUNNING` jobs `FAILED`.**
 
@@ -1276,10 +1272,9 @@ These stories break the design above into units of work. Each one has a descript
 
 - A secret field is never returned, and a field that is not on the allowlist is encrypted.
 - `POST` returns `201` when the `id` already exists. Nothing changes: no second job, no schedule.
-- `POST` returns `201` when a connector that has not `FAILED` already exists, and when `MAX_QUEUED_JOBS` jobs are queued. The new connector is stored with status `FAILED` and the reason in `message`, with no `training_configs` row, no job and no schedule. It does not count as the single connector, and the forecast endpoint skips it.
+- `POST` returns `201` when a connector already exists, whatever its status, `FAILED` included, and when `DB_ENCRYPTION_KEY` is missing or not 32 bytes. The new connector is stored with status `FAILED` and the reason in `message`, with no `training_configs` row, no job and no schedule. A missing or invalid `DB_ENCRYPTION_KEY` does not stop the service from starting: it is logged as an error at startup, and the connector is stored without its secrets.
 - A secret never appears in a `message` or in a log.
-- `POST` returns `422` for an unknown type, an `id` that is not a UUID, or a missing or unknown field in `connection_details` or `service_settings`.
-- `POST` returns `409` when a new connector has the `name` of an existing connector.
+- `POST` returns `422` for an unknown type, an `id` that is not a UUID, an unknown field in `connection_details`, or a missing or invalid field in `connection_details` or `service_settings`. Unknown fields in `service_settings` are ignored.
 - The list and get responses return `status`, `message`, and `last_trained_at` from the `connectors` row.
 - `PUT` rejects `type` and `service_settings` with `422`, validates the merged details before writing, and returns `400` when they are not valid for the type.
 - Cleanup of the schedule and the forecasters of a deleted connector is not part of this story.

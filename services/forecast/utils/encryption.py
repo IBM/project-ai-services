@@ -3,8 +3,9 @@ Encryption for connector secrets.
 
 The key is read from DB_ENCRYPTION_KEY, as Digitize does, and must be exactly
 32 bytes (AES-256-GCM). The value is used as it is: it is not base64-decoded.
-``validate_cipher()`` runs in the application lifespan, so a missing or invalid
-key stops the service before it serves requests.
+``validate_cipher()`` runs in the application lifespan, which logs a missing or invalid
+key as an error. The service still starts, and POST /v1/connectors stores the connector
+as FAILED, without its secrets, with the reason in its message.
 
 Every field of a connector's connection details that is not in ``SAFE_FIELDS``
 is a secret: it is encrypted before it is stored and never returned.

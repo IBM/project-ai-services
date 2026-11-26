@@ -8,7 +8,7 @@ errors, and validation of connection_details updates.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import NoReturn, Optional
 
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError, TimeoutError as PoolTimeoutError
@@ -23,7 +23,7 @@ from forecast.models import (
     JobResult,
     TrainingSummary,
 )
-from forecast.utils.encryption import DecryptionError, decrypt_secrets, encrypt_secrets
+from forecast.utils.encryption import DecryptionError, EncryptionKeyError, decrypt_secrets, encrypt_secrets
 
 logger = get_logger("forecast_api")
 
@@ -141,11 +141,22 @@ def handle_database_errors(operation: str, connector_id: Optional[str] = None) -
 # ---------------------------------------------------------------------------
 
 
+def _raise_unusable_key(cid: str) -> NoReturn:
+    """Answer 500: the service cannot encrypt or decrypt secrets, which is not the caller's fault."""
+    logger.error(f"Update of connector {cid} failed: DB_ENCRYPTION_KEY is missing or invalid")
+    APIError.raise_error(
+        ErrorCode.INTERNAL_SERVER_ERROR,
+        "The connector encryption key of the service is missing or invalid.",
+    )
+
+
 def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
     """Validate the stored details merged with the supplied ones; return the supplied fields encrypted.
 
     Raises INVALID_REQUEST when a kept secret cannot be decrypted, the merged details
     are invalid, or the host, port, database or username changes without a new password.
+    Raises INTERNAL_SERVER_ERROR when DB_ENCRYPTION_KEY is missing or invalid, because the
+    service starts without it and secrets can then be neither read nor written.
     """
     try:
         # Only the fields that stay are decrypted, so an unreadable stored
@@ -158,6 +169,8 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
             }
         )
         merged = Db2ForIDetails.model_validate({**kept, **supplied})
+    except EncryptionKeyError:
+        _raise_unusable_key(cid)
     except DecryptionError:
         logger.warning(f"Update of connector {cid} rejected: stored secret could not be decrypted")
         APIError.raise_error(
@@ -190,4 +203,7 @@ def merge_connection_details(cid: str, config: dict, supplied: dict) -> dict:
         )
 
     # Store the validated values, so "8471" is kept as the integer 8471.
-    return encrypt_secrets(merged.model_dump(include=set(supplied)))
+    try:
+        return encrypt_secrets(merged.model_dump(include=set(supplied)))
+    except EncryptionKeyError:
+        _raise_unusable_key(cid)

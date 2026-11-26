@@ -3,8 +3,8 @@ Unit tests for the connector API and the connector secret handling.
 
 The database is mocked at the connectors DB layer, so the tests run without
 PostgreSQL. Tests cover:
- - POST /v1/connectors: create, single-connector 409, queue 429, body validation,
-   encrypted storage and the scheduler call
+ - POST /v1/connectors: create, a connector that exists or a bad key (201,
+   stored as FAILED), body validation, encrypted storage and the scheduler call
  - GET /v1/connectors and GET /v1/connectors/{id}: pagination, name filter, safe fields
  - PUT /v1/connectors/{id}: partial merge, re-encryption, validation, rejected fields
  - GET /v1/connectors/{id}/metrics: versions and training summary
@@ -71,7 +71,6 @@ def db():
         "lock_connectors": None,
         "connector_exists": False,
         "connector_id_exists": False,
-        "count_queued_jobs": 0,
         "insert_connector": None,
         "insert_failed_connector": None,
         "list_connectors": ([], 0),
@@ -103,7 +102,7 @@ def _create_body(**overrides):
         "service_settings": {
             "table": "ORDERS",
             "target_column": "DELIVERY_LATE",
-            "input_columns": [{"name": "REGION"}, {"name": "QUANTITY", "type": "integer"}],
+            "input_columns": ["REGION", "QUANTITY"],
             "schedule": "daily",
         },
     }
@@ -187,7 +186,7 @@ def test_create_stores_encrypted_connector_and_queues_training(client, db):
     assert decrypt_secrets(kwargs["config"])["password"] == "s3cret"
     assert kwargs["source_table"] == "ORDERS"
     assert kwargs["target_column"] == "DELIVERY_LATE"
-    assert kwargs["input_columns"] == [{"name": "REGION"}, {"name": "QUANTITY", "type": "integer"}]
+    assert kwargs["input_columns"] == ["REGION", "QUANTITY"]
     assert kwargs["schedule"] == "daily"
 
     db.register.assert_called_once_with(CONNECTOR_ID, "daily")
@@ -231,19 +230,6 @@ def test_create_when_a_connector_exists_is_201_and_stored_as_failed(client, db):
     assert kwargs["connector_type"] == "db2_for_i"
     assert kwargs["message"] == "A connector already exists. Only one connector is supported."
     assert decrypt_secrets(kwargs["config"])["password"] == "s3cret"
-
-
-@pytest.mark.unit
-def test_create_when_the_queue_is_full_is_201_and_stored_as_failed(client, db):
-    db.count_queued_jobs.return_value = settings.forecast.max_queued_jobs
-
-    response = client.post("/v1/connectors", json=_create_body())
-
-    assert response.status_code == 201
-    db.insert_connector.assert_not_called()
-    db.register.assert_not_called()
-    kwargs = db.insert_failed_connector.call_args.kwargs
-    assert kwargs["message"] == "Too many training jobs are queued."
 
 
 @pytest.mark.unit
@@ -322,15 +308,14 @@ def test_rejected_create_is_logged_without_secrets(client, db, caplog):
         {"connection_details": {"host": "h", "database": "d", "username": "u", "password": "p", "extra": 1}},
         {"connection_details": {"host": "h", "database": "d", "username": "u"}},
         {"service_settings": _settings(schedule="hourly-ish")},
-        {"service_settings": {**_settings(), "validation_metric": "accuracy"}},
-        {"service_settings": _settings(input_columns=[{"name": "A", "type": "blob"}])},
+        {"service_settings": _settings(input_columns=[{"name": "A"}])},
         {"service_settings": _settings(input_columns=[])},
         {"service_settings": _settings(table="T; DROP TABLE")},
         {"service_settings": _settings(target_column="C' OR 1=1")},
-        {"service_settings": _settings(input_columns=[{"name": "BAD NAME"}])},
+        {"service_settings": _settings(input_columns=["BAD NAME"])},
         {"service_settings": _settings(table="T\n")},
-        {"service_settings": _settings(input_columns=[{"name": "COL1"}, {"name": "col1"}])},
-        {"service_settings": _settings(target_column="TARGET_COL", input_columns=[{"name": "target_col"}, {"name": "OTHER"}])},
+        {"service_settings": _settings(input_columns=["COL1", "col1"])},
+        {"service_settings": _settings(target_column="TARGET_COL", input_columns=["target_col", "OTHER"])},
     ],
 )
 def test_create_rejects_invalid_bodies_with_422(client, db, overrides):
@@ -340,6 +325,17 @@ def test_create_rejects_invalid_bodies_with_422(client, db, overrides):
     _assert_envelope(response.json(), "INVALID_REQUEST", 422)
     db.insert_connector.assert_not_called()
     db.insert_failed_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_ignores_unknown_service_settings_and_does_not_store_them(client, db):
+    settings_body = {**_settings(), "validation_metric": "accuracy", "nested": {"a": 1}}
+
+    response = client.post("/v1/connectors", json=_create_body(service_settings=settings_body))
+
+    assert response.status_code == 201
+    kwargs = db.insert_connector.call_args.kwargs
+    assert "validation_metric" not in str(kwargs) and "nested" not in str(kwargs)
 
 
 @pytest.mark.unit
@@ -354,16 +350,55 @@ def test_create_without_service_settings_is_422(client, db):
 
 
 @pytest.mark.unit
-def test_create_without_a_key_is_500_and_does_not_leak_the_password(db):
-    failing_client = TestClient(forecast_app.app, raise_server_exceptions=False)
+@pytest.mark.parametrize(
+    "key, message",
+    [("", "Connector encryption key not found"), ("x" * 31, "must be exactly 32 bytes")],
+)
+def test_create_without_a_usable_key_is_201_and_stored_as_failed_without_the_secrets(db, caplog, key, message):
+    client = TestClient(forecast_app.app)
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr(key)), caplog.at_level("ERROR"):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
+    db.insert_connector.assert_not_called()
+    db.register.assert_not_called()
+    kwargs = db.insert_failed_connector.call_args.kwargs
+    assert message in kwargs["message"]
+    # Only the fields that are shown in a response are kept: nothing can be encrypted, and the
+    # password is never stored in plain text.
+    assert kwargs["config"] == {
+        "host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro",
+    }
+    assert "s3cret" not in caplog.text and "s3cret" not in response.text and "s3cret" not in kwargs["message"]
+
+
+@pytest.mark.unit
+def test_create_without_a_key_when_a_connector_exists_says_so_and_stores_no_secrets(client, db):
+    db.connector_exists.return_value = True
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
-        response = failing_client.post("/v1/connectors", json=_create_body())
+        response = client.post("/v1/connectors", json=_create_body())
 
-    assert response.status_code == 500
-    _assert_envelope(response.json(), "INTERNAL_SERVER_ERROR", 500)
-    assert "s3cret" not in response.text
+    assert response.status_code == 201
+    kwargs = db.insert_failed_connector.call_args.kwargs
+    assert kwargs["message"] == "A connector already exists. Only one connector is supported."
+    assert "password" not in kwargs["config"]
+
+
+@pytest.mark.unit
+def test_create_with_an_existing_id_and_no_key_changes_nothing(client, db):
+    db.connector_id_exists.return_value = True
+    db.connector_exists.return_value = True
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
     db.insert_connector.assert_not_called()
+    db.insert_failed_connector.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -758,20 +793,6 @@ def test_create_still_succeeds_when_scheduling_fails(client, db, caplog):
 
 
 @pytest.mark.unit
-def test_create_with_a_taken_name_is_409(client, db):
-    db.insert_connector.side_effect = IntegrityError(
-        "INSERT", {}, MagicMock(pgcode="23505")
-    )
-
-    response = client.post("/v1/connectors", json=_create_body())
-
-    assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
-    assert "prod-sales-db" in response.json()["error"]["message"]
-    db.register.assert_not_called()
-
-
-@pytest.mark.unit
 def test_create_with_another_integrity_error_is_a_database_error(client, db):
     """A CHECK or NOT NULL violation is not a name conflict."""
     db.insert_connector.side_effect = IntegrityError(
@@ -792,12 +813,11 @@ def test_create_checks_only_after_taking_the_table_lock(client, db):
     db.lock_connectors.side_effect = lambda *_: calls.append("lock")
     db.connector_id_exists.side_effect = lambda *_: calls.append("id_exists") or False
     db.connector_exists.side_effect = lambda *_: calls.append("exists") or False
-    db.count_queued_jobs.side_effect = lambda *_: calls.append("queued") or 0
 
     response = client.post("/v1/connectors", json=_create_body())
 
     assert response.status_code == 201
-    assert calls == ["lock", "id_exists", "exists", "queued"]
+    assert calls == ["lock", "id_exists", "exists"]
 
 
 @pytest.mark.unit
@@ -841,6 +861,53 @@ def test_put_keeping_unreadable_password_returns_400(client, db):
     assert response.status_code == 400
     _assert_envelope(response.json(), "INVALID_REQUEST", 400)
     assert "Stored secret could not be decrypted" in response.json()["error"]["message"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["", "x" * 31])
+@pytest.mark.parametrize(
+    "details",
+    [{"password": "fresh-pass"}, {"host": "new-host.example.com", "password": "fresh-pass"}, {"port": 8472}],
+)
+def test_put_connection_details_without_a_usable_key_is_500_and_writes_nothing(client, db, caplog, key, details):
+    db.get_connector.return_value = _stored_row()
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr(key)), caplog.at_level("ERROR"):
+        response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": details})
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "INTERNAL_SERVER_ERROR", 500)
+    assert "The connector encryption key of the service is missing or invalid." in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+    assert "DB_ENCRYPTION_KEY is missing or invalid" in caplog.text
+    assert "fresh-pass" not in response.text and "fresh-pass" not in caplog.text
+
+
+@pytest.mark.unit
+def test_put_that_fails_to_encrypt_the_merged_details_is_500_and_writes_nothing(client, db):
+    from forecast.utils.encryption import EncryptionKeyError
+
+    db.get_connector.return_value = _stored_row()
+
+    with patch("forecast.utils.api_utils.encrypt_secrets", side_effect=EncryptionKeyError("no key")):
+        response = client.put(
+            f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"password": "fresh-pass"}}
+        )
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "INTERNAL_SERVER_ERROR", 500)
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_rename_without_a_usable_key_still_succeeds(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"name": "renamed"})
+
+    assert response.status_code == 200
+    assert db.update_connector.call_args.kwargs["name"] == "renamed"
 
 
 @pytest.mark.unit

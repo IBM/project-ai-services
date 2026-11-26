@@ -1,9 +1,9 @@
 """Request and response models of the Forecast service API."""
 
-from typing import Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, StringConstraints, model_validator
 
 # SQL identifier patterns: allows letters, numbers, underscores, and common SQL/Db2 special chars ($, #, @).
 # Table can optionally be schema-qualified (e.g. "SCHEMA.TABLE" or just "TABLE").
@@ -11,7 +11,6 @@ _SQL_IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
 _SQL_TABLE_PATTERN = r"^(?:[A-Za-z_][A-Za-z0-9_$#@]{0,127}\.)?[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
 
 Schedule = Literal["hourly", "daily", "weekly", "monthly", "yearly"]
-ColumnType = Literal["string", "integer", "number"]
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -46,29 +45,28 @@ class Db2ForIDetailsPatch(BaseModel):
     password: Any = None
 
 
-class TrainingInputColumn(BaseModel):
-    """An input column used for model training."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
-    type: Optional[ColumnType] = None
+# The name of an input column. Its type is not given: the forecaster reads every input as text.
+InputColumn = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)]
 
 
 class ServiceSettings(BaseModel):
-    """Settings chosen when the service is deployed: the training data and the training schedule."""
+    """Settings chosen when the service is deployed: the training data and the training schedule.
 
-    model_config = ConfigDict(extra="forbid")
+    Unknown fields are ignored: the catalog forwards every setting of the deployed service,
+    and the service cannot tell which of them are meant for the connector.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     table: str = Field(min_length=1, max_length=257, pattern=_SQL_TABLE_PATTERN)
     target_column: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
-    input_columns: list[TrainingInputColumn] = Field(min_length=1, max_length=1000)
+    input_columns: list[InputColumn] = Field(min_length=1, max_length=1000)
     schedule: Optional[Schedule] = None
 
     @model_validator(mode="after")
     def _validate_columns(self) -> "ServiceSettings":
         """Reject duplicate input column names and a target that is also an input column."""
-        names = [col.name.upper() for col in self.input_columns]
+        names = [name.upper() for name in self.input_columns]
         if len(set(names)) != len(names):
             raise ValueError("input_columns must not contain duplicate column names")
         if self.target_column.upper() in names:
