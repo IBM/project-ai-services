@@ -19,45 +19,67 @@ index be669502..e63c75d0 100644
          ## LOG SUCCESS
          # Upstream errors are already logged via _log_passthrough_upstream_failure
          # above; the success handler has no status-code awareness of its own; so
-diff --git a/litellm/llms/hosted_vllm/chat/transformation.py b/litellm/llms/hosted_vllm/chat/transformation.py
-index f3f6bc9cbf1..5fb389767a6 100644
---- a/litellm/llms/hosted_vllm/chat/transformation.py
-+++ b/litellm/llms/hosted_vllm/chat/transformation.py
-@@ -5,6 +5,7 @@ Translate from OpenAI's `/v1/chat/completions` to VLLM's `/v1/chat/completions`
- import json
- from collections.abc import Coroutine
- from typing import Final, Literal, cast, overload
-+from urllib.parse import urlparse
+diff --git a/litellm/llms/vllm/common_utils.py b/litellm/llms/vllm/common_utils.py
+index 6484cdc88e3..9db93b7d032 100644
+--- a/litellm/llms/vllm/common_utils.py
++++ b/litellm/llms/vllm/common_utils.py
+@@ -1,4 +1,5 @@
+ from typing import Final
++from urllib.parse import urlsplit, urlunsplit
  
- from litellm.litellm_core_utils.prompt_templates.common_utils import (
-     get_image_mime_type_from_url,
-@@ -112,6 +113,26 @@ class HostedVLLMChatConfig(OpenAIGPTConfig):
-         dynamic_api_key: Final = api_key or get_secret_str("HOSTED_VLLM_API_KEY") or "fake-api-key"
-         return api_base, dynamic_api_key
+ import httpx
  
-+    def get_complete_url(
-+        self,
-+        api_base: str | None,
-+        api_key: str | None,
-+        model: str,
-+        optional_params: dict,
-+        litellm_params: dict,
-+        stream: bool | None = None,
-+    ) -> str:
-+        has_no_path: Final = api_base is not None and not urlparse(api_base).path.strip("/")
-+        resolved_api_base: Final = f"{api_base.rstrip('/')}/v1" if api_base is not None and has_no_path else api_base
-+        return super().get_complete_url(
-+            api_base=resolved_api_base,
-+            api_key=api_key,
-+            model=model,
-+            optional_params=optional_params,
-+            litellm_params=litellm_params,
-+            stream=stream,
-+        )
+@@ -28,6 +29,12 @@ class VLLMError(BaseLLMException):
+         )
+ 
+ 
++def without_last_path_segment(api_base: str) -> str:
++    parts: Final = urlsplit(api_base)
++    parent_path: Final = parts.path.rstrip("/").rpartition("/")[0]
++    return urlunsplit(parts._replace(path=parent_path))
 +
-     def get_openai_compatible_provider_info(
++
+ class VLLMModelInfo(BaseLLMModelInfo):
+     def validate_environment(
          self,
-         api_base: str | None,
+@@ -45,12 +52,12 @@ class VLLMModelInfo(BaseLLMModelInfo):
+ 
+     @staticmethod
+     def get_api_base(api_base: str | None = None) -> str | None:
+-        api_base = api_base or get_secret_str("VLLM_API_BASE")
+-        if api_base is None:
++        env_api_base: Final = get_secret_str("VLLM_API_BASE")
++        if api_base is None and env_api_base is None:
+             raise ValueError(
+                 "VLLM_API_BASE is not set. Please set the environment variable, to use VLLM's pass-through - `{LITELLM_API_BASE}/vllm/{endpoint}`."
+             )
+-        return api_base
++        return api_base or (without_last_path_segment(env_api_base) if env_api_base else None)
+ 
+     @staticmethod
+     def get_api_key(api_key: str | None = None) -> str | None:
+diff --git a/litellm/llms/vllm/passthrough/transformation.py b/litellm/llms/vllm/passthrough/transformation.py
+index e7da6e54410..9de675880d7 100644
+--- a/litellm/llms/vllm/passthrough/transformation.py
++++ b/litellm/llms/vllm/passthrough/transformation.py
+@@ -13,7 +13,7 @@ from litellm.llms.openai_like.passthrough.transformation import (
+     relays_text_completion,
+ )
+ 
+-from ..common_utils import VLLMModelInfo
++from ..common_utils import VLLMModelInfo, without_last_path_segment
+ 
+ if TYPE_CHECKING:
+     from httpx import URL
+@@ -34,7 +34,7 @@ class VLLMPassthroughConfig(VLLMModelInfo, BasePassthroughConfig):
+         request_query_params: dict | None,
+         litellm_params: dict,
+     ) -> tuple["URL", str]:
+-        base_target_url: Final = self.get_api_base(api_base)
++        base_target_url: Final = self.get_api_base(without_last_path_segment(api_base) if api_base else None)
+ 
+         if base_target_url is None:
+             raise Exception("VLLM api base not found")
 diff --git a/litellm/proxy/_types.py b/litellm/proxy/_types.py
 index 5e812eec477..67d08fc1e9c 100644
 --- a/litellm/proxy/_types.py
@@ -233,10 +255,10 @@ index 978882ef3f1..b8ad371419b 100644
          request_query_params["version"] = litellm.WATSONX_DEFAULT_API_VERSION
 diff --git a/litellm/proxy/pass_through_endpoints/llm_provider_handlers/vllm_passthrough_handler.py b/litellm/proxy/pass_through_endpoints/llm_provider_handlers/vllm_passthrough_handler.py
 new file mode 100644
-index 00000000000..ae7780f8aca
+index 00000000000..22e3451f5fc
 --- /dev/null
 +++ b/litellm/proxy/pass_through_endpoints/llm_provider_handlers/vllm_passthrough_handler.py
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,101 @@
 +from collections.abc import Mapping, Sequence
 +from dataclasses import dataclass
 +from typing import TYPE_CHECKING, Final
@@ -245,6 +267,7 @@ index 00000000000..ae7780f8aca
 +from litellm.exceptions import BadRequestError
 +from litellm.litellm_core_utils.credential_accessor import CredentialAccessor
 +from litellm.litellm_core_utils.get_llm_provider_logic import get_llm_provider
++from litellm.llms.vllm.common_utils import without_last_path_segment
 +from litellm.proxy.pass_through_endpoints.llm_provider_handlers.watsonx_passthrough_handler import (
 +    WatsonxPassthroughHandler,
 +)
@@ -286,11 +309,13 @@ index 00000000000..ae7780f8aca
 +    )
 +    credential_api_key: Final = credential_values.get("api_key")
 +    credential_api_base: Final = credential_values.get("api_base")
++    deployment_api_base: Final = (
++        credential_api_base if isinstance(credential_api_base, str) else None
++    ) or litellm_params.get("api_base")
 +    return VLLMPassThroughCredentials(
 +        api_key=(credential_api_key if isinstance(credential_api_key, str) else None)
 +        or litellm_params.get("api_key"),
-+        api_base=(credential_api_base if isinstance(credential_api_base, str) else None)
-+        or litellm_params.get("api_base"),
++        api_base=without_last_path_segment(deployment_api_base) if deployment_api_base else None,
 +        model=model,
 +    )
 +
