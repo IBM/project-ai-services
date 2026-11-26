@@ -26,17 +26,12 @@ type Syncer struct {
 }
 
 // New creates a Syncer.
-// If litellmClient is nil, a default client is created via catalogclient.NewLiteLLMClient.
 func New(
 	compRepo dbrepo.ComponentRepository,
 	connectorRepo dbrepo.ConnectorRepository,
 	catalogProvider *catalog.CatalogProvider,
 	litellmClient catalogclient.LiteLLMClient,
 ) *Syncer {
-	if litellmClient == nil {
-		litellmClient = catalogclient.NewLiteLLMClient()
-	}
-
 	return &Syncer{
 		compRepo:      compRepo,
 		connectorRepo: connectorRepo,
@@ -53,12 +48,11 @@ func (s *Syncer) Sync(ctx context.Context) {
 	logger.DebuglnCtx(ctx, "Completed model sync")
 }
 
-// OwnsComponent reports whether model sync is responsible for the component's status: it is a
-// model-category component registered with the LiteLLM gateway. A model component without a
-// LiteLLM model ID (e.g. one deployed as part of an application) is not owned, so the application
-// sync keeps checking its pods.
+// OwnsComponent reports whether model sync, not the application sync, is responsible for the
+// component's status. It is decided by the catalog: the component's type is served by providers
+// declaring `category: models` in their metadata.yaml, whoever deployed the component.
 func (s *Syncer) OwnsComponent(comp *dbmodels.Component) bool {
-	return slices.Contains(s.modelCatalog.ComponentTypes(), comp.Type) && extractLiteLLMModelID(comp.Metadata) != ""
+	return slices.Contains(s.modelCatalog.ComponentTypes(), comp.Type)
 }
 
 // syncLocalModels checks the health of managed local model components and updates their status.
@@ -94,7 +88,14 @@ func (s *Syncer) shouldSyncComponent(comp *dbmodels.Component) bool {
 }
 
 func (s *Syncer) syncLocalModel(ctx context.Context, comp *dbmodels.Component) {
-	if err := s.probe(ctx, extractLiteLLMModelID(comp.Metadata)); err != nil {
+	modelID := extractLiteLLMModelID(comp.Metadata)
+	if modelID == "" {
+		logger.DebugfCtx(ctx, "Model sync: component %s has no LiteLLM model ID, nothing to probe", comp.ID)
+
+		return
+	}
+
+	if err := s.probe(ctx, modelID); err != nil {
 		s.handleLocalFailure(ctx, comp, err.Error())
 	} else {
 		s.handleLocalSuccess(ctx, comp)

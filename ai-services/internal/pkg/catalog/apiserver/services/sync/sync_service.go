@@ -56,7 +56,7 @@ type ResourceCounts struct {
 type ModelSyncer interface {
 	// Sync runs one model synchronization cycle.
 	Sync(ctx context.Context)
-	// OwnsComponent reports whether the model syncer, not the pod check, tracks the component's status.
+	// OwnsComponent reports whether the model syncer, not the application sync, tracks the component's status.
 	OwnsComponent(component *models.Component) bool
 }
 
@@ -415,7 +415,7 @@ func (s *SyncService) syncAllComponents(ctx context.Context, runtimeSync Runtime
 				continue
 			}
 
-			// Models registered with the LiteLLM gateway are health-checked by the model syncer
+			// Model-category components are reported by the model syncer
 			if s.modelSyncer != nil && s.modelSyncer.OwnsComponent(component) {
 				processedComponents[dep.DependencyID] = true
 

@@ -327,7 +327,7 @@ func TestSyncLocalModels_SkipNonObservableAndUnmanaged(t *testing.T) {
 	assert.Empty(t, compRepo.updates)
 }
 
-func TestSyncLocalModels_WithoutModelID_NotOwned(t *testing.T) {
+func TestSyncLocalModels_WithoutModelID_OwnedButNotProbed(t *testing.T) {
 	provider := setupTestCatalogProvider(t)
 	compRepo := &mockComponentRepo{
 		components: []dbmodels.Component{
@@ -347,8 +347,8 @@ func TestSyncLocalModels_WithoutModelID_NotOwned(t *testing.T) {
 	svc := New(compRepo, connRepo, provider, llmClient)
 	svc.Sync(context.Background())
 
-	// Left to the application sync, which checks the pods of such components.
-	assert.False(t, svc.OwnsComponent(&compRepo.components[0]))
+	// Owned by model sync (category: models), but with no LiteLLM route there is nothing to probe.
+	assert.True(t, svc.OwnsComponent(&compRepo.components[0]))
 	assert.Equal(t, 0, llmClient.ProbedCount())
 	assert.Empty(t, compRepo.updates)
 }
@@ -362,7 +362,8 @@ func TestOwnsComponent(t *testing.T) {
 		want bool
 	}{
 		{"model type with litellm id", dbmodels.Component{Type: "llm", Metadata: makeModelMetadata("id-1")}, true},
-		{"model type without litellm id", dbmodels.Component{Type: "llm", Metadata: map[string]any{}}, false},
+		{"model type without litellm id", dbmodels.Component{Type: "llm", Metadata: map[string]any{}}, true},
+		{"embedding model type", dbmodels.Component{Type: "embedding", Metadata: map[string]any{}}, true},
 		{"non-model type with litellm id", dbmodels.Component{Type: "vector_db", Metadata: makeModelMetadata("id-1")}, false},
 	}
 
