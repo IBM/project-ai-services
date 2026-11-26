@@ -162,15 +162,11 @@ type resolvedComponent struct {
 	connector *dbmodels.Connector // the remote model connector the service uses, nil for a component
 }
 
-// remoteModelDefaults are the values a service reads from a remote model beyond those the model
-// service returns. A remote model has no values.yaml, so these stand in for the context length and
-// batch size of a local one, by component type.
-//
-// TODO(model-params): these hardcoded defaults will be replaced with the parameters stored in the
-// DB for the remote model, so each one carries its own context length and batch size.
-var remoteModelDefaults = map[string]map[string]any{
-	"llm":       {"maxModelLen": 8096, "maxBatchSize": 32}, //nolint:mnd // TODO(model-params): replaced with DB params
-	"embedding": {"maxModelLen": 512},                      //nolint:mnd // TODO(model-params): replaced with DB params
+// remoteModelParamKeys are the params stored in the DB for a remote model that a service reads, in
+// place of the values.yaml a remote model does not have: the context length and the batch size.
+var remoteModelParamKeys = []string{
+	catalogconstants.ParamMaxModelLen,
+	catalogconstants.ParamMaxBatchSize,
 }
 
 // processService processes a single service from the request.
@@ -247,9 +243,10 @@ func (p *DeploymentPlanner) processService(
 	// Use values from ParamBuilder (already includes component values nested under component_type)
 	servicePlan.Values = serviceParams.Values
 
-	// A remote model has no component values to load: its model and defaults stand in for them.
+	// A remote model has no component values to load: its model and the params stored in the DB
+	// stand in for them.
 	for _, rc := range connected {
-		serviceParams.Values[rc.req.ComponentType] = remoteModelValues(rc.req)
+		serviceParams.Values[rc.req.ComponentType] = remoteModelValues(rc.req, rc.connector)
 	}
 
 	// Extract component values from serviceParams.Values and populate ComponentPlan.Values
@@ -382,14 +379,30 @@ func checkModelSources(serviceID string, svc *ServicePlan, plan *DeploymentPlan)
 }
 
 // remoteModelValues are the values of a remote model component of a service: its model and the
-// defaults for its component type. What the model service returns (host, key, ...) is merged later.
-func remoteModelValues(comp apimodels.Component) map[string]any {
-	values := maps.Clone(remoteModelDefaults[comp.ComponentType])
-	if values == nil {
-		values = make(map[string]any, 1)
+// maxModelLen and maxBatchSize stored in the DB params of its connector. What the model service
+// returns (host, key, ...) is merged later.
+func remoteModelValues(comp apimodels.Component, conn *dbmodels.Connector) map[string]any {
+	values := map[string]any{catalogconstants.ParamKeyModel: comp.Model}
+
+	if conn == nil {
+		return values
 	}
 
-	values[catalogconstants.ParamKeyModel] = comp.Model
+	stored, _ := conn.Metadata[catalogconstants.MetadataKeyParams].(map[string]any)
+
+	for _, key := range remoteModelParamKeys {
+		v, ok := stored[key]
+		if !ok {
+			continue
+		}
+
+		// Metadata read back from the DB holds JSON numbers (float64); services expect whole numbers.
+		if f, isFloat := v.(float64); isFloat {
+			v = int(f)
+		}
+
+		values[key] = v
+	}
 
 	return values
 }

@@ -579,14 +579,41 @@ func TestProcessComponentRemote(t *testing.T) {
 }
 
 func TestRemoteModelValues(t *testing.T) {
-	llm := remoteModelValues(apimodels.Component{ComponentType: "llm", Model: "ibm/granite"})
-	assert.Equal(t, map[string]any{"model": "ibm/granite", "maxModelLen": 8096, "maxBatchSize": 32}, llm)
+	connector := func(params map[string]any) *dbmodels.Connector {
+		return &dbmodels.Connector{Metadata: map[string]any{catalogconstants.MetadataKeyParams: params}}
+	}
 
-	reranker := remoteModelValues(apimodels.Component{ComponentType: "reranker", Model: "bge"})
-	assert.Equal(t, map[string]any{"model": "bge"}, reranker)
+	t.Run("the context length and batch size come from the DB params of the connector", func(t *testing.T) {
+		llm := remoteModelValues(
+			apimodels.Component{ComponentType: "llm", Model: "ibm/granite"},
+			connector(map[string]any{"maxModelLen": 131072, "maxBatchSize": 64, "api_base": "http://h"}))
 
-	llm["maxModelLen"] = 1
-	assert.Equal(t, 8096, remoteModelDefaults["llm"]["maxModelLen"], "the defaults are not shared with the values")
+		assert.Equal(t, map[string]any{"model": "ibm/granite", "maxModelLen": 131072, "maxBatchSize": 64}, llm)
+	})
+
+	t.Run("numbers read back from the DB as JSON floats are whole numbers", func(t *testing.T) {
+		llm := remoteModelValues(
+			apimodels.Component{ComponentType: "llm", Model: "ibm/granite"},
+			connector(map[string]any{"maxModelLen": float64(131072), "maxBatchSize": float64(64)}))
+
+		assert.Equal(t, map[string]any{"model": "ibm/granite", "maxModelLen": 131072, "maxBatchSize": 64}, llm)
+	})
+
+	t.Run("only the params the connector holds are set", func(t *testing.T) {
+		embedding := remoteModelValues(
+			apimodels.Component{ComponentType: "embedding", Model: "bge"},
+			connector(map[string]any{"maxModelLen": 512}))
+
+		assert.Equal(t, map[string]any{"model": "bge", "maxModelLen": 512}, embedding)
+	})
+
+	t.Run("a connector without params leaves the model only", func(t *testing.T) {
+		comp := apimodels.Component{ComponentType: "llm", Model: "ibm/granite"}
+		want := map[string]any{"model": "ibm/granite"}
+
+		assert.Equal(t, want, remoteModelValues(comp, &dbmodels.Connector{}))
+		assert.Equal(t, want, remoteModelValues(comp, nil))
+	})
 }
 
 func TestCheckModelSources(t *testing.T) {
