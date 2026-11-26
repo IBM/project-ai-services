@@ -1,0 +1,14 @@
+name: triton
+version: "1.0.0"
+
+podTemplateExecutions:
+  - [triton-server.yaml.tmpl]
+
+# Resource requirements. These are reservations that the Catalog adds up for its capacity check.
+# They are not limits: nothing here is applied to the pod (see memoryLimit and resources in values.yaml).
+# Estimated from a measurement of Triton 2.73 on ppc64le: 17 MB idle, about 5 MB per loaded model,
+# 61 MB with 10 models under 4000 requests per second. TBD (DEV): confirm for the target workload.
+resources:
+  cpu: 1
+  memory: 2147483648   # 2Gi in bytes
+  storage: 5368709120  # 5Gi in bytes: size of the repository volume

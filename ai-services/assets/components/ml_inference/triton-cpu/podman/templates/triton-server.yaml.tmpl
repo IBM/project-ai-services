@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "triton-{{ .InstanceSlug }}"
+  labels:
+    ai-services.io/template: "{{ .TemplateID }}"
+    # The repository volume is listed here only. The Forecast pod mounts it but must not list it.
+    ai-services.io/volume: "triton-repo-{{ .InstanceSlug }}"
+  # No ai-services.io/routes and no ai-services.io/ports: the pod is reachable only from
+  # other pods of the application, by pod name.
+spec:
+  restartPolicy: always
+  volumes:
+    - name: repository
+      persistentVolumeClaim:
+        claimName: "triton-repo-{{ .InstanceSlug }}"
+  initContainers:
+    # The volume root is created root-owned. Hand it to the Forecast user so it can create,
+    # rename and delete under /models. The directories stay 0755, so Triton's user can read them.
+    #
+    # WORKAROUND, do not remove the mkdir of .staging: Podman gives an EMPTY named volume to the
+    # user of each container that mounts it. Triton runs as root, so when it starts it would take
+    # the volume back from the Forecast user and the Forecast service could no longer write to it.
+    # A volume that has content keeps its owner, so .staging (which the Forecast service uses to
+    # build a model directory before it renames it into place) is created here.
+    #
+    # Verified only with rootful Podman 5.8.5 on ppc64le. Rootless Podman is UNTESTED: its user
+    # namespace may map the owner differently.
+    - name: fix-permissions
+      image: "{{ .Values.image }}"
+      command:
+        - sh
+        - -c
+        - mkdir -p /models/.staging && chown {{ .Values.repositoryOwner }} /models /models/.staging && chmod 0755 /models /models/.staging
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+        - mountPath: /models:z
+          name: repository
+  containers:
+    - name: triton
+      image: "{{ .Values.image }}"
+      args:
+        - tritonserver
+        - --model-repository=/models
+        - --model-control-mode=explicit
+        - --strict-readiness=false
+        - --exit-on-error=false
+        - --http-port=8000
+        - --metrics-port=8002
+      ports:
+        - containerPort: 8000     # must be first: the deployer gives this port to consumers
+        - containerPort: 8002
+      livenessProbe:
+        httpGet:
+          path: /v2/health/live
+          port: 8000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 6
+      {{- if .Values.memoryLimit }}
+      resources:
+        requests:
+          memory: "{{ .Values.memoryLimit }}"
+        limits:
+          memory: "{{ .Values.memoryLimit }}"
+      {{- end }}
+      volumeMounts:
+        - mountPath: /models:z
+          name: repository
+          readOnly: true
