@@ -202,7 +202,7 @@ func initCreateCommonFlags() {
 			"The provider is chosen with --params, e.g. --params llm.vllm-cpu=true. Without --model, a component\n"+
 			"type uses the model the template recommends for its provider, else the provider's default model.\n"+
 			"A provider cannot be chosen for a registered model: it brings its own.\n"+
-			"Use \"ai-services application templates parameters <template>\" to see the component types and their models.\n",
+			"Use \"ai-services application templates models --template <template>\" to see the component types and their models.\n",
 	)
 
 	createCmd.Flags().StringArrayVarP(
