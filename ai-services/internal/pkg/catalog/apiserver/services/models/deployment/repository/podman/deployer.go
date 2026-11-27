@@ -33,15 +33,19 @@ func NewPodmanDeployer(routes RouteRegistrar) *PodmanDeployer {
 	return &PodmanDeployer{routes: routes}
 }
 
-// Check verifies that the worker has the Spyre cards the provider needs. It only discovers free
-// cards; Start is what allocates them.
+// Check verifies that the worker has the Spyre cards and AMD GPUs the provider needs. It only
+// discovers free devices; Start is what allocates them.
 func (d *PodmanDeployer) Check(ctx context.Context, plan *types.LocalPlan) error {
 	tmpls, err := loadTemplates(plan)
 	if err != nil {
 		return err
 	}
 
-	_, err = allocateSpyreCards(ctx, plan, tmpls)
+	if _, err = allocateSpyreCards(ctx, plan, tmpls); err != nil {
+		return err
+	}
+
+	_, err = allocateAMDGPUs(ctx, plan, tmpls)
 
 	return err
 }
@@ -78,7 +82,7 @@ func (d *PodmanDeployer) Prepare(ctx context.Context, plan *types.LocalPlan) err
 	return nil
 }
 
-// Start allocates Spyre cards when the provider needs them, starts the pods and returns the
+// Start allocates Spyre cards and AMD GPUs when the provider needs them, starts the pods and returns the
 // model server's endpoints.
 //
 // A model on the local worker is reached at the pod's own address. For a remote worker the pod is
@@ -100,13 +104,18 @@ func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (type
 		return types.ModelEndpoints{}, err
 	}
 
+	amdPool, err := allocateAMDGPUs(ctx, plan, tmpls)
+	if err != nil {
+		return types.ModelEndpoints{}, err
+	}
+
 	baseDir, err := podmanutils.FetchBaseDir(ctx, plan.Runtime)
 	if err != nil {
 		return types.ModelEndpoints{}, err
 	}
 
-	// Same code path as application components: it handles ordered PodTemplateExecutions, Spyre
-	// env injection, the ai-services.io/template label used by deletion, and endpoint extraction.
+	// Same code path as application components: it handles ordered PodTemplateExecutions, Spyre and
+	// AMD GPU env injection, the ai-services.io/template label used by deletion, and endpoint extraction.
 	podEndpoints, err := podmanutils.DeployComponentPods(ctx, podmanutils.ComponentPodsParams{
 		Runtime:       plan.Runtime,
 		ComponentID:   plan.ComponentID,
@@ -115,6 +124,7 @@ func (d *PodmanDeployer) Start(ctx context.Context, plan *types.LocalPlan) (type
 		Metadata:      metadata,
 		Templates:     tmpls,
 		SpyrePool:     spyrePool,
+		AMDGPUPool:    amdPool,
 		BaseDir:       baseDir,
 	})
 	if err != nil {
@@ -176,6 +186,32 @@ func allocateSpyreCards(
 	pool, err := podmanutils.NewSpyreCardPool(ctx, plan.Runtime, required)
 	if err != nil {
 		return nil, fmt.Errorf("spyre card allocation failed: %w", err)
+	}
+
+	return pool, nil
+}
+
+// allocateAMDGPUs builds an AMD GPU pool when the provider templates declare amd-gpus
+// annotations. It returns a nil pool for providers that need no GPUs.
+func allocateAMDGPUs(
+	ctx context.Context,
+	plan *types.LocalPlan,
+	tmpls map[string]*texttemplate.Template,
+) (*types.AMDGPUPool, error) {
+	required, err := plan.Catalog.CollectAMDGPUsFromTemplates(ctx, tmpls, plan.Values)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count required AMD GPUs: %w", err)
+	}
+
+	if required == 0 {
+		return nil, nil //nolint:nilnil // a nil pool means "no GPUs required".
+	}
+
+	logger.InfofCtx(ctx, "Model requires %d AMD GPU(s)", required)
+
+	pool, err := podmanutils.NewAMDGPUPool(ctx, plan.Runtime, required)
+	if err != nil {
+		return nil, fmt.Errorf("AMD GPU allocation failed: %w", err)
 	}
 
 	return pool, nil

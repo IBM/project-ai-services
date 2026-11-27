@@ -424,6 +424,21 @@ func (r *RemoteRuntime) FindFreeSpyreCards(ctx context.Context) ([]string, error
 	return cards, nil
 }
 
+// FindFreeAMDGPUDevices returns free AMD GPU ROCm device ordinals discovered on the worker host.
+func (r *RemoteRuntime) FindFreeAMDGPUDevices(ctx context.Context) ([]string, error) {
+	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_FIND_FREE_AMD_GPU_DEVICES, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var devices []string
+	if err := unmarshalData(res, &devices); err != nil {
+		return nil, err
+	}
+
+	return devices, nil
+}
+
 // GetBaseDir returns the AI Launchpad base directory configured on the worker host.
 func (r *RemoteRuntime) GetBaseDir(ctx context.Context) (string, error) {
 	res, err := r.send(ctx, workerpb.CommandType_COMMAND_TYPE_GET_BASE_DIR, nil)

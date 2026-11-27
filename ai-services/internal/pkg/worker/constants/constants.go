@@ -95,6 +95,13 @@ const (
 	ArgParamWorkerPodmanURI   = "worker.podman.uri"
 	ArgParamWorkerAuthFile    = "worker.podman.authFileContent"
 
+	// ArgParamWorkerHostPathVFIO, ArgParamWorkerHostPathIOMMUGroups and ArgParamWorkerHostPathDRM
+	// toggle the accelerator-related host paths mounted into the worker pod. Each is "true" only
+	// when the path exists on the host.
+	ArgParamWorkerHostPathVFIO        = "worker.hostPaths.vfio"
+	ArgParamWorkerHostPathIOMMUGroups = "worker.hostPaths.iommuGroups"
+	ArgParamWorkerHostPathDRM         = "worker.hostPaths.drm"
+
 	// WorkerGatewayName is the DNS name used by the catalog worker gateway route.
 	WorkerGatewayName = "catalog-worker-gateway"
 

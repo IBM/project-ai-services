@@ -142,6 +142,57 @@ func (p *CatalogProvider) CollectSpyreCardsFromTemplates(
 	return totalSpyreCards, nil
 }
 
+// CollectAMDGPUsFromTemplates extracts AMD GPU requirements from a set of pre-loaded templates
+// by analyzing the ai-services.io/<container>--amd-gpus pod annotations. Returns the total number
+// of AMD GPUs required.
+func (p *CatalogProvider) CollectAMDGPUsFromTemplates(
+	ctx context.Context,
+	templates map[string]*texttemplate.Template,
+	values map[string]any,
+) (int, error) {
+	totalGPUs := 0
+
+	processor := func(templateName string, podSpec *models.PodSpec) error {
+		gpus, err := fetchAMDGPUsFromPodAnnotations(podSpec.Annotations)
+		if err != nil {
+			return fmt.Errorf("failed to extract AMD GPUs: %w", err)
+		}
+
+		totalGPUs += gpus
+		if gpus > 0 {
+			logger.InfofCtx(ctx, "Template %s requires %d AMD GPUs\n", templateName, gpus)
+		}
+
+		return nil
+	}
+
+	if err := p.ProcessTemplates(ctx, templates, values, "amd-gpu-calculation", processor); err != nil {
+		return 0, fmt.Errorf("failed to process templates for AMD GPU calculation: %w", err)
+	}
+
+	return totalGPUs, nil
+}
+
+// fetchAMDGPUsFromPodAnnotations returns the total number of AMD GPUs requested through pod annotations.
+func fetchAMDGPUsFromPodAnnotations(annotations map[string]string) (int, error) {
+	total := 0
+
+	for key, val := range annotations {
+		if !vars.AMDGPUAnnotationRegex.MatchString(key) {
+			continue
+		}
+
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return 0, fmt.Errorf("failed to convert to int. Provided val: %s is not of int type", val)
+		}
+
+		total += n
+	}
+
+	return total, nil
+}
+
 // fetchSpyreCardsFromPodAnnotations extracts Spyre card requirements from pod annotations.
 // Returns the total number of Spyre cards and a map of container names to their card requirements.
 func fetchSpyreCardsFromPodAnnotations(annotations map[string]string) (int, map[string]int, error) {

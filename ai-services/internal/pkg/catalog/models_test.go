@@ -62,3 +62,45 @@ func TestEmbeddedProviderSchemasIncludeModels(t *testing.T) {
 		}
 	}
 }
+
+// TestVLLMROCmProviderSchemaIncludesModels verifies the Podman-only vllm-rocm provider
+// exposes its models from models.yaml.
+func TestVLLMROCmProviderSchemaIncludesModels(t *testing.T) {
+	base, err := NewCatalogProvider(nil)
+	if err != nil {
+		t.Fatalf("failed to create catalog provider: %v", err)
+	}
+
+	provider, err := base.WithRuntime(runtimeTypes.RuntimeTypePodman.String())
+	if err != nil {
+		t.Fatalf("WithRuntime: %v", err)
+	}
+
+	schema, err := provider.GetComponentProviderParams(context.Background(), "llm", "vllm-rocm")
+	if err != nil {
+		t.Fatalf("GetComponentProviderParams: %v", err)
+	}
+
+	got := map[string]bool{}
+	models.ExtractFromSchema(schema, got)
+
+	want := []string{
+		"ibm-granite/granite-4.1-8b",
+		"ibm-granite/granite-4.1-8b-fp8",
+		"openai/gpt-oss-120b",
+		"mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+	}
+	if len(got) != len(want) {
+		t.Errorf("models = %v, want %v", got, want)
+	}
+	for _, m := range want {
+		if !got[m] {
+			t.Errorf("model %q missing from schema", m)
+		}
+	}
+
+	field := schema["properties"].(map[string]any)["model"].(map[string]any)
+	if field["default"] != "ibm-granite/granite-4.1-8b" {
+		t.Errorf("default = %v, want ibm-granite/granite-4.1-8b", field["default"])
+	}
+}

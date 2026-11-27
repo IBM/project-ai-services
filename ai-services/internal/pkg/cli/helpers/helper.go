@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/amdgpu"
 	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -125,6 +126,12 @@ func ListSpyreCards(ctx context.Context) ([]string, error) {
 // This is a wrapper around spyre.FindFreeCards for backward compatibility.
 func FindFreeSpyreCards(ctx context.Context) ([]string, error) {
 	return spyre.FindFreeCards(ctx)
+}
+
+// FindFreeAMDGPUDevices returns ROCm device ordinals of AMD GPUs with no VRAM in use.
+// It uses sysfs (/sys/class/drm) to determine occupancy — a GPU is free when mem_info_vram_used == 0.
+func FindFreeAMDGPUDevices(ctx context.Context) ([]string, error) {
+	return amdgpu.FindFreeDevices(ctx)
 }
 
 func ParseSkipChecks(skipChecks []string) map[string]bool {

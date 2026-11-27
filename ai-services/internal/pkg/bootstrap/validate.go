@@ -3,7 +3,10 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"slices"
 
+	"github.com/project-ai-services/ai-services/internal/pkg/accelerator/amdgpu"
+	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap/spyreconfig/spyre"
 	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -55,11 +58,13 @@ func (p *BootstrapFactory) Validate(ctx context.Context, skip map[string]bool) e
 }
 
 // GetRulesForRuntime returns the appropriate validation rules based on the runtime type.
+// For Podman, it selects ROCmRegistry on AMD-only hosts, PodmanRegistry (Spyre) when no AMD GPU is
+// detected, and the union of both on hosts that have AMD GPUs and Spyre cards.
 func GetRulesForRuntime() []validators.Rule {
 	rt := vars.RuntimeFactory.GetRuntimeType()
 	switch rt {
 	case types.RuntimeTypePodman:
-		return validators.PodmanRegistry.Rules()
+		return podmanRules(amdgpu.IsApplicable(), spyre.IsApplicable())
 	case types.RuntimeTypeOpenShift:
 		return validators.OpenshiftRegistry.Rules()
 	default:
@@ -101,4 +106,36 @@ func executeRule(ctx context.Context, rule validators.Rule) validationResult {
 	s.Stop(rule.Message())
 
 	return validationResult{}
+}
+
+// AllPodmanRules returns every Podman rule that can apply on some host (Spyre and ROCm rules, each
+// once). It is host-independent, which suits help text and flag descriptions.
+func AllPodmanRules() []validators.Rule {
+	return podmanRules(true, true)
+}
+
+// podmanRules selects the Podman rules for the accelerators present on the host. Without AMD GPUs
+// the Spyre (default) rules apply; with only AMD GPUs the ROCm rules apply; with both, the Spyre
+// rules are extended with the ROCm rules they do not already contain.
+func podmanRules(hasAMDGPU, hasSpyre bool) []validators.Rule {
+	switch {
+	case !hasAMDGPU:
+		return validators.PodmanRegistry.Rules()
+	case !hasSpyre:
+		return validators.ROCmRegistry.Rules()
+	}
+
+	rules := slices.Clone(validators.PodmanRegistry.Rules())
+	seen := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		seen[r.Name()] = true
+	}
+
+	for _, r := range validators.ROCmRegistry.Rules() {
+		if !seen[r.Name()] {
+			rules = append(rules, r)
+		}
+	}
+
+	return rules
 }

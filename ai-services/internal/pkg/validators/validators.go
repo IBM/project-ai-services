@@ -11,6 +11,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/rhods"
 	spyrepolicy "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/spyreclusterpolicy"
 	storageclass "github.com/project-ai-services/ai-services/internal/pkg/validators/openshift/storageclass"
+	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/amdgpu"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/numa"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/platform"
 	"github.com/project-ai-services/ai-services/internal/pkg/validators/podman/power"
@@ -23,7 +24,7 @@ import (
 
 // Initialize the default registry with built-in rules.
 func init() {
-	// Podman checks
+	// Podman checks (Spyre)
 	PodmanRegistry.Register(numa.NewNumaRule())
 	PodmanRegistry.Register(platform.NewPlatformRule())
 	PodmanRegistry.Register(power.NewPowerRule())
@@ -32,6 +33,17 @@ func init() {
 	PodmanRegistry.Register(usergroup.NewUsergroupRule())
 	PodmanRegistry.Register(ulimits.NewUlimitsRule())
 	PodmanRegistry.Register(slicelimits.NewSliceLimitsRule())
+
+	// Podman checks (AMD GPU)
+	ROCmRegistry.Register(platform.NewROCmPlatformRule())
+	ROCmRegistry.Register(power.NewPowerRule())
+	// TODO: Register a ROCm-only rule validating that the Power system firmware level is FW1120 or later.
+	ROCmRegistry.Register(rhn.NewRHNRule())
+	ROCmRegistry.Register(amdgpu.NewAMDGPURule())
+	ROCmRegistry.Register(amdgpu.NewROCmVersionRule())
+	// memlock ulimits are required for GPU DMA; slice limits apply regardless of accelerator type.
+	ROCmRegistry.Register(ulimits.NewUlimitsRule())
+	ROCmRegistry.Register(slicelimits.NewSliceLimitsRule())
 
 	// OpenshiftChecks
 	OpenshiftRegistry.Register(kubeconfig.NewKubeconfigRule())
@@ -53,8 +65,12 @@ type Rule interface {
 	Description() string
 }
 
-// PodmanRegistry is the podman registry instance that holds all registered checks.
+// PodmanRegistry is the default Podman registry for Spyre-based deployments.
 var PodmanRegistry = NewValidationRegistry()
+
+// ROCmRegistry is the Podman registry for AMD GPU-based deployments.
+var ROCmRegistry = NewValidationRegistry()
+
 var OpenshiftRegistry = NewValidationRegistry()
 
 // ValidationRegistry holds the list of checks.

@@ -21,6 +21,7 @@ func TestGetModelProviders(t *testing.T) {
 			deploymentType: "local",
 			want: []types.ProviderInfo{
 				{ID: "vllm-cpu", Name: "AI Inference on CPU"},
+				{ID: "vllm-rocm", Name: "AI Inference with AMD GPU (ROCm)"},
 				{ID: "vllm-spyre", Name: "Red Hat AI Inference with Spyre"},
 			},
 		},
@@ -37,6 +38,7 @@ func TestGetModelProviders(t *testing.T) {
 			want: []types.ProviderInfo{
 				{ID: "hosted_vllm", Name: "VLLM"},
 				{ID: "vllm-cpu", Name: "AI Inference on CPU"},
+				{ID: "vllm-rocm", Name: "AI Inference with AMD GPU (ROCm)"},
 				{ID: "vllm-spyre", Name: "Red Hat AI Inference with Spyre"},
 				{ID: "watsonx", Name: "IBM watsonx.ai on IBM Cloud"},
 			},

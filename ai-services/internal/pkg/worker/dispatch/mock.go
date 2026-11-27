@@ -15,7 +15,7 @@ import (
 const mockBaseDir = "/tmp/ai-services-mock"
 
 // handleMock serves the commands that bypass the runtime.Runtime interface
-// (Helm, Spyre discovery, model download, HTTP tunnel, base dir, OpenShift
+// (Helm, Spyre/AMD GPU discovery, model download, HTTP tunnel, base dir, OpenShift
 // InferenceService wait) when rt is the in-memory mock. Nothing real is run.
 // handled is false for every other command, which then follows the normal path.
 func handleMock(rt runtime.Runtime, cmd *workerpb.Command) (data []byte, handled bool, err error) {
@@ -35,6 +35,13 @@ func handleMock(rt runtime.Runtime, cmd *workerpb.Command) (data []byte, handled
 
 	case workerpb.CommandType_COMMAND_TYPE_FIND_FREE_SPYRE_CARDS:
 		data, err := marshalOr(mc.FreeSpyreCards(), nil)
+
+		return data, true, err
+
+	case workerpb.CommandType_COMMAND_TYPE_FIND_FREE_AMD_GPU_DEVICES:
+		// The mock advertises no AMD GPUs (see GetSystemInfo), so report none
+		// instead of probing the real host.
+		data, err := marshalOr([]string{}, nil)
 
 		return data, true, err
 

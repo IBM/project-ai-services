@@ -5,6 +5,13 @@ worker:
   gatewayAddr: ""
   # @generate:password length=32, special=false
   mtlsEncryptionKey: ""
+  # hostPaths: accelerator-related host paths the worker pod mounts. They are set to "true" at
+  # deploy time only when the path exists on the host, so the pod starts on any host and the
+  # worker discovers what it can use (Spyre via vfio/iommu_groups, AMD GPUs via /sys/class/drm).
+  hostPaths:
+    vfio: "false"
+    iommuGroups: "false"
+    drm: "false"
   podman:
     uri: "/run/podman/podman.sock"
     authFileContent: ""

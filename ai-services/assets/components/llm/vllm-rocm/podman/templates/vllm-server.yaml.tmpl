@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "llm-{{ .InstanceSlug }}"
+  labels:
+    ai-services.io/template: "{{ .TemplateID }}"
+  annotations:
+    ai-services.io/llm--amd-gpus: "{{ index .Values.resources.accelerators "amd.com/gpu" }}"
+spec:
+  hostIPC: true
+  restartPolicy: always
+  volumes:
+    - name: models
+      hostPath:
+        path: "{{ .BaseDir }}/models"
+        type: Directory
+    - name: dev-kfd
+      hostPath:
+        path: /dev/kfd
+    - name: dev-dri
+      hostPath:
+        path: /dev/dri
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: {{ .Values.shmSize }}
+  containers:
+    - name: llm
+      image: "{{ .Values.image }}"
+      workingDir: /opt/vllm
+      securityContext:
+        privileged: true
+        seccompProfile:
+          type: Unconfined
+      args:
+        - --model
+        - /models/{{ .Values.model }}
+        - --served-model-name
+        - {{ .Values.model }}
+        - --tensor-parallel-size
+        - "{{ index .Values.resources.accelerators "amd.com/gpu" }}"
+        - --max-model-len
+        - "{{ .Values.maxModelLen }}"
+        - --max-num-seqs
+        - "{{ .Values.maxBatchSize }}"
+        - --port
+        - "8000"
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 420
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+      env:
+        {{- with .env.llm }}
+          {{- range $k, $v := . }}
+        - name: {{ $k }}
+          value: "{{ $v }}"
+          {{- end }}
+        {{- end }}
+      resources:
+        requests:
+          memory: "{{ .Values.resources.memory }}"
+        limits:
+          memory: "{{ .Values.resources.memory }}"
+      ports:
+        - containerPort: 8000
+      volumeMounts:
+        - mountPath: /models:z
+          name: models
+          readOnly: true
+        - mountPath: /dev/kfd
+          name: dev-kfd
+        - mountPath: /dev/dri
+          name: dev-dri
+        - mountPath: /dev/shm
+          name: dshm
