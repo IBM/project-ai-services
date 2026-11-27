@@ -63,7 +63,7 @@ func TestConnectDatasourcesToApplication_OwnershipCheck(t *testing.T) {
 	}
 
 	// 1. Attacker calls connect on victim-owned application -> 403 Forbidden
-	resp, err := svc.ConnectDatasourcesToApplication(context.Background(), appID, "attacker-user", []uuid.UUID{dsID}, true)
+	resp, err := svc.ConnectDatasourcesToApplication(context.Background(), appID, "attacker-user", []uuid.UUID{dsID}, catalogconstants.EnforceAllowConnect)
 	assert.Nil(t, resp)
 	require.Error(t, err)
 

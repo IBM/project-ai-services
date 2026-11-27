@@ -17,6 +17,7 @@ import (
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/repository"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/services/auth"
+	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
@@ -117,7 +118,7 @@ func (m *mockDatasourceServiceForAuth) ListApplicationDatasources(_ context.Cont
 	return nil, nil
 }
 
-func (m *mockDatasourceServiceForAuth) ConnectDatasourcesToApplication(_ context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, _ bool) (*apimodels.ConnectDatasourcesResponse, error) {
+func (m *mockDatasourceServiceForAuth) ConnectDatasourcesToApplication(_ context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, _ catalogconstants.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error) {
 	m.connectCalled = true
 	m.lastAppID = applicationID
 	m.lastUserID = userID
