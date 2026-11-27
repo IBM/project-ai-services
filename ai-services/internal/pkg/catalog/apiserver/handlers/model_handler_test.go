@@ -90,6 +90,7 @@ func setupModelRouter(svc repository.ModelServiceInterface, tm *auth.TokenManage
 	router.POST("/api/v1/models", authMw, h.CreateModel)
 	router.GET("/api/v1/models", authMw, h.ListModels)
 	router.GET("/api/v1/models/:id", authMw, h.GetModelByID)
+	router.GET("/api/v1/models/:id/ps", authMw, h.ModelPS)
 	router.POST("/api/v1/models/:id/keys", authMw, h.GenerateModelKey)
 	router.DELETE("/api/v1/models/:id", authMw, h.DeleteModel)
 
@@ -747,6 +748,216 @@ func TestGetModelByID_ResponseShape(t *testing.T) {
 	assert.NotContains(t, raw, "profile")
 	assert.Len(t, raw["applications"], 1)
 	assert.Contains(t, raw, "connected_services")
+}
+
+func TestModelPS(t *testing.T) {
+	const modelID = "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f"
+
+	tests := []struct {
+		name            string
+		path            string
+		noAuth          bool
+		svcErr          error
+		wantCode        int
+		wantCalled      bool
+		wantErrContains string
+		wantAbsent      string
+	}{
+		{name: "found", path: modelID, wantCode: http.StatusOK, wantCalled: true},
+		{name: "malformed id", path: "not-a-uuid", wantCode: http.StatusBadRequest, wantErrContains: "Invalid model ID"},
+		{name: "no token", path: modelID, noAuth: true, wantCode: http.StatusUnauthorized},
+		{
+			name:            "not found",
+			path:            modelID,
+			svcErr:          validators.NotFound("model not found"),
+			wantCode:        http.StatusNotFound,
+			wantCalled:      true,
+			wantErrContains: "model not found",
+		},
+		{
+			name:            "not the owner",
+			path:            modelID,
+			svcErr:          validators.Forbidden("user does not own this model"),
+			wantCode:        http.StatusForbidden,
+			wantCalled:      true,
+			wantErrContains: "does not own",
+		},
+		{
+			name:            "worker unreachable",
+			path:            modelID,
+			svcErr:          validators.Unprocessable("cannot reach worker %q: %v", "default", "connection refused"),
+			wantCode:        http.StatusUnprocessableEntity,
+			wantCalled:      true,
+			wantErrContains: "cannot reach worker",
+		},
+		{
+			name:            "internal error is not leaked",
+			path:            modelID,
+			svcErr:          errors.New("pq: connection refused to 10.0.0.5"),
+			wantCode:        http.StatusInternalServerError,
+			wantCalled:      true,
+			wantErrContains: "Failed to get model process status",
+			wantAbsent:      "10.0.0.5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var (
+				called   bool
+				gotID    uuid.UUID
+				gotOwner string
+			)
+
+			svc := &mockModelService{
+				getModelPSFunc: func(_ context.Context, id uuid.UUID, createdBy string) (*models.ModelPSResponse, error) {
+					called = true
+					gotID = id
+					gotOwner = createdBy
+
+					if tt.svcErr != nil {
+						return nil, tt.svcErr
+					}
+
+					return &models.ModelPSResponse{ID: id.String(), Pods: []types.Pod{}}, nil
+				},
+			}
+
+			tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+			router := setupModelRouter(svc, tm)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/models/"+tt.path+"/ps", nil)
+
+			if !tt.noAuth {
+				token, _, err := tm.GenerateAccessToken("user-123")
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+			assert.Equal(t, tt.wantCalled, called, "whether the request reached the model service")
+
+			if tt.wantCalled {
+				assert.Equal(t, modelID, gotID.String())
+				assert.Equal(t, "user-123", gotOwner, "the owner comes from the token, not the request")
+			}
+
+			if tt.wantErrContains != "" {
+				var errResp ErrorResponse
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
+				assert.Contains(t, errResp.Error, tt.wantErrContains)
+			}
+
+			if tt.wantAbsent != "" {
+				assert.NotContains(t, w.Body.String(), tt.wantAbsent)
+			}
+		})
+	}
+}
+
+func TestModelPS_ResponseShape(t *testing.T) {
+	svc := &mockModelService{
+		getModelPSFunc: func(_ context.Context, id uuid.UUID, _ string) (*models.ModelPSResponse, error) {
+			return &models.ModelPSResponse{
+				ID:             id.String(),
+				Name:           "granite-llm",
+				DeploymentType: "local",
+				Message:        "model is ready",
+				ComponentType:  "llm",
+				ProviderID:     "vllm-spyre",
+				Model:          "ibm-granite/granite-3.3-8b-instruct",
+				WorkerName:     "default",
+				RuntimeType:    "podman",
+				Pods: []types.Pod{
+					{
+						PodID:   "pod-1",
+						PodName: "granite-llm-pod",
+						Status:  types.Running,
+						Healthy: true,
+						Created: "2026-01-01T00:00:00Z",
+						Containers: []types.PodContainer{
+							{Name: "vllm", Status: types.Running, Healthy: true},
+						},
+					},
+				},
+			}, nil
+		},
+	}
+
+	tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+	router := setupModelRouter(svc, tm)
+
+	token, _, err := tm.GenerateAccessToken("user-123")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f/ps", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+
+	assert.Equal(t, "7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f", raw["id"])
+	assert.Equal(t, "granite-llm", raw["name"])
+	assert.Equal(t, "local", raw["deployment_type"])
+	assert.Equal(t, "model is ready", raw["message"])
+	assert.Equal(t, "llm", raw["component_type"])
+	assert.Equal(t, "vllm-spyre", raw["provider_id"])
+	assert.Equal(t, "default", raw["worker_name"])
+	assert.Equal(t, "podman", raw["runtime_type"])
+	assert.NotContains(t, raw, "namespace", "namespace is omitted when empty")
+
+	pods, ok := raw["pods"].([]any)
+	require.True(t, ok)
+	require.Len(t, pods, 1)
+
+	pod, ok := pods[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "pod-1", pod["pod_id"])
+	assert.Equal(t, "running", pod["status"])
+	assert.Equal(t, true, pod["healthy"])
+	assert.Len(t, pod["containers"], 1)
+}
+
+func TestModelPS_RemoteModelHasEmptyPods(t *testing.T) {
+	svc := &mockModelService{
+		getModelPSFunc: func(_ context.Context, id uuid.UUID, _ string) (*models.ModelPSResponse, error) {
+			return &models.ModelPSResponse{
+				ID:             id.String(),
+				Name:           "prod-watsonx",
+				DeploymentType: "remote",
+				Pods:           []types.Pod{},
+			}, nil
+		},
+	}
+
+	tm := auth.NewTokenManager("test-secret-key-32-bytes-auth1", 15*time.Minute, 24*time.Hour)
+	router := setupModelRouter(svc, tm)
+
+	token, _, err := tm.GenerateAccessToken("user-123")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/models/7f3a1c2d-8e4b-4f5a-9d6e-1a2b3c4d5e6f/ps", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+
+	assert.Equal(t, "remote", raw["deployment_type"])
+	assert.Contains(t, raw, "pods")
+	assert.Empty(t, raw["pods"], "remote models have no pods, but the field is still present")
+	assert.NotContains(t, raw, "message", "message is omitted when empty")
+	assert.NotContains(t, raw, "worker_name")
 }
 
 func TestGenerateModelKey(t *testing.T) {
