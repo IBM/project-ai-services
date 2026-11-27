@@ -15,7 +15,11 @@ import { formatVersion } from "@/utils/string";
 import styles from "../DeployFlow.shared.module.scss";
 import type { DeployFormData, DeploymentRuntimeType } from "../types";
 import type { WorkerApiResponse } from "@/types/api.types";
-import { WORKER_RUNTIME_LABELS, LOCAL_WORKER_NAME } from "@/constants";
+import {
+  WORKER_RUNTIME_LABELS,
+  LOCAL_WORKER_NAME,
+  REMOTE_RUNTIME,
+} from "@/constants";
 import RegisterWorkerModal from "@/components/WorkerResourcesTable/RegisterWorkerModal";
 import type { RegisterPhase } from "@/components/WorkerResourcesTable/types";
 import { registerWorker } from "@/api/workerResources.api";
@@ -102,6 +106,8 @@ export interface SharedStepOneProps {
   deploymentTypeHeading?: string;
   // Overrides the default worker-runtime tiles
   runtimeOptions?: Record<string, { label: string; description: string }>;
+  // Runtime tiles shown grayed out and not selectable
+  disabledRuntimes?: readonly string[];
   // Worker picker copy
   locationLabel?: string;
   locationTooltip?: string;
@@ -133,6 +139,7 @@ export const SharedStepOne = ({
   isNameValid: isNameValidFn = (name) => !!name.trim(),
   deploymentTypeHeading = "Deployment type",
   runtimeOptions = WORKER_RUNTIME_LABELS,
+  disabledRuntimes = [],
   locationLabel = "Worker resource",
   locationTooltip = DEFAULT_LOCATION_TOOLTIP,
   showLocationHeading = true,
@@ -152,7 +159,7 @@ export const SharedStepOne = ({
     ? [{ id: version, text: formatVersion(version) }]
     : [];
   // Remote has no worker
-  const showLocation = formData.deploymentType !== "remote";
+  const showLocation = formData.deploymentType !== REMOTE_RUNTIME;
 
   const [registerState, dispatchRegister] = useReducer(
     registerReducer,
@@ -372,13 +379,15 @@ export const SharedStepOne = ({
               {Object.entries(runtimeOptions).map(
                 ([value, { label, description }]) => {
                   const isSelected = formData.deploymentType === value;
+                  const isDisabled = disabledRuntimes.includes(value);
                   return (
                     <ClickableTile
                       key={value}
                       id={`deployment-type-${value}`}
+                      disabled={isDisabled}
                       className={`${styles.deploymentTypeTile} ${
                         isSelected ? styles.deploymentTypeTileSelected : ""
-                      }`}
+                      } ${isDisabled ? styles.deploymentTypeTileDisabled : ""}`}
                       onClick={() => handleDeploymentTypeChange(value)}
                     >
                       {isSelected && (

@@ -34,6 +34,12 @@ export const LOCAL_WORKER_NAME = "Local";
 // The default runtime used when no worker runtime is known yet.
 export const DEFAULT_RUNTIME = "podman" as const;
 
+// Runtime id for models served from an external endpoint rather than a worker.
+export const REMOTE_RUNTIME = "remote" as const;
+
+// Runtimes that run on a worker; unavailable to remote-only models.
+export const LOCAL_RUNTIMES: readonly string[] = ["podman", "openshift"];
+
 export const WORKER_RUNTIME_LABELS: Record<
   string,
   { short: string; label: string; description: string }

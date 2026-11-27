@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { REMOTE_RUNTIME } from "@/constants";
 import { fetchModelDeployOptions } from "@/api/models.api";
 import { fetchServiceSchemaParams } from "@/api/applications.api";
 import { useDeployStore } from "@/store/deploy.store";
@@ -16,15 +17,12 @@ interface FetchError {
   message: string;
 }
 
-// Cache key for remote providers, which are fetched without a runtime
-const REMOTE_RUNTIME_KEY = "remote";
-
 // Fetches deploy options into the store unless a fresh entry is cached
 export const loadModelDeployOptions = async (
   modelId: string,
   runtime?: string,
 ): Promise<void> => {
-  const runtimeKey = runtime ?? REMOTE_RUNTIME_KEY;
+  const runtimeKey = runtime ?? REMOTE_RUNTIME;
   const store = useDeployStore.getState();
   if (
     store.modelDeployOptions[`${modelId}:${runtimeKey}`] &&
@@ -44,7 +42,7 @@ export const useModelDeployOptions = (
   modelId: string | null,
   runtime?: string,
 ): FetchState<ModelDeployOptions> => {
-  const runtimeKey = runtime ?? REMOTE_RUNTIME_KEY;
+  const runtimeKey = runtime ?? REMOTE_RUNTIME;
   const key = modelId ? `${modelId}:${runtimeKey}` : null;
   const cached = useDeployStore((state) =>
     key ? state.modelDeployOptions[key] : undefined,

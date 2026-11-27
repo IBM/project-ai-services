@@ -1,3 +1,4 @@
+import { REMOTE_RUNTIME } from "@/constants";
 import type { CatalogModel, CreateModelRequest } from "@/types/api.types";
 import type { DeployFormData } from "../../Shared/types";
 import type { ModelConfig } from "../types";
@@ -24,7 +25,7 @@ export const buildCreateModelPayload = ({
   model,
   config,
 }: BuildPayloadOptions): CreateModelRequest => {
-  const isRemote = formData.deploymentType === "remote";
+  const isRemote = formData.deploymentType === REMOTE_RUNTIME;
   const params = compactParams(config.params);
 
   return {

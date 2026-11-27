@@ -1,7 +1,7 @@
 import { useReducer, useEffect, useCallback, useState } from "react";
 import { useWorkers } from "@/hooks/useWorkers";
 import { useModels } from "@/hooks/useModels";
-import { DEFAULT_RUNTIME } from "@/constants";
+import { DEFAULT_RUNTIME, LOCAL_RUNTIMES, REMOTE_RUNTIME } from "@/constants";
 import { createModel } from "@/api/models.api";
 import type {
   ModelConfig,
@@ -110,19 +110,24 @@ export const ModelsDeployFlow = ({
   // Remote field errors show once Register is clicked
   const [showRemoteErrors, setShowRemoteErrors] = useState(false);
 
-  const isRemote = state.formData.deploymentType === "remote";
+  const isRemote = state.formData.deploymentType === REMOTE_RUNTIME;
   // Remote has no Configure model step
   const lastStep = isRemote ? STEP_ONE : STEP_TWO;
   const selectedModel = models.find((m) => m.id === state.selectedModelId);
+  const isRemoteOnly =
+    !!selectedModel?.providers.length &&
+    selectedModel.providers.every((p) => p.deployment_type === "remote");
+  const disabledRuntimes = isRemoteOnly ? LOCAL_RUNTIMES : [];
 
-  // Prefetch the default runtime's options once a model is picked
+  // Prefetch the default runtime's options once a model is picked.
+  // Skipped for remote-only models, which never use a local runtime.
   useEffect(() => {
-    if (!open || !state.selectedModelId) return;
+    if (!open || !state.selectedModelId || isRemoteOnly) return;
     // Errors surface in the config step's own fetch
     loadModelDeployOptions(state.selectedModelId, DEFAULT_RUNTIME).catch(
       () => undefined,
     );
-  }, [open, state.selectedModelId]);
+  }, [open, state.selectedModelId, isRemoteOnly]);
 
   useEffect(() => {
     if (open && preSelectedModelId) {
@@ -144,15 +149,28 @@ export const ModelsDeployFlow = ({
     handleBack: handleStepBack,
   } = useDeployFlowReducer(dispatch, state.currentStep, STEP_ONE, lastStep);
 
+  // A remote-only model can't use a local runtime, so switch to remote
+  useEffect(() => {
+    if (isRemoteOnly && !isRemote) {
+      handleFormDataChange({ deploymentType: REMOTE_RUNTIME, workerName: "" });
+    }
+  }, [isRemoteOnly, isRemote, handleFormDataChange]);
+
   // Goes back a step and clears remote errors so they don't reappear on return
   const handleBack = () => {
     setShowRemoteErrors(false);
     handleStepBack();
   };
 
-  // Picks a model and clears remote errors left over from the previous one
+  // Picks a model and clears remote errors left over from the previous one.
+  // A different model also resets the runtime to the default, so a previous
+  // remote or OpenShift choice doesn't carry over (remote-only models are
+  // switched to remote by the effect above).
   const handleModelSelect = (modelId: string) => {
     setShowRemoteErrors(false);
+    if (modelId !== state.selectedModelId) {
+      handleFormDataChange(DEFAULT_FORM_DATA);
+    }
     dispatch({ type: ACTION_TYPES.SET_SELECTED_MODEL, payload: modelId });
   };
 
@@ -285,6 +303,7 @@ export const ModelsDeployFlow = ({
           isNameValid={isValidModelName}
           deploymentTypeHeading="Model registration"
           runtimeOptions={MODEL_RUNTIME_OPTIONS}
+          disabledRuntimes={disabledRuntimes}
           locationLabel="Location"
           locationTooltip="The host and partition or namespace where this deployment will run."
           showLocationHeading={false}
