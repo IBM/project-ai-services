@@ -876,8 +876,14 @@ definitions:
   github_com_project-ai-services_ai-services_internal_pkg_catalog_types.DatasourceSettings:
     properties:
       allow_connect:
+        description: |-
+          AllowConnect controls whether datasources may be connected after application creation via the connect API.
+          Defaults to true when unset.
         type: boolean
       allow_disconnect:
+        description: |-
+          AllowDisconnect controls whether datasources may be disconnected after application creation via the disconnect API.
+          Defaults to false when required is true, and true otherwise.
         type: boolean
       max_connections:
         description: |-
@@ -886,8 +892,13 @@ definitions:
           Must be >= 1 when set.
         type: integer
       required:
+        description: Required indicates that at least one datasource must be connected
+          before the application can be used.
         type: boolean
       supported_providers:
+        description: |-
+          SupportedProviders is the list of datasource provider IDs that this service accepts (e.g. "s3", "filesystem").
+          When empty, all providers are accepted.
         items:
           type: string
         type: array

@@ -111,46 +111,13 @@ func (p *CatalogProvider) buildSingleService(ctx context.Context, serviceID stri
 		// Derive accepts_datasource and copy datasource config from catalog YAML so the UI knows whether to
 		// render a connector picker for this service and which providers are supported.
 		AcceptsDatasource: service.Datasource != nil,
-		Datasource:        resolveDatasourceDefaults(service.Datasource),
+		Datasource:        service.Datasource.ResolveDefaults(),
 	}
 
 	// Only add schema if the service has non-empty schema properties
 	p.addServiceSchemaIfPresent(ctx, deployOptionsService, service.ID)
 
 	return deployOptionsService, nil
-}
-
-// CanConnectDatasource reports whether datasources may be connected post-application creation.
-// allow_connect defaults to true when unset.
-func CanConnectDatasource(settings *types.DatasourceSettings) bool {
-	return settings.AllowConnect == nil || *settings.AllowConnect
-}
-
-// CanDisconnectDatasource reports whether datasources may be disconnected post-application creation.
-// allow_disconnect defaults to false when the datasource is required and to true otherwise.
-func CanDisconnectDatasource(settings *types.DatasourceSettings) bool {
-	if settings.AllowDisconnect == nil {
-		return !settings.Required
-	}
-
-	return *settings.AllowDisconnect
-}
-
-// resolveDatasourceDefaults returns a copy of the settings with allow_connect and allow_disconnect
-// set to their effective values so API consumers never see an unset flag. It returns nil when the
-// service declares no datasource block.
-func resolveDatasourceDefaults(settings *types.DatasourceSettings) *types.DatasourceSettings {
-	if settings == nil {
-		return nil
-	}
-
-	allowConnect := CanConnectDatasource(settings)
-	allowDisconnect := CanDisconnectDatasource(settings)
-	resolved := *settings
-	resolved.AllowConnect = &allowConnect
-	resolved.AllowDisconnect = &allowDisconnect
-
-	return &resolved
 }
 
 // buildServiceComponents builds deploy options components for a service's dependencies.
@@ -248,7 +215,7 @@ func (p *CatalogProvider) GetServiceDeployOptions(ctx context.Context, serviceID
 		Components:        components,
 		Resources:         resources,
 		AcceptsDatasource: service.Datasource != nil,
-		Datasource:        resolveDatasourceDefaults(service.Datasource),
+		Datasource:        service.Datasource.ResolveDefaults(),
 	}
 
 	// Only add schema if the service has non-empty schema properties.

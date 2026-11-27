@@ -4676,9 +4676,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "allow_connect": {
+                    "description": "AllowConnect controls whether datasources may be connected after application creation via the connect API.\nDefaults to true when unset.",
                     "type": "boolean"
                 },
                 "allow_disconnect": {
+                    "description": "AllowDisconnect controls whether datasources may be disconnected after application creation via the disconnect API.\nDefaults to false when required is true, and true otherwise.",
                     "type": "boolean"
                 },
                 "max_connections": {
@@ -4686,9 +4688,11 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "required": {
+                    "description": "Required indicates that at least one datasource must be connected before the application can be used.",
                     "type": "boolean"
                 },
                 "supported_providers": {
+                    "description": "SupportedProviders is the list of datasource provider IDs that this service accepts (e.g. \"s3\", \"filesystem\").\nWhen empty, all providers are accepted.",
                     "type": "array",
                     "items": {
                         "type": "string"

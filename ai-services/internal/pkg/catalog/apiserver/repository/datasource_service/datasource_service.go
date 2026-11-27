@@ -969,12 +969,16 @@ func (s *DatasourceService) disconnectOneDatasource(ctx context.Context, proxy h
 	return nil
 }
 
-// checkAllowConnect returns a 422 ValidationError if any service in the list has
-// allow_connect == false in its catalog datasource settings.
+// checkAllowConnect returns an error if any service in the list fails to load from the catalog
+// or has allow_connect == false in its catalog datasource settings.
 func (s *DatasourceService) checkAllowConnect(services []dbrepo.LinkedServiceRow) error {
 	for _, svc := range services {
 		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
-		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanConnectDatasource(catalogSvc.Datasource) {
+		if loadErr != nil {
+			return fmt.Errorf("failed to load catalog service %q: %w", svc.ServiceCatalogID, loadErr)
+		}
+
+		if catalogSvc.Datasource != nil && !catalogSvc.Datasource.CanConnect() {
 			return validators.Unprocessable("service %q does not allow post-creation datasource connect", svc.ServiceCatalogID)
 		}
 	}
@@ -982,12 +986,16 @@ func (s *DatasourceService) checkAllowConnect(services []dbrepo.LinkedServiceRow
 	return nil
 }
 
-// checkAllowDisconnect returns a 422 ValidationError if any service in the list has
-// allow_disconnect == false in its catalog datasource settings.
+// checkAllowDisconnect returns an error if any service in the list fails to load from the catalog
+// or has allow_disconnect == false in its catalog datasource settings.
 func (s *DatasourceService) checkAllowDisconnect(services []dbrepo.LinkedServiceRow) error {
 	for _, svc := range services {
 		catalogSvc, loadErr := s.catalogProvider.LoadService(svc.ServiceCatalogID)
-		if loadErr == nil && catalogSvc.Datasource != nil && !catalog.CanDisconnectDatasource(catalogSvc.Datasource) {
+		if loadErr != nil {
+			return fmt.Errorf("failed to load catalog service %q: %w", svc.ServiceCatalogID, loadErr)
+		}
+
+		if catalogSvc.Datasource != nil && !catalogSvc.Datasource.CanDisconnect() {
 			return validators.Unprocessable("service %q does not allow datasource disconnect", svc.ServiceCatalogID)
 		}
 	}

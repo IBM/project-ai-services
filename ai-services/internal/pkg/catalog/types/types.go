@@ -93,14 +93,54 @@ type Resources struct {
 // AllowConnect and AllowDisconnect are pointers so an unset value (nil, default applies) can be told
 // apart from an explicit false.
 type DatasourceSettings struct {
-	Required           bool     `yaml:"required,omitempty" json:"required"`
-	AllowConnect       *bool    `yaml:"allow_connect,omitempty" json:"allow_connect,omitempty"`
-	AllowDisconnect    *bool    `yaml:"allow_disconnect,omitempty" json:"allow_disconnect,omitempty"`
+	// Required indicates that at least one datasource must be connected before the application can be used.
+	Required bool `yaml:"required,omitempty" json:"required"`
+	// AllowConnect controls whether datasources may be connected after application creation via the connect API.
+	// Defaults to true when unset.
+	AllowConnect *bool `yaml:"allow_connect,omitempty" json:"allow_connect,omitempty"`
+	// AllowDisconnect controls whether datasources may be disconnected after application creation via the disconnect API.
+	// Defaults to false when required is true, and true otherwise.
+	AllowDisconnect *bool `yaml:"allow_disconnect,omitempty" json:"allow_disconnect,omitempty"`
+	// SupportedProviders is the list of datasource provider IDs that this service accepts (e.g. "s3", "filesystem").
+	// When empty, all providers are accepted.
 	SupportedProviders []string `yaml:"supported_providers,omitempty" json:"supported_providers,omitempty"`
 	// MaxConnections is the maximum number of datasources that may be attached to the service at any
 	// one time (creation-time and post-creation connections combined). nil means unlimited.
 	// Must be >= 1 when set.
 	MaxConnections *int `yaml:"max_connections,omitempty" json:"max_connections,omitempty"`
+}
+
+// CanConnect reports whether datasources may be connected post-application creation.
+// allow_connect defaults to true when unset.
+func (s *DatasourceSettings) CanConnect() bool {
+	return s.AllowConnect == nil || *s.AllowConnect
+}
+
+// CanDisconnect reports whether datasources may be disconnected post-application creation.
+// allow_disconnect defaults to false when the datasource is required and to true otherwise.
+func (s *DatasourceSettings) CanDisconnect() bool {
+	if s.AllowDisconnect == nil {
+		return !s.Required
+	}
+
+	return *s.AllowDisconnect
+}
+
+// ResolveDefaults returns a copy of the settings with allow_connect and allow_disconnect
+// set to their effective values so API consumers never see an unset flag.
+// It returns nil when the service declares no datasource block (s == nil).
+func (s *DatasourceSettings) ResolveDefaults() *DatasourceSettings {
+	if s == nil {
+		return nil
+	}
+
+	allowConnect := s.CanConnect()
+	allowDisconnect := s.CanDisconnect()
+	resolved := *s
+	resolved.AllowConnect = &allowConnect
+	resolved.AllowDisconnect = &allowDisconnect
+
+	return &resolved
 }
 
 // Service represents a deployable AI service.

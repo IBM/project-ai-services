@@ -317,21 +317,22 @@ func TestDatasourceLifecycleDefaults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := CanConnectDatasource(&tt.settings); got != tt.wantConnect {
-				t.Errorf("CanConnectDatasource() = %v, want %v", got, tt.wantConnect)
+			if got := tt.settings.CanConnect(); got != tt.wantConnect {
+				t.Errorf("CanConnect() = %v, want %v", got, tt.wantConnect)
 			}
-			if got := CanDisconnectDatasource(&tt.settings); got != tt.wantDisconnect {
-				t.Errorf("CanDisconnectDatasource() = %v, want %v", got, tt.wantDisconnect)
+			if got := tt.settings.CanDisconnect(); got != tt.wantDisconnect {
+				t.Errorf("CanDisconnect() = %v, want %v", got, tt.wantDisconnect)
 			}
 
-			resolved := resolveDatasourceDefaults(&tt.settings)
+			resolved := tt.settings.ResolveDefaults()
 			if *resolved.AllowConnect != tt.wantConnect || *resolved.AllowDisconnect != tt.wantDisconnect {
-				t.Errorf("resolveDatasourceDefaults() = connect %v, disconnect %v", *resolved.AllowConnect, *resolved.AllowDisconnect)
+				t.Errorf("ResolveDefaults() = connect %v, disconnect %v", *resolved.AllowConnect, *resolved.AllowDisconnect)
 			}
 		})
 	}
 
-	if resolveDatasourceDefaults(nil) != nil {
-		t.Error("resolveDatasourceDefaults(nil) should return nil")
+	var nilSettings *types.DatasourceSettings
+	if nilSettings.ResolveDefaults() != nil {
+		t.Error("ResolveDefaults() on nil should return nil")
 	}
 }
