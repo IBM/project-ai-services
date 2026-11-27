@@ -7,23 +7,21 @@ import (
 
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	catalogutils "github.com/project-ai-services/ai-services/internal/pkg/catalog/utils"
-	"github.com/project-ai-services/ai-services/internal/pkg/proxy"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
-	workerconstants "github.com/project-ai-services/ai-services/internal/pkg/worker/constants"
 )
 
 // InjectServiceAuthValues populates auth-related values in a service's Values map if not already explicitly set.
 // It handles:
-// - authJwksUrl: URL to fetch the catalog JWKS keys
-// - authCatalogApiUrl: base URL for the catalog API (used by UI exchange proxy)
-// - authJwksPlaintextHosts: hosts allowed to serve JWKS over plain HTTP
 // - authAudience: default audience if missing
+// - authJwksUrl: URL to fetch the catalog JWKS keys (OpenShift only)
+// - authCatalogApiUrl: base URL for the catalog API, used by the UI exchange proxy (OpenShift only)
+// - authJwksPlaintextHosts: hosts allowed to serve JWKS over plain HTTP (OpenShift only)
 // - authCatalogCaBundle (OpenShift only): CA bundle PEM if present in the catalog environment or already set.
 //
-// A Podman service never needs a CA bundle: a service on the catalog host reaches the catalog over
-// the pod network, and a service on a remote worker reaches it through its worker's Caddy, which
-// carries the request to the catalog over mTLS.
+// On Podman only authAudience is set per service. The other values are the same for every
+// service on a worker, so EnsurePodmanCatalogAuthSecret stores them once in a shared secret that
+// the pods read through envFrom.
 func InjectServiceAuthValues(
 	ctx context.Context,
 	serviceID string,
@@ -55,8 +53,6 @@ func InjectServiceAuthValues(
 				values["authCatalogCaBundle"] = envCA
 			}
 		}
-	case runtimeTypes.RuntimeTypePodman.String():
-		injectPodmanAuth(values, existingJwksURL, isRemoteWorker)
 	}
 
 	return nil
@@ -112,52 +108,6 @@ func injectRemoteOpenShiftAuth(ctx context.Context, values map[string]any, exist
 	}
 
 	return nil
-}
-
-func injectPodmanAuth(values map[string]any, existingJwksURL string, isRemoteWorker bool) {
-	if isRemoteWorker {
-		// The catalog pod name only resolves on the catalog host's podman network, so a remote
-		// worker reaches the catalog through its own Caddy (plain HTTP in, mTLS out).
-		injectRemotePodmanAuth(values, existingJwksURL)
-
-		return
-	}
-
-	// On Podman, local worker accesses catalog API directly on the podman network
-	catalogHost := fmt.Sprintf("%s--catalog", constants.CatalogAppName)
-	catalogPort := "8080"
-	if existingJwksURL == "" {
-		values["authJwksUrl"] = fmt.Sprintf("http://%s:%s/.well-known/jwks.json", catalogHost, catalogPort)
-	}
-	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
-		values["authCatalogApiUrl"] = fmt.Sprintf("http://%s:%s", catalogHost, catalogPort)
-	}
-	if _, ok := values["authJwksPlaintextHosts"]; !ok || values["authJwksPlaintextHosts"] == "" {
-		values["authJwksPlaintextHosts"] = catalogHost
-	}
-}
-
-// injectRemotePodmanAuth points a service on a remote Podman worker at the catalog through the
-// worker's own Caddy egress server. The worker gateway registers that route (catalog-auth) when the
-// worker connects; Caddy forwards the request over mTLS to the catalog's private ingress, which
-// exposes only the service-auth endpoints. The service-to-Caddy hop is plain HTTP inside the worker
-// host, so the Caddy host is also listed as a plaintext host.
-func injectRemotePodmanAuth(values map[string]any, existingJwksURL string) {
-	caddyHost := workerconstants.WorkerCaddyPodName
-	baseURL := fmt.Sprintf("http://%s:%s%s", caddyHost, proxy.PrivateEgressPort, workerconstants.CatalogAuthPathPrefix)
-
-	if existingJwksURL == "" {
-		values["authJwksUrl"] = baseURL + "/.well-known/jwks.json"
-	}
-	if _, ok := values["authCatalogApiUrl"]; !ok || values["authCatalogApiUrl"] == "" {
-		values["authCatalogApiUrl"] = baseURL
-	}
-	if _, ok := values["authJwksPlaintextHosts"]; !ok || values["authJwksPlaintextHosts"] == "" {
-		values["authJwksPlaintextHosts"] = caddyHost
-	}
-
-	// The browser cannot use the internal route, so the sign-in page keeps its public address.
-	injectCatalogUIURL(values, podmanCatalogUIURL())
 }
 
 // injectCatalogUIURL sets authCatalogUiUrl, the catalog UI address a service UI sends the

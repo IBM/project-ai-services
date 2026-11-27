@@ -14,17 +14,12 @@ mcp:
   image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.10
   port: "5001"
 
-# Inbound auth: chat verifies catalog tokens whose audience is authAudience. The catalog sets
-# authJwksUrl and authCatalogApiUrl at deploy time.
+# Inbound auth: chat verifies catalog tokens whose audience is authAudience. The catalog addresses
+# (JWKS URL, API URL, UI URL, plaintext hosts) come from the shared "catalog-auth" secret that the
+# catalog creates on the worker at deploy time.
 # Outbound auth: chat trades a service credential for a short-lived similarity token. The
 # catalog creates the credential and its Secret at deploy time and sets authServiceCredentialSecret
 # to the Secret's name; the credential itself never passes through values. Never set it here.
-authJwksUrl: ""
 authAudience: "chat"
-authCatalogApiUrl: ""
-# Address of the catalog UI (sign-in page). Set by the catalog at deploy time; empty means the UI infers it.
-authCatalogUiUrl: ""
 # @credential:service grants=similarity:read
 authServiceCredentialSecret: ""
-# Comma-separated hosts allowed to be reached over plain HTTP. Empty (HTTPS only) by default.
-authJwksPlaintextHosts: ""

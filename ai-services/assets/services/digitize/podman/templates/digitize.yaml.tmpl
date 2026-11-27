@@ -47,14 +47,10 @@ spec:
           value: "digitize-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "4000"
-        {{- if .Values.authCatalogApiUrl }}
-        - name: CATALOG_API_URL
-          value: "{{ .Values.authCatalogApiUrl }}"
-        {{- end }}
-        {{- if .Values.authCatalogUiUrl }}
-        - name: CATALOG_UI_URL
-          value: "{{ .Values.authCatalogUiUrl }}"
-        {{- end }}
+      # CATALOG_API_URL and CATALOG_UI_URL come from the shared catalog-auth secret.
+      envFrom:
+        - secretRef:
+            name: "catalog-auth"
       ports:
         - containerPort: 4001
           protocol: TCP
@@ -147,14 +143,12 @@ spec:
           value: "1"
         - name: LOG_LEVEL
           value: "{{ .Values.digitize.log_level }}"
-        - name: AUTH_JWKS_URL
-          value: "{{ .Values.authJwksUrl }}"
+        # AUTH_JWKS_URL and AUTH_JWKS_PLAINTEXT_HOSTS come from the shared catalog-auth secret.
         - name: AUTH_AUDIENCE
           value: "{{ .Values.authAudience }}"
-        {{- if .Values.authJwksPlaintextHosts }}
-        - name: AUTH_JWKS_PLAINTEXT_HOSTS
-          value: "{{ .Values.authJwksPlaintextHosts }}"
-        {{- end }}
+      envFrom:
+        - secretRef:
+            name: "catalog-auth"
       volumeMounts:
         - mountPath: /var/cache:z
           name: cache

@@ -17,10 +17,5 @@ mcp:
   image: icr.io/ai-services-cicd/ai-services-mcp:v0.0.10
   port: "4002"
 
-authJwksUrl: ""
+# The catalog addresses come from the shared "catalog-auth" secret created at deploy time.
 authAudience: "digitize"
-authCatalogApiUrl: ""
-# Address of the catalog UI (sign-in page). Set by the catalog at deploy time; empty means the UI infers it.
-authCatalogUiUrl: ""
-# Comma-separated hosts allowed to serve JWKS over plain HTTP. Empty (HTTPS only) by default.
-authJwksPlaintextHosts: ""

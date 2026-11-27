@@ -39,15 +39,11 @@ spec:
           value: "chat-bot-{{ .InstanceSlug }}"
         - name: BACKEND_PORT
           value: "5000"
-        {{- if .Values.authCatalogApiUrl }}
-        # Sign-in: the UI's Nginx trades the one-time code for a token at the catalog.
-        - name: CATALOG_API_URL
-          value: "{{ .Values.authCatalogApiUrl }}"
-        {{- end }}
-        {{- if .Values.authCatalogUiUrl }}
-        - name: CATALOG_UI_URL
-          value: "{{ .Values.authCatalogUiUrl }}"
-        {{- end }}
+      # Sign-in: the UI's Nginx trades the one-time code for a token at the catalog. CATALOG_API_URL
+      # and CATALOG_UI_URL come from the shared catalog-auth secret.
+      envFrom:
+        - secretRef:
+            name: "catalog-auth"
       ports:
         - containerPort: 3000
           protocol: TCP
@@ -112,20 +108,14 @@ spec:
         - name: CHATBOT_SIMILARITY_SERVICE_URL
           value: "http://similarity-api-{{ .InstanceSlug }}:7000"
         # Inbound auth: every route except /health, /ready and /openapi.json needs a catalog token.
-        - name: AUTH_JWKS_URL
-          value: "{{ .Values.authJwksUrl }}"
+        # AUTH_JWKS_URL, AUTH_JWKS_PLAINTEXT_HOSTS and AUTH_CATALOG_API_URL come from the shared
+        # catalog-auth secret.
         - name: AUTH_AUDIENCE
           value: "{{ .Values.authAudience }}"
-        {{- if .Values.authJwksPlaintextHosts }}
-        - name: AUTH_JWKS_PLAINTEXT_HOSTS
-          value: "{{ .Values.authJwksPlaintextHosts }}"
-        {{- end }}
         {{- if .Values.authServiceCredentialSecret }}
         # Credential to obtain a similarity token from the catalog. Mounted from a Secret, never a literal value.
         - name: AUTH_SERVICE_CREDENTIAL_FILE
           value: "/etc/secret/service-credential/credential"
-        - name: AUTH_CATALOG_API_URL
-          value: "{{ .Values.authCatalogApiUrl }}"
         {{- end }}
         - name: CHATBOT_SYSTEM_PROMPT
           {{- if .Values.backend.systemPrompt }}
@@ -133,6 +123,9 @@ spec:
           {{- else }}
           value: ""
           {{ end }}
+      envFrom:
+        - secretRef:
+            name: "catalog-auth"
       ports:
         - containerPort: 5000
           protocol: TCP

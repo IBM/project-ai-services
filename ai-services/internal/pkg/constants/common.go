@@ -120,6 +120,9 @@ const (
 const (
 	// PodmanAuthSecret represents podman auth secret name.
 	PodmanAuthSecret = "podman-auth-secret"
+	// CatalogAuthSecret is the Podman secret holding the catalog auth settings shared by every
+	// service on a worker. It has no pod label, so uninstall removes it by name.
+	CatalogAuthSecret = "catalog-auth"
 	// VolumeLabel represents the volume name associated with Pod.
 	VolumeLabel = "ai-services.io/volume"
 	// VolumeSkipLabel represents volumes associated with pod should be skipped while deletion.

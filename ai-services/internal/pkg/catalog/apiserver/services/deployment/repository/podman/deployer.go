@@ -545,6 +545,13 @@ func (d *PodmanDeployer) deployComponentPods(
 func (d *PodmanDeployer) deployServices(ctx context.Context, plan *DeploymentPlan) error {
 	logger.InfofCtx(ctx, "Deploying %d services concurrently...\n", len(plan.Services))
 
+	// The catalog auth settings are the same for every service on this worker, so store them once
+	// in a shared secret that the service pods read, before any of them starts.
+	_, isRemote := d.runtime.(*remoteruntime.RemoteRuntime)
+	if err := deploymentauth.EnsurePodmanCatalogAuthSecret(ctx, d.runtime, isRemote); err != nil {
+		return err
+	}
+
 	// Build id → dbID index so RunConcurrently can track status per service.
 	items := make(map[string]uuid.UUID, len(plan.Services))
 	for id, svc := range plan.Services {
