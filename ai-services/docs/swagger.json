@@ -2773,7 +2773,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Retrieves the runtime process and pod status of a model (local pod details or empty list for remote connectors). Accessing a model created by another user returns 403 Forbidden.",
+                "description": "Retrieves the runtime process and pod status of a model. For deployment_type=local, the pods of the model are returned. For deployment_type=remote, the model exists only as a connector in the Connector DB and has no pods, so only the model details are returned with an empty pods list (no worker is contacted). Accessing a model created by another user returns 403 Forbidden.",
                 "produces": [
                     "application/json"
                 ],
@@ -2822,7 +2822,7 @@
                         }
                     },
                     "422": {
-                        "description": "Worker unreachable",
+                        "description": "Worker unreachable (local models only)",
                         "schema": {
                             "$ref": "#/definitions/internal_pkg_catalog_apiserver_handlers.ErrorResponse"
                         }

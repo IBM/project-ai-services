@@ -186,7 +186,7 @@ func (h *ModelHandler) GetModelByID(c *gin.Context) {
 // ModelPS godoc
 //
 //	@Summary		Get process and pod status for a model
-//	@Description	Retrieves the runtime process and pod status of a model (local pod details or empty list for remote connectors). Accessing a model created by another user returns 403 Forbidden.
+//	@Description	Retrieves the runtime process and pod status of a model. For deployment_type=local, the pods of the model are returned. For deployment_type=remote, the model exists only as a connector in the Connector DB and has no pods, so only the model details are returned with an empty pods list (no worker is contacted). Accessing a model created by another user returns 403 Forbidden.
 //	@Tags			Models
 //	@Produce		json
 //	@Security		BearerAuth
@@ -196,7 +196,7 @@ func (h *ModelHandler) GetModelByID(c *gin.Context) {
 //	@Failure		401	{object}	ErrorResponse	"Unauthorized"
 //	@Failure		403	{object}	ErrorResponse	"User does not own the model"
 //	@Failure		404	{object}	ErrorResponse	"Model not found"
-//	@Failure		422	{object}	ErrorResponse	"Worker unreachable"
+//	@Failure		422	{object}	ErrorResponse	"Worker unreachable (local models only)"
 //	@Failure		500	{object}	ErrorResponse	"Internal Server Error"
 //	@Router			/models/{id}/ps [get]
 func (h *ModelHandler) ModelPS(c *gin.Context) {
