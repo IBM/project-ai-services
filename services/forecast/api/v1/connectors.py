@@ -2,7 +2,10 @@
 Connector REST API endpoints.
 
 Mounted at /v1/connectors by app.py. Only one connector is supported in this
-release, so POST returns 409 while a connector exists.
+release, and a connector that exists blocks a new one whatever its status: POST
+answers 409 and stores nothing. A new connector whose secrets cannot be encrypted
+(no usable DB_ENCRYPTION_KEY) is answered with 201 and stored as FAILED, with the
+reason in its message.
 
 Endpoints:
   POST   /v1/connectors
@@ -17,6 +20,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, Response, status
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from common.error_utils import APIError, ErrorCode, http_error_responses
 from common.misc_utils import get_logger
@@ -32,7 +36,6 @@ from forecast.models import (
     ConnectorVersions,
     Pagination,
 )
-from forecast.settings import settings
 from forecast.training.scheduler import register_connector_job
 from forecast.utils.api_utils import (
     UNIQUE_VIOLATION,
@@ -44,9 +47,10 @@ from forecast.utils.api_utils import (
     sqlstate,
     training_summary,
 )
-from forecast.utils.encryption import encrypt_secrets, safe_connection_details
+from forecast.utils.encryption import EncryptionKeyError, encrypt_secrets, safe_connection_details
 
 router = APIRouter()
+CONNECTOR_EXISTS_MESSAGE = "A connector already exists. Only one connector is supported."
 logger = get_logger("forecast_connectors")
 
 
@@ -59,79 +63,59 @@ logger = get_logger("forecast_connectors")
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ConnectorCreateResponse,
-    responses={
-        409: http_error_responses[409],
-        429: http_error_responses[429],
-        500: http_error_responses[500],
-    },
     summary="Create the connector and queue its first training",
     description=(
-        "Stores the connector with its encrypted secrets and the training details, and "
-        "queues the first training job. Only one connector is supported in this release."
+        "Stores the connector with its encrypted secrets and the service settings, and "
+        "queues the first training job. Only one connector is supported in this release: "
+        "when a connector exists, whatever its status, the call is answered with 409. "
+        "Without a usable DB_ENCRYPTION_KEY the call is answered with 201 and the connector "
+        "is stored with the status FAILED and the reason in its message."
     ),
     response_description="Connector created",
 )
 def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
     """Create the single connector and queue its first training job."""
     connector_id = str(body.id)
+    details = body.connection_details.model_dump(exclude_none=True)
 
-    # Cheap pre-check, so a request that will be rejected never takes the table lock below.
-    with handle_database_errors("checking existing connector", connector_id), get_db_session() as session:
-        if connectors_db.connector_exists(session):
-            logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                "A connector already exists. Only one connector is supported.",
-            )
-
-    encrypted = encrypt_secrets(body.connection_details.model_dump(exclude_none=True))
-
+    accepted = False
     with handle_database_errors("creating", connector_id), get_db_session() as session:
         connectors_db.lock_connectors(session)
-        if connectors_db.connector_exists(session):
-            logger.warning(f"Create rejected for connector {connector_id}: a connector already exists")
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                "A connector already exists. Only one connector is supported.",
-            )
-        if connectors_db.count_queued_jobs(session) >= settings.forecast.max_queued_jobs:
-            logger.warning(f"Create rejected for connector {connector_id}: training queue is full")
-            APIError.raise_error(ErrorCode.SERVER_BUSY, "Too many training jobs are queued.")
+        if connectors_db.connector_id_exists(session, connector_id):
+            # A repeated request: nothing changes, so it cannot queue a second job.
+            logger.info(f"Create of connector {connector_id} ignored: it already exists")
+        elif connectors_db.connector_exists(session):
+            logger.warning(f"Create of connector {connector_id} rejected: a connector already exists")
+            APIError.raise_error(ErrorCode.RESOURCE_CONFLICT, CONNECTOR_EXISTS_MESSAGE)
+        else:
+            # Without a usable key the secrets cannot be stored. The request is still answered with 201: the
+            # connector is stored as FAILED, without its secrets, and the message tells why. A connector
+            # that already exists is checked first, so it is answered with 409 whatever the key.
+            try:
+                encrypted = encrypt_secrets(details)
+            except EncryptionKeyError as exc:
+                logger.error(f"Connector {connector_id} cannot be accepted: {exc}")
+                connectors_db.insert_failed_connector(
+                    session,
+                    connector_id=connector_id,
+                    name=body.name,
+                    connector_type=body.type,
+                    config=safe_connection_details(details),
+                    message=str(exc),
+                )
+            else:
+                _insert_accepted(session, body, connector_id, encrypted)
+                accepted = True  # Only an accepted connector gets a scheduled training.
 
-        try:
-            connectors_db.insert_connector(
-                session,
-                connector_id=connector_id,
-                name=body.name,
-                connector_type=body.type,
-                config=encrypted,
-                source_table=body.training.table,
-                target_column=body.training.target_column,
-                input_columns=[
-                    column.model_dump(exclude_none=True) for column in body.training.input_columns
-                ],
-                schedule=body.schedule,
-            )
-        except IntegrityError as exc:
-            # Only a duplicate id or name is a conflict. Any other integrity error
-            # is a server fault and goes to database_errors.
-            if sqlstate(exc) not in (None, UNIQUE_VIOLATION):
-                raise
-            logger.warning(
-                f"Create rejected for connector {connector_id}: duplicate connector name or ID"
-            )
-            APIError.raise_error(
-                ErrorCode.RESOURCE_LOCKED,
-                f"A connector with this id or the name {body.name!r} already exists",
-            )
+    if not accepted:
+        return ConnectorCreateResponse(id=connector_id)
 
     # Scheduled only after the transaction has committed, so a failed insert
     # never leaves a scheduler job for a connector that does not exist. The
     # connector and its queued job are stored by now: a failed registration must
-    # not fail the call, or the retry would be rejected as "a connector already
-    # exists". Startup registers the jobs of every connector that has none.
+    # not fail the call. Startup registers the jobs of every connector that has none.
     try:
-        register_connector_job(connector_id, body.schedule)
+        register_connector_job(connector_id, body.service_settings.forecast.schedule)
     except Exception:
         logger.error(
             f"Connector {connector_id} is stored, but its training could not be scheduled",
@@ -139,6 +123,24 @@ def create_connector(body: ConnectorCreateRequest) -> ConnectorCreateResponse:
         )
     logger.info(f"Connector {connector_id} ({body.name!r}) created, first training queued")
     return ConnectorCreateResponse(id=connector_id)
+
+
+def _insert_accepted(
+    session: Session, body: ConnectorCreateRequest, connector_id: str, encrypted: dict
+) -> None:
+    """Store the connector, its service settings and its first training job."""
+    svc = body.service_settings.forecast
+    connectors_db.insert_connector(
+        session,
+        connector_id=connector_id,
+        name=body.name,
+        connector_type=body.type,
+        config=encrypted,
+        source_table=svc.table,
+        target_column=svc.target_column,
+        input_columns=svc.input_columns,
+        schedule=svc.schedule,
+    )
 
 
 # ---------------------------------------------------------------------------

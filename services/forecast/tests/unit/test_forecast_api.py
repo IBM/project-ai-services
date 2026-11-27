@@ -94,11 +94,7 @@ def _mock_connector(**overrides):
         "source_table": "SALES",
         "target_column": "DELIVERY_LATE",
         "schedule": "daily",
-        "input_columns": [
-            {"name": "REGION", "type": "string"},
-            {"name": "QUANTITY", "type": "integer"},
-            {"name": "UNIT_PRICE", "type": "number"},
-        ],
+        "input_columns": ["REGION", "QUANTITY", "UNIT_PRICE"],
         "created_at": CREATED,
         "updated_at": CREATED,
         "last_trained_at": CREATED,
@@ -305,19 +301,6 @@ def test_forecast_null_column_value_fails_400(client, db):
 
 
 @pytest.mark.unit
-def test_forecast_wrong_column_type_fails_400(client, db):
-    db.get_connector.return_value = _mock_connector()
-    db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
-
-    # String passed for integer column
-    payload = [{"REGION": "EMEA", "QUANTITY": "ten", "UNIT_PRICE": 20.0}]
-    response = client.post(f"/v1/forecast/{CONNECTOR_ID}", json=payload)
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    assert "expected integer" in response.json()["error"]["message"]
-
-
-@pytest.mark.unit
 def test_forecast_no_ready_forecaster_fails_404(client, db):
     db.get_connector.return_value = _mock_connector()
     db.get_newest_forecaster.return_value = None
@@ -383,67 +366,8 @@ def test_forecast_with_invalid_non_positive_version_fails_400(client, db):
 
 
 @pytest.mark.unit
-def test_forecast_nan_float_fails_400(client, db):
-    db.get_connector.return_value = _mock_connector()
-    db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
-
-    # Send raw JSON containing NaN to bypass client-side JSON serialization
-    raw_content = b'[{"REGION": "EMEA", "QUANTITY": 1, "UNIT_PRICE": NaN}]'
-    response = client.post(
-        f"/v1/forecast/{CONNECTOR_ID}",
-        content=raw_content,
-        headers={"Content-Type": "application/json"},
-    )
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    assert "must be a finite number" in response.json()["error"]["message"]
-
-
-@pytest.mark.unit
-def test_forecast_out_of_range_integer_fails_400(client, db):
-    db.get_connector.return_value = _mock_connector()
-    db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
-
-    payload = [{"REGION": "EMEA", "QUANTITY": 2**64, "UNIT_PRICE": 10.0}]
-    response = client.post(f"/v1/forecast/{CONNECTOR_ID}", json=payload)
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    assert "64-bit integer" in response.json()["error"]["message"]
-
-
-@pytest.mark.unit
-def test_forecast_out_of_range_float_fails_400(client, db):
-    db.get_connector.return_value = _mock_connector()
-    db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
-
-    payload = [{"REGION": "EMEA", "QUANTITY": 1, "UNIT_PRICE": 1e39}]
-    response = client.post(f"/v1/forecast/{CONNECTOR_ID}", json=payload)
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    assert "single-precision range" in response.json()["error"]["message"]
-
-
-
-@pytest.mark.unit
-def test_forecast_huge_integer_in_number_column_fails_400(client, db):
-    db.get_connector.return_value = _mock_connector()
-    db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
-
-    raw = b'[{"REGION": "EMEA", "QUANTITY": 1, "UNIT_PRICE": 1' + b"0" * 400 + b"}]"
-    response = client.post(
-        f"/v1/forecast/{CONNECTOR_ID}",
-        content=raw,
-        headers={"Content-Type": "application/json"},
-    )
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    assert "single-precision range" in response.json()["error"]["message"]
-
-@pytest.mark.unit
-def test_forecast_typeless_complex_json_fails_400(client, db):
-    db.get_connector.return_value = _mock_connector(
-        input_columns=[{"name": "CONFIG", "type": None}]
-    )
+def test_forecast_complex_json_fails_400(client, db):
+    db.get_connector.return_value = _mock_connector(input_columns=["CONFIG"])
     db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
 
     payload = [{"CONFIG": {"nested": "dict"}}]
@@ -464,34 +388,6 @@ def test_forecast_unknown_connector_fails_404(client, db):
     db.get_newest_forecaster.assert_not_called()
 
 
-@pytest.mark.unit
-def test_forecast_string_column_with_a_number_fails_400(client, db):
-    db.get_connector.return_value = _mock_connector()
-    db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
-
-    payload = [{"REGION": 5, "QUANTITY": 10, "UNIT_PRICE": 20.0}]
-    response = client.post(f"/v1/forecast/{CONNECTOR_ID}", json=payload)
-
-    assert response.status_code == 400
-    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
-    assert "expected string, got int" in response.json()["error"]["message"]
-
-
-@pytest.mark.unit
-def test_forecast_error_message_truncates_a_huge_integer(client, db):
-    db.get_connector.return_value = _mock_connector()
-    db.get_newest_forecaster.return_value = _mock_forecaster(version=12)
-
-    payload = [{"REGION": "EMEA", "QUANTITY": 10**100, "UNIT_PRICE": 20.0}]
-    response = client.post(f"/v1/forecast/{CONNECTOR_ID}", json=payload)
-
-    assert response.status_code == 400
-    message = response.json()["error"]["message"]
-    assert "64-bit integer" in message
-    assert message.endswith("...")
-    assert "0" * 60 not in message
-
-
 def _validation_error(instances, input_columns):
     from fastapi import HTTPException
     from forecast.utils.inference_validation import validate_inference_instances
@@ -504,33 +400,26 @@ def _validation_error(instances, input_columns):
 
 @pytest.mark.unit
 def test_validation_rejects_a_body_that_is_not_an_array():
-    message = _validation_error({"REGION": "EMEA"}, [{"name": "REGION", "type": "string"}])
+    message = _validation_error({"REGION": "EMEA"}, ["REGION"])
 
     assert "must be a JSON array" in message
 
 
 @pytest.mark.unit
 def test_validation_rejects_a_row_that_is_not_an_object():
-    message = _validation_error(["EMEA"], [{"name": "REGION", "type": "string"}])
+    message = _validation_error(["EMEA"], ["REGION"])
 
     assert message.endswith("Row 0 is not a valid JSON object.")
 
 
 @pytest.mark.unit
-def test_validation_accepts_scalars_in_typeless_columns():
+def test_validation_accepts_scalars():
     from forecast.utils.inference_validation import validate_inference_instances
 
     validate_inference_instances(
         [{"A": "text", "B": 1, "C": 2.5}],
-        [{"name": "A"}, {"name": "B", "type": None}, {"name": "C"}],
+        ["A", "B", "C"],
     )
-
-
-@pytest.mark.unit
-def test_validation_does_not_check_a_column_of_an_unknown_type():
-    from forecast.utils.inference_validation import validate_inference_instances
-
-    validate_inference_instances([{"A": {"x": 1}}], [{"name": "A", "type": "date"}])
 
 
 @pytest.mark.unit
@@ -577,10 +466,10 @@ def test_triton_run_inference_flat_v2_tensor_parsing():
     }
 
     input_cols = [
-        {"name": "S", "type": "string"},
-        {"name": "I", "type": "integer"},
-        {"name": "N", "type": "number"},
-        {"name": "U", "type": None},
+        "S",
+        "I",
+        "N",
+        "U",
     ]
     instances = [
         {"S": "text", "I": 42, "N": 3.14, "U": "fallback"},
@@ -617,7 +506,7 @@ def test_triton_run_inference_probabilities_with_class_labels():
         ]
     }
 
-    input_cols = [{"name": "A", "type": "string"}]
+    input_cols = ["A"]
     instances = [{"A": "x"}, {"A": "y"}]
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
@@ -643,7 +532,7 @@ def test_triton_run_inference_reads_the_outputs_of_the_training_worker():
     }
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
-        preds = asyncio.run(run_inference("fc_model_1", [{"A": "x"}, {"A": "y"}], [{"name": "A", "type": None}]))
+        preds = asyncio.run(run_inference("fc_model_1", [{"A": "x"}, {"A": "y"}], ["A"]))
 
     assert preds == [{"prediction": "Y", "confidence": 0.8}, {"prediction": "N", "confidence": 0.7}]
 
@@ -664,11 +553,10 @@ def test_triton_scalar_probabilities_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}, {"A": 2}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}, {"A": 2}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
-
 
 
 @pytest.mark.unit
@@ -686,7 +574,7 @@ def test_triton_probabilities_without_predictions_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}, {"A": 2}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}, {"A": 2}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -704,7 +592,7 @@ def test_triton_run_inference_separate_predictions_and_confidences():
         ]
     }
 
-    input_cols = [{"name": "A", "type": "string"}]
+    input_cols = ["A"]
     instances = [{"A": "x"}, {"A": "y"}]
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
@@ -726,7 +614,7 @@ def test_triton_malformed_json_response_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -748,11 +636,10 @@ def test_triton_non_finite_confidence_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
-
 
 
 @pytest.mark.unit
@@ -771,7 +658,7 @@ def test_triton_non_numeric_probabilities_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -793,7 +680,7 @@ def test_triton_non_scalar_prediction_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -809,7 +696,7 @@ def test_triton_run_inference_handles_not_served_404_as_503():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -826,7 +713,7 @@ def test_triton_run_inference_handles_unknown_model_400_as_503():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -843,7 +730,7 @@ def test_triton_run_inference_handles_http_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton inference failed" in exc_info.value.detail["error"]["message"]
@@ -860,7 +747,7 @@ def test_triton_run_inference_handles_malformed_json():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]
@@ -885,7 +772,7 @@ def test_triton_run_inference_output_dimension_mismatch_raises_500():
             asyncio.run(run_inference(
                 "fc_model_1",
                 [{"A": 1}, {"A": 2}],
-                [{"name": "A", "type": "integer"}],
+                ["A"],
             ))
 
     assert exc_info.value.status_code == 500
@@ -978,6 +865,27 @@ def test_post_forecast_default_no_ready_forecaster_fails_404(client, db):
 
 
 @pytest.mark.unit
+def test_post_forecast_default_failed_connector_without_training_details_fails_404(client, db):
+    # The oldest connector is one that was stored as FAILED: no training_configs row, no forecaster.
+    db.get_default_connector.return_value = _mock_connector(
+        status="FAILED",
+        message="A connector already exists. Only one connector is supported.",
+        source_table=None,
+        target_column=None,
+        schedule=None,
+        input_columns=None,
+        last_trained_at=None,
+    )
+    db.get_newest_forecaster.return_value = None
+
+    response = client.post("/v1/forecast", json=[{"REGION": "EMEA"}])
+
+    assert response.status_code == 404
+    _assert_envelope(response.json(), "RESOURCE_NOT_FOUND", 404)
+    assert "No ready forecaster found" in response.json()["error"]["message"]
+
+
+@pytest.mark.unit
 def test_post_forecast_default_specific_version_success(client, db):
     db.get_default_connector.return_value = _mock_connector()
     db.get_forecaster.return_value = _mock_forecaster(version=5)
@@ -1053,10 +961,10 @@ def test_triton_run_inference_payload_structure_and_datatypes():
     }
 
     input_cols = [
-        {"name": "INT_COL", "type": "integer"},
-        {"name": "NUM_COL", "type": "number"},
-        {"name": "STR_COL", "type": "string"},
-        {"name": "TYPELESS_COL", "type": None},
+        "INT_COL",
+        "NUM_COL",
+        "STR_COL",
+        "TYPELESS_COL",
     ]
     instances = [
         {"INT_COL": 10, "NUM_COL": 12.5, "STR_COL": "val1", "TYPELESS_COL": "x"},
@@ -1071,7 +979,7 @@ def test_triton_run_inference_payload_structure_and_datatypes():
     _, kwargs = mock_post.call_args
     sent_inputs = kwargs["json"]["inputs"]
 
-    # Every column goes as text, whatever its type, because the forecaster's inputs are TYPE_STRING.
+    # Every column goes as text, because the forecaster's inputs are TYPE_STRING.
     assert sent_inputs == [
         {"name": "INT_COL", "shape": [2, 1], "datatype": "BYTES", "data": ["10", "20"]},
         {"name": "NUM_COL", "shape": [2, 1], "datatype": "BYTES", "data": ["12.5", "25.0"]},
@@ -1087,7 +995,7 @@ def test_triton_run_inference_timeout_raises_503():
 
     with patch("httpx.AsyncClient.post", side_effect=httpx.ReadTimeout("Triton read timeout")):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -1100,7 +1008,7 @@ def test_triton_run_inference_connection_error_raises_503():
 
     with patch("httpx.AsyncClient.post", side_effect=httpx.ConnectError("Connection refused")):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail["error"]["code"] == "TRITON_UNAVAILABLE"
@@ -1113,7 +1021,7 @@ def test_triton_run_inference_request_exception_raises_500():
 
     with patch("httpx.AsyncClient.post", side_effect=httpx.RemoteProtocolError("Corrupt payload")):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton inference failed" in exc_info.value.detail["error"]["message"]
@@ -1130,7 +1038,7 @@ def test_triton_run_inference_http_400_not_unserved_marker_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton inference failed" in exc_info.value.detail["error"]["message"]
@@ -1151,7 +1059,7 @@ def test_triton_run_inference_missing_confidences_raises_500():
 
     with patch("httpx.AsyncClient.post", return_value=mock_resp):
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(run_inference("fc_model_1", [{"A": 1}], [{"name": "A", "type": "integer"}]))
+            asyncio.run(run_inference("fc_model_1", [{"A": 1}], ["A"]))
 
     assert exc_info.value.status_code == 500
     assert "Triton returned an unusable response" in exc_info.value.detail["error"]["message"]

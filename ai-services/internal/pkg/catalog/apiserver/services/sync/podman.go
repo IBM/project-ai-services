@@ -250,7 +250,9 @@ func (s *podmanSync) loadComponentTemplatesAndValues(catalogID, instanceID strin
 		"TemplateID":   instanceID,
 	}
 
-	values, err := s.catalogProvider.LoadComponentValues(componentType, providerID, overrides)
+	// Templates read the hardware values of a profile; the sync only counts resources, so the
+	// provider's default profile is enough.
+	values, err := s.catalogProvider.LoadComponentValuesForModel(componentType, providerID, "", "", overrides)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load component values: %w", err)
 	}

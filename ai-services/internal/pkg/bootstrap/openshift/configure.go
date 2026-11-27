@@ -16,7 +16,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -159,7 +158,7 @@ func fetchSCPSpec(ctx context.Context, client *openshift.OpenshiftClient) (map[s
 	// Find Spyre operator config
 	var spyreOp constants.OperatorConfig
 	for _, op := range constants.RequiredOperators {
-		if op.Name == "spyre-operator" {
+		if op.Name == constants.SpyreOperatorPackage {
 			spyreOp = op
 
 			break
@@ -182,7 +181,7 @@ func fetchSCPSpec(ctx context.Context, client *openshift.OpenshiftClient) (map[s
 	}
 
 	for _, ex := range examples {
-		if ex["kind"] != "SpyreClusterPolicy" {
+		if ex["kind"] != constants.SpyreKind {
 			continue
 		}
 		if spec, ok := ex["spec"].(map[string]any); ok {
@@ -190,7 +189,7 @@ func fetchSCPSpec(ctx context.Context, client *openshift.OpenshiftClient) (map[s
 		}
 	}
 
-	return nil, fmt.Errorf("SpyreClusterPolicy not found")
+	return nil, fmt.Errorf("%s not found", constants.SpyreKind)
 }
 
 // modifySpec remove `externalDeviceReservation` from `experimentalMode`.
@@ -230,12 +229,12 @@ func modifySpec(spec map[string]any, s *spinner.Spinner) error {
 func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec map[string]any, s *spinner.Spinner) error {
 	scp := &unstructured.Unstructured{}
 	c := client.Client
-	scp.SetName("spyreclusterpolicy")
+	scp.SetName(constants.SpyreClusterPolicyName)
 	scp.Object = map[string]any{
-		"apiVersion": "spyre.ibm.com/v1alpha1",
-		"kind":       "SpyreClusterPolicy",
+		"apiVersion": fmt.Sprintf("%s/%s", constants.SpyreGroup, constants.SpyreVersion),
+		"kind":       constants.SpyreKind,
 		"metadata": map[string]any{
-			"name": "spyreclusterpolicy",
+			"name": constants.SpyreClusterPolicyName,
 		},
 		"spec": spec,
 	}
@@ -243,12 +242,12 @@ func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec 
 	err := c.Create(ctx, scp)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			s.UpdateMessage("SpyreClusterPolicy already exists")
+			s.UpdateMessage(fmt.Sprintf("%s already exists", constants.SpyreKind))
 
 			return nil
 		}
 		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("missing required permissions to create SpyreClusterPolicy")
+			return fmt.Errorf("missing required permissions to create %s", constants.SpyreKind)
 		}
 	}
 
@@ -256,23 +255,15 @@ func frameAndApply(ctx context.Context, client *openshift.OpenshiftClient, spec 
 }
 
 func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftClient) error {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "spyre.ibm.com",
-		Version: "v1alpha1",
-		Kind:    "SpyreClusterPolicy",
-	})
-
 	return wait.PollUntilContextTimeout(ctx, constants.OperatorPollInterval, constants.OperatorPollTimeout, true, func(pollCtx context.Context) (bool, error) {
-		if err := client.Client.Get(pollCtx, k8stypes.NamespacedName{Name: "spyreclusterpolicy"}, obj); err != nil {
+		state, stateFound, err := utils.GetSpyreClusterPolicyState(pollCtx, client)
+		if err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Debugln("SpyreClusterPolicy not found yet, waiting...")
 
 				return false, nil
 			}
-			if apierrors.IsForbidden(err) {
-				return false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
-			}
+
 			// Handle rate limiting and other transient errors as retryable
 			if utils.IsTransientK8sError(err) {
 				logger.Debugln("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...")
@@ -280,18 +271,17 @@ func waitForSpyreClusterPolicy(ctx context.Context, client *openshift.OpenshiftC
 				return false, nil
 			}
 
-			return false, fmt.Errorf("failed to get SpyreClusterPolicy: %w", err)
+			return false, err
 		}
 
-		state, found, err := unstructured.NestedString(obj.Object, "status", "state")
-		if err != nil {
-			return false, fmt.Errorf("failed to parse status.state: %w", err)
+		if !stateFound {
+			// CR exists but status.state not set yet.
+			logger.Debugln("SpyreClusterPolicy status.state not populated yet, waiting...")
+
+			return false, nil
 		}
 
-		if !found || state != "ready" {
-			if !found {
-				state = "unknown"
-			}
+		if state != utils.SpyreStateReady && state != utils.SpyreStateNoSpyreNodes {
 			logger.Debugf("SpyreClusterPolicy not ready yet (status.state: %s), waiting...", state)
 
 			return false, nil

@@ -1,17 +1,29 @@
 """Request and response models of the Forecast service API."""
 
-from typing import Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    StrictBool,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 # SQL identifier patterns: allows letters, numbers, underscores, and common SQL/Db2 special chars ($, #, @).
 # Table can optionally be schema-qualified (e.g. "SCHEMA.TABLE" or just "TABLE").
 _SQL_IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
 _SQL_TABLE_PATTERN = r"^(?:[A-Za-z_][A-Za-z0-9_$#@]{0,127}\.)?[A-Za-z_][A-Za-z0-9_$#@]{0,127}$"
 
+_MAX_CERTIFICATE_LENGTH = 65536
+_PEM_BEGIN = "-----BEGIN CERTIFICATE-----"
+_PEM_END = "-----END CERTIFICATE-----"
+
 Schedule = Literal["hourly", "daily", "weekly", "monthly", "yearly"]
-ColumnType = Literal["string", "integer", "number"]
 
 # ---------------------------------------------------------------------------
 # Request models
@@ -19,7 +31,11 @@ ColumnType = Literal["string", "integer", "number"]
 
 
 class Db2ForIDetails(BaseModel):
-    """connection_details of a db2_for_i connector. Unknown fields are rejected."""
+    """connection_details of a db2_for_i connector. Unknown fields are rejected.
+
+    certificate is the PEM certificate the server's TLS certificate is verified against.
+    With ignore_secure_connection true the server's certificate is not verified.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -28,6 +44,16 @@ class Db2ForIDetails(BaseModel):
     database: str = Field(min_length=1, max_length=128)
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=1024)
+    ignore_secure_connection: StrictBool = False
+    certificate: Optional[str] = Field(default=None, max_length=_MAX_CERTIFICATE_LENGTH)
+
+    @field_validator("certificate")
+    @classmethod
+    def _certificate_is_pem(cls, value: Optional[str]) -> Optional[str]:
+        """Reject a value that holds no PEM certificate block."""
+        if value is not None and not (_PEM_BEGIN in value and _PEM_END in value):
+            raise ValueError("certificate must be a PEM certificate")
+        return value
 
 
 class Db2ForIDetailsPatch(BaseModel):
@@ -44,35 +70,50 @@ class Db2ForIDetailsPatch(BaseModel):
     database: Any = None
     username: Any = None
     password: Any = None
+    ignore_secure_connection: Any = None
+    certificate: Any = None
 
 
-class TrainingInputColumn(BaseModel):
-    """An input column used for model training."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
-    type: Optional[ColumnType] = None
+# The name of an input column. Its type is not given: the forecaster reads every input as text.
+InputColumn = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)]
 
 
-class TrainingRequest(BaseModel):
-    """Training configuration for a connector."""
+class ForecastSettings(BaseModel):
+    """The `forecast` settings of the service: the training data and the training schedule.
 
-    model_config = ConfigDict(extra="forbid")
+    Unknown fields are ignored. The keys are camelCase, as the catalog sends them.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     table: str = Field(min_length=1, max_length=257, pattern=_SQL_TABLE_PATTERN)
-    target_column: str = Field(min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN)
-    input_columns: list[TrainingInputColumn] = Field(min_length=1, max_length=1000)
+    target_column: str = Field(
+        alias="targetColumn", min_length=1, max_length=128, pattern=_SQL_IDENTIFIER_PATTERN
+    )
+    input_columns: list[InputColumn] = Field(alias="inputColumns", min_length=1, max_length=1000)
+    schedule: Optional[Schedule] = None
 
     @model_validator(mode="after")
-    def _validate_columns(self) -> "TrainingRequest":
+    def _validate_columns(self) -> "ForecastSettings":
         """Reject duplicate input column names and a target that is also an input column."""
-        names = [col.name.upper() for col in self.input_columns]
+        names = [name.upper() for name in self.input_columns]
         if len(set(names)) != len(names):
-            raise ValueError("input_columns must not contain duplicate column names")
+            raise ValueError("inputColumns must not contain duplicate column names")
         if self.target_column.upper() in names:
-            raise ValueError("target_column must not be present in input_columns")
+            raise ValueError("targetColumn must not be present in inputColumns")
         return self
+
+
+class ServiceSettings(BaseModel):
+    """Settings chosen when the service is deployed, grouped by the part of the service they are for.
+
+    Unknown fields are ignored: the catalog forwards every setting of the deployed service,
+    and the service cannot tell which of them are meant for the connector.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    forecast: ForecastSettings
 
 
 class ForecastRequest(RootModel[list[dict[str, Any]]]):
@@ -87,9 +128,8 @@ class ConnectorCreateRequest(BaseModel):
     id: UUID
     name: str = Field(min_length=1, max_length=255)
     type: Literal["db2_for_i"]
-    schedule: Optional[Schedule] = None
     connection_details: Db2ForIDetails
-    training: TrainingRequest
+    service_settings: ServiceSettings
 
 
 class ConnectorUpdateRequest(BaseModel):

@@ -41,6 +41,10 @@ const (
 	// MetadataKeyLiteLLMModelID is the key, nested under MetadataKeyLiteLLM, that stores the model ID
 	// LiteLLM assigned on registration.
 	MetadataKeyLiteLLMModelID = "model_id"
+	// ParamMaxModelLen is the parameter key inside MetadataKeyParams storing maximum model length.
+	ParamMaxModelLen = "maxModelLen"
+	// ParamMaxBatchSize is the parameter key inside MetadataKeyParams storing maximum batch size.
+	ParamMaxBatchSize = "maxBatchSize"
 )
 
 const (
@@ -65,6 +69,18 @@ const (
 const (
 	// ConnectorProviderWatsonx is the provider ID for IBM watsonx.ai model connectors.
 	ConnectorProviderWatsonx = "watsonx"
+	// ConnectorProviderHostedVLLM is the provider ID for hosted vLLM model connectors.
+	ConnectorProviderHostedVLLM = "hosted_vllm"
+)
+
+// Common model parameter key constants.
+const (
+	// ParamAPIBase is the parameter key for the model service's base URL (the litellm_params key of
+	// the model endpoint). It is the only provider param the platform interprets itself (to derive
+	// the /tokenize target); every other param is forwarded to LiteLLM untouched.
+	ParamAPIBase = "api_base"
+	// ParamAPIKey is the parameter key for the model service's authentication key.
+	ParamAPIKey = "api_key"
 )
 
 // DeploymentType selects how a model is provisioned.

@@ -3,8 +3,8 @@ Unit tests for the connector API and the connector secret handling.
 
 The database is mocked at the connectors DB layer, so the tests run without
 PostgreSQL. Tests cover:
- - POST /v1/connectors: create, single-connector 409, queue 429, body validation,
-   encrypted storage and the scheduler call
+ - POST /v1/connectors: create, a connector that exists (409), a bad key (201, stored as
+   FAILED), body validation, encrypted storage and the scheduler call
  - GET /v1/connectors and GET /v1/connectors/{id}: pagination, name filter, safe fields
  - PUT /v1/connectors/{id}: partial merge, re-encryption, validation, rejected fields
  - GET /v1/connectors/{id}/metrics: versions and training summary
@@ -70,8 +70,9 @@ def db():
     defaults = {
         "lock_connectors": None,
         "connector_exists": False,
-        "count_queued_jobs": 0,
+        "connector_id_exists": False,
         "insert_connector": None,
+        "insert_failed_connector": None,
         "list_connectors": ([], 0),
         "get_connector": None,
         "update_connector": None,
@@ -86,12 +87,14 @@ def db():
         yield SimpleNamespace(session=session, register=register, **mocks)
 
 
+CERTIFICATE = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUTEST\n-----END CERTIFICATE-----"
+
+
 def _create_body(**overrides):
     body = {
         "id": CONNECTOR_ID,
         "name": "prod-sales-db",
         "type": "db2_for_i",
-        "schedule": "daily",
         "connection_details": {
             "host": "ibmi.example.com",
             "port": 8471,
@@ -99,27 +102,47 @@ def _create_body(**overrides):
             "username": "forecast_ro",
             "password": "s3cret",
         },
-        "training": {
-            "table": "ORDERS",
-            "target_column": "DELIVERY_LATE",
-            "input_columns": [{"name": "REGION"}, {"name": "QUANTITY", "type": "integer"}],
+        "service_settings": {
+            "forecast": {
+                "table": "ORDERS",
+                "targetColumn": "DELIVERY_LATE",
+                "inputColumns": ["REGION", "QUANTITY"],
+                "schedule": "daily",
+            },
         },
     }
     body.update(overrides)
     return body
 
 
-def _stored_row(password="s3cret", host="ibmi.example.com", **overrides):
-    """A connector as the database returns it, with the password encrypted."""
-    config = encrypt_secrets(
-        {
-            "host": host,
-            "port": 8471,
-            "database": "PRODDB",
-            "username": "forecast_ro",
-            "password": password,
-        }
-    )
+def _settings(**overrides):
+    """The `forecast` settings of a create body, with the given fields replaced."""
+    return {**_create_body()["service_settings"]["forecast"], **overrides}
+
+
+def _service_settings(**overrides):
+    """service_settings of a create body, with the given `forecast` fields replaced."""
+    return {"forecast": _settings(**overrides)}
+
+
+def _stored_row(password="s3cret", host="ibmi.example.com", certificate=None, ignore_secure_connection=None, **overrides):
+    """A connector as the database returns it, with the password and the certificate encrypted.
+
+    A connector stored before the TLS fields existed has neither of them, so they are only
+    set when given.
+    """
+    details = {
+        "host": host,
+        "port": 8471,
+        "database": "PRODDB",
+        "username": "forecast_ro",
+        "password": password,
+    }
+    if certificate is not None:
+        details["certificate"] = certificate
+    if ignore_secure_connection is not None:
+        details["ignore_secure_connection"] = ignore_secure_connection
+    config = encrypt_secrets(details)
     fields = {
         "id": uuid.UUID(CONNECTOR_ID),
         "name": "prod-sales-db",
@@ -178,9 +201,10 @@ def test_create_stores_encrypted_connector_and_queues_training(client, db):
     assert kwargs["config"]["host"] == "ibmi.example.com"
     assert kwargs["config"]["password"] != "s3cret"
     assert decrypt_secrets(kwargs["config"])["password"] == "s3cret"
+    assert kwargs["config"]["ignore_secure_connection"] is False
     assert kwargs["source_table"] == "ORDERS"
     assert kwargs["target_column"] == "DELIVERY_LATE"
-    assert kwargs["input_columns"] == [{"name": "REGION"}, {"name": "QUANTITY", "type": "integer"}]
+    assert kwargs["input_columns"] == ["REGION", "QUANTITY"]
     assert kwargs["schedule"] == "daily"
 
     db.register.assert_called_once_with(CONNECTOR_ID, "daily")
@@ -197,26 +221,72 @@ def test_create_without_an_id_is_422(client, db):
 
 
 @pytest.mark.unit
-def test_create_when_a_connector_exists_is_409(client, db):
+def test_create_without_a_schedule_registers_none(client, db):
+    settings_body = _service_settings()
+    del settings_body["forecast"]["schedule"]
+
+    response = client.post("/v1/connectors", json=_create_body(service_settings=settings_body))
+
+    assert response.status_code == 201
+    assert db.insert_connector.call_args.kwargs["schedule"] is None
+    db.register.assert_called_once_with(CONNECTOR_ID, None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("body", [{}, {"name": "another-db"}])
+def test_create_when_a_connector_exists_is_409_and_stores_nothing(client, db, body):
     db.connector_exists.return_value = True
 
-    response = client.post("/v1/connectors", json=_create_body())
+    response = client.post("/v1/connectors", json=_create_body(**body))
 
     assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
+    _assert_envelope(response.json(), "RESOURCE_CONFLICT", 409)
+    assert response.json()["error"]["message"].endswith("A connector already exists. Only one connector is supported.")
     db.insert_connector.assert_not_called()
+    db.insert_failed_connector.assert_not_called()
     db.register.assert_not_called()
 
 
 @pytest.mark.unit
-def test_create_when_the_queue_is_full_is_429(client, db):
-    db.count_queued_jobs.return_value = settings.forecast.max_queued_jobs
+def test_create_with_an_existing_id_is_201_and_changes_nothing(client, db):
+    db.connector_id_exists.return_value = True
+    db.connector_exists.return_value = True
 
     response = client.post("/v1/connectors", json=_create_body())
 
-    assert response.status_code == 429
-    _assert_envelope(response.json(), "SERVER_BUSY", 429)
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
+    db.connector_id_exists.assert_called_once()
+    assert db.connector_id_exists.call_args.args[1] == CONNECTOR_ID
     db.insert_connector.assert_not_called()
+    db.insert_failed_connector.assert_not_called()
+    db.register.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_stored_as_failed_with_a_database_error_is_500(db):
+    failing_client = TestClient(forecast_app.app, raise_server_exceptions=False)
+    db.insert_failed_connector.side_effect = IntegrityError(
+        "INSERT", {}, MagicMock(pgcode="23514")
+    )
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        response = failing_client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "DATABASE_ERROR", 500)
+
+
+@pytest.mark.unit
+def test_rejected_create_is_logged_without_secrets(client, db, caplog):
+    db.connector_exists.return_value = True
+
+    with caplog.at_level("INFO"):
+        client.post("/v1/connectors", json=_create_body())
+
+    assert "a connector already exists" in caplog.text
+    assert CONNECTOR_ID in caplog.text
+    assert "s3cret" not in caplog.text
 
 
 @pytest.mark.unit
@@ -224,22 +294,28 @@ def test_create_when_the_queue_is_full_is_429(client, db):
     "overrides",
     [
         {"type": "oracle"},
-        {"schedule": "hourly-ish"},
         {"id": "not-a-uuid"},
         {"name": ""},
         {"name": "x" * 256},
         {"unknown": "field"},
+        {"schedule": "daily"},
+        {"training": _settings()},
+        {"params": _settings()},
         {"connection_details": {"host": "h", "database": "d", "username": "u", "password": "p", "extra": 1}},
         {"connection_details": {"host": "h", "database": "d", "username": "u"}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "A"}], "validation_metric": "accuracy"}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "A", "type": "blob"}]}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": []}},
-        {"training": {"table": "T; DROP TABLE", "target_column": "C", "input_columns": [{"name": "A"}]}},
-        {"training": {"table": "T", "target_column": "C' OR 1=1", "input_columns": [{"name": "A"}]}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "BAD NAME"}]}},
-        {"training": {"table": "T\n", "target_column": "C", "input_columns": [{"name": "A"}]}},
-        {"training": {"table": "T", "target_column": "C", "input_columns": [{"name": "COL1"}, {"name": "col1"}]}},
-        {"training": {"table": "T", "target_column": "TARGET_COL", "input_columns": [{"name": "target_col"}, {"name": "OTHER"}]}},
+        {"service_settings": _service_settings(schedule="hourly-ish")},
+        {"service_settings": _service_settings(inputColumns=[{"name": "A"}])},
+        {"service_settings": _service_settings(inputColumns=[])},
+        {"service_settings": _service_settings(table="T; DROP TABLE")},
+        {"service_settings": _service_settings(targetColumn="C' OR 1=1")},
+        {"service_settings": _service_settings(inputColumns=["BAD NAME"])},
+        {"service_settings": _service_settings(table="T\n")},
+        {"service_settings": {}},
+        {"service_settings": {"other": _settings()}},
+        {"service_settings": _settings()},
+        {"service_settings": {"forecast": {"table": "T", "target_column": "C", "input_columns": ["A"]}}},
+        {"service_settings": _service_settings(inputColumns=["COL1", "col1"])},
+        {"service_settings": _service_settings(targetColumn="TARGET_COL", inputColumns=["target_col", "OTHER"])},
     ],
 )
 def test_create_rejects_invalid_bodies_with_422(client, db, overrides):
@@ -248,19 +324,122 @@ def test_create_rejects_invalid_bodies_with_422(client, db, overrides):
     assert response.status_code == 422
     _assert_envelope(response.json(), "INVALID_REQUEST", 422)
     db.insert_connector.assert_not_called()
+    db.insert_failed_connector.assert_not_called()
 
 
 @pytest.mark.unit
-def test_create_without_a_key_is_500_and_does_not_leak_the_password(db):
-    failing_client = TestClient(forecast_app.app, raise_server_exceptions=False)
+def test_create_accepts_the_catalog_format_and_ignores_unknown_settings(client, db):
+    service_settings = {
+        "forecast": {
+            "table": "sales_data",
+            "targetColumn": "sales_amount",
+            "inputColumns": ["region", "unit_price"],
+            "schedule": "daily",
+            "validationMetric": "accuracy",
+            "nested": {"a": 1},
+        },
+        "digitize": {"anything": ["goes"]},
+    }
+
+    response = client.post("/v1/connectors", json=_create_body(service_settings=service_settings))
+
+    assert response.status_code == 201
+    kwargs = db.insert_connector.call_args.kwargs
+    assert kwargs["source_table"] == "sales_data"
+    assert kwargs["target_column"] == "sales_amount"
+    assert kwargs["input_columns"] == ["region", "unit_price"]
+    assert kwargs["schedule"] == "daily"
+    assert "validationMetric" not in str(kwargs) and "digitize" not in str(kwargs)
+
+
+@pytest.mark.unit
+def test_unknown_service_settings_are_dropped_by_the_model():
+    from forecast.models import ServiceSettings
+
+    parsed = ServiceSettings.model_validate(
+        {"forecast": {**_settings(), "extra": 1}, "other": {"x": 1}}
+    )
+
+    assert set(parsed.model_dump()) == {"forecast"}
+    assert set(parsed.forecast.model_dump()) == {"table", "target_column", "input_columns", "schedule"}
+
+
+@pytest.mark.unit
+def test_create_without_service_settings_is_422(client, db):
+    body = _create_body()
+    del body["service_settings"]
+
+    response = client.post("/v1/connectors", json=body)
+
+    assert response.status_code == 422
+    _assert_envelope(response.json(), "INVALID_REQUEST", 422)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "key, message",
+    [("", "Connector encryption key not found"), ("x" * 31, "must be exactly 32 bytes")],
+)
+def test_create_without_a_usable_key_is_201_and_stored_as_failed_without_the_secrets(db, caplog, key, message):
+    client = TestClient(forecast_app.app)
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr(key)), caplog.at_level("ERROR"):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
+    db.insert_connector.assert_not_called()
+    db.register.assert_not_called()
+    kwargs = db.insert_failed_connector.call_args.kwargs
+    assert message in kwargs["message"]
+    # Only the fields that are shown in a response are kept: nothing can be encrypted, and the
+    # password and the certificate are never stored in plain text.
+    assert kwargs["config"] == {
+        "host": "ibmi.example.com", "port": 8471, "database": "PRODDB", "username": "forecast_ro",
+        "ignore_secure_connection": False,
+    }
+    assert "s3cret" not in caplog.text and "s3cret" not in response.text and "s3cret" not in kwargs["message"]
+
+
+@pytest.mark.unit
+def test_create_without_a_key_drops_the_certificate_and_keeps_the_flag(db):
+    client = TestClient(forecast_app.app)
+    body = _create_body()
+    body["connection_details"].update({"certificate": CERTIFICATE, "ignore_secure_connection": True})
 
     with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
-        response = failing_client.post("/v1/connectors", json=_create_body())
+        response = client.post("/v1/connectors", json=body)
 
-    assert response.status_code == 500
-    _assert_envelope(response.json(), "INTERNAL_SERVER_ERROR", 500)
-    assert "s3cret" not in response.text
+    assert response.status_code == 201
+    config = db.insert_failed_connector.call_args.kwargs["config"]
+    assert config["ignore_secure_connection"] is True
+    assert "certificate" not in config
+
+
+@pytest.mark.unit
+def test_create_without_a_key_when_a_connector_exists_is_409_and_stores_nothing(client, db):
+    db.connector_exists.return_value = True
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 409
+    _assert_envelope(response.json(), "RESOURCE_CONFLICT", 409)
+    db.insert_failed_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_with_an_existing_id_and_no_key_changes_nothing(client, db):
+    db.connector_id_exists.return_value = True
+    db.connector_exists.return_value = True
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    assert response.json() == {"id": CONNECTOR_ID}
     db.insert_connector.assert_not_called()
+    db.insert_failed_connector.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +505,19 @@ def test_list_name_longer_than_255_returns_422(client, db):
 
 
 @pytest.mark.unit
-def test_get_returns_safe_details_only(client, db):
+def test_get_of_a_connector_stored_before_the_tls_fields_has_no_ignore_secure_connection(client, db):
+    # Absent means false; the response shows the details as stored.
     db.get_connector.return_value = _stored_row()
+
+    response = client.get(f"/v1/connectors/{CONNECTOR_ID}")
+
+    assert response.status_code == 200
+    assert "ignore_secure_connection" not in response.json()["connection_details"]
+
+
+@pytest.mark.unit
+def test_get_returns_safe_details_only(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE, ignore_secure_connection=True)
 
     response = client.get(f"/v1/connectors/{CONNECTOR_ID}")
 
@@ -338,7 +528,10 @@ def test_get_returns_safe_details_only(client, db):
         "port": 8471,
         "database": "PRODDB",
         "username": "forecast_ro",
+        "ignore_secure_connection": True,
     }
+    assert "BEGIN CERTIFICATE" not in response.text
+    assert "certificate" not in response.text
     assert body["table"] == "ORDERS"
     assert body["target_column"] == "DELIVERY_LATE"
     assert body["schedule"] == "daily"
@@ -476,9 +669,9 @@ def test_put_that_breaks_the_merged_details_is_400_and_writes_nothing(client, db
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "body",
-    [{"type": "db2_for_i"}, {"training": {"table": "T", "target_column": "C", "input_columns": []}}],
+    [{"type": "db2_for_i"}, {"service_settings": {"forecast": {"table": "T", "targetColumn": "C", "inputColumns": ["A"]}}}],
 )
-def test_put_rejects_type_and_training(client, db, body):
+def test_put_rejects_type_and_service_settings(client, db, body):
     db.get_connector.return_value = _stored_row()
 
     response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json=body)
@@ -597,15 +790,19 @@ def test_metrics_failed_newest_job_without_training_seconds_has_no_duration(clie
 
 
 @pytest.mark.unit
-def test_only_the_password_is_encrypted():
-    details = {"host": "h", "port": 1, "database": "d", "username": "u", "password": "p"}
+def test_only_the_secrets_are_encrypted():
+    details = {
+        "host": "h", "port": 1, "database": "d", "username": "u", "password": "p",
+        "ignore_secure_connection": True, "certificate": CERTIFICATE,
+    }
 
     stored = encrypt_secrets(details)
 
-    assert {k: stored[k] for k in ("host", "port", "database", "username")} == {
-        "host": "h", "port": 1, "database": "d", "username": "u",
+    assert {k: stored[k] for k in ("host", "port", "database", "username", "ignore_secure_connection")} == {
+        "host": "h", "port": 1, "database": "d", "username": "u", "ignore_secure_connection": True,
     }
     assert stored["password"] != "p"
+    assert stored["certificate"] != CERTIFICATE
     assert decrypt_secrets(stored) == details
 
 
@@ -619,9 +816,14 @@ def test_encryption_uses_a_fresh_nonce_each_time():
 
 @pytest.mark.unit
 def test_safe_connection_details_drops_everything_else():
-    stored = {"host": "h", "port": 1, "database": "d", "username": "u", "password": "cipher", "legacy_token": "x"}
+    stored = {
+        "host": "h", "port": 1, "database": "d", "username": "u", "ignore_secure_connection": True,
+        "password": "cipher", "certificate": "cipher", "legacy_token": "x",
+    }
 
-    assert safe_connection_details(stored) == {"host": "h", "port": 1, "database": "d", "username": "u"}
+    assert safe_connection_details(stored) == {
+        "host": "h", "port": 1, "database": "d", "username": "u", "ignore_secure_connection": True,
+    }
 
 
 @pytest.mark.unit
@@ -642,7 +844,7 @@ def test_create_does_not_schedule_when_the_insert_fails(client, db):
 
 @pytest.mark.unit
 def test_create_still_succeeds_when_scheduling_fails(client, db, caplog):
-    """The connector is stored, so the call must not fail; a retry would get a 409."""
+    """The connector is stored, so the call must not fail."""
     db.register.side_effect = RuntimeError("scheduler down")
 
     with caplog.at_level("ERROR"):
@@ -652,20 +854,6 @@ def test_create_still_succeeds_when_scheduling_fails(client, db, caplog):
     assert response.json() == {"id": CONNECTOR_ID}
     assert "could not be scheduled" in caplog.text
     assert "s3cret" not in caplog.text
-
-
-@pytest.mark.unit
-def test_create_with_a_duplicate_id_or_name_is_409(client, db):
-    db.insert_connector.side_effect = IntegrityError(
-        "INSERT", {}, MagicMock(pgcode="23505")
-    )
-
-    response = client.post("/v1/connectors", json=_create_body())
-
-    assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
-    assert "prod-sales-db" in response.json()["error"]["message"]
-    db.register.assert_not_called()
 
 
 @pytest.mark.unit
@@ -683,17 +871,17 @@ def test_create_with_another_integrity_error_is_a_database_error(client, db):
 
 
 @pytest.mark.unit
-def test_create_loses_the_race_for_the_single_connector(client, db):
-    """No connector at the pre-check, one by the time the table lock is held."""
-    db.connector_exists.side_effect = [False, True]
+def test_create_checks_only_after_taking_the_table_lock(client, db):
+    """Two requests cannot both see an empty table: every check is made under the lock."""
+    calls = []
+    db.lock_connectors.side_effect = lambda *_: calls.append("lock")
+    db.connector_id_exists.side_effect = lambda *_: calls.append("id_exists") or False
+    db.connector_exists.side_effect = lambda *_: calls.append("exists") or False
 
     response = client.post("/v1/connectors", json=_create_body())
 
-    assert response.status_code == 409
-    _assert_envelope(response.json(), "RESOURCE_LOCKED", 409)
-    db.lock_connectors.assert_called_once()
-    db.insert_connector.assert_not_called()
-    db.register.assert_not_called()
+    assert response.status_code == 201
+    assert calls == ["lock", "id_exists", "exists"]
 
 
 @pytest.mark.unit
@@ -737,6 +925,53 @@ def test_put_keeping_unreadable_password_returns_400(client, db):
     assert response.status_code == 400
     _assert_envelope(response.json(), "INVALID_REQUEST", 400)
     assert "Stored secret could not be decrypted" in response.json()["error"]["message"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["", "x" * 31])
+@pytest.mark.parametrize(
+    "details",
+    [{"password": "fresh-pass"}, {"host": "new-host.example.com", "password": "fresh-pass"}, {"port": 8472}],
+)
+def test_put_connection_details_without_a_usable_key_is_500_and_writes_nothing(client, db, caplog, key, details):
+    db.get_connector.return_value = _stored_row()
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr(key)), caplog.at_level("ERROR"):
+        response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": details})
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "INTERNAL_SERVER_ERROR", 500)
+    assert "The connector encryption key of the service is missing or invalid." in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+    assert "DB_ENCRYPTION_KEY is missing or invalid" in caplog.text
+    assert "fresh-pass" not in response.text and "fresh-pass" not in caplog.text
+
+
+@pytest.mark.unit
+def test_put_that_fails_to_encrypt_the_merged_details_is_500_and_writes_nothing(client, db):
+    from forecast.utils.encryption import EncryptionKeyError
+
+    db.get_connector.return_value = _stored_row()
+
+    with patch("forecast.utils.api_utils.encrypt_secrets", side_effect=EncryptionKeyError("no key")):
+        response = client.put(
+            f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"password": "fresh-pass"}}
+        )
+
+    assert response.status_code == 500
+    _assert_envelope(response.json(), "INTERNAL_SERVER_ERROR", 500)
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_rename_without_a_usable_key_still_succeeds(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    with patch.object(settings.forecast, "db_encryption_key", SecretStr("")):
+        response = client.put(f"/v1/connectors/{CONNECTOR_ID}", json={"name": "renamed"})
+
+    assert response.status_code == 200
+    assert db.update_connector.call_args.kwargs["name"] == "renamed"
 
 
 @pytest.mark.unit
@@ -886,18 +1121,6 @@ def test_create_logs_the_outcome_without_the_secret(client, db, caplog):
 
     assert response.status_code == 201
     assert f"Connector {CONNECTOR_ID} ('prod-sales-db') created" in caplog.text
-    assert "s3cret" not in caplog.text
-
-
-@pytest.mark.unit
-def test_rejected_create_is_logged(client, db, caplog):
-    db.connector_exists.return_value = True
-
-    with caplog.at_level("WARNING"):
-        response = client.post("/v1/connectors", json=_create_body())
-
-    assert response.status_code == 409
-    assert "a connector already exists" in caplog.text
     assert "s3cret" not in caplog.text
 
 
@@ -1059,6 +1282,65 @@ def test_create_rejects_oversized_connection_details(client, db, field, value):
     _assert_envelope(response.json(), "INVALID_REQUEST", 422)
 
 
+def _certificate_of_length(length):
+    """A value with both PEM markers and exactly `length` characters."""
+    head, tail = "-----BEGIN CERTIFICATE-----\n", "\n-----END CERTIFICATE-----"
+    return head + "A" * (length - len(head) - len(tail)) + tail
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("certificate", "not a certificate"),
+        ("certificate", ""),
+        ("certificate", "-----BEGIN CERTIFICATE-----\nno end marker"),
+        ("certificate", "no begin marker\n-----END CERTIFICATE-----"),
+        ("certificate", _certificate_of_length(65537)),
+        ("certificate", CERTIFICATE + "a" * 65536),
+        ("certificate", 42),
+        ("ignore_secure_connection", "true"),
+        ("ignore_secure_connection", 1),
+        ("ignore_secure_connection", None),
+    ],
+)
+def test_create_rejects_invalid_tls_details(client, db, field, value):
+    body = _create_body()
+    body["connection_details"][field] = value
+
+    response = client.post("/v1/connectors", json=body)
+
+    assert response.status_code == 422
+    _assert_envelope(response.json(), "INVALID_REQUEST", 422)
+    if isinstance(value, str) and value:
+        # The message names the field and the problem, never the value that was sent.
+        assert value not in response.text
+    db.insert_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_create_accepts_a_certificate_of_the_maximum_length(client, db):
+    certificate = _certificate_of_length(65536)
+    body = _create_body()
+    body["connection_details"]["certificate"] = certificate
+
+    response = client.post("/v1/connectors", json=body)
+
+    assert response.status_code == 201
+    config = db.insert_connector.call_args.kwargs["config"]
+    assert decrypt_secrets(config)["certificate"] == certificate
+
+
+@pytest.mark.unit
+def test_create_without_tls_details_defaults_to_verifying_the_server(client, db):
+    response = client.post("/v1/connectors", json=_create_body())
+
+    assert response.status_code == 201
+    config = db.insert_connector.call_args.kwargs["config"]
+    assert config["ignore_secure_connection"] is False
+    assert "certificate" not in config
+
+
 @pytest.mark.unit
 def test_decrypt_value_failures_raise_decryption_error():
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -1107,9 +1389,9 @@ def test_put_changing_the_target_without_password_fails_400(client, db, change):
     assert response.status_code == 400
     _assert_envelope(response.json(), "INVALID_REQUEST", 400)
     assert (
-        "Password must be supplied when host, port, database or username changes"
-        in response.json()["error"]["message"]
-    )
+        "Password must be supplied when host, port, database, username, "
+        "ignore_secure_connection or certificate changes"
+    ) in response.json()["error"]["message"]
     db.update_connector.assert_not_called()
 
 
@@ -1124,6 +1406,165 @@ def test_put_changing_host_with_password_succeeds(client, db):
 
     assert response.status_code == 200
     db.update_connector.assert_called_once()
+
+
+@pytest.mark.unit
+def test_put_turning_on_ignore_secure_connection_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"ignore_secure_connection": True}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "ignore_secure_connection" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_turning_on_ignore_secure_connection_with_password_stores_it_in_plain_text(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"ignore_secure_connection": True, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    assert config["ignore_secure_connection"] is True
+    assert decrypt_secrets(config)["password"] == "new-pass"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stored", [None, False, True], ids=["unset", "false", "true"])
+def test_put_repeating_the_stored_ignore_secure_connection_without_password_succeeds(client, db, stored):
+    # A connector stored before the field existed has it unset, which means false.
+    db.get_connector.return_value = _stored_row(ignore_secure_connection=stored)
+    repeated = bool(stored)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"ignore_secure_connection": repeated}}
+    )
+
+    assert response.status_code == 200
+    assert db.update_connector.call_args.kwargs["config"]["ignore_secure_connection"] is repeated
+
+
+@pytest.mark.unit
+def test_put_turning_off_ignore_secure_connection_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row(ignore_secure_connection=True)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"ignore_secure_connection": False}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "ignore_secure_connection" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_certificate_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"certificate": CERTIFICATE}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "certificate" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+def test_put_certificate_with_password_encrypts_it(client, db):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"certificate": CERTIFICATE, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    assert config["certificate"] != CERTIFICATE
+    assert decrypt_secrets(config)["certificate"] == CERTIFICATE
+    assert CERTIFICATE not in response.text
+
+
+@pytest.mark.unit
+def test_put_keeps_a_stored_certificate_when_other_fields_change(client, db):
+    row = _stored_row(certificate=CERTIFICATE)
+    db.get_connector.return_value = row
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"password": "new-pass"}}
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    assert config["certificate"] == row.config["certificate"]
+    assert decrypt_secrets(config)["certificate"] == CERTIFICATE
+
+
+@pytest.mark.unit
+def test_put_clearing_the_certificate_with_password_stores_null(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {"certificate": None, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 200
+    config = db.update_connector.call_args.kwargs["config"]
+    # The key stays, with the value null: a null certificate means no certificate.
+    assert "certificate" in config and config["certificate"] is None
+
+
+@pytest.mark.unit
+def test_put_clearing_the_certificate_without_password_fails_400(client, db):
+    db.get_connector.return_value = _stored_row(certificate=CERTIFICATE)
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}", json={"connection_details": {"certificate": None}}
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    assert "certificate" in response.json()["error"]["message"]
+    db.update_connector.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "change,leaked",
+    [
+        ({"certificate": "not a certificate"}, "not a certificate"),
+        ({"certificate": 42}, "42"),
+        ({"ignore_secure_connection": "yes"}, "yes"),
+        ({"ignore_secure_connection": None}, None),
+    ],
+)
+def test_put_with_an_invalid_tls_value_is_400_and_writes_nothing(client, db, change, leaked):
+    db.get_connector.return_value = _stored_row()
+
+    response = client.put(
+        f"/v1/connectors/{CONNECTOR_ID}",
+        json={"connection_details": {**change, "password": "new-pass"}},
+    )
+
+    assert response.status_code == 400
+    _assert_envelope(response.json(), "INVALID_REQUEST", 400)
+    # The message names the field and the problem, never the value that was sent.
+    assert "new-pass" not in response.text
+    if leaked is not None:
+        assert f"'{leaked}'" not in response.text and f'"{leaked}"' not in response.text
+    db.update_connector.assert_not_called()
 
 
 @pytest.mark.unit

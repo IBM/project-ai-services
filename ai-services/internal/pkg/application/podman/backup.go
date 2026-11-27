@@ -117,14 +117,8 @@ func (p *PodmanApplication) backupDigitize(ctx context.Context, appName, backupF
 
 	logger.Infof("Digitize API URL: %s\n", digitizeURL)
 
-	// Create digitize backup client and call Export API
-	client := commonBackup.NewDigitizeBackupClient(digitizeURL)
-	exportResponse, err := client.CallExportAPI(ctx)
+	exportResponse, err := commonBackup.BackupDigitize(ctx, digitizeURL, absBackupFile)
 	if err != nil {
-		return err
-	}
-
-	if err := commonBackup.CreateDigitizeBackupArchive(absBackupFile, exportResponse); err != nil {
 		return err
 	}
 

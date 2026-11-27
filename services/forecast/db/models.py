@@ -10,6 +10,7 @@ must update only jobs.result and jobs.message and must not flush other columns.
 
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from sqlalchemy import (
@@ -32,6 +33,18 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
+
+
+class ConnectorStatus(str, Enum):
+    """Status of a connector. The values are those of chk_connectors_status."""
+
+    ACCEPTED = "ACCEPTED"
+    TRAINING = "TRAINING"
+    TRAINED = "TRAINED"
+    FAILED = "FAILED"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 class Connector(Base):
@@ -64,7 +77,7 @@ class Connector(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('ACCEPTED', 'TRAINING', 'TRAINED', 'FAILED')",
+            "status IN (" + ", ".join(f"'{status.value}'" for status in ConnectorStatus) + ")",
             name="chk_connectors_status",
         ),
     )
@@ -83,7 +96,7 @@ class TrainingConfig(Base):
     )
     source_table: Mapped[str] = mapped_column(Text, nullable=False)
     target_column: Mapped[str] = mapped_column(Text, nullable=False)
-    # [{"name": ..., "type": ...}, ...]
+    # ["COLUMN_A", "COLUMN_B", ...]
     input_columns: Mapped[list] = mapped_column(JSONB, nullable=False)
     # hourly, daily, weekly, monthly or yearly. NULL: only the first training runs.
     schedule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -115,7 +128,8 @@ class Job(Base):
     )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # rows_read, algorithm, training_seconds, attempts. Keys can be missing.
+    # rows_read, algorithm, validation_metric, validation_score, test_score, training_seconds
+    # (written by the worker) and attempts (written by the API). Keys can be missing.
     result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()

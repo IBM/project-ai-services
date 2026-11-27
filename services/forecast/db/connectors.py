@@ -14,7 +14,7 @@ from sqlalchemy import Select, exists, func, select, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from forecast.db.models import Connector, Forecaster, Job, TrainingConfig
+from forecast.db.models import Connector, ConnectorStatus, Forecaster, Job, TrainingConfig
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class ConnectorRow(ConnectorListRow):
     updated_at: datetime
     schedule: Optional[str]
     # Columns the forecast API validates rows against; None without a training_configs row.
-    input_columns: Optional[list[dict[str, Any]]] = None
+    input_columns: Optional[list[str]] = None
 
 
 @dataclass(frozen=True)
@@ -83,13 +83,38 @@ def lock_connectors(session: Session) -> None:
 
 
 def connector_exists(session: Session) -> bool:
-    """Return True when a connector row exists."""
+    """Return True when a connector exists, whatever its status: a FAILED one blocks a new one too."""
     return bool(session.scalar(select(exists().select_from(Connector))))
 
 
-def count_queued_jobs(session: Session) -> int:
-    """Return the number of jobs waiting to run."""
-    return session.scalar(select(func.count(Job.seq)).where(Job.status == "QUEUED")) or 0
+def connector_id_exists(session: Session, connector_id: str) -> bool:
+    """Return True when a connector row with this id exists, whatever its status."""
+    return bool(
+        session.scalar(select(exists().where(Connector.id == _as_uuid(connector_id))))
+    )
+
+
+def insert_failed_connector(
+    session: Session,
+    *,
+    connector_id: str,
+    name: str,
+    connector_type: str,
+    config: dict,
+    message: str,
+) -> None:
+    """Store a connector that was not accepted: status FAILED, no training details, no job."""
+    session.add(
+        Connector(
+            id=_as_uuid(connector_id),
+            name=name,
+            type=connector_type,
+            connection_details=config,
+            status=ConnectorStatus.FAILED,
+            message=message,
+        )
+    )
+    session.flush()
 
 
 def insert_connector(
@@ -101,7 +126,7 @@ def insert_connector(
     config: dict,
     source_table: str,
     target_column: str,
-    input_columns: list[dict],
+    input_columns: list[str],
     schedule: Optional[str],
 ) -> None:
     """Store the connector, its training details and the first training job."""
@@ -111,7 +136,7 @@ def insert_connector(
         name=name,
         type=connector_type,
         connection_details=config,
-        status="ACCEPTED",
+        status=ConnectorStatus.ACCEPTED,
     )
     training_config = TrainingConfig(
         connector_id=cid_uuid,

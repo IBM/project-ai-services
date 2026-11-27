@@ -19,6 +19,31 @@ TRITON_UNAVAILABLE = "TRITON_UNAVAILABLE"
 SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
 
+# Exit codes of the training worker (``python -m forecast.training <job_id> <data_path> <output_dir>``),
+# which the loader subprocess is meant to follow too. The API retries the attempt after EXIT_FAILURE,
+# a kill or a timeout, and does not retry EXIT_PERMANENT. 2 is left out because argparse uses it for
+# a bad command line.
+EXIT_OK = 0
+EXIT_FAILURE = 1
+EXIT_PERMANENT = 3
+
+
+class TrainingFailure(Exception):
+    """A training failure whose message is written for the user and stored in ``jobs.message``.
+
+    The message must name no secret and no data value. Any other exception of the worker is
+    stored as a fixed text, because its message can carry hosts, user names or rows.
+    """
+
+
+class PermanentFailure(TrainingFailure):
+    """A failure that a retry would only repeat, such as a missing table or a table too small."""
+
+
+class TransientFailure(TrainingFailure):
+    """A failure that a retry may fix, such as a dropped connection to the source database."""
+
+
 def raise_triton_unavailable(detail: Optional[str] = None) -> NoReturn:
     """Raise the 503 error used when Triton cannot be reached."""
     message = "Triton cannot be reached"

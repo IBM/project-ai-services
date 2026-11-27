@@ -1,0 +1,9 @@
+image: quay.io/powercloud/tritonserver:2.70.0-0
+storage: 5Gi
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    cpu: "1"
+    memory: 2Gi

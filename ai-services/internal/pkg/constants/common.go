@@ -17,13 +17,18 @@ const (
 	// to reach Ready=True after a Helm install.
 	PredictorWaitTimeout = 15 * time.Minute
 	// IsvcPollInterval is the interval between KServe InferenceService readiness polls.
-	IsvcPollInterval  = 15 * time.Second
-	VersionV2         = "v2"
-	DSCKind           = "DataScienceCluster"
-	DSCIKind          = "DSCInitialization"
-	SMTLevel          = 2
-	ErrSecretNotFound = "no secret with name or id"
-	CaddyServerName   = "ai_services" // Caddy server name used for route registration
+	IsvcPollInterval       = 15 * time.Second
+	VersionV2              = "v2"
+	DSCKind                = "DataScienceCluster"
+	DSCIKind               = "DSCInitialization"
+	ErrSecretNotFound      = "no secret with name or id"
+	CaddyServerName        = "ai_services" // Caddy server name used for route registration
+	SpyreOperatorPackage   = "spyre-operator"
+	SpyreClusterPolicyName = "spyreclusterpolicy"
+	SpyreGroup             = "spyre.ibm.com"
+	SpyreVersion           = "v1alpha1"
+	SpyreKind              = "SpyreClusterPolicy"
+	SMTLevel               = 2
 )
 
 const (

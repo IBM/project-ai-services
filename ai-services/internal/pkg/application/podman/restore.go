@@ -62,15 +62,10 @@ func (p *PodmanApplication) restoreOpenSearch(ctx context.Context, templateID, b
 	return podmanrestore.RestoreOpenSearch(podmanCtx, templateID, backupFile)
 }
 
-// restoreDigitize restores digitize metadata using the Import API.
+// restoreDigitize restores digitize metadata (and digitized content, if the backup has it) using the Import APIs.
 func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *catalogTypes.Application, backupFile string) error {
 	logger.Infoln("Restoring digitize metadata")
 	logger.Infoln("Digitize Import (API-based Approach)")
-
-	importPayload, err := commonrestore.GetDigitizeData(backupFile)
-	if err != nil {
-		return err
-	}
 
 	// Get digitize service API URL from catalog service endpoints
 	digitizeURL, err := commonrestore.GetDigitizeAPIURL(appDetails)
@@ -80,9 +75,7 @@ func (p *PodmanApplication) restoreDigitize(ctx context.Context, appDetails *cat
 
 	logger.Infof("Digitize API URL: %s\n", digitizeURL)
 
-	// Create digitize restore client and call Import API
-	client := commonrestore.NewDigitizeRestoreClient(digitizeURL)
-	if err := client.CallImportAPI(ctx, importPayload); err != nil {
+	if err := commonrestore.RestoreDigitize(ctx, digitizeURL, backupFile); err != nil {
 		return err
 	}
 

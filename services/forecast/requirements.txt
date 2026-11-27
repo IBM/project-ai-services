@@ -5,21 +5,28 @@
 cryptography>=42.0.0
 
 # IBM i / Db2 Data Connector (Mapepire)
-mapepire-python>=0.2.0
+mapepire-python==2.0.0
 
 # Data Extraction & Parquet Storage
 pyarrow>=14.0.0
 pandas>=2.0.0
 
-# AutoGluon ML Training & Inference
+# AutoGluon ML Training. Only LightGBM and CatBoost are trained (training/onnx_export.py), so
+# XGBoost is not needed.
 scipy>=1.11.0
 scikit-learn>=1.3.0
 lightgbm>=4.0.0
-xgboost>=2.0.0
-autogluon.tabular>=1.1.0
+catboost==1.2.7
+autogluon.tabular[lightgbm,catboost]>=1.1.0
+
+# ONNX export of the trained model (training/onnx_export.py). onnxruntime is used by the tests
+# to check the exported graph.
+onnx>=1.16.0
+onnxmltools>=1.12.0
+onnxruntime>=1.18.0
 
 # Triton inference client (async HTTP)
 httpx>=0.24.0
 
-# Triton Model Config (Protobuf Text Format)
+# Triton model repository (config.pbtxt) and ONNX serialization
 protobuf>=4.25.0

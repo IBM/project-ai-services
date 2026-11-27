@@ -27,7 +27,8 @@ Arguments:
 
 Supported targets:
   - opensearch: Backup OpenSearch indices and data (Podman and OpenShift)
-  - digitize:   Backup digitize metadata (jobs and documents) (Podman and OpenShift)`,
+  - digitize:   Backup digitization and ingestion metadata (jobs, documents and checksums)
+                along with the digitized output files (json/md/txt) (Podman and OpenShift).`,
 	Example: `  # Backup OpenSearch data
 	 ai-services application backup myapp --target opensearch
 

@@ -62,7 +62,7 @@ def _rows(output: dict, num_rows: int) -> list:
 
 
 async def run_inference(
-    model_name: str, instances: list[dict[str, Any]], input_columns: list[dict]
+    model_name: str, instances: list[dict[str, Any]], input_columns: list[str]
 ) -> list[dict[str, Any]]:
     """Forward an inference request to Triton and parse the predictions and confidences.
 
@@ -72,18 +72,18 @@ async def run_inference(
     infer_url = f"{triton_url}/v2/models/{quote(model_name, safe='')}/infer"
     timeout = settings.forecast.triton_infer_timeout_s
 
-    # Build Triton V2 HTTP request inputs. Every column is sent as text (BYTES). The type of an
-    # input column is optional, and the forecaster's inputs are all TYPE_STRING: its graph parses
+    # Build Triton V2 HTTP request inputs. Every column is sent as text (BYTES). An input column
+    # has no type, and the forecaster's inputs are all TYPE_STRING: its graph parses
     # a numeric column and looks up a category column itself (see the proposal, section 10.4).
     num_rows = len(instances)
     inputs_payload = [
         {
-            "name": col["name"],
+            "name": name,
             "shape": [num_rows, 1],
             "datatype": "BYTES",
-            "data": [str(row[col["name"]]) for row in instances],
+            "data": [str(row[name]) for row in instances],
         }
-        for col in input_columns
+        for name in input_columns
     ]
 
     payload = {"inputs": inputs_payload}

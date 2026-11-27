@@ -1,9 +1,21 @@
 package openshift
 
 import (
+	"context"
 	"testing"
 
 	semver "github.com/blang/semver/v4"
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
+	"github.com/project-ai-services/ai-services/internal/pkg/constants"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime/openshift"
+	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestExtractVersion(t *testing.T) {
@@ -21,7 +33,7 @@ func TestExtractVersion(t *testing.T) {
 		},
 		{
 			name:     "CSV with v prefix",
-			input:    "spyre-operator.v1.3.1",
+			input:    "cert-manager.v1.3.1",
 			expected: semver.MustParse("1.3.1"),
 			ok:       true,
 		},
@@ -117,20 +129,20 @@ func TestCompareVersions(t *testing.T) {
 		{
 			name: "CSV upgrade",
 			versions: upgradeVersions{
-				currentChannel:   "stable-v1.3",
-				currentCSV:       "spyre-operator.v1.3.0",
-				availableChannel: "stable-v1.3",
-				availableCSV:     "spyre-operator.v1.3.2",
+				currentChannel:   "stable-v1",
+				currentCSV:       "cert-manager.v1.10.0",
+				availableChannel: "stable-v1",
+				availableCSV:     "cert-manager.v1.12.0",
 			},
 			expected: kindUpgrade,
 		},
 		{
 			name: "CSV downgrade",
 			versions: upgradeVersions{
-				currentChannel:   "stable-v1.3",
-				currentCSV:       "spyre-operator.v1.3.2",
-				availableChannel: "stable-v1.3",
-				availableCSV:     "spyre-operator.v1.3.0",
+				currentChannel:   "stable-v1",
+				currentCSV:       "cert-manager.v1.12.0",
+				availableChannel: "stable-v1",
+				availableCSV:     "cert-manager.v1.10.0",
 			},
 			expected: kindDowngrade,
 		},
@@ -270,5 +282,123 @@ func TestIsTargetCSVReached(t *testing.T) {
 					tt.installedCSV, tt.targetCSV, tt.previousCSV, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestReinstallSpyreOperator(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = operatorsv1alpha1.AddToScheme(scheme)
+
+	t.Run("successfully deletes SCP, CSV, and Subscription", func(t *testing.T) {
+		scp := &unstructured.Unstructured{}
+		scp.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   constants.SpyreGroup,
+			Version: constants.SpyreVersion,
+			Kind:    constants.SpyreKind,
+		})
+		scp.SetName(constants.SpyreClusterPolicyName)
+
+		sub := &operatorsv1alpha1.Subscription{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      constants.SpyreOperatorPackage,
+				Namespace: constants.SpyreOperatorPackage,
+			},
+			Spec: &operatorsv1alpha1.SubscriptionSpec{
+				Package: constants.SpyreOperatorPackage,
+				Channel: "stable-v1.3",
+			},
+			Status: operatorsv1alpha1.SubscriptionStatus{
+				InstalledCSV: "spyre-operator.v1.3.1",
+			},
+		}
+
+		csv := &operatorsv1alpha1.ClusterServiceVersion{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "spyre-operator.v1.3.1",
+				Namespace: constants.SpyreOperatorPackage,
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sub, csv, scp).
+			Build()
+
+		client := &openshift.OpenshiftClient{
+			Client: fakeClient,
+		}
+
+		ctx := context.Background()
+		s := spinner.New("Testing reinstall")
+
+		err := reinstallSpyreOperator(ctx, client, sub, s)
+		if err != nil {
+			t.Fatalf("reinstallSpyreOperator failed: %v", err)
+		}
+
+		// Verify SpyreClusterPolicy is deleted
+		checkSCP := &unstructured.Unstructured{}
+		checkSCP.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   constants.SpyreGroup,
+			Version: constants.SpyreVersion,
+			Kind:    constants.SpyreKind,
+		})
+		if err := fakeClient.Get(ctx, clientpkgObjectKey(constants.SpyreClusterPolicyName, ""), checkSCP); !apierrors.IsNotFound(err) {
+			t.Errorf("expected SpyreClusterPolicy to be deleted, got err: %v", err)
+		}
+
+		// Verify Subscription is deleted
+		checkSub := &operatorsv1alpha1.Subscription{}
+		if err := fakeClient.Get(ctx, clientpkgObjectKey("spyre-operator", "spyre-operator"), checkSub); !apierrors.IsNotFound(err) {
+			t.Errorf("expected Subscription to be deleted, got err: %v", err)
+		}
+
+		// Verify CSV is deleted
+		checkCSV := &operatorsv1alpha1.ClusterServiceVersion{}
+		if err := fakeClient.Get(ctx, clientpkgObjectKey("spyre-operator.v1.3.1", "spyre-operator"), checkCSV); !apierrors.IsNotFound(err) {
+			t.Errorf("expected ClusterServiceVersion to be deleted, got err: %v", err)
+		}
+	})
+
+	t.Run("succeeds when SCP or CSV already absent", func(t *testing.T) {
+		sub := &operatorsv1alpha1.Subscription{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      constants.SpyreOperatorPackage,
+				Namespace: constants.SpyreOperatorPackage,
+			},
+			Spec: &operatorsv1alpha1.SubscriptionSpec{
+				Package: constants.SpyreOperatorPackage,
+			},
+		}
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(sub).
+			Build()
+
+		client := &openshift.OpenshiftClient{
+			Client: fakeClient,
+		}
+
+		ctx := context.Background()
+		s := spinner.New("Testing reinstall")
+
+		err := reinstallSpyreOperator(ctx, client, sub, s)
+		if err != nil {
+			t.Fatalf("reinstallSpyreOperator failed when resources absent: %v", err)
+		}
+
+		// Verify Subscription is deleted
+		checkSub := &operatorsv1alpha1.Subscription{}
+		if err := fakeClient.Get(ctx, clientpkgObjectKey("spyre-operator", "spyre-operator"), checkSub); !apierrors.IsNotFound(err) {
+			t.Errorf("expected Subscription to be deleted, got err: %v", err)
+		}
+	})
+}
+
+func clientpkgObjectKey(name, namespace string) client.ObjectKey {
+	return client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
 	}
 }

@@ -50,6 +50,10 @@ func (f *fakeLiteLLM) DeregisterPassThrough(context.Context, string) error {
 
 func (f *fakeLiteLLM) DeregisterModel(context.Context, string) error { return f.call("model") }
 
+func (f *fakeLiteLLM) GetModelInfo(context.Context, string) (*catalogclient.LiteLLMModelInfoResponse, error) {
+	return &catalogclient.LiteLLMModelInfoResponse{}, nil
+}
+
 // fakeDeleter is a Deleter that records the call, fails with err, or panics.
 type fakeDeleter struct {
 	log      *callLog
