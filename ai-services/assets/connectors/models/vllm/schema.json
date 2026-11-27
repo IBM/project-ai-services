@@ -19,7 +19,7 @@
     },
     "maxBatchSize": {
       "type": "integer",
-      "title": "Maximum Batch Size",
+      "title": "Maximum batch size",
       "description": "Maximum batch size for requests.",
       "default": 32,
       "minimum": 1
