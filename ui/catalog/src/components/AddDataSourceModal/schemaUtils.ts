@@ -1,13 +1,70 @@
-import type { ConnectorParamsSchema } from "./types";
+import type { ConnectorParamsSchema, FormValues } from "./types";
 export interface ConnectorField {
   key: string;
   label: string;
   description?: string;
-  type: "text" | "password" | "checkboxArray";
+  type: "text" | "password" | "checkboxArray" | "checkbox";
   checkboxOptions?: string[];
   sectionTitle: string;
   isRequired: boolean;
   isOptional: boolean;
+  schemaType?: string;
+  minimum?: number;
+  maximum?: number;
+  controlledBy?: string;
+  hideWhenChecked?: boolean;
+}
+
+// Fields shown only while a checkbox is unchecked are mandatory when visible
+export function isRequiredWhenVisible(field: ConnectorField): boolean {
+  return field.isRequired || (!!field.controlledBy && !!field.hideWhenChecked);
+}
+
+export function isNumericField(field: ConnectorField): boolean {
+  return field.schemaType === "integer" || field.schemaType === "number";
+}
+
+/**
+ * Returns an error message when `text` is not a valid value for a numeric
+ * field (plain decimal digits, within the schema's minimum/maximum), or null.
+ */
+export function getNumberError(
+  field: ConnectorField,
+  text: string,
+): string | null {
+  const isInteger = field.schemaType === "integer";
+  const decimalPattern = isInteger ? /^-?\d+$/ : /^-?\d+(\.\d+)?$/;
+  if (!decimalPattern.test(text)) {
+    return `Provide a valid ${field.label.toLowerCase()}`;
+  }
+
+  const num = Number(text);
+  if (isInteger && !Number.isSafeInteger(num)) {
+    return `Provide a valid ${field.label.toLowerCase()}`;
+  }
+
+  const { minimum, maximum } = field;
+  if (
+    (minimum !== undefined && num < minimum) ||
+    (maximum !== undefined && num > maximum)
+  ) {
+    if (minimum !== undefined && maximum !== undefined) {
+      return `${field.label} must be between ${minimum} and ${maximum}`;
+    }
+    return minimum !== undefined && num < minimum
+      ? `${field.label} must be at least ${minimum}`
+      : `${field.label} must be at most ${maximum}`;
+  }
+
+  return null;
+}
+
+export function isFieldHidden(
+  field: ConnectorField,
+  formValues: FormValues,
+): boolean {
+  if (!field.controlledBy || !field.hideWhenChecked) return false;
+  return formValues[field.controlledBy] === true;
 }
 
 export function parseConnectorSchema(
@@ -25,6 +82,8 @@ export function parseConnectorSchema(
     if (property.type === "array" && Array.isArray(property.items?.enum)) {
       type = "checkboxArray";
       checkboxOptions = property.items.enum;
+    } else if (property.type === "boolean") {
+      type = "checkbox";
     } else if (property.format === "password") {
       type = "password";
     }
@@ -39,6 +98,11 @@ export function parseConnectorSchema(
       sectionTitle: property["ui:section"] ?? "",
       isRequired,
       isOptional: !isRequired,
+      schemaType: property.type,
+      minimum: property.minimum,
+      maximum: property.maximum,
+      controlledBy: property["x-ui-controlled-by"],
+      hideWhenChecked: property["x-ui-hide-when-checked"],
     });
   }
 
@@ -69,15 +133,19 @@ export function groupFieldsBySections(
 
 /**
  * Builds the initial form values object from a list of ConnectorFields,
- * pre-selecting all options for checkboxArray fields and setting all others to "".
+ * pre-selecting all options for checkboxArray fields, unchecking checkbox
+ * fields and setting all others to "".
  */
-export function buildInitialValues(
-  fields: ConnectorField[],
-): Record<string, string | string[]> {
-  const values: Record<string, string | string[]> = {};
+export function buildInitialValues(fields: ConnectorField[]): FormValues {
+  const values: FormValues = {};
   for (const field of fields) {
-    values[field.key] =
-      field.type === "checkboxArray" ? [...(field.checkboxOptions ?? [])] : "";
+    if (field.type === "checkboxArray") {
+      values[field.key] = [...(field.checkboxOptions ?? [])];
+    } else if (field.type === "checkbox") {
+      values[field.key] = false;
+    } else {
+      values[field.key] = "";
+    }
   }
   return values;
 }

@@ -510,8 +510,13 @@ export interface ParamProperty {
   };
   minItems?: number;
   uniqueItems?: boolean;
+  /** Bounds for integer/number fields */
+  minimum?: number;
+  maximum?: number;
   /** Carbon UI extension — the section heading this field belongs to */
   "ui:section"?: string;
+  "x-ui-controlled-by"?: string;
+  "x-ui-hide-when-checked"?: boolean;
 }
 
 /** Full response from GET /api/v1/connectors/datasource/providers/:id/params */
@@ -527,7 +532,7 @@ export interface ConnectorParamsSchema {
 export interface CreateDatasourceRequest {
   name: string;
   provider_id: string;
-  params: Record<string, string | string[]>;
+  params: Record<string, string | string[] | boolean | number>;
 }
 
 /** POST /datasources — response body */
@@ -597,7 +602,7 @@ export interface DataSourceDetailResponse {
 
 /** PATCH /datasources/:id — update authentication key request */
 export interface UpdateDataSourceAuthRequest {
-  params: Record<string, string | string[]>;
+  params: Record<string, string | string[] | boolean>;
 }
 
 // Matches backend ConnectDatasourcesResponse (PUT /applications/:id/datasources → 207).

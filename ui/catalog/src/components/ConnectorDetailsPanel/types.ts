@@ -1,5 +1,6 @@
 import type { DataSourceDetailResponse } from "@/types/api.types";
 import type { ConnectorField } from "@/components/AddDataSourceModal/schemaUtils";
+import type { FormValues } from "@/components/AddDataSourceModal/types";
 export type { ConnectorField };
 
 export type DetailsPanelMode = "view" | "update-key";
@@ -18,7 +19,7 @@ export interface ConnectorDetailsPanelState {
   isLoading: boolean;
   fetchError: string | null;
   /** Current values in the authentication form */
-  authFormValues: Record<string, string>;
+  authFormValues: FormValues;
   /** Validation errors keyed by field key */
   authFieldErrors: Record<string, string>;
   authSectionState: AuthSectionState;
@@ -48,12 +49,17 @@ export type PanelAction =
   | { type: typeof PANEL_ACTION_TYPES.FETCH_FAILURE; payload: string }
   | {
       type: typeof PANEL_ACTION_TYPES.SHOW_AUTH_FORM;
-      payload: Record<string, string>;
+      payload: FormValues;
     }
   | { type: typeof PANEL_ACTION_TYPES.HIDE_AUTH_FORM }
   | {
       type: typeof PANEL_ACTION_TYPES.SET_AUTH_FIELD;
-      payload: { key: string; value: string };
+      payload: {
+        key: string;
+        value: string | boolean;
+        /** Fields controlled by this field; their errors are cleared */
+        controlledKeys?: string[];
+      };
     }
   | {
       type: typeof PANEL_ACTION_TYPES.SET_AUTH_FIELD_ERRORS;
@@ -111,6 +117,9 @@ export function panelReducer(
     case PANEL_ACTION_TYPES.SET_AUTH_FIELD: {
       const nextErrors = { ...state.authFieldErrors };
       delete nextErrors[action.payload.key];
+      for (const key of action.payload.controlledKeys ?? []) {
+        delete nextErrors[key];
+      }
       return {
         ...state,
         authFormValues: {

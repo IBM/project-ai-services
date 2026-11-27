@@ -24,10 +24,15 @@ import {
   parseConnectorSchema,
   groupFieldsBySections,
   buildInitialValues,
+  isFieldHidden,
+  isNumericField,
+  isRequiredWhenVisible,
+  getNumberError,
   type ConnectorField,
 } from "./schemaUtils";
 import { transformToCreateDatasourcePayload } from "./datasourceTransform";
 import { useConnectorsStore } from "@/store/connectors.store";
+import { DB2_FOR_I_PROVIDER_ID } from "@/constants/app.constants";
 import { parseMessageCheckType } from "@/components/ConnectorDetailsPanel/types";
 import styles from "./AddDataSourceModal.module.scss";
 
@@ -127,6 +132,24 @@ const AddDataSourceModal = ({
     });
   };
 
+  const setBooleanValue = (
+    key: string,
+    value: boolean,
+    sectionTitle: string,
+  ) => {
+    dispatch({
+      type: ACTION_TYPES.SET_BOOLEAN_VALUE,
+      payload: {
+        key,
+        value,
+        sectionTitle,
+        controlledKeys: fields
+          .filter((f) => f.controlledBy === key)
+          .map((f) => f.key),
+      },
+    });
+  };
+
   // ── Derived loading / error states ────────────────────────────────────────
   const paramsLoading = selectedType
     ? isParamsLoading(selectedType.provider.id)
@@ -145,13 +168,21 @@ const AddDataSourceModal = ({
 
     const fieldErrors: Record<string, string> = {};
     for (const field of fields) {
-      if (!field.isRequired) continue;
+      if (field.type === "checkbox") continue;
+      if (isFieldHidden(field, formValues)) continue;
       const val = formValues[field.key];
       const isEmpty =
         field.type === "checkboxArray"
           ? (val as string[]).length === 0
           : !val || !String(val).trim();
-      if (isEmpty) {
+      const numberError =
+        !isEmpty && isNumericField(field)
+          ? getNumberError(field, String(val).trim())
+          : null;
+      if (numberError) {
+        fieldErrors[field.key] = numberError;
+        valid = false;
+      } else if (isRequiredWhenVisible(field) && isEmpty) {
         fieldErrors[field.key] = `Provide a valid ${field.label.toLowerCase()}`;
         valid = false;
       }
@@ -200,6 +231,9 @@ const AddDataSourceModal = ({
     const structuredRe = /at\s+'\/([^']+)':/g;
 
     for (const field of fields) {
+      // A server message must not attach an error to a field the user can't see.
+      if (isFieldHidden(field, formValues)) continue;
+
       let matched = false;
 
       // A: exact key from JSON Schema output — no section restriction needed.
@@ -317,6 +351,20 @@ const AddDataSourceModal = ({
     );
 
     switch (field.type) {
+      case "checkbox":
+        return (
+          <Checkbox
+            key={field.key}
+            id={fieldId}
+            labelText={labelNode}
+            checked={formValues[field.key] === true}
+            disabled={isSubmitting}
+            onChange={(_, { checked }) =>
+              setBooleanValue(field.key, checked, field.sectionTitle)
+            }
+          />
+        );
+
       case "checkboxArray": {
         const options = field.checkboxOptions ?? [];
         const selected = (formValues[field.key] as string[]) ?? [];
@@ -380,6 +428,7 @@ const AddDataSourceModal = ({
             invalid={!!fieldError}
             invalidText={fieldError}
             disabled={isSubmitting}
+            inputMode={isNumericField(field) ? "numeric" : undefined}
             value={(formValues[field.key] as string) ?? ""}
             onChange={(e) =>
               setTextValue(field.key, e.target.value, field.sectionTitle)
@@ -509,7 +558,10 @@ const AddDataSourceModal = ({
         {!paramsLoading &&
           !paramsError &&
           sections.map((section) => {
-            const isLocationSection = section.title === "Location";
+            // Db2 for i shows its optional port inline instead of behind "Add prefix +"
+            const isLocationSection =
+              section.title === "Location" &&
+              selectedType?.provider.id !== DB2_FOR_I_PROVIDER_ID;
             const visibleFields = isLocationSection
               ? section.fields.filter(
                   (f) => !f.isOptional || showLocationOptionals,
@@ -550,7 +602,9 @@ const AddDataSourceModal = ({
                   </div>
                 )}
 
-                {visibleFields.map((field) => renderField(field))}
+                {visibleFields
+                  .filter((field) => !isFieldHidden(field, formValues))
+                  .map((field) => renderField(field))}
 
                 {isLocationSection &&
                   hiddenOptionals.length > 0 &&
