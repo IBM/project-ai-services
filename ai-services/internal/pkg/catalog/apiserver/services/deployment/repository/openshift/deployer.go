@@ -148,20 +148,9 @@ func (d *OpenShiftDeployer) deployComponent(ctx context.Context, plan *Deploymen
 		return err
 	}
 
-	// Helm considers the InferenceService "Current" as soon as the CRD is accepted,
-	// so we must wait for the predictor pod to become ready — but only when the
-	// chart actually deploys an InferenceService resource.
-	if catalogutils.ChartHasInferenceService(fsys, comp.CatalogPath) {
-		isvcName := comp.ComponentType
-
-		logger.InfofCtx(ctx, "Waiting for InferenceService '%s' to become ready\n", isvcName)
-
-		waitCtx, cancel := context.WithTimeout(ctx, constants.PredictorWaitTimeout)
-		defer cancel()
-
-		if err := catalogutils.WaitForInferenceServiceReady(waitCtx, d.runtime, isvcName); err != nil {
-			return fmt.Errorf("InferenceService %q is not ready yet: %w", isvcName, err)
-		}
+	// The InferenceService is named after the component type.
+	if err := openshiftutils.WaitForInferenceService(ctx, d.runtime, fsys, comp.CatalogPath, comp.ComponentType); err != nil {
+		return err
 	}
 
 	if err := d.updateComponentEndpoint(ctx, plan, comp); err != nil {

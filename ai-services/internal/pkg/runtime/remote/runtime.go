@@ -355,7 +355,7 @@ func (r *RemoteRuntime) ListCRD(ctx context.Context, list *unstructured.Unstruct
 
 	result := make([]types.CRDResource, len(items))
 	for i, item := range items {
-		result[i] = types.CRDResource{Name: item.Name, Labels: item.Labels}
+		result[i] = types.CRDResource{Name: item.Name, Labels: item.Labels, Ready: item.Ready}
 	}
 
 	return result, nil

@@ -523,7 +523,7 @@ func handle(ctx context.Context, rt runtime.Runtime, pr *workercaddy.ProxyRouter
 
 		wireItems := make([]payload.CRDResource, len(resources))
 		for i, r := range resources {
-			wireItems[i] = payload.CRDResource{Name: r.Name, Labels: r.Labels}
+			wireItems[i] = payload.CRDResource{Name: r.Name, Labels: r.Labels, Ready: r.Ready}
 		}
 
 		return marshalOr(wireItems, nil)

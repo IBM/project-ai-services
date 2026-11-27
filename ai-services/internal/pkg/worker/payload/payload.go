@@ -191,6 +191,7 @@ type ListCRD struct {
 type CRDResource struct {
 	Name   string            `json:"name"`
 	Labels map[string]string `json:"labels,omitempty"`
+	Ready  bool              `json:"ready,omitempty"`
 }
 
 // DeleteNamespace is the wire payload for COMMAND_TYPE_DELETE_NAMESPACE.

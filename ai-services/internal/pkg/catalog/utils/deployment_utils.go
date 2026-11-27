@@ -13,6 +13,8 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // DeployFunc is the work function for a single item: receives its ID and returns an error.
@@ -84,21 +86,24 @@ func RunConcurrently(
 	return nil
 }
 
-// WaitForInferenceServiceReady polls the predictor pods of the named KServe InferenceService
-// (label "serving.kserve.io/inferenceservice=<isvcName>") until at least one pod exists and
-// all of its containers report healthy, mirroring the Podman container readiness wait.
-// It returns an error when ctx is done first. Each poll is a short ListPods call, so it
-// works the same for local and remote (worker) runtimes.
+// WaitForInferenceServiceReady polls the named KServe InferenceService until its Ready condition
+// is True, or ctx is done. A missing InferenceService is treated as ready, as there is nothing to
+// wait for. rt must be scoped to the namespace the InferenceService was installed in.
 func WaitForInferenceServiceReady(ctx context.Context, rt runtime.Runtime, isvcName string) error {
-	filters := map[string][]string{"label": {"serving.kserve.io/inferenceservice=" + isvcName}}
-
 	for {
-		pods, err := rt.ListPods(ctx, filters)
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   "serving.kserve.io",
+			Version: "v1beta1",
+			Kind:    "InferenceServiceList",
+		})
+
+		isvcs, err := rt.ListCRD(ctx, list, nil)
 		if err != nil {
-			return fmt.Errorf("failed to list pods for InferenceService %q: %w", isvcName, err)
+			return fmt.Errorf("failed to get InferenceService %q: %w", isvcName, err)
 		}
 
-		if predictorPodsReady(pods) {
+		if inferenceServiceReady(isvcs, isvcName) {
 			logger.InfofCtx(ctx, "InferenceService %q is ready\n", isvcName)
 
 			return nil
@@ -114,21 +119,11 @@ func WaitForInferenceServiceReady(ctx context.Context, rt runtime.Runtime, isvcN
 	}
 }
 
-// predictorPodsReady reports whether pods is non-empty and every container in every pod is healthy.
-func predictorPodsReady(pods []runtimeTypes.Pod) bool {
-	if len(pods) == 0 {
-		return false
-	}
-
-	for _, pod := range pods {
-		if len(pod.Containers) == 0 {
-			return false
-		}
-
-		for _, c := range pod.Containers {
-			if c.Health != string(constants.Ready) {
-				return false
-			}
+// inferenceServiceReady reports whether the InferenceService isvcName is Ready, or absent from isvcs.
+func inferenceServiceReady(isvcs []runtimeTypes.CRDResource, isvcName string) bool {
+	for _, isvc := range isvcs {
+		if isvc.Name == isvcName {
+			return isvc.Ready
 		}
 	}
 

@@ -7,7 +7,6 @@ import (
 	"testing/fstest"
 
 	helmutil "github.com/project-ai-services/ai-services/internal/pkg/helm"
-	"github.com/project-ai-services/ai-services/internal/pkg/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/mock"
 	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
@@ -29,7 +28,7 @@ func TestNewHelmManager_LocalRuntime(t *testing.T) {
 	assert.IsType(t, &helmutil.LocalHelmManager{}, got, "a runtime that is not remote uses the local kubeconfig")
 }
 
-func TestWaitForInferenceServiceReady_SkipsChartWithoutInferenceService(t *testing.T) {
+func TestWaitForInferenceService_SkipsChartWithoutInferenceService(t *testing.T) {
 	fsys := fstest.MapFS{
 		"chart/templates/secret.yaml": {Data: []byte("kind: Secret\n")},
 	}
@@ -37,37 +36,52 @@ func TestWaitForInferenceServiceReady_SkipsChartWithoutInferenceService(t *testi
 	// A failing wait would be reported, so a nil error proves the wait was skipped.
 	rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift)}
 
-	require.NoError(t, WaitForInferenceServiceReady(context.Background(), rt, fsys, "chart", "llm"))
+	require.NoError(t, WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm"))
 	assert.False(t, rt.listed)
 }
 
-func TestWaitForInferenceServiceReady_WaitsForInferenceService(t *testing.T) {
+func TestWaitForInferenceService_WaitsForInferenceService(t *testing.T) {
 	fsys := fstest.MapFS{
 		"chart/templates/isvc.yaml": {Data: []byte("kind: InferenceService\n")},
 	}
 
 	t.Run("ready", func(t *testing.T) {
-		// Return a pod whose single container reports healthy so the poll returns immediately.
-		readyPod := runtimeTypes.Pod{
-			Name: "llm-predictor-pod",
-			Containers: []runtimeTypes.Container{
-				{Name: "llm", Health: string(constants.Ready)},
-			},
+		rt := &failingWaitRuntime{
+			Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift),
+			crds:    []runtimeTypes.CRDResource{{Name: "llm", Ready: true}},
 		}
-		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift), pods: []runtimeTypes.Pod{readyPod}}
 
-		require.NoError(t, WaitForInferenceServiceReady(context.Background(), rt, fsys, "chart", "llm"))
+		require.NoError(t, WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm"))
 		assert.True(t, rt.listed)
 	})
 
 	t.Run("not ready", func(t *testing.T) {
-		// Return a ListPods error so WaitForInferenceServiceReady exits on the first poll.
-		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift), listPodsErr: errors.New("api down")}
+		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift), listErr: errors.New("api down")}
 
-		err := WaitForInferenceServiceReady(context.Background(), rt, fsys, "chart", "llm")
+		err := WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm")
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `InferenceService "llm" is not ready yet`)
+	})
+
+	t.Run("times out while the InferenceService is not Ready", func(t *testing.T) {
+		rt := &failingWaitRuntime{
+			Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift),
+			crds:    []runtimeTypes.CRDResource{{Name: "llm", Ready: false}},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := WaitForInferenceService(ctx, rt, fsys, "chart", "llm")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out waiting for InferenceService")
+	})
+
+	t.Run("missing InferenceService is treated as ready", func(t *testing.T) {
+		rt := &failingWaitRuntime{Runtime: mock.New(runtimeTypes.RuntimeTypeOpenShift)}
+
+		require.NoError(t, WaitForInferenceService(context.Background(), rt, fsys, "chart", "llm"))
 	})
 }
 
@@ -125,22 +139,14 @@ func TestCleanupModelsNamespace(t *testing.T) {
 // failingWaitRuntime wraps the mock runtime to record and fail the calls the helpers make.
 type failingWaitRuntime struct {
 	runtime.Runtime
-	// ListPods control
-	pods        []runtimeTypes.Pod
-	listPodsErr error
-	listed      bool
-	// ListCRD control
 	listErr error
+	listed  bool
 	crds    []runtimeTypes.CRDResource
 }
 
-func (f *failingWaitRuntime) ListPods(_ context.Context, _ map[string][]string) ([]runtimeTypes.Pod, error) {
+func (f *failingWaitRuntime) ListCRD(context.Context, *unstructured.UnstructuredList, map[string][]string) ([]runtimeTypes.CRDResource, error) {
 	f.listed = true
 
-	return f.pods, f.listPodsErr
-}
-
-func (f *failingWaitRuntime) ListCRD(context.Context, *unstructured.UnstructuredList, map[string][]string) ([]runtimeTypes.CRDResource, error) {
 	return f.crds, f.listErr
 }
 

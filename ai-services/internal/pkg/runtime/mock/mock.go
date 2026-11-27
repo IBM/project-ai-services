@@ -40,14 +40,12 @@ const EnvMockRuntime = "AI_SERVICES_MOCK_RUNTIME"
 const (
 	mockNamespace   = "mock-namespace"
 	releaseLabelKey = "ai-services.io/service"
-	// isvcLabelKey is the label KServe puts on predictor pods.
-	isvcLabelKey = "serving.kserve.io/inferenceservice"
-	podRunning   = "Running"
-	podExited    = "Exited"
-	ctrRunning   = "running"
-	ctrCreated   = "created"
-	infraSuffix  = "infra"
-	decoderBuf   = 4096
+	podRunning      = "Running"
+	podExited       = "Exited"
+	ctrRunning      = "running"
+	ctrCreated      = "created"
+	infraSuffix     = "infra"
+	decoderBuf      = 4096
 
 	fakeCPUs        = 16
 	fakeAvailCPUs   = 12.0
@@ -555,9 +553,6 @@ func (c *Client) InstallRelease(namespace, release, templateID string) {
 		Labels: map[string]string{
 			constants.ApplicationTemplateKey: templateID,
 			releaseLabelKey:                  release,
-			// Release names are "<component>-<appID8>" and the InferenceService is named
-			// after the component, so the catalog's readiness wait finds this pod.
-			isvcLabelKey: release[:max(strings.LastIndex(release, "-"), 0)],
 		},
 	}}
 	obj.Spec.Containers = []corev1.Container{{Name: "main", LivenessProbe: &corev1.Probe{}}}

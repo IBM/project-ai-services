@@ -21,11 +21,11 @@ func PredictorAddress(isvcName, namespace string) string {
 	return fmt.Sprintf("%s-predictor.%s.svc.cluster.local:%s", isvcName, namespace, PredictorPort)
 }
 
-// WaitForInferenceServiceReady waits until the InferenceService isvcName is Ready, but only when
-// the chart at catalogPath deploys one. Helm marks an InferenceService "Current" as soon as the
-// CRD is accepted, while KServe only sets Ready=True once the predictor pod is fully up, so the
-// status has to be polled directly. rt must be scoped to the namespace the chart was installed in.
-func WaitForInferenceServiceReady(ctx context.Context, rt runtime.Runtime, fsys fs.FS, catalogPath, isvcName string) error {
+// WaitForInferenceService waits until the InferenceService isvcName is Ready, but only when the chart
+// at catalogPath deploys one. Helm marks an InferenceService "Current" as soon as the CRD is accepted,
+// while KServe only sets Ready=True once the predictor is up, so the status has to be polled directly.
+// rt must be scoped to the namespace the chart was installed in.
+func WaitForInferenceService(ctx context.Context, rt runtime.Runtime, fsys fs.FS, catalogPath, isvcName string) error {
 	if !catalogutils.ChartHasInferenceService(fsys, catalogPath) {
 		return nil
 	}

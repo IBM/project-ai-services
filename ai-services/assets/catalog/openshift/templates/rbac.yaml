@@ -19,6 +19,11 @@ rules:
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
     verbs: ["get", "list"]
+  # Required by the catalog deployer to wait for a deployed InferenceService to report Ready
+  # (WaitForInferenceServiceReady), which it now does itself instead of through the worker.
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["inferenceservices"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

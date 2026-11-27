@@ -160,7 +160,7 @@ The CLI is run with `AI_SERVICES_MOCK_RUNTIME=true`, which swaps in an in-memory
 |------|----------------|
 | Pods | `kube play` YAML is parsed. Each `Pod` becomes a `Running` pod with an infra container plus its spec containers, healthy if it has a liveness probe. `Secret` documents are recorded as secrets. `start=off` creates the pod as `Exited`. |
 | System info | Fixed 16 CPUs, 64 GiB memory and 8 Spyre cards, all free. |
-| Helm (`openshift`) | Install and uninstall are recorded in memory. Each release with a template ID gets one healthy placeholder pod labelled `ai-services.io/template`, so the catalog sync finds it. `WAIT_INFERENCE_SERVICE` returns immediately. |
+| Helm (`openshift`) | Install and uninstall are recorded in memory. Each release with a template ID gets one healthy placeholder pod labelled `ai-services.io/template`, so the catalog sync finds it. |
 | Caddy (`podman`) | `PROXY_ROUTE` is served by an in-memory route table. |
 | Models, HTTP tunnel | `DOWNLOAD_MODEL` is a no-op and `HTTP_PROXY` returns an empty `200`. |
 | Routes, CRDs, PVCs, namespaces | OpenShift mock returns empty results. The podman mock returns `unsupported method`, as the real Podman client does. |
