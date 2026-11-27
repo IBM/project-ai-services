@@ -439,9 +439,9 @@ func (s *DatasourceService) buildConnectedApplications(ctx context.Context, conn
 // Results are returned per datasource. At least one eligible service must exist; the call
 // returns 422 if none are found.
 //
-// Pass catalogconstants.EnforceAllowConnect for the HTTP connect endpoint or
-// catalogconstants.SkipAllowConnect for the application-creation deploy path.
-func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, policy catalogconstants.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error) {
+// Pass catalogtypes.EnforceAllowConnect for the HTTP connect endpoint or
+// catalogtypes.SkipAllowConnect for the application-creation deploy path.
+func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, policy catalogtypes.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error) {
 	// Verify application exists and ownership.
 	app, err := appservice.LoadAppWithOwnership(ctx, s.appRepo, applicationID, userID)
 	if err != nil {
@@ -459,7 +459,7 @@ func (s *DatasourceService) ConnectDatasourcesToApplication(ctx context.Context,
 	}
 
 	// Guard: for the connect API, reject if any eligible service does not permit post-creation connect.
-	if policy == catalogconstants.EnforceAllowConnect {
+	if policy == catalogtypes.EnforceAllowConnect {
 		if err := s.checkAllowConnect(linkedServices); err != nil {
 			return nil, err
 		}

@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/uuid"
 	apimodels "github.com/project-ai-services/ai-services/internal/pkg/catalog/apiserver/models"
-	catalogconstants "github.com/project-ai-services/ai-services/internal/pkg/catalog/constants"
 	"github.com/project-ai-services/ai-services/internal/pkg/catalog/types"
 )
 
@@ -38,8 +37,8 @@ type DatasourceServiceInterface interface {
 	CreateDatasource(ctx context.Context, req apimodels.CreateDatasourceRequest) (*apimodels.CreateDatasourceResponse, error)
 	// ConnectDatasourcesToApplication links one or more datasource connectors to each eligible service in a
 	// running application. policy controls whether the allow_connect catalog flag is enforced:
-	// pass catalogconstants.EnforceAllowConnect for the HTTP endpoint, catalogconstants.SkipAllowConnect for the deploy path.
-	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, policy catalogconstants.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error)
+	// pass types.EnforceAllowConnect for the HTTP endpoint, types.SkipAllowConnect for the deploy path.
+	ConnectDatasourcesToApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceIDs []uuid.UUID, policy types.ConnectPolicy) (*apimodels.ConnectDatasourcesResponse, error)
 	// DisconnectDatasourcesFromApplication removes a single datasource connector from each
 	// eligible service in a running application and removes the service_dependency record.
 	DisconnectDatasourcesFromApplication(ctx context.Context, applicationID uuid.UUID, userID string, datasourceID uuid.UUID) error

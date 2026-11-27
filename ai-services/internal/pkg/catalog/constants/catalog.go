@@ -152,19 +152,4 @@ const (
 	ModelEndpointTypeExternal = "external"
 )
 
-// ConnectPolicy controls whether the allow_connect catalog flag is checked when
-// linking datasources to an application.
-type ConnectPolicy bool
-
-// Datasource connect policy constants.
-const (
-	// EnforceAllowConnect rejects the connect request with a 422 if any eligible
-	// service has allow_connect == false in its catalog settings. Use for the
-	// PUT /applications/:id/datasources HTTP endpoint.
-	EnforceAllowConnect ConnectPolicy = true
-	// SkipAllowConnect bypasses the allow_connect check. Use for the
-	// application-creation deploy path where datasources are always attached.
-	SkipAllowConnect ConnectPolicy = false
-)
-
 // Made with Bob
