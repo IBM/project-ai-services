@@ -54,6 +54,7 @@ export function transformModelDeploymentToRow(
 // Fetches a single page of model deployments (optionally filtered)
 export async function fetchModelsPage(
   params: FetchModelsPageParams,
+  options?: { signal?: AbortSignal },
 ): Promise<ModelDeploymentsListResponse> {
   const queryParams: Record<string, unknown> = {
     page: params.page,
@@ -67,6 +68,7 @@ export async function fetchModelsPage(
       params: queryParams,
       // `indexes: null` serialises arrays as repeated params
       paramsSerializer: { indexes: null },
+      signal: options?.signal,
     },
   );
   return response.data;
@@ -76,18 +78,22 @@ export async function fetchModelsPage(
 export async function fetchAllModels(
   providerIds?: string[],
   models?: string[],
+  options?: { signal?: AbortSignal },
 ): Promise<ModelDeployment[]> {
   let currentPage = 1;
   let hasNext = true;
   const allData: ModelDeployment[] = [];
 
   while (hasNext) {
-    const { data, pagination } = await fetchModelsPage({
-      page: currentPage,
-      pageSize: 100,
-      providerIds,
-      models,
-    });
+    const { data, pagination } = await fetchModelsPage(
+      {
+        page: currentPage,
+        pageSize: 100,
+        providerIds,
+        models,
+      },
+      options,
+    );
     allData.push(...data);
     hasNext = pagination?.has_next ?? false;
     currentPage++;

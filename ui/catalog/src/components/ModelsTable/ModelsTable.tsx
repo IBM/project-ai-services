@@ -1,4 +1,5 @@
 import { useReducer, useCallback, useRef, useState, useEffect } from "react";
+import axios from "axios";
 import {
   DataTable,
   DataTableSkeleton,
@@ -148,28 +149,43 @@ const ModelsTable = ({
   // instead of showing the full skeleton.
   const hasEverLoadedRef = useRef(false);
 
+  //A newer fetch aborts the previous one so a slow,
+  // older response can never overwrite newer rows.
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const filterOptionsAbortRef = useRef<AbortController | null>(null);
+
   // ─── Data fetching ──────────────────────────────────────────────────────────
 
+  // `silent` skips the loading state; only background refreshes set it.
   const fetchModels = useCallback(
     async (
       page = pageRef.current,
       pageSize = pageSizeRef.current,
       providerIds = selectedProvidersRef.current,
       models = selectedModelsRef.current,
+      options?: { silent?: boolean },
     ) => {
-      // Skip the skeleton while rows are transitional so polling updates statuses in place
-      if (!hasTransitionalRowRef.current) {
+      const silent = options?.silent ?? false;
+
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      if (!silent) {
         dispatch({ type: "SHARED_SET_LOADING", payload: true });
       }
       dispatch({ type: "SHARED_SET_FETCH_ERROR", payload: null });
 
       try {
-        const { data: rawData, pagination } = await fetchModelsPage({
-          page,
-          pageSize,
-          providerIds,
-          models,
-        });
+        const { data: rawData, pagination } = await fetchModelsPage(
+          {
+            page,
+            pageSize,
+            providerIds,
+            models,
+          },
+          { signal: controller.signal },
+        );
 
         const totalItems = pagination?.total_items ?? rawData.length;
         const totalPages = pagination?.total_pages ?? 1;
@@ -178,7 +194,9 @@ const ModelsTable = ({
         if (page > totalPages && totalPages >= 1) {
           pageRef.current = totalPages;
           dispatch({ type: "SHARED_SET_PAGE", payload: totalPages });
-          void fetchModels(totalPages, pageSize, providerIds, models);
+          void fetchModels(totalPages, pageSize, providerIds, models, {
+            silent,
+          });
           return;
         }
 
@@ -191,6 +209,16 @@ const ModelsTable = ({
           },
         });
       } catch (error) {
+        // The axios interceptor wraps cancellations in a generic Error, so
+        // check the signal itself to ignore superseded requests.
+        if (
+          controller.signal.aborted ||
+          (error instanceof Error && error.name === "AbortError") ||
+          axios.isCancel(error)
+        ) {
+          return;
+        }
+
         const errorMessage =
           error instanceof Error ? error.message : "Failed to fetch models";
         dispatch({ type: "SHARED_SET_LOADING", payload: false });
@@ -202,9 +230,31 @@ const ModelsTable = ({
 
   // ─── Filters ────────────────────────────────────────────────────────────────
 
+  const applyFilters = useCallback(
+    (providers: string[], models: string[]) => {
+      dispatch({
+        type: ACTION_TYPES.SET_FILTERS,
+        payload: { providers, models },
+      });
+      pageRef.current = 1;
+      selectedProvidersRef.current = providers;
+      selectedModelsRef.current = models;
+      void fetchModels(1, pageSizeRef.current, providers, models);
+    },
+    [fetchModels],
+  );
+
   const loadFilterOptions = useCallback(async () => {
+    filterOptionsAbortRef.current?.abort();
+    const controller = new AbortController();
+    filterOptionsAbortRef.current = controller;
+
     try {
-      const allModels = await fetchAllModels();
+      const allModels = await fetchAllModels(undefined, undefined, {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+
       const backends = new Map<string, string>();
       const models = new Set<string>();
       allModels.forEach((m) => {
@@ -215,29 +265,59 @@ const ModelsTable = ({
         [...backends].map(([id, name]) => ({ id, label: name })),
       );
       setModelOptions([...models].map((name) => ({ id: name })));
+
+      // Drop selections that no longer exist (e.g. the last model of a
+      // selected backend was deleted) so no hidden filter stays active.
+      const providers = selectedProvidersRef.current.filter((id) =>
+        backends.has(id),
+      );
+      const selectedModels = selectedModelsRef.current.filter((name) =>
+        models.has(name),
+      );
+      if (
+        providers.length !== selectedProvidersRef.current.length ||
+        selectedModels.length !== selectedModelsRef.current.length
+      ) {
+        applyFilters(providers, selectedModels);
+      }
     } catch {
-      // Filter options are non-critical; leave the lists empty on failure.
+      // Filter options are non-critical; keep previous lists and selections.
     }
-  }, []);
+  }, [applyFilters]);
 
+  // Used by useAutoRefresh (mount, refreshTrigger, 2-min tick, 5-s poll).
+  // Rows refresh silently while transitional; filter options are reloaded
+  // except during the 5-s status poll, which cannot change the option set.
+  const refreshModels = useCallback(async () => {
+    const silent = hasTransitionalRowRef.current;
+    const tasks: Promise<void>[] = [
+      fetchModels(
+        pageRef.current,
+        pageSizeRef.current,
+        selectedProvidersRef.current,
+        selectedModelsRef.current,
+        { silent },
+      ),
+    ];
+    if (!silent) tasks.push(loadFilterOptions());
+    await Promise.all(tasks);
+  }, [fetchModels, loadFilterOptions]);
+
+  // Once transitional rows settle (e.g. a deploy finished), pick up any new
+  // models/backends, since the poll skipped the options reload.
+  const prevHasTransitionalRef = useRef(hasTransitionalRow);
   useEffect(() => {
-    void loadFilterOptions();
-  }, [loadFilterOptions]);
-
-  const applyFilters = (providers: string[], models: string[]) => {
-    dispatch({
-      type: ACTION_TYPES.SET_FILTERS,
-      payload: { providers, models },
-    });
-    pageRef.current = 1;
-    void fetchModels(1, pageSizeRef.current, providers, models);
-  };
+    if (prevHasTransitionalRef.current && !hasTransitionalRow) {
+      void loadFilterOptions();
+    }
+    prevHasTransitionalRef.current = hasTransitionalRow;
+  }, [hasTransitionalRow, loadFilterOptions]);
 
   // ─── Auto-refresh ───────────────────────────────────────────────────────────
 
   // hasData is always true so auto-refresh keeps running when filters match nothing.
   useAutoRefresh({
-    fetchFn: fetchModels,
+    fetchFn: refreshModels,
     hasData: true,
     isPaused: state.isDeleteDialogOpen || state.isDeleting,
     refreshTrigger,
